@@ -5,7 +5,7 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 ## Features
 
 - `State<T>` and `UseState()`
-- Opt-in local scope code generation with `[[huxerui::scope]]`
+- Local component scope generation with `[[huxerui::scope]]`
 - Dependency tracking for state reads
 - Recomposition scheduling for root and component scopes
 - Scope-level local recomposition with coalesced frame requests
@@ -37,17 +37,16 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 
 using namespace huxerui;
 
+[[huxerui::scope]]
 View Counter() {
-  HUXERUI_SCOPE_BEGIN
-    auto count = UseState(1);
+  auto count = UseState(1);
 
-    return Column{
-        Text(count),
-        Button("+1").OnClick([count] {
-          count += 1;
-        }),
-    }.With(Spacing{16.0F});
-  HUXERUI_SCOPE_END
+  return Column{
+      Text(count),
+      Button("+1").OnClick([count] {
+        count += 1;
+      }),
+  }.With(Spacing{16.0F});
 }
 
 View App() {
@@ -61,11 +60,9 @@ int main() {
 }
 ```
 
-`Scope` defines the identity boundary of a custom stateful component. Each mounted scope owns an independent `UseState()` state table, so multiple calls to the same component function do not share local state. `UseState()` uses C++20 `std::source_location` to identify call sites within a scope.
+`[[huxerui::scope]]` defines the identity boundary of a custom stateful component. Each mounted scope owns an independent `UseState()` state table, so multiple calls to the same component function do not share local state. `UseState()` uses C++20 `std::source_location` to identify call sites within a scope.
 
-`HUXERUI_SCOPE_BEGIN` and `HUXERUI_SCOPE_END` are the recommended form for multiline component bodies. They create a deferred factory that captures component parameters by value. The single `HUXERUI_SCOPE({...})` macro remains available when a compact expression is more convenient.
-
-Applications can opt into build-time local scope generation for a target:
+Enable build-time scope generation for each target that contains marked components:
 
 ```cmake
 add_executable(my_app main.cpp)
@@ -73,20 +70,7 @@ target_link_libraries(my_app PRIVATE HuxerUI::huxerui)
 huxerui_enable_codegen(my_app)
 ```
 
-A generated component uses ordinary function-body syntax:
-
-```cpp
-[[huxerui::scope]]
-View Counter() {
-  auto count = UseState(1);
-
-  return Button("+1").OnClick([count] {
-    ++count;
-  });
-}
-```
-
-The code generator replaces `[[huxerui::scope]]` with the existing `HUXERUI_SCOPE_BEGIN` and `HUXERUI_SCOPE_END` form before compilation. The attribute creates an independent local state and recomposition boundary; it is not required on every function that returns a View. The application root already has an implicit root scope and should remain unmarked. Call `huxerui_enable_codegen()` after adding all sources to the target. The initial implementation supports marked function definitions in `.cpp`, `.cc`, and `.cxx` files; explicit scope macros remain available for headers, templates, and custom capture behavior.
+The code generator detects `[[huxerui::scope]]` and automatically generates the local state and recomposition boundary before compilation, so the component keeps an ordinary function body. The attribute is only needed on components that require an independent scope. The application root already has an implicit root scope and should remain unmarked. Call `huxerui_enable_codegen()` after adding all sources to the target. Marked function definitions are currently supported in `.cpp`, `.cc`, and `.cxx` files.
 
 Components can expose typed semantic events without adding callbacks to their function parameters:
 
@@ -96,14 +80,13 @@ struct SearchBoxEvents {
       : Event<SearchBoxEvents, void(std::string)> {};
 };
 
+[[huxerui::scope]]
 View SearchBox() {
-  HUXERUI_SCOPE_BEGIN
-    auto events = UseEvents<SearchBoxEvents>();
+  auto events = UseEvents<SearchBoxEvents>();
 
-    return Button("Submit").OnClick([events] {
-      events.Emit<SearchBoxEvents::Submitted>("query");
-    });
-  HUXERUI_SCOPE_END
+  return Button("Submit").OnClick([events] {
+    events.Emit<SearchBoxEvents::Submitted>("query");
+  });
 }
 
 SearchBox().On<SearchBoxEvents::Submitted>(
@@ -165,10 +148,9 @@ return Row{
     Checkbox(checked).OnChanged([checked](bool value) {
       checked = value;
     }),
-    Switch(checked).On<ToggleEvents::Changed>(
-        [checked](bool value) {
-          checked = value;
-        }),
+    Switch(checked).On<ToggleEvents::Changed>([checked](bool value) {
+      checked = value;
+    }),
 };
 ```
 
@@ -203,14 +185,13 @@ focus when dismissed.
 `State<T>` is a lightweight handle to a shared `StateCell<T>` and can be passed to child components by value. A scope subscribes to state changes when it reads that state:
 
 ```cpp
+[[huxerui::scope]]
 View CounterLabel(State<int> count) {
-  HUXERUI_SCOPE_BEGIN
-    return Text(count);
-  HUXERUI_SCOPE_END
+  return Text(count);
 }
 ```
 
-The scope factory runs lazily. Both macro forms use `[=]` to capture component parameters referenced by the body. The lower-level `Scope(factory)` API remains available; the macros only create the factory and return it from the component function.
+The generated scope factory runs lazily and captures component parameters referenced by the body by value.
 
 When local component state changes, the runtime only recomposes scopes subscribed to that state. It does not recompose the root or unrelated sibling scopes. Multiple state changes are coalesced into the next frame. Measurement and layout currently still traverse the mounted node tree, while painting skips fully invisible subtrees using nested visible rectangles.
 
