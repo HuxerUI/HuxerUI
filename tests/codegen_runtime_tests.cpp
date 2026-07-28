@@ -24,7 +24,7 @@ using huxerui::detail::Runtime;
 
 class TestPlatform final
     : public PlatformHost,
-      public huxerui::TextService {
+      public huxerui::detail::TextService {
 public:
   int Run(
       Runtime& runtime,
@@ -43,7 +43,7 @@ public:
     return 0.0;
   }
 
-  huxerui::TextService& Text() override {
+  huxerui::detail::TextService& Text() override {
     return *this;
   }
 

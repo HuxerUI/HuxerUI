@@ -1,10 +1,17 @@
 #pragma once
 
+#include <any>
+#include <concepts>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <type_traits>
+#include <typeindex>
 #include <utility>
 
 #include <huxerui/color.h>
 #include <huxerui/environment.h>
+#include <huxerui/view.h>
 
 namespace huxerui {
 

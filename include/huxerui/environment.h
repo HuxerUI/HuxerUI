@@ -9,9 +9,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include <huxerui/view.h>
-
 namespace huxerui {
+
+class View;
 
 namespace detail {
 struct EnvironmentFrame;
@@ -48,18 +48,11 @@ private:
 
 namespace detail {
 
-struct EnvironmentFrame {
-  std::shared_ptr<const EnvironmentFrame> parent;
-  EnvironmentValues overrides;
-};
-
 std::shared_ptr<const EnvironmentFrame> CurrentEnvironmentFrame();
 const std::any *FindEnvironmentValue(
     std::shared_ptr<const EnvironmentFrame> environment,
     std::type_index key);
 const std::any *FindEnvironmentValue(std::type_index key);
-View ProvideEnvironmentView(
-    EnvironmentValues values, std::function<View()> content);
 
 } // namespace detail
 
@@ -86,13 +79,7 @@ const typename Key::Value &UseEnvironment() {
   return fallback;
 }
 
-template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View ProvideEnvironment(EnvironmentValues values, Factory &&content) {
-  return detail::ProvideEnvironmentView(
-      std::move(values),
-      std::function<View()>(std::forward<Factory>(content)));
-}
+View ProvideEnvironment(
+    EnvironmentValues values, std::function<View()> content);
 
 } // namespace huxerui

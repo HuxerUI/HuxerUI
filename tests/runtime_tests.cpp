@@ -106,7 +106,9 @@ using huxerui::VirtualList;
 using huxerui::detail::PlatformHost;
 using huxerui::detail::Runtime;
 
-class TestPlatform final : public PlatformHost, public huxerui::TextService {
+class TestPlatform final
+    : public PlatformHost,
+      public huxerui::detail::TextService {
 public:
   int Run(Runtime &runtime, const huxerui::AppOptions &options) override {
     static_cast<void>(runtime);
@@ -123,7 +125,7 @@ public:
 
   void AdvanceTime(double seconds) { current_time += seconds; }
 
-  huxerui::TextService &Text() override { return *this; }
+  huxerui::detail::TextService &Text() override { return *this; }
 
   Size MeasureText(std::string_view text, float font_size,
                    float max_width) override {
@@ -4434,6 +4436,33 @@ void TestBuiltInPointerEventsAndClickLifecycle() {
   HUXERUI_CHECK(received_pointer_events.size() == 2);
   HUXERUI_CHECK(pointer_clicks == 1);
 
+  received_pointer_events.clear();
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      11,
+      {50.0F, 20.0F},
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      11,
+      {50.0F, 20.0F},
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      11,
+      {50.0F, 20.0F},
+  });
+  HUXERUI_CHECK(received_pointer_events.size() == 4);
+  HUXERUI_CHECK(
+      received_pointer_events[0].type == PointerEventType::Down);
+  HUXERUI_CHECK(
+      received_pointer_events[1].type == PointerEventType::Cancel);
+  HUXERUI_CHECK(
+      received_pointer_events[2].type == PointerEventType::Down);
+  HUXERUI_CHECK(
+      received_pointer_events[3].type == PointerEventType::Up);
+  HUXERUI_CHECK(pointer_clicks == 2);
+
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
       10,
@@ -4448,7 +4477,7 @@ void TestBuiltInPointerEventsAndClickLifecycle() {
       {50.0F, 20.0F},
   });
   HUXERUI_CHECK(received_pointer_events.size() == events_before_release);
-  HUXERUI_CHECK(pointer_clicks == 1);
+  HUXERUI_CHECK(pointer_clicks == 2);
 }
 
 void TestPointerDragScrollingAndClickArbitration() {

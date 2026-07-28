@@ -3,6 +3,8 @@
 #include <huxerui/modifier.h>
 #include <huxerui/presentation.h>
 
+#include "internal.h"
+
 namespace huxerui {
 
 namespace {

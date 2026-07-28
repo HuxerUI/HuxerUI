@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstddef>
 #include <concepts>
 #include <functional>
 #include <ranges>
 #include <type_traits>
 #include <utility>
 
+#include <huxerui/state.h>
 #include <huxerui/view.h>
 
 namespace huxerui {

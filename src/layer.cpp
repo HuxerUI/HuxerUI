@@ -6,6 +6,14 @@
 
 namespace huxerui {
 
+LayerController::LayerController(detail::Runtime &runtime)
+    : state_(std::make_shared<detail::LayerControllerState>(
+          detail::LayerControllerState{&runtime})) {}
+
+void LayerController::Disconnect() noexcept {
+  state_->runtime = nullptr;
+}
+
 LayerId LayerController::Attach(
     LayerOptions options, ViewFactory content) const {
   return AttachCaptured(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <any>
 #include <array>
 #include <concepts>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <typeindex>
 #include <utility>
 #include <vector>
 

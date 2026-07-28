@@ -6,10 +6,12 @@
 #include <cmath>
 #include <concepts>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <source_location>
 #include <string>
+#include <string_view>
 #include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
@@ -21,7 +23,6 @@
 #include <huxerui/display_list.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
-#include <huxerui/platform.h>
 #include <huxerui/state.h>
 #include <huxerui/view.h>
 
@@ -30,6 +31,25 @@ namespace huxerui::detail {
 class Runtime;
 struct MountedNode;
 class ScrollConnection;
+
+struct EnvironmentFrame {
+  std::shared_ptr<const EnvironmentFrame> parent;
+  EnvironmentValues overrides;
+};
+
+struct LayerControllerState {
+  Runtime *runtime = nullptr;
+};
+
+class TextService {
+public:
+  virtual ~TextService() = default;
+
+  virtual Size MeasureText(
+      std::string_view text,
+      float font_size,
+      float max_width = std::numeric_limits<float>::infinity()) = 0;
+};
 
 enum class AnimationEasing {
   Linear,
@@ -573,6 +593,27 @@ private:
   void RequestFrame();
   void RequestFrameAfter(double delay_seconds);
   void NotifyScrollActivity(MountedNode &node);
+  static MountedNode *FindNode(
+      MountedNode &node, std::uint64_t identity);
+  static MountedModifier *FindModifier(
+      MountedNode &root,
+      const ModifierPointerCapture &capture);
+  static void ActivateNode(MountedNode &node);
+  void ReleaseScrollGesture(PointerSession &session);
+  void DispatchModifierObservers(
+      PointerSession &session,
+      const PointerEvent &event,
+      bool clear);
+  [[nodiscard]] std::optional<std::size_t>
+  FindScrollCandidate(
+      const PointerSession &session,
+      Axis axis, float delta);
+  MountedNode *ApplyDragScroll(
+      PointerSession &session, float delta);
+  void HandlePointerDown(const PointerEvent &event);
+  void HandlePointerMove(const PointerEvent &event);
+  void HandlePointerCancel(const PointerEvent &event);
+  void HandlePointerUp(const PointerEvent &event);
   void UpdateHoveredModifier(Point position);
   void RefreshInteractionTree();
   [[nodiscard]] std::optional<LayerId>

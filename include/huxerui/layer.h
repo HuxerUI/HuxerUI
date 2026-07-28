@@ -1,20 +1,23 @@
 #pragma once
 
+#include <concepts>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
-#include <huxerui/view.h>
+#include <huxerui/color.h>
 
 namespace huxerui {
+
+class View;
 
 namespace detail {
 class Runtime;
 struct EnvironmentFrame;
-struct LayerControllerState {
-  Runtime *runtime = nullptr;
-};
+struct LayerControllerState;
 }
 
 class DialogService;
@@ -79,13 +82,8 @@ private:
       LayerOptions options, ViewFactory content,
       std::shared_ptr<const detail::EnvironmentFrame> environment) const;
 
-  explicit LayerController(detail::Runtime &runtime)
-      : state_(std::make_shared<detail::LayerControllerState>(
-            detail::LayerControllerState{&runtime})) {}
-
-  void Disconnect() noexcept {
-    state_->runtime = nullptr;
-  }
+  explicit LayerController(detail::Runtime &runtime);
+  void Disconnect() noexcept;
 
   std::shared_ptr<detail::LayerControllerState> state_;
 

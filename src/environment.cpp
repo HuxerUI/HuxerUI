@@ -36,25 +36,25 @@ const std::any *FindEnvironmentValue(std::type_index key) {
       Composer::RequireCurrent().Environment(), key);
 }
 
-View ProvideEnvironmentView(
+} // namespace detail
+
+View ProvideEnvironment(
     EnvironmentValues values, std::function<View()> content) {
   if (!content) {
     throw std::invalid_argument(
         "HuxerUI environment content factory must not be empty");
   }
-  auto frame = std::make_shared<EnvironmentFrame>(
-      EnvironmentFrame{
-          CurrentEnvironmentFrame(),
+  auto frame = std::make_shared<detail::EnvironmentFrame>(
+      detail::EnvironmentFrame{
+          detail::CurrentEnvironmentFrame(),
           std::move(values),
       });
   return Scope(
       [frame = std::move(frame),
        content = std::move(content)]() mutable {
-        Composer::EnvironmentGuard guard{frame};
+        detail::Composer::EnvironmentGuard guard{frame};
         return content();
       });
 }
-
-} // namespace detail
 
 } // namespace huxerui
