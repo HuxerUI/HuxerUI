@@ -15,6 +15,12 @@ enum class TextAlign {
   Center,
 };
 
+enum class StrokeCap {
+  Butt,
+  Round,
+  Square,
+};
+
 struct DrawRectCommand {
   Rect rect;
   Color color;
@@ -35,6 +41,16 @@ struct DrawCircleCommand {
   Color color;
 };
 
+struct DrawArcCommand {
+  Point center;
+  float radius = 0.0F;
+  float start_angle = 0.0F;
+  float sweep_angle = 0.0F;
+  Color color;
+  float width = 1.0F;
+  StrokeCap cap = StrokeCap::Butt;
+};
+
 struct DrawBorderCommand {
   Rect rect;
   Color color;
@@ -53,6 +69,7 @@ using DrawCommand = std::variant<
     DrawRectCommand,
     DrawTextCommand,
     DrawCircleCommand,
+    DrawArcCommand,
     DrawBorderCommand,
     PushClipCommand,
     PopClipCommand>;
@@ -79,6 +96,21 @@ public:
   void DrawCircle(Point center, float radius, Color color) {
     commands_.emplace_back(
         DrawCircleCommand{center, radius, color});
+  }
+
+  void DrawArc(
+      Point center, float radius, float start_angle,
+      float sweep_angle, Color color, float width,
+      StrokeCap cap = StrokeCap::Butt) {
+    commands_.emplace_back(DrawArcCommand{
+        center,
+        radius,
+        start_angle,
+        sweep_angle,
+        color,
+        width,
+        cap,
+    });
   }
 
   void DrawBorder(

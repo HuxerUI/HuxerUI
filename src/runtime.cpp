@@ -243,11 +243,24 @@ bool ContainsNodeIdentity(
 }
 
 bool HandlesPointerEvents(const MountedNode &node) {
-  return HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
+  return static_cast<bool>(node.activation) ||
+         HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerDown>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerMove>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerUp>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerCancel>(node.event_bindings);
+}
+
+bool IsActivatable(const MountedNode &node) {
+  return static_cast<bool>(node.activation) ||
+         HasEventBinding<ViewEvents::Click>(node.event_bindings);
+}
+
+void ActivateNode(MountedNode &node) {
+  EmitEvent<ViewEvents::Click>(node.event_bindings);
+  if (node.activation) {
+    node.activation(node.event_bindings);
+  }
 }
 
 bool IsScrollContainer(const MountedNode &node) {
@@ -1158,7 +1171,7 @@ void Runtime::HandlePointerEvent(const PointerEvent &event) {
           HitTestPointer(*mounted_root_, event.position);
       released && released->enabled &&
       released->identity == *identity) {
-    EmitEvent<ViewEvents::Click>(target->event_bindings);
+    ActivateNode(*target);
   }
 }
 
@@ -1192,21 +1205,18 @@ void Runtime::HandleKeyEvent(const KeyEvent &event) {
   }
 
   DispatchKey(*focused, event);
-  const bool button =
-      focused->kind == NodeKind::Button &&
-      HasEventBinding<ViewEvents::Click>(
-          focused->event_bindings);
+  const bool activatable = IsActivatable(*focused);
   if (event.type == KeyEventType::Down) {
-    if (button && event.key == Key::Enter && !event.repeat) {
-      EmitEvent<ViewEvents::Click>(focused->event_bindings);
-    } else if (button && event.key == Key::Space &&
+    if (activatable && event.key == Key::Enter && !event.repeat) {
+      ActivateNode(*focused);
+    } else if (activatable && event.key == Key::Space &&
                !event.repeat) {
       keyboard_activation_identity_ = focused->identity;
     }
   } else if (event.key == Key::Space) {
-    if (button && keyboard_activation_identity_.has_value() &&
+    if (activatable && keyboard_activation_identity_.has_value() &&
         *keyboard_activation_identity_ == focused->identity) {
-      EmitEvent<ViewEvents::Click>(focused->event_bindings);
+      ActivateNode(*focused);
     }
     keyboard_activation_identity_.reset();
   }
@@ -1373,6 +1383,7 @@ void Runtime::Reconcile(std::unique_ptr<MountedNode> &mounted,
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;
   mounted->event_bindings = incoming->event_bindings;
+  mounted->activation = incoming->activation;
   mounted->environment = incoming->environment;
   mounted->pointer_events_enabled =
       incoming->pointer_events_enabled;
@@ -1414,6 +1425,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec> &incoming) {
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;
   mounted->event_bindings = incoming->event_bindings;
+  mounted->activation = incoming->activation;
   mounted->environment = incoming->environment;
   mounted->pointer_events_enabled =
       incoming->pointer_events_enabled;

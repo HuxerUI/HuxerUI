@@ -23,12 +23,51 @@ View AccentTheme(Factory &&content) {
 [[huxerui::scope]]
 View ThemeContent() {
   const auto theme = UseTheme();
+  auto checkbox_checked = UseState(true);
+  auto switch_checked = UseState(false);
+  auto progress = UseState(0.35F);
 
   return Column{
         Text("Material Theme", TextRole::Title),
         Text("Text and controls resolve semantic values from "
              "the nearest Theme."),
         Button("Material button").OnClick([] {}),
+        Row{
+            Checkbox(checkbox_checked).OnChanged([checkbox_checked](bool checked) {
+                checkbox_checked = checked;
+            }),
+            Text::Format(
+                "Checkbox: {}",
+                checkbox_checked ? "checked" : "unchecked"),
+        }.With(
+            Spacing{theme.spacing.small},
+            CrossAlign{CrossAxisAlignment::Center}),
+        Row{
+            Switch(switch_checked).OnChanged([switch_checked](bool checked) {
+                switch_checked = checked;
+            }),
+            Text::Format("Switch: {}", switch_checked ? "on" : "off"),
+        }.With(
+            Spacing{theme.spacing.small},
+            CrossAlign{CrossAxisAlignment::Center}
+        ),
+        Row{
+            ProgressCircle(),
+            Text("Indeterminate progress"),
+        }.With(
+            Spacing{theme.spacing.small},
+            CrossAlign{CrossAxisAlignment::Center}),
+        Row{
+            ProgressCircle(progress),
+            Text::Format("Progress: {}", progress),
+            Button("Advance").OnClick([progress] {
+                progress.Update([](float &value) {
+                    value = value >= 0.95F ? 0.15F : value + 0.2F;
+                });
+            }),
+        }.With(
+            Spacing{theme.spacing.small},
+            CrossAlign{CrossAxisAlignment::Center}),
         HUXERUI_THEME(
             AccentTheme,
             Button("Nested button style").OnClick([] {})),
@@ -76,6 +115,6 @@ int main() {
       {
           .title = "HuxerUI Theme",
           .width = 560.0F,
-          .height = 560.0F,
+          .height = 820.0F,
       });
 }

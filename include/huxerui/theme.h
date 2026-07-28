@@ -103,6 +103,54 @@ struct ButtonStyleKey {
   static Value Default();
 };
 
+struct CheckboxStyle {
+  float size = 20.0F;
+  Color checked_background = Color::Rgb(31, 111, 235);
+  Color checkmark = Color::White();
+  Color unchecked_border = Color::Rgb(87, 96, 106);
+  float border_width = 2.0F;
+  float corner_radius = 4.0F;
+};
+
+struct CheckboxStyleKey {
+  using Value = CheckboxStyle;
+
+  static Value Default();
+};
+
+struct SwitchStyle {
+  float width = 40.0F;
+  float height = 24.0F;
+  Color unchecked_track = Color::Rgb(87, 96, 106, 0.38F);
+  Color checked_track = Color::Rgb(31, 111, 235);
+  Color thumb = Color::White();
+  float thumb_radius = 8.0F;
+  float track_padding = 4.0F;
+  float corner_radius = 12.0F;
+  double animation_duration = 0.2;
+};
+
+struct SwitchStyleKey {
+  using Value = SwitchStyle;
+
+  static Value Default();
+};
+
+struct ProgressCircleStyle {
+  float size = 24.0F;
+  float stroke_width = 3.0F;
+  Color track_color = Color::Rgb(87, 96, 106, 0.16F);
+  Color indicator_color = Color::Rgb(31, 111, 235);
+  float indeterminate_arc_fraction = 0.28F;
+  double animation_duration = 0.9;
+};
+
+struct ProgressCircleStyleKey {
+  using Value = ProgressCircleStyle;
+
+  static Value Default();
+};
+
 struct ThemeKey {
   using Value = ThemeSpec;
 
@@ -219,6 +267,9 @@ const std::any *FindThemeStyleValue(
 TextStyle DefaultTextStyle(
     const ThemeSpec &theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec &theme);
+CheckboxStyle DefaultCheckboxStyle(const ThemeSpec &theme);
+SwitchStyle DefaultSwitchStyle(const ThemeSpec &theme);
+ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec &theme);
 
 } // namespace detail
 

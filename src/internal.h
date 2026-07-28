@@ -119,6 +119,9 @@ public:
 enum class NodeKind {
   Text,
   Button,
+  Checkbox,
+  Switch,
+  ProgressCircle,
   Spacer,
   Scope,
   Layout,
@@ -162,6 +165,7 @@ struct ViewSpec {
   VirtualItemSource virtual_items;
   std::unordered_map<std::type_index, std::any> layout_values;
   EventBindings event_bindings;
+  std::function<void(const EventBindings &)> activation;
   std::vector<ModifierSpec> modifiers;
   std::shared_ptr<const EnvironmentFrame> environment;
   bool pointer_events_enabled = true;
@@ -232,6 +236,7 @@ struct MountedNode final : public huxerui::MountedNode {
   std::unordered_map<std::type_index, std::any> layout_cache;
   std::vector<LayoutResult::Placement> layout_placements;
   EventBindings event_bindings;
+  std::function<void(const EventBindings &)> activation;
   std::shared_ptr<RecomposeScope> recompose_scope;
   Size measured_size;
   Rect frame;

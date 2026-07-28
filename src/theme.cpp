@@ -17,6 +17,52 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec &theme) {
   };
 }
 
+CheckboxStyle MaterialCheckboxStyle(const ThemeSpec &theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.6F;
+  return {
+      .size = 20.0F,
+      .checked_background = theme.colors.primary,
+      .checkmark = theme.colors.on_primary,
+      .unchecked_border = border,
+      .border_width = 2.0F,
+      .corner_radius = 2.0F,
+  };
+}
+
+SwitchStyle MaterialSwitchStyle(const ThemeSpec &theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.32F;
+  return {
+      .width = 52.0F,
+      .height = 32.0F,
+      .unchecked_track = track,
+      .checked_track = theme.colors.primary,
+      .thumb = theme.colors.surface,
+      .thumb_radius = 12.0F,
+      .track_padding = 4.0F,
+      .corner_radius = 16.0F,
+      .animation_duration =
+          theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+  };
+}
+
+ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec &theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.12F;
+  return {
+      .size = 40.0F,
+      .stroke_width = 4.0F,
+      .track_color = track,
+      .indicator_color = theme.colors.primary,
+      .indeterminate_arc_fraction = 0.25F,
+      .animation_duration =
+          theme.motion.reduced_motion
+              ? 0.0
+              : theme.motion.slow * 3.0,
+  };
+}
+
 ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec &theme) {
   Color thumb = theme.colors.on_surface;
   thumb.alpha *= 0.38F;
@@ -43,6 +89,12 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set<ButtonStyleKey>(
       MaterialButtonStyle(theme));
+  definition.Set<CheckboxStyleKey>(
+      MaterialCheckboxStyle(theme));
+  definition.Set<SwitchStyleKey>(
+      MaterialSwitchStyle(theme));
+  definition.Set<ProgressCircleStyleKey>(
+      MaterialProgressCircleStyle(theme));
   definition.Set<ToastStyleKey>(ToastStyle{
       .background = theme.colors.inverse_surface,
       .foreground = theme.colors.inverse_on_surface,
@@ -120,6 +172,52 @@ ButtonStyle DefaultButtonStyle(const ThemeSpec &theme) {
   };
 }
 
+CheckboxStyle DefaultCheckboxStyle(const ThemeSpec &theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.55F;
+  return {
+      .size = 20.0F,
+      .checked_background = theme.colors.primary,
+      .checkmark = theme.colors.on_primary,
+      .unchecked_border = border,
+      .border_width = 2.0F,
+      .corner_radius = theme.shapes.small,
+  };
+}
+
+SwitchStyle DefaultSwitchStyle(const ThemeSpec &theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.28F;
+  return {
+      .width = 40.0F,
+      .height = 24.0F,
+      .unchecked_track = track,
+      .checked_track = theme.colors.primary,
+      .thumb = theme.colors.surface,
+      .thumb_radius = 8.0F,
+      .track_padding = 4.0F,
+      .corner_radius = 12.0F,
+      .animation_duration =
+          theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+  };
+}
+
+ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec &theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.16F;
+  return {
+      .size = 24.0F,
+      .stroke_width = 3.0F,
+      .track_color = track,
+      .indicator_color = theme.colors.primary,
+      .indeterminate_arc_fraction = 0.28F,
+      .animation_duration =
+          theme.motion.reduced_motion
+              ? 0.0
+              : theme.motion.slow * 3.0,
+  };
+}
+
 } // namespace detail
 
 TextStyle TextStyleKey::Default() {
@@ -128,6 +226,18 @@ TextStyle TextStyleKey::Default() {
 
 ButtonStyle ButtonStyleKey::Default() {
   return detail::DefaultButtonStyle(ThemeKey::Default());
+}
+
+CheckboxStyle CheckboxStyleKey::Default() {
+  return detail::DefaultCheckboxStyle(ThemeKey::Default());
+}
+
+SwitchStyle SwitchStyleKey::Default() {
+  return detail::DefaultSwitchStyle(ThemeKey::Default());
+}
+
+ProgressCircleStyle ProgressCircleStyleKey::Default() {
+  return detail::DefaultProgressCircleStyle(ThemeKey::Default());
 }
 
 ThemeSpec FlatLightThemeSpec() {

@@ -517,6 +517,36 @@ public:
   explicit Button(const char *label);
 };
 
+class Checkbox final : public detail::TypedView<Checkbox> {
+public:
+  explicit Checkbox(bool checked);
+  explicit Checkbox(const State<bool> &checked) : Checkbox(checked.Get()) {}
+
+  template <class Function> Checkbox OnChanged(Function &&function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(
+        std::forward<Function>(function));
+  }
+};
+
+class Switch final : public detail::TypedView<Switch> {
+public:
+  explicit Switch(bool checked);
+  explicit Switch(const State<bool> &checked) : Switch(checked.Get()) {}
+
+  template <class Function> Switch OnChanged(Function &&function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(
+        std::forward<Function>(function));
+  }
+};
+
+class ProgressCircle final : public detail::TypedView<ProgressCircle> {
+public:
+  ProgressCircle();
+  explicit ProgressCircle(float progress);
+  explicit ProgressCircle(const State<float> &progress)
+      : ProgressCircle(progress.Get()) {}
+};
+
 class Scope final : public View {
 public:
   explicit Scope(std::function<View()> factory);

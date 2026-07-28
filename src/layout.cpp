@@ -109,7 +109,8 @@ bool IsScrollable(const MountedNode &node) {
 }
 
 bool HandlesPointer(const MountedNode &node) {
-  return HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
+  return static_cast<bool>(node.activation) ||
+         HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerDown>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerMove>(node.event_bindings) ||
          HasEventBinding<ViewEvents::PointerUp>(node.event_bindings) ||
@@ -209,6 +210,9 @@ Size MeasureNode(MountedNode &node, const Constraints &constraints,
   case NodeKind::Button:
     content_size = text_service.MeasureText(node.text, ResolveFontSize(node));
     break;
+  case NodeKind::Checkbox:
+  case NodeKind::Switch:
+  case NodeKind::ProgressCircle:
   case NodeKind::Spacer:
     break;
   case NodeKind::Layout: {
@@ -353,6 +357,9 @@ void LayoutNode(MountedNode &node, Point origin) {
   }
   case NodeKind::Text:
   case NodeKind::Button:
+  case NodeKind::Checkbox:
+  case NodeKind::Switch:
+  case NodeKind::ProgressCircle:
   case NodeKind::Spacer:
     break;
   }

@@ -87,6 +87,10 @@ struct ViewEvents {
   struct KeyUp : Event<ViewEvents, void(const KeyEvent &)> {};
 };
 
+struct ToggleEvents {
+  struct Changed : Event<ToggleEvents, void(bool)> {};
+};
+
 namespace detail {
 
 template <class Key>

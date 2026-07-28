@@ -20,6 +20,9 @@ using huxerui::AnimateTo;
 using huxerui::Button;
 using huxerui::ButtonStyle;
 using huxerui::ButtonStyleKey;
+using huxerui::Checkbox;
+using huxerui::CheckboxStyle;
+using huxerui::CheckboxStyleKey;
 using huxerui::Color;
 using huxerui::Column;
 using huxerui::CrossAxisAlignment;
@@ -27,6 +30,7 @@ using huxerui::DisplayList;
 using huxerui::Dialog;
 using huxerui::DialogContext;
 using huxerui::DialogHandle;
+using huxerui::DrawArcCommand;
 using huxerui::DrawBorderCommand;
 using huxerui::DrawRectCommand;
 using huxerui::DrawTextCommand;
@@ -57,6 +61,9 @@ using huxerui::PointerEvent;
 using huxerui::PointerEventType;
 using huxerui::Point;
 using huxerui::PopClipCommand;
+using huxerui::ProgressCircle;
+using huxerui::ProgressCircleStyle;
+using huxerui::ProgressCircleStyleKey;
 using huxerui::PushClipCommand;
 using huxerui::Rect;
 using huxerui::Row;
@@ -68,11 +75,16 @@ using huxerui::Size;
 using huxerui::Spacer;
 using huxerui::Stack;
 using huxerui::State;
+using huxerui::StrokeCap;
+using huxerui::Switch;
+using huxerui::SwitchStyle;
+using huxerui::SwitchStyleKey;
 using huxerui::Text;
 using huxerui::TextRole;
 using huxerui::Theme;
 using huxerui::ThemeDefinition;
 using huxerui::ThemeSpec;
+using huxerui::ToggleEvents;
 using huxerui::ToastHandle;
 using huxerui::TweenSpec;
 using huxerui::UseEvents;
@@ -169,11 +181,17 @@ std::vector<std::string> focus_changes;
 std::vector<Key> received_keys;
 int first_keyboard_clicks = 0;
 int third_keyboard_clicks = 0;
+int custom_keyboard_clicks = 0;
 int disabled_clicks = 0;
 int underlying_clicks = 0;
 int background_dialog_clicks = 0;
 int first_dialog_clicks = 0;
 int second_dialog_clicks = 0;
+State<bool> checkbox_checked;
+State<bool> switch_checked;
+int checkbox_changes = 0;
+int switch_changes = 0;
+State<float> progress_circle_value;
 
 View EnvironmentReader() {
   HUXERUI_SCOPE({
@@ -282,6 +300,59 @@ View MaterialDarkThemeApp() {
       Button("material dark button"));
 }
 
+View ToggleApp() {
+  auto checkbox = UseState(false);
+  auto switch_value = UseState(false);
+  checkbox_checked = checkbox;
+  switch_checked = switch_value;
+  return Row{
+      Checkbox(checkbox).OnChanged([checkbox](bool checked) {
+        ++checkbox_changes;
+        checkbox = checked;
+      }),
+      Switch(switch_value).On<ToggleEvents::Changed>(
+          [switch_value](bool checked) {
+            ++switch_changes;
+            switch_value = checked;
+          }),
+  }.With(huxerui::Spacing{8.0F});
+}
+
+View DeterminateProgressCircleApp() {
+  auto progress = UseState(0.25F);
+  progress_circle_value = progress;
+  return Row{
+      ProgressCircle(progress),
+  };
+}
+
+View IndeterminateProgressCircleApp() {
+  return ProgressCircle();
+}
+
+View EmptyProgressCircleApp() {
+  return ProgressCircle(-1.0F);
+}
+
+View FullProgressCircleApp() {
+  return ProgressCircle(2.0F);
+}
+
+template <class Factory>
+View ReducedMotionProgressTheme(Factory &&content) {
+  ThemeSpec spec = huxerui::FlatLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  return Theme(
+      ThemeDefinition{spec},
+      std::forward<Factory>(content));
+}
+
+View ReducedMotionProgressCircleApp() {
+  return HUXERUI_THEME(
+      ReducedMotionProgressTheme,
+      ProgressCircle());
+}
+
 template <class Factory>
 View InteractionTestTheme(Factory &&content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
@@ -336,6 +407,7 @@ View FocusContent() {
             }),
         Text("custom focus")
             .With(Focusable{})
+            .OnClick([] { ++custom_keyboard_clicks; })
             .On<ViewEvents::KeyDown>([](const KeyEvent &event) {
               received_keys.push_back(event.key);
             }),
@@ -1965,6 +2037,33 @@ void TestMaterialThemeDefinitionsAndIndication() {
   HUXERUI_CHECK(button_style->padding.left == 24.0F);
   HUXERUI_CHECK(button_style->padding.top == 10.0F);
 
+  const auto *checkbox_style = std::any_cast<CheckboxStyle>(
+      definition.Values().Find(typeid(CheckboxStyleKey)));
+  HUXERUI_CHECK(checkbox_style != nullptr);
+  HUXERUI_CHECK(checkbox_style->size == 20.0F);
+  HUXERUI_CHECK(checkbox_style->corner_radius == 2.0F);
+  HUXERUI_CHECK(
+      checkbox_style->checked_background.red ==
+      light.colors.primary.red);
+
+  const auto *switch_style = std::any_cast<SwitchStyle>(
+      definition.Values().Find(typeid(SwitchStyleKey)));
+  HUXERUI_CHECK(switch_style != nullptr);
+  HUXERUI_CHECK(switch_style->width == 52.0F);
+  HUXERUI_CHECK(switch_style->height == 32.0F);
+  HUXERUI_CHECK(switch_style->thumb_radius == 12.0F);
+
+  const auto *progress_circle_style =
+      std::any_cast<ProgressCircleStyle>(
+          definition.Values().Find(
+              typeid(ProgressCircleStyleKey)));
+  HUXERUI_CHECK(progress_circle_style != nullptr);
+  HUXERUI_CHECK(progress_circle_style->size == 40.0F);
+  HUXERUI_CHECK(progress_circle_style->stroke_width == 4.0F);
+  HUXERUI_CHECK(
+      progress_circle_style->indicator_color.red ==
+      light.colors.primary.red);
+
   const auto *toast_style =
       std::any_cast<huxerui::ToastStyle>(
           definition.Values().Find(
@@ -2126,6 +2225,227 @@ void TestMaterialThemeDefinitionsAndIndication() {
       dark.colors.primary.red);
 }
 
+void TestControlledTogglesAndAnimation() {
+  checkbox_changes = 0;
+  switch_changes = 0;
+
+  TestPlatform platform;
+  Runtime runtime{ToggleApp, platform};
+  runtime.SetViewport({160.0F, 64.0F});
+  const DisplayList &initial = runtime.BuildFrame();
+
+  const auto *root = runtime.RootNode();
+  HUXERUI_CHECK(root != nullptr);
+  HUXERUI_CHECK(root->children.size() == 2);
+  const auto *checkbox = root->children[0].get();
+  const auto *switch_node = root->children[1].get();
+  HUXERUI_CHECK(
+      checkbox->kind == huxerui::detail::NodeKind::Checkbox);
+  HUXERUI_CHECK(
+      switch_node->kind == huxerui::detail::NodeKind::Switch);
+  HUXERUI_CHECK(checkbox->focusable);
+  HUXERUI_CHECK(switch_node->focusable);
+  HUXERUI_CHECK(checkbox->measured_size.width == 20.0F);
+  HUXERUI_CHECK(switch_node->measured_size.width == 40.0F);
+
+  const huxerui::DrawCircleCommand *initial_thumb = nullptr;
+  for (const auto &command : initial.Commands()) {
+    if (const auto *circle =
+            std::get_if<huxerui::DrawCircleCommand>(&command)) {
+      initial_thumb = circle;
+      break;
+    }
+  }
+  HUXERUI_CHECK(initial_thumb != nullptr);
+  const float initial_thumb_x = initial_thumb->center.x;
+
+  const std::uint64_t checkbox_identity = checkbox->identity;
+  ClickAt(runtime, {
+                       checkbox->frame.x + checkbox->frame.width * 0.5F,
+                       checkbox->frame.y + checkbox->frame.height * 0.5F,
+                   });
+  const DisplayList &checked_display = runtime.BuildFrame();
+  HUXERUI_CHECK(checkbox_changes == 1);
+  HUXERUI_CHECK(checkbox_checked.Get());
+  HUXERUI_CHECK(FindText(checked_display, "✓") != nullptr);
+  HUXERUI_CHECK(
+      runtime.RootNode()->children[0]->identity == checkbox_identity);
+
+  switch_node = runtime.RootNode()->children[1].get();
+  ClickAt(runtime, {
+                       switch_node->frame.x +
+                           switch_node->frame.width * 0.5F,
+                       switch_node->frame.y +
+                           switch_node->frame.height * 0.5F,
+                   });
+  const DisplayList &switch_start = runtime.BuildFrame();
+  HUXERUI_CHECK(switch_changes == 1);
+  HUXERUI_CHECK(switch_checked.Get());
+
+  const huxerui::DrawCircleCommand *start_thumb = nullptr;
+  for (const auto &command : switch_start.Commands()) {
+    if (const auto *circle =
+            std::get_if<huxerui::DrawCircleCommand>(&command)) {
+      start_thumb = circle;
+      break;
+    }
+  }
+  HUXERUI_CHECK(start_thumb != nullptr);
+  HUXERUI_CHECK(
+      std::abs(start_thumb->center.x - initial_thumb_x) < 0.001F);
+
+  platform.AdvanceTime(0.1);
+  const DisplayList &switch_middle = runtime.BuildFrame();
+  const huxerui::DrawCircleCommand *middle_thumb = nullptr;
+  for (const auto &command : switch_middle.Commands()) {
+    if (const auto *circle =
+            std::get_if<huxerui::DrawCircleCommand>(&command)) {
+      middle_thumb = circle;
+      break;
+    }
+  }
+  HUXERUI_CHECK(middle_thumb != nullptr);
+  HUXERUI_CHECK(middle_thumb->center.x > initial_thumb_x);
+  const float middle_thumb_x = middle_thumb->center.x;
+
+  platform.AdvanceTime(0.2);
+  const DisplayList &switch_end = runtime.BuildFrame();
+  const huxerui::DrawCircleCommand *end_thumb = nullptr;
+  for (const auto &command : switch_end.Commands()) {
+    if (const auto *circle =
+            std::get_if<huxerui::DrawCircleCommand>(&command)) {
+      end_thumb = circle;
+      break;
+    }
+  }
+  HUXERUI_CHECK(end_thumb != nullptr);
+  HUXERUI_CHECK(end_thumb->center.x > middle_thumb_x);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Space,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Up,
+      .key = Key::Space,
+  });
+  HUXERUI_CHECK(checkbox_changes == 2);
+  HUXERUI_CHECK(!checkbox_checked.Get());
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  HUXERUI_CHECK(switch_changes == 2);
+  HUXERUI_CHECK(!switch_checked.Get());
+}
+
+void TestProgressCircleDrawingStateAndAnimation() {
+  constexpr float pi = 3.14159265358979323846F;
+  const auto arcs = [](const DisplayList &display_list) {
+    std::vector<DrawArcCommand> result;
+    for (const auto &command : display_list.Commands()) {
+      if (const auto *arc =
+              std::get_if<DrawArcCommand>(&command)) {
+        result.push_back(*arc);
+      }
+    }
+    return result;
+  };
+
+  TestPlatform platform;
+  Runtime determinate{DeterminateProgressCircleApp, platform};
+  determinate.SetViewport({64.0F, 64.0F});
+  const DisplayList &initial = determinate.BuildFrame();
+  const auto initial_arcs = arcs(initial);
+  HUXERUI_CHECK(initial_arcs.size() == 2);
+  HUXERUI_CHECK(
+      std::abs(initial_arcs[0].sweep_angle - pi * 2.0F) <
+      0.001F);
+  HUXERUI_CHECK(initial_arcs[0].cap == StrokeCap::Butt);
+  HUXERUI_CHECK(
+      std::abs(initial_arcs[1].sweep_angle - pi * 0.5F) <
+      0.001F);
+  HUXERUI_CHECK(initial_arcs[1].cap == StrokeCap::Round);
+
+  const auto *root = determinate.RootNode();
+  HUXERUI_CHECK(root != nullptr);
+  HUXERUI_CHECK(root->children.size() == 1);
+  const auto *progress_node = root->children[0].get();
+  HUXERUI_CHECK(
+      progress_node->kind ==
+      huxerui::detail::NodeKind::ProgressCircle);
+  HUXERUI_CHECK(progress_node->measured_size.width == 24.0F);
+  HUXERUI_CHECK(progress_node->measured_size.height == 24.0F);
+  const std::uint64_t identity = progress_node->identity;
+
+  progress_circle_value = 0.75F;
+  const auto updated_arcs = arcs(determinate.BuildFrame());
+  HUXERUI_CHECK(updated_arcs.size() == 2);
+  HUXERUI_CHECK(
+      std::abs(updated_arcs[1].sweep_angle - pi * 1.5F) <
+      0.001F);
+  HUXERUI_CHECK(
+      determinate.RootNode()->children[0]->identity == identity);
+
+  Runtime empty{EmptyProgressCircleApp, platform};
+  empty.SetViewport({64.0F, 64.0F});
+  HUXERUI_CHECK(arcs(empty.BuildFrame()).size() == 1);
+
+  Runtime full{FullProgressCircleApp, platform};
+  full.SetViewport({64.0F, 64.0F});
+  const auto full_arcs = arcs(full.BuildFrame());
+  HUXERUI_CHECK(full_arcs.size() == 2);
+  HUXERUI_CHECK(
+      std::abs(full_arcs[1].sweep_angle - pi * 2.0F) <
+      0.001F);
+
+  TestPlatform animated_platform;
+  Runtime animated{
+      IndeterminateProgressCircleApp,
+      animated_platform};
+  animated.SetViewport({64.0F, 64.0F});
+  const int requests_before =
+      animated_platform.requested_frames;
+  const auto animated_initial = arcs(animated.BuildFrame());
+  HUXERUI_CHECK(animated_initial.size() == 2);
+  HUXERUI_CHECK(
+      animated_platform.requested_frames >
+      requests_before);
+  const float initial_start =
+      animated_initial[1].start_angle;
+
+  animated_platform.AdvanceTime(0.48);
+  const auto animated_next = arcs(animated.BuildFrame());
+  HUXERUI_CHECK(animated_next.size() == 2);
+  HUXERUI_CHECK(
+      std::abs(
+          animated_next[1].start_angle -
+          initial_start) >
+      0.1F);
+
+  TestPlatform reduced_platform;
+  Runtime reduced{
+      ReducedMotionProgressCircleApp,
+      reduced_platform};
+  reduced.SetViewport({64.0F, 64.0F});
+  const int reduced_requests_before =
+      reduced_platform.requested_frames;
+  const auto reduced_arcs = arcs(reduced.BuildFrame());
+  HUXERUI_CHECK(reduced_arcs.size() == 2);
+  HUXERUI_CHECK(
+      reduced_platform.requested_frames ==
+      reduced_requests_before);
+}
+
 void TestThemeDrivesHoverAndPressedIndication() {
   TestPlatform platform;
   Runtime runtime{ThemedIndicationApp, platform};
@@ -2225,6 +2545,7 @@ void TestFocusTraversalKeyboardAndThemeVisuals() {
   received_keys.clear();
   first_keyboard_clicks = 0;
   third_keyboard_clicks = 0;
+  custom_keyboard_clicks = 0;
   disabled_clicks = 0;
 
   TestPlatform platform;
@@ -2299,6 +2620,11 @@ void TestFocusTraversalKeyboardAndThemeVisuals() {
   });
   HUXERUI_CHECK(received_keys.size() == 1);
   HUXERUI_CHECK(received_keys.front() == Key::ArrowRight);
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  HUXERUI_CHECK(custom_keyboard_clicks == 1);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
@@ -4456,6 +4782,8 @@ int main() {
   TestThemeProviderUpdatesNestedContent();
   TestFlatDarkThemeAndSemanticTextRoles();
   TestMaterialThemeDefinitionsAndIndication();
+  TestControlledTogglesAndAnimation();
+  TestProgressCircleDrawingStateAndAnimation();
   TestThemeDrivesHoverAndPressedIndication();
   TestEnabledInheritanceAndHitTestBlocking();
   TestFocusTraversalKeyboardAndThemeVisuals();

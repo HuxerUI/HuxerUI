@@ -13,12 +13,12 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. The first pla
 - `UseState()` identity based on call site and occurrence
 - `Views`, data-driven `ForEach`, virtualized lists, and virtualized grids
 - Reconciliation between transient `ViewSpec` objects and persistent `MountedNode` objects
-- `Column`, `Row`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, and `Button`
+- `Column`, `Row`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, `Button`, `Checkbox`, `Switch`, and `ProgressCircle`
 - Public `Layout<Derived>` extension API shared by built-in and custom layouts
 - Public `VirtualLayout<Derived>` extension API for custom virtualized containers
 - Typed built-in and component events with `On<Key>()`, `UseEvents()`, and `Emit<Key>()`
 - Inherited enabled state, window focus traversal, and platform-independent key events
-- Nested Flat and Material Theme providers with semantic Text, Button, Dialog, Toast, and ScrollBar styles
+- Nested Flat and Material Theme providers with semantic Text, Button, Checkbox, Switch, ProgressCircle, Dialog, Toast, and ScrollBar styles
 - Per-window layers with Toast and declarative or command-oriented Dialog presentation
 - Padding, spacing, frames, foreground and background colors, and corner radii
 - Main-axis distribution, cross-axis alignment, stack alignment, and grow factors
@@ -135,9 +135,10 @@ outside its bounds, while Click is emitted only when the pointer is released
 over the same mounted target. Captures safely expire when their target
 unmounts.
 
-Button participates in focus traversal automatically. Custom interactive
-Views opt in with `Focusable{}`. Tab and Shift+Tab traverse enabled focusable
-nodes, while Enter and Space activate a focused Button:
+Button, Checkbox, and Switch participate in focus traversal automatically.
+Custom interactive Views opt in with `Focusable{}`. Tab and Shift+Tab traverse
+enabled focusable nodes, while Enter and Space activate any focused View with
+`OnClick()` or built-in activation behavior:
 
 ```cpp
 Column{
@@ -150,6 +151,45 @@ Column{
         .On<ViewEvents::KeyDown>(HandleKey),
 };
 ```
+
+Checkbox and Switch are controlled components. Their current value comes from
+the constructor, and `OnChanged(bool)` asks the owner to update that value:
+
+```cpp
+auto checked = UseState(false);
+
+return Row{
+    Checkbox(checked).OnChanged([checked](bool value) {
+      checked = value;
+    }),
+    Switch(checked).On<ToggleEvents::Changed>(
+        [checked](bool value) {
+          checked = value;
+        }),
+};
+```
+
+`OnChanged()` is a convenience wrapper for
+`On<ToggleEvents::Changed>()`. Pointer clicks, Enter, and Space all use the
+same activation path. Switch movement is retained by its mounted modifier and
+uses the current Theme motion duration; reduced-motion themes update it
+immediately. `CheckboxStyleKey` and `SwitchStyleKey` allow a nested Theme to
+replace their semantic styles.
+
+`ProgressCircle` supports both indeterminate and determinate progress:
+
+```cpp
+ProgressCircle();
+ProgressCircle(0.65F);
+ProgressCircle(progress_state);
+```
+
+Determinate values are constrained to the `0` to `1` range. An indeterminate
+circle rotates using its mounted modifier, while a determinate circle does not
+continuously request frames. Reduced-motion themes keep the indeterminate arc
+static. `ProgressCircleStyleKey` controls its intrinsic size, stroke width,
+track and indicator colors, arc fraction, and animation duration. `Frame` can
+override the intrinsic size.
 
 `Enabled{false}` is inherited by the entire subtree. A disabled control remains
 a hit-test barrier, preventing input from falling through to content behind

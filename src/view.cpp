@@ -88,6 +88,275 @@ void ApplyFocusable(
   spec.focusable = modifier.value;
 }
 
+Color ApplyOpacity(Color color, float opacity) {
+  color.alpha *= std::clamp(opacity, 0.0F, 1.0F);
+  return color;
+}
+
+Color InterpolateColor(Color from, Color to, float progress) {
+  const float value = std::clamp(progress, 0.0F, 1.0F);
+  return {
+      from.red + (to.red - from.red) * value,
+      from.green + (to.green - from.green) * value,
+      from.blue + (to.blue - from.blue) * value,
+      from.alpha + (to.alpha - from.alpha) * value,
+  };
+}
+
+enum class ToggleVisualKind {
+  Checkbox,
+  Switch,
+};
+
+struct ResolvedCheckboxStyle {
+  using Value = CheckboxStyle;
+};
+
+struct ResolvedSwitchStyle {
+  using Value = SwitchStyle;
+};
+
+struct ResolvedProgressCircleStyle {
+  using Value = ProgressCircleStyle;
+};
+
+struct ToggleVisual {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  ToggleVisualKind kind;
+  bool checked;
+};
+
+class MountedToggleVisual final : public MountedModifier {
+public:
+  MountedToggleVisual(MountedNode &node, const ToggleVisual &modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode &node, const ToggleVisual &modifier) {
+    kind_ = modifier.kind;
+    checkbox_style_ =
+        node.LayoutValueOr<ResolvedCheckboxStyle>(
+            CheckboxStyleKey::Default());
+    switch_style_ =
+        node.LayoutValueOr<ResolvedSwitchStyle>(
+            SwitchStyleKey::Default());
+    if (!initialized_) {
+      checked_ = modifier.checked;
+      progress_.Set(checked_ ? 1.0F : 0.0F);
+      initialized_ = true;
+      return;
+    }
+    if (checked_ != modifier.checked) {
+      checked_ = modifier.checked;
+      target_pending_ = true;
+    }
+  }
+
+  ModifierFrameResult OnFrame(
+      MountedNode &node, const FrameInfo &frame) override {
+    static_cast<void>(node);
+    if (kind_ != ToggleVisualKind::Switch) {
+      progress_.Set(checked_ ? 1.0F : 0.0F);
+      target_pending_ = false;
+      return {};
+    }
+    if (target_pending_) {
+      progress_.AnimateTo(
+          checked_ ? 1.0F : 0.0F,
+          frame.timestamp,
+          switch_style_.animation_duration);
+      target_pending_ = false;
+    }
+    progress_.Advance(frame.timestamp);
+    return {
+        .needs_frame = progress_.IsRunning(),
+    };
+  }
+
+  void Paint(
+      const MountedNode &node, DisplayList &display_list) const override {
+    if (kind_ == ToggleVisualKind::Checkbox) {
+      PaintCheckbox(node, display_list);
+    } else {
+      PaintSwitch(node, display_list);
+    }
+  }
+
+private:
+  void PaintCheckbox(
+      const MountedNode &node, DisplayList &display_list) const {
+    const Rect frame = node.PresentationFrame();
+    const float opacity = node.PresentationOpacity();
+    if (checked_) {
+      display_list.DrawRect(
+          frame,
+          ApplyOpacity(checkbox_style_.checked_background, opacity),
+          std::max(0.0F, checkbox_style_.corner_radius));
+      display_list.DrawText(
+          frame, "✓",
+          ApplyOpacity(checkbox_style_.checkmark, opacity),
+          std::max(0.0F, checkbox_style_.size * 0.72F),
+          TextAlign::Center);
+      return;
+    }
+    display_list.DrawBorder(
+        frame,
+        ApplyOpacity(checkbox_style_.unchecked_border, opacity),
+        std::max(0.0F, checkbox_style_.border_width),
+        std::max(0.0F, checkbox_style_.corner_radius));
+  }
+
+  void PaintSwitch(
+      const MountedNode &node, DisplayList &display_list) const {
+    const Rect frame = node.PresentationFrame();
+    const float opacity = node.PresentationOpacity();
+    const float progress = progress_.Value();
+    const Color track = InterpolateColor(
+        switch_style_.unchecked_track,
+        switch_style_.checked_track,
+        progress);
+    display_list.DrawRect(
+        frame, ApplyOpacity(track, opacity),
+        std::max(0.0F, switch_style_.corner_radius));
+
+    const float padding =
+        std::max(0.0F, switch_style_.track_padding);
+    const float maximum_radius =
+        std::max(0.0F, std::min(
+            frame.height * 0.5F - padding,
+            frame.width * 0.5F - padding));
+    const float radius = std::clamp(
+        switch_style_.thumb_radius, 0.0F, maximum_radius);
+    const float start_x = frame.x + padding + radius;
+    const float travel = std::max(
+        0.0F, frame.width - 2.0F * (padding + radius));
+    display_list.DrawCircle(
+        {
+            start_x + travel * progress,
+            frame.y + frame.height * 0.5F,
+        },
+        radius,
+        ApplyOpacity(switch_style_.thumb, opacity));
+  }
+
+  ToggleVisualKind kind_ = ToggleVisualKind::Checkbox;
+  CheckboxStyle checkbox_style_;
+  SwitchStyle switch_style_;
+  detail::AnimatedValue<float> progress_;
+  bool checked_ = false;
+  bool initialized_ = false;
+  bool target_pending_ = false;
+};
+
+const detail::ModifierDescriptor &ToggleVisual::Descriptor() {
+  return detail::ModifierDescriptorFor<
+      ToggleVisual, MountedToggleVisual>();
+}
+
+struct ProgressCircleVisual {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  std::optional<float> progress;
+};
+
+class MountedProgressCircleVisual final : public MountedModifier {
+public:
+  MountedProgressCircleVisual(
+      MountedNode &node, const ProgressCircleVisual &modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(
+      MountedNode &node, const ProgressCircleVisual &modifier) {
+    style_ = node.LayoutValueOr<ResolvedProgressCircleStyle>(
+        ProgressCircleStyleKey::Default());
+    if (progress_ != modifier.progress) {
+      progress_ = modifier.progress;
+      animation_start_.reset();
+      phase_ = 0.0F;
+    }
+  }
+
+  ModifierFrameResult OnFrame(
+      MountedNode &node, const FrameInfo &frame) override {
+    static_cast<void>(node);
+    if (progress_.has_value() ||
+        !std::isfinite(style_.animation_duration) ||
+        style_.animation_duration <= 0.0) {
+      animation_start_.reset();
+      phase_ = 0.0F;
+      return {};
+    }
+    if (!animation_start_.has_value()) {
+      animation_start_ = frame.timestamp;
+    }
+    const double elapsed =
+        std::max(0.0, frame.timestamp - *animation_start_);
+    phase_ = static_cast<float>(
+        std::fmod(elapsed, style_.animation_duration) /
+        style_.animation_duration);
+    return {
+        .needs_frame = true,
+    };
+  }
+
+  void Paint(
+      const MountedNode &node, DisplayList &display_list) const override {
+    constexpr float pi = 3.14159265358979323846F;
+    constexpr float full_circle = pi * 2.0F;
+
+    const Rect frame = node.PresentationFrame();
+    const float stroke_width =
+        std::max(0.0F, style_.stroke_width);
+    const float radius = std::max(
+        0.0F,
+        std::min(frame.width, frame.height) * 0.5F -
+            stroke_width * 0.5F);
+    if (radius <= 0.0F || stroke_width <= 0.0F) {
+      return;
+    }
+
+    const Point center{
+        frame.x + frame.width * 0.5F,
+        frame.y + frame.height * 0.5F,
+    };
+    const float opacity = node.PresentationOpacity();
+    if (style_.track_color.alpha > 0.0F) {
+      display_list.DrawArc(
+          center, radius, -pi * 0.5F, full_circle,
+          ApplyOpacity(style_.track_color, opacity),
+          stroke_width);
+    }
+
+    const float progress = progress_.value_or(
+        std::clamp(
+            style_.indeterminate_arc_fraction,
+            0.0F, 1.0F));
+    if (progress <= 0.0F) {
+      return;
+    }
+    const float start =
+        -pi * 0.5F +
+        (progress_.has_value() ? 0.0F : phase_ * full_circle);
+    display_list.DrawArc(
+        center, radius, start, progress * full_circle,
+        ApplyOpacity(style_.indicator_color, opacity),
+        stroke_width, StrokeCap::Round);
+  }
+
+private:
+  ProgressCircleStyle style_;
+  std::optional<float> progress_;
+  std::optional<double> animation_start_;
+  float phase_ = 0.0F;
+};
+
+const detail::ModifierDescriptor &ProgressCircleVisual::Descriptor() {
+  return detail::ModifierDescriptorFor<
+      ProgressCircleVisual, MountedProgressCircleVisual>();
+}
+
 template <class Key>
 std::optional<typename Key::Value> ResolveStyleOverride(
     const std::shared_ptr<const detail::EnvironmentFrame> &environment) {
@@ -131,6 +400,38 @@ void ApplyThemeDefaults(detail::ViewSpec &spec) {
     spec.style.foreground = style.foreground;
     spec.style.font_size = style.font_size;
     spec.style.corner_radius = style.corner_radius;
+    return;
+  }
+  if (spec.kind == detail::NodeKind::Checkbox) {
+    const CheckboxStyle style =
+        ResolveStyleOverride<CheckboxStyleKey>(spec.environment)
+            .value_or(detail::DefaultCheckboxStyle(theme));
+    spec.layout_values.insert_or_assign(
+        typeid(ResolvedCheckboxStyle), style);
+    spec.style.width = std::max(0.0F, style.size);
+    spec.style.height = std::max(0.0F, style.size);
+    spec.style.corner_radius = std::max(0.0F, style.corner_radius);
+    return;
+  }
+  if (spec.kind == detail::NodeKind::Switch) {
+    const SwitchStyle style =
+        ResolveStyleOverride<SwitchStyleKey>(spec.environment)
+            .value_or(detail::DefaultSwitchStyle(theme));
+    spec.layout_values.insert_or_assign(
+        typeid(ResolvedSwitchStyle), style);
+    spec.style.width = std::max(0.0F, style.width);
+    spec.style.height = std::max(0.0F, style.height);
+    spec.style.corner_radius = std::max(0.0F, style.corner_radius);
+    return;
+  }
+  if (spec.kind == detail::NodeKind::ProgressCircle) {
+    const ProgressCircleStyle style =
+        ResolveStyleOverride<ProgressCircleStyleKey>(spec.environment)
+            .value_or(detail::DefaultProgressCircleStyle(theme));
+    spec.layout_values.insert_or_assign(
+        typeid(ResolvedProgressCircleStyle), style);
+    spec.style.width = std::max(0.0F, style.size);
+    spec.style.height = std::max(0.0F, style.size);
   }
 }
 
@@ -146,6 +447,45 @@ std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
   spec->text = std::move(label);
   spec->focusable = true;
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeToggleSpec(
+    detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked) {
+  auto spec = std::make_shared<detail::ViewSpec>(kind);
+  spec->focusable = true;
+  spec->activation = [checked](const detail::EventBindings &bindings) {
+    detail::EmitEvent<ToggleEvents::Changed>(bindings, !checked);
+  };
+  spec->modifiers.push_back(
+      detail::MakeModifierSpec(
+          ToggleVisual{visual_kind, checked}));
+  spec->modifiers.push_back(
+      detail::MakeModifierSpec(detail::DefaultIndication{}));
+  return spec;
+}
+
+float NormalizeProgress(float progress) {
+  if (std::isnan(progress) || progress <= 0.0F) {
+    return 0.0F;
+  }
+  if (progress >= 1.0F) {
+    return 1.0F;
+  }
+  return progress;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(
+    std::optional<float> progress) {
+  if (progress.has_value()) {
+    progress = NormalizeProgress(*progress);
+  }
+  auto spec =
+      std::make_shared<detail::ViewSpec>(
+          detail::NodeKind::ProgressCircle);
+  spec->modifiers.push_back(
+      detail::MakeModifierSpec(
+          ProgressCircleVisual{progress}));
   return spec;
 }
 
@@ -369,6 +709,28 @@ Button::Button(std::string_view label) : Button(std::string(label)) {}
 
 Button::Button(const char *label)
     : Button(label == nullptr ? std::string{} : std::string(label)) {}
+
+Checkbox::Checkbox(bool checked)
+    : detail::TypedView<Checkbox>(
+          MakeToggleSpec(
+              detail::NodeKind::Checkbox,
+              ToggleVisualKind::Checkbox,
+              checked)) {}
+
+Switch::Switch(bool checked)
+    : detail::TypedView<Switch>(
+          MakeToggleSpec(
+              detail::NodeKind::Switch,
+              ToggleVisualKind::Switch,
+              checked)) {}
+
+ProgressCircle::ProgressCircle()
+    : detail::TypedView<ProgressCircle>(
+          MakeProgressCircleSpec(std::nullopt)) {}
+
+ProgressCircle::ProgressCircle(float progress)
+    : detail::TypedView<ProgressCircle>(
+          MakeProgressCircleSpec(progress)) {}
 
 Scope::Scope(std::function<View()> factory)
     : View(MakeScopeSpec(std::move(factory))) {}

@@ -417,6 +417,38 @@ private:
             diameter, diameter));
   }
 
+  void RenderCommand(CGContextRef context, const DrawArcCommand &command) {
+    if (command.radius <= 0.0F || command.width <= 0.0F ||
+        command.color.alpha <= 0.0F ||
+        !std::isfinite(command.start_angle) ||
+        !std::isfinite(command.sweep_angle) ||
+        command.sweep_angle == 0.0F) {
+      return;
+    }
+
+    CGLineCap cap = kCGLineCapButt;
+    if (command.cap == StrokeCap::Round) {
+      cap = kCGLineCapRound;
+    } else if (command.cap == StrokeCap::Square) {
+      cap = kCGLineCapSquare;
+    }
+
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathAddRelativeArc(
+        path, nullptr,
+        command.center.x, command.center.y,
+        command.radius, command.start_angle,
+        command.sweep_angle);
+    CGContextSaveGState(context);
+    SetStrokeColor(context, command.color);
+    CGContextSetLineWidth(context, command.width);
+    CGContextSetLineCap(context, cap);
+    CGContextAddPath(context, path);
+    CGContextStrokePath(context);
+    CGContextRestoreGState(context);
+    CGPathRelease(path);
+  }
+
   void RenderCommand(CGContextRef context, const DrawBorderCommand &command) {
     if (command.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
