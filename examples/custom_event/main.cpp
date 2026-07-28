@@ -1,4 +1,6 @@
 #include <iostream>
+#include <format>
+
 #include <huxerui/huxerui.h>
 
 using namespace huxerui;

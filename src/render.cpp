@@ -58,7 +58,7 @@ void PaintModifiers(MountedNode &node, DisplayList &display_list) {
 void PaintFocusRing(
     const MountedNode &node, const Rect &frame,
     float opacity, DisplayList &display_list) {
-  if (!node.focused || !node.enabled ||
+  if (!node.focus_visible || !node.enabled ||
       node.style.focus_ring_width <= 0.0F) {
     return;
   }

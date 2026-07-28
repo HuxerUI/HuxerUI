@@ -241,7 +241,17 @@ ProgressCircleStyle ProgressCircleStyleKey::Default() {
 }
 
 ThemeSpec FlatLightThemeSpec() {
-  return {};
+  ThemeSpec theme;
+  theme.interactions = {
+      .hover_overlay = Color::Rgb(0, 0, 0, 0.10F),
+      .pressed_overlay = Color::Rgb(0, 0, 0, 0.16F),
+      .ripple = Color::Rgb(255, 255, 255, 0.28F),
+      .indication = IndicationKind::StateOverlay,
+      .focus_ring = std::nullopt,
+      .focus_ring_width = 2.0F,
+      .disabled_opacity = 0.42F,
+  };
+  return theme;
 }
 
 ThemeSpec FlatDarkThemeSpec() {
@@ -258,8 +268,13 @@ ThemeSpec FlatDarkThemeSpec() {
       .error = Color::Rgb(248, 81, 73),
   };
   theme.interactions = {
-      .hover_overlay = Color::Rgb(255, 255, 255, 0.08F),
-      .pressed_overlay = Color::Rgb(255, 255, 255, 0.14F),
+      .hover_overlay = Color::Rgb(255, 255, 255, 0.12F),
+      .pressed_overlay = Color::Rgb(255, 255, 255, 0.18F),
+      .ripple = Color::Rgb(255, 255, 255, 0.28F),
+      .indication = IndicationKind::StateOverlay,
+      .focus_ring = std::nullopt,
+      .focus_ring_width = 2.0F,
+      .disabled_opacity = 0.42F,
   };
   return theme;
 }

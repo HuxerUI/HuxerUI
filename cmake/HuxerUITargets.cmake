@@ -7,13 +7,17 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_ID "generic")
     set(HUXERUI_PLATFORM_SOURCE_FILES)
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS)
+    set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES)
 
     if (APPLE)
         set(HUXERUI_PLATFORM_ID "macos")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Apple.cmake")
+    elseif (WIN32)
+        set(HUXERUI_PLATFORM_ID "windows")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports macOS only")
+        message(FATAL_ERROR "HuxerUI currently supports macOS and Windows only")
     endif ()
 
     huxerui_platform_configure()
@@ -21,6 +25,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}" PARENT_SCOPE)
     set(HUXERUI_PLATFORM_SOURCE_FILES ${HUXERUI_PLATFORM_SOURCE_FILES} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS ${HUXERUI_PLATFORM_COMPILE_OPTIONS} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
 endfunction()
 
@@ -31,10 +36,15 @@ function(huxerui_configure_compile_target target_name)
             "${HUXERUI_PROJECT_DIR}/src"
     )
     target_compile_options(${target_name} PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
+            "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
+            "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
             ${HUXERUI_PLATFORM_COMPILE_OPTIONS}
+    )
+    target_compile_definitions(${target_name} PRIVATE
+            ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS}
     )
 endfunction()
 
@@ -45,6 +55,15 @@ function(huxerui_configure_public_target target_name)
             $<INSTALL_INTERFACE:include>
     )
     target_link_libraries(${target_name} PRIVATE ${HUXERUI_PLATFORM_LINK_LIBRARIES})
+
+    if (WIN32)
+        get_target_property(HUXERUI_TARGET_TYPE ${target_name} TYPE)
+        if (HUXERUI_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
+            set_target_properties(${target_name} PROPERTIES
+                    WINDOWS_EXPORT_ALL_SYMBOLS ON
+            )
+        endif ()
+    endif ()
 endfunction()
 
 function(huxerui_configure_targets)

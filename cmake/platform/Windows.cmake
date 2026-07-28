@@ -1,0 +1,21 @@
+function(huxerui_platform_configure)
+    set(HUXERUI_PLATFORM_SOURCE_FILES
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_host.cpp"
+            PARENT_SCOPE
+    )
+    set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS
+            UNICODE
+            _UNICODE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+            WINVER=0x0A00
+            _WIN32_WINNT=0x0A00
+            PARENT_SCOPE
+    )
+    set(HUXERUI_PLATFORM_LINK_LIBRARIES
+            d2d1
+            dwrite
+            user32
+            PARENT_SCOPE
+    )
+endfunction()

@@ -288,6 +288,12 @@ View FlatDarkThemeApp() {
           }));
 }
 
+View FlatThemeInteractionApp() {
+  return HUXERUI_THEME(
+      huxerui::FlatTheme,
+      Button("flat interaction").OnClick([] {}));
+}
+
 View MaterialThemeApp() {
   return HUXERUI_THEME(
       huxerui::MaterialTheme,
@@ -2012,6 +2018,57 @@ void TestFlatDarkThemeAndSemanticTextRoles() {
       background->color.blue == dark.colors.primary.blue);
 }
 
+void TestFlatThemeHoverAndPressedIndication() {
+  const ThemeSpec light = huxerui::FlatLightThemeSpec();
+  const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
+  HUXERUI_CHECK(
+      std::abs(light.interactions.hover_overlay.alpha - 0.10F) <
+      0.001F);
+  HUXERUI_CHECK(
+      std::abs(light.interactions.pressed_overlay.alpha - 0.16F) <
+      0.001F);
+  HUXERUI_CHECK(
+      std::abs(dark.interactions.hover_overlay.alpha - 0.12F) <
+      0.001F);
+  HUXERUI_CHECK(
+      std::abs(dark.interactions.pressed_overlay.alpha - 0.18F) <
+      0.001F);
+
+  TestPlatform platform;
+  Runtime runtime{FlatThemeInteractionApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  const DisplayList &initial = runtime.BuildFrame();
+  const DrawTextCommand *button =
+      FindText(initial, "flat interaction");
+  HUXERUI_CHECK(button != nullptr);
+  const Point pointer{
+      button->rect.x + button->rect.width * 0.5F,
+      button->rect.y + button->rect.height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      105,
+      pointer,
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(light.motion.fast);
+  const DisplayList &hovered = runtime.BuildFrame();
+  HUXERUI_CHECK(
+      FindRectWithColor(
+          hovered, light.interactions.hover_overlay) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      105,
+      pointer,
+  });
+  const DisplayList &pressed = runtime.BuildFrame();
+  HUXERUI_CHECK(
+      FindRectWithColor(
+          pressed, light.interactions.pressed_overlay) != nullptr);
+}
+
 void TestMaterialThemeDefinitionsAndIndication() {
   const ThemeSpec light = huxerui::MaterialLightThemeSpec();
   const ThemeSpec dark = huxerui::MaterialDarkThemeSpec();
@@ -2635,6 +2692,50 @@ void TestFocusTraversalKeyboardAndThemeVisuals() {
   });
   runtime.BuildFrame();
   HUXERUI_CHECK(focus_changes.back() == "third:on");
+}
+
+void TestPointerFocusDoesNotPaintFocusRing() {
+  focus_changes.clear();
+
+  TestPlatform platform;
+  Runtime runtime{FocusApp, platform};
+  runtime.SetViewport({240.0F, 180.0F});
+  const DisplayList &initial = runtime.BuildFrame();
+  const DrawTextCommand *first = FindText(initial, "first");
+  HUXERUI_CHECK(first != nullptr);
+  const Point pointer{
+      first->rect.x + first->rect.width * 0.5F,
+      first->rect.y + first->rect.height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      104,
+      pointer,
+  });
+  const DisplayList &pointer_focused = runtime.BuildFrame();
+  HUXERUI_CHECK(focus_changes.size() == 1);
+  HUXERUI_CHECK(focus_changes.back() == "first:on");
+  HUXERUI_CHECK(
+      FindBorderWithColor(
+          pointer_focused, Color::Rgb(40, 180, 90)) ==
+      nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      104,
+      pointer,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  const DisplayList &keyboard_focused = runtime.BuildFrame();
+  HUXERUI_CHECK(focus_changes.back() == "third:on");
+  HUXERUI_CHECK(
+      FindBorderWithColor(
+          keyboard_focused, Color::Rgb(40, 180, 90)) !=
+      nullptr);
 }
 
 void TestModalDialogTrapsAndRestoresFocusTraversal() {
@@ -4781,12 +4882,14 @@ int main() {
   TestNestedEnvironmentValues();
   TestThemeProviderUpdatesNestedContent();
   TestFlatDarkThemeAndSemanticTextRoles();
+  TestFlatThemeHoverAndPressedIndication();
   TestMaterialThemeDefinitionsAndIndication();
   TestControlledTogglesAndAnimation();
   TestProgressCircleDrawingStateAndAnimation();
   TestThemeDrivesHoverAndPressedIndication();
   TestEnabledInheritanceAndHitTestBlocking();
   TestFocusTraversalKeyboardAndThemeVisuals();
+  TestPointerFocusDoesNotPaintFocusRing();
   TestModalDialogTrapsAndRestoresFocusTraversal();
   TestRootHooksServicesAndLayers();
   TestToastAndDialogPresentation();

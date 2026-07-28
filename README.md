@@ -1,6 +1,6 @@
 # HuxerUI
 
-HuxerUI is a cross-platform declarative UI runtime powered by C++. The first platform implementation targets macOS, while core state management, recomposition, node reconciliation, layout, hit testing, and display lists remain in the platform-independent C++ layer.
+HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backends are available for macOS and Windows, while core state management, recomposition, node reconciliation, layout, hit testing, and display lists remain in the platform-independent C++ layer.
 
 ## Features
 
@@ -25,10 +25,10 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. The first pla
 - Width-constrained multiline text measurement and rendering
 - C++ measurement, layout, and hit testing
 - Nested rectangular display-list clipping and paint culling
-- AppKit windows and input forwarding
+- Native AppKit and Win32 windows with input forwarding
 - One-shot display-synchronized frame scheduling with delayed wakeups
-- CoreText text measurement and rendering
-- CoreGraphics drawing
+- CoreText and DirectWrite text measurement and rendering
+- CoreGraphics and Direct2D drawing
 
 ## Example
 
@@ -151,6 +151,9 @@ Column{
         .On<ViewEvents::KeyDown>(HandleKey),
 };
 ```
+
+Theme focus rings are shown for keyboard focus navigation. Pointer presses can
+move focus without drawing a focus ring over the pressed indication.
 
 Checkbox and Switch are controlled components. Their current value comes from
 the constructor, and `OnChanged(bool)` asks the owner to update that value:
@@ -603,17 +606,30 @@ Measure / Layout / HitTest
 DisplayList
   ↓
 macOS AppKit / CoreText / CoreGraphics
+Windows Win32 / DirectWrite / Direct2D
 ```
 
-The platform layer handles windows, frame scheduling, input forwarding, text services, and the canvas. The shared C++ core does not own AppKit objects.
+The platform layer handles windows, frame scheduling, input forwarding, text services, and the canvas. The shared C++ core does not own AppKit or Win32 objects.
 
 ## Building
+
+macOS:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
+
+Windows with Visual Studio 2022:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug --parallel
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+The Windows backend targets Windows 10 and later.
 
 Example applications:
 
@@ -631,6 +647,8 @@ Example applications:
 
 Run an example:
 
+macOS:
+
 ```bash
 open build/bin/huxerui_counter.app
 open build/bin/huxerui_layout_gallery.app
@@ -643,6 +661,13 @@ open build/bin/huxerui_scroll_state.app
 open build/bin/huxerui_toast.app
 open build/bin/huxerui_dialog.app
 open build/bin/huxerui_theme.app
+```
+
+Windows:
+
+```powershell
+.\build\bin\Debug\huxerui_counter.exe
+.\build\bin\Debug\huxerui_theme.exe
 ```
 
 ## CMake Options
@@ -664,4 +689,4 @@ open build/bin/huxerui_theme.app
 - IME, editable text input, and text selection
 - General saveable-state APIs, inertial scrolling, public animation APIs, and overscroll effects
 - Semantics tree and accessibility
-- iOS, Android, Windows, Linux, and Web backends
+- iOS, Android, Linux, and Web backends

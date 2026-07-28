@@ -24,9 +24,11 @@ target_include_directories(huxerui_codegen_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/tools/codegen"
 )
 target_compile_options(huxerui_codegen_tests PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
+        "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
 )
 
 add_test(NAME HuxerUICodegenTests COMMAND huxerui_codegen_tests)

@@ -257,6 +257,7 @@ struct MountedNode final : public huxerui::MountedNode {
   bool enabled = true;
   bool focusable = false;
   bool focused = false;
+  bool focus_visible = false;
   bool subtree_has_mounted_modifiers = true;
   std::vector<std::unique_ptr<MountedNode>> children;
 
@@ -578,7 +579,8 @@ private:
   ActiveModalLayerId() const;
   MountedNode *ActiveModalFocusRoot();
   void SetFocusedNode(
-      std::optional<std::uint64_t> identity);
+      std::optional<std::uint64_t> identity,
+      std::optional<bool> focus_visible = std::nullopt);
   void MoveFocus(bool reverse);
   bool UpdateMountedModifiers(
       MountedNode &node, const FrameInfo &frame,
@@ -620,6 +622,7 @@ private:
   std::optional<ModifierPointerCapture> hovered_modifier_;
   std::unordered_map<std::int64_t, PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
+  bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
   std::optional<LayerId> active_modal_focus_layer_;
   std::unordered_map<

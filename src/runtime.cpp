@@ -211,12 +211,15 @@ void ResolveEnabledTree(
 
 void ResolveFocusedFlags(
     MountedNode &node,
-    const std::optional<std::uint64_t> &focused_identity) {
+    const std::optional<std::uint64_t> &focused_identity,
+    bool focus_visible) {
   node.focused =
       focused_identity.has_value() &&
       node.identity == *focused_identity;
+  node.focus_visible = node.focused && focus_visible;
   for (auto &child : node.children) {
-    ResolveFocusedFlags(*child, focused_identity);
+    ResolveFocusedFlags(
+        *child, focused_identity, focus_visible);
   }
 }
 
@@ -564,6 +567,7 @@ void Runtime::UpdateHoveredModifier(Point position) {
 void Runtime::RefreshInteractionTree() {
   if (!mounted_root_) {
     focused_node_identity_.reset();
+    focus_visible_ = false;
     keyboard_activation_identity_.reset();
     hovered_modifier_.reset();
     return;
@@ -633,7 +637,8 @@ void Runtime::RefreshInteractionTree() {
   }
 
   ResolveFocusedFlags(
-      *mounted_root_, focused_node_identity_);
+      *mounted_root_, focused_node_identity_,
+      focus_visible_);
 }
 
 MountedNode *Runtime::ActiveModalFocusRoot() {
@@ -674,7 +679,8 @@ Runtime::ActiveModalLayerId() const {
 }
 
 void Runtime::SetFocusedNode(
-    std::optional<std::uint64_t> identity) {
+    std::optional<std::uint64_t> identity,
+    std::optional<bool> focus_visible) {
   if (identity.has_value()) {
     if (!mounted_root_) {
       identity.reset();
@@ -687,7 +693,21 @@ void Runtime::SetFocusedNode(
       }
     }
   }
+  const bool next_focus_visible =
+      focus_visible.value_or(focus_visible_);
+  if (focused_node_identity_ == identity &&
+      focus_visible_ == next_focus_visible) {
+    return;
+  }
   if (focused_node_identity_ == identity) {
+    focus_visible_ = next_focus_visible;
+    if (identity.has_value() && mounted_root_) {
+      if (MountedNode *focused =
+              FindNode(*mounted_root_, *identity)) {
+        focused->focus_visible = focus_visible_;
+      }
+    }
+    RequestFrame();
     return;
   }
 
@@ -696,16 +716,19 @@ void Runtime::SetFocusedNode(
             FindNode(
                 *mounted_root_, *focused_node_identity_)) {
       previous->focused = false;
+      previous->focus_visible = false;
       DispatchFocusChanged(*previous, false);
     }
   }
   keyboard_activation_identity_.reset();
   focused_node_identity_ = identity;
+  focus_visible_ = next_focus_visible;
   if (focused_node_identity_.has_value() && mounted_root_) {
     if (MountedNode *next =
             FindNode(
                 *mounted_root_, *focused_node_identity_)) {
       next->focused = true;
+      next->focus_visible = focus_visible_;
       DispatchFocusChanged(*next, true);
     }
   }
@@ -721,7 +744,7 @@ void Runtime::MoveFocus(bool reverse) {
   CollectFocusableNodes(
       root ? *root : *mounted_root_, focusable);
   if (focusable.empty()) {
-    SetFocusedNode(std::nullopt);
+    SetFocusedNode(std::nullopt, true);
     return;
   }
 
@@ -736,7 +759,8 @@ void Runtime::MoveFocus(bool reverse) {
 
   if (current == focusable.end()) {
     SetFocusedNode(
-        (reverse ? focusable.back() : focusable.front())->identity);
+        (reverse ? focusable.back() : focusable.front())->identity,
+        true);
     return;
   }
   if (reverse) {
@@ -750,7 +774,7 @@ void Runtime::MoveFocus(bool reverse) {
       current = focusable.begin();
     }
   }
-  SetFocusedNode((*current)->identity);
+  SetFocusedNode((*current)->identity, true);
 }
 
 bool Runtime::UpdateMountedModifiers(
@@ -871,7 +895,7 @@ void Runtime::HandlePointerEvent(const PointerEvent &event) {
         break;
       }
     }
-    SetFocusedNode(focus_target);
+    SetFocusedNode(focus_target, false);
 
     PointerSession session;
     session.down_position = event.position;
@@ -1204,6 +1228,9 @@ void Runtime::HandleKeyEvent(const KeyEvent &event) {
     return;
   }
 
+  if (event.type == KeyEventType::Down) {
+    SetFocusedNode(focused->identity, true);
+  }
   DispatchKey(*focused, event);
   const bool activatable = IsActivatable(*focused);
   if (event.type == KeyEventType::Down) {
