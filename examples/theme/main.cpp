@@ -105,16 +105,14 @@ View ThemeContent() {
   );
 }
 
-auto App() {
+View App() {
   return HUXERUI_THEME(MaterialTheme, ThemeContent());
 }
 
-int main() {
-  return RunApp(
-      App,
-      {
-          .title = "HuxerUI Theme",
-          .width = 560.0F,
-          .height = 820.0F,
-      });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Theme",
+        .width = 560.0F,
+        .height = 820.0F,
+    })

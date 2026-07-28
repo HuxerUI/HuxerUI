@@ -77,15 +77,13 @@ View App() {
   });
 }
 
-int main() {
-  return RunApp(
-      App,
-      {
-          .title = "HuxerUI Dialog",
-          .width = 520.0F,
-          .height = 360.0F,
-          .root_hooks = {
-              InstallDialogs(),
-          },
-      });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Dialog",
+        .width = 520.0F,
+        .height = 360.0F,
+        .root_hooks = {
+            InstallDialogs(),
+        },
+    })

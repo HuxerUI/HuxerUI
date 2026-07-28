@@ -52,10 +52,10 @@ View App() {
   );
 }
 
-int main() {
-  return RunApp(App, {
-                         .title = "HuxerUI Scroll State",
-                         .width = 640.0F,
-                         .height = 560.0F,
-                     });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Scroll State",
+        .width = 640.0F,
+        .height = 560.0F,
+    })

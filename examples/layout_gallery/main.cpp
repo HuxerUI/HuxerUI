@@ -105,12 +105,10 @@ View App() {
   );
 }
 
-int main() {
-  return RunApp(
+HUXERUI_APP(
     App,
     {
-      .title = "HuxerUI Layout Gallery",
-      .width = 720.0F,
-      .height = 660.0F,
-    });
-}
+        .title = "HuxerUI Layout Gallery",
+        .width = 720.0F,
+        .height = 660.0F,
+    })

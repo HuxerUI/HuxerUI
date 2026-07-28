@@ -46,10 +46,10 @@ View App() {
       );
 }
 
-int main() {
-  return RunApp(App, {
-                         .title = "HuxerUI Virtual Grid",
-                         .width = 760.0F,
-                         .height = 600.0F,
-                     });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Virtual Grid",
+        .width = 760.0F,
+        .height = 600.0F,
+    })

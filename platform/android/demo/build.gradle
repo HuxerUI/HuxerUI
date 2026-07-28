@@ -1,0 +1,56 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace "org.huxerui.demo"
+    compileSdk 36
+    ndkVersion "29.0.14206865"
+
+    defaultConfig {
+        applicationId "org.huxerui.demo"
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName "1.0"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared",
+                        "-DHUXERUI_ROOT_DIR=${rootProject.projectDir.parentFile.parentFile.absolutePath}"
+            }
+        }
+
+        ndk {
+            abiFilters "arm64-v8a", "x86_64"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile(
+                    "proguard-android-optimize.txt"),
+                    "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+}
+
+dependencies {
+    implementation project(":huxerui")
+}

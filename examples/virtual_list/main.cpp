@@ -42,10 +42,10 @@ View App() {
   );
 }
 
-int main() {
-  return RunApp(App, {
-                         .title = "HuxerUI Virtual List",
-                         .width = 640.0F,
-                         .height = 560.0F,
-                     });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Virtual List",
+        .width = 640.0F,
+        .height = 560.0F,
+    })

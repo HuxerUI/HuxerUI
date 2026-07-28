@@ -1,4 +1,7 @@
-add_executable(huxerui_codegen EXCLUDE_FROM_ALL
+cmake_minimum_required(VERSION 3.20)
+project(huxerui_codegen LANGUAGES CXX)
+
+add_executable(huxerui_codegen
         main.cpp
         transform.cpp
 )

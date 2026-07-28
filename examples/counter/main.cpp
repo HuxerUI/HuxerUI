@@ -24,12 +24,8 @@ View App() {
   }.With(Padding{32.0F});
 }
 
-int main() {
-  return RunApp(
-    App,
-    {
-      .title = "HuxerUI Counter",
-      .width = 520.0F,
-      .height = 360.0F,
-    });
-}
+HUXERUI_APP(App, {
+  .title = "HuxerUI Counter",
+  .width = 520.0F,
+  .height = 360.0F,
+})

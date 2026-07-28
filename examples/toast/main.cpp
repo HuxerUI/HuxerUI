@@ -21,15 +21,13 @@ View App() {
   );
 }
 
-int main() {
-  return RunApp(
+HUXERUI_APP(
     App,
     {
-      .title = "HuxerUI Toast",
-      .width = 520.0F,
-      .height = 360.0F,
-      .root_hooks = {
-        InstallToast(),
-      },
-    });
-}
+        .title = "HuxerUI Toast",
+        .width = 520.0F,
+        .height = 360.0F,
+        .root_hooks = {
+            InstallToast(),
+        },
+    })

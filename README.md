@@ -1,6 +1,6 @@
 # HuxerUI
 
-HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backends are available for macOS and Windows, while core state management, recomposition, node reconciliation, layout, hit testing, and display lists remain in the platform-independent C++ layer.
+HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backends are available for Android, macOS, and Windows, while core state management, recomposition, node reconciliation, layout, hit testing, and display lists remain in the platform-independent C++ layer.
 
 ## Features
 
@@ -25,10 +25,10 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 - Width-constrained multiline text measurement and rendering
 - C++ measurement, layout, and hit testing
 - Nested rectangular display-list clipping and paint culling
-- Native AppKit and Win32 windows with input forwarding
+- Native Android View, AppKit, and Win32 hosts with input forwarding
 - One-shot display-synchronized frame scheduling with delayed wakeups
-- CoreText and DirectWrite text measurement and rendering
-- CoreGraphics and Direct2D drawing
+- Android StaticLayout, CoreText, and DirectWrite text measurement and rendering
+- Android Canvas, CoreGraphics, and Direct2D drawing
 
 ## Example
 
@@ -55,12 +55,25 @@ View App() {
   }.With(Padding{32.0F});
 }
 
-int main() {
-  return RunApp(App);
-}
+HUXERUI_APP(App, {})
 ```
 
 `[[huxerui::scope]]` defines the identity boundary of a custom stateful component. Each mounted scope owns an independent `UseState()` state table, so multiple calls to the same component function do not share local state. `UseState()` uses C++20 `std::source_location` to identify call sites within a scope.
+
+`HUXERUI_APP` declares the application entry point. On desktop platforms it
+generates `main()` and calls `RunApp()`. On mobile platforms it registers the
+application definition for the native lifecycle host. Window options are
+written directly after the root factory:
+
+```cpp
+HUXERUI_APP(
+    App,
+    {
+        .title = "My App",
+        .width = 720.0F,
+        .height = 480.0F,
+    })
+```
 
 Enable build-time scope generation for each target that contains marked components:
 
@@ -588,9 +601,10 @@ DisplayList
   ↓
 macOS AppKit / CoreText / CoreGraphics
 Windows Win32 / DirectWrite / Direct2D
+Android View / StaticLayout / Canvas
 ```
 
-The platform layer handles windows, frame scheduling, input forwarding, text services, and the canvas. The shared C++ core does not own AppKit or Win32 objects.
+The platform layer handles windows or host views, frame scheduling, input forwarding, text services, and the canvas. The shared C++ core does not own Android View, AppKit, or Win32 objects.
 
 ## Building
 
@@ -612,6 +626,78 @@ ctest --test-dir build -C Debug --output-on-failure
 
 The Windows backend targets Windows 10 and later.
 
+Android provides `HuxerUIActivity` for full-screen applications and
+`HuxerUIView` for embedding HuxerUI content in an existing Android interface.
+`HuxerUIView` loads the shared C++ runtime, while `HuxerUIActivity` loads the
+application native library named `huxerui_app`.
+`HUXERUI_APP` registers one immutable application definition on mobile
+platforms. Every native host view creates its own `AppRuntime`, so multiple
+views can share the same root factory without sharing their state tree,
+layout, frame scheduling, or input state.
+
+Mobile platform integrations implement `AppHost`, create an `AppRuntime` from
+the registered `AppDefinition`, and forward viewport, frame, and input events:
+
+```cpp
+#include <huxerui/huxerui.h>
+
+using namespace huxerui;
+
+View App() {
+  return MaterialTheme([] {
+    return Button("Mobile");
+  });
+}
+
+class MobileHost final : public AppHost {
+  // Implement frame scheduling, time, and text measurement.
+};
+
+MobileHost host;
+AppRuntime runtime{
+    {
+        .root_factory = App,
+        .options = {.title = "HuxerUI"},
+    },
+    host,
+};
+
+runtime.SetViewport({width, height});
+const DisplayList& display_list = runtime.BuildFrame();
+```
+
+`AppRuntime` is shared by Android, iOS, and OHOS integrations. Rendering and
+native lifecycle ownership remain platform specific.
+
+The Android Gradle project contains the `huxerui` library module and the
+`demo` application module. A full-screen application only needs to derive its
+launcher activity from `HuxerUIActivity`:
+
+```java
+public final class MainActivity extends HuxerUIActivity {}
+```
+
+The application module builds its native entry point as `huxerui_app`.
+Loading that library performs mobile application registration before the
+activity constructs its `HuxerUIView`.
+
+The Android host keeps HuxerUI coordinates density independent, maps
+multi-touch, mouse hover, wheel, and keyboard events to the shared input
+model, and schedules animation frames through the View frame clock. The
+minimum supported Android API level is 23. The complete Gradle and CMake
+integration is available in `platform/android`; open that directory in
+Android Studio or build it from the command line:
+
+```powershell
+cd platform\android
+.\gradlew.bat :demo:assembleDebug
+```
+
+The demo compiles `App()` from `examples/theme/main.cpp`. Scope code
+generation automatically uses the matching host executable under
+`tools/prebuilt/<system>/<architecture>`; cross-compiles do not build or run a
+target-architecture code generator.
+
 Example applications:
 
 - `huxerui_counter`: component scopes and local state
@@ -625,6 +711,7 @@ Example applications:
 - `huxerui_toast`: per-window Toast presentation through a root-installed service
 - `huxerui_dialog`: declarative modal presentation controlled by local state
 - `huxerui_theme`: Material light and dark themes, nested FlatTheme boundaries, semantic text roles, ripple indication, and explicit modifier precedence
+- `platform/android/demo`: Android Custom View host displaying the theme example
 
 Run an example:
 
@@ -670,4 +757,4 @@ Windows:
 - IME, editable text input, and text selection
 - General saveable-state APIs, inertial scrolling, public animation APIs, and overscroll effects
 - Semantics tree and accessibility
-- iOS, Android, Linux, and Web backends
+- iOS, Linux, and Web backends

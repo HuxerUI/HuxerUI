@@ -107,12 +107,10 @@ View App() {
   return DynamicList();
 }
 
-int main() {
-  return RunApp(
-      App,
-      {
-          .title = "HuxerUI Dynamic List",
-          .width = 720.0F,
-          .height = 620.0F,
-      });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Dynamic List",
+        .width = 720.0F,
+        .height = 620.0F,
+    })

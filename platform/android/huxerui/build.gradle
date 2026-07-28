@@ -1,0 +1,49 @@
+plugins {
+    alias(libs.plugins.android.library)
+}
+
+android {
+    namespace "org.huxerui"
+    compileSdk 36
+    ndkVersion "29.0.14206865"
+
+    defaultConfig {
+        minSdk 23
+        consumerProguardFiles "consumer-rules.pro"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared",
+                        "-DHUXERUI_BUILD_SHARED=ON",
+                        "-DHUXERUI_BUILD_STATIC=OFF",
+                        "-DHUXERUI_BUILD_TESTS=OFF",
+                        "-DHUXERUI_BUILD_EXAMPLES=OFF"
+            }
+        }
+
+        ndk {
+            abiFilters "arm64-v8a", "x86_64"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("../../../CMakeLists.txt")
+        }
+    }
+
+    buildFeatures {
+        prefabPublishing true
+    }
+
+    prefab {
+        huxerui {
+            headers "../../../include"
+        }
+    }
+}

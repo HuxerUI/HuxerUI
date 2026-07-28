@@ -30,13 +30,11 @@ View App() {
   }.With(Padding{32.0F});
 }
 
-int main() {
-  return RunApp(
-      App,
-      {
-          .title = "HuxerUI Custom Event",
-          .width = 520.0F,
-          .height = 360.0F,
-          .root_hooks = {InstallToast()}
-      });
-}
+HUXERUI_APP(
+    App,
+    {
+        .title = "HuxerUI Custom Event",
+        .width = 520.0F,
+        .height = 360.0F,
+        .root_hooks = {InstallToast()},
+    })

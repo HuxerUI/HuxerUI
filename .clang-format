@@ -1,0 +1,26 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+ColumnLimit: 120
+IndentWidth: 2
+ContinuationIndentWidth: 4
+UseTab: Never
+BreakBeforeBraces: Attach
+AlignAfterOpenBracket: Align
+AlignEscapedNewlines: DontAlign
+AllowShortFunctionsOnASingleLine: Empty
+BinPackArguments: true
+BinPackParameters: true
+DerivePointerAlignment: false
+PointerAlignment: Right
+ReflowComments: false
+SortIncludes: Never
+---
+Language: Java
+BasedOnStyle: Google
+ColumnLimit: 120
+IndentWidth: 4
+ContinuationIndentWidth: 8
+UseTab: Never
+ReflowComments: false
+SortIncludes: Never

@@ -10,14 +10,17 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES)
 
-    if (APPLE)
+    if (ANDROID)
+        set(HUXERUI_PLATFORM_ID "android")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Android.cmake")
+    elseif (APPLE)
         set(HUXERUI_PLATFORM_ID "macos")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Apple.cmake")
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports macOS and Windows only")
+        message(FATAL_ERROR "HuxerUI currently supports Android, macOS, and Windows only")
     endif ()
 
     huxerui_platform_configure()
@@ -104,6 +107,43 @@ function(huxerui_configure_targets)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
 endfunction()
 
+function(huxerui_resolve_host_tool tool_name output_variable)
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" HUXERUI_HOST_SYSTEM)
+    if (HUXERUI_HOST_SYSTEM STREQUAL "darwin")
+        set(HUXERUI_HOST_SYSTEM "macos")
+    elseif (NOT HUXERUI_HOST_SYSTEM STREQUAL "windows"
+            AND NOT HUXERUI_HOST_SYSTEM STREQUAL "linux")
+        message(FATAL_ERROR
+                "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_NAME}"
+        )
+    endif ()
+
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" HUXERUI_HOST_ARCHITECTURE)
+    if (HUXERUI_HOST_ARCHITECTURE MATCHES "^(amd64|x64|x86_64)$")
+        set(HUXERUI_HOST_ARCHITECTURE "x86_64")
+    elseif (HUXERUI_HOST_ARCHITECTURE MATCHES "^(aarch64|arm64)$")
+        set(HUXERUI_HOST_ARCHITECTURE "arm64")
+    else ()
+        message(FATAL_ERROR
+                "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_PROCESSOR}"
+        )
+    endif ()
+
+    set(HUXERUI_HOST_TOOL_SUFFIX)
+    if (HUXERUI_HOST_SYSTEM STREQUAL "windows")
+        set(HUXERUI_HOST_TOOL_SUFFIX ".exe")
+    endif ()
+    set(HUXERUI_HOST_TOOL
+            "${HUXERUI_PROJECT_DIR}/tools/prebuilt/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}/huxerui-${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
+    )
+    if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
+        message(FATAL_ERROR
+                "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
+        )
+    endif ()
+    set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)
+endfunction()
+
 function(huxerui_enable_codegen target_name)
     if (NOT TARGET ${target_name})
         message(FATAL_ERROR
@@ -111,11 +151,7 @@ function(huxerui_enable_codegen target_name)
         )
     endif ()
 
-    if (NOT TARGET huxerui_codegen)
-        message(FATAL_ERROR
-                "huxerui_enable_codegen() requires the huxerui_codegen tool target"
-        )
-    endif ()
+    huxerui_resolve_host_tool("codegen" HUXERUI_CODEGEN_COMMAND)
 
     get_target_property(HUXERUI_CODEGEN_ALREADY_ENABLED
             ${target_name}
@@ -228,12 +264,12 @@ function(huxerui_enable_codegen target_name)
         )
         add_custom_command(
                 OUTPUT "${HUXERUI_CODEGEN_OUTPUT}"
-                COMMAND "$<TARGET_FILE:huxerui_codegen>"
+                COMMAND "${HUXERUI_CODEGEN_COMMAND}"
                         --input "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
                         --output "${HUXERUI_CODEGEN_OUTPUT}"
                 DEPENDS
                         "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
-                        huxerui_codegen
+                        "${HUXERUI_CODEGEN_COMMAND}"
                 COMMENT
                         "Generating HuxerUI scope source ${HUXERUI_CODEGEN_SOURCE_NAME}"
                 VERBATIM

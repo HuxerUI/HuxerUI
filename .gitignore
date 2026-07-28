@@ -2,7 +2,6 @@
 .idea
 .vscode
 .vs
-.cxx
 .cache
 .DS_Store
 *.xcuserstate
