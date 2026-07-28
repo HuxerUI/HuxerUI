@@ -2878,9 +2878,14 @@ void TestToastAndDialogPresentation() {
       "saved", huxerui::ToastOptions{0.5});
   const DisplayList &toast = runtime.BuildFrame();
   HUXERUI_CHECK(ContainsText(toast, "saved"));
-  HUXERUI_CHECK(
+  const DrawRectCommand *toast_background =
       FindRectWithColor(
-          toast, Color::Rgb(20, 30, 40, 0.9F)) != nullptr);
+          toast, Color::Rgb(20, 30, 40, 0.9F));
+  HUXERUI_CHECK(toast_background != nullptr);
+  HUXERUI_CHECK(toast_background->rect.x == 65.0F);
+  HUXERUI_CHECK(toast_background->rect.y == 36.0F);
+  HUXERUI_CHECK(toast_background->rect.width == 70.0F);
+  HUXERUI_CHECK(toast_background->rect.height == 40.0F);
   const DrawTextCommand *toast_text = FindText(toast, "saved");
   HUXERUI_CHECK(toast_text != nullptr);
   HUXERUI_CHECK(

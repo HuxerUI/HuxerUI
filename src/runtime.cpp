@@ -9,7 +9,7 @@ namespace huxerui::detail {
 
 namespace {
 
-struct RuntimeModalLayer {
+struct RuntimeFillsViewport {
   using Value = bool;
 };
 
@@ -26,7 +26,7 @@ public:
     for (huxerui::MountedNode &child : node.Children()) {
       const bool tight =
           index == 0 ||
-          child.LayoutValueOr<RuntimeModalLayer>(false);
+          child.LayoutValueOr<RuntimeFillsViewport>(false);
       static_cast<void>(context.Measure(
           child, tight ? constraints : constraints.Loose()));
       result.Place(child, {});
@@ -827,6 +827,22 @@ void Runtime::ComposeRoot() {
         LayerInputPolicy::PassThrough) {
       layer.spec_->pointer_events_enabled = false;
     }
+    if (entry->options.kind == LayerKind::Toast) {
+      layer =
+          Stack{std::move(layer)}
+              .With(
+                  Padding{EdgeInsets{
+                      0.0F,
+                      16.0F,
+                      24.0F,
+                      16.0F,
+                  }},
+                  Align{
+                      HorizontalAlignment::Center,
+                      VerticalAlignment::End,
+                  })
+              .LayoutValue<RuntimeFillsViewport>(true);
+    }
     if (entry->options.input_policy == LayerInputPolicy::Modal) {
       layer = std::move(layer).On<ViewEvents::PointerDown>(
           [](const PointerEvent &) {});
@@ -836,7 +852,7 @@ void Runtime::ComposeRoot() {
                   HorizontalAlignment::Center,
                   VerticalAlignment::Center,
               })
-              .LayoutValue<RuntimeModalLayer>(true)
+              .LayoutValue<RuntimeFillsViewport>(true)
               .On<ViewEvents::PointerDown>(
                   [this, id = entry->id,
                    dismiss =
