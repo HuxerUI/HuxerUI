@@ -1,0 +1,272 @@
+#pragma once
+
+#include <concepts>
+#include <memory>
+#include <optional>
+#include <type_traits>
+#include <typeindex>
+#include <utility>
+
+#include <huxerui/color.h>
+#include <huxerui/display_list.h>
+#include <huxerui/event.h>
+#include <huxerui/geometry.h>
+#include <huxerui/layout.h>
+
+namespace huxerui {
+
+struct FrameInfo {
+  double timestamp = 0.0;
+  double delta_time = 0.0;
+};
+
+struct ModifierFrameResult {
+  bool needs_frame = false;
+  std::optional<double> wake_after;
+};
+
+enum class ModifierPointerResult {
+  Ignored,
+  Observe,
+  Handled,
+  Capture,
+};
+
+class MountedModifier {
+public:
+  virtual ~MountedModifier() = default;
+
+  virtual ModifierFrameResult OnFrame(
+      MountedNode &node, const FrameInfo &frame) {
+    static_cast<void>(node);
+    static_cast<void>(frame);
+    return {};
+  }
+
+  virtual void OnScrollActivity(MountedNode &node) {
+    static_cast<void>(node);
+  }
+
+  virtual void OnScrollGesture(MountedNode &node, bool active) {
+    static_cast<void>(node);
+    static_cast<void>(active);
+  }
+
+  [[nodiscard]] virtual bool
+  HitTest(MountedNode &node, Point position) const {
+    static_cast<void>(node);
+    static_cast<void>(position);
+    return false;
+  }
+
+  [[nodiscard]] virtual bool
+  HoverHitTest(MountedNode &node, Point position) const {
+    static_cast<void>(node);
+    static_cast<void>(position);
+    return false;
+  }
+
+  virtual void OnHoverChanged(MountedNode &node, bool hovered) {
+    static_cast<void>(node);
+    static_cast<void>(hovered);
+  }
+
+  virtual void OnFocusChanged(MountedNode &node, bool focused) {
+    static_cast<void>(node);
+    static_cast<void>(focused);
+  }
+
+  virtual void OnKey(
+      MountedNode &node, const KeyEvent &event) {
+    static_cast<void>(node);
+    static_cast<void>(event);
+  }
+
+  virtual ModifierPointerResult
+  OnPointer(MountedNode &node, const PointerEvent &event) {
+    static_cast<void>(node);
+    static_cast<void>(event);
+    return ModifierPointerResult::Ignored;
+  }
+
+  virtual void Paint(
+      const MountedNode &node, DisplayList &display_list) const {
+    static_cast<void>(node);
+    static_cast<void>(display_list);
+  }
+};
+
+namespace detail {
+
+struct ViewSpec;
+
+struct ModifierDescriptor {
+  std::type_index type;
+  void (*apply)(ViewSpec &, const void *) = nullptr;
+  std::unique_ptr<MountedModifier> (*mount)(MountedNode &, const void *) =
+      nullptr;
+  void (*update)(MountedModifier &, MountedNode &, const void *) = nullptr;
+};
+
+struct ModifierSpec {
+  const ModifierDescriptor *descriptor = nullptr;
+  std::shared_ptr<const void> value;
+};
+
+template <class Spec, class Mounted>
+  requires std::derived_from<Mounted, MountedModifier> &&
+           std::constructible_from<Mounted, MountedNode &, const Spec &> &&
+           requires(Mounted &mounted, MountedNode &node, const Spec &spec) {
+             mounted.Update(node, spec);
+           }
+const ModifierDescriptor &ModifierDescriptorFor() {
+  static const ModifierDescriptor descriptor{
+      typeid(Spec),
+      nullptr,
+      [](MountedNode &node,
+         const void *value) -> std::unique_ptr<MountedModifier> {
+        return std::make_unique<Mounted>(
+            node, *static_cast<const Spec *>(value));
+      },
+      [](MountedModifier &mounted, MountedNode &node, const void *value) {
+        static_cast<Mounted &>(mounted).Update(
+            node, *static_cast<const Spec *>(value));
+      },
+  };
+  return descriptor;
+}
+
+} // namespace detail
+
+template <class T>
+concept ViewModifier =
+    std::copy_constructible<std::remove_cvref_t<T>> &&
+    requires {
+      {
+        std::remove_cvref_t<T>::Descriptor()
+      } -> std::same_as<const detail::ModifierDescriptor &>;
+    };
+
+namespace detail {
+
+template <ViewModifier Modifier>
+ModifierSpec MakeModifierSpec(Modifier &&modifier) {
+  using Value = std::remove_cvref_t<Modifier>;
+  return {
+      &Value::Descriptor(),
+      std::make_shared<Value>(std::forward<Modifier>(modifier)),
+  };
+}
+
+} // namespace detail
+
+struct ScrollBarStyle {
+  float thickness = 6.0F;
+  float minimum_thumb_extent = 24.0F;
+  float margin = 3.0F;
+  float corner_radius = 3.0F;
+  float fade_in_duration = 0.12F;
+  float fade_out_delay = 0.7F;
+  float fade_out_duration = 0.22F;
+  Color track_color = Color::Transparent();
+  Color thumb_color = Color::Rgb(137, 143, 152, 0.8F);
+};
+
+struct ScrollBarStyleKey {
+  using Value = ScrollBarStyle;
+
+  static Value Default() {
+    return {};
+  }
+};
+
+struct Enabled {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  bool value = true;
+};
+
+struct Focusable {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  bool value = true;
+};
+
+struct Padding {
+  explicit Padding(float value) : insets(EdgeInsets::All(value)) {}
+  explicit Padding(EdgeInsets value) : insets(value) {}
+
+  static const detail::ModifierDescriptor &Descriptor();
+
+  EdgeInsets insets;
+};
+
+struct Background {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  Color color;
+};
+
+struct Foreground {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  Color color;
+};
+
+struct FontSize {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  float value;
+};
+
+struct Frame {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  float width;
+  float height;
+};
+
+struct CornerRadius {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  float value;
+};
+
+struct Spacing {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  float value;
+};
+
+struct MainAlign {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  MainAxisAlignment alignment;
+};
+
+struct CrossAlign {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  CrossAxisAlignment alignment;
+};
+
+struct Align {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  HorizontalAlignment horizontal;
+  VerticalAlignment vertical;
+};
+
+struct Grow {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  float factor = 1.0F;
+};
+
+struct ScrollBar {
+  static const detail::ModifierDescriptor &Descriptor();
+
+  std::optional<ScrollBarStyle> style;
+};
+
+} // namespace huxerui

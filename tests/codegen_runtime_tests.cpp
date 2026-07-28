@@ -1,0 +1,139 @@
+#include <huxerui/huxerui.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <string_view>
+#include <variant>
+
+#include "internal.h"
+
+namespace {
+
+using huxerui::DisplayList;
+using huxerui::DrawTextCommand;
+using huxerui::Size;
+using huxerui::State;
+using huxerui::Text;
+using huxerui::UseState;
+using huxerui::View;
+using huxerui::detail::PlatformHost;
+using huxerui::detail::Runtime;
+
+class TestPlatform final
+    : public PlatformHost,
+      public huxerui::TextService {
+public:
+  int Run(
+      Runtime& runtime,
+      const huxerui::AppOptions& options) override {
+    static_cast<void>(runtime);
+    static_cast<void>(options);
+    return 0;
+  }
+
+  void RequestFrame(double delay_seconds) override {
+    static_cast<void>(delay_seconds);
+    ++requested_frames;
+  }
+
+  [[nodiscard]] double Now() const noexcept override {
+    return 0.0;
+  }
+
+  huxerui::TextService& Text() override {
+    return *this;
+  }
+
+  Size MeasureText(
+      std::string_view text,
+      float font_size,
+      float max_width) override {
+    static_cast<void>(font_size);
+    const float natural_width =
+        static_cast<float>(text.size()) * 10.0F;
+    if (!std::isfinite(max_width)) {
+      return {natural_width, 20.0F};
+    }
+    if (max_width <= 0.0F) {
+      return {};
+    }
+    const float line_count =
+        std::max(
+            1.0F,
+            std::ceil(natural_width / max_width));
+    return {
+        std::min(natural_width, max_width),
+        line_count * 20.0F,
+    };
+  }
+
+  int requested_frames = 0;
+};
+
+State<int> generated_count;
+int generated_compositions = 0;
+
+[[huxerui::scope]]
+View GeneratedCounter(int initial) {
+  ++generated_compositions;
+  auto count = UseState(initial);
+  generated_count = count;
+  return Text(count);
+}
+
+View GeneratedApp() {
+  return GeneratedCounter(3);
+}
+
+[[nodiscard]] std::string FirstText(
+    const DisplayList& display_list) {
+  for (const auto& command : display_list.Commands()) {
+    if (const auto* text =
+            std::get_if<DrawTextCommand>(&command)) {
+      return text->text;
+    }
+  }
+  return {};
+}
+
+void Check(
+    bool condition,
+    std::string_view expression,
+    int line) {
+  if (condition) {
+    return;
+  }
+  std::cerr
+      << "Check failed at line "
+      << line
+      << ": "
+      << expression
+      << '\n';
+  std::exit(1);
+}
+
+#define HUXERUI_CODEGEN_CHECK(expression) \
+  Check((expression), #expression, __LINE__)
+
+}  // namespace
+
+int main() {
+  TestPlatform platform;
+  Runtime runtime{GeneratedApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+
+  HUXERUI_CODEGEN_CHECK(
+      FirstText(runtime.BuildFrame()) == "3");
+  HUXERUI_CODEGEN_CHECK(generated_compositions == 1);
+  HUXERUI_CODEGEN_CHECK(generated_count.IsValid());
+
+  generated_count = 8;
+  HUXERUI_CODEGEN_CHECK(platform.requested_frames > 0);
+  HUXERUI_CODEGEN_CHECK(
+      FirstText(runtime.BuildFrame()) == "8");
+  HUXERUI_CODEGEN_CHECK(generated_compositions == 2);
+  return 0;
+}

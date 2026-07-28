@@ -1,0 +1,254 @@
+set(HUXERUI_TARGETS_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+function(huxerui_platform_configure)
+endfunction()
+
+function(huxerui_configure_platform)
+    set(HUXERUI_PLATFORM_ID "generic")
+    set(HUXERUI_PLATFORM_SOURCE_FILES)
+    set(HUXERUI_PLATFORM_COMPILE_OPTIONS)
+    set(HUXERUI_PLATFORM_LINK_LIBRARIES)
+
+    if (APPLE)
+        set(HUXERUI_PLATFORM_ID "macos")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Apple.cmake")
+    else ()
+        message(FATAL_ERROR "HuxerUI currently supports macOS only")
+    endif ()
+
+    huxerui_platform_configure()
+
+    set(HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}" PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_SOURCE_FILES ${HUXERUI_PLATFORM_SOURCE_FILES} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_COMPILE_OPTIONS ${HUXERUI_PLATFORM_COMPILE_OPTIONS} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
+endfunction()
+
+function(huxerui_configure_compile_target target_name)
+    target_compile_features(${target_name} PRIVATE cxx_std_20)
+    target_include_directories(${target_name} PRIVATE
+            "${HUXERUI_PUBLIC_INCLUDE_DIR}"
+            "${HUXERUI_PROJECT_DIR}/src"
+    )
+    target_compile_options(${target_name} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            ${HUXERUI_PLATFORM_COMPILE_OPTIONS}
+    )
+endfunction()
+
+function(huxerui_configure_public_target target_name)
+    target_include_directories(${target_name}
+            PUBLIC
+            $<BUILD_INTERFACE:${HUXERUI_PUBLIC_INCLUDE_DIR}>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(${target_name} PRIVATE ${HUXERUI_PLATFORM_LINK_LIBRARIES})
+endfunction()
+
+function(huxerui_configure_targets)
+    if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
+        message(FATAL_ERROR "At least one HuxerUI library target must be enabled")
+    endif ()
+
+    huxerui_configure_platform()
+
+    file(GLOB HUXERUI_CORE_SOURCE_FILES CONFIGURE_DEPENDS
+            "${HUXERUI_PROJECT_DIR}/src/*.cpp"
+    )
+
+    add_library(huxerui_core_objects OBJECT
+            ${HUXERUI_CORE_SOURCE_FILES}
+            ${HUXERUI_PLATFORM_SOURCE_FILES}
+    )
+    set_target_properties(huxerui_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    huxerui_configure_compile_target(huxerui_core_objects)
+
+    if (HUXERUI_BUILD_SHARED)
+        add_library(${HUXERUI_SHARED_LIB_NAME} SHARED
+                $<TARGET_OBJECTS:huxerui_core_objects>
+        )
+        huxerui_configure_public_target(${HUXERUI_SHARED_LIB_NAME})
+        add_library(HuxerUI::huxerui ALIAS ${HUXERUI_SHARED_LIB_NAME})
+    endif ()
+
+    if (HUXERUI_BUILD_STATIC)
+        add_library(${HUXERUI_STATIC_LIB_NAME} STATIC
+                $<TARGET_OBJECTS:huxerui_core_objects>
+        )
+        huxerui_configure_public_target(${HUXERUI_STATIC_LIB_NAME})
+        add_library(HuxerUI::huxerui_static ALIAS ${HUXERUI_STATIC_LIB_NAME})
+    endif ()
+
+    set(HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}" PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
+endfunction()
+
+function(huxerui_enable_codegen target_name)
+    if (NOT TARGET ${target_name})
+        message(FATAL_ERROR
+                "huxerui_enable_codegen() target does not exist: ${target_name}"
+        )
+    endif ()
+
+    if (NOT TARGET huxerui_codegen)
+        message(FATAL_ERROR
+                "huxerui_enable_codegen() requires the huxerui_codegen tool target"
+        )
+    endif ()
+
+    get_target_property(HUXERUI_CODEGEN_ALREADY_ENABLED
+            ${target_name}
+            HUXERUI_CODEGEN_ENABLED
+    )
+    if (HUXERUI_CODEGEN_ALREADY_ENABLED)
+        return()
+    endif ()
+
+    get_target_property(HUXERUI_CODEGEN_TARGET_TYPE ${target_name} TYPE)
+    if (HUXERUI_CODEGEN_TARGET_TYPE STREQUAL "INTERFACE_LIBRARY"
+            OR HUXERUI_CODEGEN_TARGET_TYPE STREQUAL "UTILITY")
+        message(FATAL_ERROR
+                "huxerui_enable_codegen() requires a compilable target: ${target_name}"
+        )
+    endif ()
+
+    get_target_property(HUXERUI_CODEGEN_SOURCE_DIR ${target_name} SOURCE_DIR)
+    get_target_property(HUXERUI_CODEGEN_BINARY_DIR ${target_name} BINARY_DIR)
+    get_target_property(HUXERUI_CODEGEN_SOURCES ${target_name} SOURCES)
+
+    if (NOT HUXERUI_CODEGEN_SOURCES)
+        message(FATAL_ERROR
+                "huxerui_enable_codegen() target has no sources: ${target_name}"
+        )
+    endif ()
+
+    set(HUXERUI_CODEGEN_REWRITTEN_SOURCES)
+    set(HUXERUI_CODEGEN_GENERATED_SOURCES)
+
+    foreach (HUXERUI_CODEGEN_SOURCE IN LISTS HUXERUI_CODEGEN_SOURCES)
+        if (HUXERUI_CODEGEN_SOURCE MATCHES "^\\$<")
+            list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
+                    "${HUXERUI_CODEGEN_SOURCE}"
+            )
+            continue()
+        endif ()
+
+        get_filename_component(HUXERUI_CODEGEN_EXTENSION
+                "${HUXERUI_CODEGEN_SOURCE}"
+                EXT
+        )
+        string(TOLOWER
+                "${HUXERUI_CODEGEN_EXTENSION}"
+                HUXERUI_CODEGEN_EXTENSION
+        )
+        if (NOT HUXERUI_CODEGEN_EXTENSION STREQUAL ".cpp"
+                AND NOT HUXERUI_CODEGEN_EXTENSION STREQUAL ".cc"
+                AND NOT HUXERUI_CODEGEN_EXTENSION STREQUAL ".cxx")
+            list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
+                    "${HUXERUI_CODEGEN_SOURCE}"
+            )
+            continue()
+        endif ()
+
+        get_filename_component(HUXERUI_CODEGEN_ABSOLUTE_SOURCE
+                "${HUXERUI_CODEGEN_SOURCE}"
+                ABSOLUTE
+                BASE_DIR "${HUXERUI_CODEGEN_SOURCE_DIR}"
+        )
+        if (NOT EXISTS "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}")
+            list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
+                    "${HUXERUI_CODEGEN_SOURCE}"
+            )
+            continue()
+        endif ()
+
+        set_property(DIRECTORY "${HUXERUI_CODEGEN_SOURCE_DIR}"
+                APPEND
+                PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+        )
+        file(READ
+                "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+                HUXERUI_CODEGEN_SOURCE_CONTENT
+        )
+        string(FIND
+                "${HUXERUI_CODEGEN_SOURCE_CONTENT}"
+                "[[huxerui::scope]]"
+                HUXERUI_CODEGEN_MARKER_INDEX
+        )
+        if (HUXERUI_CODEGEN_MARKER_INDEX EQUAL -1)
+            list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
+                    "${HUXERUI_CODEGEN_SOURCE}"
+            )
+            continue()
+        endif ()
+
+        string(SHA256
+                HUXERUI_CODEGEN_SOURCE_HASH
+                "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+        )
+        string(SUBSTRING
+                "${HUXERUI_CODEGEN_SOURCE_HASH}"
+                0
+                16
+                HUXERUI_CODEGEN_SOURCE_HASH
+        )
+        get_filename_component(HUXERUI_CODEGEN_SOURCE_NAME
+                "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+                NAME
+        )
+        get_filename_component(HUXERUI_CODEGEN_SOURCE_DIRECTORY
+                "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+                DIRECTORY
+        )
+
+        set(HUXERUI_CODEGEN_OUTPUT
+                "${HUXERUI_CODEGEN_BINARY_DIR}/huxerui-codegen/${target_name}/${HUXERUI_CODEGEN_SOURCE_HASH}/${HUXERUI_CODEGEN_SOURCE_NAME}"
+        )
+        add_custom_command(
+                OUTPUT "${HUXERUI_CODEGEN_OUTPUT}"
+                COMMAND "$<TARGET_FILE:huxerui_codegen>"
+                        --input "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+                        --output "${HUXERUI_CODEGEN_OUTPUT}"
+                DEPENDS
+                        "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
+                        huxerui_codegen
+                COMMENT
+                        "Generating HuxerUI scope source ${HUXERUI_CODEGEN_SOURCE_NAME}"
+                VERBATIM
+        )
+
+        set_source_files_properties(
+                "${HUXERUI_CODEGEN_OUTPUT}"
+                PROPERTIES GENERATED TRUE
+        )
+        target_include_directories(${target_name}
+                PRIVATE "${HUXERUI_CODEGEN_SOURCE_DIRECTORY}"
+        )
+        list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
+                "${HUXERUI_CODEGEN_OUTPUT}"
+        )
+        list(APPEND HUXERUI_CODEGEN_GENERATED_SOURCES
+                "${HUXERUI_CODEGEN_OUTPUT}"
+        )
+    endforeach ()
+
+    set_property(TARGET ${target_name}
+            PROPERTY SOURCES ${HUXERUI_CODEGEN_REWRITTEN_SOURCES}
+    )
+    set_property(TARGET ${target_name}
+            PROPERTY HUXERUI_CODEGEN_ENABLED TRUE
+    )
+    set_property(TARGET ${target_name}
+            PROPERTY HUXERUI_CODEGEN_GENERATED_SOURCES
+                     "${HUXERUI_CODEGEN_GENERATED_SOURCES}"
+    )
+
+    target_compile_options(${target_name} PRIVATE
+            "$<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang>:-Wno-unknown-attributes>"
+            "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-attributes>"
+            "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd5030>"
+    )
+endfunction()
