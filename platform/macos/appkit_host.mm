@@ -21,7 +21,7 @@ class MacPlatformHost;
 
 @interface HuxerUIHostView : NSView {
 @public
-  huxerui::detail::Runtime *huxeruiRuntime;
+  huxerui::Runtime *huxeruiRuntime;
   huxerui::detail::MacPlatformHost *huxeruiHost;
   NSPoint huxeruiPointerPosition;
   NSTrackingArea *huxeruiTrackingArea;
@@ -223,9 +223,10 @@ Key TranslateKey(unsigned short key_code) {
 
 } // namespace
 
-class MacPlatformHost final : public PlatformHost, public TextService {
+class MacPlatformHost final : public PlatformHost {
 public:
-  int Run(Runtime &runtime, const AppOptions &options) override {
+  int Run(huxerui::Runtime &runtime,
+          const AppOptions &options) {
     @autoreleasepool {
       NSApplication *application = [NSApplication sharedApplication];
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -278,8 +279,6 @@ public:
                Clock::now().time_since_epoch())
         .count();
   }
-
-  TextService &Text() override { return *this; }
 
   Size MeasureText(std::string_view text, float font_size,
                    float max_width) override {
@@ -505,8 +504,11 @@ private:
   __strong HuxerUIFrameScheduler *frame_scheduler_ = nil;
 };
 
-std::unique_ptr<PlatformHost> CreateDefaultPlatformHost() {
-  return std::make_unique<MacPlatformHost>();
+int RunPlatformApp(AppDefinition definition) {
+  AppOptions options = definition.options;
+  MacPlatformHost platform;
+  Runtime runtime{std::move(definition), platform};
+  return platform.Run(runtime, options);
 }
 
 } // namespace huxerui::detail

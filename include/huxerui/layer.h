@@ -12,10 +12,10 @@
 
 namespace huxerui {
 
+class Runtime;
 class View;
 
 namespace detail {
-class Runtime;
 struct EnvironmentFrame;
 struct LayerControllerState;
 }
@@ -82,12 +82,12 @@ private:
       LayerOptions options, ViewFactory content,
       std::shared_ptr<const detail::EnvironmentFrame> environment) const;
 
-  explicit LayerController(detail::Runtime &runtime);
+  explicit LayerController(Runtime &runtime);
   void Disconnect() noexcept;
 
   std::shared_ptr<detail::LayerControllerState> state_;
 
-  friend class detail::Runtime;
+  friend class Runtime;
   friend class DialogService;
   friend class ToastService;
 };

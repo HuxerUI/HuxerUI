@@ -52,10 +52,7 @@ RuntimeRoot
 The application still starts with the existing shape:
 
 ```cpp
-int main()
-{
-  return RunApp(App);
-}
+HUXERUI_APP(App, {})
 ```
 
 `RuntimeRoot` is synthesized by the Runtime. It is not a public layout
@@ -878,14 +875,14 @@ public:
 Installation uses `AppOptions`:
 
 ```cpp
-return RunApp(
+HUXERUI_APP(
     App,
-    AppOptions{
+    {
         .root_hooks = {
             InstallXxxToast(),
             InstallDebugPanel(),
         },
-    });
+    })
 ```
 
 A service hook can be a function:

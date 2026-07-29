@@ -164,9 +164,9 @@ D2D1_CAP_STYLE ToD2DCap(StrokeCap cap) {
 
 } // namespace
 
-class Win32PlatformHost final : public PlatformHost, public TextService {
+class Win32PlatformHost final : public huxerui::PlatformHost {
 public:
-  int Run(Runtime &runtime, const AppOptions &options) override {
+  int Run(huxerui::Runtime &runtime, const AppOptions &options) {
     runtime_ = &runtime;
     SetProcessDpiAwarenessContext(
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -240,10 +240,6 @@ public:
     return std::chrono::duration<double>(
                Clock::now().time_since_epoch())
         .count();
-  }
-
-  TextService &Text() override {
-    return *this;
   }
 
   Size MeasureText(
@@ -920,7 +916,7 @@ private:
     }
   }
 
-  Runtime *runtime_ = nullptr;
+  huxerui::Runtime *runtime_ = nullptr;
   HINSTANCE instance_ = nullptr;
   ATOM class_atom_ = 0;
   HWND window_ = nullptr;
@@ -938,8 +934,11 @@ private:
   std::vector<ClipState> clip_stack_;
 };
 
-std::unique_ptr<PlatformHost> CreateDefaultPlatformHost() {
-  return std::make_unique<Win32PlatformHost>();
+int RunPlatformApp(AppDefinition definition) {
+  AppOptions options = definition.options;
+  Win32PlatformHost platform;
+  Runtime runtime{std::move(definition), platform};
+  return platform.Run(runtime, options);
 }
 
 } // namespace huxerui::detail

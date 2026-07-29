@@ -13,9 +13,7 @@
 
 namespace huxerui {
 
-namespace detail {
 class Runtime;
-}
 
 template <class Service> struct ServiceEnvironmentKey {
   using Value = std::shared_ptr<Service>;
@@ -59,7 +57,7 @@ private:
   std::unordered_set<std::type_index> *service_types_;
   std::vector<std::shared_ptr<void>> *services_;
 
-  friend class detail::Runtime;
+  friend class Runtime;
 };
 
 using RootHook = std::function<void(RootContext &)>;

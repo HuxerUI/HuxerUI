@@ -30,6 +30,8 @@
 
 namespace huxerui {
 
+class Runtime;
+
 enum class TextRole {
   Body,
   Label,
@@ -38,7 +40,6 @@ enum class TextRole {
 
 namespace detail {
 struct ViewSpec;
-class Runtime;
 class VirtualMeasureSession;
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -131,7 +132,7 @@ private:
 
   std::shared_ptr<detail::ViewSpec> spec_;
 
-  friend class detail::Runtime;
+  friend class Runtime;
   friend class detail::VirtualMeasureSession;
 };
 

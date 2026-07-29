@@ -28,7 +28,6 @@
 
 namespace huxerui::detail {
 
-class Runtime;
 struct MountedNode;
 class ScrollConnection;
 
@@ -39,16 +38,6 @@ struct EnvironmentFrame {
 
 struct LayerControllerState {
   Runtime *runtime = nullptr;
-};
-
-class TextService {
-public:
-  virtual ~TextService() = default;
-
-  virtual Size MeasureText(
-      std::string_view text,
-      float font_size,
-      float max_width = std::numeric_limits<float>::infinity()) = 0;
 };
 
 enum class AnimationEasing {
@@ -511,16 +500,6 @@ private:
   std::shared_ptr<const EnvironmentFrame> environment_;
 };
 
-class PlatformHost {
-public:
-  virtual ~PlatformHost() = default;
-
-  virtual int Run(Runtime &runtime, const AppOptions &options) = 0;
-  virtual void RequestFrame(double delay_seconds) = 0;
-  virtual double Now() const noexcept = 0;
-  virtual TextService &Text() = 0;
-};
-
 struct ScrollBarGeometry {
   Axis axis = Axis::Vertical;
   Rect track;
@@ -558,97 +537,30 @@ struct LayerEntry {
   std::shared_ptr<const EnvironmentFrame> environment;
 };
 
-class Runtime {
-public:
-  Runtime(RootFactory root_factory, PlatformHost &platform,
-          AppOptions options = {});
-  ~Runtime();
+} // namespace huxerui::detail
 
-  Runtime(const Runtime &) = delete;
-  Runtime &operator=(const Runtime &) = delete;
+namespace huxerui {
 
-  void SetViewport(Size viewport);
-  const DisplayList &BuildFrame();
-  const DisplayList &BuildFrame(FrameInfo frame);
-  void HandlePointerEvent(const PointerEvent &event);
-  void HandleScrollEvent(const ScrollEvent &event);
-  void HandleKeyEvent(const KeyEvent &event);
-  void InvalidateRoot();
-  void InvalidateScope(std::uint64_t scope_id);
-
-  [[nodiscard]] const MountedNode *RootNode() const noexcept {
-    return has_application_root_ && mounted_root_ &&
-                   !mounted_root_->children.empty()
-               ? mounted_root_->children.front().get()
-               : nullptr;
-  }
-
-private:
-  LayerId AttachLayer(LayerOptions options, ViewFactory content,
-                      std::shared_ptr<const EnvironmentFrame> environment);
-  bool UpdateLayer(LayerId id, ViewFactory content);
-  bool UpdateLayer(
-      LayerId id, LayerOptions options, ViewFactory content);
-  bool DismissLayer(LayerId id);
-  void RequestFrame();
-  void RequestFrameAfter(double delay_seconds);
-  void NotifyScrollActivity(MountedNode &node);
-  static MountedNode *FindNode(
-      MountedNode &node, std::uint64_t identity);
-  static MountedModifier *FindModifier(
-      MountedNode &root,
-      const ModifierPointerCapture &capture);
-  static void ActivateNode(MountedNode &node);
-  void ReleaseScrollGesture(PointerSession &session);
-  void DispatchModifierObservers(
-      PointerSession &session,
-      const PointerEvent &event,
-      bool clear);
-  [[nodiscard]] std::optional<std::size_t>
-  FindScrollCandidate(
-      const PointerSession &session,
-      Axis axis, float delta);
-  MountedNode *ApplyDragScroll(
-      PointerSession &session, float delta);
-  void HandlePointerDown(const PointerEvent &event);
-  void HandlePointerMove(const PointerEvent &event);
-  void HandlePointerCancel(const PointerEvent &event);
-  void HandlePointerUp(const PointerEvent &event);
-  void UpdateHoveredModifier(Point position);
-  void RefreshInteractionTree();
-  [[nodiscard]] std::optional<LayerId>
-  ActiveModalLayerId() const;
-  MountedNode *ActiveModalFocusRoot();
-  void SetFocusedNode(
-      std::optional<std::uint64_t> identity,
-      std::optional<bool> focus_visible = std::nullopt);
-  void MoveFocus(bool reverse);
-  bool UpdateMountedModifiers(
-      MountedNode &node, const FrameInfo &frame,
-      bool &needs_frame, std::optional<double> &next_wakeup,
-      bool rebuild_cache);
-  void ComposeRoot();
-  void ComposeScope(MountedNode &mounted);
-  void RecomposeDirtyScopes(MountedNode &mounted);
-  void Reconcile(std::unique_ptr<MountedNode> &mounted,
-                 const std::shared_ptr<ViewSpec> &incoming);
-  std::unique_ptr<MountedNode> Mount(const std::shared_ptr<ViewSpec> &incoming);
-  void ReconcileChildren(MountedNode &mounted,
-                         const std::vector<View> &incoming_children);
-  SavedNodeState SaveNodeState(MountedNode &mounted);
-  void RestoreNodeState(MountedNode &mounted, SavedNodeState &saved);
+struct Runtime::State {
+  State(
+      RootFactory root_factory, PlatformHost *platform,
+      std::shared_ptr<detail::RecomposeScope> root_scope,
+      LayerController layer_controller)
+      : root_factory_(root_factory), platform_(platform),
+        root_scope_(std::move(root_scope)),
+        layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
   PlatformHost *platform_;
   Size viewport_;
-  std::shared_ptr<RecomposeScope> root_scope_;
+  std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
   std::vector<std::shared_ptr<void>> root_services_;
   EnvironmentValues root_environment_values_;
   std::unordered_set<std::type_index> root_service_types_;
-  std::shared_ptr<const EnvironmentFrame> root_environment_;
-  std::vector<LayerEntry> layers_;
-  std::unique_ptr<MountedNode> mounted_root_;
+  std::shared_ptr<const detail::EnvironmentFrame> root_environment_;
+  std::vector<detail::LayerEntry> layers_;
+  std::unique_ptr<detail::MountedNode> mounted_root_;
   DisplayList display_list_;
   bool composition_dirty_ = true;
   bool composing_root_ = false;
@@ -660,8 +572,8 @@ private:
   std::uint64_t next_scope_identity_ = 2;
   LayerId next_layer_id_ = 1;
   bool has_application_root_ = false;
-  std::optional<ModifierPointerCapture> hovered_modifier_;
-  std::unordered_map<std::int64_t, PointerSession> pointer_sessions_;
+  std::optional<detail::ModifierPointerCapture> hovered_modifier_;
+  std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
@@ -669,14 +581,25 @@ private:
   std::unordered_map<
       LayerId, std::optional<std::uint64_t>>
       modal_focus_restore_;
+};
 
-  friend class VirtualMeasureSession;
-  friend class ScrollConnection;
-  friend class huxerui::LayerController;
+} // namespace huxerui
+
+namespace huxerui::detail {
+
+struct RuntimeAccess {
+  static void InvalidateRoot(Runtime &runtime) {
+    runtime.InvalidateRoot();
+  }
+
+  static const MountedNode *
+  RootNode(const Runtime &runtime) noexcept {
+    return runtime.RootNode();
+  }
 };
 
 Size MeasureNode(MountedNode &node, const Constraints &constraints,
-                 TextService &text_service, Runtime &runtime);
+                 PlatformHost &platform, Runtime &runtime);
 void LayoutNode(MountedNode &node, Point origin);
 void PaintNode(MountedNode &node, DisplayList &display_list);
 bool BuildPointerRoute(MountedNode &node, Point position,
@@ -690,6 +613,8 @@ MountedNode *ScrollNode(MountedNode &node, const ScrollEvent &event);
 
 bool IsVirtualLayoutNode(const MountedNode &node) noexcept;
 
-std::unique_ptr<PlatformHost> CreateDefaultPlatformHost();
+#if !defined(__ANDROID__)
+int RunPlatformApp(AppDefinition definition);
+#endif
 
 } // namespace huxerui::detail

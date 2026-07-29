@@ -6,7 +6,7 @@
 
 namespace huxerui {
 
-LayerController::LayerController(detail::Runtime &runtime)
+LayerController::LayerController(Runtime &runtime)
     : state_(std::make_shared<detail::LayerControllerState>(
           detail::LayerControllerState{&runtime})) {}
 

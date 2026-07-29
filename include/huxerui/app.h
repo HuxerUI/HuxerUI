@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,9 +28,9 @@ struct AppDefinition {
   AppOptions options;
 };
 
-class AppHost {
+class PlatformHost {
 public:
-  virtual ~AppHost() = default;
+  virtual ~PlatformHost() = default;
 
   virtual void RequestFrame(double delay_seconds) = 0;
   virtual double Now() const noexcept = 0;
@@ -37,15 +38,30 @@ public:
                            float max_width = std::numeric_limits<float>::infinity()) = 0;
 };
 
-class AppRuntime final {
-public:
-  AppRuntime(AppDefinition definition, AppHost &host);
-  ~AppRuntime();
+namespace detail {
 
-  AppRuntime(const AppRuntime &) = delete;
-  AppRuntime &operator=(const AppRuntime &) = delete;
-  AppRuntime(AppRuntime &&) = delete;
-  AppRuntime &operator=(AppRuntime &&) = delete;
+struct EnvironmentFrame;
+struct ModifierPointerCapture;
+struct MountedNode;
+struct PointerSession;
+struct RuntimeAccess;
+struct SavedNodeState;
+struct ViewSpec;
+class RecomposeScope;
+class ScrollConnection;
+class VirtualMeasureSession;
+
+} // namespace detail
+
+class Runtime final {
+public:
+  Runtime(AppDefinition definition, PlatformHost &host);
+  ~Runtime();
+
+  Runtime(const Runtime &) = delete;
+  Runtime &operator=(const Runtime &) = delete;
+  Runtime(Runtime &&) = delete;
+  Runtime &operator=(Runtime &&) = delete;
 
   void SetViewport(Size viewport);
   const DisplayList &BuildFrame();
@@ -54,8 +70,56 @@ public:
   void HandleKeyEvent(const KeyEvent &event);
 
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  struct State;
+
+  LayerId AttachLayer(LayerOptions options, ViewFactory content,
+                      std::shared_ptr<const detail::EnvironmentFrame> environment);
+  bool UpdateLayer(LayerId id, ViewFactory content);
+  bool UpdateLayer(LayerId id, LayerOptions options, ViewFactory content);
+  bool DismissLayer(LayerId id);
+  void RequestFrame();
+  void RequestFrameAfter(double delay_seconds);
+  void NotifyScrollActivity(detail::MountedNode &node);
+  static detail::MountedNode *FindNode(detail::MountedNode &node, std::uint64_t identity);
+  static MountedModifier *FindModifier(detail::MountedNode &root, const detail::ModifierPointerCapture &capture);
+  static void ActivateNode(detail::MountedNode &node);
+  void ReleaseScrollGesture(detail::PointerSession &session);
+  void DispatchModifierObservers(detail::PointerSession &session, const PointerEvent &event, bool clear);
+  [[nodiscard]] std::optional<std::size_t> FindScrollCandidate(const detail::PointerSession &session, Axis axis,
+                                                               float delta);
+  detail::MountedNode *ApplyDragScroll(detail::PointerSession &session, float delta);
+  void HandlePointerDown(const PointerEvent &event);
+  void HandlePointerMove(const PointerEvent &event);
+  void HandlePointerCancel(const PointerEvent &event);
+  void HandlePointerUp(const PointerEvent &event);
+  void UpdateHoveredModifier(Point position);
+  void RefreshInteractionTree();
+  [[nodiscard]] std::optional<LayerId> ActiveModalLayerId() const;
+  detail::MountedNode *ActiveModalFocusRoot();
+  void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
+  void MoveFocus(bool reverse);
+  bool UpdateMountedModifiers(detail::MountedNode &node, const FrameInfo &frame, bool &needs_frame,
+                              std::optional<double> &next_wakeup, bool rebuild_cache);
+  const DisplayList &BuildFrame(FrameInfo frame);
+  void InvalidateRoot();
+  void InvalidateScope(std::uint64_t scope_id);
+  void ComposeRoot();
+  void ComposeScope(detail::MountedNode &mounted);
+  void RecomposeDirtyScopes(detail::MountedNode &mounted);
+  void Reconcile(std::unique_ptr<detail::MountedNode> &mounted, const std::shared_ptr<detail::ViewSpec> &incoming);
+  std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec> &incoming);
+  void ReconcileChildren(detail::MountedNode &mounted, const std::vector<View> &incoming_children);
+  detail::SavedNodeState SaveNodeState(detail::MountedNode &mounted);
+  void RestoreNodeState(detail::MountedNode &mounted, detail::SavedNodeState &saved);
+  [[nodiscard]] const detail::MountedNode *RootNode() const noexcept;
+
+  std::unique_ptr<State> state_;
+
+  friend class LayerController;
+  friend class detail::RecomposeScope;
+  friend class detail::ScrollConnection;
+  friend class detail::VirtualMeasureSession;
+  friend struct detail::RuntimeAccess;
 };
 
 namespace detail {
@@ -65,7 +129,7 @@ const AppDefinition &RegisteredAppDefinition();
 
 } // namespace detail
 
-int RunApp(RootFactory root_factory, AppOptions options = {});
+int RunApp(AppDefinition definition);
 
 } // namespace huxerui
 
@@ -83,6 +147,9 @@ int RunApp(RootFactory root_factory, AppOptions options = {});
 #else
 #define HUXERUI_APP(app_root, ...) \
   int main() { \
-    return ::huxerui::RunApp((app_root), __VA_ARGS__); \
+    return ::huxerui::RunApp({ \
+        .root_factory = (app_root), \
+        .options = __VA_ARGS__, \
+    }); \
   }
 #endif

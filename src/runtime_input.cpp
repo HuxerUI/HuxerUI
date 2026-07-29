@@ -42,13 +42,19 @@ void SetScrollGesture(MountedNode &node, bool active) {
 
 } // namespace
 
-MountedNode *Runtime::FindNode(
-    MountedNode &node, std::uint64_t identity) {
+} // namespace huxerui::detail
+
+namespace huxerui {
+
+using namespace detail;
+
+detail::MountedNode *Runtime::FindNode(
+    detail::MountedNode &node, std::uint64_t identity) {
   if (node.identity == identity) {
     return &node;
   }
   for (auto &child : node.children) {
-    if (MountedNode *found = FindNode(*child, identity)) {
+    if (detail::MountedNode *found = FindNode(*child, identity)) {
       return found;
     }
   }
@@ -56,9 +62,9 @@ MountedNode *Runtime::FindNode(
 }
 
 MountedModifier *Runtime::FindModifier(
-    MountedNode &root,
+    detail::MountedNode &root,
     const ModifierPointerCapture &capture) {
-  MountedNode *node =
+  detail::MountedNode *node =
       FindNode(root, capture.node_identity);
   if (!node || capture.modifier_index >= node->modifiers.size()) {
     return nullptr;
@@ -71,7 +77,7 @@ MountedModifier *Runtime::FindModifier(
   return entry.mounted.get();
 }
 
-void Runtime::ActivateNode(MountedNode &node) {
+void Runtime::ActivateNode(detail::MountedNode &node) {
   EmitEvent<ViewEvents::Click>(node.event_bindings);
   if (node.activation) {
     node.activation(node.event_bindings);
@@ -83,8 +89,8 @@ void Runtime::ReleaseScrollGesture(
   if (!session.active_scroll_node.has_value()) {
     return;
   }
-  if (MountedNode *node = FindNode(
-          *mounted_root_, *session.active_scroll_node)) {
+  if (detail::MountedNode *node = FindNode(
+          *state_->mounted_root_, *session.active_scroll_node)) {
     SetScrollGesture(*node, false);
   }
   session.active_scroll_node.reset();
@@ -97,9 +103,9 @@ void Runtime::DispatchModifierObservers(
   for (const ModifierPointerCapture &observer :
        session.modifier_observers) {
     MountedModifier *modifier =
-        FindModifier(*mounted_root_, observer);
-    MountedNode *node =
-        FindNode(*mounted_root_, observer.node_identity);
+        FindModifier(*state_->mounted_root_, observer);
+    detail::MountedNode *node =
+        FindNode(*state_->mounted_root_, observer.node_identity);
     if (modifier && node) {
       modifier->OnPointer(*node, event);
     }
@@ -115,8 +121,8 @@ Runtime::FindScrollCandidate(
     Axis axis, float delta) {
   for (std::size_t index = 0;
        index < session.scroll_chain.size(); ++index) {
-    MountedNode *candidate =
-        FindNode(*mounted_root_, session.scroll_chain[index]);
+    detail::MountedNode *candidate =
+        FindNode(*state_->mounted_root_, session.scroll_chain[index]);
     if (candidate && candidate->enabled &&
         ScrollAxis(*candidate) == axis &&
         CanScrollNode(*candidate, delta)) {
@@ -126,18 +132,18 @@ Runtime::FindScrollCandidate(
   return std::nullopt;
 }
 
-MountedNode *Runtime::ApplyDragScroll(
+detail::MountedNode *Runtime::ApplyDragScroll(
     PointerSession &session, float delta) {
   if (!session.drag_axis.has_value() || delta == 0.0F) {
     return nullptr;
   }
 
-  MountedNode *last_changed = nullptr;
+  detail::MountedNode *last_changed = nullptr;
   float remaining = delta;
   for (std::size_t index = session.active_scroll;
        index < session.scroll_chain.size(); ++index) {
-    MountedNode *candidate =
-        FindNode(*mounted_root_, session.scroll_chain[index]);
+    detail::MountedNode *candidate =
+        FindNode(*state_->mounted_root_, session.scroll_chain[index]);
     if (!candidate || !candidate->enabled ||
         ScrollAxis(*candidate) != *session.drag_axis) {
       continue;
@@ -158,7 +164,7 @@ MountedNode *Runtime::ApplyDragScroll(
 
 void Runtime::HandlePointerEvent(
     const PointerEvent &event) {
-  if (!mounted_root_) {
+  if (!state_->mounted_root_) {
     return;
   }
 
@@ -180,8 +186,8 @@ void Runtime::HandlePointerEvent(
 
 void Runtime::HandlePointerDown(
     const PointerEvent &event) {
-  auto captured = pointer_sessions_.find(event.pointer_id);
-  if (captured != pointer_sessions_.end()) {
+  auto captured = state_->pointer_sessions_.find(event.pointer_id);
+  if (captured != state_->pointer_sessions_.end()) {
     const std::optional<std::uint64_t> previous_identity =
         captured->second.target_identity;
     PointerEvent cancel = event;
@@ -192,29 +198,29 @@ void Runtime::HandlePointerDown(
       const ModifierPointerCapture modifier_capture =
           *captured->second.modifier_capture;
       if (MountedModifier *modifier =
-              FindModifier(*mounted_root_, modifier_capture)) {
-        if (MountedNode *node =
+              FindModifier(*state_->mounted_root_, modifier_capture)) {
+        if (detail::MountedNode *node =
                 FindNode(
-                    *mounted_root_,
+                    *state_->mounted_root_,
                     modifier_capture.node_identity)) {
           modifier->OnPointer(*node, cancel);
         }
       }
     }
     ReleaseScrollGesture(captured->second);
-    pointer_sessions_.erase(captured);
+    state_->pointer_sessions_.erase(captured);
     if (previous_identity.has_value()) {
-      if (MountedNode *previous =
-              FindNode(*mounted_root_, *previous_identity)) {
+      if (detail::MountedNode *previous =
+              FindNode(*state_->mounted_root_, *previous_identity)) {
         EmitEvent<ViewEvents::PointerCancel>(
             previous->event_bindings, cancel);
       }
     }
   }
 
-  std::vector<MountedNode *> route;
+  std::vector<detail::MountedNode *> route;
   if (!BuildPointerRoute(
-          *mounted_root_, event.position, route)) {
+          *state_->mounted_root_, event.position, route)) {
     return;
   }
 
@@ -300,11 +306,11 @@ void Runtime::HandlePointerDown(
 
   const std::optional<std::uint64_t> target_identity =
       session.target_identity;
-  pointer_sessions_.insert_or_assign(
+  state_->pointer_sessions_.insert_or_assign(
       event.pointer_id, std::move(session));
   if (target_identity.has_value()) {
-    if (MountedNode *target =
-            FindNode(*mounted_root_, *target_identity)) {
+    if (detail::MountedNode *target =
+            FindNode(*state_->mounted_root_, *target_identity)) {
       EmitEvent<ViewEvents::PointerDown>(
           target->event_bindings, event);
     }
@@ -313,11 +319,11 @@ void Runtime::HandlePointerDown(
 
 void Runtime::HandlePointerMove(
     const PointerEvent &event) {
-  auto captured = pointer_sessions_.find(event.pointer_id);
-  if (captured == pointer_sessions_.end()) {
+  auto captured = state_->pointer_sessions_.find(event.pointer_id);
+  if (captured == state_->pointer_sessions_.end()) {
     UpdateHoveredModifier(event.position);
-    if (MountedNode *target =
-            HitTestPointer(*mounted_root_, event.position);
+    if (detail::MountedNode *target =
+            HitTestPointer(*state_->mounted_root_, event.position);
         target && target->enabled) {
       EmitEvent<ViewEvents::PointerMove>(
           target->event_bindings, event);
@@ -331,13 +337,13 @@ void Runtime::HandlePointerMove(
     const ModifierPointerCapture modifier_capture =
         *session.modifier_capture;
     MountedModifier *modifier =
-        FindModifier(*mounted_root_, modifier_capture);
-    MountedNode *node =
+        FindModifier(*state_->mounted_root_, modifier_capture);
+    detail::MountedNode *node =
         FindNode(
-            *mounted_root_, modifier_capture.node_identity);
+            *state_->mounted_root_, modifier_capture.node_identity);
     if (!modifier || !node) {
       ReleaseScrollGesture(session);
-      pointer_sessions_.erase(captured);
+      state_->pointer_sessions_.erase(captured);
       return;
     }
     if (modifier->OnPointer(*node, event) !=
@@ -350,9 +356,9 @@ void Runtime::HandlePointerMove(
 
   if (!session.drag_axis.has_value()) {
     if (session.target_identity.has_value()) {
-      if (MountedNode *target =
+      if (detail::MountedNode *target =
               FindNode(
-                  *mounted_root_, *session.target_identity)) {
+                  *state_->mounted_root_, *session.target_identity)) {
         EmitEvent<ViewEvents::PointerMove>(
             target->event_bindings, event);
       } else {
@@ -387,9 +393,9 @@ void Runtime::HandlePointerMove(
     }
 
     if (session.target_identity.has_value()) {
-      if (MountedNode *target =
+      if (detail::MountedNode *target =
               FindNode(
-                  *mounted_root_, *session.target_identity)) {
+                  *state_->mounted_root_, *session.target_identity)) {
         PointerEvent cancel = event;
         cancel.type = PointerEventType::Cancel;
         EmitEvent<ViewEvents::PointerCancel>(
@@ -403,7 +409,7 @@ void Runtime::HandlePointerMove(
 
     session.drag_axis = axis;
     session.active_scroll = *scroll_candidate;
-    if (MountedNode *scrolled =
+    if (detail::MountedNode *scrolled =
             ApplyDragScroll(session, delta)) {
       NotifyScrollActivity(*scrolled);
       session.active_scroll_node = scrolled->identity;
@@ -418,14 +424,14 @@ void Runtime::HandlePointerMove(
       PointerDelta(
           session.last_position, event.position,
           *session.drag_axis);
-  if (MountedNode *scrolled =
+  if (detail::MountedNode *scrolled =
           ApplyDragScroll(session, delta)) {
     NotifyScrollActivity(*scrolled);
     if (session.active_scroll_node != scrolled->identity) {
       if (session.active_scroll_node.has_value()) {
-        if (MountedNode *previous =
+        if (detail::MountedNode *previous =
                 FindNode(
-                    *mounted_root_,
+                    *state_->mounted_root_,
                     *session.active_scroll_node)) {
           SetScrollGesture(*previous, false);
         }
@@ -440,23 +446,23 @@ void Runtime::HandlePointerMove(
 
 void Runtime::HandlePointerCancel(
     const PointerEvent &event) {
-  if (hovered_modifier_.has_value()) {
+  if (state_->hovered_modifier_.has_value()) {
     const ModifierPointerCapture hovered =
-        *hovered_modifier_;
+        *state_->hovered_modifier_;
     if (MountedModifier *modifier =
-            FindModifier(*mounted_root_, hovered)) {
-      if (MountedNode *node =
+            FindModifier(*state_->mounted_root_, hovered)) {
+      if (detail::MountedNode *node =
               FindNode(
-                  *mounted_root_, hovered.node_identity)) {
+                  *state_->mounted_root_, hovered.node_identity)) {
         modifier->OnHoverChanged(*node, false);
       }
     }
-    hovered_modifier_.reset();
+    state_->hovered_modifier_.reset();
     RequestFrame();
   }
 
-  auto captured = pointer_sessions_.find(event.pointer_id);
-  if (captured == pointer_sessions_.end()) {
+  auto captured = state_->pointer_sessions_.find(event.pointer_id);
+  if (captured == state_->pointer_sessions_.end()) {
     return;
   }
   const std::optional<std::uint64_t> identity =
@@ -467,10 +473,10 @@ void Runtime::HandlePointerCancel(
     const ModifierPointerCapture modifier_capture =
         *captured->second.modifier_capture;
     if (MountedModifier *modifier =
-            FindModifier(*mounted_root_, modifier_capture)) {
-      if (MountedNode *node =
+            FindModifier(*state_->mounted_root_, modifier_capture)) {
+      if (detail::MountedNode *node =
               FindNode(
-                  *mounted_root_,
+                  *state_->mounted_root_,
                   modifier_capture.node_identity)) {
         modifier->OnPointer(*node, event);
       }
@@ -478,10 +484,10 @@ void Runtime::HandlePointerCancel(
     RequestFrame();
   }
   ReleaseScrollGesture(captured->second);
-  pointer_sessions_.erase(captured);
+  state_->pointer_sessions_.erase(captured);
   if (identity.has_value()) {
-    if (MountedNode *target =
-            FindNode(*mounted_root_, *identity)) {
+    if (detail::MountedNode *target =
+            FindNode(*state_->mounted_root_, *identity)) {
       EmitEvent<ViewEvents::PointerCancel>(
           target->event_bindings, event);
     }
@@ -490,10 +496,10 @@ void Runtime::HandlePointerCancel(
 
 void Runtime::HandlePointerUp(
     const PointerEvent &event) {
-  auto captured = pointer_sessions_.find(event.pointer_id);
-  if (captured == pointer_sessions_.end()) {
-    if (MountedNode *target =
-            HitTestPointer(*mounted_root_, event.position);
+  auto captured = state_->pointer_sessions_.find(event.pointer_id);
+  if (captured == state_->pointer_sessions_.end()) {
+    if (detail::MountedNode *target =
+            HitTestPointer(*state_->mounted_root_, event.position);
         target && target->enabled) {
       EmitEvent<ViewEvents::PointerUp>(
           target->event_bindings, event);
@@ -508,16 +514,16 @@ void Runtime::HandlePointerUp(
     const ModifierPointerCapture modifier_capture =
         *captured->second.modifier_capture;
     if (MountedModifier *modifier =
-            FindModifier(*mounted_root_, modifier_capture)) {
-      if (MountedNode *node =
+            FindModifier(*state_->mounted_root_, modifier_capture)) {
+      if (detail::MountedNode *node =
               FindNode(
-                  *mounted_root_,
+                  *state_->mounted_root_,
                   modifier_capture.node_identity)) {
         modifier->OnPointer(*node, event);
       }
     }
     ReleaseScrollGesture(captured->second);
-    pointer_sessions_.erase(captured);
+    state_->pointer_sessions_.erase(captured);
     UpdateHoveredModifier(event.position);
     RequestFrame();
     return;
@@ -528,26 +534,26 @@ void Runtime::HandlePointerUp(
   const bool was_dragging =
       captured->second.drag_axis.has_value();
   ReleaseScrollGesture(captured->second);
-  pointer_sessions_.erase(captured);
+  state_->pointer_sessions_.erase(captured);
   UpdateHoveredModifier(event.position);
   if (was_dragging || !identity.has_value()) {
     return;
   }
 
-  MountedNode *target =
-      FindNode(*mounted_root_, *identity);
+  detail::MountedNode *target =
+      FindNode(*state_->mounted_root_, *identity);
   if (!target || !target->enabled) {
     return;
   }
 
   EmitEvent<ViewEvents::PointerUp>(
       target->event_bindings, event);
-  if (MountedNode *released =
-          HitTestPointer(*mounted_root_, event.position);
+  if (detail::MountedNode *released =
+          HitTestPointer(*state_->mounted_root_, event.position);
       released && released->enabled &&
       released->identity == *identity) {
     ActivateNode(*target);
   }
 }
 
-} // namespace huxerui::detail
+} // namespace huxerui

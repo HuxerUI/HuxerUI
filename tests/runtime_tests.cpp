@@ -103,19 +103,55 @@ using huxerui::VirtualLayout;
 using huxerui::VirtualLayoutContext;
 using huxerui::VirtualLayoutResult;
 using huxerui::VirtualList;
-using huxerui::detail::PlatformHost;
-using huxerui::detail::Runtime;
 
-class TestPlatform final
-    : public PlatformHost,
-      public huxerui::detail::TextService {
+class Runtime final {
 public:
-  int Run(Runtime &runtime, const huxerui::AppOptions &options) override {
-    static_cast<void>(runtime);
-    static_cast<void>(options);
-    return 0;
+  Runtime(
+      huxerui::RootFactory root_factory,
+      huxerui::PlatformHost &platform,
+      huxerui::AppOptions options = {})
+      : runtime_(
+            {
+                .root_factory = root_factory,
+                .options = std::move(options),
+            },
+            platform) {}
+
+  void SetViewport(Size viewport) {
+    runtime_.SetViewport(viewport);
   }
 
+  const DisplayList &BuildFrame() {
+    return runtime_.BuildFrame();
+  }
+
+  void HandlePointerEvent(const PointerEvent &event) {
+    runtime_.HandlePointerEvent(event);
+  }
+
+  void HandleScrollEvent(const ScrollEvent &event) {
+    runtime_.HandleScrollEvent(event);
+  }
+
+  void HandleKeyEvent(const KeyEvent &event) {
+    runtime_.HandleKeyEvent(event);
+  }
+
+  void InvalidateRoot() {
+    huxerui::detail::RuntimeAccess::InvalidateRoot(runtime_);
+  }
+
+  const huxerui::detail::MountedNode *
+  RootNode() const noexcept {
+    return huxerui::detail::RuntimeAccess::RootNode(runtime_);
+  }
+
+private:
+  huxerui::Runtime runtime_;
+};
+
+class TestPlatform final : public huxerui::PlatformHost {
+public:
   void RequestFrame(double delay_seconds) override {
     ++requested_frames;
     requested_delays.push_back(delay_seconds);
@@ -124,8 +160,6 @@ public:
   double Now() const noexcept override { return current_time; }
 
   void AdvanceTime(double seconds) { current_time += seconds; }
-
-  huxerui::detail::TextService &Text() override { return *this; }
 
   Size MeasureText(std::string_view text, float font_size,
                    float max_width) override {

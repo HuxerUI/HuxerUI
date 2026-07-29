@@ -100,7 +100,7 @@ void ThrowJavaException(JNIEnv *environment, const char *message) noexcept {
   }
 }
 
-class AndroidViewPlatformHost final : public AppHost {
+class AndroidViewPlatformHost final : public PlatformHost {
 public:
   AndroidViewPlatformHost(JNIEnv *environment, jobject view) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
@@ -306,7 +306,7 @@ public:
 
 private:
   AndroidViewPlatformHost platform_;
-  AppRuntime runtime_;
+  Runtime runtime_;
 };
 
 AndroidSession *Session(jlong handle) {
@@ -314,10 +314,6 @@ AndroidSession *Session(jlong handle) {
 }
 
 } // namespace
-
-std::unique_ptr<PlatformHost> CreateDefaultPlatformHost() {
-  throw std::runtime_error("RunApp() is not available on Android; use AppRuntime with HuxerUIView");
-}
 
 } // namespace huxerui::detail
 

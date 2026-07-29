@@ -29,7 +29,7 @@ struct VirtualLayoutContextAccess {
 namespace {
 
 struct MeasureEnvironment {
-  TextService *text_service;
+  PlatformHost *platform;
   Runtime *runtime;
 };
 
@@ -72,7 +72,7 @@ Size MeasureScopeChild(MountedNode &node, const Constraints &constraints,
     return constraints.Constrain({});
   }
   return MeasureNode(*node.children.front(), constraints,
-                     *environment.text_service, *environment.runtime);
+                     *environment.platform, *environment.runtime);
 }
 
 Size MeasureScrollChild(MountedNode &node, const Constraints &constraints,
@@ -90,7 +90,7 @@ Size MeasureScrollChild(MountedNode &node, const Constraints &constraints,
   };
   const Size child_size =
       MeasureNode(*node.children.front(), child_constraints,
-                  *environment.text_service, *environment.runtime);
+                  *environment.platform, *environment.runtime);
   node.scroll_content_height = child_size.height;
   return constraints.Constrain(child_size);
 }
@@ -166,7 +166,7 @@ Size MeasureLayoutChild(void *state, huxerui::MountedNode &child,
                         Constraints constraints) {
   auto &environment = *static_cast<MeasureEnvironment *>(state);
   return MeasureNode(static_cast<MountedNode &>(child), constraints,
-                     *environment.text_service, *environment.runtime);
+                     *environment.platform, *environment.runtime);
 }
 
 std::size_t VirtualItemCount(void *state) {
@@ -185,14 +185,14 @@ Size MeasureVirtualItem(void *state, huxerui::MountedNode &item,
                         Constraints constraints) {
   auto &environment = *static_cast<VirtualContextState *>(state)->environment;
   return MeasureNode(static_cast<MountedNode &>(item), constraints,
-                     *environment.text_service, *environment.runtime);
+                     *environment.platform, *environment.runtime);
 }
 
 } // namespace
 
 Size MeasureNode(MountedNode &node, const Constraints &constraints,
-                 TextService &text_service, Runtime &runtime) {
-  MeasureEnvironment environment{&text_service, &runtime};
+                 PlatformHost &platform, Runtime &runtime) {
+  MeasureEnvironment environment{&platform, &runtime};
   if (IsScrollable(node)) {
     PrepareScrollState(node, runtime);
   }
@@ -204,11 +204,11 @@ Size MeasureNode(MountedNode &node, const Constraints &constraints,
 
   switch (node.kind) {
   case NodeKind::Text:
-    content_size = text_service.MeasureText(node.text, ResolveFontSize(node),
-                                            content_constraints.max_width);
+    content_size = platform.MeasureText(node.text, ResolveFontSize(node),
+                                        content_constraints.max_width);
     break;
   case NodeKind::Button:
-    content_size = text_service.MeasureText(node.text, ResolveFontSize(node));
+    content_size = platform.MeasureText(node.text, ResolveFontSize(node));
     break;
   case NodeKind::Checkbox:
   case NodeKind::Switch:

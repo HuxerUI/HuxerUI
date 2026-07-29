@@ -222,44 +222,51 @@ bool IsVirtualLayoutNode(const MountedNode &node) noexcept {
   return node.kind == NodeKind::VirtualLayout;
 }
 
+} // namespace huxerui::detail
+
+namespace huxerui {
+
+using namespace detail;
+
 Runtime::Runtime(
-    RootFactory root_factory, PlatformHost &platform, AppOptions options)
-    : root_factory_(root_factory), platform_(&platform),
-      root_scope_(std::make_shared<RecomposeScope>(*this, 1)),
-      layer_controller_(*this) {
-  if (root_factory_ == nullptr) {
+    AppDefinition definition, PlatformHost &platform) {
+  if (definition.root_factory == nullptr) {
     throw std::invalid_argument("HuxerUI root factory must not be null");
   }
+  state_ = std::make_unique<State>(
+      definition.root_factory, &platform,
+      std::make_shared<RecomposeScope>(*this, 1),
+      LayerController(*this));
   RootContext root{
-      layer_controller_, root_environment_values_,
-      root_service_types_, root_services_};
-  for (RootHook &hook : options.root_hooks) {
+      state_->layer_controller_, state_->root_environment_values_,
+      state_->root_service_types_, state_->root_services_};
+  for (RootHook &hook : definition.options.root_hooks) {
     if (!hook) {
       throw std::invalid_argument(
           "HuxerUI root hook must not be empty");
     }
     hook(root);
   }
-  root_environment_ = std::make_shared<EnvironmentFrame>(
+  state_->root_environment_ = std::make_shared<EnvironmentFrame>(
       EnvironmentFrame{
           nullptr,
-          root_environment_values_,
+          state_->root_environment_values_,
       });
 }
 
 Runtime::~Runtime() {
-  pointer_sessions_.clear();
-  hovered_modifier_.reset();
-  mounted_root_.reset();
-  layers_.clear();
-  root_environment_.reset();
-  root_environment_values_ = {};
-  for (auto service = root_services_.rbegin();
-       service != root_services_.rend(); ++service) {
+  state_->pointer_sessions_.clear();
+  state_->hovered_modifier_.reset();
+  state_->mounted_root_.reset();
+  state_->layers_.clear();
+  state_->root_environment_.reset();
+  state_->root_environment_values_ = {};
+  for (auto service = state_->root_services_.rbegin();
+       service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
-  root_services_.clear();
-  layer_controller_.Disconnect();
+  state_->root_services_.clear();
+  state_->layer_controller_.Disconnect();
 }
 
 LayerId Runtime::AttachLayer(
@@ -269,12 +276,12 @@ LayerId Runtime::AttachLayer(
     throw std::invalid_argument(
         "HuxerUI layer content factory must not be empty");
   }
-  const LayerId id = next_layer_id_++;
-  layers_.push_back(LayerEntry{
+  const LayerId id = state_->next_layer_id_++;
+  state_->layers_.push_back(LayerEntry{
       id,
       options,
       std::move(content),
-      environment ? std::move(environment) : root_environment_,
+      environment ? std::move(environment) : state_->root_environment_,
   });
   InvalidateRoot();
   return id;
@@ -286,13 +293,13 @@ bool Runtime::UpdateLayer(LayerId id, ViewFactory content) {
         "HuxerUI layer content factory must not be empty");
   }
   const auto found = std::find_if(
-      layers_.begin(), layers_.end(),
+      state_->layers_.begin(), state_->layers_.end(),
       [id](const LayerEntry &entry) { return entry.id == id; });
-  if (found == layers_.end()) {
+  if (found == state_->layers_.end()) {
     return false;
   }
   found->content = std::move(content);
-  if (!composing_root_) {
+  if (!state_->composing_root_) {
     InvalidateRoot();
   }
   return true;
@@ -305,14 +312,14 @@ bool Runtime::UpdateLayer(
         "HuxerUI layer content factory must not be empty");
   }
   const auto found = std::find_if(
-      layers_.begin(), layers_.end(),
+      state_->layers_.begin(), state_->layers_.end(),
       [id](const LayerEntry &entry) { return entry.id == id; });
-  if (found == layers_.end()) {
+  if (found == state_->layers_.end()) {
     return false;
   }
   found->options = std::move(options);
   found->content = std::move(content);
-  if (!composing_root_) {
+  if (!state_->composing_root_) {
     InvalidateRoot();
   }
   return true;
@@ -320,31 +327,31 @@ bool Runtime::UpdateLayer(
 
 bool Runtime::DismissLayer(LayerId id) {
   const auto found = std::find_if(
-      layers_.begin(), layers_.end(),
+      state_->layers_.begin(), state_->layers_.end(),
       [id](const LayerEntry &entry) { return entry.id == id; });
-  if (found == layers_.end()) {
+  if (found == state_->layers_.end()) {
     return false;
   }
-  layers_.erase(found);
+  state_->layers_.erase(found);
   InvalidateRoot();
   return true;
 }
 
 void Runtime::SetViewport(Size viewport) {
-  if (viewport_.width == viewport.width &&
-      viewport_.height == viewport.height) {
+  if (state_->viewport_.width == viewport.width &&
+      state_->viewport_.height == viewport.height) {
     return;
   }
-  viewport_ = viewport;
+  state_->viewport_ = viewport;
   RequestFrame();
 }
 
 void Runtime::RequestFrame() {
-  const double now = platform_->Now();
-  if (!frame_requested_ || frame_request_deadline_ > now) {
-    frame_requested_ = true;
-    frame_request_deadline_ = now;
-    platform_->RequestFrame(0.0);
+  const double now = state_->platform_->Now();
+  if (!state_->frame_requested_ || state_->frame_request_deadline_ > now) {
+    state_->frame_requested_ = true;
+    state_->frame_request_deadline_ = now;
+    state_->platform_->RequestFrame(0.0);
   }
 }
 
@@ -353,100 +360,107 @@ void Runtime::RequestFrameAfter(double delay_seconds) {
     return;
   }
   delay_seconds = std::max(0.0, delay_seconds);
-  const double deadline = platform_->Now() + delay_seconds;
-  if (!frame_requested_ || deadline < frame_request_deadline_) {
-    frame_requested_ = true;
-    frame_request_deadline_ = deadline;
-    platform_->RequestFrame(delay_seconds);
+  const double deadline = state_->platform_->Now() + delay_seconds;
+  if (!state_->frame_requested_ || deadline < state_->frame_request_deadline_) {
+    state_->frame_requested_ = true;
+    state_->frame_request_deadline_ = deadline;
+    state_->platform_->RequestFrame(delay_seconds);
   }
 }
 
-void Runtime::NotifyScrollActivity(MountedNode &node) {
+void Runtime::NotifyScrollActivity(detail::MountedNode &node) {
   DispatchScrollActivity(node);
   RequestFrame();
 }
 
 const DisplayList &Runtime::BuildFrame() {
-  const double timestamp = platform_->Now();
+  const double timestamp = state_->platform_->Now();
   const double delta_time =
-      previous_frame_timestamp_.has_value()
-          ? std::clamp(timestamp - *previous_frame_timestamp_, 0.0, 0.25)
+      state_->previous_frame_timestamp_.has_value()
+          ? std::clamp(timestamp - *state_->previous_frame_timestamp_, 0.0, 0.25)
           : 0.0;
   return BuildFrame({timestamp, delta_time});
 }
 
 const DisplayList &Runtime::BuildFrame(FrameInfo frame) {
   if (!std::isfinite(frame.timestamp)) {
-    frame.timestamp = platform_->Now();
+    frame.timestamp = state_->platform_->Now();
   }
   if (!std::isfinite(frame.delta_time)) {
     frame.delta_time = 0.0;
   }
   frame.delta_time = std::clamp(frame.delta_time, 0.0, 0.25);
-  previous_frame_timestamp_ = frame.timestamp;
-  frame_requested_ = false;
-  if (composition_dirty_) {
+  state_->previous_frame_timestamp_ = frame.timestamp;
+  state_->frame_requested_ = false;
+  if (state_->composition_dirty_) {
     ComposeRoot();
-  } else if (mounted_root_) {
-    RecomposeDirtyScopes(*mounted_root_);
+  } else if (state_->mounted_root_) {
+    RecomposeDirtyScopes(*state_->mounted_root_);
   }
 
-  display_list_.Clear();
-  if (!mounted_root_ || viewport_.width <= 0.0F || viewport_.height <= 0.0F) {
-    return display_list_;
+  state_->display_list_.Clear();
+  if (!state_->mounted_root_ || state_->viewport_.width <= 0.0F || state_->viewport_.height <= 0.0F) {
+    return state_->display_list_;
   }
 
   const Constraints constraints{
-      viewport_.width,
-      viewport_.width,
-      viewport_.height,
-      viewport_.height,
+      state_->viewport_.width,
+      state_->viewport_.width,
+      state_->viewport_.height,
+      state_->viewport_.height,
   };
-  MeasureNode(*mounted_root_, constraints, platform_->Text(), *this);
-  LayoutNode(*mounted_root_, {0.0F, 0.0F});
+  MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+  LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
   RefreshInteractionTree();
 
   bool needs_frame = false;
   std::optional<double> next_wakeup;
   UpdateMountedModifiers(
-      *mounted_root_, frame, needs_frame, next_wakeup,
-      modifier_tree_dirty_);
-  modifier_tree_dirty_ = false;
-  PaintNode(*mounted_root_, display_list_);
+      *state_->mounted_root_, frame, needs_frame, next_wakeup,
+      state_->modifier_tree_dirty_);
+  state_->modifier_tree_dirty_ = false;
+  PaintNode(*state_->mounted_root_, state_->display_list_);
   if (needs_frame) {
     RequestFrame();
   } else if (next_wakeup.has_value()) {
     RequestFrameAfter(*next_wakeup);
   }
-  return display_list_;
+  return state_->display_list_;
+}
+
+const detail::MountedNode *Runtime::RootNode() const noexcept {
+  return state_->has_application_root_ && state_->mounted_root_ &&
+                 !state_->mounted_root_->children.empty()
+             ? state_->mounted_root_->children.front().get()
+             : nullptr;
 }
 
 void Runtime::UpdateHoveredModifier(Point position) {
-  std::vector<MountedNode *> route;
+  std::vector<detail::MountedNode *> route;
   std::optional<ModifierPointerCapture> next_hovered;
-  if (mounted_root_ &&
-      BuildPointerRoute(*mounted_root_, position, route)) {
+  if (state_->mounted_root_ &&
+      BuildPointerRoute(*state_->mounted_root_, position, route)) {
     next_hovered = HitTestModifier(route, position);
   }
 
-  if (hovered_modifier_ == next_hovered) {
+  if (state_->hovered_modifier_ == next_hovered) {
     return;
   }
-  if (hovered_modifier_.has_value() && mounted_root_) {
+  if (state_->hovered_modifier_.has_value() && state_->mounted_root_) {
     if (MountedModifier *previous =
-            FindModifier(*mounted_root_, *hovered_modifier_)) {
-      if (MountedNode *node = FindNode(
-              *mounted_root_, hovered_modifier_->node_identity)) {
+            FindModifier(*state_->mounted_root_, *state_->hovered_modifier_)) {
+      if (detail::MountedNode *node = FindNode(
+              *state_->mounted_root_, state_->hovered_modifier_->node_identity)) {
         previous->OnHoverChanged(*node, false);
       }
     }
   }
-  hovered_modifier_ = next_hovered;
-  if (hovered_modifier_.has_value() && mounted_root_) {
+  state_->hovered_modifier_ = next_hovered;
+  if (state_->hovered_modifier_.has_value() && state_->mounted_root_) {
     if (MountedModifier *next =
-            FindModifier(*mounted_root_, *hovered_modifier_)) {
-      if (MountedNode *node = FindNode(
-              *mounted_root_, hovered_modifier_->node_identity)) {
+            FindModifier(*state_->mounted_root_, *state_->hovered_modifier_)) {
+      if (detail::MountedNode *node = FindNode(
+              *state_->mounted_root_, state_->hovered_modifier_->node_identity)) {
         next->OnHoverChanged(*node, true);
       }
     }
@@ -455,46 +469,46 @@ void Runtime::UpdateHoveredModifier(Point position) {
 }
 
 void Runtime::RefreshInteractionTree() {
-  if (!mounted_root_) {
-    focused_node_identity_.reset();
-    focus_visible_ = false;
-    keyboard_activation_identity_.reset();
-    hovered_modifier_.reset();
+  if (!state_->mounted_root_) {
+    state_->focused_node_identity_.reset();
+    state_->focus_visible_ = false;
+    state_->keyboard_activation_identity_.reset();
+    state_->hovered_modifier_.reset();
     return;
   }
 
-  ResolveEnabledTree(*mounted_root_, true);
+  ResolveEnabledTree(*state_->mounted_root_, true);
   const std::optional<LayerId> modal_layer =
       ActiveModalLayerId();
-  if (active_modal_focus_layer_ != modal_layer) {
-    if (active_modal_focus_layer_.has_value()) {
+  if (state_->active_modal_focus_layer_ != modal_layer) {
+    if (state_->active_modal_focus_layer_.has_value()) {
       const bool previous_still_present =
           std::ranges::any_of(
-              layers_, [this](const LayerEntry &entry) {
+              state_->layers_, [this](const LayerEntry &entry) {
                 return entry.id ==
-                       *active_modal_focus_layer_;
+                       *state_->active_modal_focus_layer_;
               });
       if (!previous_still_present) {
         const auto restore =
-            modal_focus_restore_.find(
-                *active_modal_focus_layer_);
-        if (restore != modal_focus_restore_.end()) {
+            state_->modal_focus_restore_.find(
+                *state_->active_modal_focus_layer_);
+        if (restore != state_->modal_focus_restore_.end()) {
           SetFocusedNode(restore->second);
-          modal_focus_restore_.erase(restore);
+          state_->modal_focus_restore_.erase(restore);
         }
       }
     }
     if (modal_layer.has_value() &&
-        !modal_focus_restore_.contains(*modal_layer)) {
-      modal_focus_restore_.insert_or_assign(
-          *modal_layer, focused_node_identity_);
+        !state_->modal_focus_restore_.contains(*modal_layer)) {
+      state_->modal_focus_restore_.insert_or_assign(
+          *modal_layer, state_->focused_node_identity_);
     }
-    active_modal_focus_layer_ = modal_layer;
+    state_->active_modal_focus_layer_ = modal_layer;
   }
-  MountedNode *modal_focus_root = ActiveModalFocusRoot();
-  if (focused_node_identity_.has_value()) {
-    MountedNode *focused =
-        FindNode(*mounted_root_, *focused_node_identity_);
+  detail::MountedNode *modal_focus_root = ActiveModalFocusRoot();
+  if (state_->focused_node_identity_.has_value()) {
+    detail::MountedNode *focused =
+        FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
     if (!focused || !focused->enabled || !focused->focusable ||
         (modal_focus_root &&
          !ContainsNodeIdentity(
@@ -502,8 +516,8 @@ void Runtime::RefreshInteractionTree() {
       SetFocusedNode(std::nullopt);
     }
   }
-  if (modal_focus_root && !focused_node_identity_.has_value()) {
-    std::vector<MountedNode *> modal_focusable;
+  if (modal_focus_root && !state_->focused_node_identity_.has_value()) {
+    std::vector<detail::MountedNode *> modal_focusable;
     CollectFocusableNodes(
         *modal_focus_root, modal_focusable);
     if (!modal_focusable.empty()) {
@@ -511,28 +525,28 @@ void Runtime::RefreshInteractionTree() {
     }
   }
 
-  if (hovered_modifier_.has_value()) {
-    MountedNode *hovered =
+  if (state_->hovered_modifier_.has_value()) {
+    detail::MountedNode *hovered =
         FindNode(
-            *mounted_root_, hovered_modifier_->node_identity);
+            *state_->mounted_root_, state_->hovered_modifier_->node_identity);
     if (!hovered || !hovered->enabled) {
       if (hovered) {
         if (MountedModifier *modifier =
-                FindModifier(*mounted_root_, *hovered_modifier_)) {
+                FindModifier(*state_->mounted_root_, *state_->hovered_modifier_)) {
           modifier->OnHoverChanged(*hovered, false);
         }
       }
-      hovered_modifier_.reset();
+      state_->hovered_modifier_.reset();
     }
   }
 
   ResolveFocusedFlags(
-      *mounted_root_, focused_node_identity_,
-      focus_visible_);
+      *state_->mounted_root_, state_->focused_node_identity_,
+      state_->focus_visible_);
 }
 
-MountedNode *Runtime::ActiveModalFocusRoot() {
-  if (!mounted_root_) {
+detail::MountedNode *Runtime::ActiveModalFocusRoot() {
+  if (!state_->mounted_root_) {
     return nullptr;
   }
   const std::optional<LayerId> modal_id =
@@ -543,7 +557,7 @@ MountedNode *Runtime::ActiveModalFocusRoot() {
 
   const std::string key =
       "__huxerui_layer_" + std::to_string(*modal_id);
-  for (auto &child : mounted_root_->children) {
+  for (auto &child : state_->mounted_root_->children) {
     if (!child->key.has_value()) {
       continue;
     }
@@ -559,7 +573,7 @@ MountedNode *Runtime::ActiveModalFocusRoot() {
 std::optional<LayerId>
 Runtime::ActiveModalLayerId() const {
   std::optional<LayerId> modal_id;
-  for (const LayerEntry &entry : layers_) {
+  for (const LayerEntry &entry : state_->layers_) {
     if (entry.options.input_policy ==
         LayerInputPolicy::Modal) {
       modal_id = entry.id;
@@ -572,11 +586,11 @@ void Runtime::SetFocusedNode(
     std::optional<std::uint64_t> identity,
     std::optional<bool> focus_visible) {
   if (identity.has_value()) {
-    if (!mounted_root_) {
+    if (!state_->mounted_root_) {
       identity.reset();
     } else {
-      MountedNode *candidate =
-          FindNode(*mounted_root_, *identity);
+      detail::MountedNode *candidate =
+          FindNode(*state_->mounted_root_, *identity);
       if (!candidate || !candidate->enabled ||
           !candidate->focusable) {
         identity.reset();
@@ -584,41 +598,41 @@ void Runtime::SetFocusedNode(
     }
   }
   const bool next_focus_visible =
-      focus_visible.value_or(focus_visible_);
-  if (focused_node_identity_ == identity &&
-      focus_visible_ == next_focus_visible) {
+      focus_visible.value_or(state_->focus_visible_);
+  if (state_->focused_node_identity_ == identity &&
+      state_->focus_visible_ == next_focus_visible) {
     return;
   }
-  if (focused_node_identity_ == identity) {
-    focus_visible_ = next_focus_visible;
-    if (identity.has_value() && mounted_root_) {
-      if (MountedNode *focused =
-              FindNode(*mounted_root_, *identity)) {
-        focused->focus_visible = focus_visible_;
+  if (state_->focused_node_identity_ == identity) {
+    state_->focus_visible_ = next_focus_visible;
+    if (identity.has_value() && state_->mounted_root_) {
+      if (detail::MountedNode *focused =
+              FindNode(*state_->mounted_root_, *identity)) {
+        focused->focus_visible = state_->focus_visible_;
       }
     }
     RequestFrame();
     return;
   }
 
-  if (focused_node_identity_.has_value() && mounted_root_) {
-    if (MountedNode *previous =
+  if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
+    if (detail::MountedNode *previous =
             FindNode(
-                *mounted_root_, *focused_node_identity_)) {
+                *state_->mounted_root_, *state_->focused_node_identity_)) {
       previous->focused = false;
       previous->focus_visible = false;
       DispatchFocusChanged(*previous, false);
     }
   }
-  keyboard_activation_identity_.reset();
-  focused_node_identity_ = identity;
-  focus_visible_ = next_focus_visible;
-  if (focused_node_identity_.has_value() && mounted_root_) {
-    if (MountedNode *next =
+  state_->keyboard_activation_identity_.reset();
+  state_->focused_node_identity_ = identity;
+  state_->focus_visible_ = next_focus_visible;
+  if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
+    if (detail::MountedNode *next =
             FindNode(
-                *mounted_root_, *focused_node_identity_)) {
+                *state_->mounted_root_, *state_->focused_node_identity_)) {
       next->focused = true;
-      next->focus_visible = focus_visible_;
+      next->focus_visible = state_->focus_visible_;
       DispatchFocusChanged(*next, true);
     }
   }
@@ -626,24 +640,24 @@ void Runtime::SetFocusedNode(
 }
 
 void Runtime::MoveFocus(bool reverse) {
-  if (!mounted_root_) {
+  if (!state_->mounted_root_) {
     return;
   }
-  std::vector<MountedNode *> focusable;
-  MountedNode *root = ActiveModalFocusRoot();
+  std::vector<detail::MountedNode *> focusable;
+  detail::MountedNode *root = ActiveModalFocusRoot();
   CollectFocusableNodes(
-      root ? *root : *mounted_root_, focusable);
+      root ? *root : *state_->mounted_root_, focusable);
   if (focusable.empty()) {
     SetFocusedNode(std::nullopt, true);
     return;
   }
 
   auto current = focusable.end();
-  if (focused_node_identity_.has_value()) {
+  if (state_->focused_node_identity_.has_value()) {
     current = std::find_if(
         focusable.begin(), focusable.end(),
-        [this](const MountedNode *node) {
-          return node->identity == *focused_node_identity_;
+        [this](const detail::MountedNode *node) {
+          return node->identity == *state_->focused_node_identity_;
         });
   }
 
@@ -668,7 +682,7 @@ void Runtime::MoveFocus(bool reverse) {
 }
 
 bool Runtime::UpdateMountedModifiers(
-    MountedNode &node, const FrameInfo &frame, bool &needs_frame,
+    detail::MountedNode &node, const FrameInfo &frame, bool &needs_frame,
     std::optional<double> &next_wakeup, bool rebuild_cache) {
   if (!rebuild_cache &&
       !node.subtree_has_mounted_modifiers) {
@@ -706,16 +720,16 @@ bool Runtime::UpdateMountedModifiers(
 }
 
 void Runtime::HandleScrollEvent(const ScrollEvent &event) {
-  if (!mounted_root_) {
+  if (!state_->mounted_root_) {
     return;
   }
-  if (MountedNode *scrolled = ScrollNode(*mounted_root_, event)) {
+  if (detail::MountedNode *scrolled = ScrollNode(*state_->mounted_root_, event)) {
     NotifyScrollActivity(*scrolled);
   }
 }
 
 void Runtime::HandleKeyEvent(const KeyEvent &event) {
-  if (!mounted_root_) {
+  if (!state_->mounted_root_) {
     return;
   }
   if (event.type == KeyEventType::Down &&
@@ -723,12 +737,12 @@ void Runtime::HandleKeyEvent(const KeyEvent &event) {
     MoveFocus(event.modifiers.shift);
     return;
   }
-  if (!focused_node_identity_.has_value()) {
+  if (!state_->focused_node_identity_.has_value()) {
     return;
   }
 
-  MountedNode *focused =
-      FindNode(*mounted_root_, *focused_node_identity_);
+  detail::MountedNode *focused =
+      FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
   if (!focused || !focused->enabled || !focused->focusable) {
     SetFocusedNode(std::nullopt);
     return;
@@ -744,31 +758,31 @@ void Runtime::HandleKeyEvent(const KeyEvent &event) {
       ActivateNode(*focused);
     } else if (activatable && event.key == Key::Space &&
                !event.repeat) {
-      keyboard_activation_identity_ = focused->identity;
+      state_->keyboard_activation_identity_ = focused->identity;
     }
   } else if (event.key == Key::Space) {
-    if (activatable && keyboard_activation_identity_.has_value() &&
-        *keyboard_activation_identity_ == focused->identity) {
+    if (activatable && state_->keyboard_activation_identity_.has_value() &&
+        *state_->keyboard_activation_identity_ == focused->identity) {
       ActivateNode(*focused);
     }
-    keyboard_activation_identity_.reset();
+    state_->keyboard_activation_identity_.reset();
   }
   RequestFrame();
 }
 
 void Runtime::InvalidateRoot() {
-  composition_dirty_ = true;
+  state_->composition_dirty_ = true;
   RequestFrame();
 }
 
 void Runtime::InvalidateScope(std::uint64_t scope_id) {
-  if (scope_id == root_scope_->Id()) {
-    composition_dirty_ = true;
+  if (scope_id == state_->root_scope_->Id()) {
+    state_->composition_dirty_ = true;
   }
   RequestFrame();
 }
 
-void Runtime::RecomposeDirtyScopes(MountedNode &mounted) {
+void Runtime::RecomposeDirtyScopes(detail::MountedNode &mounted) {
   if (mounted.kind == NodeKind::Scope && mounted.recompose_scope &&
       mounted.recompose_scope->IsDirty()) {
     ComposeScope(mounted);
@@ -781,31 +795,31 @@ void Runtime::RecomposeDirtyScopes(MountedNode &mounted) {
 }
 
 void Runtime::ComposeRoot() {
-  composing_root_ = true;
-  composition_dirty_ = false;
-  root_scope_->BeginComposition();
-  Composer composer{root_scope_, root_environment_};
+  state_->composing_root_ = true;
+  state_->composition_dirty_ = false;
+  state_->root_scope_->BeginComposition();
+  Composer composer{state_->root_scope_, state_->root_environment_};
 
   View application;
   {
     Composer::Guard guard{composer};
-    application = root_factory_();
+    application = state_->root_factory_();
   }
 
-  root_scope_->EndComposition();
+  state_->root_scope_->EndComposition();
 
-  has_application_root_ = static_cast<bool>(application);
+  state_->has_application_root_ = static_cast<bool>(application);
   std::vector<View> children;
   children.reserve(
-      static_cast<std::size_t>(has_application_root_) +
-      layers_.size());
+      static_cast<std::size_t>(state_->has_application_root_) +
+      state_->layers_.size());
   if (application) {
     children.push_back(std::move(application));
   }
 
   std::vector<const LayerEntry *> ordered_layers;
-  ordered_layers.reserve(layers_.size());
-  for (const LayerEntry &entry : layers_) {
+  ordered_layers.reserve(state_->layers_.size());
+  for (const LayerEntry &entry : state_->layers_) {
     ordered_layers.push_back(&entry);
   }
   std::stable_sort(
@@ -816,7 +830,7 @@ void Runtime::ComposeRoot() {
 
   for (const LayerEntry *entry : ordered_layers) {
     auto environment =
-        entry->environment ? entry->environment : root_environment_;
+        entry->environment ? entry->environment : state_->root_environment_;
     View layer = Scope(
         [factory = entry->content,
          environment = std::move(environment)]() mutable {
@@ -880,25 +894,25 @@ void Runtime::ComposeRoot() {
   }
 
   View incoming = RuntimeRootLayout{std::move(children)};
-  Reconcile(mounted_root_, incoming.spec_);
-  composing_root_ = false;
+  Reconcile(state_->mounted_root_, incoming.spec_);
+  state_->composing_root_ = false;
 }
 
-void Runtime::ComposeScope(MountedNode &mounted) {
+void Runtime::ComposeScope(detail::MountedNode &mounted) {
   if (!mounted.scope_factory) {
     mounted.children.clear();
     return;
   }
   if (!mounted.recompose_scope) {
     mounted.recompose_scope =
-        std::make_shared<RecomposeScope>(*this, next_scope_identity_++);
+        std::make_shared<RecomposeScope>(*this, state_->next_scope_identity_++);
   }
   mounted.recompose_scope->SetEventBindings(mounted.event_bindings);
 
   mounted.recompose_scope->BeginComposition();
   Composer composer{
       mounted.recompose_scope,
-      mounted.environment ? mounted.environment : root_environment_};
+      mounted.environment ? mounted.environment : state_->root_environment_};
 
   View content;
   {
@@ -915,9 +929,9 @@ void Runtime::ComposeScope(MountedNode &mounted) {
   ReconcileChildren(mounted, children);
 }
 
-void Runtime::Reconcile(std::unique_ptr<MountedNode> &mounted,
+void Runtime::Reconcile(std::unique_ptr<detail::MountedNode> &mounted,
                         const std::shared_ptr<ViewSpec> &incoming) {
-  modifier_tree_dirty_ = true;
+  state_->modifier_tree_dirty_ = true;
   const bool compatible = mounted && SameNodeType(*mounted, *incoming) &&
                           mounted->key == incoming->key;
   if (!compatible) {
@@ -961,11 +975,11 @@ void Runtime::Reconcile(std::unique_ptr<MountedNode> &mounted,
   }
 }
 
-std::unique_ptr<MountedNode>
+std::unique_ptr<detail::MountedNode>
 Runtime::Mount(const std::shared_ptr<ViewSpec> &incoming) {
-  auto mounted = std::make_unique<MountedNode>();
+  auto mounted = std::make_unique<detail::MountedNode>();
   mounted->kind = incoming->kind;
-  mounted->identity = next_node_identity_++;
+  mounted->identity = state_->next_node_identity_++;
   mounted->key = incoming->key;
   mounted->text = incoming->text;
   mounted->style = incoming->style;
@@ -992,7 +1006,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec> &incoming) {
   return mounted;
 }
 
-void Runtime::ReconcileChildren(MountedNode &mounted,
+void Runtime::ReconcileChildren(detail::MountedNode &mounted,
                                 const std::vector<View> &incoming_children) {
   std::unordered_set<ViewKey> incoming_keys;
   for (const auto &child_view : incoming_children) {
@@ -1006,7 +1020,7 @@ void Runtime::ReconcileChildren(MountedNode &mounted,
   }
 
   auto previous = std::move(mounted.children);
-  std::vector<std::unique_ptr<MountedNode>> next;
+  std::vector<std::unique_ptr<detail::MountedNode>> next;
   next.reserve(incoming_children.size());
 
   for (std::size_t index = 0; index < incoming_children.size(); ++index) {
@@ -1015,7 +1029,7 @@ void Runtime::ReconcileChildren(MountedNode &mounted,
       continue;
     }
 
-    std::unique_ptr<MountedNode> candidate;
+    std::unique_ptr<detail::MountedNode> candidate;
     if (child_view.spec_->key.has_value()) {
       auto found =
           std::find_if(previous.begin(), previous.end(),
@@ -1039,7 +1053,7 @@ void Runtime::ReconcileChildren(MountedNode &mounted,
   mounted.children = std::move(next);
 }
 
-SavedNodeState Runtime::SaveNodeState(MountedNode &mounted) {
+SavedNodeState Runtime::SaveNodeState(detail::MountedNode &mounted) {
   SavedNodeState saved{
       mounted.kind,
       mounted.key,
@@ -1058,20 +1072,20 @@ SavedNodeState Runtime::SaveNodeState(MountedNode &mounted) {
   return saved;
 }
 
-void Runtime::RestoreNodeState(MountedNode &mounted, SavedNodeState &saved) {
+void Runtime::RestoreNodeState(detail::MountedNode &mounted, SavedNodeState &saved) {
   if (!SameSavedNodeType(mounted, saved) || mounted.key != saved.key) {
     return;
   }
 
   if (mounted.kind == NodeKind::Scope && saved.state_slots) {
     mounted.recompose_scope = std::make_shared<RecomposeScope>(
-        *this, next_scope_identity_++, std::move(*saved.state_slots));
+        *this, state_->next_scope_identity_++, std::move(*saved.state_slots));
     ComposeScope(mounted);
   }
 
   std::vector<bool> restored(saved.children.size(), false);
   for (std::size_t index = 0; index < mounted.children.size(); ++index) {
-    MountedNode &child = *mounted.children[index];
+    detail::MountedNode &child = *mounted.children[index];
     SavedNodeState *saved_child = nullptr;
     std::size_t saved_index = 0;
 
@@ -1097,6 +1111,10 @@ void Runtime::RestoreNodeState(MountedNode &mounted, SavedNodeState &saved) {
     }
   }
 }
+
+} // namespace huxerui
+
+namespace huxerui::detail {
 
 VirtualMeasureSession::VirtualMeasureSession(Runtime &runtime,
                                              MountedNode &owner)
@@ -1283,8 +1301,8 @@ void VirtualMeasureSession::Commit(
   owner_->children = std::move(next);
   owner_->virtual_state->child_indices = std::move(next_indices);
   owner_->virtual_state->source_dirty = false;
-  runtime_->modifier_tree_dirty_ =
-      runtime_->modifier_tree_dirty_ || structure_changed;
+  runtime_->state_->modifier_tree_dirty_ =
+      runtime_->state_->modifier_tree_dirty_ || structure_changed;
   committed_ = true;
 }
 

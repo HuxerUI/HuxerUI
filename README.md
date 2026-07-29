@@ -631,11 +631,11 @@ Android provides `HuxerUIActivity` for full-screen applications and
 `HuxerUIView` loads the shared C++ runtime, while `HuxerUIActivity` loads the
 application native library named `huxerui_app`.
 `HUXERUI_APP` registers one immutable application definition on mobile
-platforms. Every native host view creates its own `AppRuntime`, so multiple
+platforms. Every native host view creates its own `Runtime`, so multiple
 views can share the same root factory without sharing their state tree,
 layout, frame scheduling, or input state.
 
-Mobile platform integrations implement `AppHost`, create an `AppRuntime` from
+Mobile platform integrations implement `PlatformHost`, create a `Runtime` from
 the registered `AppDefinition`, and forward viewport, frame, and input events:
 
 ```cpp
@@ -649,12 +649,12 @@ View App() {
   });
 }
 
-class MobileHost final : public AppHost {
+class MobileHost final : public PlatformHost {
   // Implement frame scheduling, time, and text measurement.
 };
 
 MobileHost host;
-AppRuntime runtime{
+Runtime runtime{
     {
         .root_factory = App,
         .options = {.title = "HuxerUI"},
@@ -666,7 +666,7 @@ runtime.SetViewport({width, height});
 const DisplayList& display_list = runtime.BuildFrame();
 ```
 
-`AppRuntime` is shared by Android, iOS, and OHOS integrations. Rendering and
+`Runtime` is shared by Android, iOS, and OHOS integrations. Rendering and
 native lifecycle ownership remain platform specific.
 
 The Android Gradle project contains the `huxerui` library module and the

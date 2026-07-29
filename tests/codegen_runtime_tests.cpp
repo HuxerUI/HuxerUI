@@ -14,26 +14,15 @@ namespace {
 
 using huxerui::DisplayList;
 using huxerui::DrawTextCommand;
+using huxerui::PlatformHost;
+using huxerui::Runtime;
 using huxerui::Size;
 using huxerui::State;
 using huxerui::Text;
 using huxerui::UseState;
 using huxerui::View;
-using huxerui::detail::PlatformHost;
-using huxerui::detail::Runtime;
-
-class TestPlatform final
-    : public PlatformHost,
-      public huxerui::detail::TextService {
+class TestPlatform final : public PlatformHost {
 public:
-  int Run(
-      Runtime& runtime,
-      const huxerui::AppOptions& options) override {
-    static_cast<void>(runtime);
-    static_cast<void>(options);
-    return 0;
-  }
-
   void RequestFrame(double delay_seconds) override {
     static_cast<void>(delay_seconds);
     ++requested_frames;
@@ -41,10 +30,6 @@ public:
 
   [[nodiscard]] double Now() const noexcept override {
     return 0.0;
-  }
-
-  huxerui::detail::TextService& Text() override {
-    return *this;
   }
 
   Size MeasureText(
@@ -122,7 +107,10 @@ void Check(
 
 int main() {
   TestPlatform platform;
-  Runtime runtime{GeneratedApp, platform};
+  Runtime runtime{
+      {.root_factory = GeneratedApp},
+      platform,
+  };
   runtime.SetViewport({320.0F, 240.0F});
 
   HUXERUI_CODEGEN_CHECK(
