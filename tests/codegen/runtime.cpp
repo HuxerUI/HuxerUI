@@ -54,8 +54,7 @@ public:
 State<int> generated_count;
 int generated_compositions = 0;
 
-[[huxerui::scope]]
-View GeneratedCounter(int initial) {
+[[huxerui::scope]] View GeneratedCounter(int initial) {
   ++generated_compositions;
   auto count = UseState(initial);
   generated_count = count;
@@ -66,9 +65,9 @@ View GeneratedApp() {
   return GeneratedCounter(3);
 }
 
-[[nodiscard]] std::string FirstText(const DisplayList &display_list) {
-  for (const auto &command : display_list.Commands()) {
-    if (const auto *text = std::get_if<DrawTextCommand>(&command)) {
+[[nodiscard]] std::string FirstText(const DisplayList& display_list) {
+  for (const auto& command : display_list.Commands()) {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
       return text->text;
     }
   }

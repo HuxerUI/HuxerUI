@@ -18,7 +18,7 @@ class View;
 namespace detail {
 struct EnvironmentFrame;
 struct LayerControllerState;
-}
+} // namespace detail
 
 class DialogService;
 class ToastService;
@@ -49,15 +49,14 @@ struct LayerOptions {
 
 class LayerController {
 public:
-  LayerController(const LayerController &) = default;
-  LayerController &operator=(const LayerController &) = default;
+  LayerController(const LayerController&) = default;
+  LayerController& operator=(const LayerController&) = default;
 
   LayerId Attach(LayerOptions options, ViewFactory content) const;
 
   template <class Factory>
-    requires std::invocable<Factory &> &&
-             std::convertible_to<std::invoke_result_t<Factory &>, View>
-  LayerId Attach(LayerKind kind, Factory &&content) const {
+    requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+  LayerId Attach(LayerKind kind, Factory&& content) const {
     LayerInputPolicy input_policy = LayerInputPolicy::Content;
     if (kind == LayerKind::Toast) {
       input_policy = LayerInputPolicy::PassThrough;
@@ -69,20 +68,20 @@ public:
             .kind = kind,
             .input_policy = input_policy,
         },
-        ViewFactory(std::forward<Factory>(content)));
+        ViewFactory(std::forward<Factory>(content))
+    );
   }
 
   bool Update(LayerId id, ViewFactory content) const;
-  bool Update(
-      LayerId id, LayerOptions options, ViewFactory content) const;
+  bool Update(LayerId id, LayerOptions options, ViewFactory content) const;
   bool Dismiss(LayerId id) const;
 
 private:
   LayerId AttachCaptured(
-      LayerOptions options, ViewFactory content,
-      std::shared_ptr<const detail::EnvironmentFrame> environment) const;
+      LayerOptions options, ViewFactory content, std::shared_ptr<const detail::EnvironmentFrame> environment
+  ) const;
 
-  explicit LayerController(Runtime &runtime);
+  explicit LayerController(Runtime& runtime);
   void Disconnect() noexcept;
 
   std::shared_ptr<detail::LayerControllerState> state_;

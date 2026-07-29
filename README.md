@@ -173,7 +173,7 @@ return Row {
 
 `OnChanged()` is a convenience wrapper for
 `On<ToggleEvents::Changed>()`. Pointer clicks, Enter, and Space all use the
-same activation path. Switch movement is retained by its mounted modifier and
+same activation path. Switch movement is retained by its node extension and
 uses the current Theme motion duration; reduced-motion themes update it
 immediately. `CheckboxStyleKey` and `SwitchStyleKey` allow a nested Theme to
 replace their semantic styles.
@@ -187,7 +187,7 @@ ProgressCircle(progress_state);
 ```
 
 Determinate values are constrained to the `0` to `1` range. An indeterminate
-circle rotates using its mounted modifier, while a determinate circle does not
+circle rotates using its node extension, while a determinate circle does not
 continuously request frames. Reduced-motion themes keep the indeterminate arc
 static. `ProgressCircleStyleKey` controls its intrinsic size, stroke width,
 track and indicator colors, arc fraction, and animation duration. `Frame` can
@@ -382,7 +382,21 @@ ScrollView { content }.With(
 );
 ```
 
-The scrollbar infers its axis, does not affect content layout, and is omitted when the content does not overflow. It fades out after inactivity and reappears while scrolling, hovering, or dragging. Its thumb can be dragged directly and takes pointer priority over content interactions while visible; a fully hidden scrollbar does not intercept content input. Fade timings are configurable through `ScrollBarStyle`. Track-page clicks, inertia, and overscroll effects are not yet implemented.
+The scrollbar infers its axis, does not affect content layout, and is omitted when the content does not overflow. It fades out after inactivity and reappears while scrolling, hovering, or dragging. Its thumb can be dragged directly and takes pointer priority over content interactions while visible; a fully hidden scrollbar does not intercept content input. Wheel and trackpad deltas are consumed from the innermost same-axis container outward, preserving any distance left at a nested boundary. Touch drags continue with decaying inertial motion after release. When a nested container reaches its boundary, remaining velocity continues through the nearest same-axis parent that can scroll. Momentum is cancelled by the next press, wheel input, or explicit `ScrollState` operation. Fade timings are configurable through `ScrollBarStyle`. Track-page clicks and overscroll effects are not yet implemented.
+
+Inertial motion is enabled by default. `ScrollPhysics` can disable it or tune
+its velocity thresholds and deceleration without replacing the container's
+internal scroll motion:
+
+```cpp
+VirtualList(items, ItemView).With(
+    ScrollPhysics{
+        .deceleration_rate = 7.0F,
+        .minimum_fling_velocity = 48.0F,
+        .maximum_fling_velocity = 6000.0F,
+    }
+);
+```
 
 Layout nodes use braces to express parent-child relationships, while individual controls use constructor calls:
 
@@ -506,6 +520,42 @@ Only items included in the final `VirtualLayoutResult` remain mounted. The runti
 The root node fills the window viewport. Text nodes calculate multiline height from the maximum width supplied by their parent layout, while buttons remain centered on a single line.
 
 `View` uses copy-on-write semantics. Adding a modifier to one copied view does not change the other copy's `ViewSpec`.
+
+`With()` processes modifiers from left to right. Property modifiers such as
+`Padding`, `Frame`, and `Background` write directly to `ViewSpec`, so a later
+write to the same property wins and changing the order of unrelated property
+modifiers does not create wrapper semantics. Retained modifiers such as
+`ScrollBar`, `Indication`, animated presentation modifiers, and third-party
+`NodeExtension` modifiers keep declaration order and preserve compatible
+mounted state across reconciliation.
+
+`Offset`, `Opacity`, `Scale`, and `Rotation` accept immediate values or
+`AnimateTo()` targets. Scale is a multiplier, Rotation uses degrees, and both
+default to the center of the View:
+
+```cpp
+auto transformed = UseState(false);
+
+return Button("Transform")
+    .With(
+        Scale{
+            AnimateTo(
+                transformed ? 1.2F : 1.0F,
+                TweenSpec{0.24, Easing::EaseOut})},
+        Rotation{
+            AnimateTo(
+                transformed ? 12.0F : 0.0F,
+                SpringSpec{})})
+    .OnClick([transformed] {
+      transformed = !transformed;
+    });
+```
+
+Scale, Rotation, and Offset are presentation transforms: they do not change
+the measured size or parent layout. They transform the View background, text,
+children, foreground node extensions, clipping, and pointer hit region
+together. `TransformOrigin{x, y}` uses normalized coordinates and can place
+the origin outside the View when needed.
 
 Themes are deferred Environment providers. `FlatTheme`, `FlatDarkTheme`,
 `MaterialTheme`, and `MaterialDarkTheme` supply complete light and dark theme
@@ -699,7 +749,7 @@ target-architecture code generator.
 Example applications:
 
 - `example_counter`: component scopes and local state
-- `example_layout_gallery`: layout, alignment, grow factors, and multiline text
+- `example_ui_gallery`: built-in controls, layout containers, typography, and presentation animations
 - `example_dynamic_list`: `ForEach`, stable keys, and per-item local state
 - `example_scroll_view`: vertical scrolling, observable metrics, programmatic offsets, and local state after scrolling
 - `example_virtual_list`: a large virtualized variable-height list with programmatic item positioning
@@ -718,7 +768,7 @@ macOS:
 
 ```bash
 open build/bin/example_counter.app
-open build/bin/example_layout_gallery.app
+open build/bin/example_ui_gallery.app
 open build/bin/example_dynamic_list.app
 open build/bin/example_scroll_view.app
 open build/bin/example_virtual_list.app
@@ -752,9 +802,9 @@ Windows:
 - Local measurement, layout, and paint invalidation
 - Composite key paths
 - Minimum and maximum frames, layout priority, and intrinsic-size queries
-- Clipping, transforms, and opacity
+- General-purpose clipping modifiers
 - Event capture/bubbling and explicit user-controlled pointer capture
 - IME, editable text input, and text selection
-- General saveable-state APIs, inertial scrolling, public animation APIs, and overscroll effects
+- General saveable-state APIs, keyframe and decay animation, and overscroll effects
 - Semantics tree and accessibility
 - iOS, Linux, and Web backends

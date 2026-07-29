@@ -49,23 +49,20 @@ struct ScrollBarBinding {
 class View {
 public:
   View() = default;
-  View(const View &) = default;
-  View(View &&) noexcept = default;
-  View &operator=(const View &) = default;
-  View &operator=(View &&) noexcept = default;
+  View(const View&) = default;
+  View(View&&) noexcept = default;
+  View& operator=(const View&) = default;
+  View& operator=(View&&) noexcept = default;
   ~View() = default;
 
-  template <class Function> View OnClick(Function &&function) && {
-    ApplyEvent<ViewEvents::Click>(
-        std::forward<Function>(function));
+  template <class Function> View OnClick(Function&& function) && {
+    ApplyEvent<ViewEvents::Click>(std::forward<Function>(function));
     return std::move(*this);
   }
 
   template <class Key, class Function>
-    requires detail::EventKey<Key> &&
-             std::constructible_from<std::function<typename Key::Signature>,
-                                     Function>
-  View On(Function &&function) && {
+    requires detail::EventKey<Key> && std::constructible_from<std::function<typename Key::Signature>, Function>
+  View On(Function&& function) && {
     ApplyEvent<Key>(std::forward<Function>(function));
     return std::move(*this);
   }
@@ -75,8 +72,7 @@ public:
     return std::move(*this);
   }
 
-  template <ViewModifier... Modifiers>
-  View With(Modifiers &&...modifiers) && {
+  template <ViewModifier... Modifiers> View With(Modifiers&&... modifiers) && {
     ApplyModifiers(std::forward<Modifiers>(modifiers)...);
     return std::move(*this);
   }
@@ -85,7 +81,7 @@ public:
   View Key(std::uint64_t value) &&;
   View Key(std::string value) &&;
   View Key(std::string_view value) &&;
-  View Key(const char *value) &&;
+  View Key(const char* value) &&;
 
   template <std::integral T>
     requires(!std::same_as<std::remove_cv_t<T>, bool>)
@@ -111,33 +107,27 @@ public:
 protected:
   explicit View(std::shared_ptr<detail::ViewSpec> spec);
 
-  template <class Key, class Function>
-  void ApplyEvent(Function &&function) {
+  template <class Key, class Function> void ApplyEvent(Function&& function) {
     SetEventBinding(
         typeid(Key),
         std::make_shared<detail::EventHandler<typename Key::Signature>>(
-            std::function<typename Key::Signature>(
-                std::forward<Function>(function))));
+            std::function<typename Key::Signature>(std::forward<Function>(function))
+        )
+    );
     if constexpr (std::same_as<Key, ViewEvents::Click>) {
-      AddModifier(detail::MakeModifierSpec(
-          detail::DefaultIndication{}));
+      AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
     }
   }
 
-  template <class Key>
-  void ApplyLayoutValue(typename Key::Value value) {
+  template <class Key> void ApplyLayoutValue(typename Key::Value value) {
     SetLayoutValue(typeid(Key), std::move(value));
   }
 
-  template <ViewModifier... Modifiers>
-  void ApplyModifiers(Modifiers &&...modifiers) {
-    (AddModifier(detail::MakeModifierSpec(
-         std::forward<Modifiers>(modifiers))),
-     ...);
+  template <ViewModifier... Modifiers> void ApplyModifiers(Modifiers&&... modifiers) {
+    (AddModifier(detail::MakeModifierSpec(std::forward<Modifiers>(modifiers))), ...);
   }
 
-  void SetEventBinding(std::type_index key,
-                       std::shared_ptr<detail::EventHandlerBase> handler);
+  void SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler);
   void SetLayoutValue(std::type_index key, std::any value);
   void AddModifier(detail::ModifierSpec modifier);
   void SetKey(std::int64_t value);
@@ -155,8 +145,7 @@ private:
 
 namespace detail {
 
-std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor &layout,
-                                         std::vector<View> children);
+std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor& layout, std::vector<View> children);
 
 } // namespace detail
 
@@ -166,17 +155,25 @@ public:
 
   explicit Views(std::vector<View> items) : items_(std::move(items)) {}
 
-  void Reserve(std::size_t capacity) { items_.reserve(capacity); }
+  void Reserve(std::size_t capacity) {
+    items_.reserve(capacity);
+  }
 
-  void Add(View view) { items_.push_back(std::move(view)); }
+  void Add(View view) {
+    items_.push_back(std::move(view));
+  }
 
-  [[nodiscard]] std::size_t Size() const noexcept { return items_.size(); }
+  [[nodiscard]] std::size_t Size() const noexcept {
+    return items_.size();
+  }
 
-  [[nodiscard]] const std::vector<View> &Items() const noexcept {
+  [[nodiscard]] const std::vector<View>& Items() const noexcept {
     return items_;
   }
 
-  [[nodiscard]] std::vector<View> Take() && { return std::move(items_); }
+  [[nodiscard]] std::vector<View> Take() && {
+    return std::move(items_);
+  }
 
 private:
   std::vector<View> items_;
@@ -184,13 +181,12 @@ private:
 
 namespace detail {
 
-template <class T> std::string FormatText(const T &value) {
+template <class T> std::string FormatText(const T& value) {
   if constexpr (std::is_same_v<std::decay_t<T>, std::string>) {
     return value;
   } else if constexpr (std::is_same_v<std::decay_t<T>, std::string_view>) {
     return std::string(value);
-  } else if constexpr (std::is_same_v<std::decay_t<T>, const char *> ||
-                       std::is_same_v<std::decay_t<T>, char *>) {
+  } else if constexpr (std::is_same_v<std::decay_t<T>, const char*> || std::is_same_v<std::decay_t<T>, char*>) {
     return value == nullptr ? std::string{} : std::string(value);
   } else {
     std::ostringstream stream;
@@ -199,13 +195,11 @@ template <class T> std::string FormatText(const T &value) {
   }
 }
 
-template <class T> std::string FormatText(const State<T> &value) {
+template <class T> std::string FormatText(const State<T>& value) {
   return FormatText(value.Get());
 }
 
-template <class... Arguments>
-std::string InterpolateText(std::string_view format,
-                            const Arguments &...arguments) {
+template <class... Arguments> std::string InterpolateText(std::string_view format, const Arguments&... arguments) {
   const std::array<std::string, sizeof...(Arguments)> values{
       FormatText(arguments)...,
   };
@@ -225,8 +219,7 @@ std::string InterpolateText(std::string_view format,
       }
       if (next == '}') {
         if (argument_index >= values.size()) {
-          throw std::invalid_argument(
-              "HuxerUI text format has fewer arguments than placeholders");
+          throw std::invalid_argument("HuxerUI text format has fewer arguments than placeholders");
         }
         result += values[argument_index++];
         index += 2;
@@ -234,8 +227,7 @@ std::string InterpolateText(std::string_view format,
       }
     }
 
-    if (character == '}' && index + 1 < format.size() &&
-        format[index + 1] == '}') {
+    if (character == '}' && index + 1 < format.size() && format[index + 1] == '}') {
       result.push_back('}');
       index += 2;
       continue;
@@ -246,17 +238,15 @@ std::string InterpolateText(std::string_view format,
   }
 
   if (argument_index != values.size()) {
-    throw std::invalid_argument(
-        "HuxerUI text format has more arguments than placeholders");
+    throw std::invalid_argument("HuxerUI text format has more arguments than placeholders");
   }
   return result;
 }
 
 template <class T>
-concept ViewChild =
-    std::convertible_to<T, View> || std::same_as<std::remove_cvref_t<T>, Views>;
+concept ViewChild = std::convertible_to<T, View> || std::same_as<std::remove_cvref_t<T>, Views>;
 
-template <class Child> std::size_t ChildCount(const Child &child) {
+template <class Child> std::size_t ChildCount(const Child& child) {
   if constexpr (std::same_as<std::remove_cvref_t<Child>, Views>) {
     return child.Size();
   } else {
@@ -266,22 +256,20 @@ template <class Child> std::size_t ChildCount(const Child &child) {
 
 template <class Child>
   requires std::convertible_to<Child, View>
-void AppendChild(std::vector<View> &result, Child &&child) {
+void AppendChild(std::vector<View>& result, Child&& child) {
   result.emplace_back(std::forward<Child>(child));
 }
 
-inline void AppendChild(std::vector<View> &result, const Views &children) {
+inline void AppendChild(std::vector<View>& result, const Views& children) {
   result.insert(result.end(), children.Items().begin(), children.Items().end());
 }
 
-inline void AppendChild(std::vector<View> &result, Views &&children) {
+inline void AppendChild(std::vector<View>& result, Views&& children) {
   std::vector<View> items = std::move(children).Take();
-  result.insert(result.end(), std::make_move_iterator(items.begin()),
-                std::make_move_iterator(items.end()));
+  result.insert(result.end(), std::make_move_iterator(items.begin()), std::make_move_iterator(items.end()));
 }
 
-template <ViewChild... Children>
-std::vector<View> CollectChildren(Children &&...children) {
+template <ViewChild... Children> std::vector<View> CollectChildren(Children&&... children) {
   std::vector<View> result;
   result.reserve((ChildCount(children) + ... + 0));
   (AppendChild(result, std::forward<Children>(children)), ...);
@@ -294,42 +282,33 @@ struct VirtualItemSource {
 };
 
 template <std::ranges::input_range Range, class Factory>
-  requires std::constructible_from<std::ranges::range_value_t<Range>,
-                                   std::ranges::range_reference_t<Range>> &&
-           std::invocable<Factory &, std::ranges::range_reference_t<Range>> &&
-           std::convertible_to<
-               std::invoke_result_t<Factory &,
-                                    std::ranges::range_reference_t<Range>>,
-               View>
-VirtualItemSource MakeVirtualItemSource(Range &&range, Factory &&factory) {
+  requires std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>> &&
+           std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
+           std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
+VirtualItemSource MakeVirtualItemSource(Range&& range, Factory&& factory) {
   using Value = std::ranges::range_value_t<Range>;
   auto values = std::make_shared<std::vector<Value>>();
   if constexpr (std::ranges::sized_range<Range>) {
     values->reserve(static_cast<std::size_t>(std::ranges::size(range)));
   }
-  for (auto &&value : range) {
+  for (auto&& value : range) {
     values->emplace_back(value);
   }
 
-  auto shared_factory =
-      std::make_shared<std::decay_t<Factory>>(std::forward<Factory>(factory));
+  auto shared_factory = std::make_shared<std::decay_t<Factory>>(std::forward<Factory>(factory));
   return {
       values->size(),
-      [values = std::move(values),
-       shared_factory = std::move(shared_factory)](std::size_t index) -> View {
+      [values = std::move(values), shared_factory = std::move(shared_factory)](std::size_t index) -> View {
         return std::invoke(*shared_factory, (*values)[index]);
       },
   };
 }
 
 template <class Factory>
-  requires std::invocable<Factory &, std::size_t> &&
-           std::convertible_to<std::invoke_result_t<Factory &, std::size_t>,
-                               View>
-VirtualItemSource MakeVirtualItemSource(std::size_t item_count,
-                                        Factory &&factory) {
-  auto shared_factory =
-      std::make_shared<std::decay_t<Factory>>(std::forward<Factory>(factory));
+  requires std::invocable<Factory&, std::size_t> &&
+           std::convertible_to<std::invoke_result_t<Factory&, std::size_t>, View>
+VirtualItemSource MakeVirtualItemSource(std::size_t item_count, Factory&& factory) {
+  auto shared_factory = std::make_shared<std::decay_t<Factory>>(std::forward<Factory>(factory));
   return {
       item_count,
       [shared_factory = std::move(shared_factory)](std::size_t index) -> View {
@@ -342,25 +321,19 @@ VirtualItemSource MakeVirtualItemSource(std::size_t item_count,
 
 namespace detail {
 
-std::shared_ptr<ViewSpec>
-MakeVirtualLayoutSpec(const VirtualLayoutDescriptor &layout,
-                      VirtualItemSource source);
+std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, VirtualItemSource source);
 
 template <class Derived> class TypedView : public View {
 public:
-  template <class Function> Derived OnClick(Function &&function) && {
-    this->template ApplyEvent<ViewEvents::Click>(
-        std::forward<Function>(function));
+  template <class Function> Derived OnClick(Function&& function) && {
+    this->template ApplyEvent<ViewEvents::Click>(std::forward<Function>(function));
     return TakeDerived();
   }
 
   template <class Key, class Function>
-    requires detail::EventKey<Key> &&
-             std::constructible_from<std::function<typename Key::Signature>,
-                                     Function>
-  Derived On(Function &&function) && {
-    this->template ApplyEvent<Key>(
-        std::forward<Function>(function));
+    requires detail::EventKey<Key> && std::constructible_from<std::function<typename Key::Signature>, Function>
+  Derived On(Function&& function) && {
+    this->template ApplyEvent<Key>(std::forward<Function>(function));
     return TakeDerived();
   }
 
@@ -369,10 +342,8 @@ public:
     return TakeDerived();
   }
 
-  template <ViewModifier... Modifiers>
-  Derived With(Modifiers &&...modifiers) && {
-    this->ApplyModifiers(
-        std::forward<Modifiers>(modifiers)...);
+  template <ViewModifier... Modifiers> Derived With(Modifiers&&... modifiers) && {
+    this->ApplyModifiers(std::forward<Modifiers>(modifiers)...);
     return TakeDerived();
   }
 
@@ -395,7 +366,7 @@ public:
     return std::move(*this).Key(std::string(value));
   }
 
-  Derived Key(const char *value) && {
+  Derived Key(const char* value) && {
     if (value == nullptr) {
       throw std::invalid_argument("HuxerUI key string must not be null");
     }
@@ -423,7 +394,9 @@ protected:
   explicit TypedView(std::shared_ptr<ViewSpec> spec) : View(std::move(spec)) {}
 
 private:
-  Derived TakeDerived() { return std::move(static_cast<Derived &>(*this)); }
+  Derived TakeDerived() {
+    return std::move(static_cast<Derived&>(*this));
+  }
 };
 
 } // namespace detail
@@ -431,115 +404,91 @@ private:
 template <class Derived> class Layout : public detail::TypedView<Derived> {
 public:
   explicit Layout(std::vector<View> children)
-      : detail::TypedView<Derived>(detail::MakeLayoutSpec(
-            detail::LayoutDescriptorFor<Derived>(), std::move(children))) {}
+      : detail::TypedView<Derived>(detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Derived>(), std::move(children))
+        ) {}
 
   template <class... Children>
     requires(detail::ViewChild<Children> && ...)
-  explicit Layout(Children &&...children)
-      : Layout(detail::CollectChildren(std::forward<Children>(children)...)) {}
+  explicit Layout(Children&&... children) : Layout(detail::CollectChildren(std::forward<Children>(children)...)) {}
 };
 
-template <class Derived>
-class VirtualLayout : public detail::TypedView<Derived> {
+template <class Derived> class VirtualLayout : public detail::TypedView<Derived> {
 public:
   Derived ScrollState(huxerui::ScrollState state) && {
     this->SetLayoutValue(typeid(detail::ScrollStateBinding), std::move(state));
-    return std::move(static_cast<Derived &>(*this));
+    return std::move(static_cast<Derived&>(*this));
   }
 
   template <std::ranges::input_range Range, class Factory>
-    requires std::constructible_from<std::ranges::range_value_t<Range>,
-                                     std::ranges::range_reference_t<Range>> &&
-             std::invocable<Factory &, std::ranges::range_reference_t<Range>> &&
-             std::convertible_to<
-                 std::invoke_result_t<Factory &,
-                                      std::ranges::range_reference_t<Range>>,
-                 View>
-  explicit VirtualLayout(Range &&range, Factory &&factory)
-      : VirtualLayout(detail::MakeVirtualItemSource(
-            std::forward<Range>(range), std::forward<Factory>(factory))) {}
+    requires std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
+  explicit VirtualLayout(Range&& range, Factory&& factory)
+      : VirtualLayout(detail::MakeVirtualItemSource(std::forward<Range>(range), std::forward<Factory>(factory))) {}
 
   template <class Range, class Factory>
-    requires std::ranges::input_range<const Range &> &&
-             std::invocable<Factory &,
-                            std::ranges::range_reference_t<const Range &>> &&
-             std::convertible_to<
-                 std::invoke_result_t<
-                     Factory &, std::ranges::range_reference_t<const Range &>>,
-                 View>
-  explicit VirtualLayout(const State<Range> &range, Factory &&factory)
+    requires std::ranges::input_range<const Range&> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<const Range&>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<const Range&>>, View>
+  explicit VirtualLayout(const State<Range>& range, Factory&& factory)
       : VirtualLayout(range.Get(), std::forward<Factory>(factory)) {}
 
   template <class Factory>
-    requires std::invocable<Factory &, std::size_t> &&
-             std::convertible_to<std::invoke_result_t<Factory &, std::size_t>,
-                                 View>
-  VirtualLayout(std::size_t item_count, Factory &&factory)
-      : VirtualLayout(detail::MakeVirtualItemSource(
-            item_count, std::forward<Factory>(factory))) {}
+    requires std::invocable<Factory&, std::size_t> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::size_t>, View>
+  VirtualLayout(std::size_t item_count, Factory&& factory)
+      : VirtualLayout(detail::MakeVirtualItemSource(item_count, std::forward<Factory>(factory))) {}
 
 protected:
   explicit VirtualLayout(detail::VirtualItemSource source)
-      : detail::TypedView<Derived>(detail::MakeVirtualLayoutSpec(
-            detail::VirtualLayoutDescriptorFor<Derived>(), std::move(source))) {
-  }
+      : detail::TypedView<Derived>(
+            detail::MakeVirtualLayoutSpec(detail::VirtualLayoutDescriptorFor<Derived>(), std::move(source))
+        ) {}
 };
 
 class Text final : public View {
 public:
-  explicit Text(
-      std::string value, TextRole role = TextRole::Body);
-  explicit Text(
-      std::string_view value, TextRole role = TextRole::Body);
-  explicit Text(
-      const char *value, TextRole role = TextRole::Body);
+  explicit Text(std::string value, TextRole role = TextRole::Body);
+  explicit Text(std::string_view value, TextRole role = TextRole::Body);
+  explicit Text(const char* value, TextRole role = TextRole::Body);
 
-  template <class... Arguments>
-  static Text Format(std::string_view format, const Arguments &...arguments) {
+  template <class... Arguments> static Text Format(std::string_view format, const Arguments&... arguments) {
     return Text(detail::InterpolateText(format, arguments...));
   }
 
   template <class... Arguments>
-  static Text Format(
-      TextRole role, std::string_view format,
-      const Arguments &...arguments) {
-    return Text(
-        detail::InterpolateText(format, arguments...), role);
+  static Text Format(TextRole role, std::string_view format, const Arguments&... arguments) {
+    return Text(detail::InterpolateText(format, arguments...), role);
   }
 
   template <class T>
-  explicit Text(
-      const State<T> &value, TextRole role = TextRole::Body)
-      : Text(detail::FormatText(value), role) {}
+  explicit Text(const State<T>& value, TextRole role = TextRole::Body) : Text(detail::FormatText(value), role) {}
 };
 
 class Button final : public View {
 public:
   explicit Button(std::string label);
   explicit Button(std::string_view label);
-  explicit Button(const char *label);
+  explicit Button(const char* label);
 };
 
 class Checkbox final : public detail::TypedView<Checkbox> {
 public:
   explicit Checkbox(bool checked);
-  explicit Checkbox(const State<bool> &checked) : Checkbox(checked.Get()) {}
+  explicit Checkbox(const State<bool>& checked) : Checkbox(checked.Get()) {}
 
-  template <class Function> Checkbox OnChanged(Function &&function) && {
-    return std::move(*this).On<ToggleEvents::Changed>(
-        std::forward<Function>(function));
+  template <class Function> Checkbox OnChanged(Function&& function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(std::forward<Function>(function));
   }
 };
 
 class Switch final : public detail::TypedView<Switch> {
 public:
   explicit Switch(bool checked);
-  explicit Switch(const State<bool> &checked) : Switch(checked.Get()) {}
+  explicit Switch(const State<bool>& checked) : Switch(checked.Get()) {}
 
-  template <class Function> Switch OnChanged(Function &&function) && {
-    return std::move(*this).On<ToggleEvents::Changed>(
-        std::forward<Function>(function));
+  template <class Function> Switch OnChanged(Function&& function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(std::forward<Function>(function));
   }
 };
 
@@ -547,8 +496,7 @@ class ProgressCircle final : public detail::TypedView<ProgressCircle> {
 public:
   ProgressCircle();
   explicit ProgressCircle(float progress);
-  explicit ProgressCircle(const State<float> &progress)
-      : ProgressCircle(progress.Get()) {}
+  explicit ProgressCircle(const State<float>& progress) : ProgressCircle(progress.Get()) {}
 };
 
 class Scope final : public View {
@@ -556,10 +504,8 @@ public:
   explicit Scope(std::function<View()> factory);
 
   template <class Function>
-    requires std::invocable<Function &> &&
-             std::convertible_to<std::invoke_result_t<Function &>, View>
-  explicit Scope(Function &&factory)
-      : Scope(std::function<View()>(std::forward<Function>(factory))) {}
+    requires std::invocable<Function&> && std::convertible_to<std::invoke_result_t<Function&>, View>
+  explicit Scope(Function&& factory) : Scope(std::function<View()>(std::forward<Function>(factory))) {}
 };
 
 class Spacer final : public View {
@@ -571,24 +517,21 @@ class Column final : public Layout<Column> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext &context, MountedNode &node,
-                              Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };
 
 class Row final : public Layout<Row> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext &context, MountedNode &node,
-                              Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };
 
 class Stack final : public Layout<Stack> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext &context, MountedNode &node,
-                              Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };
 
 class ScrollView final : public detail::TypedView<ScrollView> {
@@ -607,13 +550,9 @@ public:
   VirtualList EstimatedItemExtent(float extent) &&;
   VirtualList CacheExtent(float extent) &&;
 
-  static VirtualLayoutResult Measure(VirtualLayoutContext &context,
-                                     MountedNode &node,
-                                     Constraints constraints);
-  static std::optional<float> ScrollOffsetForItem(MountedNode &node,
-                                                  std::size_t index,
-                                                  ScrollAlignment alignment,
-                                                  float viewport_extent);
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints);
+  static std::optional<float>
+  ScrollOffsetForItem(MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
 };
 
 class VirtualGrid final : public VirtualLayout<VirtualGrid> {
@@ -628,13 +567,9 @@ public:
   VirtualGrid CacheExtent(float extent) &&;
   VirtualGrid ItemSpans(std::vector<std::size_t> spans) &&;
 
-  static VirtualLayoutResult Measure(VirtualLayoutContext &context,
-                                     MountedNode &node,
-                                     Constraints constraints);
-  static std::optional<float> ScrollOffsetForItem(MountedNode &node,
-                                                  std::size_t index,
-                                                  ScrollAlignment alignment,
-                                                  float viewport_extent);
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints);
+  static std::optional<float>
+  ScrollOffsetForItem(MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
 };
 
 } // namespace huxerui

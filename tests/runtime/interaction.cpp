@@ -6,9 +6,12 @@ std::vector<PointerEvent> received_pointer_events;
 State<bool> show_pointer_target;
 int pointer_clicks = 0;
 ScrollState drag_scroll;
+ScrollState configured_drag_scroll;
+ScrollPhysics configured_scroll_physics;
 ScrollState horizontal_drag_scroll;
 ScrollState nested_outer_scroll;
 ScrollState nested_inner_scroll;
+State<bool> include_apply_only_modifier;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 
@@ -24,10 +27,10 @@ View PointerInputApp() {
   return Stack{
       Button("Target")
           .With(huxerui::Frame{100.0F, 40.0F})
-          .On<ViewEvents::PointerDown>([](const PointerEvent &event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerMove>([](const PointerEvent &event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerUp>([](const PointerEvent &event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerCancel>([](const PointerEvent &event) { received_pointer_events.push_back(event); })
+          .On<ViewEvents::PointerDown>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
+          .On<ViewEvents::PointerMove>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
+          .On<ViewEvents::PointerUp>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
+          .On<ViewEvents::PointerCancel>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .OnClick([] { ++pointer_clicks; }),
   };
 }
@@ -35,17 +38,33 @@ View PointerInputApp() {
 View DragScrollApp() {
   auto scroll = UseScrollState();
   drag_scroll = scroll;
-  return VirtualList(std::size_t{100},
-                     [](std::size_t index) {
-                       return Button(std::to_string(index))
-                           .With(huxerui::Frame{100.0F, 40.0F})
-                           .On<ViewEvents::PointerCancel>([](const PointerEvent &) { ++drag_item_cancels; })
-                           .OnClick([] { ++drag_item_clicks; })
-                           .Key(index);
-                     })
+  return VirtualList(
+             std::size_t{100},
+             [](std::size_t index) {
+               return Button(std::to_string(index))
+                   .With(huxerui::Frame{100.0F, 40.0F})
+                   .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++drag_item_cancels; })
+                   .OnClick([] { ++drag_item_clicks; })
+                   .Key(index);
+             }
+  )
       .ItemExtent(40.0F)
       .ScrollState(scroll)
       .With(huxerui::ScrollBar{});
+}
+
+View ConfiguredDragScrollApp() {
+  auto scroll = UseScrollState();
+  configured_drag_scroll = scroll;
+  return VirtualList(
+             std::size_t{100},
+             [](std::size_t index) {
+               return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 40.0F}).Key(index);
+             }
+  )
+      .ItemExtent(40.0F)
+      .ScrollState(scroll)
+      .With(configured_scroll_physics);
 }
 
 View ThemedScrollBarApp() {
@@ -71,10 +90,12 @@ View FlatDarkScrollBarApp() {
 View HorizontalDragScrollApp() {
   auto scroll = UseScrollState();
   horizontal_drag_scroll = scroll;
-  return VirtualList(std::size_t{100},
-                     [](std::size_t index) {
-                       return Text(std::to_string(index)).With(huxerui::Frame{40.0F, 40.0F}).Key(index);
-                     })
+  return VirtualList(
+             std::size_t{100},
+             [](std::size_t index) {
+               return Text(std::to_string(index)).With(huxerui::Frame{40.0F, 40.0F}).Key(index);
+             }
+  )
       .ScrollAxis(Axis::Horizontal)
       .ItemExtent(40.0F)
       .ScrollState(scroll)
@@ -115,6 +136,21 @@ View NestedDragScrollApp() {
 View ShortScrollBarApp() {
   return ScrollView{
       Text("Short").With(huxerui::Frame{100.0F, 40.0F}),
+  }
+      .With(huxerui::ScrollBar{});
+}
+
+View ModifierReconciliationApp() {
+  auto include_apply_only = UseState(false);
+  include_apply_only_modifier = include_apply_only;
+  if (include_apply_only.Get()) {
+    return ScrollView{
+        Text("Tall").With(huxerui::Frame{100.0F, 200.0F}),
+    }
+        .With(huxerui::Padding{4.0F}, huxerui::ScrollPhysics{}, huxerui::ScrollBar{});
+  }
+  return ScrollView{
+      Text("Tall").With(huxerui::Frame{100.0F, 200.0F}),
   }
       .With(huxerui::ScrollBar{});
 }
@@ -298,7 +334,201 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
   REQUIRE(drag_item_clicks == 2);
 
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_offset_y == 20.0F);
+  REQUIRE(runtime.RootNode()->scroll->offset_y == 20.0F);
+}
+
+TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      60,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      60,
+      {50.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      60,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      60,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+
+  const float released_offset = drag_scroll.Offset();
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.016);
+  runtime.BuildFrame();
+  REQUIRE(drag_scroll.Offset() > released_offset);
+
+  const float moving_offset = drag_scroll.Offset();
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      61,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(drag_scroll.Offset() == moving_offset);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Cancel,
+      61,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Touch,
+  });
+}
+
+TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
+  TestPlatform platform;
+  Runtime touch{DragScrollApp, platform};
+  touch.SetViewport({100.0F, 100.0F});
+  touch.BuildFrame();
+  REQUIRE(drag_scroll.ScrollTo(drag_scroll.MaxOffset() - 5.0F));
+  touch.BuildFrame();
+
+  touch.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      62,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.016);
+  touch.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      62,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+  touch.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      62,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+  touch.BuildFrame();
+  platform.AdvanceTime(0.05);
+  touch.BuildFrame();
+  REQUIRE(drag_scroll.Offset() == drag_scroll.MaxOffset());
+
+  TestPlatform mouse_platform;
+  Runtime mouse{DragScrollApp, mouse_platform};
+  mouse.SetViewport({100.0F, 100.0F});
+  mouse.BuildFrame();
+  mouse.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      63,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Mouse,
+  });
+  mouse_platform.AdvanceTime(0.016);
+  mouse.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      63,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Mouse,
+  });
+  mouse.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      63,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Mouse,
+  });
+  const float mouse_offset = drag_scroll.Offset();
+  mouse.BuildFrame();
+  mouse_platform.AdvanceTime(0.05);
+  mouse.BuildFrame();
+  REQUIRE(drag_scroll.Offset() == mouse_offset);
+
+  TestPlatform horizontal_platform;
+  Runtime horizontal{HorizontalDragScrollApp, horizontal_platform};
+  horizontal.SetViewport({100.0F, 40.0F});
+  horizontal.BuildFrame();
+  horizontal.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      64,
+      {30.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  horizontal_platform.AdvanceTime(0.016);
+  horizontal.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      64,
+      {10.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  horizontal.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      64,
+      {10.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  const float horizontal_offset = horizontal_drag_scroll.Offset();
+  horizontal.BuildFrame();
+  horizontal_platform.AdvanceTime(0.016);
+  horizontal.BuildFrame();
+  REQUIRE(horizontal_drag_scroll.Offset() > horizontal_offset);
+}
+
+TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
+  configured_scroll_physics = ScrollPhysics{
+      .fling_enabled = false,
+  };
+  TestPlatform platform;
+  Runtime runtime{ConfiguredDragScrollApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      65,
+      {50.0F, 30.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      65,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      65,
+      {50.0F, 10.0F},
+      PointerDeviceKind::Touch,
+  });
+  const float released_offset = configured_drag_scroll.Offset();
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(configured_drag_scroll.Offset() == released_offset);
+
+  bool rejected = false;
+  try {
+    static_cast<void>(VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
+                          .With(ScrollPhysics{
+                              .minimum_fling_velocity = 100.0F,
+                              .maximum_fling_velocity = 50.0F,
+                          }));
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  REQUIRE(rejected);
 }
 
 TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
@@ -332,7 +562,7 @@ TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
   });
 
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_offset_x == 30.0F);
+  REQUIRE(runtime.RootNode()->scroll->offset_x == 30.0F);
 }
 
 TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
@@ -365,7 +595,102 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   REQUIRE(nested_inner_scroll.Offset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 20.0F);
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_offset_y == 20.0F);
+  REQUIRE(runtime.RootNode()->scroll->offset_y == 20.0F);
+}
+
+TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
+  TestPlatform platform;
+  Runtime runtime{NestedDragScrollApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+
+  REQUIRE(nested_inner_scroll.ScrollTo(130.0F));
+  runtime.BuildFrame();
+  runtime.HandleScrollEvent(ScrollEvent{
+      {50.0F, 50.0F},
+      0.0F,
+      30.0F,
+  });
+  REQUIRE(nested_inner_scroll.Offset() == 140.0F);
+  REQUIRE(nested_outer_scroll.Offset() == 20.0F);
+
+  REQUIRE(nested_inner_scroll.ScrollTo(10.0F));
+  REQUIRE(nested_outer_scroll.ScrollTo(20.0F));
+  runtime.BuildFrame();
+  runtime.HandleScrollEvent(ScrollEvent{
+      {50.0F, 50.0F},
+      0.0F,
+      -40.0F,
+  });
+  REQUIRE(nested_inner_scroll.Offset() == 0.0F);
+  REQUIRE(nested_outer_scroll.Offset() == 0.0F);
+}
+
+TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
+  TestPlatform platform;
+  Runtime runtime{NestedDragScrollApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+
+  REQUIRE(nested_inner_scroll.ScrollTo(120.0F));
+  runtime.BuildFrame();
+  REQUIRE(nested_inner_scroll.MaxOffset() == 140.0F);
+  REQUIRE(nested_outer_scroll.Offset() == 0.0F);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      66,
+      {50.0F, 70.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      66,
+      {50.0F, 60.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      66,
+      {50.0F, 60.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(nested_inner_scroll.Offset() == 130.0F);
+
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.016);
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.016);
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.016);
+  runtime.BuildFrame();
+
+  REQUIRE(nested_inner_scroll.Offset() == nested_inner_scroll.MaxOffset());
+  REQUIRE(nested_outer_scroll.Offset() > 0.0F);
+}
+
+TEST_CASE("TestApplyOnlyModifiersDoNotReplaceNodeExtensions") {
+  TestPlatform platform;
+  Runtime runtime{ModifierReconciliationApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->extensions.size() == 1);
+  REQUIRE(root->extensions.front().extension != nullptr);
+  const NodeExtension* extension = root->extensions.front().extension.get();
+
+  include_apply_only_modifier = true;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->style.padding.top == 4.0F);
+  REQUIRE(root->layout_values.contains(typeid(ScrollPhysics)));
+  REQUIRE(root->extensions.size() == 1);
+  REQUIRE(root->extensions.front().extension.get() == extension);
 }
 
 TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
@@ -375,7 +700,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   TestPlatform platform;
   Runtime vertical{DragScrollApp, platform};
   vertical.SetViewport({100.0F, 100.0F});
-  const DisplayList &vertical_display = vertical.BuildFrame();
+  const DisplayList& vertical_display = vertical.BuildFrame();
 
   const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
   REQUIRE(vertical_bar.has_value());
@@ -427,7 +752,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 
   Runtime horizontal{HorizontalDragScrollApp, platform};
   horizontal.SetViewport({100.0F, 40.0F});
-  const DisplayList &horizontal_display = horizontal.BuildFrame();
+  const DisplayList& horizontal_display = horizontal.BuildFrame();
   const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
   REQUIRE(horizontal_bar.has_value());
   REQUIRE(horizontal_bar->axis == Axis::Horizontal);
@@ -468,7 +793,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
                                   .thickness = 0.0F,
                               },
                           }));
-  } catch (const std::invalid_argument &) {
+  } catch (const std::invalid_argument&) {
     invalid_style_rejected = true;
   }
   REQUIRE(invalid_style_rejected);
@@ -476,7 +801,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   Runtime themed{ThemedScrollBarApp, platform};
   themed.SetViewport({100.0F, 100.0F});
   themed.BuildFrame();
-  const auto *themed_root = themed.RootNode();
+  const auto* themed_root = themed.RootNode();
   REQUIRE(themed_root != nullptr);
   REQUIRE(themed_root->children.size() == 1);
   const auto themed_bar = huxerui::detail::ResolveScrollBarGeometry(*themed_root->children.front());
@@ -488,7 +813,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   Runtime dark{FlatDarkScrollBarApp, platform};
   dark.SetViewport({100.0F, 100.0F});
   dark.BuildFrame();
-  const auto *dark_root = dark.RootNode();
+  const auto* dark_root = dark.RootNode();
   REQUIRE(dark_root != nullptr);
   REQUIRE(dark_root->children.size() == 1);
   const auto dark_bar = huxerui::detail::ResolveScrollBarGeometry(*dark_root->children.front());
@@ -501,11 +826,12 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 
 TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   huxerui::detail::AnimatedValue<float> animated{0.0F};
-  animated.AnimateTo(1.0F, 1.0, 0.2);
+  animated.Update(1.0F, TweenSpec{0.2, Easing::EaseOut});
+  REQUIRE(animated.Advance(1.0, 0.0));
   REQUIRE(animated.IsRunning());
-  REQUIRE(animated.Advance(1.1));
+  REQUIRE(animated.Advance(1.1, 0.1));
   REQUIRE(std::abs(animated.Value() - 0.875F) < 0.001F);
-  REQUIRE(!animated.Advance(1.21));
+  REQUIRE(!animated.Advance(1.21, 0.11));
   REQUIRE(animated.Value() == 1.0F);
 
   drag_item_clicks = 0;
@@ -514,7 +840,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   TestPlatform platform;
   Runtime runtime{DragScrollApp, platform};
   runtime.SetViewport({100.0F, 100.0F});
-  const DisplayList &initial = runtime.BuildFrame();
+  const DisplayList& initial = runtime.BuildFrame();
   const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
   REQUIRE(geometry.has_value());
   REQUIRE(ContainsRect(initial, geometry->thumb));
@@ -526,14 +852,14 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   REQUIRE(platform.requested_delays.back() == 0.0);
 
   platform.AdvanceTime(0.11);
-  const DisplayList &fading = runtime.BuildFrame();
+  const DisplayList& fading = runtime.BuildFrame();
   const auto fading_alpha = RectAlpha(fading, geometry->thumb);
   REQUIRE(fading_alpha.has_value());
   REQUIRE(*fading_alpha > 0.0F);
   REQUIRE(*fading_alpha < geometry->style.thumb_color.alpha);
 
   platform.AdvanceTime(0.11);
-  const DisplayList &hidden = runtime.BuildFrame();
+  const DisplayList& hidden = runtime.BuildFrame();
   REQUIRE(!ContainsRect(hidden, geometry->thumb));
 
   ClickAt(runtime, {94.0F, 80.0F}, 60);
@@ -546,7 +872,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(0.12);
-  const DisplayList &shown = runtime.BuildFrame();
+  const DisplayList& shown = runtime.BuildFrame();
   const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
   REQUIRE(shown_geometry.has_value());
   REQUIRE(ContainsRect(shown, shown_geometry->thumb));
@@ -558,7 +884,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(2.0);
-  const DisplayList &held = runtime.BuildFrame();
+  const DisplayList& held = runtime.BuildFrame();
   REQUIRE(ContainsRect(held, shown_geometry->thumb));
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -570,7 +896,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   platform.AdvanceTime(0.7);
   runtime.BuildFrame();
   platform.AdvanceTime(0.22);
-  const DisplayList &hidden_after_exit = runtime.BuildFrame();
+  const DisplayList& hidden_after_exit = runtime.BuildFrame();
   REQUIRE(!ContainsRect(hidden_after_exit, shown_geometry->thumb));
 }
 

@@ -30,4 +30,4 @@ struct Color {
   }
 };
 
-}  // namespace huxerui
+} // namespace huxerui

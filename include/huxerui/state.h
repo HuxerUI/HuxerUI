@@ -26,11 +26,9 @@ public:
   std::unordered_map<std::uint64_t, std::weak_ptr<RecomposeScope>> subscribers;
 };
 
-template<class T>
-class StateCell final : public StateCellBase {
+template <class T> class StateCell final : public StateCellBase {
 public:
-  template<class U>
-  explicit StateCell(U&& initial) : value(std::forward<U>(initial)) {}
+  template <class U> explicit StateCell(U&& initial) : value(std::forward<U>(initial)) {}
 
   [[nodiscard]] std::type_index Type() const noexcept override {
     return typeid(T);
@@ -42,15 +40,12 @@ public:
 void ObserveState(const std::shared_ptr<StateCellBase>& cell);
 void NotifyState(const std::shared_ptr<StateCellBase>& cell);
 
-std::shared_ptr<StateCellBase> UseStateCell(
-    std::type_index type,
-    const std::source_location& location,
-    std::shared_ptr<StateCellBase> initial);
+std::shared_ptr<StateCellBase>
+UseStateCell(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
 
-}  // namespace detail
+} // namespace detail
 
-template<class T>
-class State {
+template <class T> class State {
 public:
   using ValueType = T;
 
@@ -74,8 +69,7 @@ public:
     return *this;
   }
 
-  template<class Function>
-  void Update(Function&& function) const {
+  template <class Function> void Update(Function&& function) const {
     EnsureValid();
     T next = cell_->value;
     std::forward<Function>(function)(next);
@@ -94,24 +88,18 @@ public:
     return &Get();
   }
 
-  template<class U>
+  template <class U>
   const State& operator+=(U&& value) const
-    requires requires(const T& current, U&& delta) {
-      T(current + std::forward<U>(delta));
-    }
+    requires requires(const T& current, U&& delta) { T(current + std::forward<U>(delta)); }
   {
     Write(T(Get() + std::forward<U>(value)));
     return *this;
   }
 
   const State& operator++() const
-    requires requires(T value) {
-      ++value;
-    }
+    requires requires(T value) { ++value; }
   {
-    Update([](T& value) {
-      ++value;
-    });
+    Update([](T& value) { ++value; });
     return *this;
   }
 
@@ -137,10 +125,8 @@ private:
   std::shared_ptr<detail::StateCell<T>> cell_;
 };
 
-template<class T>
-State<std::decay_t<T>> UseState(
-    T&& initial,
-    const std::source_location& location = std::source_location::current()) {
+template <class T>
+State<std::decay_t<T>> UseState(T&& initial, const std::source_location& location = std::source_location::current()) {
   using Value = std::decay_t<T>;
   auto candidate = std::make_shared<detail::StateCell<Value>>(std::forward<T>(initial));
   auto cell = detail::UseStateCell(typeid(Value), location, std::move(candidate));
@@ -151,4 +137,4 @@ State<std::decay_t<T>> UseState(
   return State<Value>{std::move(typed_cell)};
 }
 
-}  // namespace huxerui
+} // namespace huxerui

@@ -60,9 +60,13 @@ public:
 
     ChildIterator() = default;
 
-    reference operator*() const { return owner_->ChildAt(index_); }
+    reference operator*() const {
+      return owner_->ChildAt(index_);
+    }
 
-    pointer operator->() const { return &owner_->ChildAt(index_); }
+    pointer operator->() const {
+      return &owner_->ChildAt(index_);
+    }
 
     ChildIterator& operator++() {
       ++index_;
@@ -88,13 +92,21 @@ public:
 
   class ChildrenRange {
   public:
-    ChildIterator begin() const { return ChildIterator{*owner_, 0}; }
+    ChildIterator begin() const {
+      return ChildIterator{*owner_, 0};
+    }
 
-    ChildIterator end() const { return ChildIterator{*owner_, owner_->ChildCount()}; }
+    ChildIterator end() const {
+      return ChildIterator{*owner_, owner_->ChildCount()};
+    }
 
-    [[nodiscard]] std::size_t Size() const noexcept { return owner_->ChildCount(); }
+    [[nodiscard]] std::size_t Size() const noexcept {
+      return owner_->ChildCount();
+    }
 
-    [[nodiscard]] bool Empty() const noexcept { return Size() == 0; }
+    [[nodiscard]] bool Empty() const noexcept {
+      return Size() == 0;
+    }
 
   private:
     explicit ChildrenRange(MountedNode& owner) : owner_(&owner) {}
@@ -106,9 +118,13 @@ public:
 
   virtual ~MountedNode() = default;
 
-  [[nodiscard]] ChildrenRange Children() noexcept { return ChildrenRange{*this}; }
+  [[nodiscard]] ChildrenRange Children() noexcept {
+    return ChildrenRange{*this};
+  }
 
-  [[nodiscard]] std::size_t ChildCount() const noexcept { return ChildCountImpl(); }
+  [[nodiscard]] std::size_t ChildCount() const noexcept {
+    return ChildCountImpl();
+  }
 
   [[nodiscard]] MountedNode& ChildAt(std::size_t index) {
     if (index >= ChildCount()) {
@@ -124,9 +140,13 @@ public:
     return ChildAtImpl(index);
   }
 
-  [[nodiscard]] Size MeasuredSize() const noexcept { return MeasuredSizeImpl(); }
+  [[nodiscard]] Size MeasuredSize() const noexcept {
+    return MeasuredSizeImpl();
+  }
 
-  [[nodiscard]] Rect Frame() const noexcept { return FrameImpl(); }
+  [[nodiscard]] Rect Frame() const noexcept {
+    return FrameImpl();
+  }
 
   [[nodiscard]] Rect PresentationFrame() const noexcept {
     return PresentationFrameImpl();
@@ -144,13 +164,21 @@ public:
     return IsFocusedImpl();
   }
 
-  [[nodiscard]] float Spacing() const noexcept { return SpacingImpl(); }
+  [[nodiscard]] float Spacing() const noexcept {
+    return SpacingImpl();
+  }
 
-  [[nodiscard]] float GrowFactor() const noexcept { return GrowFactorImpl(); }
+  [[nodiscard]] float GrowFactor() const noexcept {
+    return GrowFactorImpl();
+  }
 
-  [[nodiscard]] MainAxisAlignment MainAlignment() const noexcept { return MainAlignmentImpl(); }
+  [[nodiscard]] MainAxisAlignment MainAlignment() const noexcept {
+    return MainAlignmentImpl();
+  }
 
-  [[nodiscard]] CrossAxisAlignment CrossAlignment() const noexcept { return CrossAlignmentImpl(); }
+  [[nodiscard]] CrossAxisAlignment CrossAlignment() const noexcept {
+    return CrossAlignmentImpl();
+  }
 
   [[nodiscard]] HorizontalAlignment HorizontalAlignmentValue() const noexcept {
     return HorizontalAlignmentImpl();
@@ -165,8 +193,7 @@ public:
     return value == nullptr ? nullptr : std::any_cast<typename Key::Value>(value);
   }
 
-  template <class Key>
-  [[nodiscard]] typename Key::Value LayoutValueOr(typename Key::Value fallback) const {
+  template <class Key> [[nodiscard]] typename Key::Value LayoutValueOr(typename Key::Value fallback) const {
     if (const auto* value = LayoutValue<Key>()) {
       return *value;
     }
@@ -241,9 +268,13 @@ public:
     return *this;
   }
 
-  [[nodiscard]] huxerui::Size MeasuredSize() const noexcept { return size_; }
+  [[nodiscard]] huxerui::Size MeasuredSize() const noexcept {
+    return size_;
+  }
 
-  [[nodiscard]] const std::vector<Placement>& Placements() const noexcept { return placements_; }
+  [[nodiscard]] const std::vector<Placement>& Placements() const noexcept {
+    return placements_;
+  }
 
 private:
   huxerui::Size size_;
@@ -267,6 +298,6 @@ template <class Derived> const LayoutDescriptor& LayoutDescriptorFor() {
   return descriptor;
 }
 
-}  // namespace detail
+} // namespace detail
 
-}  // namespace huxerui
+} // namespace huxerui

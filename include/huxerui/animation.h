@@ -26,8 +26,12 @@ struct SpringSpec {
   float damping_ratio = 0.82F;
 };
 
-using AnimationSpec =
-    std::variant<SnapSpec, TweenSpec, SpringSpec>;
+using AnimationSpec = std::variant<SnapSpec, TweenSpec, SpringSpec>;
+
+struct TransformOrigin {
+  float x = 0.5F;
+  float y = 0.5F;
+};
 
 template <class T> struct Animated {
   T target;
@@ -36,7 +40,7 @@ template <class T> struct Animated {
 
 template <class T, class Spec>
   requires std::constructible_from<AnimationSpec, Spec>
-Animated<T> AnimateTo(T target, Spec &&animation) {
+Animated<T> AnimateTo(T target, Spec&& animation) {
   return {
       std::move(target),
       AnimationSpec(std::forward<Spec>(animation)),
@@ -45,22 +49,43 @@ Animated<T> AnimateTo(T target, Spec &&animation) {
 
 struct Opacity {
   explicit Opacity(float value) : value(value) {}
-  explicit Opacity(Animated<float> value)
-      : value(std::move(value)) {}
+  explicit Opacity(Animated<float> value) : value(std::move(value)) {}
 
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   std::variant<float, Animated<float>> value;
 };
 
 struct Offset {
   explicit Offset(Point value) : value(value) {}
-  explicit Offset(Animated<Point> value)
-      : value(std::move(value)) {}
+  explicit Offset(Animated<Point> value) : value(std::move(value)) {}
 
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   std::variant<Point, Animated<Point>> value;
+};
+
+struct Scale {
+  explicit Scale(float value, TransformOrigin origin = {}) : value(value), origin(origin) {}
+
+  explicit Scale(Animated<float> value, TransformOrigin origin = {}) : value(std::move(value)), origin(origin) {}
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+  std::variant<float, Animated<float>> value;
+  TransformOrigin origin;
+};
+
+struct Rotation {
+  explicit Rotation(float degrees, TransformOrigin origin = {}) : degrees(degrees), origin(origin) {}
+
+  explicit Rotation(Animated<float> degrees, TransformOrigin origin = {})
+      : degrees(std::move(degrees)), origin(origin) {}
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+  std::variant<float, Animated<float>> degrees;
+  TransformOrigin origin;
 };
 
 } // namespace huxerui

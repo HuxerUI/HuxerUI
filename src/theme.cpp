@@ -9,7 +9,7 @@ namespace huxerui {
 
 namespace {
 
-ButtonStyle MaterialButtonStyle(const ThemeSpec &theme) {
+ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   return {
       theme.colors.primary,
       theme.colors.on_primary,
@@ -19,7 +19,7 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec &theme) {
   };
 }
 
-CheckboxStyle MaterialCheckboxStyle(const ThemeSpec &theme) {
+CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
   border.alpha *= 0.6F;
   return {
@@ -32,7 +32,7 @@ CheckboxStyle MaterialCheckboxStyle(const ThemeSpec &theme) {
   };
 }
 
-SwitchStyle MaterialSwitchStyle(const ThemeSpec &theme) {
+SwitchStyle MaterialSwitchStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.32F;
   return {
@@ -44,12 +44,11 @@ SwitchStyle MaterialSwitchStyle(const ThemeSpec &theme) {
       .thumb_radius = 12.0F,
       .track_padding = 4.0F,
       .corner_radius = 16.0F,
-      .animation_duration =
-          theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
   };
 }
 
-ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec &theme) {
+ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.12F;
   return {
@@ -58,14 +57,11 @@ ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec &theme) {
       .track_color = track,
       .indicator_color = theme.colors.primary,
       .indeterminate_arc_fraction = 0.25F,
-      .animation_duration =
-          theme.motion.reduced_motion
-              ? 0.0
-              : theme.motion.slow * 3.0,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow * 3.0,
   };
 }
 
-ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec &theme) {
+ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   Color thumb = theme.colors.on_surface;
   thumb.alpha *= 0.38F;
   return {
@@ -73,15 +69,9 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec &theme) {
       .minimum_thumb_extent = 24.0F,
       .margin = 4.0F,
       .corner_radius = 2.0F,
-      .fade_in_duration =
-          theme.motion.reduced_motion
-              ? 0.0F
-              : static_cast<float>(theme.motion.fast),
+      .fade_in_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.fast),
       .fade_out_delay = 0.8F,
-      .fade_out_duration =
-          theme.motion.reduced_motion
-              ? 0.0F
-              : static_cast<float>(theme.motion.normal),
+      .fade_out_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.normal),
       .track_color = Color::Transparent(),
       .thumb_color = thumb,
   };
@@ -89,26 +79,20 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec &theme) {
 
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
-  definition.Set<ButtonStyleKey>(
-      MaterialButtonStyle(theme));
-  definition.Set<CheckboxStyleKey>(
-      MaterialCheckboxStyle(theme));
-  definition.Set<SwitchStyleKey>(
-      MaterialSwitchStyle(theme));
-  definition.Set<ProgressCircleStyleKey>(
-      MaterialProgressCircleStyle(theme));
+  definition.Set<ButtonStyleKey>(MaterialButtonStyle(theme));
+  definition.Set<CheckboxStyleKey>(MaterialCheckboxStyle(theme));
+  definition.Set<SwitchStyleKey>(MaterialSwitchStyle(theme));
+  definition.Set<ProgressCircleStyleKey>(MaterialProgressCircleStyle(theme));
   definition.Set<ToastStyleKey>(ToastStyle{
       .background = theme.colors.inverse_surface,
       .foreground = theme.colors.inverse_on_surface,
-      .padding =
-          theme.spacing.small + theme.spacing.extra_small,
+      .padding = theme.spacing.small + theme.spacing.extra_small,
       .corner_radius = theme.shapes.small,
   });
   definition.Set<DialogStyleKey>(DialogStyle{
       .scrim = theme.colors.scrim,
   });
-  definition.Set<ScrollBarStyleKey>(
-      MaterialScrollBarStyle(theme));
+  definition.Set<ScrollBarStyleKey>(MaterialScrollBarStyle(theme));
   return definition;
 }
 
@@ -120,25 +104,19 @@ ThemeSpec ThemeKey::Default() {
 
 namespace detail {
 
-ThemeSpec ResolveThemeSpec(
-    std::shared_ptr<const EnvironmentFrame> environment) {
-  if (const std::any *value = FindEnvironmentValue(
-          std::move(environment), typeid(ThemeKey))) {
-    if (const auto *theme = std::any_cast<ThemeSpec>(value)) {
+ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment) {
+  if (const std::any* value = FindEnvironmentValue(std::move(environment), typeid(ThemeKey))) {
+    if (const auto* theme = std::any_cast<ThemeSpec>(value)) {
       return *theme;
     }
-    throw std::logic_error(
-        "HuxerUI theme environment value has an invalid type");
+    throw std::logic_error("HuxerUI theme environment value has an invalid type");
   }
   return ThemeKey::Default();
 }
 
-const std::any *FindThemeStyleValue(
-    std::shared_ptr<const EnvironmentFrame> environment,
-    std::type_index key) {
-  for (auto frame = std::move(environment);
-       frame != nullptr; frame = frame->parent) {
-    if (const std::any *value = frame->overrides.Find(key)) {
+const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key) {
+  for (auto frame = std::move(environment); frame != nullptr; frame = frame->parent) {
+    if (const std::any* value = frame->overrides.Find(key)) {
       return value;
     }
     if (frame->overrides.Find(typeid(ThemeKey))) {
@@ -148,8 +126,7 @@ const std::any *FindThemeStyleValue(
   return nullptr;
 }
 
-TextStyle DefaultTextStyle(
-    const ThemeSpec &theme, TextRole role) {
+TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role) {
   float font_size = theme.typography.body;
   if (role == TextRole::Label) {
     font_size = theme.typography.label;
@@ -162,19 +139,17 @@ TextStyle DefaultTextStyle(
   };
 }
 
-ButtonStyle DefaultButtonStyle(const ThemeSpec &theme) {
+ButtonStyle DefaultButtonStyle(const ThemeSpec& theme) {
   return {
       theme.colors.primary,
       theme.colors.on_primary,
       theme.typography.label,
-      EdgeInsets::Symmetric(
-          theme.spacing.medium,
-          theme.spacing.small),
+      EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
       theme.shapes.medium,
   };
 }
 
-CheckboxStyle DefaultCheckboxStyle(const ThemeSpec &theme) {
+CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
   border.alpha *= 0.55F;
   return {
@@ -187,7 +162,7 @@ CheckboxStyle DefaultCheckboxStyle(const ThemeSpec &theme) {
   };
 }
 
-SwitchStyle DefaultSwitchStyle(const ThemeSpec &theme) {
+SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.28F;
   return {
@@ -199,12 +174,11 @@ SwitchStyle DefaultSwitchStyle(const ThemeSpec &theme) {
       .thumb_radius = 8.0F,
       .track_padding = 4.0F,
       .corner_radius = 12.0F,
-      .animation_duration =
-          theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
   };
 }
 
-ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec &theme) {
+ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.16F;
   return {
@@ -213,10 +187,7 @@ ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec &theme) {
       .track_color = track,
       .indicator_color = theme.colors.primary,
       .indeterminate_arc_fraction = 0.28F,
-      .animation_duration =
-          theme.motion.reduced_motion
-              ? 0.0
-              : theme.motion.slow * 3.0,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow * 3.0,
   };
 }
 

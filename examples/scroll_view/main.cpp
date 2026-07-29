@@ -49,25 +49,76 @@ View ScrollRow(int index) {
   );
 }
 
-View App() {
-  auto scroll = UseScrollState();
-  std::vector<int> items(24);
-  std::iota(items.begin(), items.end(), 1);
+[[huxerui::scope]]
+View NestedScrollSection(ScrollState scroll) {
+  const ScrollMetrics metrics = scroll.Metrics();
+  std::vector<int> items(12);
+  std::iota(items.begin(), items.end(), 101);
 
   return Column {
-    ScrollToolbar(scroll),
+    Row {
+        Text("Nested ScrollView").With(
+            FontSize(20.0F),
+            Foreground(primary_text_color)
+        ),
+        Spacer(),
+        Text::Format(
+            "Inner offset {} / {}",
+            static_cast<int>(metrics.offset),
+            static_cast<int>(metrics.maximum_offset)
+        ).With(Foreground(secondary_text_color)),
+    }.With(CrossAlign(CrossAxisAlignment::Center)),
+    Text(
+        "Scroll inside this panel. When it reaches an edge, continued "
+        "scrolling moves the outer ScrollView."
+    ).With(FontSize(14.0F), Foreground(secondary_text_color)),
+    ScrollView {
+      Column {
+          ForEach(items, [](int index) { return ScrollRow(index).Key(index); }),
+      }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch)),
+    }
+        .ScrollState(scroll)
+        .With(
+            Frame(520.0F, 220.0F),
+            Padding(8.0F),
+            ScrollBar(),
+            Background(Color::White()),
+            CornerRadius(8.0F)
+        ),
+  }.With(
+      Padding(16.0F),
+      Spacing(8.0F),
+      Background(Color::Rgb(234, 242, 255)),
+      CornerRadius(12.0F),
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
+}
+
+View App() {
+  auto outer_scroll = UseScrollState();
+  auto inner_scroll = UseScrollState();
+  std::vector<int> leading_items(6);
+  std::vector<int> trailing_items(10);
+  std::iota(leading_items.begin(), leading_items.end(), 1);
+  std::iota(trailing_items.begin(), trailing_items.end(), 7);
+
+  return Column {
+    ScrollToolbar(outer_scroll),
     ScrollView {
       Column {
           Text("ScrollView").With(FontSize(30.0F), Foreground(primary_text_color)),
           Text(
               "Scroll with a trackpad or mouse wheel, observe its offset, or "
-              "move it programmatically. Item state persists after scrolling."
+              "move it programmatically. The nested panel demonstrates scroll "
+              "handoff at container boundaries."
           )
               .With(FontSize(14.0F), Foreground(secondary_text_color)),
-          ForEach(items, [](int index) { return ScrollRow(index).Key(index); }),
+          ForEach(leading_items, [](int index) { return ScrollRow(index).Key(index); }),
+          NestedScrollSection(inner_scroll),
+          ForEach(trailing_items, [](int index) { return ScrollRow(index).Key(index); }),
       }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch)),
     }
-        .ScrollState(scroll)
+        .ScrollState(outer_scroll)
         .With(ScrollBar(), Grow()),
   }.With(
       Padding(24.0F),

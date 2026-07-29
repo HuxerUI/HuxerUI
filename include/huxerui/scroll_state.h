@@ -20,7 +20,7 @@ struct ScrollMetrics {
   float viewport_extent = 0.0F;
   float content_extent = 0.0F;
 
-  bool operator==(const ScrollMetrics &) const = default;
+  bool operator==(const ScrollMetrics&) const = default;
 };
 
 namespace detail {
@@ -41,10 +41,9 @@ public:
 
   bool ScrollTo(float offset) const;
   bool ScrollBy(float delta) const;
-  bool ScrollToItem(std::size_t index,
-                    ScrollAlignment alignment = ScrollAlignment::Start) const;
+  bool ScrollToItem(std::size_t index, ScrollAlignment alignment = ScrollAlignment::Start) const;
 
-  bool operator==(const ScrollState &) const = default;
+  bool operator==(const ScrollState&) const = default;
 
 private:
   std::shared_ptr<detail::ScrollStateData> data_;
@@ -52,9 +51,8 @@ private:
   friend struct detail::ScrollStateAccess;
 };
 
-inline ScrollState UseScrollState(
-    float initial_offset = 0.0F,
-    const std::source_location &location = std::source_location::current()) {
+inline ScrollState
+UseScrollState(float initial_offset = 0.0F, const std::source_location& location = std::source_location::current()) {
   return UseState(ScrollState{initial_offset}, location).Get();
 }
 

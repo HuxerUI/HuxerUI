@@ -83,13 +83,13 @@ template <class... Arguments> struct Event {
 
 struct ViewEvents {
   struct Click : Event<> {};
-  struct PointerDown : Event<const PointerEvent &> {};
-  struct PointerMove : Event<const PointerEvent &> {};
-  struct PointerUp : Event<const PointerEvent &> {};
-  struct PointerCancel : Event<const PointerEvent &> {};
+  struct PointerDown : Event<const PointerEvent&> {};
+  struct PointerMove : Event<const PointerEvent&> {};
+  struct PointerUp : Event<const PointerEvent&> {};
+  struct PointerCancel : Event<const PointerEvent&> {};
   struct FocusChanged : Event<bool> {};
-  struct KeyDown : Event<const KeyEvent &> {};
-  struct KeyUp : Event<const KeyEvent &> {};
+  struct KeyDown : Event<const KeyEvent&> {};
+  struct KeyUp : Event<const KeyEvent&> {};
 };
 
 struct ToggleEvents {
@@ -99,9 +99,7 @@ struct ToggleEvents {
 namespace detail {
 
 template <class Key>
-concept EventKey = requires {
-  typename Key::Signature;
-};
+concept EventKey = requires { typename Key::Signature; };
 
 class EventHandlerBase {
 public:
@@ -110,11 +108,9 @@ public:
 
 template <class Signature> class EventHandler;
 
-template <class... Arguments>
-class EventHandler<void(Arguments...)> final : public EventHandlerBase {
+template <class... Arguments> class EventHandler<void(Arguments...)> final : public EventHandlerBase {
 public:
-  explicit EventHandler(std::function<void(Arguments...)> function)
-      : function_(std::move(function)) {}
+  explicit EventHandler(std::function<void(Arguments...)> function) : function_(std::move(function)) {}
 
   template <class... Values> void Invoke(Values&&... values) const {
     function_(std::forward<Values>(values)...);
@@ -126,20 +122,16 @@ private:
 
 using EventBindings = std::unordered_map<std::type_index, std::shared_ptr<EventHandlerBase>>;
 
-template <class Key>
-bool HasEventBinding(const EventBindings &bindings) {
+template <class Key> bool HasEventBinding(const EventBindings& bindings) {
   return bindings.contains(typeid(Key));
 }
 
-template <class Key, class... Arguments>
-bool EmitEvent(const EventBindings &bindings, Arguments&&... arguments) {
+template <class Key, class... Arguments> bool EmitEvent(const EventBindings& bindings, Arguments&&... arguments) {
   const auto found = bindings.find(typeid(Key));
   if (found == bindings.end()) {
     return false;
   }
-  const auto handler =
-      std::dynamic_pointer_cast<EventHandler<typename Key::Signature>>(
-          found->second);
+  const auto handler = std::dynamic_pointer_cast<EventHandler<typename Key::Signature>>(found->second);
   if (!handler) {
     return false;
   }
@@ -149,7 +141,9 @@ bool EmitEvent(const EventBindings &bindings, Arguments&&... arguments) {
 
 class EventHub {
 public:
-  void SetBindings(EventBindings bindings) { bindings_ = std::move(bindings); }
+  void SetBindings(EventBindings bindings) {
+    bindings_ = std::move(bindings);
+  }
 
   template <class Key, class... Arguments> void Emit(Arguments&&... arguments) const {
     EmitEvent<Key>(bindings_, std::forward<Arguments>(arguments)...);
@@ -161,22 +155,23 @@ private:
 
 std::shared_ptr<EventHub> UseEventHub();
 
-}  // namespace detail
+} // namespace detail
 
 class EventEmitter {
 public:
   EventEmitter() = default;
 
   template <class Key, class... Arguments>
-    requires detail::EventKey<Key> &&
-             std::invocable<std::function<typename Key::Signature>&, Arguments...>
+    requires detail::EventKey<Key> && std::invocable<std::function<typename Key::Signature>&, Arguments...>
   void Emit(Arguments&&... arguments) const {
     if (auto hub = hub_.lock()) {
       hub->template Emit<Key>(std::forward<Arguments>(arguments)...);
     }
   }
 
-  [[nodiscard]] bool IsConnected() const noexcept { return !hub_.expired(); }
+  [[nodiscard]] bool IsConnected() const noexcept {
+    return !hub_.expired();
+  }
 
 private:
   explicit EventEmitter(std::shared_ptr<detail::EventHub> hub) : hub_(std::move(hub)) {}
@@ -190,4 +185,4 @@ inline EventEmitter UseEvents() {
   return EventEmitter{detail::UseEventHub()};
 }
 
-}  // namespace huxerui
+} // namespace huxerui

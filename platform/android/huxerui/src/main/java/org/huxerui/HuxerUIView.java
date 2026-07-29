@@ -2,6 +2,7 @@ package org.huxerui;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -40,6 +41,8 @@ public final class HuxerUIView extends View {
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final RectF rect = new RectF();
     private final Path path = new Path();
+    private final Matrix transform = new Matrix();
+    private final float[] transformValues = new float[9];
     private final float density;
 
     private long nativeHandle;
@@ -338,6 +341,26 @@ public final class HuxerUIView extends View {
     }
 
     private void popClip(Canvas canvas) {
+        canvas.restore();
+    }
+
+    private void pushTransform(
+            Canvas canvas, float m11, float m12, float m21, float m22, float translateX, float translateY) {
+        canvas.save();
+        transformValues[Matrix.MSCALE_X] = m11;
+        transformValues[Matrix.MSKEW_X] = m21;
+        transformValues[Matrix.MTRANS_X] = translateX;
+        transformValues[Matrix.MSKEW_Y] = m12;
+        transformValues[Matrix.MSCALE_Y] = m22;
+        transformValues[Matrix.MTRANS_Y] = translateY;
+        transformValues[Matrix.MPERSP_0] = 0.0F;
+        transformValues[Matrix.MPERSP_1] = 0.0F;
+        transformValues[Matrix.MPERSP_2] = 1.0F;
+        transform.setValues(transformValues);
+        canvas.concat(transform);
+    }
+
+    private void popTransform(Canvas canvas) {
         canvas.restore();
     }
 

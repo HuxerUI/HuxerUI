@@ -1,25 +1,26 @@
 # HuxerUI Architecture Design
 
-Status: proposed
+Status: implemented foundation with deferred follow-up work
 
-This document describes the target architecture for the next stage of HuxerUI.
-It combines the modifier, animation, interaction, theme, presentation, and root
-extension designs into one model. The APIs in this document are not all
-implemented yet.
+This document describes the implemented modifier, animation, interaction,
+theme, presentation, and root extension foundation, followed by explicitly
+identified follow-up work. Code examples in implemented sections match the
+current public API.
 
 Current implementation status:
 
-- Generic View modifiers, mounted modifier reconciliation, frame callbacks,
+- Generic View modifiers, node extension reconciliation, frame callbacks,
   pointer observation, foreground painting, and third-party descriptors are
   implemented.
 - ScrollBar animation, hit testing, dragging, and painting are implemented as
-  a mounted modifier without Runtime feature branches.
+  a node extension without Runtime feature branches.
 - Typed Environment, direct Theme providers, nested Theme propagation, and
   reduced-motion animation resolution are implemented.
 - The synthetic RuntimeRoot, fixed LayerHost ordering, RootHook services,
   Toast, command and declarative Dialog presentation are implemented.
-- Tween and spring animated Offset and Opacity values, state-overlay
-  indication, and multi-pointer ripple indication are implemented.
+- Tween and spring animated Offset, Opacity, Scale, and Rotation values,
+  state-overlay indication, and multi-pointer ripple indication are
+  implemented.
 - Retained exit transitions, keyframes, decay animation, focus restoration,
   platform Back handling, and advanced Toast queue policy remain follow-up
   work.
@@ -69,7 +70,7 @@ ViewSpec and ModifierSpec
     ↓
 reconciliation
     ↓
-MountedNode and MountedModifier
+MountedNode and NodeExtension
     ↓
 frame, measure, layout, hit testing, and paint
     ↓
@@ -151,63 +152,67 @@ new modifier type.
 
 ### Modifier order
 
-Modifier order is observable. Modifiers are applied from left to right, with a
-later modifier wrapping the effects before it. This preserves the expected
-difference between declarations such as:
+Modifiers are processed from left to right, but the current property modifiers
+do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`,
+`FontSize`, alignment, spacing, and similar values apply directly to
+`ViewSpec`. A later modifier that writes the same property wins.
 
 ```cpp
 view.With(
     Padding{12.0F},
     Background{Colors::Blue});
-```
-
-and:
-
-```cpp
 view.With(
     Background{Colors::Blue},
     Padding{12.0F});
 ```
 
-The first form paints the background around the padded result. The second form
-adds padding outside the background.
+These declarations currently produce the same padding and background. They do
+not express inner and outer backgrounds.
 
-## Modifier descriptions and mounted state
+Retained modifiers such as `ScrollBar`, `Indication`, animated `Opacity`, and
+third-party modifiers with an extension preserve their relative order.
+Compatible retained entries reconcile by descriptor and position. Frame and
+foreground paint callbacks run in declaration order, while extension hit
+testing runs in reverse order.
 
-A modifier has two representations:
+## Modifier descriptions and node extensions
 
-- The immutable modifier value stored in `ViewSpec`.
-- The persistent mounted implementation stored in `MountedNode`.
+There are two modifier categories:
+
+- A property modifier applies its value directly to `ViewSpec` and is not
+  retained afterward.
+- A retained modifier stores a type-erased `ModifierSpec` in `ViewSpec` and a
+  persistent `NodeExtension` in `MountedNode`.
 
 Conceptually:
 
 ```text
-Padding / Ripple / ScrollBar / Glow
-    ↓ type erasure
-ModifierSpec
-    ↓ reconciliation
-MountedModifier
+Padding / Background ── apply ──▶ ViewSpec properties
+
+Ripple / ScrollBar / Glow
+    └── type erasure ──▶ ModifierSpec
+                            └── reconciliation ──▶ NodeExtension
 ```
 
 Each modifier type has a stable descriptor identity. Reconciliation compares
 modifier type and position:
 
-- A compatible modifier updates its existing mounted implementation.
-- An incompatible modifier destroys the previous mounted implementation and
-  mounts a new one.
+- A compatible modifier updates its existing node extension.
+- An incompatible modifier destroys the previous node extension and creates
+  a new one.
 - Reusing a `MountedNode` also preserves compatible modifier animation,
   gesture, and presentation state.
-- Reordering modifiers is a semantic change and may recreate affected mounted
-  implementations.
+- Reordering modifiers is a semantic change and may recreate affected node
+  extensions.
 
-A third-party modifier can expose its mounted implementation without changing
+A third-party modifier can expose its node extension without changing
 `View`:
 
 ```cpp
-class MountedGlow;
+class GlowExtension;
 
 struct Glow {
-  using Mounted = MountedGlow;
+  using Extension = GlowExtension;
 
   Color color;
   float radius = 12.0F;
@@ -218,9 +223,9 @@ The framework-provided adapter performs type erasure and dispatches typed
 updates:
 
 ```cpp
-class MountedGlow final : public MountedModifier {
+class GlowExtension final : public NodeExtension {
 public:
-  MountedGlow(MountedNode& node, const Glow& spec);
+  GlowExtension(MountedNode& node, const Glow& spec);
 
   void Update(MountedNode& node, const Glow& spec);
 
@@ -230,83 +235,76 @@ public:
 };
 ```
 
-The framework detects `Glow::Mounted`, creates the mounted object, and
+The framework detects `Glow::Extension`, creates the node extension, and
 dispatches typed updates without requiring the modifier to expose descriptor
 or type-erasure details.
 
-## MountedModifier lifecycle
+## NodeExtension lifecycle
 
-`MountedModifier` operates directly on a controlled public `MountedNode`.
+`NodeExtension` operates directly on a controlled public `MountedNode`.
 There is no separate `ModifierHost` and no context object for every phase.
 
-The complete interface can grow by capability, while the common lifecycle
-remains:
+The current public lifecycle is:
 
 ```cpp
-class MountedModifier {
+class NodeExtension {
 public:
-  virtual ~MountedModifier() = default;
+  struct FrameResult {
+    bool needs_frame;
+    std::optional<double> wake_after;
+  };
 
-  virtual void OnFrame(
+  enum class PointerResult {
+    Ignored,
+    Observe,
+    Handled,
+    Capture,
+  };
+
+  virtual ~NodeExtension() = default;
+
+  virtual FrameResult OnFrame(
       MountedNode& node,
       const FrameInfo& frame);
 
-  virtual void OnPointer(
-      MountedNode& node,
-      const PointerEvent& event);
-
-  virtual Size Measure(
-      MountedNode& node,
-      Constraints constraints,
-      MeasureNext next);
-
-  virtual void Layout(
-      MountedNode& node,
-      Rect frame,
-      LayoutNext next);
+  virtual void OnScrollActivity(MountedNode& node);
+  virtual void OnScrollGesture(MountedNode& node, bool active);
 
   virtual bool HitTest(
       MountedNode& node,
-      Point position,
-      HitTestNext next);
+      Point position) const;
+
+  virtual bool HoverHitTest(
+      MountedNode& node,
+      Point position) const;
+
+  virtual void OnHoverChanged(MountedNode& node, bool hovered);
+  virtual void OnFocusChanged(MountedNode& node, bool focused);
+  virtual void OnKey(MountedNode& node, const KeyEvent& event);
+
+  virtual PointerResult OnPointer(
+      MountedNode& node,
+      const PointerEvent& event);
 
   virtual void Paint(
-      MountedNode& node,
-      DisplayList& display_list,
-      PaintNext next);
+      const MountedNode& node,
+      DisplayList& display_list) const;
 };
 ```
 
-The `Next` values are lightweight continuations, not stateful context classes.
-They allow a modifier to wrap the next modifier or the underlying View:
+`Paint()` is currently a foreground pass after the View content and children.
+`NodeExtension` does not wrap measure, layout, or paint, and it has no `Next`
+continuations. Custom child measurement and placement belong to
+`Layout<Derived>` or `VirtualLayout<Derived>`.
 
-```cpp
-void MountedClip::Paint(
-    MountedNode& node,
-    DisplayList& display_list,
-    PaintNext next)
-{
-  display_list.PushClip(node.Frame());
-  next(display_list);
-  display_list.PopClip();
-}
-```
-
-An internal capability mask prevents the Runtime from invoking irrelevant
-hooks:
-
-```text
-Frame
-Pointer
-Measure
-Layout
-HitTest
-Paint
-```
+During `Paint()`, the DisplayList already contains the node's inherited
+presentation transform, so extension drawing uses `MountedNode::Frame()`.
+`PresentationFrame()` is the transformed axis-aligned window-space bounds.
+Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()`
+are mapped back into the coordinate space of `Frame()`.
 
 The existing `LayoutContext` and `VirtualLayoutContext` remain because they
-represent real child measurement sessions. They are not replaced by modifier
-contexts.
+represent real child measurement sessions.
 
 ## MountedNode capabilities
 
@@ -316,74 +314,49 @@ layouts and modifiers:
 ```cpp
 class MountedNode {
 public:
-  template <class Key>
-  const typename Key::Value& Environment() const;
-
-  template <class Key, class... Arguments>
-  void Emit(Arguments&&... arguments);
-
-  void Invalidate(Invalidation invalidation);
-
-  void InvalidateAfter(
-      Invalidation invalidation,
-      double delay_seconds);
-
   Rect Frame() const;
+  Rect PresentationFrame() const;
+  float PresentationOpacity() const;
   Size MeasuredSize() const;
+  bool IsEnabled() const;
+  bool IsFocused() const;
 
   std::size_t ChildCount() const;
   MountedNode& ChildAt(std::size_t index);
   const MountedNode& ChildAt(std::size_t index) const;
+
+  template <class Key>
+  const typename Key::Value* LayoutValue() const;
+
+  template <class T, class... Arguments>
+  T& Cache(Arguments&&... arguments);
 };
 ```
 
-It does not expose Runtime ownership, reconciliation internals, or direct child
-insertion and removal.
-
-Invalidation is explicit:
-
-```cpp
-enum class Invalidation : std::uint32_t {
-  None = 0,
-  Frame = 1 << 0,
-  Measure = 1 << 1,
-  Layout = 1 << 2,
-  Paint = 1 << 3,
-};
-```
-
-Requesting an invalidation also schedules the required frame. A modifier does
-not need direct access to `Runtime::RequestFrame()`.
+It does not expose Runtime ownership, Environment storage, reconciliation
+internals, or direct child insertion and removal. A `NodeExtension` requests a
+continuing frame or a delayed wake-up through the `FrameResult` returned from
+`OnFrame()`. A general public measure/layout/paint invalidation API is deferred.
 
 ## Frame lifecycle
 
 The target frame sequence is:
 
 ```text
-apply State and Environment invalidations
+apply State invalidations
 recompose dirty scopes
 reconcile ViewSpec and MountedNode
-update mounted modifier targets
-advance active mounted modifiers
 measure
 layout
+advance retained node extensions
 paint
 schedule the next frame or delayed wake-up
 ```
 
-Each node tracks the work required by itself and its descendants:
-
-```text
-NeedsCompose
-NeedsMeasure
-NeedsLayout
-NeedsPaint
-NeedsFrame
-```
-
-The frame traversal prunes subtrees without active frame work. A modifier that
-is waiting for a delayed transition schedules one wake-up rather than running
-empty frames.
+The current Runtime measures and lays out the mounted tree on every produced
+frame. Node-extension frame traversal caches whether a subtree contains any
+extensions and skips extension-free subtrees. A modifier that is waiting for a
+delayed transition schedules one wake-up rather than running empty frames.
 
 Runtime calls fixed node and modifier lifecycle functions. It does not contain
 branches for concrete features such as ScrollBar, Ripple, Dialog, or a
@@ -402,10 +375,10 @@ visibility transitions.
 using AnimationSpec = std::variant<
     SnapSpec,
     TweenSpec,
-    SpringSpec,
-    KeyframesSpec,
-    DecaySpec>;
+    SpringSpec>;
 ```
+
+Keyframes, decay animation, and visibility transitions remain follow-up work.
 
 Examples:
 
@@ -456,12 +429,25 @@ return Panel().With(
             TweenSpec{
                 .duration = 0.2,
             }),
+    },
+    Scale{
+        AnimateTo(
+            visible ? 1.0F : 0.92F,
+            SpringSpec{}),
+    },
+    Rotation{
+        AnimateTo(
+            selected ? 8.0F : 0.0F,
+            TweenSpec{.duration = 0.2}),
     });
 ```
 
 The current value, velocity, start time, and target are stored in the
-compatible `MountedModifier`. Retargeting starts from the current presentation
-value. Advancing an animation does not recompose the component.
+compatible `NodeExtension`. Retargeting starts from the current presentation
+value. Advancing an animation does not recompose the component. Scale and
+Rotation default to the View center, use a normalized `TransformOrigin`, and
+share their transform with descendant drawing, clipping, foreground
+extensions, and pointer hit testing without changing Measure or Layout.
 
 ### TransitionSpec
 
@@ -612,7 +598,7 @@ return VirtualList(items, ItemView).With(
     });
 ```
 
-`MountedScrollBar` owns:
+`ScrollBarExtension` owns:
 
 - Opacity animation state.
 - Delayed hide scheduling.
@@ -992,7 +978,7 @@ return Content().With(
     });
 ```
 
-`MountedDialog` owns a LayerEntry handle. Updating the modifier updates the
+`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the
 entry. Destroying the source modifier dismisses the entry, while LayerHost
 retains the presentation until its exit transition completes.
 
@@ -1074,9 +1060,9 @@ The target extension points are:
 | Custom layout | `Layout<Derived>`, `LayoutContext`, `LayoutResult` |
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
 | Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
-| Custom View effect | Modifier value and `MountedModifier` |
+| Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
-| Custom interaction visual | `IndicationSpec` and `MountedModifier` |
+| Custom interaction visual | `IndicationSpec` and `NodeExtension` |
 | Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and LayerHost |
@@ -1091,11 +1077,12 @@ The architecture follows these rules:
 
 - Animation advances mounted state and does not recompose components every
   frame.
-- Modifier frame traversal skips inactive subtrees.
+- Node extension frame traversal skips subtrees that contain no retained
+  extensions after the extension-tree cache is rebuilt.
 - Delayed animation work schedules one wake-up instead of polling.
-- Environment dependencies are tracked per typed key.
+- Environment values are captured during composition; the current runtime does
+  not maintain per-key Environment dependency subscriptions.
 - Layer entries use independent scopes.
-- Exit transitions retain only the nodes that are leaving.
 - ScrollBar state exists only on Views that install the modifier.
 - Pointer interaction state is stored per pointer ID.
 - Explicit style values override Theme without mutating Theme.
@@ -1128,8 +1115,8 @@ The target design does not introduce:
 
 The design can be introduced without combining all changes into one rewrite:
 
-- Add the generic modifier descriptor and mounted modifier reconciliation.
-- Move ScrollBar frame, pointer, and paint state into a mounted modifier.
+- Add the generic modifier descriptor and node extension reconciliation.
+- Move ScrollBar frame, pointer, and paint state into a node extension.
 - Add generic invalidation flags and prune inactive frame subtrees.
 - Add typed Environment frames and direct Theme providers.
 - Add the synthetic RuntimeRoot and shared LayerHost.

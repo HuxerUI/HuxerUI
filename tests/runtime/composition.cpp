@@ -10,39 +10,40 @@ EventEmitter saved_event_emitter;
 std::string received_event;
 
 State<int> modifier_value;
-int modifier_mounts = 0;
-int modifier_updates = 0;
-int modifier_destroys = 0;
+int extension_creations = 0;
+int extension_updates = 0;
+int extension_destroys = 0;
 
 struct ProbeModifier;
 
-class MountedProbeModifier final : public MountedModifier {
+class ProbeModifierExtension final : public NodeExtension {
 public:
-  MountedProbeModifier(MountedNode &node, const ProbeModifier &modifier);
-  ~MountedProbeModifier() override {
-    ++modifier_destroys;
+  ProbeModifierExtension(MountedNode& node, const ProbeModifier& modifier);
+  ~ProbeModifierExtension() override {
+    ++extension_destroys;
   }
 
-  void Update(MountedNode &node, const ProbeModifier &modifier);
+  void Update(MountedNode& node, const ProbeModifier& modifier);
 
   int value = 0;
 };
 
 struct ProbeModifier {
-  using Mounted = MountedProbeModifier;
+  using Extension = ProbeModifierExtension;
 
   int value;
 };
 
-MountedProbeModifier::MountedProbeModifier(MountedNode &node, const ProbeModifier &modifier) : value(modifier.value) {
+ProbeModifierExtension::ProbeModifierExtension(MountedNode& node, const ProbeModifier& modifier)
+    : value(modifier.value) {
   static_cast<void>(node);
-  ++modifier_mounts;
+  ++extension_creations;
 }
 
-void MountedProbeModifier::Update(MountedNode &node, const ProbeModifier &modifier) {
+void ProbeModifierExtension::Update(MountedNode& node, const ProbeModifier& modifier) {
   static_cast<void>(node);
   value = modifier.value;
-  ++modifier_updates;
+  ++extension_updates;
 }
 
 View EventSource() {
@@ -65,16 +66,13 @@ View EventApp() {
 
   if (mode.Get() == 1) {
     return Column{
-        EventSource().Key("source").On<SearchSubmitted>(
-            [](std::string value) { received_event = "second:" + value; }),
+        EventSource().Key("source").On<SearchSubmitted>([](std::string value) { received_event = "second:" + value; }),
     };
   }
 
   return Column{
-      EventSource()
-          .Key("source")
-          .On<SearchSubmitted>([](std::string value) { received_event = "replaced:" + value; })
-          .On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; }),
+      EventSource().Key("source").On<SearchSubmitted>([](std::string value) { received_event = "replaced:" + value; }
+      ).On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; }),
   };
 }
 
@@ -185,7 +183,7 @@ int local_root_compositions = 0;
 int left_scope_compositions = 0;
 int right_scope_compositions = 0;
 
-View CountedCounter(int *compositions) {
+View CountedCounter(int* compositions) {
   HUXERUI_SCOPE({
     ++*compositions;
     auto count = UseState(0);
@@ -223,29 +221,195 @@ View PropUpdateApp() {
   };
 }
 
+State<int> root_recovery_state;
+bool root_composition_should_throw = false;
+
+View RecoveringRootApp() {
+  auto value = UseState(1);
+  root_recovery_state = value;
+  const int current = value.Get();
+  if (root_composition_should_throw) {
+    throw std::runtime_error("root composition failed");
+  }
+  return Text(std::to_string(current));
+}
+
+State<int> child_recovery_state;
+State<int> child_recovery_trigger;
+bool child_composition_should_throw = false;
+
+View RecoveringChildScope() {
+  HUXERUI_SCOPE({
+    auto value = UseState(0);
+    child_recovery_state = value;
+    const int current = value.Get();
+    if (child_composition_should_throw) {
+      throw std::runtime_error("child composition failed");
+    }
+    return Text(std::to_string(current));
+  });
+}
+
+View RecoveringChildApp() {
+  auto trigger = UseState(0);
+  child_recovery_trigger = trigger;
+  return Column{
+      Text(std::to_string(trigger.Get())),
+      RecoveringChildScope(),
+  };
+}
+
+class ThrowingModifierExtension final : public NodeExtension {
+public:
+  ThrowingModifierExtension(MountedNode& node, const struct ThrowingModifier& modifier);
+
+  void Update(MountedNode& node, const struct ThrowingModifier& modifier);
+};
+
+struct ThrowingModifier {
+  using Extension = ThrowingModifierExtension;
+};
+
+ThrowingModifierExtension::ThrowingModifierExtension(MountedNode& node, const ThrowingModifier& modifier) {
+  static_cast<void>(node);
+  static_cast<void>(modifier);
+  throw std::runtime_error("modifier creation failed");
+}
+
+void ThrowingModifierExtension::Update(MountedNode& node, const ThrowingModifier& modifier) {
+  static_cast<void>(node);
+  static_cast<void>(modifier);
+}
+
+State<bool> throwing_modifier_visible;
+
+View RecoveringModifierApp() {
+  auto visible = UseState(false);
+  throwing_modifier_visible = visible;
+  View content = Text("modifier recovery").With(ProbeModifier{7});
+  if (visible.Get()) {
+    content = std::move(content).With(ThrowingModifier{});
+  }
+  return content;
+}
+
 TEST_CASE("TestUseStateAndStateUpdate") {
   TestPlatform platform;
   Runtime runtime{CounterApp, platform};
   runtime.SetViewport({320.0F, 240.0F});
 
-  const DisplayList &initial = runtime.BuildFrame();
+  const DisplayList& initial = runtime.BuildFrame();
   REQUIRE(FirstText(initial) == "1");
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const std::uint64_t root_identity = root->identity;
 
   runtime.InvalidateRoot();
-  const DisplayList &recomposed = runtime.BuildFrame();
+  const DisplayList& recomposed = runtime.BuildFrame();
   REQUIRE(FirstText(recomposed) == "1");
   REQUIRE(runtime.RootNode()->identity == root_identity);
 
   ClickAt(runtime, {10.0F, 42.0F});
   REQUIRE(platform.requested_frames > 0);
 
-  const DisplayList &updated = runtime.BuildFrame();
+  const DisplayList& updated = runtime.BuildFrame();
   REQUIRE(FirstText(updated) == "2");
   REQUIRE(runtime.RootNode()->identity == root_identity);
+}
+
+TEST_CASE("TestRootCompositionRecoversAfterException") {
+  root_composition_should_throw = false;
+
+  TestPlatform platform;
+  Runtime runtime{RecoveringRootApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const std::uint64_t identity = root->identity;
+
+  root_composition_should_throw = true;
+  root_recovery_state = 2;
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
+  REQUIRE(runtime.RootNode()->identity == identity);
+  REQUIRE(runtime.RootNode()->text == "1");
+
+  root_composition_should_throw = false;
+  root_recovery_state = 3;
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->identity == identity);
+  REQUIRE(runtime.RootNode()->text == "3");
+}
+
+TEST_CASE("TestChildReconciliationRecoversAfterException") {
+  child_composition_should_throw = false;
+
+  TestPlatform platform;
+  Runtime runtime{RecoveringChildApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 2);
+  const std::uint64_t label_identity = root->children[0]->identity;
+  const std::uint64_t scope_identity = root->children[1]->identity;
+
+  child_composition_should_throw = true;
+  child_recovery_trigger = 1;
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
+
+  root = runtime.RootNode();
+  REQUIRE(root->children.size() == 2);
+  REQUIRE(root->children[0]->identity == label_identity);
+  REQUIRE(root->children[1]->identity == scope_identity);
+  REQUIRE(root->children[1]->children.size() == 1);
+  REQUIRE(root->children[1]->children[0]->text == "0");
+
+  child_composition_should_throw = false;
+  child_recovery_state = 2;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->children[0]->identity == label_identity);
+  REQUIRE(root->children[0]->text == "1");
+  REQUIRE(root->children[1]->identity == scope_identity);
+  REQUIRE(root->children[1]->children[0]->text == "2");
+}
+
+TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
+  extension_creations = 0;
+  extension_updates = 0;
+  extension_destroys = 0;
+
+  TestPlatform platform;
+  Runtime runtime{RecoveringModifierApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->extensions.size() == 1);
+  NodeExtension* extension = root->extensions[0].extension.get();
+  const std::uint64_t identity = root->identity;
+
+  throwing_modifier_visible = true;
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
+
+  root = runtime.RootNode();
+  REQUIRE(root->identity == identity);
+  REQUIRE(root->extensions.size() == 1);
+  REQUIRE(root->extensions[0].extension.get() == extension);
+  REQUIRE(extension_destroys == 0);
+
+  throwing_modifier_visible = false;
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->identity == identity);
+  REQUIRE(root->extensions.size() == 1);
+  REQUIRE(root->extensions[0].extension.get() == extension);
 }
 
 TEST_CASE("TestLayoutAndHitTest") {
@@ -254,7 +418,7 @@ TEST_CASE("TestLayoutAndHitTest") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
   REQUIRE(root->children[0]->frame.y == 0.0F);
@@ -269,7 +433,7 @@ TEST_CASE("TestViewCopyOnWrite") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
   REQUIRE(root->children[0]->style.foreground.has_value());
@@ -279,9 +443,9 @@ TEST_CASE("TestViewCopyOnWrite") {
 }
 
 TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
-  modifier_mounts = 0;
-  modifier_updates = 0;
-  modifier_destroys = 0;
+  extension_creations = 0;
+  extension_updates = 0;
+  extension_destroys = 0;
 
   TestPlatform platform;
   {
@@ -289,14 +453,14 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
     runtime.SetViewport({320.0F, 240.0F});
     runtime.BuildFrame();
 
-    const auto *root = runtime.RootNode();
+    const auto* root = runtime.RootNode();
     REQUIRE(root != nullptr);
     REQUIRE(root->style.padding.left == 5.0F);
     REQUIRE(root->style.background.has_value());
-    REQUIRE(root->modifiers.size() == 3);
-    REQUIRE(root->modifiers[2].mounted != nullptr);
-    REQUIRE(modifier_mounts == 1);
-    REQUIRE(modifier_updates == 0);
+    REQUIRE(root->extensions.size() == 1);
+    REQUIRE(root->extensions[0].extension != nullptr);
+    REQUIRE(extension_creations == 1);
+    REQUIRE(extension_updates == 0);
     const std::uint64_t identity = root->identity;
 
     modifier_value = 2;
@@ -304,16 +468,16 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
 
     root = runtime.RootNode();
     REQUIRE(root->identity == identity);
-    REQUIRE(modifier_mounts == 1);
-    REQUIRE(modifier_updates == 1);
-    REQUIRE(static_cast<MountedProbeModifier *>(root->modifiers[2].mounted.get())->value == 2);
+    REQUIRE(extension_creations == 1);
+    REQUIRE(extension_updates == 1);
+    REQUIRE(static_cast<ProbeModifierExtension*>(root->extensions[0].extension.get())->value == 2);
   }
-  REQUIRE(modifier_destroys == 1);
+  REQUIRE(extension_destroys == 1);
 
   Runtime copy_runtime{ModifierCopyOnWriteApp, platform};
   copy_runtime.SetViewport({320.0F, 240.0F});
   copy_runtime.BuildFrame();
-  const auto *copy_root = copy_runtime.RootNode();
+  const auto* copy_root = copy_runtime.RootNode();
   REQUIRE(copy_root != nullptr);
   REQUIRE(copy_root->children[0]->style.foreground.has_value());
   REQUIRE(copy_root->children[0]->style.foreground->red == huxerui::TextStyleKey::Default().foreground.red);
@@ -326,7 +490,7 @@ TEST_CASE("TestScopeStateIsolation") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
   REQUIRE(root->children[0]->children[0]->children[0]->text == "0");
@@ -346,7 +510,7 @@ TEST_CASE("TestStatePassedIntoScope") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children[0]->children[0]->text == "7");
 
@@ -363,7 +527,7 @@ TEST_CASE("TestKeyedScopeIdentity") {
   runtime.SetViewport({320.0F, 320.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const std::uint64_t first_scope_identity = root->children[0]->identity;
 
@@ -389,7 +553,7 @@ TEST_CASE("TestDuplicateSiblingKeys") {
   bool rejected = false;
   try {
     runtime.BuildFrame();
-  } catch (const std::logic_error &) {
+  } catch (const std::logic_error&) {
     rejected = true;
   }
   REQUIRE(rejected);
@@ -401,7 +565,7 @@ TEST_CASE("TestRepeatedUseStateCallSite") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 3);
   REQUIRE(root->children[0]->text == "0");
@@ -431,7 +595,7 @@ TEST_CASE("TestLocalScopeRecomposition") {
   REQUIRE(left_scope_compositions == 1);
   REQUIRE(right_scope_compositions == 1);
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   const int requested_frames = platform.requested_frames;
   InvokeClick(*root->children[0]->children[0]->children[1]);
   InvokeClick(*root->children[0]->children[0]->children[1]);
@@ -456,7 +620,7 @@ TEST_CASE("TestScopeReceivesUpdatedProps") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root->children[0]->children[0]->text == "3");
   REQUIRE(prop_root_compositions == 1);
   REQUIRE(prop_scope_compositions == 1);
@@ -479,9 +643,9 @@ TEST_CASE("TestTypedScopeEvents") {
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  const auto *source = root->children[0].get();
+  const auto* source = root->children[0].get();
   const std::uint64_t source_identity = source->identity;
   const std::uint64_t scope_id = source->recompose_scope->Id();
   InvokeClick(*source->children[0]);

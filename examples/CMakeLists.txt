@@ -19,7 +19,7 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
 endfunction()
 
 add_subdirectory(counter)
-add_subdirectory(layout_gallery)
+add_subdirectory(ui_gallery)
 add_subdirectory(dynamic_list)
 add_subdirectory(scroll_view)
 add_subdirectory(virtual_list)

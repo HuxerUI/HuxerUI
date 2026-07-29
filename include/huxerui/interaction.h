@@ -11,13 +11,11 @@ namespace huxerui {
 namespace detail {
 
 struct DefaultIndication {
-  static const ModifierDescriptor &Descriptor();
+  static const ModifierDescriptor& Descriptor();
 };
 
-bool IsDefaultIndicationDescriptor(
-    const ModifierDescriptor *descriptor) noexcept;
-bool IsExplicitIndicationDescriptor(
-    const ModifierDescriptor *descriptor) noexcept;
+bool IsDefaultIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
+bool IsExplicitIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
 
 } // namespace detail
 
@@ -39,17 +37,13 @@ struct RippleIndication {
   double hover_fade_out_duration = 0.16;
 };
 
-using IndicationSpec = std::variant<
-    NoIndication,
-    StateOverlayIndication,
-    RippleIndication>;
+using IndicationSpec = std::variant<NoIndication, StateOverlayIndication, RippleIndication>;
 
 struct Indication {
   Indication() = default;
-  explicit Indication(IndicationSpec value)
-      : value(std::move(value)) {}
+  explicit Indication(IndicationSpec value) : value(std::move(value)) {}
 
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   std::optional<IndicationSpec> value;
 };

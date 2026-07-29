@@ -83,44 +83,49 @@ TEST_CASE("Markers inside non-code text are ignored") {
   REQUIRE(result.source == source);
 }
 
-template <class Function> void ExpectTransformError(Function &&function) {
+template <class Function> void ExpectTransformError(Function&& function) {
   bool rejected = false;
   try {
     function();
-  } catch (const TransformError &) {
+  } catch (const TransformError&) {
     rejected = true;
   }
   REQUIRE(rejected);
 }
 
 TEST_CASE("Scope declarations are rejected") {
-  ExpectTransformError(
-      [] { static_cast<void>(TransformSource("[[huxerui::scope]] View Counter();\n", "declaration.cpp")); });
+  ExpectTransformError([] {
+    static_cast<void>(TransformSource("[[huxerui::scope]] View Counter();\n", "declaration.cpp"));
+  });
 }
 
 TEST_CASE("Explicit scope boundaries are rejected") {
   ExpectTransformError([] {
-    static_cast<void>(TransformSource("[[huxerui::scope]]\n"
-                                      "View Counter() {\n"
-                                      "  HUXERUI_SCOPE_BEGIN\n"
-                                      "  return Text(\"counter\");\n"
-                                      "  HUXERUI_SCOPE_END\n"
-                                      "}\n",
-                                      "explicit.cpp"));
+    static_cast<void>(TransformSource(
+        "[[huxerui::scope]]\n"
+        "View Counter() {\n"
+        "  HUXERUI_SCOPE_BEGIN\n"
+        "  return Text(\"counter\");\n"
+        "  HUXERUI_SCOPE_END\n"
+        "}\n",
+        "explicit.cpp"
+    ));
   });
 }
 
 TEST_CASE("Conditional compilation inside scopes is rejected") {
   ExpectTransformError([] {
-    static_cast<void>(TransformSource("[[huxerui::scope]]\n"
-                                      "View Counter() {\n"
-                                      "#if ENABLE_COUNTER\n"
-                                      "  return Text(\"counter\");\n"
-                                      "#else\n"
-                                      "  return View{};\n"
-                                      "#endif\n"
-                                      "}\n",
-                                      "conditional.cpp"));
+    static_cast<void>(TransformSource(
+        "[[huxerui::scope]]\n"
+        "View Counter() {\n"
+        "#if ENABLE_COUNTER\n"
+        "  return Text(\"counter\");\n"
+        "#else\n"
+        "  return View{};\n"
+        "#endif\n"
+        "}\n",
+        "conditional.cpp"
+    ));
   });
 }
 

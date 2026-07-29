@@ -20,77 +20,71 @@ struct FrameInfo {
   double delta_time = 0.0;
 };
 
-struct ModifierFrameResult {
-  bool needs_frame = false;
-  std::optional<double> wake_after;
-};
-
-enum class ModifierPointerResult {
-  Ignored,
-  Observe,
-  Handled,
-  Capture,
-};
-
-class MountedModifier {
+class NodeExtension {
 public:
-  virtual ~MountedModifier() = default;
+  struct FrameResult {
+    bool needs_frame = false;
+    std::optional<double> wake_after;
+  };
 
-  virtual ModifierFrameResult OnFrame(
-      MountedNode &node, const FrameInfo &frame) {
+  enum class PointerResult {
+    Ignored,
+    Observe,
+    Handled,
+    Capture,
+  };
+
+  virtual ~NodeExtension() = default;
+
+  virtual FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) {
     static_cast<void>(node);
     static_cast<void>(frame);
     return {};
   }
 
-  virtual void OnScrollActivity(MountedNode &node) {
+  virtual void OnScrollActivity(MountedNode& node) {
     static_cast<void>(node);
   }
 
-  virtual void OnScrollGesture(MountedNode &node, bool active) {
+  virtual void OnScrollGesture(MountedNode& node, bool active) {
     static_cast<void>(node);
     static_cast<void>(active);
   }
 
-  [[nodiscard]] virtual bool
-  HitTest(MountedNode &node, Point position) const {
+  [[nodiscard]] virtual bool HitTest(MountedNode& node, Point position) const {
     static_cast<void>(node);
     static_cast<void>(position);
     return false;
   }
 
-  [[nodiscard]] virtual bool
-  HoverHitTest(MountedNode &node, Point position) const {
+  [[nodiscard]] virtual bool HoverHitTest(MountedNode& node, Point position) const {
     static_cast<void>(node);
     static_cast<void>(position);
     return false;
   }
 
-  virtual void OnHoverChanged(MountedNode &node, bool hovered) {
+  virtual void OnHoverChanged(MountedNode& node, bool hovered) {
     static_cast<void>(node);
     static_cast<void>(hovered);
   }
 
-  virtual void OnFocusChanged(MountedNode &node, bool focused) {
+  virtual void OnFocusChanged(MountedNode& node, bool focused) {
     static_cast<void>(node);
     static_cast<void>(focused);
   }
 
-  virtual void OnKey(
-      MountedNode &node, const KeyEvent &event) {
+  virtual void OnKey(MountedNode& node, const KeyEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
   }
 
-  virtual ModifierPointerResult
-  OnPointer(MountedNode &node, const PointerEvent &event) {
+  virtual PointerResult OnPointer(MountedNode& node, const PointerEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
-    return ModifierPointerResult::Ignored;
+    return PointerResult::Ignored;
   }
 
-  virtual void Paint(
-      const MountedNode &node, DisplayList &display_list) const {
+  virtual void Paint(const MountedNode& node, DisplayList& display_list) const {
     static_cast<void>(node);
     static_cast<void>(display_list);
   }
@@ -102,71 +96,54 @@ struct ViewSpec;
 
 struct ModifierDescriptor {
   std::type_index type;
-  void (*apply)(ViewSpec &, const void *) = nullptr;
-  std::unique_ptr<MountedModifier> (*mount)(MountedNode &, const void *) =
-      nullptr;
-  void (*update)(MountedModifier &, MountedNode &, const void *) = nullptr;
+  void (*apply)(ViewSpec&, const void*) = nullptr;
+  std::unique_ptr<NodeExtension> (*create_extension)(MountedNode&, const void*) = nullptr;
+  void (*update_extension)(NodeExtension&, MountedNode&, const void*) = nullptr;
 };
 
 struct ModifierSpec {
-  const ModifierDescriptor *descriptor = nullptr;
+  const ModifierDescriptor* descriptor = nullptr;
   std::shared_ptr<const void> value;
 };
 
-template <class Spec, class Mounted>
-  requires std::derived_from<Mounted, MountedModifier> &&
-           std::constructible_from<Mounted, MountedNode &, const Spec &> &&
-           requires(Mounted &mounted, MountedNode &node, const Spec &spec) {
-             mounted.Update(node, spec);
-           }
-const ModifierDescriptor &ModifierDescriptorFor() {
+template <class Spec, class Extension>
+  requires std::derived_from<Extension, NodeExtension> &&
+           std::constructible_from<Extension, MountedNode&, const Spec&> &&
+           requires(Extension& extension, MountedNode& node, const Spec& spec) { extension.Update(node, spec); }
+const ModifierDescriptor& ModifierDescriptorFor() {
   static const ModifierDescriptor descriptor{
       typeid(Spec),
       nullptr,
-      [](MountedNode &node,
-         const void *value) -> std::unique_ptr<MountedModifier> {
-        return std::make_unique<Mounted>(
-            node, *static_cast<const Spec *>(value));
+      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+        return std::make_unique<Extension>(node, *static_cast<const Spec*>(value));
       },
-      [](MountedModifier &mounted, MountedNode &node, const void *value) {
-        static_cast<Mounted &>(mounted).Update(
-            node, *static_cast<const Spec *>(value));
+      [](NodeExtension& extension, MountedNode& node, const void* value) {
+        static_cast<Extension&>(extension).Update(node, *static_cast<const Spec*>(value));
       },
   };
   return descriptor;
 }
 
 template <class Modifier>
-concept ExplicitModifierDescriptor =
-    requires {
-      {
-        Modifier::Descriptor()
-      } -> std::same_as<const ModifierDescriptor &>;
-    };
+concept ExplicitModifierDescriptor = requires {
+  { Modifier::Descriptor() } -> std::same_as<const ModifierDescriptor&>;
+};
 
 template <class Modifier>
 concept AutomaticModifierDescriptor =
-    requires {
-      typename Modifier::Mounted;
-    } &&
-    std::derived_from<typename Modifier::Mounted, MountedModifier> &&
-    std::constructible_from<
-        typename Modifier::Mounted, MountedNode &, const Modifier &> &&
-    requires(
-        typename Modifier::Mounted &mounted, MountedNode &node,
-        const Modifier &modifier) {
-      mounted.Update(node, modifier);
+    requires { typename Modifier::Extension; } && std::derived_from<typename Modifier::Extension, NodeExtension> &&
+    std::constructible_from<typename Modifier::Extension, MountedNode&, const Modifier&> &&
+    requires(typename Modifier::Extension& extension, MountedNode& node, const Modifier& modifier) {
+      extension.Update(node, modifier);
     };
 
 template <class Modifier>
-  requires ExplicitModifierDescriptor<Modifier> ||
-           AutomaticModifierDescriptor<Modifier>
-const ModifierDescriptor &ResolveModifierDescriptor() {
+  requires ExplicitModifierDescriptor<Modifier> || AutomaticModifierDescriptor<Modifier>
+const ModifierDescriptor& ResolveModifierDescriptor() {
   if constexpr (ExplicitModifierDescriptor<Modifier>) {
     return Modifier::Descriptor();
   } else {
-    return ModifierDescriptorFor<
-        Modifier, typename Modifier::Mounted>();
+    return ModifierDescriptorFor<Modifier, typename Modifier::Extension>();
   }
 }
 
@@ -174,14 +151,12 @@ const ModifierDescriptor &ResolveModifierDescriptor() {
 
 template <class T>
 concept ViewModifier =
-    std::copy_constructible<std::remove_cvref_t<T>> &&
-    (detail::ExplicitModifierDescriptor<std::remove_cvref_t<T>> ||
-     detail::AutomaticModifierDescriptor<std::remove_cvref_t<T>>);
+    std::copy_constructible<std::remove_cvref_t<T>> && (detail::ExplicitModifierDescriptor<std::remove_cvref_t<T>> ||
+                                                        detail::AutomaticModifierDescriptor<std::remove_cvref_t<T>>);
 
 namespace detail {
 
-template <ViewModifier Modifier>
-ModifierSpec MakeModifierSpec(Modifier &&modifier) {
+template <ViewModifier Modifier> ModifierSpec MakeModifierSpec(Modifier&& modifier) {
   using Value = std::remove_cvref_t<Modifier>;
   return {
       &ResolveModifierDescriptor<Value>(),
@@ -211,14 +186,23 @@ struct ScrollBarStyleKey {
   }
 };
 
+struct ScrollPhysics {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool fling_enabled = true;
+  float deceleration_rate = 6.0F;
+  float minimum_fling_velocity = 40.0F;
+  float maximum_fling_velocity = 6000.0F;
+};
+
 struct Enabled {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   bool value = true;
 };
 
 struct Focusable {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   bool value = true;
 };
@@ -227,75 +211,75 @@ struct Padding {
   explicit Padding(float value) : insets(EdgeInsets::All(value)) {}
   explicit Padding(EdgeInsets value) : insets(value) {}
 
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   EdgeInsets insets;
 };
 
 struct Background {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   Color color;
 };
 
 struct Foreground {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   Color color;
 };
 
 struct FontSize {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   float value;
 };
 
 struct Frame {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   float width;
   float height;
 };
 
 struct CornerRadius {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   float value;
 };
 
 struct Spacing {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   float value;
 };
 
 struct MainAlign {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   MainAxisAlignment alignment;
 };
 
 struct CrossAlign {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   CrossAxisAlignment alignment;
 };
 
 struct Align {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   HorizontalAlignment horizontal;
   VerticalAlignment vertical;
 };
 
 struct Grow {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   float factor = 1.0F;
 };
 
 struct ScrollBar {
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 
   std::optional<ScrollBarStyle> style;
 };

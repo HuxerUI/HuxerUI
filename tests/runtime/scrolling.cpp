@@ -40,7 +40,8 @@ View ControlledVirtualListApp() {
 
   return VirtualList(
              std::size_t{1000},
-             [scroll](std::size_t index) { return ScrollObserverItem(static_cast<int>(index), scroll).Key(index); })
+             [scroll](std::size_t index) { return ScrollObserverItem(static_cast<int>(index), scroll).Key(index); }
+  )
       .ItemExtent(20.0F)
       .CacheExtent(40.0F)
       .ScrollState(scroll);
@@ -63,10 +64,12 @@ View ScrollStateExampleApp() {
   example_scroll = scroll;
   return Column{
       ScrollStateToolbar(scroll),
-      VirtualList(std::size_t{1000},
-                  [](std::size_t index) {
-                    return Text::Format("Item {}", index + 1).With(huxerui::Frame{100.0F, 40.0F}).Key(index);
-                  })
+      VirtualList(
+          std::size_t{1000},
+          [](std::size_t index) {
+            return Text::Format("Item {}", index + 1).With(huxerui::Frame{100.0F, 40.0F}).Key(index);
+          }
+      )
           .ItemExtent(48.0F)
           .ScrollState(scroll)
           .With(huxerui::Spacing{8.0F}, huxerui::Grow{}),
@@ -77,10 +80,12 @@ View ScrollStateExampleApp() {
 View ControlledVirtualGridApp() {
   auto scroll = UseScrollState();
   controlled_grid_scroll = scroll;
-  return VirtualGrid(std::size_t{300},
-                     [](std::size_t index) {
-                       return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F}).Key(index);
-                     })
+  return VirtualGrid(
+             std::size_t{300},
+             [](std::size_t index) {
+               return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F}).Key(index);
+             }
+  )
       .Columns(GridColumns::Fixed(3))
       .RowExtent(20.0F)
       .RowSpacing(4.0F)
@@ -94,7 +99,12 @@ View ControlledScrollViewApp() {
   std::iota(items.begin(), items.end(), 0);
   return ScrollView{
       Column{
-          ForEach(items, [](int index) { return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F}); }),
+          ForEach(
+              items,
+              [](int index) {
+                return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F});
+              }
+          ),
       },
   }
       .ScrollState(scroll);
@@ -106,19 +116,21 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   TestPlatform platform;
   Runtime runtime{ScrollViewApp, platform};
   runtime.SetViewport({100.0F, 60.0F});
-  const DisplayList &initial = runtime.BuildFrame();
+  const DisplayList& initial = runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->measured_size.width == 100.0F);
   REQUIRE(root->measured_size.height == 60.0F);
-  REQUIRE(root->scroll_content_height == 120.0F);
-  REQUIRE(root->scroll_offset_y == 0.0F);
+  REQUIRE(root->scroll != nullptr);
+  REQUIRE(root->scroll->content_height == 120.0F);
+  REQUIRE(root->scroll->offset_y == 0.0F);
+  REQUIRE(root->children[0]->scroll == nullptr);
   REQUIRE(root->children[0]->frame.y == 0.0F);
 
   int push_clips = 0;
   int pop_clips = 0;
-  for (const auto &command : initial.Commands()) {
+  for (const auto& command : initial.Commands()) {
     push_clips += std::holds_alternative<PushClipCommand>(command) ? 1 : 0;
     pop_clips += std::holds_alternative<PopClipCommand>(command) ? 1 : 0;
   }
@@ -138,7 +150,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 45.0F);
+  REQUIRE(root->scroll->offset_y == 45.0F);
   REQUIRE(root->children[0]->frame.y == -45.0F);
 
   ClickAt(runtime, {50.0F, 50.0F});
@@ -147,7 +159,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   runtime.InvalidateRoot();
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 45.0F);
+  REQUIRE(root->scroll->offset_y == 45.0F);
 
   runtime.HandleScrollEvent(ScrollEvent{
       {50.0F, 30.0F},
@@ -156,12 +168,12 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   });
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 60.0F);
+  REQUIRE(root->scroll->offset_y == 60.0F);
 
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 20.0F);
+  REQUIRE(root->scroll->offset_y == 20.0F);
 }
 
 TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
@@ -173,10 +185,10 @@ TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
   runtime.BuildFrame();
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(controlled_list_scroll.IsConnected());
-  REQUIRE(root->scroll_offset_y == 40.0F);
+  REQUIRE(root->scroll->offset_y == 40.0F);
   REQUIRE(controlled_list_scroll.Offset() == 40.0F);
   REQUIRE(controlled_list_scroll.MaxOffset() == 19900.0F);
   REQUIRE(controlled_list_scroll.ViewportExtent() == 100.0F);
@@ -186,14 +198,14 @@ TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
   REQUIRE(controlled_list_scroll.ScrollBy(20.0F));
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 60.0F);
+  REQUIRE(root->scroll->offset_y == 60.0F);
   REQUIRE(controlled_list_scroll.Offset() == 60.0F);
   REQUIRE(scroll_observer_compositions > compositions_before_scroll);
 
   REQUIRE(controlled_list_scroll.ScrollToItem(std::size_t{50}, ScrollAlignment::Center));
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 960.0F);
+  REQUIRE(root->scroll->offset_y == 960.0F);
   const auto centered =
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(centered != root->virtual_state->child_indices.end());
@@ -202,7 +214,7 @@ TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
 
   REQUIRE(controlled_list_scroll.ScrollTo(0.0F));
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_offset_y == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll->offset_y == 0.0F);
 
   show_controlled_scroll = false;
   runtime.BuildFrame();
@@ -218,31 +230,37 @@ TEST_CASE("TestScrollStateExampleButtonsAndFollowUpFrame") {
   runtime.BuildFrame();
 
   REQUIRE(platform.requested_frames == frames_before_build + 1);
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
   REQUIRE(root->children[0]->children.size() == 1);
-  const auto *toolbar = root->children[0]->children[0].get();
+  const auto* toolbar = root->children[0]->children[0].get();
   REQUIRE(toolbar->children.size() == 4);
-  const auto *item_button = toolbar->children[1].get();
+  const auto* item_button = toolbar->children[1].get();
 
-  ClickAt(runtime, {
-                       item_button->frame.x + item_button->frame.width * 0.5F,
-                       item_button->frame.y + item_button->frame.height * 0.5F,
-                   });
+  ClickAt(
+      runtime,
+      {
+          item_button->frame.x + item_button->frame.width * 0.5F,
+          item_button->frame.y + item_button->frame.height * 0.5F,
+      }
+  );
   REQUIRE(example_scroll.Offset() > 0.0F);
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->children[1]->scroll_offset_y > 0.0F);
+  REQUIRE(runtime.RootNode()->children[1]->scroll->offset_y > 0.0F);
 
   root = runtime.RootNode();
   toolbar = root->children[0]->children[0].get();
-  const auto *top_button = toolbar->children[0].get();
-  ClickAt(runtime, {
-                       top_button->frame.x + top_button->frame.width * 0.5F,
-                       top_button->frame.y + top_button->frame.height * 0.5F,
-                   });
+  const auto* top_button = toolbar->children[0].get();
+  ClickAt(
+      runtime,
+      {
+          top_button->frame.x + top_button->frame.width * 0.5F,
+          top_button->frame.y + top_button->frame.height * 0.5F,
+      }
+  );
   REQUIRE(example_scroll.Offset() == 0.0F);
-  REQUIRE(runtime.RootNode()->children[1]->scroll_offset_y == 0.0F);
+  REQUIRE(runtime.RootNode()->children[1]->scroll->offset_y == 0.0F);
 }
 
 TEST_CASE("TestScrollStateControlsVirtualGridItems") {
@@ -255,8 +273,8 @@ TEST_CASE("TestScrollStateControlsVirtualGridItems") {
   REQUIRE(controlled_grid_scroll.ScrollToItem(std::size_t{50}));
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 384.0F);
+  const auto* root = runtime.RootNode();
+  REQUIRE(root->scroll->offset_y == 384.0F);
   const auto item =
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(item != root->virtual_state->child_indices.end());
@@ -267,7 +285,7 @@ TEST_CASE("TestScrollStateControlsVirtualGridItems") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll_offset_y == 370.0F);
+  REQUIRE(root->scroll->offset_y == 370.0F);
   const auto centered =
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(centered != root->virtual_state->child_indices.end());
@@ -281,10 +299,10 @@ TEST_CASE("TestScrollStateControlsScrollView") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(controlled_view_scroll.IsConnected());
-  REQUIRE(root->scroll_offset_y == 20.0F);
+  REQUIRE(root->scroll->offset_y == 20.0F);
   REQUIRE(controlled_view_scroll.Offset() == 20.0F);
   REQUIRE(controlled_view_scroll.MaxOffset() == 300.0F);
   REQUIRE(controlled_view_scroll.ViewportExtent() == 100.0F);
@@ -292,7 +310,7 @@ TEST_CASE("TestScrollStateControlsScrollView") {
 
   REQUIRE(controlled_view_scroll.ScrollBy(30.0F));
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_offset_y == 50.0F);
+  REQUIRE(runtime.RootNode()->scroll->offset_y == 50.0F);
   REQUIRE(controlled_view_scroll.Offset() == 50.0F);
   REQUIRE(!controlled_view_scroll.ScrollToItem(std::size_t{3}));
 }

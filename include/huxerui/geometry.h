@@ -26,7 +26,9 @@ struct Rect {
     return point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height;
   }
 
-  [[nodiscard]] bool IsEmpty() const noexcept { return width <= 0.0F || height <= 0.0F; }
+  [[nodiscard]] bool IsEmpty() const noexcept {
+    return width <= 0.0F || height <= 0.0F;
+  }
 
   [[nodiscard]] bool Intersects(const Rect& other) const noexcept {
     return !IsEmpty() && !other.IsEmpty() && x < other.x + other.width && x + width > other.x &&
@@ -53,15 +55,21 @@ struct EdgeInsets {
   float bottom = 0.0F;
   float left = 0.0F;
 
-  static EdgeInsets All(float value) noexcept { return {value, value, value, value}; }
+  static EdgeInsets All(float value) noexcept {
+    return {value, value, value, value};
+  }
 
   static EdgeInsets Symmetric(float horizontal, float vertical) noexcept {
     return {vertical, horizontal, vertical, horizontal};
   }
 
-  [[nodiscard]] float Horizontal() const noexcept { return left + right; }
+  [[nodiscard]] float Horizontal() const noexcept {
+    return left + right;
+  }
 
-  [[nodiscard]] float Vertical() const noexcept { return top + bottom; }
+  [[nodiscard]] float Vertical() const noexcept {
+    return top + bottom;
+  }
 };
 
 struct Constraints {
@@ -85,11 +93,17 @@ struct Constraints {
     return std::clamp(height, min_height, max_height);
   }
 
-  [[nodiscard]] bool HasBoundedWidth() const noexcept { return std::isfinite(max_width); }
+  [[nodiscard]] bool HasBoundedWidth() const noexcept {
+    return std::isfinite(max_width);
+  }
 
-  [[nodiscard]] bool HasBoundedHeight() const noexcept { return std::isfinite(max_height); }
+  [[nodiscard]] bool HasBoundedHeight() const noexcept {
+    return std::isfinite(max_height);
+  }
 
-  [[nodiscard]] Constraints Loose() const noexcept { return {0.0F, max_width, 0.0F, max_height}; }
+  [[nodiscard]] Constraints Loose() const noexcept {
+    return {0.0F, max_width, 0.0F, max_height};
+  }
 
   [[nodiscard]] Constraints LooseWidth() const noexcept {
     return {0.0F, max_width, min_height, max_height};
@@ -121,4 +135,4 @@ struct Constraints {
   }
 };
 
-}  // namespace huxerui
+} // namespace huxerui

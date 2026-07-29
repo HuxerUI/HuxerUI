@@ -170,20 +170,17 @@ public:
   explicit ThemeDefinition(ThemeSpec theme) : theme_(std::move(theme)) {}
 
   template <class Key>
-    requires requires {
-      typename Key::Value;
-    }
-  ThemeDefinition &Set(typename Key::Value value) {
+    requires requires { typename Key::Value; }
+  ThemeDefinition& Set(typename Key::Value value) {
     values_.Set<Key>(std::move(value));
     return *this;
   }
 
-  [[nodiscard]] const std::optional<ThemeSpec> &
-  Spec() const noexcept {
+  [[nodiscard]] const std::optional<ThemeSpec>& Spec() const noexcept {
     return theme_;
   }
 
-  [[nodiscard]] const EnvironmentValues &Values() const noexcept {
+  [[nodiscard]] const EnvironmentValues& Values() const noexcept {
     return values_;
   }
 
@@ -192,21 +189,19 @@ private:
   EnvironmentValues values_;
 };
 
-inline const ThemeSpec &UseTheme() {
+inline const ThemeSpec& UseTheme() {
   return UseEnvironment<ThemeKey>();
 }
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View Theme(ThemeDefinition definition, Factory &&content) {
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View Theme(ThemeDefinition definition, Factory&& content) {
   EnvironmentValues values;
   if (definition.Spec().has_value()) {
     values.Set<ThemeKey>(*definition.Spec());
   }
   values.Merge(definition.Values());
-  return ProvideEnvironment(
-      std::move(values), std::forward<Factory>(content));
+  return ProvideEnvironment(std::move(values), std::forward<Factory>(content));
 }
 
 ThemeSpec FlatLightThemeSpec();
@@ -220,67 +215,47 @@ ThemeDefinition MaterialThemeDefinition();
 ThemeDefinition MaterialDarkThemeDefinition();
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View FlatTheme(Factory &&content) {
-  return Theme(
-      FlatThemeDefinition(),
-      std::forward<Factory>(content));
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View FlatTheme(Factory&& content) {
+  return Theme(FlatThemeDefinition(), std::forward<Factory>(content));
 }
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View FlatDarkTheme(Factory &&content) {
-  return Theme(
-      FlatDarkThemeDefinition(),
-      std::forward<Factory>(content));
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View FlatDarkTheme(Factory&& content) {
+  return Theme(FlatDarkThemeDefinition(), std::forward<Factory>(content));
 }
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View MaterialTheme(ThemeSpec theme, Factory &&content) {
-  return Theme(
-      MaterialThemeDefinition(std::move(theme)),
-      std::forward<Factory>(content));
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View MaterialTheme(ThemeSpec theme, Factory&& content) {
+  return Theme(MaterialThemeDefinition(std::move(theme)), std::forward<Factory>(content));
 }
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View MaterialTheme(Factory &&content) {
-  return Theme(
-      MaterialThemeDefinition(),
-      std::forward<Factory>(content));
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View MaterialTheme(Factory&& content) {
+  return Theme(MaterialThemeDefinition(), std::forward<Factory>(content));
 }
 
 template <class Factory>
-  requires std::invocable<Factory &> &&
-           std::convertible_to<std::invoke_result_t<Factory &>, View>
-View MaterialDarkTheme(Factory &&content) {
-  return Theme(
-      MaterialDarkThemeDefinition(),
-      std::forward<Factory>(content));
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View MaterialDarkTheme(Factory&& content) {
+  return Theme(MaterialDarkThemeDefinition(), std::forward<Factory>(content));
 }
 
 namespace detail {
 
-ThemeSpec ResolveThemeSpec(
-    std::shared_ptr<const EnvironmentFrame> environment);
-const std::any *FindThemeStyleValue(
-    std::shared_ptr<const EnvironmentFrame> environment,
-    std::type_index key);
-TextStyle DefaultTextStyle(
-    const ThemeSpec &theme, TextRole role = TextRole::Body);
-ButtonStyle DefaultButtonStyle(const ThemeSpec &theme);
-CheckboxStyle DefaultCheckboxStyle(const ThemeSpec &theme);
-SwitchStyle DefaultSwitchStyle(const ThemeSpec &theme);
-ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec &theme);
+ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment);
+const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key);
+TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
+ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
+CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
+SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
+ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);
 
 } // namespace detail
 
 } // namespace huxerui
 
-#define HUXERUI_THEME(ThemeProvider, ...)                              \
-  (ThemeProvider)([=]() -> ::huxerui::View { return (__VA_ARGS__); })
+#define HUXERUI_THEME(ThemeProvider, ...) (ThemeProvider)([=]() -> ::huxerui::View { return (__VA_ARGS__); })

@@ -16,14 +16,14 @@ public:
     return std::move(*this).With(huxerui::Spacing{value});
   }
 
-  static LayoutResult Measure(LayoutContext &context, MountedNode &node, huxerui::Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
     LayoutResult result;
     float x = 0.0F;
     float y = 0.0F;
     float line_height = 0.0F;
     float measured_width = 0.0F;
 
-    for (MountedNode &child : node.Children()) {
+    for (MountedNode& child : node.Children()) {
       const Size child_size = context.Measure(child, constraints.Loose());
       const bool break_before = child.LayoutValueOr<FlowBreakBefore>(false);
       if (x > 0.0F && (break_before || x + child_size.width > constraints.max_width)) {
@@ -128,8 +128,8 @@ View ForEachLayoutApp() {
   const std::vector<std::string> empty;
   return Column{
       Text("Header"),
-      ForEach(items, [](const std::string &item) { return Text(item); }),
-      ForEach(empty, [](const std::string &item) { return Text(item); }),
+      ForEach(items, [](const std::string& item) { return Text(item); }),
+      ForEach(empty, [](const std::string& item) { return Text(item); }),
       Text("Footer"),
   }
       .With(huxerui::Spacing{5.0F});
@@ -158,7 +158,7 @@ View ForEachIdentityApp() {
                                                    "second",
                                                };
   return Column{
-      ForEach(items, [](const std::string &item) { return LayoutCounter().Key(item); }),
+      ForEach(items, [](const std::string& item) { return LayoutCounter().Key(item); }),
       Button("Toggle").OnClick([expanded] { expanded = !expanded; }),
   };
 }
@@ -172,10 +172,10 @@ View ReactiveStateApiApp() {
 
   return Column{
       Text::Format("Taps {}", taps),
-      ForEach(items, [](const std::string &item) { return Text(item); }),
+      ForEach(items, [](const std::string& item) { return Text(item); }),
       Button("Update").OnClick([taps, items] {
         taps += 1;
-        items.Update([](auto &values) { values.push_back("Charlie"); });
+        items.Update([](auto& values) { values.push_back("Charlie"); });
       }),
   };
 }
@@ -186,7 +186,7 @@ TEST_CASE("TestMainAndCrossAxisAlignment") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->frame.width == 100.0F);
   REQUIRE(root->frame.height == 100.0F);
@@ -202,7 +202,7 @@ TEST_CASE("TestSpacerAndGrowLayout") {
   runtime.SetViewport({200.0F, 60.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children[0]->frame.x == 0.0F);
   REQUIRE(root->children[0]->frame.y == 20.0F);
@@ -227,7 +227,7 @@ TEST_CASE("TestStackAndStretchAlignment") {
   stack_runtime.SetViewport({100.0F, 80.0F});
   stack_runtime.BuildFrame();
 
-  const auto *root = stack_runtime.RootNode();
+  const auto* root = stack_runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children[0]->frame.x == 80.0F);
   REQUIRE(root->children[0]->frame.y == 35.0F);
@@ -246,7 +246,7 @@ TEST_CASE("TestWrappedTextMeasurement") {
   runtime.SetViewport({40.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children[0]->frame.width == 40.0F);
   REQUIRE(root->children[0]->frame.height == 60.0F);
@@ -258,7 +258,7 @@ TEST_CASE("TestForEachFlattensChildren") {
   runtime.SetViewport({200.0F, 160.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 5);
   REQUIRE(root->children[0]->text == "Header");
@@ -279,7 +279,7 @@ TEST_CASE("TestForEachKeyedIdentity") {
   runtime.SetViewport({320.0F, 320.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 3);
   const std::uint64_t first_identity = root->children[0]->identity;
@@ -315,7 +315,7 @@ TEST_CASE("TestReactiveStateApis") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 4);
   REQUIRE(root->children[0]->text == "Taps 2");
@@ -337,7 +337,7 @@ TEST_CASE("TestCustomLayoutProtocol") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::Layout);
   REQUIRE(root->layout->type == std::type_index(typeid(TestFlow)));
@@ -356,7 +356,7 @@ TEST_CASE("TestLayoutTypeParticipatesInIdentity") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  const auto *root = runtime.RootNode();
+  const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const std::uint64_t row_identity = root->identity;
   REQUIRE(root->layout->type == std::type_index(typeid(Row)));

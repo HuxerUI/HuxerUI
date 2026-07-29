@@ -45,16 +45,12 @@ class ToastService;
 
 class ToastHandle {
 public:
-  LayerId Show(
-      std::string message, ToastOptions options = {}) const;
+  LayerId Show(std::string message, ToastOptions options = {}) const;
   bool Dismiss(LayerId id) const;
 
 private:
-  ToastHandle(
-      std::shared_ptr<ToastService> service,
-      std::shared_ptr<const detail::EnvironmentFrame> environment)
-      : service_(std::move(service)),
-        environment_(std::move(environment)) {}
+  ToastHandle(std::shared_ptr<ToastService> service, std::shared_ptr<const detail::EnvironmentFrame> environment)
+      : service_(std::move(service)), environment_(std::move(environment)) {}
 
   std::shared_ptr<ToastService> service_;
   std::shared_ptr<const detail::EnvironmentFrame> environment_;
@@ -62,17 +58,14 @@ private:
   friend ToastHandle UseToast();
 };
 
-class ToastService
-    : public std::enable_shared_from_this<ToastService> {
+class ToastService : public std::enable_shared_from_this<ToastService> {
 public:
-  explicit ToastService(LayerController &layers) : layers_(layers) {}
+  explicit ToastService(LayerController& layers) : layers_(layers) {}
 
   bool Dismiss(LayerId id);
 
 private:
-  LayerId Show(
-      std::string message, ToastOptions options,
-      std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId Show(std::string message, ToastOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
 
   LayerController layers_;
 
@@ -99,8 +92,7 @@ public:
   }
 
 private:
-  DialogContext(LayerController layers, LayerId id)
-      : layers_(std::move(layers)), id_(id) {}
+  DialogContext(LayerController layers, LayerId id) : layers_(std::move(layers)), id_(id) {}
 
   LayerController layers_;
   LayerId id_;
@@ -112,20 +104,15 @@ using DialogFactory = std::function<View(DialogContext)>;
 
 class DialogHandle {
 public:
-  LayerId Show(
-      ViewFactory content, DialogOptions options = {}) const;
-  LayerId Show(
-      DialogFactory content, DialogOptions options = {}) const;
+  LayerId Show(ViewFactory content, DialogOptions options = {}) const;
+  LayerId Show(DialogFactory content, DialogOptions options = {}) const;
   bool Update(LayerId id, ViewFactory content) const;
   bool Update(LayerId id, DialogFactory content) const;
   bool Dismiss(LayerId id) const;
 
 private:
-  DialogHandle(
-      std::shared_ptr<DialogService> service,
-      std::shared_ptr<const detail::EnvironmentFrame> environment)
-      : service_(std::move(service)),
-        environment_(std::move(environment)) {}
+  DialogHandle(std::shared_ptr<DialogService> service, std::shared_ptr<const detail::EnvironmentFrame> environment)
+      : service_(std::move(service)), environment_(std::move(environment)) {}
 
   std::shared_ptr<DialogService> service_;
   std::shared_ptr<const detail::EnvironmentFrame> environment_;
@@ -135,22 +122,22 @@ private:
 
 class DialogService {
 public:
-  explicit DialogService(LayerController &layers) : layers_(layers) {}
+  explicit DialogService(LayerController& layers) : layers_(layers) {}
 
   bool Update(LayerId id, ViewFactory content);
   bool Update(LayerId id, DialogFactory content);
   bool Dismiss(LayerId id);
 
 private:
-  LayerId Show(
-      ViewFactory content, DialogOptions options,
-      std::shared_ptr<const detail::EnvironmentFrame> environment);
-  LayerId Show(
-      DialogFactory content, DialogOptions options,
-      std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId Show(ViewFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId
+  Show(DialogFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
   bool Update(
-      LayerId id, ViewFactory content, DialogOptions options,
-      std::shared_ptr<const detail::EnvironmentFrame> environment);
+      LayerId id,
+      ViewFactory content,
+      DialogOptions options,
+      std::shared_ptr<const detail::EnvironmentFrame> environment
+  );
 
   LayerController layers_;
 
@@ -166,7 +153,7 @@ struct Dialog {
   bool dismiss_on_outside_press = false;
   std::function<void()> on_dismiss_request;
 
-  static const detail::ModifierDescriptor &Descriptor();
+  static const detail::ModifierDescriptor& Descriptor();
 };
 
 } // namespace huxerui

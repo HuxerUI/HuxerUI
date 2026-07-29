@@ -11,7 +11,7 @@ namespace huxerui {
 
 namespace {
 
-std::optional<AppDefinition> &AppRegistration() {
+std::optional<AppDefinition>& AppRegistration() {
   static std::optional<AppDefinition> definition;
   return definition;
 }
@@ -25,15 +25,15 @@ void RegisterAppDefinition(AppDefinition definition) {
     throw std::invalid_argument("HuxerUI application registration requires a root factory");
   }
 
-  auto &registration = AppRegistration();
+  auto& registration = AppRegistration();
   if (registration.has_value()) {
     throw std::logic_error("HuxerUI application has already been registered");
   }
   registration.emplace(std::move(definition));
 }
 
-const AppDefinition &RegisteredAppDefinition() {
-  const auto &registration = AppRegistration();
+const AppDefinition& RegisteredAppDefinition() {
+  const auto& registration = AppRegistration();
   if (!registration.has_value()) {
     throw std::logic_error("HuxerUI application has not been registered");
   }

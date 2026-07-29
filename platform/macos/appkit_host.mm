@@ -21,15 +21,13 @@ class MacPlatformHost;
 
 @interface HuxerUIHostView : NSView {
 @public
-  huxerui::Runtime *huxeruiRuntime;
-  huxerui::detail::MacPlatformHost *huxeruiHost;
+  huxerui::Runtime* huxeruiRuntime;
+  huxerui::detail::MacPlatformHost* huxeruiHost;
   NSPoint huxeruiPointerPosition;
-  NSTrackingArea *huxeruiTrackingArea;
+  NSTrackingArea* huxeruiTrackingArea;
 }
-- (void)sendPointerEvent:(NSEvent *)event
-                    type:(huxerui::PointerEventType)type;
-- (void)sendKeyEvent:(NSEvent *)event
-                 type:(huxerui::KeyEventType)type;
+- (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
+- (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
 - (void)cancelPointer;
 @end
 
@@ -37,7 +35,7 @@ class MacPlatformHost;
 @end
 
 @interface HuxerUIFrameScheduler : NSObject
-- (instancetype)initWithView:(HuxerUIHostView *)view;
+- (instancetype)initWithView:(HuxerUIHostView*)view;
 - (void)requestFrameAfter:(double)delaySeconds;
 - (void)shutdown;
 @end
@@ -48,12 +46,12 @@ class MacPlatformHost;
 @end
 
 @implementation HuxerUIFrameScheduler {
-  __weak HuxerUIHostView *_view;
-  __strong CADisplayLink *_displayLink;
+  __weak HuxerUIHostView* _view;
+  __strong CADisplayLink* _displayLink;
   NSUInteger _generation;
 }
 
-- (instancetype)initWithView:(HuxerUIHostView *)view {
+- (instancetype)initWithView:(HuxerUIHostView*)view {
   self = [super init];
   if (self == nil) {
     return nil;
@@ -61,11 +59,9 @@ class MacPlatformHost;
 
   _view = view;
   if (@available(macOS 14.0, *)) {
-    _displayLink = [view displayLinkWithTarget:self
-                                      selector:@selector(displayLinkDidFire:)];
+    _displayLink = [view displayLinkWithTarget:self selector:@selector(displayLinkDidFire:)];
     _displayLink.paused = YES;
-    [_displayLink addToRunLoop:NSRunLoop.mainRunLoop
-                       forMode:NSRunLoopCommonModes];
+    [_displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
   }
   return self;
 }
@@ -73,18 +69,14 @@ class MacPlatformHost;
 - (void)requestFrameAfter:(double)delaySeconds {
   const NSUInteger generation = ++_generation;
   if (delaySeconds > 0.0) {
-    const auto nanoseconds = static_cast<std::int64_t>(
-        delaySeconds * static_cast<double>(NSEC_PER_SEC));
-    __weak HuxerUIFrameScheduler *scheduler = self;
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, nanoseconds),
-        dispatch_get_main_queue(), ^{
-          HuxerUIFrameScheduler *strongScheduler = scheduler;
-          if (strongScheduler != nil &&
-              strongScheduler->_generation == generation) {
-            [strongScheduler armForGeneration:generation];
-          }
-        });
+    const auto nanoseconds = static_cast<std::int64_t>(delaySeconds * static_cast<double>(NSEC_PER_SEC));
+    __weak HuxerUIFrameScheduler* scheduler = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, nanoseconds), dispatch_get_main_queue(), ^{
+      HuxerUIFrameScheduler* strongScheduler = scheduler;
+      if (strongScheduler != nil && strongScheduler->_generation == generation) {
+        [strongScheduler armForGeneration:generation];
+      }
+    });
     return;
   }
   [self armForGeneration:generation];
@@ -99,23 +91,22 @@ class MacPlatformHost;
     return;
   }
 
-  __weak HuxerUIFrameScheduler *scheduler = self;
+  __weak HuxerUIFrameScheduler* scheduler = self;
   dispatch_async(dispatch_get_main_queue(), ^{
-    HuxerUIFrameScheduler *strongScheduler = scheduler;
-    if (strongScheduler != nil &&
-        strongScheduler->_generation == generation) {
+    HuxerUIFrameScheduler* strongScheduler = scheduler;
+    if (strongScheduler != nil && strongScheduler->_generation == generation) {
       [strongScheduler display];
     }
   });
 }
 
-- (void)displayLinkDidFire:(CADisplayLink *)displayLink {
+- (void)displayLinkDidFire:(CADisplayLink*)displayLink {
   displayLink.paused = YES;
   [self display];
 }
 
 - (void)display {
-  HuxerUIHostView *view = _view;
+  HuxerUIHostView* view = _view;
   if (view != nil && view.window != nil) {
     [view setNeedsDisplay:YES];
   }
@@ -136,32 +127,38 @@ namespace {
 
 CFStringRef CreateString(std::string_view text) {
   return CFStringCreateWithBytes(
-      kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(text.data()),
-      static_cast<CFIndex>(text.size()), kCFStringEncodingUTF8, false);
+      kCFAllocatorDefault,
+      reinterpret_cast<const UInt8*>(text.data()),
+      static_cast<CFIndex>(text.size()),
+      kCFStringEncodingUTF8,
+      false
+  );
 }
 
 CTFontRef CreateFont(float font_size) {
-  return CTFontCreateUIFontForLanguage(
-      kCTFontUIFontSystem, static_cast<CGFloat>(font_size), nullptr);
+  return CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, static_cast<CGFloat>(font_size), nullptr);
 }
 
-CFAttributedStringRef CreateAttributedString(std::string_view text,
-                                             float font_size) {
+CFAttributedStringRef CreateAttributedString(std::string_view text, float font_size) {
   CFStringRef string = CreateString(text);
   CTFontRef font = CreateFont(font_size);
-  const void *keys[] = {
+  const void* keys[] = {
       kCTFontAttributeName,
       kCTForegroundColorFromContextAttributeName,
   };
-  const void *values[] = {
+  const void* values[] = {
       font,
       kCFBooleanTrue,
   };
   CFDictionaryRef attributes = CFDictionaryCreate(
-      kCFAllocatorDefault, keys, values, 2, &kCFTypeDictionaryKeyCallBacks,
-      &kCFTypeDictionaryValueCallBacks);
-  CFAttributedStringRef attributed =
-      CFAttributedStringCreate(kCFAllocatorDefault, string, attributes);
+      kCFAllocatorDefault,
+      keys,
+      values,
+      2,
+      &kCFTypeDictionaryKeyCallBacks,
+      &kCFTypeDictionaryValueCallBacks
+  );
+  CFAttributedStringRef attributed = CFAttributedStringCreate(kCFAllocatorDefault, string, attributes);
   CFRelease(attributes);
   CFRelease(font);
   CFRelease(string);
@@ -176,13 +173,11 @@ CTLineRef CreateLine(std::string_view text, float font_size) {
 }
 
 void SetFillColor(CGContextRef context, Color color) {
-  CGContextSetRGBFillColor(context, color.red, color.green, color.blue,
-                           color.alpha);
+  CGContextSetRGBFillColor(context, color.red, color.green, color.blue, color.alpha);
 }
 
 void SetStrokeColor(CGContextRef context, Color color) {
-  CGContextSetRGBStrokeColor(
-      context, color.red, color.green, color.blue, color.alpha);
+  CGContextSetRGBStrokeColor(context, color.red, color.green, color.blue, color.alpha);
 }
 
 Key TranslateKey(unsigned short key_code) {
@@ -225,31 +220,25 @@ Key TranslateKey(unsigned short key_code) {
 
 class MacPlatformHost final : public PlatformHost {
 public:
-  int Run(huxerui::Runtime &runtime,
-          const AppOptions &options) {
+  int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     @autoreleasepool {
-      NSApplication *application = [NSApplication sharedApplication];
+      NSApplication* application = [NSApplication sharedApplication];
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
 
       delegate_ = [[HuxerUIApplicationDelegate alloc] init];
       application.delegate = delegate_;
 
       const NSRect frame = NSMakeRect(0.0, 0.0, options.width, options.height);
-      const NSWindowStyleMask style =
-          NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-          NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-      window_ = [[NSWindow alloc] initWithContentRect:frame
-                                            styleMask:style
-                                              backing:NSBackingStoreBuffered
-                                                defer:NO];
+      const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                      NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+      window_ = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;
 
       view_ = [[HuxerUIHostView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
       view_->huxeruiHost = this;
-      frame_scheduler_ =
-          [[HuxerUIFrameScheduler alloc] initWithView:view_];
+      frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
       [window_ makeKeyAndOrderFront:nil];
@@ -275,24 +264,23 @@ public:
 
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
-    return std::chrono::duration<double>(
-               Clock::now().time_since_epoch())
-        .count();
+    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
   }
 
-  Size MeasureText(std::string_view text, float font_size,
-                   float max_width) override {
+  Size MeasureText(std::string_view text, float font_size, float max_width) override {
     if (std::isfinite(max_width)) {
       if (max_width <= 0.0F) {
         return {};
       }
-      CFAttributedStringRef attributed =
-          CreateAttributedString(text, font_size);
-      CTFramesetterRef framesetter =
-          CTFramesetterCreateWithAttributedString(attributed);
+      CFAttributedStringRef attributed = CreateAttributedString(text, font_size);
+      CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
       const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
-          framesetter, CFRangeMake(0, 0), nullptr,
-          CGSizeMake(max_width, CGFLOAT_MAX), nullptr);
+          framesetter,
+          CFRangeMake(0, 0),
+          nullptr,
+          CGSizeMake(max_width, CGFLOAT_MAX),
+          nullptr
+      );
       CFRelease(framesetter);
       CFRelease(attributed);
       return {
@@ -305,8 +293,7 @@ public:
     CGFloat ascent = 0.0;
     CGFloat descent = 0.0;
     CGFloat leading = 0.0;
-    const double width =
-        CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+    const double width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
     CFRelease(line);
 
     return {
@@ -315,25 +302,21 @@ public:
     };
   }
 
-  void Render(const DisplayList &display_list, CGContextRef context) {
+  void Render(const DisplayList& display_list, CGContextRef context) {
     SetFillColor(context, Color::Rgb(247, 248, 250));
     CGContextFillRect(context, NSRectToCGRect(view_.bounds));
 
-    for (const DrawCommand &command : display_list.Commands()) {
-      std::visit(
-          [this, context](const auto &value) { RenderCommand(context, value); },
-          command);
+    for (const DrawCommand& command : display_list.Commands()) {
+      std::visit([this, context](const auto& value) { RenderCommand(context, value); }, command);
     }
   }
 
 private:
-  void RenderCommand(CGContextRef context, const DrawRectCommand &command) {
+  void RenderCommand(CGContextRef context, const DrawRectCommand& command) {
     SetFillColor(context, command.color);
-    const CGRect rect = CGRectMake(command.rect.x, command.rect.y,
-                                   command.rect.width, command.rect.height);
+    const CGRect rect = CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
     if (command.corner_radius > 0.0F) {
-      CGPathRef path = CGPathCreateWithRoundedRect(
-          rect, command.corner_radius, command.corner_radius, nullptr);
+      CGPathRef path = CGPathCreateWithRoundedRect(rect, command.corner_radius, command.corner_radius, nullptr);
       CGContextAddPath(context, path);
       CGContextFillPath(context);
       CGPathRelease(path);
@@ -342,24 +325,18 @@ private:
     }
   }
 
-  void RenderCommand(CGContextRef context, const DrawTextCommand &command) {
+  void RenderCommand(CGContextRef context, const DrawTextCommand& command) {
     if (command.align == TextAlign::Leading) {
       if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
         return;
       }
-      CFAttributedStringRef attributed =
-          CreateAttributedString(command.text, command.font_size);
-      CTFramesetterRef framesetter =
-          CTFramesetterCreateWithAttributedString(attributed);
-      CGPathRef path = CGPathCreateWithRect(
-          CGRectMake(0.0, 0.0, command.rect.width, command.rect.height),
-          nullptr);
-      CTFrameRef frame = CTFramesetterCreateFrame(
-          framesetter, CFRangeMake(0, 0), path, nullptr);
+      CFAttributedStringRef attributed = CreateAttributedString(command.text, command.font_size);
+      CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
+      CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, command.rect.width, command.rect.height), nullptr);
+      CTFrameRef frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nullptr);
 
       CGContextSaveGState(context);
-      CGContextTranslateCTM(context, command.rect.x,
-                            command.rect.y + command.rect.height);
+      CGContextTranslateCTM(context, command.rect.x, command.rect.y + command.rect.height);
       CGContextScaleCTM(context, 1.0, -1.0);
       CGContextSetTextMatrix(context, CGAffineTransformIdentity);
       SetFillColor(context, command.color);
@@ -377,18 +354,15 @@ private:
     CGFloat ascent = 0.0;
     CGFloat descent = 0.0;
     CGFloat leading = 0.0;
-    const double width =
-        CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+    const double width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
     const CGFloat text_height = ascent + descent + leading;
 
     CGFloat x = command.rect.x;
     if (command.align == TextAlign::Center) {
-      x += std::max(0.0F,
-                    (command.rect.width - static_cast<float>(width)) * 0.5F);
+      x += std::max(0.0F, (command.rect.width - static_cast<float>(width)) * 0.5F);
     }
 
-    const CGFloat bottom_padding = std::max(
-        0.0F, (command.rect.height - static_cast<float>(text_height)) * 0.5F);
+    const CGFloat bottom_padding = std::max(0.0F, (command.rect.height - static_cast<float>(text_height)) * 0.5F);
     const CGFloat baseline_from_bottom = bottom_padding + descent;
 
     CGContextSaveGState(context);
@@ -402,7 +376,7 @@ private:
     CFRelease(line);
   }
 
-  void RenderCommand(CGContextRef context, const DrawCircleCommand &command) {
+  void RenderCommand(CGContextRef context, const DrawCircleCommand& command) {
     if (command.radius <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
@@ -410,18 +384,13 @@ private:
     const float diameter = command.radius * 2.0F;
     CGContextFillEllipseInRect(
         context,
-        CGRectMake(
-            command.center.x - command.radius,
-            command.center.y - command.radius,
-            diameter, diameter));
+        CGRectMake(command.center.x - command.radius, command.center.y - command.radius, diameter, diameter)
+    );
   }
 
-  void RenderCommand(CGContextRef context, const DrawArcCommand &command) {
-    if (command.radius <= 0.0F || command.width <= 0.0F ||
-        command.color.alpha <= 0.0F ||
-        !std::isfinite(command.start_angle) ||
-        !std::isfinite(command.sweep_angle) ||
-        command.sweep_angle == 0.0F) {
+  void RenderCommand(CGContextRef context, const DrawArcCommand& command) {
+    if (command.radius <= 0.0F || command.width <= 0.0F || command.color.alpha <= 0.0F ||
+        !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
       return;
     }
 
@@ -434,10 +403,14 @@ private:
 
     CGMutablePathRef path = CGPathCreateMutable();
     CGPathAddRelativeArc(
-        path, nullptr,
-        command.center.x, command.center.y,
-        command.radius, command.start_angle,
-        command.sweep_angle);
+        path,
+        nullptr,
+        command.center.x,
+        command.center.y,
+        command.radius,
+        command.start_angle,
+        command.sweep_angle
+    );
     CGContextSaveGState(context);
     SetStrokeColor(context, command.color);
     CGContextSetLineWidth(context, command.width);
@@ -448,7 +421,7 @@ private:
     CGPathRelease(path);
   }
 
-  void RenderCommand(CGContextRef context, const DrawBorderCommand &command) {
+  void RenderCommand(CGContextRef context, const DrawBorderCommand& command) {
     if (command.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
@@ -457,11 +430,10 @@ private:
         command.rect.x + inset,
         command.rect.y + inset,
         std::max(0.0F, command.rect.width - command.width),
-        std::max(0.0F, command.rect.height - command.width));
-    const float radius =
-        std::max(0.0F, command.corner_radius - inset);
-    CGPathRef path = CGPathCreateWithRoundedRect(
-        rect, radius, radius, nullptr);
+        std::max(0.0F, command.rect.height - command.width)
+    );
+    const float radius = std::max(0.0F, command.corner_radius - inset);
+    CGPathRef path = CGPathCreateWithRoundedRect(rect, radius, radius, nullptr);
     CGContextSaveGState(context);
     SetStrokeColor(context, command.color);
     CGContextSetLineWidth(context, command.width);
@@ -471,37 +443,49 @@ private:
     CGPathRelease(path);
   }
 
-  void RenderCommand(CGContextRef context, const PushClipCommand &command) {
+  void RenderCommand(CGContextRef context, const PushClipCommand& command) {
     CGContextSaveGState(context);
-    const CGRect rect =
-        CGRectMake(
-            command.rect.x, command.rect.y,
-            command.rect.width, command.rect.height);
+    const CGRect rect = CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
     if (command.corner_radius <= 0.0F) {
       CGContextClipToRect(context, rect);
       return;
     }
-    const float radius = std::min(
-        command.corner_radius,
-        std::min(
-            command.rect.width,
-            command.rect.height) * 0.5F);
-    CGPathRef path = CGPathCreateWithRoundedRect(
-        rect, radius, radius, nullptr);
+    const float radius = std::min(command.corner_radius, std::min(command.rect.width, command.rect.height) * 0.5F);
+    CGPathRef path = CGPathCreateWithRoundedRect(rect, radius, radius, nullptr);
     CGContextAddPath(context, path);
     CGContextClip(context);
     CGPathRelease(path);
   }
 
-  void RenderCommand(CGContextRef context, const PopClipCommand &command) {
+  void RenderCommand(CGContextRef context, const PopClipCommand& command) {
     static_cast<void>(command);
     CGContextRestoreGState(context);
   }
 
-  __strong NSWindow *window_ = nil;
-  __strong HuxerUIHostView *view_ = nil;
-  __strong HuxerUIApplicationDelegate *delegate_ = nil;
-  __strong HuxerUIFrameScheduler *frame_scheduler_ = nil;
+  void RenderCommand(CGContextRef context, const PushTransformCommand& command) {
+    CGContextSaveGState(context);
+    CGContextConcatCTM(
+        context,
+        CGAffineTransformMake(
+            command.m11,
+            command.m12,
+            command.m21,
+            command.m22,
+            command.translate_x,
+            command.translate_y
+        )
+    );
+  }
+
+  void RenderCommand(CGContextRef context, const PopTransformCommand& command) {
+    static_cast<void>(command);
+    CGContextRestoreGState(context);
+  }
+
+  __strong NSWindow* window_ = nil;
+  __strong HuxerUIHostView* view_ = nil;
+  __strong HuxerUIApplicationDelegate* delegate_ = nil;
+  __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
 };
 
 int RunPlatformApp(AppDefinition definition) {
@@ -527,14 +511,11 @@ int RunPlatformApp(AppDefinition definition) {
   if (huxeruiTrackingArea != nil) {
     [self removeTrackingArea:huxeruiTrackingArea];
   }
-  huxeruiTrackingArea = [[NSTrackingArea alloc]
-      initWithRect:NSZeroRect
-           options:NSTrackingMouseEnteredAndExited |
-                   NSTrackingMouseMoved |
-                   NSTrackingActiveInKeyWindow |
-                   NSTrackingInVisibleRect
-             owner:self
-          userInfo:nil];
+  huxeruiTrackingArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                                                             NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                                       owner:self
+                                                    userInfo:nil];
   [self addTrackingArea:huxeruiTrackingArea];
   [super updateTrackingAreas];
 }
@@ -550,13 +531,12 @@ int RunPlatformApp(AppDefinition definition) {
       static_cast<float>(bounds.size.width),
       static_cast<float>(bounds.size.height),
   });
-  const huxerui::DisplayList &displayList = huxeruiRuntime->BuildFrame();
+  const huxerui::DisplayList& displayList = huxeruiRuntime->BuildFrame();
   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
   huxeruiHost->Render(displayList, context);
 }
 
-- (void)sendPointerEvent:(NSEvent *)event
-                    type:(huxerui::PointerEventType)type {
+- (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type {
   if (huxeruiRuntime == nullptr) {
     return;
   }
@@ -587,14 +567,12 @@ int RunPlatformApp(AppDefinition definition) {
   });
 }
 
-- (void)sendKeyEvent:(NSEvent *)event
-                 type:(huxerui::KeyEventType)type {
+- (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type {
   if (huxeruiRuntime == nullptr) {
     return;
   }
   const NSEventModifierFlags flags = event.modifierFlags;
-  const char *characters =
-      event.characters == nil ? nullptr : event.characters.UTF8String;
+  const char* characters = event.characters == nil ? nullptr : event.characters.UTF8String;
   huxeruiRuntime->HandleKeyEvent({
       type,
       huxerui::detail::TranslateKey(event.keyCode),
@@ -609,33 +587,33 @@ int RunPlatformApp(AppDefinition definition) {
   });
 }
 
-- (void)mouseDown:(NSEvent *)event {
+- (void)mouseDown:(NSEvent*)event {
   [self.window makeFirstResponder:self];
   [self sendPointerEvent:event type:huxerui::PointerEventType::Down];
 }
 
-- (void)mouseMoved:(NSEvent *)event {
+- (void)mouseMoved:(NSEvent*)event {
   [self sendPointerEvent:event type:huxerui::PointerEventType::Move];
 }
 
-- (void)mouseDragged:(NSEvent *)event {
+- (void)mouseDragged:(NSEvent*)event {
   [self sendPointerEvent:event type:huxerui::PointerEventType::Move];
 }
 
-- (void)mouseExited:(NSEvent *)event {
+- (void)mouseExited:(NSEvent*)event {
   static_cast<void>(event);
   [self cancelPointer];
 }
 
-- (void)mouseUp:(NSEvent *)event {
+- (void)mouseUp:(NSEvent*)event {
   [self sendPointerEvent:event type:huxerui::PointerEventType::Up];
 }
 
-- (void)keyDown:(NSEvent *)event {
+- (void)keyDown:(NSEvent*)event {
   [self sendKeyEvent:event type:huxerui::KeyEventType::Down];
 }
 
-- (void)keyUp:(NSEvent *)event {
+- (void)keyUp:(NSEvent*)event {
   [self sendKeyEvent:event type:huxerui::KeyEventType::Up];
 }
 
@@ -644,14 +622,14 @@ int RunPlatformApp(AppDefinition definition) {
   [self cancelPointer];
 }
 
-- (void)viewWillMoveToWindow:(NSWindow *)newWindow {
+- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
   if (newWindow == nil) {
     [self cancelPointer];
   }
   [super viewWillMoveToWindow:newWindow];
 }
 
-- (void)scrollWheel:(NSEvent *)event {
+- (void)scrollWheel:(NSEvent*)event {
   if (huxeruiRuntime == nullptr) {
     return;
   }
@@ -672,8 +650,7 @@ int RunPlatformApp(AppDefinition definition) {
 
 @implementation HuxerUIApplicationDelegate
 
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:
-    (NSApplication *)sender {
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
   static_cast<void>(sender);
   return YES;
 }

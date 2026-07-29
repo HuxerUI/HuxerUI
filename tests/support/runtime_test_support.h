@@ -54,8 +54,8 @@ using huxerui::Layout;
 using huxerui::LayoutContext;
 using huxerui::LayoutResult;
 using huxerui::MainAxisAlignment;
-using huxerui::MountedModifier;
 using huxerui::MountedNode;
+using huxerui::NodeExtension;
 using huxerui::Offset;
 using huxerui::Opacity;
 using huxerui::Point;
@@ -66,8 +66,11 @@ using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
 using huxerui::ProgressCircleStyleKey;
 using huxerui::PushClipCommand;
+using huxerui::PushTransformCommand;
 using huxerui::Rect;
+using huxerui::Rotation;
 using huxerui::Row;
+using huxerui::Scale;
 using huxerui::ScrollAlignment;
 using huxerui::ScrollEvent;
 using huxerui::ScrollState;
@@ -107,31 +110,32 @@ using huxerui::VirtualList;
 
 class Runtime final {
 public:
-  Runtime(huxerui::RootFactory root_factory, huxerui::PlatformHost &platform, huxerui::AppOptions options = {})
+  Runtime(huxerui::RootFactory root_factory, huxerui::PlatformHost& platform, huxerui::AppOptions options = {})
       : runtime_(
             {
                 .root_factory = root_factory,
                 .options = std::move(options),
             },
-            platform) {}
+            platform
+        ) {}
 
   void SetViewport(Size viewport) {
     runtime_.SetViewport(viewport);
   }
 
-  const DisplayList &BuildFrame() {
+  const DisplayList& BuildFrame() {
     return runtime_.BuildFrame();
   }
 
-  void HandlePointerEvent(const PointerEvent &event) {
+  void HandlePointerEvent(const PointerEvent& event) {
     runtime_.HandlePointerEvent(event);
   }
 
-  void HandleScrollEvent(const ScrollEvent &event) {
+  void HandleScrollEvent(const ScrollEvent& event) {
     runtime_.HandleScrollEvent(event);
   }
 
-  void HandleKeyEvent(const KeyEvent &event) {
+  void HandleKeyEvent(const KeyEvent& event) {
     runtime_.HandleKeyEvent(event);
   }
 
@@ -139,7 +143,7 @@ public:
     huxerui::detail::RuntimeAccess::InvalidateRoot(runtime_);
   }
 
-  const huxerui::detail::MountedNode *RootNode() const noexcept {
+  const huxerui::detail::MountedNode* RootNode() const noexcept {
     return huxerui::detail::RuntimeAccess::RootNode(runtime_);
   }
 
@@ -183,18 +187,18 @@ public:
   std::vector<double> requested_delays;
 };
 
-inline std::string FirstText(const DisplayList &display_list) {
-  for (const auto &command : display_list.Commands()) {
-    if (const auto *text = std::get_if<DrawTextCommand>(&command)) {
+inline std::string FirstText(const DisplayList& display_list) {
+  for (const auto& command : display_list.Commands()) {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
       return text->text;
     }
   }
   return {};
 }
 
-inline bool ContainsText(const DisplayList &display_list, std::string_view expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *text = std::get_if<DrawTextCommand>(&command);
+inline bool ContainsText(const DisplayList& display_list, std::string_view expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return true;
     }
@@ -202,9 +206,9 @@ inline bool ContainsText(const DisplayList &display_list, std::string_view expec
   return false;
 }
 
-inline const DrawTextCommand *FindText(const DisplayList &display_list, std::string_view expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *text = std::get_if<DrawTextCommand>(&command);
+inline const DrawTextCommand* FindText(const DisplayList& display_list, std::string_view expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return text;
     }
@@ -212,9 +216,9 @@ inline const DrawTextCommand *FindText(const DisplayList &display_list, std::str
   return nullptr;
 }
 
-inline const DrawRectCommand *FindRect(const DisplayList &display_list, Rect expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *rect = std::get_if<DrawRectCommand>(&command);
+inline const DrawRectCommand* FindRect(const DisplayList& display_list, Rect expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
     if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
         rect->rect.height == expected.height) {
       return rect;
@@ -223,9 +227,9 @@ inline const DrawRectCommand *FindRect(const DisplayList &display_list, Rect exp
   return nullptr;
 }
 
-inline const DrawRectCommand *FindRectWithColor(const DisplayList &display_list, Color expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *rect = std::get_if<DrawRectCommand>(&command);
+inline const DrawRectCommand* FindRectWithColor(const DisplayList& display_list, Color expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
     if (rect && rect->color.red == expected.red && rect->color.green == expected.green &&
         rect->color.blue == expected.blue && rect->color.alpha == expected.alpha) {
       return rect;
@@ -234,9 +238,9 @@ inline const DrawRectCommand *FindRectWithColor(const DisplayList &display_list,
   return nullptr;
 }
 
-inline const DrawBorderCommand *FindBorderWithColor(const DisplayList &display_list, Color expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *border = std::get_if<DrawBorderCommand>(&command);
+inline const DrawBorderCommand* FindBorderWithColor(const DisplayList& display_list, Color expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
     if (border && border->color.red == expected.red && border->color.green == expected.green &&
         border->color.blue == expected.blue && border->color.alpha == expected.alpha) {
       return border;
@@ -245,9 +249,9 @@ inline const DrawBorderCommand *FindBorderWithColor(const DisplayList &display_l
   return nullptr;
 }
 
-inline bool ContainsRect(const DisplayList &display_list, Rect expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *rect = std::get_if<DrawRectCommand>(&command);
+inline bool ContainsRect(const DisplayList& display_list, Rect expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
     if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
         rect->rect.height == expected.height) {
       return true;
@@ -256,9 +260,9 @@ inline bool ContainsRect(const DisplayList &display_list, Rect expected) {
   return false;
 }
 
-inline std::optional<float> RectAlpha(const DisplayList &display_list, Rect expected) {
-  for (const auto &command : display_list.Commands()) {
-    const auto *rect = std::get_if<DrawRectCommand>(&command);
+inline std::optional<float> RectAlpha(const DisplayList& display_list, Rect expected) {
+  for (const auto& command : display_list.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
     if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
         rect->rect.height == expected.height) {
       return rect->color.alpha;
@@ -266,11 +270,11 @@ inline std::optional<float> RectAlpha(const DisplayList &display_list, Rect expe
   }
   return std::nullopt;
 }
-inline void InvokeClick(const huxerui::detail::MountedNode &node) {
+inline void InvokeClick(const huxerui::detail::MountedNode& node) {
   REQUIRE(huxerui::detail::EmitEvent<ViewEvents::Click>(node.event_bindings));
 }
 
-inline void ClickAt(Runtime &runtime, Point position, std::int64_t pointer_id = 0) {
+inline void ClickAt(Runtime& runtime, Point position, std::int64_t pointer_id = 0) {
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
       pointer_id,

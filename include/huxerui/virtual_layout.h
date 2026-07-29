@@ -21,10 +21,9 @@ public:
   static GridColumns Fixed(std::size_t count);
   static GridColumns Adaptive(float minimum_width);
 
-  [[nodiscard]] std::size_t Resolve(float available_width,
-                                    float spacing) const noexcept;
+  [[nodiscard]] std::size_t Resolve(float available_width, float spacing) const noexcept;
 
-  bool operator==(const GridColumns &) const = default;
+  bool operator==(const GridColumns&) const = default;
 
 private:
   enum class Mode {
@@ -68,25 +67,26 @@ public:
     return viewport_(state_);
   }
 
-  MountedNode &Item(std::size_t index) const { return item_(state_, index); }
+  MountedNode& Item(std::size_t index) const {
+    return item_(state_, index);
+  }
 
-  [[nodiscard]] Size Measure(MountedNode &item, Constraints constraints) const {
+  [[nodiscard]] Size Measure(MountedNode& item, Constraints constraints) const {
     return measure_(state_, item, constraints);
   }
 
 private:
-  using ItemCountFunction = std::size_t (*)(void *);
-  using ViewportFunction = VirtualViewport (*)(void *);
-  using ItemFunction = MountedNode &(*)(void *, std::size_t);
-  using MeasureFunction = Size (*)(void *, MountedNode &, Constraints);
+  using ItemCountFunction = std::size_t (*)(void*);
+  using ViewportFunction = VirtualViewport (*)(void*);
+  using ItemFunction = MountedNode& (*)(void*, std::size_t);
+  using MeasureFunction = Size (*)(void*, MountedNode&, Constraints);
 
-  VirtualLayoutContext(void *state, ItemCountFunction item_count,
-                       ViewportFunction viewport, ItemFunction item,
-                       MeasureFunction measure)
-      : state_(state), item_count_(item_count), viewport_(viewport),
-        item_(item), measure_(measure) {}
+  VirtualLayoutContext(
+      void* state, ItemCountFunction item_count, ViewportFunction viewport, ItemFunction item, MeasureFunction measure
+  )
+      : state_(state), item_count_(item_count), viewport_(viewport), item_(item), measure_(measure) {}
 
-  void *state_;
+  void* state_;
   ItemCountFunction item_count_;
   ViewportFunction viewport_;
   ItemFunction item_;
@@ -98,46 +98,52 @@ private:
 class VirtualLayoutResult {
 public:
   struct Placement {
-    MountedNode *item;
+    MountedNode* item;
     Point offset;
   };
 
-  VirtualLayoutResult &Place(MountedNode &item, Point offset) {
+  VirtualLayoutResult& Place(MountedNode& item, Point offset) {
     placements_.push_back({&item, offset});
     return *this;
   }
 
-  VirtualLayoutResult &SetSize(Size size) noexcept {
+  VirtualLayoutResult& SetSize(Size size) noexcept {
     size_ = size;
     return *this;
   }
 
-  VirtualLayoutResult &SetContentSize(Size size) noexcept {
+  VirtualLayoutResult& SetContentSize(Size size) noexcept {
     content_size_ = size;
     return *this;
   }
 
-  VirtualLayoutResult &SetAxis(Axis axis) noexcept {
+  VirtualLayoutResult& SetAxis(Axis axis) noexcept {
     axis_ = axis;
     return *this;
   }
 
-  VirtualLayoutResult &SetScrollOffset(float offset) noexcept {
+  VirtualLayoutResult& SetScrollOffset(float offset) noexcept {
     scroll_offset_ = offset;
     return *this;
   }
 
-  [[nodiscard]] Size MeasuredSize() const noexcept { return size_; }
+  [[nodiscard]] Size MeasuredSize() const noexcept {
+    return size_;
+  }
 
-  [[nodiscard]] Size ContentSize() const noexcept { return content_size_; }
+  [[nodiscard]] Size ContentSize() const noexcept {
+    return content_size_;
+  }
 
-  [[nodiscard]] Axis ScrollAxis() const noexcept { return axis_; }
+  [[nodiscard]] Axis ScrollAxis() const noexcept {
+    return axis_;
+  }
 
   [[nodiscard]] std::optional<float> CorrectedScrollOffset() const noexcept {
     return scroll_offset_;
   }
 
-  [[nodiscard]] const std::vector<Placement> &Placements() const noexcept {
+  [[nodiscard]] const std::vector<Placement>& Placements() const noexcept {
     return placements_;
   }
 
@@ -153,28 +159,20 @@ namespace detail {
 
 struct VirtualLayoutDescriptor {
   std::type_index type;
-  VirtualLayoutResult (*measure)(VirtualLayoutContext &, MountedNode &,
-                                 Constraints);
-  std::optional<float> (*scroll_offset_for_item)(MountedNode &, std::size_t,
-                                                 ScrollAlignment, float);
+  VirtualLayoutResult (*measure)(VirtualLayoutContext&, MountedNode&, Constraints);
+  std::optional<float> (*scroll_offset_for_item)(MountedNode&, std::size_t, ScrollAlignment, float);
 };
 
-template <class Derived>
-const VirtualLayoutDescriptor &VirtualLayoutDescriptorFor() {
+template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorFor() {
   static const VirtualLayoutDescriptor descriptor{
       typeid(Derived),
-      [](VirtualLayoutContext &context, MountedNode &node,
-         Constraints constraints) -> VirtualLayoutResult {
+      [](VirtualLayoutContext& context, MountedNode& node, Constraints constraints) -> VirtualLayoutResult {
         return Derived::Measure(context, node, constraints);
       },
-      [](MountedNode &node, std::size_t index, ScrollAlignment alignment,
-         float viewport_extent) -> std::optional<float> {
-        if constexpr (requires {
-                        Derived::ScrollOffsetForItem(node, index, alignment,
-                                                     viewport_extent);
-                      }) {
-          return Derived::ScrollOffsetForItem(node, index, alignment,
-                                              viewport_extent);
+      [](MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
+      ) -> std::optional<float> {
+        if constexpr (requires { Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent); }) {
+          return Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent);
         } else {
           return std::nullopt;
         }

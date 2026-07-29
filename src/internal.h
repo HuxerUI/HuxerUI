@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/animation.h>
 #include <huxerui/app.h>
 #include <huxerui/display_list.h>
 #include <huxerui/event.h>
@@ -31,83 +32,199 @@ namespace huxerui::detail {
 struct MountedNode;
 class ScrollConnection;
 
+struct PresentationTransform {
+  float m11 = 1.0F;
+  float m12 = 0.0F;
+  float m21 = 0.0F;
+  float m22 = 1.0F;
+  float translate_x = 0.0F;
+  float translate_y = 0.0F;
+
+  [[nodiscard]] bool IsIdentity() const noexcept {
+    return m11 == 1.0F && m12 == 0.0F && m21 == 0.0F && m22 == 1.0F && translate_x == 0.0F && translate_y == 0.0F;
+  }
+
+  [[nodiscard]] Point Apply(Point point) const noexcept {
+    return {
+        m11 * point.x + m21 * point.y + translate_x,
+        m12 * point.x + m22 * point.y + translate_y,
+    };
+  }
+
+  [[nodiscard]] std::optional<Point> Inverse(Point point) const noexcept {
+    const float determinant = m11 * m22 - m12 * m21;
+    if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
+      return std::nullopt;
+    }
+    const float x = point.x - translate_x;
+    const float y = point.y - translate_y;
+    return Point{
+        (m22 * x - m21 * y) / determinant,
+        (-m12 * x + m11 * y) / determinant,
+    };
+  }
+};
+
+inline PresentationTransform
+ComposeTransform(const PresentationTransform& outer, const PresentationTransform& inner) noexcept {
+  return {
+      outer.m11 * inner.m11 + outer.m21 * inner.m12,
+      outer.m12 * inner.m11 + outer.m22 * inner.m12,
+      outer.m11 * inner.m21 + outer.m21 * inner.m22,
+      outer.m12 * inner.m21 + outer.m22 * inner.m22,
+      outer.m11 * inner.translate_x + outer.m21 * inner.translate_y + outer.translate_x,
+      outer.m12 * inner.translate_x + outer.m22 * inner.translate_y + outer.translate_y,
+  };
+}
+
+inline PresentationTransform TranslationTransform(Point offset) noexcept {
+  return {
+      1.0F,
+      0.0F,
+      0.0F,
+      1.0F,
+      offset.x,
+      offset.y,
+  };
+}
+
+inline PresentationTransform AroundOriginTransform(const PresentationTransform& linear, Point origin) noexcept {
+  return ComposeTransform(
+      TranslationTransform(origin),
+      ComposeTransform(linear, TranslationTransform({-origin.x, -origin.y}))
+  );
+}
+
+inline Rect TransformBounds(const PresentationTransform& transform, Rect rect) noexcept {
+  const Point top_left = transform.Apply({rect.x, rect.y});
+  const Point top_right = transform.Apply({rect.x + rect.width, rect.y});
+  const Point bottom_left = transform.Apply({rect.x, rect.y + rect.height});
+  const Point bottom_right = transform.Apply({rect.x + rect.width, rect.y + rect.height});
+  const float left = std::min({top_left.x, top_right.x, bottom_left.x, bottom_right.x});
+  const float right = std::max({top_left.x, top_right.x, bottom_left.x, bottom_right.x});
+  const float top = std::min({top_left.y, top_right.y, bottom_left.y, bottom_right.y});
+  const float bottom = std::max({top_left.y, top_right.y, bottom_left.y, bottom_right.y});
+  return {
+      left,
+      top,
+      right - left,
+      bottom - top,
+  };
+}
+
 struct EnvironmentFrame {
   std::shared_ptr<const EnvironmentFrame> parent;
   EnvironmentValues overrides;
 };
 
-void InstallBuiltinPresentation(RootContext &root);
+void InstallBuiltinPresentation(RootContext& root);
 
 struct LayerControllerState {
-  Runtime *runtime = nullptr;
-};
-
-enum class AnimationEasing {
-  Linear,
-  EaseOut,
+  Runtime* runtime = nullptr;
 };
 
 template <std::floating_point T> class AnimatedValue {
 public:
-  explicit AnimatedValue(T value = {}) noexcept
-      : value_(value), start_(value), target_(value) {}
+  AnimatedValue() noexcept = default;
 
-  [[nodiscard]] T Value() const noexcept { return value_; }
-  [[nodiscard]] T Target() const noexcept { return target_; }
-  [[nodiscard]] bool IsRunning() const noexcept { return running_; }
+  explicit AnimatedValue(T value) noexcept {
+    Set(value);
+  }
+
+  [[nodiscard]] T Value() const noexcept {
+    return value_;
+  }
+  [[nodiscard]] T Target() const noexcept {
+    return target_;
+  }
+  [[nodiscard]] bool IsRunning() const noexcept {
+    return running_;
+  }
 
   void Set(T value) noexcept {
     value_ = value;
     start_ = value;
     target_ = value;
+    velocity_ = {};
+    initialized_ = true;
+    pending_ = false;
     running_ = false;
   }
 
-  void AnimateTo(T target, double timestamp, double duration,
-                 AnimationEasing easing = AnimationEasing::EaseOut) noexcept {
-    Advance(timestamp);
-    if (target == target_ && (running_ || value_ == target)) {
-      return;
-    }
-    if (!std::isfinite(duration) || duration <= 0.0) {
+  void Update(T target, AnimationSpec animation) {
+    if (!initialized_) {
       Set(target);
+      animation_ = std::move(animation);
       return;
     }
-    start_ = value_;
+    animation_ = std::move(animation);
+    if (target == target_ && !pending_) {
+      return;
+    }
     target_ = target;
-    start_time_ = timestamp;
-    duration_ = duration;
-    easing_ = easing;
-    running_ = true;
+    pending_ = true;
   }
 
-  bool Advance(double timestamp) noexcept {
+  bool Advance(double timestamp, double delta_time, bool reduced_motion = false) noexcept {
+    if (pending_) {
+      pending_ = false;
+      if (reduced_motion || std::holds_alternative<SnapSpec>(animation_)) {
+        Set(target_);
+        return false;
+      }
+      start_ = value_;
+      start_time_ = timestamp;
+      running_ = true;
+    }
     if (!running_) {
       return false;
     }
-    const double progress =
-        std::clamp((timestamp - start_time_) / duration_, 0.0, 1.0);
-    double eased = progress;
-    if (easing_ == AnimationEasing::EaseOut) {
-      const double inverse = 1.0 - progress;
-      eased = 1.0 - inverse * inverse * inverse;
+
+    if (const auto* tween = std::get_if<TweenSpec>(&animation_)) {
+      if (!std::isfinite(tween->duration) || tween->duration <= 0.0) {
+        Set(target_);
+        return false;
+      }
+      const double progress = std::clamp((timestamp - start_time_) / tween->duration, 0.0, 1.0);
+      double eased = progress;
+      if (tween->easing == Easing::EaseOut) {
+        const double inverse = 1.0 - progress;
+        eased = 1.0 - inverse * inverse * inverse;
+      }
+      value_ = static_cast<T>(start_ + (target_ - start_) * static_cast<T>(eased));
+      if (progress >= 1.0) {
+        Set(target_);
+      }
+      return running_;
     }
-    value_ = static_cast<T>(
-        start_ + (target_ - start_) * static_cast<T>(eased));
-    if (progress >= 1.0) {
-      value_ = target_;
-      running_ = false;
+
+    const auto& spring = std::get<SpringSpec>(animation_);
+    if (!std::isfinite(spring.stiffness) || spring.stiffness <= 0.0F || !std::isfinite(spring.damping_ratio) ||
+        spring.damping_ratio < 0.0F) {
+      Set(target_);
+      return false;
+    }
+    const T step = static_cast<T>(std::clamp(delta_time, 0.0, 1.0 / 30.0));
+    const T stiffness = static_cast<T>(spring.stiffness);
+    const T damping = static_cast<T>(2.0F * std::sqrt(spring.stiffness) * spring.damping_ratio);
+    const T acceleration = stiffness * (target_ - value_) - damping * velocity_;
+    velocity_ += acceleration * step;
+    value_ += velocity_ * step;
+    if (std::abs(target_ - value_) < static_cast<T>(0.001) && std::abs(velocity_) < static_cast<T>(0.001)) {
+      Set(target_);
     }
     return running_;
   }
 
 private:
-  T value_;
-  T start_;
-  T target_;
+  AnimationSpec animation_ = SnapSpec{};
+  T value_{};
+  T start_{};
+  T target_{};
+  T velocity_{};
   double start_time_ = 0.0;
-  double duration_ = 0.0;
-  AnimationEasing easing_ = AnimationEasing::EaseOut;
+  bool initialized_ = false;
+  bool pending_ = false;
   bool running_ = false;
 };
 
@@ -171,12 +288,12 @@ struct ViewSpec {
   ViewStyle style;
   std::vector<View> children;
   std::function<View()> scope_factory;
-  const LayoutDescriptor *layout = nullptr;
-  const VirtualLayoutDescriptor *virtual_layout = nullptr;
+  const LayoutDescriptor* layout = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout = nullptr;
   VirtualItemSource virtual_items;
   std::unordered_map<std::type_index, std::any> layout_values;
   EventBindings event_bindings;
-  std::function<void(const EventBindings &)> activation;
+  std::function<void(const EventBindings&)> activation;
   std::vector<ModifierSpec> modifiers;
   std::shared_ptr<const EnvironmentFrame> environment;
   bool pointer_events_enabled = true;
@@ -191,24 +308,22 @@ struct StateSlotKey {
   std::uint32_t column = 0;
   std::uint32_t occurrence = 0;
 
-  bool operator==(const StateSlotKey &) const = default;
+  bool operator==(const StateSlotKey&) const = default;
 };
 
 struct StateSlotKeyHash {
-  std::size_t operator()(const StateSlotKey &key) const noexcept;
+  std::size_t operator()(const StateSlotKey& key) const noexcept;
 };
 
 struct StateSlotStorage {
-  std::unordered_map<StateSlotKey, std::shared_ptr<StateCellBase>,
-                     StateSlotKeyHash>
-      slots;
+  std::unordered_map<StateSlotKey, std::shared_ptr<StateCellBase>, StateSlotKeyHash> slots;
 };
 
 struct SavedNodeState {
   NodeKind kind = NodeKind::Layout;
   std::optional<ViewKey> key;
-  const LayoutDescriptor *layout = nullptr;
-  const VirtualLayoutDescriptor *virtual_layout = nullptr;
+  const LayoutDescriptor* layout = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout = nullptr;
   std::optional<StateSlotStorage> state_slots;
   std::vector<SavedNodeState> children;
 };
@@ -224,14 +339,46 @@ struct VirtualNodeState {
   std::vector<std::size_t> child_indices;
   std::vector<VirtualLayoutResult::Placement> placements;
   std::unique_ptr<VirtualStateCache> saved_state;
-  Axis axis = Axis::Vertical;
-  Size content_size;
   bool source_dirty = true;
 };
 
-struct MountedModifierEntry {
-  const ModifierDescriptor *descriptor = nullptr;
-  std::unique_ptr<huxerui::MountedModifier> mounted;
+struct ScrollMotionFrameResult {
+  bool needs_frame = false;
+  std::optional<float> transfer_velocity;
+};
+
+class ScrollMotion {
+public:
+  void Stop() noexcept;
+  bool StartMomentum(MountedNode& node, float velocity);
+  ScrollMotionFrameResult Advance(MountedNode& node, const FrameInfo& frame);
+
+private:
+  float velocity_ = 0.0F;
+  std::optional<double> previous_timestamp_;
+  bool momentum_active_ = false;
+};
+
+struct ScrollNodeState {
+  Axis axis = Axis::Vertical;
+  float offset_y = 0.0F;
+  float offset_x = 0.0F;
+  float content_height = 0.0F;
+  float content_width = 0.0F;
+  ScrollMotion motion;
+  std::shared_ptr<ScrollConnection> connection;
+};
+
+struct NodeExtensionEntry {
+  const ModifierDescriptor* descriptor = nullptr;
+  std::unique_ptr<huxerui::NodeExtension> extension;
+};
+
+struct NodePresentation {
+  PresentationTransform local_transform;
+  float local_opacity = 1.0F;
+  PresentationTransform resolved_transform;
+  float resolved_opacity = 1.0F;
 };
 
 struct MountedNode final : public huxerui::MountedNode {
@@ -241,27 +388,20 @@ struct MountedNode final : public huxerui::MountedNode {
   std::string text;
   ViewStyle style;
   std::function<View()> scope_factory;
-  const LayoutDescriptor *layout = nullptr;
-  const VirtualLayoutDescriptor *virtual_layout = nullptr;
+  const LayoutDescriptor* layout = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout = nullptr;
   std::unordered_map<std::type_index, std::any> layout_values;
   std::unordered_map<std::type_index, std::any> layout_cache;
   std::vector<LayoutResult::Placement> layout_placements;
   EventBindings event_bindings;
-  std::function<void(const EventBindings &)> activation;
+  std::function<void(const EventBindings&)> activation;
   std::shared_ptr<RecomposeScope> recompose_scope;
   Size measured_size;
   Rect frame;
-  Point presentation_offset;
-  float presentation_opacity = 1.0F;
-  Point resolved_presentation_offset;
-  float resolved_presentation_opacity = 1.0F;
-  float scroll_offset_y = 0.0F;
-  float scroll_offset_x = 0.0F;
-  float scroll_content_height = 0.0F;
-  float scroll_content_width = 0.0F;
-  std::shared_ptr<ScrollConnection> scroll_connection;
+  NodePresentation presentation;
+  std::unique_ptr<ScrollNodeState> scroll;
   std::unique_ptr<VirtualNodeState> virtual_state;
-  std::vector<MountedModifierEntry> modifiers;
+  std::vector<NodeExtensionEntry> extensions;
   std::shared_ptr<const EnvironmentFrame> environment;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
@@ -269,7 +409,7 @@ struct MountedNode final : public huxerui::MountedNode {
   bool focusable = false;
   bool focused = false;
   bool focus_visible = false;
-  bool subtree_has_mounted_modifiers = true;
+  bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
 
 protected:
@@ -277,11 +417,11 @@ protected:
     return children.size();
   }
 
-  MountedNode &ChildAtImpl(std::size_t index) override {
+  MountedNode& ChildAtImpl(std::size_t index) override {
     return *children[index];
   }
 
-  const MountedNode &ChildAtImpl(std::size_t index) const override {
+  const MountedNode& ChildAtImpl(std::size_t index) const override {
     return *children[index];
   }
 
@@ -294,16 +434,11 @@ protected:
   }
 
   [[nodiscard]] Rect PresentationFrameImpl() const noexcept override {
-    return {
-        frame.x + resolved_presentation_offset.x,
-        frame.y + resolved_presentation_offset.y,
-        frame.width,
-        frame.height,
-    };
+    return TransformBounds(presentation.resolved_transform, frame);
   }
 
   [[nodiscard]] float PresentationOpacityImpl() const noexcept override {
-    return resolved_presentation_opacity;
+    return presentation.resolved_opacity;
   }
 
   [[nodiscard]] bool IsEnabledImpl() const noexcept override {
@@ -326,38 +461,33 @@ protected:
     return style.main_axis_alignment;
   }
 
-  [[nodiscard]] CrossAxisAlignment
-  CrossAlignmentImpl() const noexcept override {
+  [[nodiscard]] CrossAxisAlignment CrossAlignmentImpl() const noexcept override {
     return style.cross_axis_alignment;
   }
 
-  [[nodiscard]] HorizontalAlignment
-  HorizontalAlignmentImpl() const noexcept override {
+  [[nodiscard]] HorizontalAlignment HorizontalAlignmentImpl() const noexcept override {
     return style.horizontal_alignment;
   }
 
-  [[nodiscard]] VerticalAlignment
-  VerticalAlignmentImpl() const noexcept override {
+  [[nodiscard]] VerticalAlignment VerticalAlignmentImpl() const noexcept override {
     return style.vertical_alignment;
   }
 
-  [[nodiscard]] const std::any *
-  FindLayoutValue(std::type_index key_value) const noexcept override {
+  [[nodiscard]] const std::any* FindLayoutValue(std::type_index key_value) const noexcept override {
     const auto found = layout_values.find(key_value);
     return found == layout_values.end() ? nullptr : &found->second;
   }
 
-  std::any &EnsureCacheEntry(std::type_index key_value) override {
+  std::any& EnsureCacheEntry(std::type_index key_value) override {
     return layout_cache[key_value];
   }
 };
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
-  ScrollConnection(Runtime &runtime, MountedNode &node,
-                   std::shared_ptr<ScrollStateData> data);
+  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollStateData> data);
 
-  [[nodiscard]] const std::shared_ptr<ScrollStateData> &Data() const noexcept {
+  [[nodiscard]] const std::shared_ptr<ScrollStateData>& Data() const noexcept {
     return data_;
   }
 
@@ -375,32 +505,32 @@ private:
   [[nodiscard]] float CurrentOffset() const noexcept;
   void SetCurrentOffset(float offset) noexcept;
 
-  Runtime *runtime_;
-  MountedNode *node_;
+  Runtime* runtime_;
+  MountedNode* node_;
   std::shared_ptr<ScrollStateData> data_;
 };
 
-void PrepareScrollState(MountedNode &node, Runtime &runtime);
-void CompleteScrollState(MountedNode &node);
+void PrepareScrollState(MountedNode& node, Runtime& runtime);
+void CompleteScrollState(MountedNode& node);
 
 class VirtualMeasureSession {
 public:
-  VirtualMeasureSession(Runtime &runtime, MountedNode &owner);
+  VirtualMeasureSession(Runtime& runtime, MountedNode& owner);
   ~VirtualMeasureSession();
 
-  VirtualMeasureSession(const VirtualMeasureSession &) = delete;
-  VirtualMeasureSession &operator=(const VirtualMeasureSession &) = delete;
+  VirtualMeasureSession(const VirtualMeasureSession&) = delete;
+  VirtualMeasureSession& operator=(const VirtualMeasureSession&) = delete;
 
   [[nodiscard]] std::size_t ItemCount() const noexcept;
-  MountedNode &Item(std::size_t index);
-  void Commit(const std::vector<VirtualLayoutResult::Placement> &placements);
+  MountedNode& Item(std::size_t index);
+  void Commit(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
   void RestoreOwner() noexcept;
 
-  Runtime *runtime_;
-  MountedNode *owner_;
+  Runtime* runtime_;
+  MountedNode* owner_;
   std::vector<std::unique_ptr<MountedNode>> previous_;
   std::vector<std::size_t> previous_indices_;
   std::vector<std::uint64_t> previous_identities_;
@@ -411,16 +541,15 @@ private:
   bool committed_ = false;
 };
 
-class RecomposeScope final
-    : public std::enable_shared_from_this<RecomposeScope> {
+class RecomposeScope final : public std::enable_shared_from_this<RecomposeScope> {
 public:
-  RecomposeScope(Runtime &runtime, std::uint64_t id,
-                 StateSlotStorage state_slots = {});
+  RecomposeScope(Runtime& runtime, std::uint64_t id, StateSlotStorage state_slots = {});
   ~RecomposeScope();
 
   void BeginComposition();
   void EndComposition();
-  void Observe(const std::shared_ptr<StateCellBase> &cell);
+  void AbortComposition() noexcept;
+  void Observe(const std::shared_ptr<StateCellBase>& cell);
   void Invalidate();
   void SetEventBindings(EventBindings bindings);
 
@@ -429,75 +558,78 @@ public:
   }
 
   std::shared_ptr<StateCellBase>
-  UseState(std::type_index type, const std::source_location &location,
-           std::shared_ptr<StateCellBase> initial);
+  UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
 
-  [[nodiscard]] std::uint64_t Id() const noexcept { return id_; }
+  [[nodiscard]] std::uint64_t Id() const noexcept {
+    return id_;
+  }
 
-  [[nodiscard]] bool IsDirty() const noexcept { return dirty_; }
+  [[nodiscard]] bool IsDirty() const noexcept {
+    return dirty_;
+  }
 
-  StateSlotStorage TakeStateSlots() noexcept { return std::move(state_slots_); }
+  StateSlotStorage TakeStateSlots() noexcept {
+    return std::move(state_slots_);
+  }
 
 private:
-  Runtime *runtime_;
+  Runtime* runtime_;
   std::uint64_t id_;
   bool dirty_ = true;
+  bool composing_ = false;
+  bool invalidated_during_composition_ = false;
   StateSlotStorage state_slots_;
+  StateSlotStorage pending_state_slots_;
   std::unordered_set<StateSlotKey, StateSlotKeyHash> touched_state_slots_;
-  std::unordered_map<StateSlotKey, std::uint32_t, StateSlotKeyHash>
-      state_slot_occurrences_;
-  std::unordered_map<StateCellBase *, std::weak_ptr<StateCellBase>>
-      dependencies_;
+  std::unordered_map<StateSlotKey, std::uint32_t, StateSlotKeyHash> state_slot_occurrences_;
+  std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> dependencies_;
+  std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> pending_dependencies_;
+  std::unordered_map<StateCellBase*, std::uint64_t> observed_versions_;
   std::shared_ptr<EventHub> event_hub_ = std::make_shared<EventHub>();
 };
 
 class Composer {
 public:
-  explicit Composer(
-      std::shared_ptr<RecomposeScope> scope,
-      std::shared_ptr<const EnvironmentFrame> environment = {});
+  explicit Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const EnvironmentFrame> environment = {});
 
-  static Composer *Current() noexcept;
-  static Composer &RequireCurrent();
+  static Composer* Current() noexcept;
+  static Composer& RequireCurrent();
 
-  void Observe(const std::shared_ptr<StateCellBase> &cell);
+  void Observe(const std::shared_ptr<StateCellBase>& cell);
   std::shared_ptr<StateCellBase>
-  UseState(std::type_index type, const std::source_location &location,
-           std::shared_ptr<StateCellBase> initial);
+  UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
   [[nodiscard]] std::shared_ptr<EventHub> Events() const noexcept;
-  [[nodiscard]] const std::shared_ptr<const EnvironmentFrame> &
-  Environment() const noexcept {
+  [[nodiscard]] const std::shared_ptr<const EnvironmentFrame>& Environment() const noexcept {
     return environment_;
   }
 
   class EnvironmentGuard {
   public:
-    explicit EnvironmentGuard(
-        std::shared_ptr<const EnvironmentFrame> environment);
+    explicit EnvironmentGuard(std::shared_ptr<const EnvironmentFrame> environment);
     ~EnvironmentGuard();
 
-    EnvironmentGuard(const EnvironmentGuard &) = delete;
-    EnvironmentGuard &operator=(const EnvironmentGuard &) = delete;
+    EnvironmentGuard(const EnvironmentGuard&) = delete;
+    EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
 
   private:
-    Composer *composer_;
+    Composer* composer_;
     std::shared_ptr<const EnvironmentFrame> previous_;
   };
 
   class Guard {
   public:
-    explicit Guard(Composer &composer);
+    explicit Guard(Composer& composer);
     ~Guard();
 
-    Guard(const Guard &) = delete;
-    Guard &operator=(const Guard &) = delete;
+    Guard(const Guard&) = delete;
+    Guard& operator=(const Guard&) = delete;
 
   private:
-    Composer *previous_;
+    Composer* previous_;
   };
 
 private:
-  static thread_local Composer *current_;
+  static thread_local Composer* current_;
   std::shared_ptr<RecomposeScope> scope_;
   std::shared_ptr<const EnvironmentFrame> environment_;
 };
@@ -512,12 +644,12 @@ struct ScrollBarGeometry {
   float thumb_travel = 0.0F;
 };
 
-struct ModifierPointerCapture {
+struct NodeExtensionHandle {
   std::uint64_t node_identity = 0;
-  std::size_t modifier_index = 0;
-  const ModifierDescriptor *descriptor = nullptr;
+  std::size_t extension_index = 0;
+  const ModifierDescriptor* descriptor = nullptr;
 
-  bool operator==(const ModifierPointerCapture &) const = default;
+  bool operator==(const NodeExtensionHandle&) const = default;
 };
 
 struct PointerSession {
@@ -525,11 +657,15 @@ struct PointerSession {
   std::vector<std::uint64_t> scroll_chain;
   Point down_position;
   Point last_position;
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  double velocity_sample_timestamp = 0.0;
+  float scroll_velocity = 0.0F;
+  bool has_velocity_sample = false;
   std::optional<Axis> drag_axis;
   std::size_t active_scroll = 0;
   std::optional<std::uint64_t> active_scroll_node;
-  std::optional<ModifierPointerCapture> modifier_capture;
-  std::vector<ModifierPointerCapture> modifier_observers;
+  std::optional<NodeExtensionHandle> extension_capture;
+  std::vector<NodeExtensionHandle> extension_observers;
 };
 
 struct LayerEntry {
@@ -545,15 +681,16 @@ namespace huxerui {
 
 struct Runtime::State {
   State(
-      RootFactory root_factory, PlatformHost *platform,
+      RootFactory root_factory,
+      PlatformHost* platform,
       std::shared_ptr<detail::RecomposeScope> root_scope,
-      LayerController layer_controller)
-      : root_factory_(root_factory), platform_(platform),
-        root_scope_(std::move(root_scope)),
+      LayerController layer_controller
+  )
+      : root_factory_(root_factory), platform_(platform), root_scope_(std::move(root_scope)),
         layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
-  PlatformHost *platform_;
+  PlatformHost* platform_;
   Size viewport_;
   std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
@@ -566,7 +703,9 @@ struct Runtime::State {
   DisplayList display_list_;
   bool composition_dirty_ = true;
   bool composing_root_ = false;
-  bool modifier_tree_dirty_ = true;
+  bool layer_snapshot_taken_ = false;
+  bool extension_tree_dirty_ = true;
+  bool scroll_motion_active_ = false;
   bool frame_requested_ = false;
   double frame_request_deadline_ = 0.0;
   std::optional<double> previous_frame_timestamp_;
@@ -574,15 +713,13 @@ struct Runtime::State {
   std::uint64_t next_scope_identity_ = 2;
   LayerId next_layer_id_ = 1;
   bool has_application_root_ = false;
-  std::optional<detail::ModifierPointerCapture> hovered_modifier_;
+  std::optional<detail::NodeExtensionHandle> hovered_extension_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
   std::optional<LayerId> active_modal_focus_layer_;
-  std::unordered_map<
-      LayerId, std::optional<std::uint64_t>>
-      modal_focus_restore_;
+  std::unordered_map<LayerId, std::optional<std::uint64_t>> modal_focus_restore_;
 };
 
 } // namespace huxerui
@@ -590,30 +727,35 @@ struct Runtime::State {
 namespace huxerui::detail {
 
 struct RuntimeAccess {
-  static void InvalidateRoot(Runtime &runtime) {
+  static void InvalidateRoot(Runtime& runtime) {
     runtime.InvalidateRoot();
   }
 
-  static const MountedNode *
-  RootNode(const Runtime &runtime) noexcept {
+  static const MountedNode* RootNode(const Runtime& runtime) noexcept {
     return runtime.RootNode();
   }
 };
 
-Size MeasureNode(MountedNode &node, const Constraints &constraints,
-                 PlatformHost &platform, Runtime &runtime);
-void LayoutNode(MountedNode &node, Point origin);
-void PaintNode(MountedNode &node, DisplayList &display_list);
-bool BuildPointerRoute(MountedNode &node, Point position,
-                       std::vector<MountedNode *> &route);
-MountedNode *HitTestPointer(MountedNode &node, Point position);
-std::optional<ScrollBarGeometry>
-ResolveScrollBarGeometry(const MountedNode &node);
-bool CanScrollNode(const MountedNode &node, float delta);
-float ScrollNodeBy(MountedNode &node, float delta);
-MountedNode *ScrollNode(MountedNode &node, const ScrollEvent &event);
+Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost& platform, Runtime& runtime);
+void LayoutNode(MountedNode& node, Point origin);
+void PaintNode(MountedNode& node, DisplayList& display_list);
+bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
+MountedNode* HitTestPointer(MountedNode& node, Point position);
+std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);
+bool IsScrollContainer(const MountedNode& node) noexcept;
+Axis ScrollAxis(const MountedNode& node) noexcept;
+bool CanScrollNode(const MountedNode& node, float delta);
+float ScrollNodeBy(MountedNode& node, float delta);
 
-bool IsVirtualLayoutNode(const MountedNode &node) noexcept;
+struct ScrollEventResult {
+  std::vector<MountedNode*> scroll_chain;
+  std::vector<MountedNode*> scrolled_nodes;
+};
+
+ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event);
+bool AdvanceMountedNodeFrame(MountedNode& node, const FrameInfo& frame);
+
+bool IsVirtualLayoutNode(const MountedNode& node) noexcept;
 
 #if !defined(__ANDROID__)
 int RunPlatformApp(AppDefinition definition);

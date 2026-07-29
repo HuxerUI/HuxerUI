@@ -34,14 +34,14 @@ public:
 
   virtual void RequestFrame(double delay_seconds) = 0;
   virtual double Now() const noexcept = 0;
-  virtual Size MeasureText(std::string_view text, float font_size,
-                           float max_width = std::numeric_limits<float>::infinity()) = 0;
+  virtual Size
+  MeasureText(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity()) = 0;
 };
 
 namespace detail {
 
 struct EnvironmentFrame;
-struct ModifierPointerCapture;
+struct NodeExtensionHandle;
 struct MountedNode;
 struct PointerSession;
 struct RuntimeAccess;
@@ -55,63 +55,70 @@ class VirtualMeasureSession;
 
 class Runtime final {
 public:
-  Runtime(AppDefinition definition, PlatformHost &host);
+  Runtime(AppDefinition definition, PlatformHost& host);
   ~Runtime();
 
-  Runtime(const Runtime &) = delete;
-  Runtime &operator=(const Runtime &) = delete;
-  Runtime(Runtime &&) = delete;
-  Runtime &operator=(Runtime &&) = delete;
+  Runtime(const Runtime&) = delete;
+  Runtime& operator=(const Runtime&) = delete;
+  Runtime(Runtime&&) = delete;
+  Runtime& operator=(Runtime&&) = delete;
 
   void SetViewport(Size viewport);
-  const DisplayList &BuildFrame();
-  void HandlePointerEvent(const PointerEvent &event);
-  void HandleScrollEvent(const ScrollEvent &event);
-  void HandleKeyEvent(const KeyEvent &event);
+  const DisplayList& BuildFrame();
+  void HandlePointerEvent(const PointerEvent& event);
+  void HandleScrollEvent(const ScrollEvent& event);
+  void HandleKeyEvent(const KeyEvent& event);
 
 private:
   struct State;
 
-  LayerId AttachLayer(LayerOptions options, ViewFactory content,
-                      std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId
+  AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const detail::EnvironmentFrame> environment);
   bool UpdateLayer(LayerId id, ViewFactory content);
   bool UpdateLayer(LayerId id, LayerOptions options, ViewFactory content);
   bool DismissLayer(LayerId id);
   void RequestFrame();
   void RequestFrameAfter(double delay_seconds);
-  void NotifyScrollActivity(detail::MountedNode &node);
-  static detail::MountedNode *FindNode(detail::MountedNode &node, std::uint64_t identity);
-  static MountedModifier *FindModifier(detail::MountedNode &root, const detail::ModifierPointerCapture &capture);
-  static void ActivateNode(detail::MountedNode &node);
-  void ReleaseScrollGesture(detail::PointerSession &session);
-  void DispatchModifierObservers(detail::PointerSession &session, const PointerEvent &event, bool clear);
-  [[nodiscard]] std::optional<std::size_t> FindScrollCandidate(const detail::PointerSession &session, Axis axis,
-                                                               float delta);
-  detail::MountedNode *ApplyDragScroll(detail::PointerSession &session, float delta);
-  void HandlePointerDown(const PointerEvent &event);
-  void HandlePointerMove(const PointerEvent &event);
-  void HandlePointerCancel(const PointerEvent &event);
-  void HandlePointerUp(const PointerEvent &event);
-  void UpdateHoveredModifier(Point position);
+  void NotifyScrollActivity(detail::MountedNode& node);
+  static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
+  static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
+  static void ActivateNode(detail::MountedNode& node);
+  void ReleaseScrollGesture(detail::PointerSession& session);
+  void DispatchExtensionObservers(detail::PointerSession& session, const PointerEvent& event, bool clear);
+  [[nodiscard]] std::optional<std::size_t>
+  FindScrollCandidate(const detail::PointerSession& session, Axis axis, float delta);
+  std::vector<detail::MountedNode*> ApplyDragScroll(detail::PointerSession& session, float delta);
+  void HandlePointerDown(const PointerEvent& event);
+  void HandlePointerMove(const PointerEvent& event);
+  void HandlePointerCancel(const PointerEvent& event);
+  void HandlePointerUp(const PointerEvent& event);
+  void UpdateHoveredExtension(Point position);
   void RefreshInteractionTree();
   [[nodiscard]] std::optional<LayerId> ActiveModalLayerId() const;
-  detail::MountedNode *ActiveModalFocusRoot();
+  detail::MountedNode* ActiveModalFocusRoot();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
   void MoveFocus(bool reverse);
-  bool UpdateMountedModifiers(detail::MountedNode &node, const FrameInfo &frame, bool &needs_frame,
-                              std::optional<double> &next_wakeup, bool rebuild_cache);
-  const DisplayList &BuildFrame(FrameInfo frame);
+  bool UpdateNodeExtensions(
+      detail::MountedNode& node,
+      const FrameInfo& frame,
+      bool& needs_frame,
+      std::optional<double>& next_wakeup,
+      bool rebuild_cache
+  );
+  const DisplayList& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
   void InvalidateScope(std::uint64_t scope_id);
   void ComposeRoot();
-  void ComposeScope(detail::MountedNode &mounted);
-  void RecomposeDirtyScopes(detail::MountedNode &mounted);
-  void Reconcile(std::unique_ptr<detail::MountedNode> &mounted, const std::shared_ptr<detail::ViewSpec> &incoming);
-  std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec> &incoming);
-  void ReconcileChildren(detail::MountedNode &mounted, const std::vector<View> &incoming_children);
-  detail::SavedNodeState SaveNodeState(detail::MountedNode &mounted);
-  void RestoreNodeState(detail::MountedNode &mounted, detail::SavedNodeState &saved);
-  [[nodiscard]] const detail::MountedNode *RootNode() const noexcept;
+  void ComposeScope(detail::MountedNode& mounted);
+  void RecomposeDirtyScopes(detail::MountedNode& mounted);
+  void Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<detail::ViewSpec>& incoming);
+  std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec>& incoming);
+  void ReconcileChildren(
+      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+  );
+  detail::SavedNodeState SaveNodeState(detail::MountedNode& mounted);
+  void RestoreNodeState(detail::MountedNode& mounted, detail::SavedNodeState& saved);
+  [[nodiscard]] const detail::MountedNode* RootNode() const noexcept;
 
   std::unique_ptr<State> state_;
 
@@ -125,7 +132,7 @@ private:
 namespace detail {
 
 void RegisterAppDefinition(AppDefinition definition);
-const AppDefinition &RegisteredAppDefinition();
+const AppDefinition& RegisteredAppDefinition();
 
 } // namespace detail
 
