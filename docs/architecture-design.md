@@ -717,10 +717,10 @@ The built-in Flat and Material systems provide complete light and dark
 boundaries:
 
 ```cpp
-HUXERUI_THEME(FlatTheme, Content())
-HUXERUI_THEME(FlatDarkTheme, Content())
-HUXERUI_THEME(MaterialTheme, Content())
-HUXERUI_THEME(MaterialDarkTheme, Content())
+FlatTheme(Content)
+FlatDarkTheme(Content)
+MaterialTheme(Content)
+MaterialDarkTheme(Content)
 ```
 
 `FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values
@@ -732,16 +732,22 @@ component StyleKeys from those tokens.
 
 ### Theme syntax
 
-The direct syntax is:
+Pass a component function directly in the common case:
+
+```cpp
+return MaterialTheme(AppContent);
+```
+
+A content factory remains available when arguments must be captured:
 
 ```cpp
 return MaterialTheme([=] {
-  return AppContent();
+  return AppContent(user_id);
 });
 ```
 
-`HUXERUI_THEME` hides the content lambda while remaining an expression that
-can be nested:
+`HUXERUI_THEME` is optional syntax sugar for an inline View expression or a
+component call with arguments:
 
 ```cpp
 #define HUXERUI_THEME(ThemeProvider, ...)                              \
@@ -753,9 +759,7 @@ Root usage:
 ```cpp
 View App()
 {
-  return HUXERUI_THEME(
-      MaterialTheme,
-      AppContent());
+  return MaterialTheme(AppContent);
 }
 ```
 
@@ -1039,9 +1043,7 @@ View AppContent()
 
 View App()
 {
-  return HUXERUI_THEME(
-      MaterialTheme,
-      AppContent());
+  return MaterialTheme(AppContent);
 }
 ```
 

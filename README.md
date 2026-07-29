@@ -527,18 +527,24 @@ View AccentTheme(Factory&& content) {
   return Theme(std::move(definition), std::forward<Factory>(content));
 }
 
-auto App() {
-  return HUXERUI_THEME(
-      MaterialTheme,
-      Column {
-          Text("Material", TextRole::Title),
-          HUXERUI_THEME(AccentTheme, Button("Nested override")),
-          HUXERUI_THEME(MaterialDarkTheme, Button("Nested Material dark theme")),
-          HUXERUI_THEME(FlatTheme, Button("Nested Flat boundary")),
-      }
-  );
+View AppContent() {
+  return Column {
+      Text("Material", TextRole::Title),
+      HUXERUI_THEME(AccentTheme, Button("Nested override")),
+      HUXERUI_THEME(MaterialDarkTheme, Button("Nested Material dark theme")),
+      HUXERUI_THEME(FlatTheme, Button("Nested Flat boundary")),
+  };
+}
+
+View App() {
+  return MaterialTheme(AppContent);
 }
 ```
+
+Pass a component function directly for the common case. Theme providers accept
+any compatible content factory, so third-party `XxxTheme` functions follow the
+same convention. Use `HUXERUI_THEME` as optional syntax sugar when the content
+is an inline View expression or a component call with arguments.
 
 `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` select semantic
 typography without hard-coding font sizes at the call site. Text, Button,
@@ -631,10 +637,12 @@ the registered `AppDefinition`, and forward viewport, frame, and input events:
 
 using namespace huxerui;
 
+View MobileContent() {
+  return Button("Mobile");
+}
+
 View App() {
-  return MaterialTheme([] {
-    return Button("Mobile");
-  });
+  return MaterialTheme(MobileContent);
 }
 
 class MobileHost final : public PlatformHost {
@@ -699,6 +707,7 @@ Example applications:
 - `huxerui_toast`: per-window Toast presentation through a root-installed service
 - `huxerui_dialog`: declarative modal presentation controlled by local state
 - `huxerui_theme`: Material light and dark themes, nested FlatTheme boundaries, semantic text roles, ripple indication, and explicit modifier precedence
+- `huxerui_environment`: typed environment defaults, inheritance, nested overrides, and State-driven values
 - `platform/android/demo`: Android Custom View host displaying the theme example
 
 Run an example:
@@ -717,6 +726,7 @@ open build/bin/huxerui_scroll_state.app
 open build/bin/huxerui_toast.app
 open build/bin/huxerui_dialog.app
 open build/bin/huxerui_theme.app
+open build/bin/huxerui_environment.app
 ```
 
 Windows:

@@ -80,7 +80,7 @@ View ThemeContent() {
 }
 
 View App() {
-  return HUXERUI_THEME(MaterialTheme, ThemeContent());
+  return MaterialTheme(ThemeContent);
 }
 
 HUXERUI_APP(

@@ -65,7 +65,7 @@ View ThemedScrollBarApp() {
 }
 
 View FlatDarkScrollBarApp() {
-  return HUXERUI_THEME(huxerui::FlatDarkTheme, DragScrollApp());
+  return huxerui::FlatDarkTheme(DragScrollApp);
 }
 
 View HorizontalDragScrollApp() {

@@ -58,11 +58,10 @@ View EnvironmentApp() {
   EnvironmentValues outer;
   outer.Set<TestEnvironmentKey>("outer");
   return huxerui::ProvideEnvironment(std::move(outer), [] {
-    EnvironmentValues inner;
-    inner.Set<TestEnvironmentKey>("inner");
     return Column{
         EnvironmentReader(),
-        huxerui::ProvideEnvironment(std::move(inner), EnvironmentReader),
+        huxerui::ProvideEnvironment<TestEnvironmentKey>(
+            "inner", EnvironmentReader),
     };
   });
 }
@@ -79,7 +78,7 @@ View ThemedReader() {
         Text("theme label", TextRole::Label),
         Button("theme button"),
         Text("explicit text").With(huxerui::Foreground{Color::Rgb(255, 140, 0)}, huxerui::FontSize{29.0F}),
-        HUXERUI_THEME(TestButtonTheme, NestedThemeReader()),
+        TestButtonTheme(NestedThemeReader),
     };
   });
 }
@@ -115,7 +114,7 @@ View TestThemeProvider(std::function<View()> content) {
 
 View ThemeApp() {
   alternate_theme = UseState(false);
-  return HUXERUI_THEME(TestThemeProvider, ThemedReader());
+  return TestThemeProvider(ThemedReader);
 }
 
 View FlatDarkThemeApp() {
@@ -229,7 +228,7 @@ View FocusContent() {
 }
 
 View FocusApp() {
-  return HUXERUI_THEME(FocusTestTheme, FocusContent());
+  return FocusTestTheme(FocusContent);
 }
 
 View DisabledHitTestApp() {
@@ -283,7 +282,7 @@ View PresentationThemeApp() {
 }
 
 View FlatDarkPresentationApp() {
-  return HUXERUI_THEME(huxerui::FlatDarkTheme, PresentationApp());
+  return huxerui::FlatDarkTheme(PresentationApp);
 }
 
 View DeclarativeDialogApp() {

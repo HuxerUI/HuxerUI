@@ -9,9 +9,9 @@
 #include <unordered_map>
 #include <utility>
 
-namespace huxerui {
+#include <huxerui/view.h>
 
-class View;
+namespace huxerui {
 
 namespace detail {
 struct EnvironmentFrame;
@@ -81,5 +81,16 @@ const typename Key::Value &UseEnvironment() {
 
 View ProvideEnvironment(
     EnvironmentValues values, std::function<View()> content);
+
+template <EnvironmentKey Key, class Factory>
+  requires std::invocable<Factory &> &&
+           std::convertible_to<std::invoke_result_t<Factory &>, View>
+View ProvideEnvironment(
+    typename Key::Value value, Factory &&content) {
+  EnvironmentValues values;
+  values.Set<Key>(std::move(value));
+  return ProvideEnvironment(
+      std::move(values), std::forward<Factory>(content));
+}
 
 } // namespace huxerui
