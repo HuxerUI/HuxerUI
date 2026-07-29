@@ -40,9 +40,49 @@ void ApplyFontSize(detail::ViewSpec& spec, const FontSize& modifier) {
   spec.style.font_size = modifier.value;
 }
 
+void ValidateFrameValue(const std::optional<float>& value, const char* name) {
+  if (value.has_value() && (!std::isfinite(*value) || *value < 0.0F)) {
+    throw std::invalid_argument(std::string("HuxerUI frame ") + name + " must be finite and non-negative");
+  }
+}
+
+void ValidateFrameConstraints(const detail::ViewStyle::FrameConstraints& frame) {
+  ValidateFrameValue(frame.width, "width");
+  ValidateFrameValue(frame.height, "height");
+  ValidateFrameValue(frame.min_width, "minimum width");
+  ValidateFrameValue(frame.max_width, "maximum width");
+  ValidateFrameValue(frame.min_height, "minimum height");
+  ValidateFrameValue(frame.max_height, "maximum height");
+  if (frame.min_width.has_value() && frame.max_width.has_value() && *frame.min_width > *frame.max_width) {
+    throw std::invalid_argument("HuxerUI frame minimum width must not exceed maximum width");
+  }
+  if (frame.min_height.has_value() && frame.max_height.has_value() && *frame.min_height > *frame.max_height) {
+    throw std::invalid_argument("HuxerUI frame minimum height must not exceed maximum height");
+  }
+}
+
 void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
-  spec.style.width = modifier.width;
-  spec.style.height = modifier.height;
+  detail::ViewStyle::FrameConstraints frame = spec.style.frame;
+  if (modifier.width.has_value()) {
+    frame.width = modifier.width;
+  }
+  if (modifier.height.has_value()) {
+    frame.height = modifier.height;
+  }
+  if (modifier.min_width.has_value()) {
+    frame.min_width = modifier.min_width;
+  }
+  if (modifier.max_width.has_value()) {
+    frame.max_width = modifier.max_width;
+  }
+  if (modifier.min_height.has_value()) {
+    frame.min_height = modifier.min_height;
+  }
+  if (modifier.max_height.has_value()) {
+    frame.max_height = modifier.max_height;
+  }
+  ValidateFrameConstraints(frame);
+  spec.style.frame = std::move(frame);
 }
 
 void ApplyCornerRadius(detail::ViewSpec& spec, const CornerRadius& modifier) {
@@ -353,8 +393,8 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     const CheckboxStyle style =
         ResolveStyleOverride<CheckboxStyleKey>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), style);
-    spec.style.width = std::max(0.0F, style.size);
-    spec.style.height = std::max(0.0F, style.size);
+    spec.style.frame.width = std::max(0.0F, style.size);
+    spec.style.frame.height = std::max(0.0F, style.size);
     spec.style.corner_radius = std::max(0.0F, style.corner_radius);
     return;
   }
@@ -362,8 +402,8 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     const SwitchStyle style =
         ResolveStyleOverride<SwitchStyleKey>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), style);
-    spec.style.width = std::max(0.0F, style.width);
-    spec.style.height = std::max(0.0F, style.height);
+    spec.style.frame.width = std::max(0.0F, style.width);
+    spec.style.frame.height = std::max(0.0F, style.height);
     spec.style.corner_radius = std::max(0.0F, style.corner_radius);
     return;
   }
@@ -371,8 +411,8 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     const ProgressCircleStyle style = ResolveStyleOverride<ProgressCircleStyleKey>(spec.environment)
                                           .value_or(detail::DefaultProgressCircleStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), style);
-    spec.style.width = std::max(0.0F, style.size);
-    spec.style.height = std::max(0.0F, style.size);
+    spec.style.frame.width = std::max(0.0F, style.size);
+    spec.style.frame.height = std::max(0.0F, style.size);
   }
 }
 
@@ -647,13 +687,18 @@ ScrollView::ScrollView(View content)
           MakeContainerSpec(detail::NodeKind::ScrollView, std::vector<View>{std::move(content)})
       ) {}
 
+ScrollView ScrollView::ScrollAxis(Axis axis) && {
+  SetLayoutValue(typeid(detail::ScrollAxisBinding), axis);
+  return std::move(*this);
+}
+
 ScrollView ScrollView::ScrollState(huxerui::ScrollState state) && {
   SetLayoutValue(typeid(detail::ScrollStateBinding), std::move(state));
   return std::move(*this);
 }
 
 VirtualList VirtualList::ScrollAxis(Axis axis) && {
-  SetLayoutValue(typeid(detail::VirtualListAxis), axis);
+  SetLayoutValue(typeid(detail::ScrollAxisBinding), axis);
   return std::move(*this);
 }
 

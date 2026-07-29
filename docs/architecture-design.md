@@ -155,7 +155,9 @@ new modifier type.
 Modifiers are processed from left to right, but the current property modifiers
 do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`,
 `FontSize`, alignment, spacing, and similar values apply directly to
-`ViewSpec`. A later modifier that writes the same property wins.
+`ViewSpec`. A later modifier that writes the same property wins. `Frame`
+merges only explicitly supplied width, height, minimum, and maximum fields so
+independent declarations can constrain separate axes.
 
 ```cpp
 view.With(
@@ -168,6 +170,27 @@ view.With(
 
 These declarations currently produce the same padding and background. They do
 not express inner and outer backgrounds.
+
+`Frame(width, height)` is the positional fixed-size form. Its six optional
+fields also support a single preferred axis and independent minimum or maximum
+bounds. The runtime validates local bounds when the modifier is applied, then
+intersects them with the parent `Constraints` before measuring content.
+Preferred dimensions collapse the resulting range to the closest permitted
+value. Frame constraints describe the outer node size, so Padding is deflated
+only after the frame range has been resolved.
+
+Grow is a parent layout policy rather than a frame constraint. Row and Column
+divide finite remaining main-axis space by grow factor and pass each grow
+child a tight allocation. An unbounded main axis has no remaining extent to
+divide, so Grow does not expand there.
+
+Flow uses the same public `Layout<Derived>` protocol as Row, Column, and Stack.
+It first measures children at their natural widths to form horizontal lines,
+then distributes finite remaining width among Grow children within each line.
+Main alignment is resolved separately per line, cross alignment applies within
+the line height, and the common Spacing value is used for both item and line
+gaps. An unbounded width produces one intrinsic-width line without Grow
+expansion.
 
 Retained modifiers such as `ScrollBar`, `Indication`, animated `Opacity`, and
 third-party modifiers with an extension preserve their relative order.

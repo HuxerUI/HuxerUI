@@ -260,9 +260,17 @@ enum class NodeKind {
 using ViewKey = std::variant<std::int64_t, std::uint64_t, std::string>;
 
 struct ViewStyle {
+  struct FrameConstraints {
+    std::optional<float> width;
+    std::optional<float> height;
+    std::optional<float> min_width;
+    std::optional<float> max_width;
+    std::optional<float> min_height;
+    std::optional<float> max_height;
+  };
+
   EdgeInsets padding;
-  std::optional<float> width;
-  std::optional<float> height;
+  FrameConstraints frame;
   std::optional<Color> background;
   std::optional<Color> foreground;
   std::optional<float> font_size;

@@ -527,6 +527,13 @@ public:
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };
 
+class Flow final : public Layout<Flow> {
+public:
+  using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+};
+
 class Stack final : public Layout<Stack> {
 public:
   using Layout::Layout;
@@ -538,6 +545,7 @@ class ScrollView final : public detail::TypedView<ScrollView> {
 public:
   explicit ScrollView(View content);
 
+  ScrollView ScrollAxis(Axis axis) &&;
   ScrollView ScrollState(huxerui::ScrollState state) &&;
 };
 

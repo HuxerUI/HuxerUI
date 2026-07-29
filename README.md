@@ -13,7 +13,7 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 - `UseState()` identity based on call site and occurrence
 - `Views`, data-driven `ForEach`, virtualized lists, and virtualized grids
 - Reconciliation between transient `ViewSpec` objects and persistent `MountedNode` objects
-- `Column`, `Row`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, `Button`, `Checkbox`, `Switch`, and `ProgressCircle`
+- `Column`, `Row`, `Flow`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, `Button`, `Checkbox`, `Switch`, and `ProgressCircle`
 - Public `Layout<Derived>` extension API shared by built-in and custom layouts
 - Public `VirtualLayout<Derived>` extension API for custom virtualized containers
 - Typed built-in and component events with `On<Key>()`, `UseEvents()`, and `Emit<Key>()`
@@ -265,7 +265,19 @@ ScrollView {
 };
 ```
 
-`ScrollView` measures its content with vertically unbounded constraints. Scroll offsets, layout, clipping, hit testing, and pointer-drag scrolling live in the shared C++ layer. The macOS backend forwards mouse drags, trackpad input, and mouse-wheel input. A regular `ScrollView` mounts all of its content; use `VirtualList` for long lists.
+`ScrollView` is vertical by default and measures its content with an unbounded height. Select the horizontal axis when the content should instead have an unbounded width:
+
+```cpp
+ScrollView {
+    Row {
+        ForEach(items, [](const Item& item) {
+          return ItemCard(item).Key(item.id);
+        }),
+    },
+}.ScrollAxis(Axis::Horizontal);
+```
+
+Scroll offsets, layout, clipping, hit testing, and pointer-drag scrolling live in the shared C++ layer. The macOS backend forwards mouse drags, trackpad input, and mouse-wheel input. A regular `ScrollView` mounts all of its content; use `VirtualList` for long lists.
 
 `VirtualList` is vertical by default. Omit the item extent when items should use their natural height:
 
@@ -432,6 +444,38 @@ Row {
 };
 ```
 
+Grow requires a bounded main axis because an unbounded container has no finite remaining space to distribute. A vertical `Column` inside a vertical `ScrollView`, for example, keeps the intrinsic heights of its children instead of expanding Grow nodes.
+
+`Frame(width, height)` remains the compact fixed-size form. Either axis can be omitted, and minimum or maximum constraints can be supplied independently:
+
+```cpp
+Card().With(Frame{.width = 320.0F});
+
+Content().With(Frame{
+    .min_width = 240.0F,
+    .max_width = 640.0F,
+    .min_height = 48.0F,
+});
+```
+
+Frame dimensions include Padding. Local minimum and maximum values are intersected with the constraints supplied by the parent, so a child never escapes a tighter parent. When a preferred width or height is also present, it is clamped to the resolved range. Values must be finite and non-negative, and a minimum cannot exceed its corresponding maximum.
+
+`Flow` lays children out horizontally and starts a new line when the next child would exceed the available width:
+
+```cpp
+Flow {
+    Chip("Android"),
+    Chip("macOS"),
+    Chip("Windows"),
+}.With(
+    Spacing(8.0F),
+    MainAlign(MainAxisAlignment::Start),
+    CrossAlign(CrossAxisAlignment::Center)
+);
+```
+
+Spacing is used both between items and between lines. Main alignment is resolved independently for each line, while cross alignment positions children within their line. Grow factors divide the remaining width of the line in which each child was placed. With unbounded width, Flow stays on one line and Grow nodes keep their intrinsic widths.
+
 The main axis supports `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, and `SpaceEvenly`. The cross axis supports `Start`, `Center`, `End`, and `Stretch`. `Stack` uses horizontal and vertical alignment:
 
 ```cpp
@@ -440,14 +484,14 @@ Stack {
 }.With(Align(HorizontalAlignment::Center,  VerticalAlignment::Center));
 ```
 
-`Row`, `Column`, and `Stack` use the same public layout protocol as application-defined layouts. A custom layout derives from `Layout<Derived>` and implements a static `Measure` function:
+`Row`, `Column`, `Flow`, and `Stack` use the same public layout protocol as application-defined layouts. A custom layout derives from `Layout<Derived>` and implements a static `Measure` function:
 
 ```cpp
-class Flow final : public Layout<Flow> {
+class SimpleRowLayout final : public Layout<SimpleRowLayout> {
 public:
   using Layout::Layout;
 
-  Flow Gap(float value) && {
+  SimpleRowLayout Gap(float value) && {
     return std::move(*this).With(Spacing(value));
   }
 
@@ -523,7 +567,8 @@ The root node fills the window viewport. Text nodes calculate multiline height f
 
 `With()` processes modifiers from left to right. Property modifiers such as
 `Padding`, `Frame`, and `Background` write directly to `ViewSpec`, so a later
-write to the same property wins and changing the order of unrelated property
+write to the same property wins. Each `Frame` only replaces the dimensions or
+bounds it explicitly provides. Changing the order of unrelated property
 modifiers does not create wrapper semantics. Retained modifiers such as
 `ScrollBar`, `Indication`, animated presentation modifiers, and third-party
 `NodeExtension` modifiers keep declaration order and preserve compatible
@@ -801,7 +846,7 @@ Windows:
 
 - Local measurement, layout, and paint invalidation
 - Composite key paths
-- Minimum and maximum frames, layout priority, and intrinsic-size queries
+- Layout priority and intrinsic-size queries
 - General-purpose clipping modifiers
 - Event capture/bubbling and explicit user-controlled pointer capture
 - IME, editable text input, and text selection

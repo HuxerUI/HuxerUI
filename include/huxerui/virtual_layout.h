@@ -181,7 +181,7 @@ template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorF
   return descriptor;
 }
 
-struct VirtualListAxis {
+struct ScrollAxisBinding {
   using Value = Axis;
 };
 

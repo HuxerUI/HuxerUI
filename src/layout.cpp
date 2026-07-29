@@ -54,19 +54,51 @@ float ResolveFontSize(const MountedNode& node) {
   );
 }
 
+std::pair<float, float> ResolveAxisConstraints(
+    float parent_min,
+    float parent_max,
+    std::optional<float> preferred,
+    std::optional<float> local_min,
+    std::optional<float> local_max
+) {
+  const float requested_min = local_min.value_or(0.0F);
+  const float requested_max = local_max.value_or(std::numeric_limits<float>::infinity());
+  float resolved_min = std::max(parent_min, requested_min);
+  float resolved_max = std::min(parent_max, requested_max);
+  if (resolved_min > resolved_max) {
+    const float parent_edge = requested_max < parent_min ? parent_min : parent_max;
+    resolved_min = parent_edge;
+    resolved_max = parent_edge;
+  }
+  if (preferred.has_value()) {
+    const float value = std::clamp(*preferred, resolved_min, resolved_max);
+    resolved_min = value;
+    resolved_max = value;
+  }
+  return {resolved_min, resolved_max};
+}
+
 Constraints ResolveConstraints(const ViewStyle& style, const Constraints& constraints) {
-  Constraints resolved = constraints;
-  if (style.width.has_value()) {
-    const float width = std::clamp(std::max(0.0F, *style.width), constraints.min_width, constraints.max_width);
-    resolved.min_width = width;
-    resolved.max_width = width;
-  }
-  if (style.height.has_value()) {
-    const float height = std::clamp(std::max(0.0F, *style.height), constraints.min_height, constraints.max_height);
-    resolved.min_height = height;
-    resolved.max_height = height;
-  }
-  return resolved;
+  const auto [min_width, max_width] = ResolveAxisConstraints(
+      constraints.min_width,
+      constraints.max_width,
+      style.frame.width,
+      style.frame.min_width,
+      style.frame.max_width
+  );
+  const auto [min_height, max_height] = ResolveAxisConstraints(
+      constraints.min_height,
+      constraints.max_height,
+      style.frame.height,
+      style.frame.min_height,
+      style.frame.max_height
+  );
+  return {
+      min_width,
+      max_width,
+      min_height,
+      max_height,
+  };
 }
 
 Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, MeasureEnvironment& environment) {
@@ -78,18 +110,29 @@ Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, Measur
 
 Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, MeasureEnvironment& environment) {
   if (node.children.empty()) {
+    node.scroll->content_width = 0.0F;
     node.scroll->content_height = 0.0F;
     return constraints.Constrain({});
   }
 
-  const Constraints child_constraints{
-      constraints.min_width,
-      constraints.max_width,
-      0.0F,
-      std::numeric_limits<float>::infinity(),
-  };
+  const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const Constraints child_constraints =
+      vertical
+          ? Constraints{
+                constraints.min_width,
+                constraints.max_width,
+                0.0F,
+                std::numeric_limits<float>::infinity(),
+            }
+          : Constraints{
+                0.0F,
+                std::numeric_limits<float>::infinity(),
+                constraints.min_height,
+                constraints.max_height,
+            };
   const Size child_size =
       MeasureNode(*node.children.front(), child_constraints, *environment.platform, *environment.runtime);
+  node.scroll->content_width = child_size.width;
   node.scroll->content_height = child_size.height;
   return constraints.Constrain(child_size);
 }
@@ -168,6 +211,9 @@ Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints con
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost& platform, Runtime& runtime) {
   MeasureEnvironment environment{&platform, &runtime};
+  if (node.kind == NodeKind::ScrollView) {
+    node.scroll->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
+  }
   if (IsScrollContainer(node)) {
     PrepareScrollState(node, runtime);
   }
@@ -297,17 +343,19 @@ void LayoutNode(MountedNode& node, Point origin) {
       LayoutNode(*child, content_origin);
     }
     break;
-  case NodeKind::ScrollView:
+  case NodeKind::ScrollView: {
+    const bool vertical = ScrollAxis(node) == Axis::Vertical;
     for (auto& child : node.children) {
       LayoutNode(
           *child,
           {
-              content_origin.x,
-              content_origin.y - node.scroll->offset_y,
+              content_origin.x - (vertical ? 0.0F : node.scroll->offset_x),
+              content_origin.y - (vertical ? node.scroll->offset_y : 0.0F),
           }
       );
     }
     break;
+  }
   case NodeKind::VirtualLayout: {
     const bool vertical = ScrollAxis(node) == Axis::Vertical;
     const float scroll_offset = vertical ? node.scroll->offset_y : node.scroll->offset_x;
@@ -1049,16 +1097,15 @@ struct AxisPlacement {
   float gap = 0.0F;
 };
 
-AxisPlacement ResolveAxisPlacement(const MountedNode& node, float available, bool vertical) {
-  AxisPlacement result{0.0F, node.Spacing()};
-  const std::size_t count = node.ChildCount();
+AxisPlacement
+ResolveAxisPlacement(MainAxisAlignment alignment, float spacing, std::size_t count, float used, float available) {
+  AxisPlacement result{0.0F, spacing};
   if (count == 0) {
     return result;
   }
 
-  const float used = SumMainSizes(node, vertical) + TotalSpacing(node);
   const float remaining = std::max(0.0F, available - used);
-  switch (node.MainAlignment()) {
+  switch (alignment) {
   case MainAxisAlignment::Center:
     result.leading = remaining * 0.5F;
     break;
@@ -1082,6 +1129,109 @@ AxisPlacement ResolveAxisPlacement(const MountedNode& node, float available, boo
     break;
   }
   return result;
+}
+
+AxisPlacement ResolveAxisPlacement(const MountedNode& node, float available, bool vertical) {
+  return ResolveAxisPlacement(
+      node.MainAlignment(),
+      node.Spacing(),
+      node.ChildCount(),
+      SumMainSizes(node, vertical) + TotalSpacing(node),
+      available
+  );
+}
+
+struct FlowLine {
+  std::vector<MountedNode*> children;
+  float natural_width = 0.0F;
+  float height = 0.0F;
+  float total_grow = 0.0F;
+};
+
+AxisPlacement ResolveFlowLinePlacement(const MountedNode& node, const FlowLine& line, float available) {
+  const std::size_t count = line.children.size();
+  float used = count < 2 ? 0.0F : node.Spacing() * static_cast<float>(count - 1);
+  for (const MountedNode* child : line.children) {
+    used += child->MeasuredSize().width;
+  }
+  return ResolveAxisPlacement(node.MainAlignment(), node.Spacing(), count, used, available);
+}
+
+std::vector<FlowLine>
+BuildFlowLines(LayoutContext& context, MountedNode& node, const Constraints& loose, float maximum_width) {
+  std::vector<FlowLine> lines;
+  FlowLine current;
+  const bool bounded = std::isfinite(maximum_width);
+  for (MountedNode& child : node.Children()) {
+    const Size size = context.Measure(child, loose);
+    const float candidate = current.children.empty() ? size.width : current.natural_width + node.Spacing() + size.width;
+    if (bounded && !current.children.empty() && candidate > maximum_width) {
+      lines.push_back(std::move(current));
+      current = {};
+    }
+    if (!current.children.empty()) {
+      current.natural_width += node.Spacing();
+    }
+    current.children.push_back(&child);
+    current.natural_width += size.width;
+    current.height = std::max(current.height, size.height);
+    current.total_grow += child.GrowFactor();
+  }
+  if (!current.children.empty()) {
+    lines.push_back(std::move(current));
+  }
+  return lines;
+}
+
+float ResolveFlowWidth(const MountedNode& node, const std::vector<FlowLine>& lines, const Constraints& constraints) {
+  float natural_width = 0.0F;
+  bool has_grow = false;
+  for (const FlowLine& line : lines) {
+    natural_width = std::max(natural_width, line.natural_width);
+    has_grow = has_grow || line.total_grow > 0.0F;
+  }
+  if (std::isfinite(constraints.max_width) && (has_grow || node.MainAlignment() != MainAxisAlignment::Start)) {
+    return constraints.max_width;
+  }
+  return constraints.ConstrainWidth(natural_width);
+}
+
+void MeasureFlowLine(
+    LayoutContext& context, const MountedNode& node, FlowLine& line, const Constraints& loose, float width
+) {
+  const float spacing = node.Spacing() * static_cast<float>(line.children.size() - 1);
+  float fixed_width = 0.0F;
+  for (const MountedNode* child : line.children) {
+    if (child->GrowFactor() <= 0.0F) {
+      fixed_width += child->MeasuredSize().width;
+    }
+  }
+
+  if (line.total_grow > 0.0F && std::isfinite(width)) {
+    const float remaining = std::max(0.0F, width - fixed_width - spacing);
+    for (MountedNode* child : line.children) {
+      if (child->GrowFactor() <= 0.0F) {
+        continue;
+      }
+      const float share = remaining * child->GrowFactor() / line.total_grow;
+      static_cast<void>(context.Measure(*child, loose.TightWidth(share)));
+    }
+  }
+
+  line.height = 0.0F;
+  for (const MountedNode* child : line.children) {
+    line.height = std::max(line.height, child->MeasuredSize().height);
+  }
+  if (node.CrossAlignment() != CrossAxisAlignment::Stretch) {
+    return;
+  }
+  for (MountedNode* child : line.children) {
+    Constraints child_constraints = loose.TightHeight(line.height);
+    if (child->GrowFactor() > 0.0F && line.total_grow > 0.0F && std::isfinite(width)) {
+      child_constraints = child_constraints.TightWidth(child->MeasuredSize().width);
+    }
+    static_cast<void>(context.Measure(*child, child_constraints));
+  }
 }
 
 LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constraints constraints, bool vertical) {
@@ -1163,7 +1313,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
 } // namespace
 
 VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints) {
-  const Axis axis = node.LayoutValueOr<detail::VirtualListAxis>(Axis::Vertical);
+  const Axis axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   const bool vertical = axis == Axis::Vertical;
   if ((vertical && !constraints.HasBoundedHeight()) || (!vertical && !constraints.HasBoundedWidth())) {
     throw std::logic_error("HuxerUI VirtualList requires bounded constraints on its scroll axis");
@@ -1464,6 +1614,41 @@ LayoutResult Column::Measure(LayoutContext& context, MountedNode& node, Constrai
 
 LayoutResult Row::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
   return MeasureAxisLayout(context, node, constraints, false);
+}
+
+LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  const Constraints loose = constraints.Loose();
+  std::vector<FlowLine> lines = BuildFlowLines(context, node, loose, constraints.max_width);
+  const float width = ResolveFlowWidth(node, lines, constraints);
+  float content_height = 0.0F;
+  for (FlowLine& line : lines) {
+    MeasureFlowLine(context, node, line, loose, width);
+    content_height += line.height;
+  }
+  if (lines.size() > 1) {
+    content_height += node.Spacing() * static_cast<float>(lines.size() - 1);
+  }
+  const float height = constraints.ConstrainHeight(content_height);
+
+  LayoutResult result;
+  float y = 0.0F;
+  for (const FlowLine& line : lines) {
+    const AxisPlacement placement = ResolveFlowLinePlacement(node, line, width);
+    float x = placement.leading;
+    for (MountedNode* child : line.children) {
+      result.Place(
+          *child,
+          {
+              x,
+              y + CrossOffset(line.height, child->MeasuredSize().height, node.CrossAlignment()),
+          }
+      );
+      x += child->MeasuredSize().width + placement.gap;
+    }
+    y += line.height + node.Spacing();
+  }
+  result.SetSize({width, height});
+  return result;
 }
 
 LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {

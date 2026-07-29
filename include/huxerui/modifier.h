@@ -237,8 +237,12 @@ struct FontSize {
 struct Frame {
   static const detail::ModifierDescriptor& Descriptor();
 
-  float width;
-  float height;
+  std::optional<float> width;
+  std::optional<float> height;
+  std::optional<float> min_width;
+  std::optional<float> max_width;
+  std::optional<float> min_height;
+  std::optional<float> max_height;
 };
 
 struct CornerRadius {
