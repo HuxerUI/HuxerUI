@@ -624,6 +624,9 @@ cmake --build build --config Debug --parallel
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
+Unit tests use the vendored Catch2 sources under `3dparty`, so configuring and
+building the test targets does not require downloading dependencies.
+
 The Windows backend targets Windows 10 and later.
 
 Android provides `HuxerUIActivity` for full-screen applications and

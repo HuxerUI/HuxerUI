@@ -4,15 +4,27 @@ else ()
     set(HUXERUI_TEST_LIBRARY HuxerUI::huxerui)
 endif ()
 
+include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
+
 add_executable(huxerui_tests
-        runtime_tests.cpp
+        tests_main.cpp
+        runtime/composition.cpp
+        runtime/interaction.cpp
+        runtime/layout.cpp
+        runtime/presentation.cpp
+        runtime/scrolling.cpp
+        runtime/virtual_layout.cpp
 )
 
 target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
 
-target_link_libraries(huxerui_tests PRIVATE ${HUXERUI_TEST_LIBRARY})
+target_link_libraries(huxerui_tests PRIVATE
+        HuxerUI3p::Catch2
+        ${HUXERUI_TEST_LIBRARY}
+)
 
 add_test(NAME HuxerUIRuntimeTests COMMAND huxerui_tests)
 
@@ -57,20 +69,18 @@ foreach (HUXERUI_PUBLIC_HEADER IN LISTS HUXERUI_PUBLIC_HEADERS)
     )
 endforeach ()
 
-add_executable(huxerui_header_tests
-        header_compile_tests.cpp
+add_library(huxerui_header_checks OBJECT
         ${HUXERUI_HEADER_TEST_SOURCES}
 )
 
 target_link_libraries(
-        huxerui_header_tests
+        huxerui_header_checks
         PRIVATE ${HUXERUI_TEST_LIBRARY}
 )
 
-add_test(NAME HuxerUIHeaderTests COMMAND huxerui_header_tests)
-
 add_executable(huxerui_codegen_tests
-        codegen_tests.cpp
+        tests_main.cpp
+        codegen/transform.cpp
         "${HUXERUI_PROJECT_DIR}/tools/codegen/transform.cpp"
 )
 
@@ -86,10 +96,13 @@ target_compile_options(huxerui_codegen_tests PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
 )
 
+target_link_libraries(huxerui_codegen_tests PRIVATE HuxerUI3p::Catch2)
+
 add_test(NAME HuxerUICodegenTests COMMAND huxerui_codegen_tests)
 
 add_executable(huxerui_codegen_runtime_tests
-        codegen_runtime_tests.cpp
+        tests_main.cpp
+        codegen/runtime.cpp
 )
 
 target_include_directories(huxerui_codegen_runtime_tests PRIVATE
@@ -98,10 +111,11 @@ target_include_directories(huxerui_codegen_runtime_tests PRIVATE
 
 target_link_libraries(
         huxerui_codegen_runtime_tests
-        PRIVATE ${HUXERUI_TEST_LIBRARY}
+        PRIVATE
+        HuxerUI3p::Catch2
+        ${HUXERUI_TEST_LIBRARY}
 )
 
-huxerui_enable_codegen(huxerui_codegen_runtime_tests)
 huxerui_enable_codegen(huxerui_codegen_runtime_tests)
 
 add_test(

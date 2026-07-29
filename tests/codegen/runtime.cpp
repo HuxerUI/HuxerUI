@@ -1,9 +1,9 @@
 #include <huxerui/huxerui.h>
 
+#include <catch2/catch_amalgamated.hpp>
+
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <iostream>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -32,23 +32,16 @@ public:
     return 0.0;
   }
 
-  Size MeasureText(
-      std::string_view text,
-      float font_size,
-      float max_width) override {
+  Size MeasureText(std::string_view text, float font_size, float max_width) override {
     static_cast<void>(font_size);
-    const float natural_width =
-        static_cast<float>(text.size()) * 10.0F;
+    const float natural_width = static_cast<float>(text.size()) * 10.0F;
     if (!std::isfinite(max_width)) {
       return {natural_width, 20.0F};
     }
     if (max_width <= 0.0F) {
       return {};
     }
-    const float line_count =
-        std::max(
-            1.0F,
-            std::ceil(natural_width / max_width));
+    const float line_count = std::max(1.0F, std::ceil(natural_width / max_width));
     return {
         std::min(natural_width, max_width),
         line_count * 20.0F,
@@ -73,39 +66,18 @@ View GeneratedApp() {
   return GeneratedCounter(3);
 }
 
-[[nodiscard]] std::string FirstText(
-    const DisplayList& display_list) {
-  for (const auto& command : display_list.Commands()) {
-    if (const auto* text =
-            std::get_if<DrawTextCommand>(&command)) {
+[[nodiscard]] std::string FirstText(const DisplayList &display_list) {
+  for (const auto &command : display_list.Commands()) {
+    if (const auto *text = std::get_if<DrawTextCommand>(&command)) {
       return text->text;
     }
   }
   return {};
 }
 
-void Check(
-    bool condition,
-    std::string_view expression,
-    int line) {
-  if (condition) {
-    return;
-  }
-  std::cerr
-      << "Check failed at line "
-      << line
-      << ": "
-      << expression
-      << '\n';
-  std::exit(1);
-}
+} // namespace
 
-#define HUXERUI_CODEGEN_CHECK(expression) \
-  Check((expression), #expression, __LINE__)
-
-}  // namespace
-
-int main() {
+TEST_CASE("Generated scopes run in Runtime") {
   TestPlatform platform;
   Runtime runtime{
       {.root_factory = GeneratedApp},
@@ -113,15 +85,12 @@ int main() {
   };
   runtime.SetViewport({320.0F, 240.0F});
 
-  HUXERUI_CODEGEN_CHECK(
-      FirstText(runtime.BuildFrame()) == "3");
-  HUXERUI_CODEGEN_CHECK(generated_compositions == 1);
-  HUXERUI_CODEGEN_CHECK(generated_count.IsValid());
+  REQUIRE(FirstText(runtime.BuildFrame()) == "3");
+  REQUIRE(generated_compositions == 1);
+  REQUIRE(generated_count.IsValid());
 
   generated_count = 8;
-  HUXERUI_CODEGEN_CHECK(platform.requested_frames > 0);
-  HUXERUI_CODEGEN_CHECK(
-      FirstText(runtime.BuildFrame()) == "8");
-  HUXERUI_CODEGEN_CHECK(generated_compositions == 2);
-  return 0;
+  REQUIRE(platform.requested_frames > 0);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "8");
+  REQUIRE(generated_compositions == 2);
 }
