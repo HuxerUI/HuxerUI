@@ -278,11 +278,12 @@ public:
     platform_.Render(environment, canvas, runtime_.BuildFrame());
   }
 
-  void Pointer(PointerEventType type, std::int64_t pointer_id, float x, float y) {
+  void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y) {
     runtime_.HandlePointerEvent({
         type,
         pointer_id,
         {x, y},
+        device_kind,
     });
   }
 
@@ -356,11 +357,12 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeDraw(JNIEnv
 }
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(JNIEnv *environment, jclass, jlong handle,
-                                                                             jint type, jlong pointer_id, jfloat x,
-                                                                             jfloat y) {
+                                                                             jint type, jint device_kind,
+                                                                             jlong pointer_id, jfloat x, jfloat y) {
   try {
     if (auto *session = huxerui::detail::Session(handle)) {
-      session->Pointer(static_cast<huxerui::PointerEventType>(type), pointer_id, x, y);
+      session->Pointer(static_cast<huxerui::PointerEventType>(type),
+                       static_cast<huxerui::PointerDeviceKind>(device_kind), pointer_id, x, y);
     }
   } catch (const std::exception &exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

@@ -16,7 +16,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=c++_static",
+                arguments "-DANDROID_STL=c++_shared",
                         "-DHUXERUI_ROOT_DIR=${rootProject.projectDir.parentFile.parentFile.absolutePath}"
             }
         }

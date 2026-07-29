@@ -13,7 +13,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=c++_static",
+                arguments "-DANDROID_STL=c++_shared",
                         "-DHUXERUI_BUILD_SHARED=ON",
                         "-DHUXERUI_BUILD_STATIC=OFF",
                         "-DHUXERUI_BUILD_TESTS=OFF",

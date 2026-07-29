@@ -842,6 +842,25 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
   });
   const DisplayList &outside = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(outside, hover) == nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      102,
+      {20.0F, 20.0F},
+      huxerui::PointerDeviceKind::Touch,
+  });
+  const DisplayList &touch_down = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(touch_down, pressed) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      102,
+      {20.0F, 20.0F},
+      huxerui::PointerDeviceKind::Touch,
+  });
+  const DisplayList &touch_released = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(touch_released, pressed) == nullptr);
+  REQUIRE(FindRectWithColor(touch_released, hover) == nullptr);
 }
 
 TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {

@@ -32,6 +32,11 @@ float PointerDelta(Point previous, Point current, Axis axis) {
                                 : previous.x - current.x;
 }
 
+bool SupportsHover(PointerDeviceKind device_kind) {
+  return device_kind == PointerDeviceKind::Mouse ||
+         device_kind == PointerDeviceKind::Pen;
+}
+
 void SetScrollGesture(MountedNode &node, bool active) {
   for (MountedModifierEntry &entry : node.modifiers) {
     if (entry.mounted) {
@@ -321,7 +326,9 @@ void Runtime::HandlePointerMove(
     const PointerEvent &event) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured == state_->pointer_sessions_.end()) {
-    UpdateHoveredModifier(event.position);
+    if (SupportsHover(event.device_kind)) {
+      UpdateHoveredModifier(event.position);
+    }
     if (detail::MountedNode *target =
             HitTestPointer(*state_->mounted_root_, event.position);
         target && target->enabled) {
@@ -446,7 +453,8 @@ void Runtime::HandlePointerMove(
 
 void Runtime::HandlePointerCancel(
     const PointerEvent &event) {
-  if (state_->hovered_modifier_.has_value()) {
+  if (SupportsHover(event.device_kind) &&
+      state_->hovered_modifier_.has_value()) {
     const ModifierPointerCapture hovered =
         *state_->hovered_modifier_;
     if (MountedModifier *modifier =
@@ -504,7 +512,9 @@ void Runtime::HandlePointerUp(
       EmitEvent<ViewEvents::PointerUp>(
           target->event_bindings, event);
     }
-    UpdateHoveredModifier(event.position);
+    if (SupportsHover(event.device_kind)) {
+      UpdateHoveredModifier(event.position);
+    }
     return;
   }
 
@@ -524,7 +534,9 @@ void Runtime::HandlePointerUp(
     }
     ReleaseScrollGesture(captured->second);
     state_->pointer_sessions_.erase(captured);
-    UpdateHoveredModifier(event.position);
+    if (SupportsHover(event.device_kind)) {
+      UpdateHoveredModifier(event.position);
+    }
     RequestFrame();
     return;
   }
@@ -535,7 +547,9 @@ void Runtime::HandlePointerUp(
       captured->second.drag_axis.has_value();
   ReleaseScrollGesture(captured->second);
   state_->pointer_sessions_.erase(captured);
-  UpdateHoveredModifier(event.position);
+  if (SupportsHover(event.device_kind)) {
+    UpdateHoveredModifier(event.position);
+  }
   if (was_dragging || !identity.has_value()) {
     return;
   }

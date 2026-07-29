@@ -26,6 +26,10 @@ public final class HuxerUIView extends View {
     private static final int POINTER_MOVE = 2;
     private static final int POINTER_CANCEL = 3;
 
+    private static final int POINTER_DEVICE_MOUSE = 0;
+    private static final int POINTER_DEVICE_TOUCH = 1;
+    private static final int POINTER_DEVICE_PEN = 2;
+
     private static final int TEXT_ALIGN_CENTER = 1;
     private static final int STROKE_CAP_ROUND = 1;
     private static final int STROKE_CAP_SQUARE = 2;
@@ -186,8 +190,19 @@ public final class HuxerUIView extends View {
     }
 
     private void sendPointer(MotionEvent event, int index, int type) {
-        nativePointer(nativeHandle, type, event.getPointerId(index), event.getX(index) / density,
-                event.getY(index) / density);
+        nativePointer(nativeHandle, type, pointerDeviceKind(event, index), event.getPointerId(index),
+                event.getX(index) / density, event.getY(index) / density);
+    }
+
+    private int pointerDeviceKind(MotionEvent event, int index) {
+        int toolType = event.getToolType(index);
+        if (toolType == MotionEvent.TOOL_TYPE_MOUSE) {
+            return POINTER_DEVICE_MOUSE;
+        }
+        if (toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER) {
+            return POINTER_DEVICE_PEN;
+        }
+        return POINTER_DEVICE_TOUCH;
     }
 
     private void sendKey(KeyEvent event, boolean down) {
@@ -354,7 +369,7 @@ public final class HuxerUIView extends View {
 
     private static native void nativeDraw(long handle, Canvas canvas);
 
-    private static native void nativePointer(long handle, int type, long pointerId, float x, float y);
+    private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y);
 
     private static native void nativeScroll(long handle, float x, float y, float deltaX, float deltaY);
 

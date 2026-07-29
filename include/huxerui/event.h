@@ -20,10 +20,17 @@ enum class PointerEventType {
   Cancel,
 };
 
+enum class PointerDeviceKind {
+  Mouse,
+  Touch,
+  Pen,
+};
+
 struct PointerEvent {
   PointerEventType type = PointerEventType::Move;
   std::int64_t pointer_id = 0;
   Point position;
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
 };
 
 struct ScrollEvent {
