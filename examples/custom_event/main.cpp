@@ -23,11 +23,8 @@ auto Counter(int value) {
 View App() {
   auto toast = UseToast();
   return Column {
-      Counter(1)
-        .On<CounterEvents::CountChanged>([toast](int count) {
-          toast.Show(std::format("count: {}", count));
-        })
-  }.With(Padding{32.0F});
+    Counter(1).On<CounterEvents::CountChanged>([toast](int count) { toast.Show(std::format("count: {}", count)); })
+  }.With(Padding(32.0F));
 }
 
 HUXERUI_APP(
@@ -36,5 +33,6 @@ HUXERUI_APP(
         .title = "HuxerUI Custom Event",
         .width = 520.0F,
         .height = 360.0F,
-        .root_hooks = {InstallToast()},
-    })
+        .root_hooks = { InstallToast() },
+    }
+)

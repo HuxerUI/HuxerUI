@@ -41,18 +41,18 @@ using namespace huxerui;
 View Counter() {
   auto count = UseState(1);
 
-  return Column{
-      Text(count),
-      Button("+1").OnClick([count] {
-        count += 1;
-      }),
-  }.With(Spacing{16.0F});
+  return Column {
+    Text(count),
+    Button("+1").OnClick([count] {
+      count += 1;
+    }),
+  }.With(Spacing(16.0F));
 }
 
 View App() {
-  return Column{
-      Counter(),
-  }.With(Padding{32.0F});
+  return Column {
+    Counter(),
+  }.With(Padding(32.0F));
 }
 
 HUXERUI_APP(App, {})
@@ -72,7 +72,8 @@ HUXERUI_APP(
         .title = "My App",
         .width = 720.0F,
         .height = 480.0F,
-    })
+    }
+)
 ```
 
 Enable build-time scope generation for each target that contains marked components:
@@ -132,17 +133,17 @@ over the same mounted target. Captures safely expire when their target
 unmounts.
 
 Button, Checkbox, and Switch participate in focus traversal automatically.
-Custom interactive Views opt in with `Focusable{}`. Tab and Shift+Tab traverse
+Custom interactive Views opt in with `Focusable()`. Tab and Shift+Tab traverse
 enabled focusable nodes, while Enter and Space activate any focused View with
 `OnClick()` or built-in activation behavior:
 
 ```cpp
-Column{
+Column {
     Button("Save")
-        .With(Enabled{can_save})
+        .With(Enabled(can_save))
         .OnClick(Save),
     CustomControl()
-        .With(Focusable{})
+        .With(Focusable())
         .On<ViewEvents::FocusChanged>(HandleFocus)
         .On<ViewEvents::KeyDown>(HandleKey),
 };
@@ -157,7 +158,7 @@ the constructor, and `OnChanged(bool)` asks the owner to update that value:
 ```cpp
 auto checked = UseState(false);
 
-return Row{
+return Row {
     Checkbox(checked).OnChanged([checked](bool value) {
       checked = value;
     }),
@@ -189,7 +190,7 @@ static. `ProgressCircleStyleKey` controls its intrinsic size, stroke width,
 track and indicator colors, arc fraction, and animation duration. `Frame` can
 override the intrinsic size.
 
-`Enabled{false}` is inherited by the entire subtree. A disabled control remains
+`Enabled(false)` is inherited by the entire subtree. A disabled control remains
 a hit-test barrier, preventing input from falling through to content behind
 it, but it does not receive pointer, scroll, focus, or Click interaction.
 Modal Dialog layers trap focus in the topmost Dialog and restore the previous
@@ -211,7 +212,7 @@ When local component state changes, the runtime only recomposes scopes subscribe
 Keys are optional. Unkeyed siblings use their position and node type as identity, which is suitable for stable UI structures. Use stable keys when a dynamic list can insert, remove, or reorder nodes that need to retain local state:
 
 ```cpp
-Column{
+Column {
     UserCard(first).Key(first.id),
     UserCard(second).Key(second.id),
 }
@@ -224,12 +225,12 @@ Within a scope, `UseState()` identity combines the source call site with its occ
 `ForEach` uses a factory to transform a range into a collection of child nodes:
 
 ```cpp
-Column{
+Column {
     Text("Users"),
     ForEach(users, [](const User& user) {
       return UserRow(user).Key(user.id);
     }),
-}.With(Spacing{8.0F});
+}.With(Spacing(8.0F));
 ```
 
 `ForEach` can accept `State<Range>` directly; the framework handles state reads and dependency registration:
@@ -271,7 +272,7 @@ VirtualList(
     [](const Item& item) {
       return ItemRow(item).Key(item.id);
     })
-    .With(Spacing{8.0F});
+    .With(Spacing(8.0F));
 ```
 
 Set an item extent when every item has the same main-axis size and the fixed-size fast path is appropriate:
@@ -295,7 +296,7 @@ VirtualList(
     })
     .ScrollAxis(Axis::Horizontal)
     .ItemExtent(160.0F)
-    .With(Spacing{8.0F});
+    .With(Spacing(8.0F));
 ```
 
 `ItemExtent()` always refers to the scroll-axis size: height for a vertical list and width for a horizontal list. Dynamic lists can provide an initial estimate with `.EstimatedItemExtent()`. `.CacheExtent()` controls the extra pixel range mounted before and after the viewport.
@@ -314,7 +315,7 @@ VirtualGrid(
     })
     .Columns(GridColumns::Adaptive(160.0F))
     .RowExtent(120.0F)
-    .With(Spacing{8.0F});
+    .With(Spacing(8.0F));
 ```
 
 Use `GridColumns::Fixed(3)` for a fixed column count. Omit `RowExtent()` to measure each row naturally from its tallest item, and provide `EstimatedRowExtent()` when the default estimate is unsuitable. `RowSpacing()` and `ColumnSpacing()` override the common `Spacing` modifier value independently.
@@ -359,20 +360,23 @@ Opt-in overlay scrollbars are shared by `ScrollView`, built-in virtual container
 
 ```cpp
 VirtualList(items, factory).With(
-    ScrollBar{});
+    ScrollBar());
 
-ScrollView{content}.With(
-    ScrollBar{ScrollBarStyle{
-        .thickness = 8.0F,
-        .minimum_thumb_extent = 28.0F,
-        .margin = 4.0F,
-        .corner_radius = 4.0F,
-        .fade_in_duration = 0.12F,
-        .fade_out_delay = 0.7F,
-        .fade_out_duration = 0.22F,
-        .track_color = Color::Transparent(),
-        .thumb_color = Color::Rgb(120, 126, 136, 0.8F),
-    }});
+ScrollView { content }.With(
+    ScrollBar(
+        ScrollBarStyle {
+            .thickness = 8.0F,
+            .minimum_thumb_extent = 28.0F,
+            .margin = 4.0F,
+            .corner_radius = 4.0F,
+            .fade_in_duration = 0.12F,
+            .fade_out_delay = 0.7F,
+            .fade_out_duration = 0.22F,
+            .track_color = Color::Transparent(),
+            .thumb_color = Color::Rgb(120, 126, 136, 0.8F),
+        }
+    )
+);
 ```
 
 The scrollbar infers its axis, does not affect content layout, and is omitted when the content does not overflow. It fades out after inactivity and reappears while scrolling, hovering, or dragging. Its thumb can be dragged directly and takes pointer priority over content interactions while visible; a fully hidden scrollbar does not intercept content input. Fade timings are configurable through `ScrollBarStyle`. Track-page clicks, inertia, and overscroll effects are not yet implemented.
@@ -380,45 +384,43 @@ The scrollbar infers its axis, does not affect content layout, and is omitted wh
 Layout nodes use braces to express parent-child relationships, while individual controls use constructor calls:
 
 ```cpp
-Column{
+Column {
     Text("Title"),
-    Row{
+    Row {
         Button("Cancel"),
         Button("Confirm"),
-    }.With(Spacing{8.0F}),
+    }.With(Spacing(8.0F)),
 }
 ```
 
 `Row` and `Column` arrange children from the start of the main axis by default and preserve their intrinsic size on the cross axis. Main-axis distribution and cross-axis alignment can be configured explicitly:
 
 ```cpp
-Row{
+Row {
     Text("Status"),
     Spacer(),
     Button("Save"),
 }.With(
-    Spacing{8.0F},
-    CrossAlign{CrossAxisAlignment::Center});
+    Spacing(8.0F),
+    CrossAlign(CrossAxisAlignment::Center)
+);
 ```
 
-`Spacer()` has a default grow factor of 1. Other nodes can use `Grow{factor}` to receive a proportional share of the remaining space on the main axis:
+`Spacer()` has a default grow factor of 1. Other nodes can use `Grow(factor)` to receive a proportional share of the remaining space on the main axis:
 
 ```cpp
-Row{
-    Sidebar().With(Frame{240.0F, 600.0F}),
-    Content().With(Grow{}),
+Row {
+    Sidebar().With(Frame(240.0F, 600.0F)),
+    Content().With(Grow()),
 };
 ```
 
 The main axis supports `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, and `SpaceEvenly`. The cross axis supports `Start`, `Center`, `End`, and `Stretch`. `Stack` uses horizontal and vertical alignment:
 
 ```cpp
-Stack{
+Stack {
     Content(),
-}.With(Align{
-    HorizontalAlignment::Center,
-    VerticalAlignment::Center,
-});
+}.With(Align(HorizontalAlignment::Center,  VerticalAlignment::Center));
 ```
 
 `Row`, `Column`, and `Stack` use the same public layout protocol as application-defined layouts. A custom layout derives from `Layout<Derived>` and implements a static `Measure` function:
@@ -433,10 +435,7 @@ public:
     return std::move(*this);
   }
 
-  static LayoutResult Measure(
-      LayoutContext& context,
-      MountedNode& node,
-      Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
     LayoutResult result;
     float x = 0.0F;
     float height = 0.0F;
@@ -458,12 +457,10 @@ public:
 Custom layouts are used like built-in containers, and generic modifiers preserve their concrete type:
 
 ```cpp
-Flow{
+Flow {
     Tag("C++"),
     Tag("Runtime"),
-}
-    .With(Padding{12.0F})
-    .Gap(8.0F);
+}.With(Padding(12.0F)).Gap(8.0F);
 ```
 
 `LayoutContext::Measure()` recursively measures a child. `LayoutResult` records content size and relative child placements; the runtime applies padding and the final parent origin. `MountedNode::Cache<T>()` provides per-node layout cache storage. Typed `LayoutValue<Key>()` values let a parent layout read container-specific data from its children without adding every custom property to the global view style. Layout type participates in reconciliation, so different layout classes never reuse the same mounted node accidentally.
@@ -475,10 +472,7 @@ class VirtualStrip final : public VirtualLayout<VirtualStrip> {
 public:
   using VirtualLayout::VirtualLayout;
 
-  static VirtualLayoutResult Measure(
-      VirtualLayoutContext& context,
-      MountedNode& node,
-      Constraints constraints) {
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints) {
     constexpr float extent = 40.0F;
     const VirtualViewport viewport = context.Viewport();
     const std::size_t first =
@@ -530,26 +524,19 @@ View AccentTheme(Factory&& content) {
       .padding = EdgeInsets::Symmetric(16.0F, 8.0F),
       .corner_radius = 12.0F,
   });
-  return Theme(
-      std::move(definition),
-      std::forward<Factory>(content));
+  return Theme(std::move(definition), std::forward<Factory>(content));
 }
 
 auto App() {
   return HUXERUI_THEME(
       MaterialTheme,
-      Column{
+      Column {
           Text("Material", TextRole::Title),
-          HUXERUI_THEME(
-              AccentTheme,
-              Button("Nested override")),
-          HUXERUI_THEME(
-              MaterialDarkTheme,
-              Button("Nested Material dark theme")),
-          HUXERUI_THEME(
-              FlatTheme,
-              Button("Nested Flat boundary")),
-      });
+          HUXERUI_THEME(AccentTheme, Button("Nested override")),
+          HUXERUI_THEME(MaterialDarkTheme, Button("Nested Material dark theme")),
+          HUXERUI_THEME(FlatTheme, Button("Nested Flat boundary")),
+      }
+  );
 }
 ```
 
@@ -569,9 +556,7 @@ View BrandTheme(Factory&& content) {
   ThemeSpec theme = MaterialLightThemeSpec();
   theme.colors.primary = Color::Rgb(130, 80, 210);
   theme.colors.on_primary = Color::White();
-  return MaterialTheme(
-      std::move(theme),
-      std::forward<Factory>(content));
+  return MaterialTheme(std::move(theme), std::forward<Factory>(content));
 }
 ```
 

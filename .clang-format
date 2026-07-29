@@ -6,15 +6,20 @@ IndentWidth: 2
 ContinuationIndentWidth: 4
 UseTab: Never
 BreakBeforeBraces: Attach
-AlignAfterOpenBracket: Align
+AlignAfterOpenBracket: BlockIndent
 AlignEscapedNewlines: DontAlign
+AllowAllArgumentsOnNextLine: false
 AllowShortFunctionsOnASingleLine: Empty
-BinPackArguments: true
-BinPackParameters: true
+BinPackArguments: false
+BinPackParameters: OnePerLine
+BreakBeforeCloseBracketFunction: true
+Cpp11BracedListStyle: Block
 DerivePointerAlignment: false
-PointerAlignment: Right
+PointerAlignment: Left
+ReferenceAlignment: Left
 ReflowComments: false
 SortIncludes: Never
+SpaceBeforeCpp11BracedList: true
 ---
 Language: Java
 BasedOnStyle: Google
