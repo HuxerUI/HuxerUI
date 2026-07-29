@@ -240,6 +240,7 @@ Runtime::Runtime(
   RootContext root{
       state_->layer_controller_, state_->root_environment_values_,
       state_->root_service_types_, state_->root_services_};
+  InstallBuiltinPresentation(root);
   for (RootHook &hook : definition.options.root_hooks) {
     if (!hook) {
       throw std::invalid_argument(

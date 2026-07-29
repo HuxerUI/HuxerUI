@@ -80,7 +80,6 @@ private:
 };
 
 ToastHandle UseToast();
-RootHook InstallToast();
 
 struct DialogOptions {
   bool dismiss_on_outside_press = true;
@@ -131,7 +130,7 @@ private:
   std::shared_ptr<DialogService> service_;
   std::shared_ptr<const detail::EnvironmentFrame> environment_;
 
-  friend DialogHandle UseDialogs();
+  friend DialogHandle UseDialog();
 };
 
 class DialogService {
@@ -159,8 +158,7 @@ private:
   friend struct detail::DialogModifierAccess;
 };
 
-DialogHandle UseDialogs();
-RootHook InstallDialogs();
+DialogHandle UseDialog();
 
 struct Dialog {
   bool visible = false;

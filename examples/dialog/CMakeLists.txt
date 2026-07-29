@@ -1,5 +1,5 @@
 huxerui_add_example(
-        huxerui_dialog
+        example_dialog
         "HuxerUI Dialog"
         "com.huxerui.dialog"
 )

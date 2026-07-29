@@ -125,7 +125,7 @@ std::shared_ptr<DialogService> DialogServiceFor(
       typeid(ServiceEnvironmentKey<DialogService>));
   if (!value) {
     throw std::logic_error(
-        "HuxerUI Dialog modifier requires InstallDialogs()");
+        "HuxerUI dialog service is not available");
   }
   const auto *service =
       std::any_cast<std::shared_ptr<DialogService>>(value);
@@ -173,6 +173,13 @@ private:
 } // namespace
 
 namespace detail {
+
+void InstallBuiltinPresentation(RootContext &root) {
+  root.Provide(
+      std::make_shared<ToastService>(root.Layers()));
+  root.Provide(
+      std::make_shared<DialogService>(root.Layers()));
+}
 
 struct DialogModifierAccess {
   static LayerId Show(
@@ -290,13 +297,6 @@ ToastHandle UseToast() {
   };
 }
 
-RootHook InstallToast() {
-  return [](RootContext &root) {
-    root.Provide(
-        std::make_shared<ToastService>(root.Layers()));
-  };
-}
-
 LayerId DialogHandle::Show(
     ViewFactory content, DialogOptions options) const {
   return service_->Show(
@@ -387,17 +387,10 @@ bool DialogService::Dismiss(LayerId id) {
   return layers_.Dismiss(id);
 }
 
-DialogHandle UseDialogs() {
+DialogHandle UseDialog() {
   return DialogHandle{
       UseService<DialogService>(),
       detail::CurrentEnvironmentFrame(),
-  };
-}
-
-RootHook InstallDialogs() {
-  return [](RootContext &root) {
-    root.Provide(
-        std::make_shared<DialogService>(root.Layers()));
   };
 }
 

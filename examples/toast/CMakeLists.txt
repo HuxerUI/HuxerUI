@@ -1,5 +1,5 @@
 huxerui_add_example(
-        huxerui_toast
+        example_toast
         "HuxerUI Toast"
         "com.huxerui.toast"
 )

@@ -88,7 +88,7 @@ using huxerui::ThemeSpec;
 using huxerui::ToastHandle;
 using huxerui::ToggleEvents;
 using huxerui::TweenSpec;
-using huxerui::UseDialogs;
+using huxerui::UseDialog;
 using huxerui::UseEnvironment;
 using huxerui::UseEvents;
 using huxerui::UseScrollState;

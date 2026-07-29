@@ -9,6 +9,24 @@ constexpr Color primary_text_color = Color::Rgb(31, 35, 40);
 constexpr Color secondary_text_color = Color::Rgb(91, 98, 106);
 
 [[huxerui::scope]]
+View VirtualListToolbar(ScrollState scroll) {
+  const auto offset = static_cast<int>(scroll.Offset());
+
+  return Row {
+    Button("Top").OnClick([scroll] {
+      static_cast<void>(scroll.ScrollTo(0.0F));
+    }),
+    Button("Item 5000").OnClick([scroll] {
+      static_cast<void>(
+          scroll.ScrollToItem(4999, ScrollAlignment::Center));
+    }),
+    Spacer(),
+    Text::Format("Offset {}", offset)
+        .With(Foreground(secondary_text_color)),
+  }.With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center));
+}
+
+[[huxerui::scope]]
 View VirtualListItem(int index) {
   auto taps = UseState(0);
 
@@ -27,13 +45,23 @@ View VirtualListItem(int index) {
 }
 
 View App() {
+  auto scroll = UseScrollState();
   std::vector<int> items(10000);
   std::iota(items.begin(), items.end(), 1);
 
-  return VirtualList(
-             items,
-             [](int index) { return VirtualListItem(index).Key(index); }
-  ).With(ScrollBar(), Padding(24.0F), Spacing(8.0F));
+  return Column {
+    VirtualListToolbar(scroll),
+    VirtualList(
+        items,
+        [](int index) { return VirtualListItem(index).Key(index); }
+    )
+        .ScrollState(scroll)
+        .With(ScrollBar(), Spacing(8.0F), Grow()),
+  }.With(
+      Padding(24.0F),
+      Spacing(12.0F),
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
 }
 
 HUXERUI_APP(

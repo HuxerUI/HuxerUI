@@ -89,27 +89,30 @@ The code generator detects `[[huxerui::scope]]` and automatically generates the 
 Components can expose typed semantic events without adding callbacks to their function parameters:
 
 ```cpp
-struct SearchBoxEvents {
-  struct Submitted
-      : Event<SearchBoxEvents, void(std::string)> {};
-};
+struct SearchSubmitted : Event<std::string> {};
 
 [[huxerui::scope]]
 View SearchBox() {
-  auto events = UseEvents<SearchBoxEvents>();
+  auto events = UseEvents();
 
   return Button("Submit").OnClick([events] {
-    events.Emit<SearchBoxEvents::Submitted>("query");
+    events.Emit<SearchSubmitted>("query");
   });
 }
 
-SearchBox().On<SearchBoxEvents::Submitted>(
+SearchBox().On<SearchSubmitted>(
     [](std::string query) {
       // Handle the submitted query.
     });
 ```
 
-Event keys carry their callback signature, so incompatible handlers and emitted arguments are rejected at compile time. Each key has at most one handler; a later `.On<Key>()` replaces an earlier one. Events do not bubble, and emitting an event with no handler is a no-op. `EventEmitter` keeps a weak connection to the component scope and becomes disconnected after the component unmounts.
+`Event<Arguments...>` defines the callback arguments while each derived event
+struct supplies a unique event key. Event keys can be standalone as above or
+grouped for organization. Incompatible handlers and emitted arguments are
+rejected at compile time. Each key has at most one handler; a later
+`.On<Key>()` replaces an earlier one. Events do not bubble, and emitting an
+event with no handler is a no-op. `EventEmitter` keeps a weak connection to the
+component scope and becomes disconnected after the component unmounts.
 
 Built-in interactions use the same typed event storage:
 
@@ -431,8 +434,7 @@ public:
   using Layout::Layout;
 
   Flow Gap(float value) && {
-    SetSpacing(value);
-    return std::move(*this);
+    return std::move(*this).With(Spacing(value));
   }
 
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
@@ -696,18 +698,18 @@ target-architecture code generator.
 
 Example applications:
 
-- `huxerui_counter`: component scopes and local state
-- `huxerui_layout_gallery`: layout, alignment, grow factors, and multiline text
-- `huxerui_dynamic_list`: `ForEach`, stable keys, and per-item local state
-- `huxerui_scroll_view`: vertical scrolling, clipping, and local state after scrolling
-- `huxerui_virtual_list`: a large virtualized variable-height list
-- `huxerui_horizontal_virtual_list`: a virtualized horizontal list with 10,000 fixed-width items
-- `huxerui_virtual_grid`: an adaptive virtualized grid with 10,000 items and column spans
-- `huxerui_scroll_state`: observable scroll metrics and programmatic item positioning
-- `huxerui_toast`: per-window Toast presentation through a root-installed service
-- `huxerui_dialog`: declarative modal presentation controlled by local state
-- `huxerui_theme`: Material light and dark themes, nested FlatTheme boundaries, semantic text roles, ripple indication, and explicit modifier precedence
-- `huxerui_environment`: typed environment defaults, inheritance, nested overrides, and State-driven values
+- `example_counter`: component scopes and local state
+- `example_layout_gallery`: layout, alignment, grow factors, and multiline text
+- `example_dynamic_list`: `ForEach`, stable keys, and per-item local state
+- `example_scroll_view`: vertical scrolling, observable metrics, programmatic offsets, and local state after scrolling
+- `example_virtual_list`: a large virtualized variable-height list with programmatic item positioning
+- `example_horizontal_virtual_list`: a virtualized horizontal list with 10,000 fixed-width items
+- `example_virtual_grid`: an adaptive virtualized grid with 10,000 items and column spans
+- `example_custom_event`: typed custom component events
+- `example_toast`: per-window Toast presentation through the built-in service
+- `example_dialog`: declarative modal presentation controlled by local state
+- `example_theme`: Material light and dark themes, nested FlatTheme boundaries, semantic text roles, ripple indication, and explicit modifier precedence
+- `example_environment`: typed environment defaults, inheritance, nested overrides, and State-driven values
 - `platform/android/demo`: Android Custom View host displaying the theme example
 
 Run an example:
@@ -715,25 +717,25 @@ Run an example:
 macOS:
 
 ```bash
-open build/bin/huxerui_counter.app
-open build/bin/huxerui_layout_gallery.app
-open build/bin/huxerui_dynamic_list.app
-open build/bin/huxerui_scroll_view.app
-open build/bin/huxerui_virtual_list.app
-open build/bin/huxerui_horizontal_virtual_list.app
-open build/bin/huxerui_virtual_grid.app
-open build/bin/huxerui_scroll_state.app
-open build/bin/huxerui_toast.app
-open build/bin/huxerui_dialog.app
-open build/bin/huxerui_theme.app
-open build/bin/huxerui_environment.app
+open build/bin/example_counter.app
+open build/bin/example_layout_gallery.app
+open build/bin/example_dynamic_list.app
+open build/bin/example_scroll_view.app
+open build/bin/example_virtual_list.app
+open build/bin/example_horizontal_virtual_list.app
+open build/bin/example_virtual_grid.app
+open build/bin/example_custom_event.app
+open build/bin/example_toast.app
+open build/bin/example_dialog.app
+open build/bin/example_theme.app
+open build/bin/example_environment.app
 ```
 
 Windows:
 
 ```powershell
-.\build\bin\Debug\huxerui_counter.exe
-.\build\bin\Debug\huxerui_theme.exe
+.\build\bin\Debug\example_counter.exe
+.\build\bin\Debug\example_theme.exe
 ```
 
 ## CMake Options

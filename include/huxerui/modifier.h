@@ -136,16 +136,47 @@ const ModifierDescriptor &ModifierDescriptorFor() {
   return descriptor;
 }
 
+template <class Modifier>
+concept ExplicitModifierDescriptor =
+    requires {
+      {
+        Modifier::Descriptor()
+      } -> std::same_as<const ModifierDescriptor &>;
+    };
+
+template <class Modifier>
+concept AutomaticModifierDescriptor =
+    requires {
+      typename Modifier::Mounted;
+    } &&
+    std::derived_from<typename Modifier::Mounted, MountedModifier> &&
+    std::constructible_from<
+        typename Modifier::Mounted, MountedNode &, const Modifier &> &&
+    requires(
+        typename Modifier::Mounted &mounted, MountedNode &node,
+        const Modifier &modifier) {
+      mounted.Update(node, modifier);
+    };
+
+template <class Modifier>
+  requires ExplicitModifierDescriptor<Modifier> ||
+           AutomaticModifierDescriptor<Modifier>
+const ModifierDescriptor &ResolveModifierDescriptor() {
+  if constexpr (ExplicitModifierDescriptor<Modifier>) {
+    return Modifier::Descriptor();
+  } else {
+    return ModifierDescriptorFor<
+        Modifier, typename Modifier::Mounted>();
+  }
+}
+
 } // namespace detail
 
 template <class T>
 concept ViewModifier =
     std::copy_constructible<std::remove_cvref_t<T>> &&
-    requires {
-      {
-        std::remove_cvref_t<T>::Descriptor()
-      } -> std::same_as<const detail::ModifierDescriptor &>;
-    };
+    (detail::ExplicitModifierDescriptor<std::remove_cvref_t<T>> ||
+     detail::AutomaticModifierDescriptor<std::remove_cvref_t<T>>);
 
 namespace detail {
 
@@ -153,7 +184,7 @@ template <ViewModifier Modifier>
 ModifierSpec MakeModifierSpec(Modifier &&modifier) {
   using Value = std::remove_cvref_t<Modifier>;
   return {
-      &Value::Descriptor(),
+      &ResolveModifierDescriptor<Value>(),
       std::make_shared<Value>(std::forward<Modifier>(modifier)),
   };
 }

@@ -247,7 +247,7 @@ View DisabledSubtreeApp() {
 
 View FocusDialogApp() {
   HUXERUI_SCOPE({
-    saved_dialogs = UseDialogs();
+    saved_dialogs = UseDialog();
     return Button("background focus").OnClick([] { ++background_dialog_clicks; });
   });
 }
@@ -262,7 +262,7 @@ View RootHookApp() {
 View PresentationApp() {
   HUXERUI_SCOPE({
     saved_toast = UseToast();
-    saved_dialogs = UseDialogs();
+    saved_dialogs = UseDialog();
     return Text("content");
   });
 }
@@ -1022,12 +1022,8 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
   first_dialog_clicks = 0;
   second_dialog_clicks = 0;
 
-  huxerui::AppOptions options;
-  options.root_hooks = {
-      huxerui::InstallDialogs(),
-  };
   TestPlatform platform;
-  Runtime runtime{FocusDialogApp, platform, std::move(options)};
+  Runtime runtime{FocusDialogApp, platform};
   runtime.SetViewport({240.0F, 160.0F});
   runtime.BuildFrame();
 
@@ -1130,14 +1126,8 @@ TEST_CASE("TestToastAndDialogPresentation") {
   saved_dialogs.reset();
   saved_dialog_context.reset();
 
-  huxerui::AppOptions options;
-  options.root_hooks = {
-      huxerui::InstallToast(),
-      huxerui::InstallDialogs(),
-  };
-
   TestPlatform platform;
-  Runtime runtime{PresentationThemeApp, platform, std::move(options)};
+  Runtime runtime{PresentationThemeApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
   REQUIRE(saved_toast.has_value());
@@ -1208,14 +1198,8 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   saved_toast.reset();
   saved_dialogs.reset();
 
-  huxerui::AppOptions options;
-  options.root_hooks = {
-      huxerui::InstallToast(),
-      huxerui::InstallDialogs(),
-  };
-
   TestPlatform platform;
-  Runtime runtime{FlatDarkPresentationApp, platform, std::move(options)};
+  Runtime runtime{FlatDarkPresentationApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
 
@@ -1237,13 +1221,8 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
 }
 
 TEST_CASE("TestDeclarativeDialogModifier") {
-  huxerui::AppOptions options;
-  options.root_hooks = {
-      huxerui::InstallDialogs(),
-  };
-
   TestPlatform platform;
-  Runtime runtime{DeclarativeDialogApp, platform, std::move(options)};
+  Runtime runtime{DeclarativeDialogApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
 

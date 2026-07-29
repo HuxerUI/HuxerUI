@@ -56,8 +56,9 @@ public:
   ~View() = default;
 
   template <class Function> View OnClick(Function &&function) && {
-    return std::move(*this).On<ViewEvents::Click>(
+    ApplyEvent<ViewEvents::Click>(
         std::forward<Function>(function));
+    return std::move(*this);
   }
 
   template <class Key, class Function>
@@ -65,28 +66,18 @@ public:
              std::constructible_from<std::function<typename Key::Signature>,
                                      Function>
   View On(Function &&function) && {
-    SetEventBinding(
-        typeid(Key),
-        std::make_shared<detail::EventHandler<typename Key::Signature>>(
-            std::function<typename Key::Signature>(
-                std::forward<Function>(function))));
-    if constexpr (std::same_as<Key, ViewEvents::Click>) {
-      AddModifier(detail::MakeModifierSpec(
-          detail::DefaultIndication{}));
-    }
+    ApplyEvent<Key>(std::forward<Function>(function));
     return std::move(*this);
   }
 
   template <class Key> View LayoutValue(typename Key::Value value) && {
-    SetLayoutValue(typeid(Key), std::move(value));
+    ApplyLayoutValue<Key>(std::move(value));
     return std::move(*this);
   }
 
   template <ViewModifier... Modifiers>
   View With(Modifiers &&...modifiers) && {
-    (AddModifier(detail::MakeModifierSpec(
-         std::forward<Modifiers>(modifiers))),
-     ...);
+    ApplyModifiers(std::forward<Modifiers>(modifiers)...);
     return std::move(*this);
   }
 
@@ -119,6 +110,32 @@ public:
 
 protected:
   explicit View(std::shared_ptr<detail::ViewSpec> spec);
+
+  template <class Key, class Function>
+  void ApplyEvent(Function &&function) {
+    SetEventBinding(
+        typeid(Key),
+        std::make_shared<detail::EventHandler<typename Key::Signature>>(
+            std::function<typename Key::Signature>(
+                std::forward<Function>(function))));
+    if constexpr (std::same_as<Key, ViewEvents::Click>) {
+      AddModifier(detail::MakeModifierSpec(
+          detail::DefaultIndication{}));
+    }
+  }
+
+  template <class Key>
+  void ApplyLayoutValue(typename Key::Value value) {
+    SetLayoutValue(typeid(Key), std::move(value));
+  }
+
+  template <ViewModifier... Modifiers>
+  void ApplyModifiers(Modifiers &&...modifiers) {
+    (AddModifier(detail::MakeModifierSpec(
+         std::forward<Modifiers>(modifiers))),
+     ...);
+  }
+
   void SetEventBinding(std::type_index key,
                        std::shared_ptr<detail::EventHandlerBase> handler);
   void SetLayoutValue(std::type_index key, std::any value);
@@ -332,15 +349,8 @@ MakeVirtualLayoutSpec(const VirtualLayoutDescriptor &layout,
 template <class Derived> class TypedView : public View {
 public:
   template <class Function> Derived OnClick(Function &&function) && {
-    this->SetEventBinding(
-        typeid(ViewEvents::Click),
-        std::make_shared<detail::EventHandler<
-            typename ViewEvents::Click::Signature>>(
-            std::function<typename ViewEvents::Click::Signature>(
-                std::forward<Function>(function))));
-    this->AddModifier(
-        detail::MakeModifierSpec(
-            detail::DefaultIndication{}));
+    this->template ApplyEvent<ViewEvents::Click>(
+        std::forward<Function>(function));
     return TakeDerived();
   }
 
@@ -349,29 +359,20 @@ public:
              std::constructible_from<std::function<typename Key::Signature>,
                                      Function>
   Derived On(Function &&function) && {
-    this->SetEventBinding(
-        typeid(Key),
-        std::make_shared<detail::EventHandler<typename Key::Signature>>(
-            std::function<typename Key::Signature>(
-                std::forward<Function>(function))));
-    if constexpr (std::same_as<Key, ViewEvents::Click>) {
-      this->AddModifier(
-          detail::MakeModifierSpec(
-              detail::DefaultIndication{}));
-    }
+    this->template ApplyEvent<Key>(
+        std::forward<Function>(function));
     return TakeDerived();
   }
 
   template <class Key> Derived LayoutValue(typename Key::Value value) && {
-    this->SetLayoutValue(typeid(Key), std::move(value));
+    this->template ApplyLayoutValue<Key>(std::move(value));
     return TakeDerived();
   }
 
   template <ViewModifier... Modifiers>
   Derived With(Modifiers &&...modifiers) && {
-    (this->AddModifier(detail::MakeModifierSpec(
-         std::forward<Modifiers>(modifiers))),
-     ...);
+    this->ApplyModifiers(
+        std::forward<Modifiers>(modifiers)...);
     return TakeDerived();
   }
 

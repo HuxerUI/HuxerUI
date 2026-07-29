@@ -1,5 +1,5 @@
 huxerui_add_example(
-        huxerui_counter
+        example_counter
         "HuxerUI Counter"
         "com.huxerui.counter"
 )

@@ -13,7 +13,9 @@ View App() {
         "Toast is presented by the window LayerHost and "
         "dismisses itself after the configured duration."
     ),
-    Button("Show toast").OnClick([toast] { toast.Show("Changes saved", ToastOptions { 2.5 }); }),
+    Button("Show toast").OnClick([toast] {
+        toast.Show("Changes saved", ToastOptions { 2.5 });
+    }),
   }.With(Padding(32.0F), Spacing(16.0F));
 }
 
@@ -23,8 +25,5 @@ HUXERUI_APP(
         .title = "HuxerUI Toast",
         .width = 520.0F,
         .height = 360.0F,
-        .root_hooks = {
-            InstallToast(),
-        },
     }
 )

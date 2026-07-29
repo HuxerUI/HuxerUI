@@ -1,5 +1,5 @@
 huxerui_add_example(
-        huxerui_theme
+        example_theme
         "HuxerUI Theme"
         "com.huxerui.theme"
 )

@@ -5,7 +5,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <type_traits>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
@@ -71,31 +70,29 @@ struct KeyEvent {
   bool repeat = false;
 };
 
-template <class Owner, class EventSignature> struct Event {
-  using OwnerType = Owner;
-  using Signature = EventSignature;
+template <class... Arguments> struct Event {
+  using Signature = void(Arguments...);
 };
 
 struct ViewEvents {
-  struct Click : Event<ViewEvents, void()> {};
-  struct PointerDown : Event<ViewEvents, void(const PointerEvent &)> {};
-  struct PointerMove : Event<ViewEvents, void(const PointerEvent &)> {};
-  struct PointerUp : Event<ViewEvents, void(const PointerEvent &)> {};
-  struct PointerCancel : Event<ViewEvents, void(const PointerEvent &)> {};
-  struct FocusChanged : Event<ViewEvents, void(bool)> {};
-  struct KeyDown : Event<ViewEvents, void(const KeyEvent &)> {};
-  struct KeyUp : Event<ViewEvents, void(const KeyEvent &)> {};
+  struct Click : Event<> {};
+  struct PointerDown : Event<const PointerEvent &> {};
+  struct PointerMove : Event<const PointerEvent &> {};
+  struct PointerUp : Event<const PointerEvent &> {};
+  struct PointerCancel : Event<const PointerEvent &> {};
+  struct FocusChanged : Event<bool> {};
+  struct KeyDown : Event<const KeyEvent &> {};
+  struct KeyUp : Event<const KeyEvent &> {};
 };
 
 struct ToggleEvents {
-  struct Changed : Event<ToggleEvents, void(bool)> {};
+  struct Changed : Event<bool> {};
 };
 
 namespace detail {
 
 template <class Key>
 concept EventKey = requires {
-  typename Key::OwnerType;
   typename Key::Signature;
 };
 
@@ -159,12 +156,12 @@ std::shared_ptr<EventHub> UseEventHub();
 
 }  // namespace detail
 
-template <class Owner> class EventEmitter {
+class EventEmitter {
 public:
   EventEmitter() = default;
 
   template <class Key, class... Arguments>
-    requires detail::EventKey<Key> && std::same_as<typename Key::OwnerType, Owner> &&
+    requires detail::EventKey<Key> &&
              std::invocable<std::function<typename Key::Signature>&, Arguments...>
   void Emit(Arguments&&... arguments) const {
     if (auto hub = hub_.lock()) {
@@ -179,11 +176,11 @@ private:
 
   std::weak_ptr<detail::EventHub> hub_;
 
-  template <class EventOwner> friend EventEmitter<EventOwner> UseEvents();
+  friend EventEmitter UseEvents();
 };
 
-template <class Owner> EventEmitter<Owner> UseEvents() {
-  return EventEmitter<Owner>{detail::UseEventHub()};
+inline EventEmitter UseEvents() {
+  return EventEmitter{detail::UseEventHub()};
 }
 
 }  // namespace huxerui

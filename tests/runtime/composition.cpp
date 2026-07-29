@@ -2,13 +2,11 @@
 
 namespace huxerui::test {
 
-struct SearchBoxEvents {
-  struct Submitted : Event<SearchBoxEvents, void(std::string)> {};
-};
+struct SearchSubmitted : Event<std::string> {};
 
 State<int> event_mode;
 
-EventEmitter<SearchBoxEvents> saved_event_emitter;
+EventEmitter saved_event_emitter;
 std::string received_event;
 
 State<int> modifier_value;
@@ -31,9 +29,7 @@ public:
 };
 
 struct ProbeModifier {
-  static const huxerui::detail::ModifierDescriptor &Descriptor() {
-    return huxerui::detail::ModifierDescriptorFor<ProbeModifier, MountedProbeModifier>();
-  }
+  using Mounted = MountedProbeModifier;
 
   int value;
 };
@@ -51,9 +47,9 @@ void MountedProbeModifier::Update(MountedNode &node, const ProbeModifier &modifi
 
 View EventSource() {
   HUXERUI_SCOPE({
-    auto events = UseEvents<SearchBoxEvents>();
+    auto events = UseEvents();
     saved_event_emitter = events;
-    return Button("Submit").OnClick([events] { events.Emit<SearchBoxEvents::Submitted>("query"); });
+    return Button("Submit").OnClick([events] { events.Emit<SearchSubmitted>("query"); });
   });
 }
 
@@ -69,7 +65,7 @@ View EventApp() {
 
   if (mode.Get() == 1) {
     return Column{
-        EventSource().Key("source").On<SearchBoxEvents::Submitted>(
+        EventSource().Key("source").On<SearchSubmitted>(
             [](std::string value) { received_event = "second:" + value; }),
     };
   }
@@ -77,8 +73,8 @@ View EventApp() {
   return Column{
       EventSource()
           .Key("source")
-          .On<SearchBoxEvents::Submitted>([](std::string value) { received_event = "replaced:" + value; })
-          .On<SearchBoxEvents::Submitted>([](std::string value) { received_event = "first:" + value; }),
+          .On<SearchSubmitted>([](std::string value) { received_event = "replaced:" + value; })
+          .On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; }),
   };
 }
 
@@ -504,7 +500,7 @@ TEST_CASE("TestTypedScopeEvents") {
   event_mode = 2;
   runtime.BuildFrame();
   REQUIRE(!saved_event_emitter.IsConnected());
-  saved_event_emitter.Emit<SearchBoxEvents::Submitted>("ignored");
+  saved_event_emitter.Emit<SearchSubmitted>("ignored");
   REQUIRE(received_event == "second:query");
 }
 

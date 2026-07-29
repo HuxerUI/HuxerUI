@@ -204,6 +204,8 @@ A third-party modifier can expose its mounted implementation without changing
 `View`:
 
 ```cpp
+class MountedGlow;
+
 struct Glow {
   using Mounted = MountedGlow;
 
@@ -218,14 +220,19 @@ updates:
 ```cpp
 class MountedGlow final : public MountedModifier {
 public:
+  MountedGlow(MountedNode& node, const Glow& spec);
+
   void Update(MountedNode& node, const Glow& spec);
 
   void Paint(
-      MountedNode& node,
-      DisplayList& display_list,
-      PaintNext next) override;
+      const MountedNode& node,
+      DisplayList& display_list) const override;
 };
 ```
+
+The framework detects `Glow::Mounted`, creates the mounted object, and
+dispatches typed updates without requiring the modifier to expose descriptor
+or type-erasure details.
 
 ## MountedModifier lifecycle
 
@@ -930,6 +937,11 @@ and attached entries. On window destruction, Runtime removes content and
 layers before destroying services in reverse registration order. A service
 uses its destructor to release external subscriptions.
 
+HuxerUI installs its built-in Toast and Dialog services for every Runtime
+before application root hooks run. Applications use `UseToast()` and
+`UseDialog()` directly; root hooks remain the extension mechanism for
+third-party services and global components.
+
 RootHook does not provide:
 
 - Direct Runtime access.
@@ -992,11 +1004,11 @@ declarative Dialog must provide `on_dismiss_request`.
 Command-oriented presentation uses a per-window service:
 
 ```cpp
-auto dialogs = UseDialogs();
+auto dialog = UseDialog();
 
 return Button("Delete")
-    .OnClick([dialogs] {
-      dialogs.Show([](DialogContext dialog) {
+    .OnClick([dialog] {
+      dialog.Show([](DialogContext dialog) {
         return Column{
             Text("Delete item?"),
             Button("Cancel").OnClick([dialog] {
@@ -1061,7 +1073,7 @@ The target extension points are:
 | --- | --- |
 | Custom layout | `Layout<Derived>`, `LayoutContext`, `LayoutResult` |
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
-| Custom event | `On<Key>()`, `UseEvents<Owner>()`, and `Emit<Key>()` |
+| Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
 | Custom View effect | Modifier value and `MountedModifier` |
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `IndicationSpec` and `MountedModifier` |

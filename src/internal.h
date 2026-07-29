@@ -36,6 +36,8 @@ struct EnvironmentFrame {
   EnvironmentValues overrides;
 };
 
+void InstallBuiltinPresentation(RootContext &root);
+
 struct LayerControllerState {
   Runtime *runtime = nullptr;
 };
