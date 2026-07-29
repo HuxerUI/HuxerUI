@@ -7,6 +7,9 @@
 
 #include <huxerui/theme.h>
 
+#include "text_field_internal.h"
+#include "selection_area_internal.h"
+
 namespace huxerui::detail {
 
 struct LayoutContextAccess {
@@ -215,7 +218,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
     node.scroll->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   }
   if (IsScrollContainer(node)) {
-    PrepareScrollState(node, runtime);
+    PrepareScrollController(node, runtime);
   }
   const Constraints resolved_constraints = ResolveConstraints(node.style, constraints);
   const Constraints content_constraints = resolved_constraints.Deflate(node.style.padding);
@@ -227,6 +230,9 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
     break;
   case NodeKind::Button:
     content_size = platform.MeasureText(node.text, ResolveFontSize(node));
+    break;
+  case NodeKind::TextField:
+    content_size = MeasureTextField(node, platform, content_constraints);
     break;
   case NodeKind::Checkbox:
   case NodeKind::Switch:
@@ -245,6 +251,9 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
   }
   case NodeKind::Scope:
     content_size = MeasureScopeChild(node, content_constraints, environment);
+    break;
+  case NodeKind::SelectionArea:
+    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints);
     break;
   case NodeKind::ScrollView:
     content_size = MeasureScrollChild(node, content_constraints, environment);
@@ -309,7 +318,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
     float& scroll_offset = vertical ? node.scroll->offset_y : node.scroll->offset_x;
     const float max_offset = std::max(0.0F, content_extent - viewport_extent);
     scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
-    CompleteScrollState(node);
+    CompleteScrollController(node);
   }
   return node.measured_size;
 }
@@ -339,6 +348,7 @@ void LayoutNode(MountedNode& node, Point origin) {
     }
     break;
   case NodeKind::Scope:
+  case NodeKind::SelectionArea:
     for (auto& child : node.children) {
       LayoutNode(*child, content_origin);
     }
@@ -374,6 +384,7 @@ void LayoutNode(MountedNode& node, Point origin) {
   }
   case NodeKind::Text:
   case NodeKind::Button:
+  case NodeKind::TextField:
   case NodeKind::Checkbox:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
@@ -495,6 +506,38 @@ float ScrollNodeBy(MountedNode& node, float delta) {
     node.scroll->connection->PublishMetrics();
   }
   return scroll_offset - previous;
+}
+
+bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
+  if (!node.enabled || !IsScrollContainer(node)) {
+    return false;
+  }
+
+  const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const Rect viewport = ContentRect(node);
+  const float viewport_start = vertical ? viewport.y : viewport.x;
+  const float viewport_extent = vertical ? viewport.height : viewport.width;
+  const float viewport_end = viewport_start + viewport_extent;
+  const float rect_start = vertical ? rect.y : rect.x;
+  const float rect_extent = vertical ? rect.height : rect.width;
+  const float rect_end = rect_start + rect_extent;
+
+  float delta = 0.0F;
+  if (rect_extent <= viewport_extent && rect_start < viewport_start) {
+    delta = rect_start - viewport_start;
+  } else if (rect_end > viewport_end) {
+    delta = rect_end - viewport_end;
+  }
+  const float applied = ScrollNodeBy(node, delta);
+  if (applied == 0.0F) {
+    return false;
+  }
+  if (vertical) {
+    rect.y -= applied;
+  } else {
+    rect.x -= applied;
+  }
+  return true;
 }
 
 const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {

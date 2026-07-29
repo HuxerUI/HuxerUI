@@ -19,6 +19,36 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   };
 }
 
+TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
+  Color placeholder = theme.colors.on_surface;
+  placeholder.alpha *= 0.6F;
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.38F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .placeholder = placeholder,
+      .selection =
+          Color{
+              theme.colors.primary.red,
+              theme.colors.primary.green,
+              theme.colors.primary.blue,
+              0.24F,
+          },
+      .caret = theme.colors.primary,
+      .composition = theme.colors.primary,
+      .border = border,
+      .focused_border = theme.colors.primary,
+      .border_width = 1.0F,
+      .focused_border_width = 2.0F,
+      .font_size = theme.typography.body,
+      .corner_radius = theme.shapes.small,
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
+      .minimum_height = 56.0F,
+      .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
+  };
+}
+
 CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
   border.alpha *= 0.6F;
@@ -80,6 +110,7 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set<ButtonStyleKey>(MaterialButtonStyle(theme));
+  definition.Set<TextFieldStyleKey>(MaterialTextFieldStyle(theme));
   definition.Set<CheckboxStyleKey>(MaterialCheckboxStyle(theme));
   definition.Set<SwitchStyleKey>(MaterialSwitchStyle(theme));
   definition.Set<ProgressCircleStyleKey>(MaterialProgressCircleStyle(theme));
@@ -149,6 +180,36 @@ ButtonStyle DefaultButtonStyle(const ThemeSpec& theme) {
   };
 }
 
+TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
+  Color placeholder = theme.colors.on_surface;
+  placeholder.alpha *= 0.55F;
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.4F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .placeholder = placeholder,
+      .selection =
+          Color{
+              theme.colors.primary.red,
+              theme.colors.primary.green,
+              theme.colors.primary.blue,
+              0.22F,
+          },
+      .caret = theme.colors.primary,
+      .composition = theme.colors.primary,
+      .border = border,
+      .focused_border = theme.colors.primary,
+      .border_width = 1.0F,
+      .focused_border_width = 2.0F,
+      .font_size = theme.typography.body,
+      .corner_radius = theme.shapes.small + 2.0F,
+      .padding = EdgeInsets::Symmetric(10.0F, theme.spacing.small),
+      .minimum_height = 36.0F,
+      .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
+  };
+}
+
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
   border.alpha *= 0.55F;
@@ -199,6 +260,10 @@ TextStyle TextStyleKey::Default() {
 
 ButtonStyle ButtonStyleKey::Default() {
   return detail::DefaultButtonStyle(ThemeKey::Default());
+}
+
+TextFieldStyle TextFieldStyleKey::Default() {
+  return detail::DefaultTextFieldStyle(ThemeKey::Default());
 }
 
 CheckboxStyle CheckboxStyleKey::Default() {

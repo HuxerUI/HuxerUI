@@ -10,7 +10,7 @@ State<std::vector<int>> virtual_unkeyed_items;
 State<bool> variable_height_expanded;
 State<bool> variable_grid_height_expanded;
 State<bool> horizontal_virtual_list;
-ScrollState custom_virtual_scroll;
+ScrollController custom_virtual_scroll;
 
 class TestVirtualStrip final : public VirtualLayout<TestVirtualStrip> {
 public:
@@ -276,9 +276,7 @@ View FixedHorizontalVirtualListApp() {
   std::iota(items.begin(), items.end(), 0);
   return VirtualList(
              items,
-             [](int index) {
-               return Text(std::to_string(index)).With(huxerui::Frame{20.0F, 100.0F}).Key(index);
-             }
+             [](int index) { return Text(std::to_string(index)).With(huxerui::Frame{20.0F, 100.0F}).Key(index); }
   )
       .ScrollAxis(Axis::Horizontal)
       .ItemExtent(20.0F);
@@ -305,19 +303,21 @@ View StatefulHorizontalVirtualListApp() {
 }
 
 View VirtualStateListApp() {
-  auto items = UseState(std::vector<int>{
-      7,
-      8,
-      9,
-  });
+  auto items = UseState(
+      std::vector<int>{
+          7,
+          8,
+          9,
+      }
+  );
   return VirtualList(items, [](int index) { return Text(std::to_string(index)).Key(index); }).ItemExtent(20.0F);
 }
 
 View CustomVirtualLayoutApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   custom_virtual_scroll = scroll;
   return TestVirtualStrip(std::size_t{100}, [](std::size_t index) { return Text(std::to_string(index)).Key(index); })
-      .ScrollState(scroll)
+      .Controller(scroll)
       .With(huxerui::ScrollBar{}, huxerui::Padding{0.0F});
 }
 
@@ -396,9 +396,7 @@ View AdaptiveAxisVirtualListApp() {
   std::iota(items.begin(), items.end(), 0);
   return VirtualList(
              items,
-             [](int index) {
-               return Text(std::to_string(index)).With(huxerui::Frame{20.0F, 20.0F}).Key(index);
-             }
+             [](int index) { return Text(std::to_string(index)).With(huxerui::Frame{20.0F, 20.0F}).Key(index); }
   )
       .ScrollAxis(horizontal.Get() ? Axis::Horizontal : Axis::Vertical)
       .ItemExtent(20.0F);
@@ -421,17 +419,21 @@ TEST_CASE("TestForEachStateSurvivesScrolling") {
   root = runtime.RootNode();
   REQUIRE(root->children[0]->children[0]->children[0]->text == "0:4");
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          1000.0F,
+      }
+  );
   runtime.BuildFrame();
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      -1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          -1000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -461,11 +463,13 @@ TEST_CASE("TestVirtualListVirtualization") {
   REQUIRE(ContainsText(initial, "4"));
   REQUIRE(!ContainsText(initial, "5"));
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          1000.0F,
+      }
+  );
   const DisplayList& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -481,11 +485,13 @@ TEST_CASE("TestVirtualListVirtualization") {
   const std::size_t visible_position = 50 - root->virtual_state->child_indices.front();
   REQUIRE(root->children[visible_position]->frame.y == 0.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      50000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          50000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -515,11 +521,13 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   root = runtime.RootNode();
   REQUIRE(root->children[0]->children[0]->text == "0:4");
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          1000.0F,
+      }
+  );
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->virtual_state->child_indices.front() > 0);
@@ -527,11 +535,13 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   REQUIRE(root->virtual_state->saved_state != nullptr);
   REQUIRE(root->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      -1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          -1000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -554,11 +564,13 @@ TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
   }
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          1000.0F,
+      }
+  );
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
 
@@ -569,11 +581,13 @@ TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
   virtual_reorder_items.Update([](auto& items) { items.push_back(0); });
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      5000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          5000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -590,11 +604,13 @@ TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      5000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          5000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -605,11 +621,13 @@ TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
   InvokeClick(*root->children[child_index]->children[0]);
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      -5000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          -5000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -635,11 +653,13 @@ TEST_CASE("TestVariableVirtualListMeasurementAndAnchor") {
   REQUIRE(root->children[1]->measured_size.height == 40.0F);
   REQUIRE(root->children[2]->frame.y == 60.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      70.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          70.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -686,11 +706,13 @@ TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
   REQUIRE(root->scroll->axis == Axis::Horizontal);
   REQUIRE(root->scroll->content_width == 20000.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      1000.0F,
-      0.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          1000.0F,
+          0.0F,
+      }
+  );
   const DisplayList& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -714,11 +736,13 @@ TEST_CASE("TestVariableHorizontalVirtualListMeasurementAndScrolling") {
   REQUIRE(root->children[1]->measured_size.width == 40.0F);
   REQUIRE(root->children[2]->frame.x == 60.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      70.0F,
-      0.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          70.0F,
+          0.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -743,22 +767,26 @@ TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
   }
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      2000.0F,
-      0.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          2000.0F,
+          0.0F,
+      }
+  );
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->virtual_state->child_indices.front() > 0);
   REQUIRE(root->virtual_state->saved_state != nullptr);
   REQUIRE(root->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      -2000.0F,
-      0.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          -2000.0F,
+          0.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -781,11 +809,13 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   REQUIRE(FirstText(initial) == "0");
   REQUIRE(huxerui::detail::ResolveScrollBarGeometry(*root).has_value());
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      250.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          250.0F,
+      }
+  );
   const DisplayList& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -837,11 +867,13 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   }
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {45.0F, 20.0F},
-      0.0F,
-      200.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {45.0F, 20.0F},
+          0.0F,
+          200.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -870,11 +902,13 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
       static_cast<std::size_t>(resized_anchor - root->virtual_state->child_indices.begin());
   REQUIRE(root->children[resized_position]->frame.y == 0.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {30.0F, 20.0F},
-      0.0F,
-      -10000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {30.0F, 20.0F},
+          0.0F,
+          -10000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -919,11 +953,13 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   }
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 24.0F},
-      0.0F,
-      240.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 24.0F},
+          0.0F,
+          240.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -953,11 +989,13 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
       static_cast<std::size_t>(resized_anchor - root->virtual_state->child_indices.begin());
   REQUIRE(root->children[resized_position]->frame.y == 0.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {32.0F, 24.0F},
-      0.0F,
-      -10000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {32.0F, 24.0F},
+          0.0F,
+          -10000.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -992,11 +1030,13 @@ TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
   std::size_t item_two_position = static_cast<std::size_t>(item_two - root->virtual_state->child_indices.begin());
   REQUIRE(root->children[item_two_position]->frame.y == 45.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 30.0F},
-      0.0F,
-      80.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 30.0F},
+          0.0F,
+          80.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -1027,11 +1067,13 @@ TEST_CASE("TestVirtualListAxisChangePreservesAnchorAndIdentity") {
 
   const auto* root = runtime.RootNode();
   const std::uint64_t identity = root->identity;
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      1000.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          1000.0F,
+      }
+  );
   runtime.BuildFrame();
   REQUIRE(FirstText(runtime.BuildFrame()) == "50");
 

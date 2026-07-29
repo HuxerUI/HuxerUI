@@ -1,5 +1,7 @@
 package org.huxerui;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
@@ -7,6 +9,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.os.SystemClock;
+import android.os.Build;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -14,6 +17,10 @@ import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 
 import java.nio.charset.StandardCharsets;
 
@@ -48,7 +55,8 @@ public final class HuxerUIView extends View {
     private long nativeHandle;
     private boolean frameScheduled;
     private long frameTime;
-
+    private HuxerUIInputConnection inputConnection;
+    private int imeInsetBottom;
     private final Runnable frameCallback = new Runnable() {
         @Override
         public void run() {
@@ -88,6 +96,10 @@ public final class HuxerUIView extends View {
         removeCallbacks(frameCallback);
         frameScheduled = false;
         frameTime = 0L;
+        if (inputConnection != null) {
+            inputConnection.deactivate();
+            inputConnection = null;
+        }
         if (nativeHandle != 0L) {
             nativeDestroy(nativeHandle);
             nativeHandle = 0L;
@@ -99,6 +111,15 @@ public final class HuxerUIView extends View {
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         resizeNativeState(width, height);
+    }
+
+    @Override
+    public WindowInsets onApplyWindowInsets(WindowInsets insets) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            imeInsetBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            resizeNativeState(getWidth(), getHeight());
+        }
+        return super.onApplyWindowInsets(insets);
     }
 
     @Override
@@ -185,11 +206,120 @@ public final class HuxerUIView extends View {
         return true;
     }
 
+    @Override
+    public boolean onCheckIsTextEditor() {
+        return inputConnection != null && inputConnection.isActive();
+    }
+
+    @Override
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        if (inputConnection == null || !inputConnection.isActive()) {
+            return null;
+        }
+        inputConnection.configureEditorInfo(outAttrs);
+        return inputConnection;
+    }
+
+    private void startTextInput(long sessionId, int type, int capitalization, int action, boolean multiline,
+            boolean secure, boolean autocorrect, long revision, long anchor, long active, int affinity,
+            long composingStart, long composingEnd) {
+        replaceInputConnection(sessionId, type, capitalization, action, multiline, secure, autocorrect, anchor, active,
+                composingStart, composingEnd);
+        post(() -> {
+            if (!hasTextInputSession(sessionId)) {
+                return;
+            }
+            requestFocus();
+            InputMethodManager manager = inputMethodManager();
+            manager.restartInput(this);
+            manager.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    private void updateTextInput(long sessionId, long revision, long anchor, long active, int affinity,
+            long composingStart, long composingEnd, int geometryResult, float caretX, float caretY, float caretWidth,
+            float caretHeight) {
+        if (!hasTextInputSession(sessionId)) {
+            return;
+        }
+        inputConnection.updateState(anchor, active, composingStart, composingEnd);
+        inputConnection.updateCaretGeometry(geometryResult, caretX, caretY, caretWidth, caretHeight);
+        inputConnection.notifyStateChanged();
+    }
+
+    private void restartTextInput(long sessionId, int type, int capitalization, int action, boolean multiline,
+            boolean secure, boolean autocorrect, long revision, long anchor, long active, int affinity,
+            long composingStart, long composingEnd) {
+        if (!hasTextInputSession(sessionId)) {
+            return;
+        }
+        replaceInputConnection(sessionId, type, capitalization, action, multiline, secure, autocorrect, anchor, active,
+                composingStart, composingEnd);
+        post(() -> {
+            if (hasTextInputSession(sessionId)) {
+                inputMethodManager().restartInput(this);
+            }
+        });
+    }
+
+    private void stopTextInput(long sessionId) {
+        if (!hasTextInputSession(sessionId)) {
+            return;
+        }
+        inputConnection.deactivate();
+        inputConnection = null;
+        post(() -> {
+            if (inputConnection == null) {
+                inputMethodManager().hideSoftInputFromWindow(getWindowToken(), 0);
+            }
+        });
+    }
+
+    private void replaceInputConnection(long sessionId, int type, int capitalization, int action, boolean multiline,
+            boolean secure, boolean autocorrect, long anchor, long active, long composingStart, long composingEnd) {
+        if (inputConnection != null) {
+            inputConnection.deactivate();
+        }
+        inputConnection = new HuxerUIInputConnection(this, nativeHandle, sessionId, type, capitalization, action,
+                multiline, secure, autocorrect, anchor, active, composingStart, composingEnd);
+    }
+
+    private boolean hasTextInputSession(long sessionId) {
+        return inputConnection != null && inputConnection.isActive() && inputConnection.sessionId() == sessionId;
+    }
+
+    private InputMethodManager inputMethodManager() {
+        return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+    }
+
+    private byte[] readClipboardText() {
+        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null || !clipboard.hasPrimaryClip()) {
+            return null;
+        }
+        ClipData clip = clipboard.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            return null;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(getContext());
+        return text == null ? null : text.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean writeClipboardText(byte[] utf8) {
+        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            return false;
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("HuxerUI", new String(utf8, StandardCharsets.UTF_8)));
+        return true;
+    }
+
     private void resizeNativeState(int width, int height) {
         if (nativeHandle == 0L) {
             return;
         }
-        nativeResize(nativeHandle, width / density, height / density);
+        int usableHeight = Math.max(0, height - imeInsetBottom);
+        nativeResize(nativeHandle, width / density, usableHeight / density);
     }
 
     private void sendPointer(MotionEvent event, int index, int type) {
@@ -256,6 +386,11 @@ public final class HuxerUIView extends View {
                 (float) Math.ceil(measuredWidth),
                 (float) Math.ceil(layout.getHeight()),
         };
+    }
+
+    private Object createTextLayout(byte[] utf8, float fontSize, float maxWidth) {
+        prepareTextPaint(fontSize, 0xFF000000);
+        return new TextLayoutData(new String(utf8, StandardCharsets.UTF_8), new TextPaint(textPaint), maxWidth);
     }
 
     private void drawRect(Canvas canvas, float x, float y, float width, float height, int color, float cornerRadius) {
@@ -382,6 +517,95 @@ public final class HuxerUIView extends View {
                 .setAlignment(alignment)
                 .setIncludePad(false)
                 .build();
+    }
+
+    private static final class TextLayoutData {
+        private final String text;
+        private final TextPaint paint;
+        private final StaticLayout layout;
+
+        TextLayoutData(String text, TextPaint paint, float maxWidth) {
+            this.text = text;
+            this.paint = paint;
+            float desiredWidth = StaticLayout.getDesiredWidth(text, paint);
+            int width = Math.max(
+                    1, (int) Math.ceil(Float.isFinite(maxWidth) ? Math.min(maxWidth, desiredWidth) : desiredWidth));
+            layout = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width).setIncludePad(false).build();
+        }
+
+        private float[] measure() {
+            float width = 0.0F;
+            for (int line = 0; line < layout.getLineCount(); ++line) {
+                width = Math.max(width, layout.getLineWidth(line));
+            }
+            return new float[] {
+                    (float) Math.ceil(width),
+                    (float) Math.ceil(layout.getHeight()),
+            };
+        }
+
+        private long hitTest(float x, float y) {
+            int line = layout.getLineForVertical((int) Math.max(0.0F, y));
+            return layout.getOffsetForHorizontal(line, x);
+        }
+
+        private float[] caret(long requestedOffset, boolean upstream) {
+            int offset = (int) Math.max(0L, Math.min(requestedOffset, text.length()));
+            int line = layout.getLineForOffset(offset);
+            float x = upstream ? layout.getSecondaryHorizontal(offset) : layout.getPrimaryHorizontal(offset);
+            return new float[] {
+                    x,
+                    layout.getLineTop(line),
+                    1.0F,
+                    layout.getLineBottom(line) - layout.getLineTop(line),
+            };
+        }
+
+        private float[] range(long requestedStart, long requestedEnd) {
+            int start = (int) Math.max(0L, Math.min(requestedStart, text.length()));
+            int end = (int) Math.max(start, Math.min(requestedEnd, text.length()));
+            if (start == end) {
+                return new float[0];
+            }
+            int firstLine = layout.getLineForOffset(start);
+            int lastLine = layout.getLineForOffset(end);
+            float[] result = new float[(lastLine - firstLine + 1) * 4];
+            int output = 0;
+            for (int line = firstLine; line <= lastLine; ++line) {
+                int lineStart = Math.max(start, layout.getLineStart(line));
+                int lineEnd = Math.min(end, layout.getLineEnd(line));
+                if (lineStart >= lineEnd) {
+                    continue;
+                }
+                Path selection = new Path();
+                layout.getSelectionPath(lineStart, lineEnd, selection);
+                RectF bounds = new RectF();
+                selection.computeBounds(bounds, true);
+                result[output++] = bounds.left;
+                result[output++] = bounds.top;
+                result[output++] = bounds.width();
+                result[output++] = bounds.height();
+            }
+            return output == result.length ? result : java.util.Arrays.copyOf(result, output);
+        }
+
+        private long previous(long requestedOffset) {
+            int offset = (int) Math.max(0L, Math.min(requestedOffset, text.length()));
+            if (offset == 0) {
+                return 0L;
+            }
+            int result = paint.getTextRunCursor(text, 0, text.length(), false, offset, Paint.CURSOR_BEFORE);
+            return result < 0 ? 0L : result;
+        }
+
+        private long next(long requestedOffset) {
+            int offset = (int) Math.max(0L, Math.min(requestedOffset, text.length()));
+            if (offset == text.length()) {
+                return offset;
+            }
+            int result = paint.getTextRunCursor(text, 0, text.length(), false, offset, Paint.CURSOR_AFTER);
+            return result < 0 ? text.length() : result;
+        }
     }
 
     private static native long nativeCreate(HuxerUIView view);

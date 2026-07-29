@@ -13,6 +13,8 @@
 
 namespace huxerui {
 
+struct TextEditingValue;
+
 enum class PointerEventType {
   Down,
   Up,
@@ -31,6 +33,7 @@ struct PointerEvent {
   std::int64_t pointer_id = 0;
   Point position;
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  std::uint32_t click_count = 1;
 };
 
 struct ScrollEvent {
@@ -55,6 +58,10 @@ enum class Key {
   End,
   PageUp,
   PageDown,
+  A,
+  C,
+  V,
+  X,
 };
 
 enum class KeyEventType {
@@ -94,6 +101,11 @@ struct ViewEvents {
 
 struct ToggleEvents {
   struct Changed : Event<bool> {};
+};
+
+struct TextFieldEvents {
+  struct Changed : Event<const TextEditingValue&> {};
+  struct Submitted : Event<> {};
 };
 
 namespace detail {

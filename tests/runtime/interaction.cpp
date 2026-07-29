@@ -5,12 +5,12 @@ namespace huxerui::test {
 std::vector<PointerEvent> received_pointer_events;
 State<bool> show_pointer_target;
 int pointer_clicks = 0;
-ScrollState drag_scroll;
-ScrollState configured_drag_scroll;
+ScrollController drag_scroll;
+ScrollController configured_drag_scroll;
 ScrollPhysics configured_scroll_physics;
-ScrollState horizontal_drag_scroll;
-ScrollState nested_outer_scroll;
-ScrollState nested_inner_scroll;
+ScrollController horizontal_drag_scroll;
+ScrollController nested_outer_scroll;
+ScrollController nested_inner_scroll;
 State<bool> include_apply_only_modifier;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
@@ -36,7 +36,7 @@ View PointerInputApp() {
 }
 
 View DragScrollApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   drag_scroll = scroll;
   return VirtualList(
              std::size_t{100},
@@ -49,12 +49,12 @@ View DragScrollApp() {
              }
   )
       .ItemExtent(40.0F)
-      .ScrollState(scroll)
+      .Controller(scroll)
       .With(huxerui::ScrollBar{});
 }
 
 View ConfiguredDragScrollApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   configured_drag_scroll = scroll;
   return VirtualList(
              std::size_t{100},
@@ -63,7 +63,7 @@ View ConfiguredDragScrollApp() {
              }
   )
       .ItemExtent(40.0F)
-      .ScrollState(scroll)
+      .Controller(scroll)
       .With(configured_scroll_physics);
 }
 
@@ -88,23 +88,21 @@ View FlatDarkScrollBarApp() {
 }
 
 View HorizontalDragScrollApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   horizontal_drag_scroll = scroll;
   return VirtualList(
              std::size_t{100},
-             [](std::size_t index) {
-               return Text(std::to_string(index)).With(huxerui::Frame{40.0F, 40.0F}).Key(index);
-             }
+             [](std::size_t index) { return Text(std::to_string(index)).With(huxerui::Frame{40.0F, 40.0F}).Key(index); }
   )
       .ScrollAxis(Axis::Horizontal)
       .ItemExtent(40.0F)
-      .ScrollState(scroll)
+      .Controller(scroll)
       .With(huxerui::ScrollBar{});
 }
 
 View NestedDragScrollApp() {
-  auto outer = UseScrollState();
-  auto inner = UseScrollState();
+  auto outer = UseScrollController();
+  auto inner = UseScrollController();
   nested_outer_scroll = outer;
   nested_inner_scroll = inner;
 
@@ -125,12 +123,12 @@ View NestedDragScrollApp() {
                   Text("9").With(huxerui::Frame{100.0F, 20.0F}),
               },
           }
-              .ScrollState(inner)
+              .Controller(inner)
               .With(huxerui::Frame{100.0F, 60.0F}, huxerui::ScrollBar{}),
           Text("Footer").With(huxerui::Frame{100.0F, 200.0F}),
       },
   }
-      .ScrollState(outer);
+      .Controller(outer);
 }
 
 View ShortScrollBarApp() {
@@ -164,31 +162,39 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      1,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          1,
+          {50.0F, 20.0F},
+      }
+  );
   REQUIRE(received_pointer_events.size() == 1);
   REQUIRE(received_pointer_events[0].type == PointerEventType::Up);
   REQUIRE(pointer_clicks == 0);
 
   received_pointer_events.clear();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      7,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      7,
-      {150.0F, 80.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      7,
-      {150.0F, 80.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          7,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          7,
+          {150.0F, 80.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          7,
+          {150.0F, 80.0F},
+      }
+  );
   REQUIRE(received_pointer_events.size() == 3);
   REQUIRE(received_pointer_events[0].type == PointerEventType::Down);
   REQUIRE(received_pointer_events[1].type == PointerEventType::Move);
@@ -197,21 +203,27 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   REQUIRE(pointer_clicks == 0);
 
   received_pointer_events.clear();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      8,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Cancel,
-      8,
-      {150.0F, 80.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      8,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          8,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Cancel,
+          8,
+          {150.0F, 80.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          8,
+          {50.0F, 20.0F},
+      }
+  );
   REQUIRE(received_pointer_events.size() == 3);
   REQUIRE(received_pointer_events[1].type == PointerEventType::Cancel);
   REQUIRE(pointer_clicks == 0);
@@ -222,21 +234,27 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   REQUIRE(pointer_clicks == 1);
 
   received_pointer_events.clear();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      11,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      11,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      11,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          11,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          11,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          11,
+          {50.0F, 20.0F},
+      }
+  );
   REQUIRE(received_pointer_events.size() == 4);
   REQUIRE(received_pointer_events[0].type == PointerEventType::Down);
   REQUIRE(received_pointer_events[1].type == PointerEventType::Cancel);
@@ -244,19 +262,23 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   REQUIRE(received_pointer_events[3].type == PointerEventType::Up);
   REQUIRE(pointer_clicks == 2);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      10,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          10,
+          {50.0F, 20.0F},
+      }
+  );
   show_pointer_target = false;
   runtime.BuildFrame();
   const std::size_t events_before_release = received_pointer_events.size();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      10,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          10,
+          {50.0F, 20.0F},
+      }
+  );
   REQUIRE(received_pointer_events.size() == events_before_release);
   REQUIRE(pointer_clicks == 2);
 }
@@ -270,66 +292,86 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      20,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      20,
-      {50.0F, 16.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      20,
-      {50.0F, 16.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          20,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          20,
+          {50.0F, 16.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          20,
+          {50.0F, 16.0F},
+      }
+  );
   REQUIRE(drag_item_clicks == 1);
   REQUIRE(drag_item_cancels == 0);
   REQUIRE(drag_scroll.Offset() == 0.0F);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      21,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      21,
-      {50.0F, 30.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      21,
-      {50.0F, 30.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          21,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          21,
+          {50.0F, 30.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          21,
+          {50.0F, 30.0F},
+      }
+  );
   REQUIRE(drag_item_clicks == 2);
   REQUIRE(drag_item_cancels == 0);
   REQUIRE(drag_scroll.Offset() == 0.0F);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      22,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      22,
-      {50.0F, 10.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          22,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          22,
+          {50.0F, 10.0F},
+      }
+  );
   REQUIRE(drag_scroll.Offset() == 10.0F);
   REQUIRE(drag_item_cancels == 1);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      22,
-      {50.0F, 0.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      22,
-      {50.0F, 0.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          22,
+          {50.0F, 0.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          22,
+          {50.0F, 0.0F},
+      }
+  );
   REQUIRE(drag_scroll.Offset() == 20.0F);
   REQUIRE(drag_item_clicks == 2);
 
@@ -343,32 +385,40 @@ TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      60,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          60,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.016);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      60,
-      {50.0F, 20.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          60,
+          {50.0F, 20.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.016);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      60,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      60,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          60,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          60,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
 
   const float released_offset = drag_scroll.Offset();
   runtime.BuildFrame();
@@ -377,21 +427,25 @@ TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
   REQUIRE(drag_scroll.Offset() > released_offset);
 
   const float moving_offset = drag_scroll.Offset();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      61,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          61,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.05);
   runtime.BuildFrame();
   REQUIRE(drag_scroll.Offset() == moving_offset);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Cancel,
-      61,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Cancel,
+          61,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
 }
 
 TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
@@ -402,25 +456,31 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   REQUIRE(drag_scroll.ScrollTo(drag_scroll.MaxOffset() - 5.0F));
   touch.BuildFrame();
 
-  touch.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      62,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Touch,
-  });
+  touch.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          62,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.016);
-  touch.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      62,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
-  touch.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      62,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
+  touch.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          62,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  touch.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          62,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   touch.BuildFrame();
   platform.AdvanceTime(0.05);
   touch.BuildFrame();
@@ -430,25 +490,31 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   Runtime mouse{DragScrollApp, mouse_platform};
   mouse.SetViewport({100.0F, 100.0F});
   mouse.BuildFrame();
-  mouse.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      63,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Mouse,
-  });
+  mouse.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          63,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Mouse,
+      }
+  );
   mouse_platform.AdvanceTime(0.016);
-  mouse.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      63,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Mouse,
-  });
-  mouse.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      63,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Mouse,
-  });
+  mouse.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          63,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Mouse,
+      }
+  );
+  mouse.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          63,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Mouse,
+      }
+  );
   const float mouse_offset = drag_scroll.Offset();
   mouse.BuildFrame();
   mouse_platform.AdvanceTime(0.05);
@@ -459,25 +525,31 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   Runtime horizontal{HorizontalDragScrollApp, horizontal_platform};
   horizontal.SetViewport({100.0F, 40.0F});
   horizontal.BuildFrame();
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      64,
-      {30.0F, 20.0F},
-      PointerDeviceKind::Touch,
-  });
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          64,
+          {30.0F, 20.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   horizontal_platform.AdvanceTime(0.016);
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      64,
-      {10.0F, 20.0F},
-      PointerDeviceKind::Touch,
-  });
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      64,
-      {10.0F, 20.0F},
-      PointerDeviceKind::Touch,
-  });
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          64,
+          {10.0F, 20.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          64,
+          {10.0F, 20.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   const float horizontal_offset = horizontal_drag_scroll.Offset();
   horizontal.BuildFrame();
   horizontal_platform.AdvanceTime(0.016);
@@ -493,25 +565,31 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
   Runtime runtime{ConfiguredDragScrollApp, platform};
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      65,
-      {50.0F, 30.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          65,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.016);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      65,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      65,
-      {50.0F, 10.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          65,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          65,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   const float released_offset = configured_drag_scroll.Offset();
   runtime.BuildFrame();
   platform.AdvanceTime(0.05);
@@ -521,10 +599,12 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
   bool rejected = false;
   try {
     static_cast<void>(VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
-                          .With(ScrollPhysics{
-                              .minimum_fling_velocity = 100.0F,
-                              .maximum_fling_velocity = 50.0F,
-                          }));
+                          .With(
+                              ScrollPhysics{
+                                  .minimum_fling_velocity = 100.0F,
+                                  .maximum_fling_velocity = 50.0F,
+                              }
+                          ));
   } catch (const std::invalid_argument&) {
     rejected = true;
   }
@@ -537,29 +617,37 @@ TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
   runtime.SetViewport({100.0F, 40.0F});
   runtime.BuildFrame();
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      30,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      30,
-      {50.0F, 5.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          30,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          30,
+          {50.0F, 5.0F},
+      }
+  );
   REQUIRE(horizontal_drag_scroll.Offset() == 0.0F);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      30,
-      {20.0F, 18.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          30,
+          {20.0F, 18.0F},
+      }
+  );
   REQUIRE(horizontal_drag_scroll.Offset() == 30.0F);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      30,
-      {20.0F, 18.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          30,
+          {20.0F, 18.0F},
+      }
+  );
 
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->scroll->offset_x == 30.0F);
@@ -576,21 +664,27 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   REQUIRE(nested_inner_scroll.MaxOffset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 0.0F);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      40,
-      {50.0F, 50.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      40,
-      {50.0F, 20.0F},
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      40,
-      {50.0F, 20.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          40,
+          {50.0F, 50.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          40,
+          {50.0F, 20.0F},
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          40,
+          {50.0F, 20.0F},
+      }
+  );
 
   REQUIRE(nested_inner_scroll.Offset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 20.0F);
@@ -606,22 +700,26 @@ TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
 
   REQUIRE(nested_inner_scroll.ScrollTo(130.0F));
   runtime.BuildFrame();
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      30.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          30.0F,
+      }
+  );
   REQUIRE(nested_inner_scroll.Offset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 20.0F);
 
   REQUIRE(nested_inner_scroll.ScrollTo(10.0F));
   REQUIRE(nested_outer_scroll.ScrollTo(20.0F));
   runtime.BuildFrame();
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      -40.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          -40.0F,
+      }
+  );
   REQUIRE(nested_inner_scroll.Offset() == 0.0F);
   REQUIRE(nested_outer_scroll.Offset() == 0.0F);
 }
@@ -637,25 +735,31 @@ TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
   REQUIRE(nested_inner_scroll.MaxOffset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 0.0F);
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      66,
-      {50.0F, 70.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          66,
+          {50.0F, 70.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   platform.AdvanceTime(0.016);
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      66,
-      {50.0F, 60.0F},
-      PointerDeviceKind::Touch,
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      66,
-      {50.0F, 60.0F},
-      PointerDeviceKind::Touch,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          66,
+          {50.0F, 60.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          66,
+          {50.0F, 60.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
   REQUIRE(nested_inner_scroll.Offset() == 130.0F);
 
   runtime.BuildFrame();
@@ -714,34 +818,44 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(vertical_bar->thumb.height == 24.0F);
   REQUIRE(ContainsRect(vertical_display, vertical_bar->thumb));
 
-  vertical.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      49,
-      {94.0F, 80.0F},
-  });
-  vertical.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      49,
-      {94.0F, 80.0F},
-  });
+  vertical.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          49,
+          {94.0F, 80.0F},
+      }
+  );
+  vertical.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          49,
+          {94.0F, 80.0F},
+      }
+  );
   REQUIRE(drag_scroll.Offset() == 0.0F);
   REQUIRE(drag_item_clicks == 0);
 
-  vertical.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      50,
-      {94.0F, 10.0F},
-  });
-  vertical.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      50,
-      {94.0F, 40.0F},
-  });
-  vertical.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      50,
-      {94.0F, 40.0F},
-  });
+  vertical.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          50,
+          {94.0F, 10.0F},
+      }
+  );
+  vertical.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          50,
+          {94.0F, 40.0F},
+      }
+  );
+  vertical.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          50,
+          {94.0F, 40.0F},
+      }
+  );
   REQUIRE(std::abs(drag_scroll.Offset() - 1671.4286F) < 0.01F);
   REQUIRE(drag_item_clicks == 0);
   REQUIRE(drag_item_cancels == 0);
@@ -763,21 +877,27 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(horizontal_bar->thumb.width == 24.0F);
   REQUIRE(ContainsRect(horizontal_display, horizontal_bar->thumb));
 
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      51,
-      {10.0F, 34.0F},
-  });
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      51,
-      {40.0F, 34.0F},
-  });
-  horizontal.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      51,
-      {40.0F, 34.0F},
-  });
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          51,
+          {10.0F, 34.0F},
+      }
+  );
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          51,
+          {40.0F, 34.0F},
+      }
+  );
+  horizontal.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          51,
+          {40.0F, 34.0F},
+      }
+  );
   REQUIRE(std::abs(horizontal_drag_scroll.Offset() - 1671.4286F) < 0.01F);
 
   Runtime short_content{ShortScrollBarApp, platform};
@@ -788,11 +908,13 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   bool invalid_style_rejected = false;
   try {
     static_cast<void>(VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
-                          .With(huxerui::ScrollBar{
-                              huxerui::ScrollBarStyle{
-                                  .thickness = 0.0F,
-                              },
-                          }));
+                          .With(
+                              huxerui::ScrollBar{
+                                  huxerui::ScrollBarStyle{
+                                      .thickness = 0.0F,
+                                  },
+                              }
+                          ));
   } catch (const std::invalid_argument&) {
     invalid_style_rejected = true;
   }
@@ -865,11 +987,13 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   ClickAt(runtime, {94.0F, 80.0F}, 60);
   REQUIRE(drag_item_clicks == 1);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 50.0F},
-      0.0F,
-      40.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 50.0F},
+          0.0F,
+          40.0F,
+      }
+  );
   runtime.BuildFrame();
   platform.AdvanceTime(0.12);
   const DisplayList& shown = runtime.BuildFrame();
@@ -877,21 +1001,25 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   REQUIRE(shown_geometry.has_value());
   REQUIRE(ContainsRect(shown, shown_geometry->thumb));
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Move,
-      61,
-      {94.0F, 50.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          61,
+          {94.0F, 50.0F},
+      }
+  );
   runtime.BuildFrame();
   platform.AdvanceTime(2.0);
   const DisplayList& held = runtime.BuildFrame();
   REQUIRE(ContainsRect(held, shown_geometry->thumb));
 
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Cancel,
-      61,
-      {120.0F, 50.0F},
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Cancel,
+          61,
+          {120.0F, 50.0F},
+      }
+  );
   runtime.BuildFrame();
   platform.AdvanceTime(0.7);
   runtime.BuildFrame();

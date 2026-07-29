@@ -21,11 +21,12 @@
 #include <huxerui/color.h>
 #include <huxerui/event.h>
 #include <huxerui/geometry.h>
-#include <huxerui/interaction.h>
+#include <huxerui/indication.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
-#include <huxerui/scroll_state.h>
+#include <huxerui/scroll.h>
 #include <huxerui/state.h>
+#include <huxerui/text_input.h>
 #include <huxerui/virtual_layout.h>
 
 namespace huxerui {
@@ -130,6 +131,7 @@ protected:
   void SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler);
   void SetLayoutValue(std::type_index key, std::any value);
   void AddModifier(detail::ModifierSpec modifier);
+  void SetModifier(detail::ModifierSpec modifier);
   void SetKey(std::int64_t value);
   void SetKey(std::uint64_t value);
   void SetKey(std::string value);
@@ -178,6 +180,29 @@ public:
 private:
   std::vector<View> items_;
 };
+
+template <std::ranges::input_range Range, class Factory>
+  requires std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
+           std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
+Views ForEach(Range&& range, Factory&& factory) {
+  Views result;
+  if constexpr (std::ranges::sized_range<Range>) {
+    result.Reserve(static_cast<std::size_t>(std::ranges::size(range)));
+  }
+
+  for (auto&& value : range) {
+    result.Add(std::invoke(factory, value));
+  }
+  return result;
+}
+
+template <class Range, class Factory>
+  requires std::ranges::input_range<const Range&> &&
+           std::invocable<Factory&, std::ranges::range_reference_t<const Range&>> &&
+           std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<const Range&>>, View>
+Views ForEach(const State<Range>& range, Factory&& factory) {
+  return ForEach(range.Get(), std::forward<Factory>(factory));
+}
 
 namespace detail {
 
@@ -404,7 +429,8 @@ private:
 template <class Derived> class Layout : public detail::TypedView<Derived> {
 public:
   explicit Layout(std::vector<View> children)
-      : detail::TypedView<Derived>(detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Derived>(), std::move(children))
+      : detail::TypedView<Derived>(
+            detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Derived>(), std::move(children))
         ) {}
 
   template <class... Children>
@@ -414,8 +440,8 @@ public:
 
 template <class Derived> class VirtualLayout : public detail::TypedView<Derived> {
 public:
-  Derived ScrollState(huxerui::ScrollState state) && {
-    this->SetLayoutValue(typeid(detail::ScrollStateBinding), std::move(state));
+  Derived Controller(huxerui::ScrollController controller) && {
+    this->SetLayoutValue(typeid(detail::ScrollControllerBinding), std::move(controller));
     return std::move(static_cast<Derived&>(*this));
   }
 
@@ -472,6 +498,32 @@ public:
   explicit Button(const char* label);
 };
 
+class TextField final : public detail::TypedView<TextField> {
+public:
+  explicit TextField(TextEditingValue value);
+  explicit TextField(const State<TextEditingValue>& value) : TextField(value.Get()) {}
+
+  TextField Placeholder(std::string value) &&;
+  TextField Placeholder(std::string_view value) &&;
+  TextField Placeholder(const char* value) &&;
+  TextField InputConfiguration(TextInputConfiguration configuration) &&;
+
+  template <class Function> TextField OnChanged(Function&& function) && {
+    return std::move(*this).On<TextFieldEvents::Changed>(std::forward<Function>(function));
+  }
+
+  template <class Function> TextField OnSubmitted(Function&& function) && {
+    return std::move(*this).On<TextFieldEvents::Submitted>(std::forward<Function>(function));
+  }
+
+private:
+  void UpdateModifier();
+
+  TextEditingValue value_;
+  std::string placeholder_;
+  TextInputConfiguration configuration_;
+};
+
 class Checkbox final : public detail::TypedView<Checkbox> {
 public:
   explicit Checkbox(bool checked);
@@ -506,6 +558,11 @@ public:
   template <class Function>
     requires std::invocable<Function&> && std::convertible_to<std::invoke_result_t<Function&>, View>
   explicit Scope(Function&& factory) : Scope(std::function<View()>(std::forward<Function>(factory))) {}
+};
+
+class SelectionArea final : public View {
+public:
+  explicit SelectionArea(View content);
 };
 
 class Spacer final : public View {
@@ -546,7 +603,7 @@ public:
   explicit ScrollView(View content);
 
   ScrollView ScrollAxis(Axis axis) &&;
-  ScrollView ScrollState(huxerui::ScrollState state) &&;
+  ScrollView Controller(huxerui::ScrollController controller) &&;
 };
 
 class VirtualList final : public VirtualLayout<VirtualList> {
@@ -581,3 +638,13 @@ public:
 };
 
 } // namespace huxerui
+
+// clang-format off
+#define HUXERUI_SCOPE(...) return ::huxerui::Scope([=]() -> ::huxerui::View __VA_ARGS__)
+
+#define HUXERUI_SCOPE_BEGIN \
+  return ::huxerui::Scope([=]() -> ::huxerui::View {
+
+#define HUXERUI_SCOPE_END \
+  });
+// clang-format on

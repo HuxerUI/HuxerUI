@@ -8,10 +8,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "internal.h"
 
@@ -211,6 +214,14 @@ Key TranslateKey(unsigned short key_code) {
     return Key::PageUp;
   case 121:
     return Key::PageDown;
+  case 0:
+    return Key::A;
+  case 8:
+    return Key::C;
+  case 9:
+    return Key::V;
+  case 7:
+    return Key::X;
   default:
     return Key::Unknown;
   }
@@ -218,7 +229,231 @@ Key TranslateKey(unsigned short key_code) {
 
 } // namespace
 
-class MacPlatformHost final : public PlatformHost {
+class MacTextLayout final : public TextLayout {
+public:
+  MacTextLayout(std::string_view text, float font_size, float max_width) {
+    string_ = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+    CTFontRef font = CreateFont(font_size);
+    line_height_ = static_cast<float>(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font));
+    CFRelease(font);
+
+    if (!std::isfinite(max_width)) {
+      line_ = CreateLine(text, font_size);
+      CGFloat ascent = 0.0;
+      CGFloat descent = 0.0;
+      CGFloat leading = 0.0;
+      const double width = CTLineGetTypographicBounds(line_, &ascent, &descent, &leading);
+      size_ = {
+          std::ceil(static_cast<float>(width)),
+          std::ceil(std::max(line_height_, static_cast<float>(ascent + descent + leading))),
+      };
+      return;
+    }
+
+    const float width = std::max(1.0F, max_width);
+    CFAttributedStringRef attributed = CreateAttributedString(text, font_size);
+    CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
+    const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
+        framesetter,
+        CFRangeMake(0, 0),
+        nullptr,
+        CGSizeMake(width, CGFLOAT_MAX),
+        nullptr
+    );
+    const float height = std::max(line_height_, std::ceil(static_cast<float>(suggested.height)));
+    CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, width, height), nullptr);
+    frame_ = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nullptr);
+    size_ = {std::min(width, std::ceil(static_cast<float>(suggested.width))), height};
+
+    CFArrayRef lines = CTFrameGetLines(frame_);
+    const CFIndex count = CFArrayGetCount(lines);
+    std::vector<CGPoint> origins(static_cast<std::size_t>(count));
+    if (count > 0) {
+      CTFrameGetLineOrigins(frame_, CFRangeMake(0, count), origins.data());
+    }
+    line_records_.reserve(static_cast<std::size_t>(count));
+    for (CFIndex index = 0; index < count; ++index) {
+      CTLineRef line = static_cast<CTLineRef>(const_cast<void*>(CFArrayGetValueAtIndex(lines, index)));
+      CGFloat ascent = 0.0;
+      CGFloat descent = 0.0;
+      CGFloat leading = 0.0;
+      static_cast<void>(CTLineGetTypographicBounds(line, &ascent, &descent, &leading));
+      line_records_.push_back({
+          line,
+          origins[static_cast<std::size_t>(index)],
+          CTLineGetStringRange(line),
+          height - static_cast<float>(origins[static_cast<std::size_t>(index)].y) - static_cast<float>(ascent),
+          std::max(line_height_, static_cast<float>(ascent + descent + leading)),
+      });
+    }
+    if (line_records_.empty()) {
+      line_ = CreateLine(text, font_size);
+    }
+
+    CGPathRelease(path);
+    CFRelease(framesetter);
+    CFRelease(attributed);
+  }
+
+  ~MacTextLayout() override {
+    if (line_ != nullptr) {
+      CFRelease(line_);
+    }
+    if (frame_ != nullptr) {
+      CFRelease(frame_);
+    }
+  }
+
+  Size Measure() const override {
+    return size_;
+  }
+
+  TextHit HitTest(Point point) const override {
+    CTLineRef line = line_;
+    CGPoint origin{};
+    CFRange range = CFRangeMake(0, static_cast<CFIndex>(string_.length));
+    if (!line_records_.empty()) {
+      const LineRecord* selected = &line_records_.front();
+      float distance = std::numeric_limits<float>::infinity();
+      for (const LineRecord& candidate : line_records_) {
+        const float bottom = candidate.top + candidate.height;
+        const float candidate_distance =
+            point.y < candidate.top ? candidate.top - point.y : (point.y > bottom ? point.y - bottom : 0.0F);
+        if (candidate_distance < distance) {
+          selected = &candidate;
+          distance = candidate_distance;
+        }
+      }
+      line = selected->line;
+      origin = selected->origin;
+      range = selected->range;
+    }
+    CFIndex index = CTLineGetStringIndexForPosition(line, CGPointMake(point.x - origin.x, 0.0));
+    if (index == kCFNotFound) {
+      index = point.x <= origin.x ? range.location : range.location + range.length;
+    }
+    return {
+        static_cast<TextOffset>(std::clamp<CFIndex>(index, 0, static_cast<CFIndex>(string_.length))),
+        TextAffinity::Downstream,
+    };
+  }
+
+  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
+    const CFIndex index = std::clamp<CFIndex>(static_cast<CFIndex>(offset), 0, static_cast<CFIndex>(string_.length));
+    CTLineRef line = line_;
+    CGPoint origin{};
+    float top = 0.0F;
+    float height = line_height_;
+    if (!line_records_.empty()) {
+      const LineRecord* selected = &line_records_.back();
+      for (std::size_t line_index = 0; line_index < line_records_.size(); ++line_index) {
+        const LineRecord& candidate = line_records_[line_index];
+        const CFIndex start = candidate.range.location;
+        const CFIndex end = start + candidate.range.length;
+        if (index < end ||
+            (index == end && (affinity == TextAffinity::Upstream || line_index + 1 == line_records_.size()))) {
+          selected = &candidate;
+          break;
+        }
+      }
+      line = selected->line;
+      origin = selected->origin;
+      top = selected->top;
+      height = selected->height;
+    }
+    CGFloat secondary = 0.0;
+    const CGFloat primary = CTLineGetOffsetForStringIndex(line, index, &secondary);
+    const CGFloat x = affinity == TextAffinity::Upstream && secondary != primary ? secondary : primary;
+    return {
+        static_cast<float>(origin.x + x),
+        top,
+        1.0F,
+        std::ceil(height),
+    };
+  }
+
+  std::vector<Rect> RangeRects(TextRange range) const override {
+    const CFIndex start =
+        std::clamp<CFIndex>(static_cast<CFIndex>(range.start), 0, static_cast<CFIndex>(string_.length));
+    const CFIndex end =
+        std::clamp<CFIndex>(static_cast<CFIndex>(range.end), start, static_cast<CFIndex>(string_.length));
+    if (start == end) {
+      return {};
+    }
+
+    std::vector<Rect> rects;
+    auto append_line = [&](CTLineRef line, CFRange line_range, CGPoint origin, float top, float height) {
+      const CFIndex line_start = std::max(start, line_range.location);
+      const CFIndex line_end = std::min(end, line_range.location + line_range.length);
+      if (line_start >= line_end) {
+        return;
+      }
+      CFArrayRef runs = CTLineGetGlyphRuns(line);
+      const CFIndex count = CFArrayGetCount(runs);
+      for (CFIndex index = 0; index < count; ++index) {
+        CTRunRef run = static_cast<CTRunRef>(const_cast<void*>(CFArrayGetValueAtIndex(runs, index)));
+        const CFRange run_range = CTRunGetStringRange(run);
+        const CFIndex run_start = std::max(line_start, run_range.location);
+        const CFIndex run_end = std::min(line_end, run_range.location + run_range.length);
+        if (run_start >= run_end) {
+          continue;
+        }
+        const CGFloat first = CTLineGetOffsetForStringIndex(line, run_start, nullptr);
+        const CGFloat last = CTLineGetOffsetForStringIndex(line, run_end, nullptr);
+        rects.push_back({
+            static_cast<float>(origin.x + std::min(first, last)),
+            top,
+            static_cast<float>(std::abs(last - first)),
+            std::ceil(height),
+        });
+      }
+    };
+    if (line_records_.empty()) {
+      append_line(line_, CFRangeMake(0, static_cast<CFIndex>(string_.length)), {}, 0.0F, line_height_);
+    } else {
+      for (const LineRecord& line : line_records_) {
+        append_line(line.line, line.range, line.origin, line.top, line.height);
+      }
+    }
+    return rects;
+  }
+
+  TextOffset PreviousCaretOffset(TextOffset offset) const override {
+    const NSUInteger length = string_.length;
+    const NSUInteger target = static_cast<NSUInteger>(std::clamp<TextOffset>(offset, 0, length));
+    if (target == 0) {
+      return 0;
+    }
+    return static_cast<TextOffset>([string_ rangeOfComposedCharacterSequenceAtIndex:target - 1].location);
+  }
+
+  TextOffset NextCaretOffset(TextOffset offset) const override {
+    const NSUInteger length = string_.length;
+    const NSUInteger target = static_cast<NSUInteger>(std::clamp<TextOffset>(offset, 0, length));
+    if (target >= length) {
+      return static_cast<TextOffset>(length);
+    }
+    return static_cast<TextOffset>(NSMaxRange([string_ rangeOfComposedCharacterSequenceAtIndex:target]));
+  }
+
+private:
+  struct LineRecord {
+    CTLineRef line = nullptr;
+    CGPoint origin;
+    CFRange range;
+    float top = 0.0F;
+    float height = 0.0F;
+  };
+
+  __strong NSString* string_ = nil;
+  CTLineRef line_ = nullptr;
+  CTFrameRef frame_ = nullptr;
+  std::vector<LineRecord> line_records_;
+  Size size_;
+  float line_height_ = 0.0F;
+};
+
+class MacPlatformHost final : public PlatformHost, public PlatformClipboard {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     @autoreleasepool {
@@ -302,11 +537,38 @@ public:
     };
   }
 
+  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
+    return std::make_unique<MacTextLayout>(text, font_size, max_width);
+  }
+
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  std::optional<std::string> ReadText() override {
+    NSString* text = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+    if (text == nil) {
+      return std::nullopt;
+    }
+    const char* utf8 = text.UTF8String;
+    return utf8 == nullptr ? std::optional<std::string>{std::string{}} : std::optional<std::string>{utf8};
+  }
+
+  bool WriteText(std::string_view text) override {
+    NSString* value = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+    if (value == nil) {
+      return false;
+    }
+    NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+    [pasteboard clearContents];
+    return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
+  }
+
   void Render(const DisplayList& display_list, CGContextRef context) {
     SetFillColor(context, Color::Rgb(247, 248, 250));
     CGContextFillRect(context, NSRectToCGRect(view_.bounds));
 
-    for (const DrawCommand& command : display_list.Commands()) {
+    for (const DisplayCommand& command : display_list.Commands()) {
       std::visit([this, context](const auto& value) { RenderCommand(context, value); }, command);
     }
   }
@@ -550,6 +812,8 @@ int RunPlatformApp(AppDefinition definition) {
           static_cast<float>(point.x),
           static_cast<float>(point.y),
       },
+      huxerui::PointerDeviceKind::Mouse,
+      type == huxerui::PointerEventType::Down ? static_cast<std::uint32_t>(event.clickCount) : 1U,
   });
 }
 

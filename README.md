@@ -13,7 +13,7 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 - `UseState()` identity based on call site and occurrence
 - `Views`, data-driven `ForEach`, virtualized lists, and virtualized grids
 - Reconciliation between transient `ViewSpec` objects and persistent `MountedNode` objects
-- `Column`, `Row`, `Flow`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, `Button`, `Checkbox`, `Switch`, and `ProgressCircle`
+- `Column`, `Row`, `Flow`, `Stack`, `ScrollView`, `VirtualList`, `VirtualGrid`, `Spacer`, `Text`, `SelectionArea`, `TextField`, `Button`, `Checkbox`, `Switch`, and `ProgressCircle`
 - Public `Layout<Derived>` extension API shared by built-in and custom layouts
 - Public `VirtualLayout<Derived>` extension API for custom virtualized containers
 - Typed built-in and component events with `On<Key>()`, `UseEvents()`, and `Emit<Key>()`
@@ -23,6 +23,8 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 - Padding, spacing, frames, foreground and background colors, and corner radii
 - Main-axis distribution, cross-axis alignment, stack alignment, and grow factors
 - Width-constrained multiline text measurement and rendering
+- Controlled text editing with native Windows and Android IME integration
+- Clipboard shortcuts, double-click or touch selection, and theme-aware selection menus and handles
 - C++ measurement, layout, and hit testing
 - Nested rectangular display-list clipping and paint culling
 - Native Android View, AppKit, and Win32 hosts with input forwarding
@@ -186,6 +188,31 @@ ProgressCircle(0.65F);
 ProgressCircle(progress_state);
 ```
 
+Static `Text` remains non-selectable by default. Wrap related content in a
+`SelectionArea` when users should be able to drag-select and copy it:
+
+```cpp
+SelectionArea {
+  Column {
+    Text("Selectable heading", TextRole::Title),
+    Text("This content can be selected across Text nodes."),
+  },
+};
+```
+
+`TextField` is controlled by `TextEditingValue`. Echo the complete emitted
+value so selection and native composition remain authoritative:
+
+```cpp
+auto value = UseState(TextEditingValue::FromText(""));
+
+return TextField(value)
+    .Placeholder("Name")
+    .OnChanged([value](const TextEditingValue& changed) {
+      value = changed;
+    });
+```
+
 Determinate values are constrained to the `0` to `1` range. An indeterminate
 circle rotates using its node extension, while a determinate circle does not
 continuously request frames. Reduced-motion themes keep the indeterminate arc
@@ -345,13 +372,13 @@ VirtualGrid(items, factory)
 
 Changing the viewport width can change the adaptive column count. The grid keeps the first visible item anchored while rebuilding its row plan. It uses the same virtual item reconciliation, keyed state restoration, clipping, hit testing, and cache lifecycle as `VirtualList`.
 
-Create a stable `ScrollState` when scroll position must be observed or controlled:
+Create a stable `ScrollController` when scroll position must be observed or controlled:
 
 ```cpp
-auto scroll = UseScrollState(40.0F);
+auto scroll = UseScrollController(40.0F);
 
 return VirtualList(items, factory)
-    .ScrollState(scroll);
+    .Controller(scroll);
 ```
 
 `Offset()`, `MaxOffset()`, `ViewportExtent()`, and `ContentExtent()` are observable reads. A Scope that reads them is recomposed when the metrics change. Pixel commands work with `ScrollView` and every virtual layout:
@@ -394,7 +421,7 @@ ScrollView { content }.With(
 );
 ```
 
-The scrollbar infers its axis, does not affect content layout, and is omitted when the content does not overflow. It fades out after inactivity and reappears while scrolling, hovering, or dragging. Its thumb can be dragged directly and takes pointer priority over content interactions while visible; a fully hidden scrollbar does not intercept content input. Wheel and trackpad deltas are consumed from the innermost same-axis container outward, preserving any distance left at a nested boundary. Touch drags continue with decaying inertial motion after release. When a nested container reaches its boundary, remaining velocity continues through the nearest same-axis parent that can scroll. Momentum is cancelled by the next press, wheel input, or explicit `ScrollState` operation. Fade timings are configurable through `ScrollBarStyle`. Track-page clicks and overscroll effects are not yet implemented.
+The scrollbar infers its axis, does not affect content layout, and is omitted when the content does not overflow. It fades out after inactivity and reappears while scrolling, hovering, or dragging. Its thumb can be dragged directly and takes pointer priority over content interactions while visible; a fully hidden scrollbar does not intercept content input. Wheel and trackpad deltas are consumed from the innermost same-axis container outward, preserving any distance left at a nested boundary. Touch drags continue with decaying inertial motion after release. When a nested container reaches its boundary, remaining velocity continues through the nearest same-axis parent that can scroll. Momentum is cancelled by the next press, wheel input, or explicit `ScrollController` operation. Fade timings are configurable through `ScrollBarStyle`. Track-page clicks and overscroll effects are not yet implemented.
 
 Inertial motion is enabled by default. `ScrollPhysics` can disable it or tune
 its velocity thresholds and deceleration without replacing the container's
@@ -849,7 +876,7 @@ Windows:
 - Layout priority and intrinsic-size queries
 - General-purpose clipping modifiers
 - Event capture/bubbling and explicit user-controlled pointer capture
-- IME, editable text input, and text selection
+- macOS native IME integration and advanced text editing behavior
 - General saveable-state APIs, keyframe and decay animation, and overscroll effects
 - Semantics tree and accessibility
 - iOS, Linux, and Web backends

@@ -16,12 +16,23 @@
 #include <utility>
 
 #include "internal.h"
+#include "text_input_internal.h"
 
 namespace huxerui::detail {
 
 namespace {
 
 constexpr float kRadiansToDegrees = 57.2957795130823208768F;
+
+enum class AndroidTextInputOperation : jint {
+  CommitText,
+  SetComposingText,
+  FinishComposing,
+  SetSelection,
+  DeleteSurrounding,
+  DeleteSurroundingCodePoints,
+  SetComposingRegion,
+};
 
 jint PackColor(Color color) {
   const auto channel = [](float value) {
@@ -85,6 +96,14 @@ Key TranslateKey(jint key_code) {
     return Key::PageUp;
   case AKEYCODE_PAGE_DOWN:
     return Key::PageDown;
+  case AKEYCODE_A:
+    return Key::A;
+  case AKEYCODE_C:
+    return Key::C;
+  case AKEYCODE_V:
+    return Key::V;
+  case AKEYCODE_X:
+    return Key::X;
   default:
     return Key::Unknown;
   }
@@ -101,7 +120,126 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
   }
 }
 
-class AndroidViewPlatformHost final : public PlatformHost {
+class AndroidTextLayout final : public TextLayout {
+public:
+  AndroidTextLayout(JavaVM* virtual_machine, JNIEnv* environment, jobject layout)
+      : virtual_machine_(virtual_machine), layout_(environment->NewGlobalRef(layout)) {
+    if (layout_ == nullptr) {
+      throw std::runtime_error("HuxerUI could not retain its Android text layout");
+    }
+    jclass layout_class = environment->GetObjectClass(layout);
+    measure_ = environment->GetMethodID(layout_class, "measure", "()[F");
+    hit_test_ = environment->GetMethodID(layout_class, "hitTest", "(FF)J");
+    caret_ = environment->GetMethodID(layout_class, "caret", "(JZ)[F");
+    range_ = environment->GetMethodID(layout_class, "range", "(JJ)[F");
+    previous_ = environment->GetMethodID(layout_class, "previous", "(J)J");
+    next_ = environment->GetMethodID(layout_class, "next", "(J)J");
+    environment->DeleteLocalRef(layout_class);
+    if (measure_ == nullptr || hit_test_ == nullptr || caret_ == nullptr || range_ == nullptr || previous_ == nullptr ||
+        next_ == nullptr) {
+      environment->DeleteGlobalRef(layout_);
+      layout_ = nullptr;
+      throw std::runtime_error("HuxerUI Android text layout methods do not match the native backend");
+    }
+  }
+
+  ~AndroidTextLayout() override {
+    if (JNIEnv* environment = Environment(); environment != nullptr && layout_ != nullptr) {
+      environment->DeleteGlobalRef(layout_);
+    }
+  }
+
+  Size Measure() const override {
+    const std::vector<float> values = FloatArray(measure_);
+    return values.size() >= 2 ? Size{values[0], values[1]} : Size{};
+  }
+
+  TextHit HitTest(Point point) const override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr) {
+      return {};
+    }
+    return {
+        static_cast<TextOffset>(environment->CallLongMethod(layout_, hit_test_, point.x, point.y)),
+        TextAffinity::Downstream,
+    };
+  }
+
+  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
+    const std::vector<float> values =
+        FloatArray(caret_, static_cast<jlong>(offset), affinity == TextAffinity::Upstream ? JNI_TRUE : JNI_FALSE);
+    return values.size() >= 4 ? Rect{values[0], values[1], values[2], values[3]} : Rect{};
+  }
+
+  std::vector<Rect> RangeRects(TextRange range) const override {
+    const std::vector<float> values =
+        FloatArray(range_, static_cast<jlong>(range.start), static_cast<jlong>(range.end));
+    std::vector<Rect> rects;
+    rects.reserve(values.size() / 4);
+    for (std::size_t index = 0; index + 3 < values.size(); index += 4) {
+      rects.push_back({
+          values[index],
+          values[index + 1],
+          values[index + 2],
+          values[index + 3],
+      });
+    }
+    return rects;
+  }
+
+  TextOffset PreviousCaretOffset(TextOffset offset) const override {
+    JNIEnv* environment = Environment();
+    return environment == nullptr
+               ? offset
+               : static_cast<TextOffset>(environment->CallLongMethod(layout_, previous_, static_cast<jlong>(offset)));
+  }
+
+  TextOffset NextCaretOffset(TextOffset offset) const override {
+    JNIEnv* environment = Environment();
+    return environment == nullptr
+               ? offset
+               : static_cast<TextOffset>(environment->CallLongMethod(layout_, next_, static_cast<jlong>(offset)));
+  }
+
+private:
+  JNIEnv* Environment() const noexcept {
+    if (virtual_machine_ == nullptr) {
+      return nullptr;
+    }
+    JNIEnv* environment = nullptr;
+    return virtual_machine_->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6) == JNI_OK ? environment
+                                                                                                       : nullptr;
+  }
+
+  template <class... Arguments> std::vector<float> FloatArray(jmethodID method, Arguments... arguments) const {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr) {
+      return {};
+    }
+    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(layout_, method, arguments...));
+    if (result == nullptr) {
+      return {};
+    }
+    const jsize size = environment->GetArrayLength(result);
+    std::vector<float> values(static_cast<std::size_t>(size));
+    if (size > 0) {
+      environment->GetFloatArrayRegion(result, 0, size, values.data());
+    }
+    environment->DeleteLocalRef(result);
+    return values;
+  }
+
+  JavaVM* virtual_machine_ = nullptr;
+  jobject layout_ = nullptr;
+  jmethodID measure_ = nullptr;
+  jmethodID hit_test_ = nullptr;
+  jmethodID caret_ = nullptr;
+  jmethodID range_ = nullptr;
+  jmethodID previous_ = nullptr;
+  jmethodID next_ = nullptr;
+};
+
+class AndroidViewPlatformHost final : public PlatformHost, public PlatformTextInput, public PlatformClipboard {
 public:
   AndroidViewPlatformHost(JNIEnv* environment, jobject view) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
@@ -120,6 +258,13 @@ public:
     }
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
     measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFF)[F");
+    create_text_layout_ = environment->GetMethodID(view_class, "createTextLayout", "([BFF)Ljava/lang/Object;");
+    start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJ)V");
+    update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
+    restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJ)V");
+    stop_text_input_ = environment->GetMethodID(view_class, "stopTextInput", "(J)V");
+    read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
+    write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
     draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
     draw_text_ = environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFIFI)V");
     draw_circle_ = environment->GetMethodID(view_class, "drawCircle", "(Landroid/graphics/Canvas;FFFI)V");
@@ -131,9 +276,12 @@ public:
     pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
     environment->DeleteLocalRef(view_class);
 
-    if (schedule_frame_ == nullptr || measure_text_ == nullptr || draw_rect_ == nullptr || draw_text_ == nullptr ||
-        draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr || push_clip_ == nullptr ||
-        pop_clip_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
+    if (schedule_frame_ == nullptr || measure_text_ == nullptr || create_text_layout_ == nullptr ||
+        start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
+        stop_text_input_ == nullptr || read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr ||
+        draw_rect_ == nullptr || draw_text_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr ||
+        draw_border_ == nullptr || push_clip_ == nullptr || pop_clip_ == nullptr || push_transform_ == nullptr ||
+        pop_transform_ == nullptr) {
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
       throw std::runtime_error("HuxerUI Android view methods do not match the native backend");
@@ -189,8 +337,106 @@ public:
     return {values[0], values[1]};
   }
 
+  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return {};
+    }
+    jbyteArray bytes = ToByteArray(environment, text);
+    if (bytes == nullptr) {
+      return {};
+    }
+    jobject layout = environment->CallObjectMethod(view_, create_text_layout_, bytes, font_size, max_width);
+    environment->DeleteLocalRef(bytes);
+    if (layout == nullptr) {
+      return {};
+    }
+    auto result = std::make_unique<AndroidTextLayout>(virtual_machine_, environment, layout);
+    environment->DeleteLocalRef(layout);
+    return result;
+  }
+
+  PlatformTextInput* TextInput() noexcept override {
+    return this;
+  }
+
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  std::optional<std::string> ReadText() override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return std::nullopt;
+    }
+    auto* bytes = static_cast<jbyteArray>(environment->CallObjectMethod(view_, read_clipboard_text_));
+    if (bytes == nullptr || environment->ExceptionCheck()) {
+      return std::nullopt;
+    }
+    std::string text = FromByteArray(environment, bytes);
+    environment->DeleteLocalRef(bytes);
+    return text;
+  }
+
+  bool WriteText(std::string_view text) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return false;
+    }
+    jbyteArray bytes = ToByteArray(environment, text);
+    if (bytes == nullptr) {
+      return false;
+    }
+    const bool result = environment->CallBooleanMethod(view_, write_clipboard_text_, bytes) == JNI_TRUE;
+    environment->DeleteLocalRef(bytes);
+    return result && !environment->ExceptionCheck();
+  }
+
+  void Start(
+      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+  ) override {
+    CallTextInput(start_text_input_, session_id, configuration, state);
+  }
+
+  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return;
+    }
+    const TextRange composition = state.composition.value_or(TextRange{-1, -1});
+    environment->CallVoidMethod(
+        view_,
+        update_text_input_,
+        static_cast<jlong>(session_id),
+        static_cast<jlong>(state.revision),
+        static_cast<jlong>(state.selection.anchor),
+        static_cast<jlong>(state.selection.active),
+        static_cast<jint>(state.selection.affinity),
+        static_cast<jlong>(composition.start),
+        static_cast<jlong>(composition.end),
+        static_cast<jint>(geometry.result_code),
+        geometry.caret.x,
+        geometry.caret.y,
+        geometry.caret.width,
+        geometry.caret.height
+    );
+  }
+
+  void Restart(
+      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+  ) override {
+    CallTextInput(restart_text_input_, session_id, configuration, state);
+  }
+
+  void Stop(TextInputSessionId session_id) override {
+    JNIEnv* environment = Environment();
+    if (environment != nullptr && view_ != nullptr) {
+      environment->CallVoidMethod(view_, stop_text_input_, static_cast<jlong>(session_id));
+    }
+  }
+
   void Render(JNIEnv* environment, jobject canvas, const DisplayList& display_list) {
-    for (const DrawCommand& command : display_list.Commands()) {
+    for (const DisplayCommand& command : display_list.Commands()) {
       std::visit(
           [this, environment, canvas](const auto& value) { RenderCommand(environment, canvas, value); },
           command
@@ -202,6 +448,36 @@ public:
   }
 
 private:
+  void CallTextInput(
+      jmethodID method,
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state
+  ) {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return;
+    }
+    const TextRange composition = state.composition.value_or(TextRange{-1, -1});
+    environment->CallVoidMethod(
+        view_,
+        method,
+        static_cast<jlong>(session_id),
+        static_cast<jint>(configuration.type),
+        static_cast<jint>(configuration.capitalization),
+        static_cast<jint>(configuration.action),
+        configuration.multiline ? JNI_TRUE : JNI_FALSE,
+        configuration.secure ? JNI_TRUE : JNI_FALSE,
+        configuration.autocorrect ? JNI_TRUE : JNI_FALSE,
+        static_cast<jlong>(state.revision),
+        static_cast<jlong>(state.selection.anchor),
+        static_cast<jlong>(state.selection.active),
+        static_cast<jint>(state.selection.affinity),
+        static_cast<jlong>(composition.start),
+        static_cast<jlong>(composition.end)
+    );
+  }
+
   JNIEnv* Environment() const noexcept {
     if (virtual_machine_ == nullptr) {
       return nullptr;
@@ -330,6 +606,13 @@ private:
   jobject view_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
   jmethodID measure_text_ = nullptr;
+  jmethodID create_text_layout_ = nullptr;
+  jmethodID start_text_input_ = nullptr;
+  jmethodID update_text_input_ = nullptr;
+  jmethodID restart_text_input_ = nullptr;
+  jmethodID stop_text_input_ = nullptr;
+  jmethodID read_clipboard_text_ = nullptr;
+  jmethodID write_clipboard_text_ = nullptr;
   jmethodID draw_rect_ = nullptr;
   jmethodID draw_text_ = nullptr;
   jmethodID draw_circle_ = nullptr;
@@ -340,6 +623,32 @@ private:
   jmethodID push_transform_ = nullptr;
   jmethodID pop_transform_ = nullptr;
 };
+
+std::optional<TextSelection> AndroidCursorSelection(
+    const TextInputContext& context, TextRange target, TextOffset inserted_length, TextOffset new_cursor_position
+) {
+  if (target.end > context.total_length || inserted_length < 0) {
+    return std::nullopt;
+  }
+  const TextOffset retained_length = context.total_length - target.Length();
+  if (inserted_length > std::numeric_limits<TextOffset>::max() - retained_length) {
+    return std::nullopt;
+  }
+  const TextOffset result_length = retained_length + inserted_length;
+
+  TextOffset cursor = target.start;
+  if (new_cursor_position > 0) {
+    const TextOffset insertion_end = target.start + inserted_length;
+    const TextOffset delta = new_cursor_position - 1;
+    cursor = delta > result_length - insertion_end ? result_length : insertion_end + delta;
+  } else if (new_cursor_position < 0) {
+    const TextOffset magnitude = new_cursor_position == std::numeric_limits<TextOffset>::min()
+                                     ? std::numeric_limits<TextOffset>::max()
+                                     : -new_cursor_position;
+    cursor = magnitude > target.start ? 0 : target.start - magnitude;
+  }
+  return TextSelection{cursor, cursor};
+}
 
 class AndroidSession final {
 public:
@@ -382,6 +691,125 @@ public:
         modifiers,
         repeat,
     });
+  }
+
+  bool ApplyTextInputCommand(
+      TextInputSessionId session_id,
+      AndroidTextInputOperation operation,
+      std::string text,
+      TextOffset argument0,
+      TextOffset argument1,
+      TextOffset argument2
+  ) {
+    static_cast<void>(argument2);
+    TextInputCommandBatch batch;
+    batch.session_id = session_id;
+
+    switch (operation) {
+    case AndroidTextInputOperation::CommitText:
+    case AndroidTextInputOperation::SetComposingText: {
+      const TextInputContext context = runtime_.QueryTextInputContext(session_id, 0, 0);
+      const std::optional<TextOffset> inserted_length = Utf16Length(text);
+      if (context.result_code != TextInputResultCode::Ok || !inserted_length.has_value()) {
+        return false;
+      }
+      const TextRange target = context.composition.value_or(context.selection.Range());
+      const std::optional<TextSelection> selection =
+          AndroidCursorSelection(context, target, *inserted_length, argument0);
+      if (!selection.has_value()) {
+        return false;
+      }
+      TextInputCommand command;
+      command.kind = operation == AndroidTextInputOperation::CommitText ? TextInputCommandKind::CommitText
+                                                                        : TextInputCommandKind::UpdateComposition;
+      command.selection_after = selection;
+      command.text = std::move(text);
+      batch.commands.push_back(std::move(command));
+      break;
+    }
+    case AndroidTextInputOperation::FinishComposing: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::FinishComposition;
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::SetSelection: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::SetSelection;
+      command.selection_after = TextSelection{argument0, argument1};
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::DeleteSurrounding:
+    case AndroidTextInputOperation::DeleteSurroundingCodePoints: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::DeleteSurrounding;
+      command.delete_before = argument0;
+      command.delete_after = argument1;
+      command.delete_unit = operation == AndroidTextInputOperation::DeleteSurrounding ? TextInputUnit::Utf16CodeUnit
+                                                                                      : TextInputUnit::UnicodeCodePoint;
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::SetComposingRegion: {
+      const TextInputContext context = runtime_.QueryTextInputContext(session_id, 0, 0);
+      if (context.result_code != TextInputResultCode::Ok) {
+        return false;
+      }
+      const TextRange target{std::min(argument0, argument1), std::max(argument0, argument1)};
+      if (context.composition == target) {
+        return true;
+      }
+      if (context.composition.has_value()) {
+        TextInputCommand finish;
+        finish.kind = TextInputCommandKind::FinishComposition;
+        batch.commands.push_back(finish);
+      }
+      TextInputCommand begin;
+      begin.kind = TextInputCommandKind::BeginComposition;
+      begin.target = target;
+      batch.commands.push_back(begin);
+      break;
+    }
+    }
+
+    const TextInputApplyResult result = runtime_.HandleTextInputCommands(batch);
+    return result.result_code == TextInputResultCode::Ok;
+  }
+
+  TextInputContext QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
+    return runtime_.QueryTextInputContext(session_id, start, length);
+  }
+
+  TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
+    return runtime_.QueryTextInputGeometry(session_id, range);
+  }
+
+  bool PerformTextInputAction(TextInputSessionId session_id) {
+    if (runtime_.QueryTextInputContext(session_id, 0, 0).result_code != TextInputResultCode::Ok) {
+      return false;
+    }
+    runtime_.HandleKeyEvent({
+        KeyEventType::Down,
+        Key::Enter,
+        {},
+        {},
+        false,
+    });
+    runtime_.HandleKeyEvent({
+        KeyEventType::Up,
+        Key::Enter,
+        {},
+        {},
+        false,
+    });
+    return true;
+  }
+
+  bool PerformTextEditingAction(TextInputSessionId session_id, TextEditingAction action) {
+    return (session_id == 0 ||
+            runtime_.QueryTextInputContext(session_id, 0, 0).result_code == TextInputResultCode::Ok) &&
+           runtime_.PerformTextEditingAction(action);
   }
 
 private:
@@ -498,5 +926,133 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIInputConnection_nativeApplyTextInputCommand(
+    JNIEnv* environment,
+    jclass,
+    jlong handle,
+    jlong session_id,
+    jint operation,
+    jbyteArray text,
+    jlong argument0,
+    jlong argument1,
+    jlong argument2
+) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    if (session == nullptr) {
+      return JNI_FALSE;
+    }
+    return session->ApplyTextInputCommand(
+               static_cast<huxerui::TextInputSessionId>(session_id),
+               static_cast<huxerui::detail::AndroidTextInputOperation>(operation),
+               huxerui::detail::FromByteArray(environment, text),
+               static_cast<huxerui::TextOffset>(argument0),
+               static_cast<huxerui::TextOffset>(argument1),
+               static_cast<huxerui::TextOffset>(argument2)
+           )
+               ? JNI_TRUE
+               : JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
+  }
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL Java_org_huxerui_HuxerUIInputConnection_nativeQueryTextInputContext(
+    JNIEnv* environment, jclass, jlong handle, jlong session_id, jlong start, jlong length, jlongArray metadata
+) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    if (session == nullptr || metadata == nullptr || environment->GetArrayLength(metadata) < 8) {
+      return nullptr;
+    }
+    const huxerui::TextInputContext context = session->QueryTextInputContext(
+        static_cast<huxerui::TextInputSessionId>(session_id),
+        static_cast<huxerui::TextOffset>(start),
+        static_cast<huxerui::TextOffset>(length)
+    );
+    const huxerui::TextRange composition = context.composition.value_or(huxerui::TextRange{-1, -1});
+    const jlong values[] = {
+        static_cast<jlong>(context.result_code),
+        static_cast<jlong>(context.slice_start),
+        static_cast<jlong>(context.total_length),
+        static_cast<jlong>(context.selection.anchor),
+        static_cast<jlong>(context.selection.active),
+        static_cast<jlong>(context.selection.affinity),
+        static_cast<jlong>(composition.start),
+        static_cast<jlong>(composition.end),
+    };
+    environment->SetLongArrayRegion(metadata, 0, static_cast<jsize>(std::size(values)), values);
+    return huxerui::detail::ToByteArray(environment, context.text);
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIInputConnection_nativeQueryTextInputGeometry(
+    JNIEnv* environment, jclass, jlong handle, jlong session_id, jlong start, jlong end, jfloatArray geometry
+) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    if (session == nullptr || geometry == nullptr || environment->GetArrayLength(geometry) < 4) {
+      return JNI_FALSE;
+    }
+    const huxerui::TextInputGeometry result = session->QueryTextInputGeometry(
+        static_cast<huxerui::TextInputSessionId>(session_id),
+        {
+            static_cast<huxerui::TextOffset>(start),
+            static_cast<huxerui::TextOffset>(end),
+        }
+    );
+    if (result.result_code != huxerui::TextInputResultCode::Ok) {
+      return JNI_FALSE;
+    }
+    const jfloat values[] = {
+        result.caret.x,
+        result.caret.y,
+        result.caret.width,
+        result.caret.height,
+    };
+    environment->SetFloatArrayRegion(geometry, 0, static_cast<jsize>(std::size(values)), values);
+    return JNI_TRUE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIInputConnection_nativePerformTextInputAction(
+    JNIEnv* environment, jclass, jlong handle, jlong session_id, jint editor_action
+) {
+  try {
+    static_cast<void>(editor_action);
+    auto* session = huxerui::detail::Session(handle);
+    return session != nullptr && session->PerformTextInputAction(static_cast<huxerui::TextInputSessionId>(session_id))
+               ? JNI_TRUE
+               : JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIInputConnection_nativePerformTextEditingAction(
+    JNIEnv* environment, jclass, jlong handle, jlong session_id, jint action
+) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    return session != nullptr && session->PerformTextEditingAction(
+                                     static_cast<huxerui::TextInputSessionId>(session_id),
+                                     static_cast<huxerui::TextEditingAction>(action)
+                                 )
+               ? JNI_TRUE
+               : JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
   }
 }

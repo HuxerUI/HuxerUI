@@ -15,6 +15,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES
             d2d1
             dwrite
+            imm32
             user32
             PARENT_SCOPE
     )

@@ -7,14 +7,9 @@
 
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
-#include <huxerui/scroll_state.h>
+#include <huxerui/scroll.h>
 
 namespace huxerui {
-
-enum class Axis {
-  Horizontal,
-  Vertical,
-};
 
 class GridColumns {
 public:
@@ -169,8 +164,8 @@ template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorF
       [](VirtualLayoutContext& context, MountedNode& node, Constraints constraints) -> VirtualLayoutResult {
         return Derived::Measure(context, node, constraints);
       },
-      [](MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
-      ) -> std::optional<float> {
+      [](MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent)
+          -> std::optional<float> {
         if constexpr (requires { Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent); }) {
           return Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent);
         } else {

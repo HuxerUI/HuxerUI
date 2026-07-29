@@ -4,16 +4,19 @@
 #include <d2d1.h>
 #include <d2d1helper.h>
 #include <dwrite.h>
+#include <imm.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -21,6 +24,7 @@
 #include <vector>
 
 #include "internal.h"
+#include "text_input_internal.h"
 
 namespace huxerui::detail {
 
@@ -108,6 +112,14 @@ Key TranslateKey(WPARAM virtual_key) {
     return Key::PageUp;
   case VK_NEXT:
     return Key::PageDown;
+  case 'A':
+    return Key::A;
+  case 'C':
+    return Key::C;
+  case 'V':
+    return Key::V;
+  case 'X':
+    return Key::X;
   default:
     return Key::Unknown;
   }
@@ -159,7 +171,138 @@ D2D1_CAP_STYLE ToD2DCap(StrokeCap cap) {
 
 } // namespace
 
-class Win32PlatformHost final : public huxerui::PlatformHost {
+class Win32TextLayout final : public TextLayout {
+public:
+  Win32TextLayout(std::wstring text, ComPtr<IDWriteTextLayout> layout)
+      : text_(std::move(text)), layout_(std::move(layout)) {
+    UINT32 count = 0;
+    layout_->GetClusterMetrics(nullptr, 0, &count);
+    cluster_metrics_.resize(count);
+    if (count > 0) {
+      ThrowIfFailed(
+          layout_->GetClusterMetrics(cluster_metrics_.data(), count, &count),
+          "HuxerUI could not query DirectWrite text clusters"
+      );
+      cluster_metrics_.resize(count);
+    }
+  }
+
+  Size Measure() const override {
+    DWRITE_TEXT_METRICS metrics{};
+    ThrowIfFailed(layout_->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text layout");
+    return {
+        std::ceil(metrics.widthIncludingTrailingWhitespace),
+        std::ceil(metrics.height),
+    };
+  }
+
+  TextHit HitTest(Point point) const override {
+    BOOL trailing = FALSE;
+    BOOL inside = FALSE;
+    DWRITE_HIT_TEST_METRICS metrics{};
+    ThrowIfFailed(
+        layout_->HitTestPoint(point.x, point.y, &trailing, &inside, &metrics),
+        "HuxerUI could not hit test a DirectWrite text layout"
+    );
+    static_cast<void>(inside);
+    const TextOffset offset = std::min<TextOffset>(
+        static_cast<TextOffset>(text_.size()),
+        static_cast<TextOffset>(metrics.textPosition) + (trailing != FALSE ? metrics.length : 0)
+    );
+    return {
+        offset,
+        trailing != FALSE ? TextAffinity::Upstream : TextAffinity::Downstream,
+    };
+  }
+
+  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
+    UINT32 position = static_cast<UINT32>(std::clamp<TextOffset>(offset, 0, text_.size()));
+    const BOOL trailing = affinity == TextAffinity::Upstream && position > 0;
+    if (trailing != FALSE) {
+      --position;
+    }
+    DWRITE_HIT_TEST_METRICS metrics{};
+    float x = 0.0F;
+    float y = 0.0F;
+    ThrowIfFailed(
+        layout_->HitTestTextPosition(position, trailing, &x, &y, &metrics),
+        "HuxerUI could not locate a DirectWrite text caret"
+    );
+    return {
+        x,
+        y,
+        1.0F,
+        metrics.height,
+    };
+  }
+
+  std::vector<Rect> RangeRects(TextRange range) const override {
+    const TextOffset start = std::clamp<TextOffset>(range.start, 0, text_.size());
+    const TextOffset end = std::clamp<TextOffset>(range.end, start, text_.size());
+    if (start == end) {
+      return {};
+    }
+
+    std::vector<DWRITE_HIT_TEST_METRICS> metrics(text_.size() + 1);
+    UINT32 count = 0;
+    const HRESULT result = layout_->HitTestTextRange(
+        static_cast<UINT32>(start),
+        static_cast<UINT32>(end - start),
+        0.0F,
+        0.0F,
+        metrics.data(),
+        static_cast<UINT32>(metrics.size()),
+        &count
+    );
+    ThrowIfFailed(result, "HuxerUI could not locate a DirectWrite text range");
+
+    std::vector<Rect> rects;
+    rects.reserve(count);
+    for (UINT32 index = 0; index < count; ++index) {
+      rects.push_back({
+          metrics[index].left,
+          metrics[index].top,
+          metrics[index].width,
+          metrics[index].height,
+      });
+    }
+    return rects;
+  }
+
+  TextOffset PreviousCaretOffset(TextOffset offset) const override {
+    const TextOffset target = std::clamp<TextOffset>(offset, 0, text_.size());
+    TextOffset position = 0;
+    for (const DWRITE_CLUSTER_METRICS& cluster : cluster_metrics_) {
+      const TextOffset end = position + cluster.length;
+      if (target <= end) {
+        return position;
+      }
+      position = end;
+    }
+    return position;
+  }
+
+  TextOffset NextCaretOffset(TextOffset offset) const override {
+    const TextOffset target = std::clamp<TextOffset>(offset, 0, text_.size());
+    TextOffset position = 0;
+    for (const DWRITE_CLUSTER_METRICS& cluster : cluster_metrics_) {
+      position += cluster.length;
+      if (target < position) {
+        return position;
+      }
+    }
+    return position;
+  }
+
+private:
+  std::wstring text_;
+  ComPtr<IDWriteTextLayout> layout_;
+  std::vector<DWRITE_CLUSTER_METRICS> cluster_metrics_;
+};
+
+class Win32PlatformHost final : public huxerui::PlatformHost,
+                                public huxerui::PlatformTextInput,
+                                public huxerui::PlatformClipboard {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     runtime_ = &runtime;
@@ -261,6 +404,134 @@ public:
     };
   }
 
+  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
+    std::wstring wide = Utf8ToWide(text);
+    ComPtr<IDWriteTextFormat> format = CreateTextFormat(font_size);
+    const bool constrained = std::isfinite(max_width);
+    format->SetWordWrapping(constrained ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+
+    ComPtr<IDWriteTextLayout> layout;
+    ThrowIfFailed(
+        write_factory_->CreateTextLayout(
+            wide.data(),
+            static_cast<UINT32>(wide.size()),
+            format.Get(),
+            constrained ? std::max(1.0F, max_width) : std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            layout.GetAddressOf()
+        ),
+        "HuxerUI could not create an editable DirectWrite text layout"
+    );
+    return std::make_unique<Win32TextLayout>(std::move(wide), std::move(layout));
+  }
+
+  PlatformTextInput* TextInput() noexcept override {
+    return this;
+  }
+
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  std::optional<std::string> ReadText() override {
+    if (window_ == nullptr || !OpenClipboard(window_)) {
+      return std::nullopt;
+    }
+    struct ClipboardCloser {
+      ~ClipboardCloser() {
+        CloseClipboard();
+      }
+    } closer;
+
+    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+    if (handle == nullptr) {
+      return std::nullopt;
+    }
+    const auto* text = static_cast<const wchar_t*>(GlobalLock(handle));
+    if (text == nullptr) {
+      return std::nullopt;
+    }
+    const std::string result = WideToUtf8(text);
+    GlobalUnlock(handle);
+    return result;
+  }
+
+  bool WriteText(std::string_view text) override {
+    if (window_ == nullptr || !OpenClipboard(window_)) {
+      return false;
+    }
+    struct ClipboardCloser {
+      ~ClipboardCloser() {
+        CloseClipboard();
+      }
+    } closer;
+
+    const std::wstring wide = Utf8ToWide(text);
+    const SIZE_T size = (wide.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (memory == nullptr) {
+      return false;
+    }
+    void* destination = GlobalLock(memory);
+    if (destination == nullptr) {
+      GlobalFree(memory);
+      return false;
+    }
+    std::memcpy(destination, wide.c_str(), size);
+    GlobalUnlock(memory);
+    if (!EmptyClipboard() || SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+      GlobalFree(memory);
+      return false;
+    }
+    return true;
+  }
+
+  void Start(
+      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+  ) override {
+    static_cast<void>(configuration);
+    text_input_session_id_ = session_id;
+    text_input_state_ = state;
+    ime_composing_ = state.composition.has_value();
+    pending_high_surrogate_ = 0;
+    pending_ime_result_.clear();
+    UpdateImePosition(QueryTextInputGeometry());
+  }
+
+  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
+    if (session_id != text_input_session_id_) {
+      return;
+    }
+    text_input_state_ = state;
+    ime_composing_ = state.composition.has_value();
+    UpdateImePosition(geometry);
+  }
+
+  void Restart(
+      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+  ) override {
+    static_cast<void>(configuration);
+    CancelNativeComposition();
+    text_input_session_id_ = session_id;
+    text_input_state_ = state;
+    ime_composing_ = state.composition.has_value();
+    pending_high_surrogate_ = 0;
+    pending_ime_result_.clear();
+    UpdateImePosition(QueryTextInputGeometry());
+  }
+
+  void Stop(TextInputSessionId session_id) override {
+    if (session_id != text_input_session_id_) {
+      return;
+    }
+    text_input_session_id_ = 0;
+    text_input_state_ = {};
+    ime_composing_ = false;
+    pending_high_surrogate_ = 0;
+    pending_ime_result_.clear();
+    CancelNativeComposition();
+  }
+
 private:
   struct ClipState {
     bool uses_layer = false;
@@ -341,6 +612,10 @@ private:
   }
 
   void Cleanup() noexcept {
+    text_input_session_id_ = 0;
+    ime_composing_ = false;
+    pending_high_surrogate_ = 0;
+    pending_ime_result_.clear();
     if (window_ != nullptr) {
       DestroyWindow(window_);
       window_ = nullptr;
@@ -461,7 +736,7 @@ private:
     render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
     render_target_->Clear(D2D1::ColorF(247.0F / 255.0F, 248.0F / 255.0F, 250.0F / 255.0F, 1.0F));
 
-    for (const DrawCommand& command : display_list.Commands()) {
+    for (const DisplayCommand& command : display_list.Commands()) {
       std::visit([this](const auto& value) { RenderCommand(value); }, command);
     }
     while (!clip_stack_.empty()) {
@@ -594,13 +869,15 @@ private:
       return;
     }
     sink->BeginFigure(start, D2D1_FIGURE_BEGIN_HOLLOW);
-    sink->AddArc(D2D1::ArcSegment(
-        end,
-        D2D1::SizeF(command.radius, command.radius),
-        0.0F,
-        command.sweep_angle > 0.0F ? D2D1_SWEEP_DIRECTION_CLOCKWISE : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
-        std::abs(command.sweep_angle) > 3.14159265358979323846F ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL
-    ));
+    sink->AddArc(
+        D2D1::ArcSegment(
+            end,
+            D2D1::SizeF(command.radius, command.radius),
+            0.0F,
+            command.sweep_angle > 0.0F ? D2D1_SWEEP_DIRECTION_CLOCKWISE : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+            std::abs(command.sweep_angle) > 3.14159265358979323846F ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL
+        )
+    );
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
     if (FAILED(sink->Close())) {
       return;
@@ -695,12 +972,14 @@ private:
     clip_stack_.pop_back();
   }
 
-  void SendPointer(PointerEventType type, Point position) {
+  void SendPointer(PointerEventType type, Point position, std::uint32_t click_count = 1) {
     last_pointer_position_ = position;
     runtime_->HandlePointerEvent({
         type,
         0,
         position,
+        PointerDeviceKind::Mouse,
+        click_count,
     });
   }
 
@@ -732,10 +1011,236 @@ private:
     runtime_->HandleKeyEvent({
         type,
         TranslateKey(virtual_key),
-        type == KeyEventType::Down ? TranslateKeyText(virtual_key, key_data) : std::string{},
+        type == KeyEventType::Down && text_input_session_id_ == 0 ? TranslateKeyText(virtual_key, key_data)
+                                                                  : std::string{},
         CurrentKeyModifiers(),
         type == KeyEventType::Down && (static_cast<std::uintptr_t>(key_data) & (1ULL << 30U)) != 0,
     });
+  }
+
+  TextInputGeometry QueryTextInputGeometry() const {
+    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+      return {};
+    }
+    return runtime_->QueryTextInputGeometry(text_input_session_id_, text_input_state_.selection.Range());
+  }
+
+  void UpdateImePosition(const TextInputGeometry& geometry) {
+    if (window_ == nullptr || geometry.result_code != TextInputResultCode::Ok ||
+        geometry.session_id != text_input_session_id_) {
+      return;
+    }
+
+    HIMC context = ImmGetContext(window_);
+    if (context == nullptr) {
+      return;
+    }
+
+    const float scale = DpiScale();
+    const LONG left = static_cast<LONG>(std::lround(geometry.caret.x * scale));
+    const LONG top = static_cast<LONG>(std::lround(geometry.caret.y * scale));
+    const LONG right =
+        static_cast<LONG>(std::lround((geometry.caret.x + std::max(geometry.caret.width, 1.0F)) * scale));
+    const LONG bottom =
+        static_cast<LONG>(std::lround((geometry.caret.y + std::max(geometry.caret.height, 1.0F)) * scale));
+
+    COMPOSITIONFORM composition{};
+    composition.dwStyle = CFS_POINT;
+    composition.ptCurrentPos = {left, top};
+    ImmSetCompositionWindow(context, &composition);
+
+    CANDIDATEFORM candidate{};
+    candidate.dwIndex = 0;
+    candidate.dwStyle = CFS_EXCLUDE;
+    candidate.ptCurrentPos = {left, bottom};
+    candidate.rcArea = {left, top, right, bottom};
+    ImmSetCandidateWindow(context, &candidate);
+    ImmReleaseContext(window_, context);
+  }
+
+  void CancelNativeComposition() {
+    if (window_ == nullptr) {
+      return;
+    }
+    HIMC context = ImmGetContext(window_);
+    if (context == nullptr) {
+      return;
+    }
+    ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+    ImmReleaseContext(window_, context);
+  }
+
+  std::wstring ReadCompositionString(HIMC context, DWORD index) const {
+    const LONG byte_count = ImmGetCompositionStringW(context, index, nullptr, 0);
+    if (byte_count <= 0 || byte_count % static_cast<LONG>(sizeof(wchar_t)) != 0) {
+      return {};
+    }
+    std::wstring result(static_cast<std::size_t>(byte_count) / sizeof(wchar_t), L'\0');
+    const LONG copied = ImmGetCompositionStringW(context, index, result.data(), static_cast<DWORD>(byte_count));
+    if (copied != byte_count) {
+      return {};
+    }
+    return result;
+  }
+
+  TextInputApplyResult ApplyTextInputCommands(std::vector<TextInputCommand> commands) {
+    if (runtime_ == nullptr || text_input_session_id_ == 0 || commands.empty()) {
+      return {};
+    }
+    TextInputCommandBatch batch;
+    batch.session_id = text_input_session_id_;
+    batch.commands = std::move(commands);
+    return runtime_->HandleTextInputCommands(batch);
+  }
+
+  bool BeginImeComposition() {
+    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+      return false;
+    }
+    ime_composing_ = true;
+    UpdateImePosition(QueryTextInputGeometry());
+
+    const TextInputContext context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    if (context.result_code != TextInputResultCode::Ok || context.composition.has_value()) {
+      return context.result_code == TextInputResultCode::Ok;
+    }
+
+    TextInputCommand begin;
+    begin.kind = TextInputCommandKind::BeginComposition;
+    begin.target = context.selection.Range();
+    const TextInputApplyResult result = ApplyTextInputCommands({std::move(begin)});
+    return result.result_code == TextInputResultCode::Ok;
+  }
+
+  bool UpdateImeComposition(LPARAM flags) {
+    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+      return false;
+    }
+    HIMC context = ImmGetContext(window_);
+    if (context == nullptr) {
+      return false;
+    }
+
+    const bool has_result = (flags & GCS_RESULTSTR) != 0;
+    const bool has_composition = (flags & GCS_COMPSTR) != 0;
+    const std::wstring result_text = has_result ? ReadCompositionString(context, GCS_RESULTSTR) : std::wstring{};
+    const std::wstring composition_text =
+        has_composition ? ReadCompositionString(context, GCS_COMPSTR) : std::wstring{};
+    LONG cursor = has_composition ? ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0) : 0;
+    ImmReleaseContext(window_, context);
+
+    if (!has_result && !has_composition) {
+      return true;
+    }
+
+    const TextInputContext input_context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    if (input_context.result_code != TextInputResultCode::Ok) {
+      return false;
+    }
+
+    std::vector<TextInputCommand> commands;
+    TextOffset composition_start = input_context.composition.value_or(input_context.selection.Range()).start;
+    if (has_result) {
+      TextInputCommand commit;
+      commit.kind = TextInputCommandKind::CommitText;
+      commit.text = WideToUtf8(result_text);
+      commands.push_back(std::move(commit));
+      pending_ime_result_ = result_text;
+      const std::optional<TextOffset> result_length = Utf16Length(commands.back().text);
+      if (!result_length.has_value()) {
+        return false;
+      }
+      composition_start += *result_length;
+    }
+    if (has_composition) {
+      TextInputCommand update;
+      update.kind = TextInputCommandKind::UpdateComposition;
+      update.text = WideToUtf8(composition_text);
+      const std::optional<TextOffset> composition_length = Utf16Length(update.text);
+      if (!composition_length.has_value()) {
+        return false;
+      }
+      cursor = std::clamp<LONG>(cursor, 0, static_cast<LONG>(*composition_length));
+      update.selection_after = TextSelection{
+          composition_start + cursor,
+          composition_start + cursor,
+      };
+      commands.push_back(std::move(update));
+    }
+
+    const TextInputApplyResult result = ApplyTextInputCommands(std::move(commands));
+    if (result.result_code != TextInputResultCode::Ok) {
+      pending_ime_result_.clear();
+      return false;
+    }
+    ime_composing_ = has_composition;
+    return true;
+  }
+
+  bool EndImeComposition() {
+    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+      return false;
+    }
+    ime_composing_ = false;
+    pending_high_surrogate_ = 0;
+
+    const TextInputContext context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    if (context.result_code != TextInputResultCode::Ok || !context.composition.has_value()) {
+      return context.result_code == TextInputResultCode::Ok;
+    }
+
+    TextInputCommand finish;
+    finish.kind = TextInputCommandKind::FinishComposition;
+    const TextInputApplyResult result = ApplyTextInputCommands({std::move(finish)});
+    return result.result_code == TextInputResultCode::Ok;
+  }
+
+  bool SuppressImeCharacter(wchar_t character) {
+    if (pending_ime_result_.empty()) {
+      return false;
+    }
+    if (pending_ime_result_.front() != character) {
+      pending_ime_result_.clear();
+      return false;
+    }
+    pending_ime_result_.erase(pending_ime_result_.begin());
+    return true;
+  }
+
+  bool CommitCharacter(wchar_t character) {
+    if (text_input_session_id_ == 0) {
+      return false;
+    }
+    if (SuppressImeCharacter(character)) {
+      return true;
+    }
+    if (character < L' ') {
+      pending_high_surrogate_ = 0;
+      return true;
+    }
+
+    std::wstring text;
+    if (character >= 0xD800 && character <= 0xDBFF) {
+      pending_high_surrogate_ = character;
+      return true;
+    }
+    if (character >= 0xDC00 && character <= 0xDFFF) {
+      if (pending_high_surrogate_ == 0) {
+        return true;
+      }
+      text.push_back(pending_high_surrogate_);
+      text.push_back(character);
+      pending_high_surrogate_ = 0;
+    } else {
+      pending_high_surrogate_ = 0;
+      text.push_back(character);
+    }
+
+    TextInputCommand commit;
+    commit.kind = TextInputCommandKind::CommitText;
+    commit.text = WideToUtf8(text);
+    const TextInputApplyResult result = ApplyTextInputCommands({std::move(commit)});
+    return result.result_code == TextInputResultCode::Ok;
   }
 
   LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
@@ -802,11 +1307,16 @@ private:
       }
       break;
     case WM_LBUTTONDOWN:
-    case WM_LBUTTONDBLCLK:
       SetFocus(window);
       SetCapture(window);
       pointer_down_ = true;
       SendPointer(PointerEventType::Down, ClientPoint(l_param));
+      return 0;
+    case WM_LBUTTONDBLCLK:
+      SetFocus(window);
+      SetCapture(window);
+      pointer_down_ = true;
+      SendPointer(PointerEventType::Down, ClientPoint(l_param), 2);
       return 0;
     case WM_MOUSEMOVE:
       TrackMouse();
@@ -855,11 +1365,32 @@ private:
       return 0;
     }
     case WM_KEYDOWN:
+      pending_ime_result_.clear();
+      if (text_input_session_id_ != 0 && (w_param == VK_PROCESSKEY || ime_composing_ || w_param == VK_SPACE)) {
+        return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
+      }
       SendKey(KeyEventType::Down, w_param, l_param);
       return 0;
     case WM_KEYUP:
+      if (text_input_session_id_ != 0 && (w_param == VK_PROCESSKEY || ime_composing_ || w_param == VK_SPACE)) {
+        return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
+      }
       SendKey(KeyEventType::Up, w_param, l_param);
       return 0;
+    case WM_CHAR:
+      return CommitCharacter(static_cast<wchar_t>(w_param)) ? 0 : DefWindowProcW(window, message, w_param, l_param);
+    case WM_IME_STARTCOMPOSITION:
+      return BeginImeComposition() ? 0 : DefWindowProcW(window, message, w_param, l_param);
+    case WM_IME_COMPOSITION:
+      return UpdateImeComposition(l_param) ? 0 : DefWindowProcW(window, message, w_param, l_param);
+    case WM_IME_ENDCOMPOSITION:
+      return EndImeComposition() ? 0 : DefWindowProcW(window, message, w_param, l_param);
+    case WM_IME_CHAR:
+      if (text_input_session_id_ != 0) {
+        SuppressImeCharacter(static_cast<wchar_t>(w_param));
+        return 0;
+      }
+      break;
     default:
       break;
     }
@@ -898,7 +1429,12 @@ private:
   bool timer_armed_ = false;
   bool mouse_tracking_ = false;
   bool pointer_down_ = false;
+  bool ime_composing_ = false;
   Point last_pointer_position_;
+  TextInputSessionId text_input_session_id_ = 0;
+  TextInputState text_input_state_;
+  wchar_t pending_high_surrogate_ = 0;
+  std::wstring pending_ime_result_;
   std::exception_ptr failure_;
   ComPtr<ID2D1Factory> d2d_factory_;
   ComPtr<IDWriteFactory> write_factory_;

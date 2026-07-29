@@ -230,7 +230,8 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
       state_->layer_controller_,
       state_->root_environment_values_,
       state_->root_service_types_,
-      state_->root_services_};
+      state_->root_services_
+  };
   InstallBuiltinPresentation(root);
   for (RootHook& hook : definition.options.root_hooks) {
     if (!hook) {
@@ -245,6 +246,10 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
 }
 
 Runtime::~Runtime() {
+  try {
+    StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+  } catch (...) {
+  }
   state_->pointer_sessions_.clear();
   state_->hovered_extension_.reset();
   state_->mounted_root_.reset();
@@ -264,12 +269,14 @@ Runtime::AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<
     throw std::invalid_argument("HuxerUI layer content factory must not be empty");
   }
   const LayerId id = state_->next_layer_id_++;
-  state_->layers_.push_back(LayerEntry{
-      id,
-      options,
-      std::move(content),
-      environment ? std::move(environment) : state_->root_environment_,
-  });
+  state_->layers_.push_back(
+      LayerEntry{
+          id,
+          options,
+          std::move(content),
+          environment ? std::move(environment) : state_->root_environment_,
+      }
+  );
   if (!state_->composing_root_ || state_->layer_snapshot_taken_) {
     InvalidateRoot();
   }
@@ -386,6 +393,8 @@ const DisplayList& Runtime::BuildFrame(FrameInfo frame) {
 
   state_->display_list_.Clear();
   if (!state_->mounted_root_ || state_->viewport_.width <= 0.0F || state_->viewport_.height <= 0.0F) {
+    RefreshInteractionTree();
+    RefreshTextInputSession();
     return state_->display_list_;
   }
 
@@ -402,12 +411,19 @@ const DisplayList& Runtime::BuildFrame(FrameInfo frame) {
   };
   MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
   LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+  if (BringTextInputIntoView()) {
+    LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+  }
   RefreshInteractionTree();
+  RefreshTextInputSession();
+  AdvanceTextSelectionLongPress(frame.timestamp);
 
   std::optional<double> next_wakeup;
   UpdateNodeExtensions(*state_->mounted_root_, frame, needs_frame, next_wakeup, state_->extension_tree_dirty_);
   state_->extension_tree_dirty_ = false;
+  AdvanceTextSelectionOverlay(frame);
   PaintNode(*state_->mounted_root_, state_->display_list_);
+  PaintTextSelectionOverlay();
   if (needs_frame) {
     RequestFrame();
   } else if (next_wakeup.has_value()) {
@@ -568,6 +584,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     return;
   }
 
+  HideTextSelectionOverlay();
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
       previous->focused = false;
@@ -678,6 +695,7 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   }
   if (event.type == KeyEventType::Down && event.key == Key::Tab && !event.repeat) {
     MoveFocus(event.modifiers.shift);
+    RefreshTextInputSession();
     return;
   }
   if (!state_->focused_node_identity_.has_value()) {
@@ -687,11 +705,44 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
   if (!focused || !focused->enabled || !focused->focusable) {
     SetFocusedNode(std::nullopt);
+    RefreshTextInputSession();
     return;
   }
 
   if (event.type == KeyEventType::Down) {
     SetFocusedNode(focused->identity, true);
+  }
+  if (event.type == KeyEventType::Down && !event.repeat && !event.modifiers.alt &&
+      (event.modifiers.control || event.modifiers.meta)) {
+    std::optional<TextEditingAction> action;
+    switch (event.key) {
+    case Key::A:
+      action = TextEditingAction::SelectAll;
+      break;
+    case Key::C:
+      action = TextEditingAction::Copy;
+      break;
+    case Key::V:
+      action = TextEditingAction::Paste;
+      break;
+    case Key::X:
+      action = TextEditingAction::Cut;
+      break;
+    default:
+      break;
+    }
+    if (action.has_value() && (state_->text_input_session_.has_value() || CanPerformTextEditingAction(*action))) {
+      PerformTextEditingAction(*action);
+      RequestFrame();
+      RefreshTextInputSession();
+      return;
+    }
+  }
+  if (state_->text_input_session_.has_value() && state_->text_input_session_->node_identity == focused->identity &&
+      state_->text_input_session_->client->HandleTextKey(event) == TextInputKeyResult::Handled) {
+    RequestFrame();
+    RefreshTextInputSession();
+    return;
   }
   DispatchKey(*focused, event);
   const bool activatable = IsActivatable(*focused);
@@ -709,6 +760,7 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
     state_->keyboard_activation_identity_.reset();
   }
   RequestFrame();
+  RefreshTextInputSession();
 }
 
 void Runtime::InvalidateRoot() {
@@ -840,10 +892,12 @@ void Runtime::ComposeRoot() {
       if (entry->options.input_policy == LayerInputPolicy::Modal) {
         layer = std::move(layer).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
         View modal = Stack{std::move(layer)}
-                         .With(Align{
-                             HorizontalAlignment::Center,
-                             VerticalAlignment::Center,
-                         })
+                         .With(
+                             Align{
+                                 HorizontalAlignment::Center,
+                                 VerticalAlignment::Center,
+                             }
+                         )
                          .LayoutValue<RuntimeFillsViewport>(true)
                          .On<ViewEvents::PointerDown>([this,
                                                        id = entry->id,
@@ -1035,11 +1089,10 @@ void Runtime::ReconcileChildren(
             break;
           }
         }
-      } else if (index < previous.size() &&
-                 previous[index] &&
-                 !previous[index]->key.has_value() &&
-                 SameNodeType(
-                     *previous[index], *child_view.spec_)) {
+      } else if (
+          index < previous.size() && previous[index] && !previous[index]->key.has_value() &&
+          SameNodeType(*previous[index], *child_view.spec_)
+      ) {
         origin = index;
       }
 
@@ -1108,9 +1161,10 @@ void Runtime::RestoreNodeState(detail::MountedNode& mounted, SavedNodeState& sav
           break;
         }
       }
-    } else if (index < saved.children.size() && !restored[index] &&
-               !saved.children[index].key.has_value() &&
-               SameSavedNodeType(child, saved.children[index])) {
+    } else if (
+        index < saved.children.size() && !restored[index] && !saved.children[index].key.has_value() &&
+        SameSavedNodeType(child, saved.children[index])
+    ) {
       saved_index = index;
       saved_child = &saved.children[index];
     }
@@ -1256,8 +1310,10 @@ void VirtualMeasureSession::Commit(const std::vector<VirtualLayoutResult::Placem
       return item.get() == placement.item;
     });
     if (found == requested_.end()) {
-      throw std::logic_error("HuxerUI virtual layout can only place items "
-                             "requested from its context");
+      throw std::logic_error(
+          "HuxerUI virtual layout can only place items "
+          "requested from its context"
+      );
     }
     const std::size_t position = static_cast<std::size_t>(found - requested_.begin());
     next.push_back(std::move(*found));

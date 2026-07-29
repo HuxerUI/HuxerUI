@@ -8,11 +8,15 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
 add_executable(huxerui_tests
         tests_main.cpp
+        text_input.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
         runtime/layout.cpp
         runtime/presentation.cpp
         runtime/scrolling.cpp
+        runtime/selection_area.cpp
+        runtime/text_field.cpp
+        runtime/text_input.cpp
         runtime/virtual_layout.cpp
 )
 
@@ -31,22 +35,22 @@ add_test(NAME HuxerUIRuntimeTests COMMAND huxerui_tests)
 set(HUXERUI_PUBLIC_HEADERS
         animation.h
         app.h
+        clipboard.h
         color.h
         display_list.h
         environment.h
         event.h
-        foreach.h
         geometry.h
         huxerui.h
-        interaction.h
+        indication.h
         layer.h
         layout.h
         modifier.h
         presentation.h
         root.h
-        scope.h
-        scroll_state.h
+        scroll.h
         state.h
+        text_input.h
         theme.h
         view.h
         virtual_layout.h

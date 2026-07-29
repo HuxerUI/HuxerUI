@@ -31,6 +31,24 @@ namespace huxerui::detail {
 
 struct MountedNode;
 class ScrollConnection;
+class IndicationState;
+
+struct TextHit {
+  TextOffset offset = 0;
+  TextAffinity affinity = TextAffinity::Downstream;
+};
+
+class TextLayout {
+public:
+  virtual ~TextLayout() = default;
+
+  [[nodiscard]] virtual Size Measure() const = 0;
+  [[nodiscard]] virtual TextHit HitTest(Point point) const = 0;
+  [[nodiscard]] virtual Rect CaretRect(TextOffset offset, TextAffinity affinity) const = 0;
+  [[nodiscard]] virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
+  [[nodiscard]] virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
+  [[nodiscard]] virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
+};
 
 struct PresentationTransform {
   float m11 = 1.0F;
@@ -233,9 +251,9 @@ struct ScrollItemRequest {
   ScrollAlignment alignment;
 };
 
-class ScrollStateData {
+class ScrollControllerData {
 public:
-  explicit ScrollStateData(float initial_offset);
+  explicit ScrollControllerData(float initial_offset);
 
   std::shared_ptr<StateCell<ScrollMetrics>> metrics;
   std::weak_ptr<ScrollConnection> connection;
@@ -247,11 +265,13 @@ public:
 enum class NodeKind {
   Text,
   Button,
+  TextField,
   Checkbox,
   Switch,
   ProgressCircle,
   Spacer,
   Scope,
+  SelectionArea,
   Layout,
   ScrollView,
   VirtualLayout,
@@ -493,9 +513,9 @@ protected:
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
-  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollStateData> data);
+  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerData> data);
 
-  [[nodiscard]] const std::shared_ptr<ScrollStateData>& Data() const noexcept {
+  [[nodiscard]] const std::shared_ptr<ScrollControllerData>& Data() const noexcept {
     return data_;
   }
 
@@ -515,11 +535,11 @@ private:
 
   Runtime* runtime_;
   MountedNode* node_;
-  std::shared_ptr<ScrollStateData> data_;
+  std::shared_ptr<ScrollControllerData> data_;
 };
 
-void PrepareScrollState(MountedNode& node, Runtime& runtime);
-void CompleteScrollState(MountedNode& node);
+void PrepareScrollController(MountedNode& node, Runtime& runtime);
+void CompleteScrollController(MountedNode& node);
 
 class VirtualMeasureSession {
 public:
@@ -676,6 +696,47 @@ struct PointerSession {
   std::vector<NodeExtensionHandle> extension_observers;
 };
 
+struct ActiveTextInputSession {
+  std::uint64_t node_identity = 0;
+  TextInputSessionId session_id = 0;
+  std::shared_ptr<TextInputClient> client;
+  TextInputConfiguration configuration;
+  TextInputState state;
+};
+
+struct TextSelectionOverlayState {
+  bool visible = false;
+  bool dragging = false;
+  bool dragging_start_handle = false;
+  bool show_handles = false;
+  bool dismissing = false;
+  std::optional<std::int64_t> pointer_id;
+  std::optional<std::size_t> pressed_action;
+  std::optional<std::size_t> hovered_action;
+  bool long_press_pending = false;
+  std::int64_t long_press_pointer_id = 0;
+  Point long_press_position;
+  double long_press_deadline = 0.0;
+  bool tap_pending = false;
+  std::int64_t tap_pointer_id = 0;
+  Point tap_position;
+  std::optional<double> previous_tap_time;
+  Point previous_tap_position;
+  std::optional<std::uint64_t> previous_tap_node;
+  Rect start_handle_hit_rect;
+  Rect end_handle_hit_rect;
+  Rect toolbar_rect;
+  Color toolbar_background;
+  Color toolbar_foreground;
+  Color toolbar_border;
+  float toolbar_corner_radius = 0.0F;
+  float toolbar_font_size = 14.0F;
+  std::vector<TextEditingAction> actions;
+  std::vector<Rect> action_rects;
+  std::vector<std::string> action_labels;
+  std::vector<std::shared_ptr<IndicationState>> action_indications;
+};
+
 struct LayerEntry {
   LayerId id = 0;
   LayerOptions options;
@@ -726,6 +787,9 @@ struct Runtime::State {
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
+  std::optional<detail::ActiveTextInputSession> text_input_session_;
+  detail::TextSelectionOverlayState text_selection_overlay_;
+  TextInputSessionId next_text_input_session_id_ = 1;
   std::optional<LayerId> active_modal_focus_layer_;
   std::unordered_map<LayerId, std::optional<std::uint64_t>> modal_focus_restore_;
 };
@@ -754,6 +818,7 @@ bool IsScrollContainer(const MountedNode& node) noexcept;
 Axis ScrollAxis(const MountedNode& node) noexcept;
 bool CanScrollNode(const MountedNode& node, float delta);
 float ScrollNodeBy(MountedNode& node, float delta);
+bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect);
 
 struct ScrollEventResult {
   std::vector<MountedNode*> scroll_chain;

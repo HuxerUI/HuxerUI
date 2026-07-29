@@ -158,6 +158,10 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
   if (!state_->mounted_root_) {
     return;
   }
+  if (HandleTextSelectionOverlayPointer(event)) {
+    RefreshTextInputSession();
+    return;
+  }
 
   switch (event.type) {
   case PointerEventType::Down:
@@ -173,6 +177,9 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
     HandlePointerUp(event);
     break;
   }
+  HandleTextSelectionClick(event);
+  TrackTouchTextSelectionGesture(event);
+  RefreshTextInputSession();
 }
 
 void Runtime::HandlePointerDown(const PointerEvent& event) {
@@ -249,11 +256,13 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
         continue;
       }
       if (result == NodeExtension::PointerResult::Observe) {
-        session.extension_observers.push_back(NodeExtensionHandle{
-            (*node)->identity,
-            index - 1,
-            entry.descriptor,
-        });
+        session.extension_observers.push_back(
+            NodeExtensionHandle{
+                (*node)->identity,
+                index - 1,
+                entry.descriptor,
+            }
+        );
         RequestFrame();
         continue;
       }

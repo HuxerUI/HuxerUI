@@ -8,6 +8,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "text_field_internal.h"
 
 namespace huxerui {
 
@@ -389,6 +390,18 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.style.corner_radius = style.corner_radius;
     return;
   }
+  if (spec.kind == detail::NodeKind::TextField) {
+    const TextFieldStyle style =
+        ResolveStyleOverride<TextFieldStyleKey>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
+    spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), style);
+    spec.style.padding = style.padding;
+    spec.style.background = style.background;
+    spec.style.foreground = style.foreground;
+    spec.style.font_size = style.font_size;
+    spec.style.corner_radius = style.corner_radius;
+    spec.style.frame.min_height = std::max(0.0F, style.minimum_height);
+    return;
+  }
   if (spec.kind == detail::NodeKind::Checkbox) {
     const CheckboxStyle style =
         ResolveStyleOverride<CheckboxStyleKey>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
@@ -606,6 +619,21 @@ void View::AddModifier(detail::ModifierSpec modifier) {
   spec_->modifiers.push_back(std::move(modifier));
 }
 
+void View::SetModifier(detail::ModifierSpec modifier) {
+  if (modifier.descriptor == nullptr || !modifier.value || modifier.descriptor->create_extension == nullptr) {
+    throw std::invalid_argument("HuxerUI retained modifier descriptor and value must not be empty");
+  }
+  EnsureUniqueSpec();
+  const auto found = std::ranges::find_if(spec_->modifiers, [&modifier](const detail::ModifierSpec& existing) {
+    return existing.descriptor == modifier.descriptor;
+  });
+  if (found == spec_->modifiers.end()) {
+    spec_->modifiers.push_back(std::move(modifier));
+  } else {
+    *found = std::move(modifier);
+  }
+}
+
 void View::SetKey(std::int64_t value) {
   EnsureUniqueSpec();
   spec_->key = value;
@@ -692,8 +720,8 @@ ScrollView ScrollView::ScrollAxis(Axis axis) && {
   return std::move(*this);
 }
 
-ScrollView ScrollView::ScrollState(huxerui::ScrollState state) && {
-  SetLayoutValue(typeid(detail::ScrollStateBinding), std::move(state));
+ScrollView ScrollView::Controller(huxerui::ScrollController controller) && {
+  SetLayoutValue(typeid(detail::ScrollControllerBinding), std::move(controller));
   return std::move(*this);
 }
 
@@ -766,8 +794,10 @@ VirtualGrid VirtualGrid::RowExtent(float extent) && {
 
 VirtualGrid VirtualGrid::EstimatedRowExtent(float extent) && {
   if (!std::isfinite(extent) || extent <= 0.0F) {
-    throw std::invalid_argument("HuxerUI estimated virtual grid row extent must be finite and "
-                                "positive");
+    throw std::invalid_argument(
+        "HuxerUI estimated virtual grid row extent must be finite and "
+        "positive"
+    );
   }
   SetLayoutValue(typeid(detail::VirtualGridEstimatedRowExtent), extent);
   return std::move(*this);

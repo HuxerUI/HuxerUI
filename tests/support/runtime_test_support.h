@@ -72,9 +72,10 @@ using huxerui::Rotation;
 using huxerui::Row;
 using huxerui::Scale;
 using huxerui::ScrollAlignment;
+using huxerui::ScrollController;
 using huxerui::ScrollEvent;
-using huxerui::ScrollState;
 using huxerui::ScrollView;
+using huxerui::SelectionArea;
 using huxerui::Size;
 using huxerui::Spacer;
 using huxerui::Stack;
@@ -84,6 +85,18 @@ using huxerui::Switch;
 using huxerui::SwitchStyle;
 using huxerui::SwitchStyleKey;
 using huxerui::Text;
+using huxerui::TextEditingAction;
+using huxerui::TextEditingValue;
+using huxerui::TextField;
+using huxerui::TextFieldEvents;
+using huxerui::TextFieldStyle;
+using huxerui::TextFieldStyleKey;
+using huxerui::TextInputApplyResult;
+using huxerui::TextInputCommandBatch;
+using huxerui::TextInputContext;
+using huxerui::TextInputGeometry;
+using huxerui::TextInputSessionId;
+using huxerui::TextOffset;
 using huxerui::TextRole;
 using huxerui::Theme;
 using huxerui::ThemeDefinition;
@@ -94,7 +107,7 @@ using huxerui::TweenSpec;
 using huxerui::UseDialog;
 using huxerui::UseEnvironment;
 using huxerui::UseEvents;
-using huxerui::UseScrollState;
+using huxerui::UseScrollController;
 using huxerui::UseService;
 using huxerui::UseState;
 using huxerui::UseTheme;
@@ -139,6 +152,26 @@ public:
     runtime_.HandleKeyEvent(event);
   }
 
+  bool CanPerformTextEditingAction(huxerui::TextEditingAction action) const {
+    return runtime_.CanPerformTextEditingAction(action);
+  }
+
+  bool PerformTextEditingAction(huxerui::TextEditingAction action) {
+    return runtime_.PerformTextEditingAction(action);
+  }
+
+  TextInputApplyResult HandleTextInputCommands(const TextInputCommandBatch& batch) {
+    return runtime_.HandleTextInputCommands(batch);
+  }
+
+  TextInputContext QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
+    return runtime_.QueryTextInputContext(session_id, start, length);
+  }
+
+  TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, huxerui::TextRange range) const {
+    return runtime_.QueryTextInputGeometry(session_id, range);
+  }
+
   void InvalidateRoot() {
     huxerui::detail::RuntimeAccess::InvalidateRoot(runtime_);
   }
@@ -153,6 +186,95 @@ private:
 
 class TestPlatform final : public huxerui::PlatformHost {
 public:
+  class TextLayout final : public huxerui::detail::TextLayout {
+  public:
+    explicit TextLayout(std::string_view text) {
+      offsets_.push_back(0);
+      positions_.push_back(0.0F);
+      TextOffset offset = 0;
+      float position = 0.0F;
+      for (std::size_t index = 0; index < text.size();) {
+        const unsigned char first = static_cast<unsigned char>(text[index]);
+        std::uint32_t code_point = first;
+        std::size_t length = 1;
+        if ((first & 0xE0U) == 0xC0U) {
+          code_point = first & 0x1FU;
+          length = 2;
+        } else if ((first & 0xF0U) == 0xE0U) {
+          code_point = first & 0x0FU;
+          length = 3;
+        } else if ((first & 0xF8U) == 0xF0U) {
+          code_point = first & 0x07U;
+          length = 4;
+        }
+        for (std::size_t continuation = 1; continuation < length; ++continuation) {
+          code_point = (code_point << 6U) | (static_cast<unsigned char>(text[index + continuation]) & 0x3FU);
+        }
+        index += length;
+        offset += code_point > 0xFFFFU ? 2 : 1;
+        const bool combining = code_point >= 0x0300U && code_point <= 0x036FU;
+        if (!combining) {
+          position += code_point > 0xFFFFU ? 20.0F : 10.0F;
+        }
+        if (combining && offsets_.size() > 1) {
+          offsets_.back() = offset;
+        } else {
+          offsets_.push_back(offset);
+          positions_.push_back(position);
+        }
+      }
+    }
+
+    Size Measure() const override {
+      return {positions_.back(), 20.0F};
+    }
+
+    huxerui::detail::TextHit HitTest(Point point) const override {
+      for (std::size_t index = 1; index < positions_.size(); ++index) {
+        if (point.x < (positions_[index - 1] + positions_[index]) * 0.5F) {
+          return {offsets_[index - 1], huxerui::TextAffinity::Downstream};
+        }
+      }
+      return {offsets_.back(), huxerui::TextAffinity::Downstream};
+    }
+
+    Rect CaretRect(TextOffset offset, huxerui::TextAffinity affinity) const override {
+      static_cast<void>(affinity);
+      return {Position(offset), 0.0F, 1.0F, 20.0F};
+    }
+
+    std::vector<Rect> RangeRects(huxerui::TextRange range) const override {
+      if (range.IsCollapsed()) {
+        return {};
+      }
+      const float start = Position(range.start);
+      const float end = Position(range.end);
+      return {{start, 0.0F, end - start, 20.0F}};
+    }
+
+    TextOffset PreviousCaretOffset(TextOffset offset) const override {
+      const auto found = std::lower_bound(offsets_.begin(), offsets_.end(), offset);
+      return found == offsets_.begin() ? 0 : *std::prev(found);
+    }
+
+    TextOffset NextCaretOffset(TextOffset offset) const override {
+      const auto found = std::upper_bound(offsets_.begin(), offsets_.end(), offset);
+      return found == offsets_.end() ? offsets_.back() : *found;
+    }
+
+  private:
+    float Position(TextOffset offset) const {
+      const auto found = std::lower_bound(offsets_.begin(), offsets_.end(), offset);
+      if (found == offsets_.end()) {
+        return positions_.back();
+      }
+      return positions_[static_cast<std::size_t>(std::distance(offsets_.begin(), found))];
+    }
+
+    std::vector<TextOffset> offsets_;
+    std::vector<float> positions_;
+  };
+
   void RequestFrame(double delay_seconds) override {
     ++requested_frames;
     requested_delays.push_back(delay_seconds);
@@ -182,9 +304,26 @@ public:
     };
   }
 
+  std::unique_ptr<huxerui::detail::TextLayout>
+  CreateTextLayout(std::string_view text, float font_size, float max_width) override {
+    static_cast<void>(font_size);
+    static_cast<void>(max_width);
+    return std::make_unique<TextLayout>(text);
+  }
+
+  huxerui::PlatformTextInput* TextInput() noexcept override {
+    return platform_text_input;
+  }
+
+  huxerui::PlatformClipboard* Clipboard() noexcept override {
+    return platform_clipboard;
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_delays;
+  huxerui::PlatformTextInput* platform_text_input = nullptr;
+  huxerui::PlatformClipboard* platform_clipboard = nullptr;
 };
 
 inline std::string FirstText(const DisplayList& display_list) {
@@ -275,16 +414,20 @@ inline void InvokeClick(const huxerui::detail::MountedNode& node) {
 }
 
 inline void ClickAt(Runtime& runtime, Point position, std::int64_t pointer_id = 0) {
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Down,
-      pointer_id,
-      position,
-  });
-  runtime.HandlePointerEvent(PointerEvent{
-      PointerEventType::Up,
-      pointer_id,
-      position,
-  });
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          pointer_id,
+          position,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          pointer_id,
+          position,
+      }
+  );
 }
 
 } // namespace huxerui::test

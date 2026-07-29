@@ -7,12 +7,18 @@
 #include <string_view>
 #include <vector>
 
+#include <huxerui/clipboard.h>
 #include <huxerui/display_list.h>
 #include <huxerui/event.h>
 #include <huxerui/root.h>
+#include <huxerui/text_input.h>
 #include <huxerui/view.h>
 
 namespace huxerui {
+
+namespace detail {
+class TextLayout;
+}
 
 struct AppOptions {
   std::string title = "HuxerUI";
@@ -36,6 +42,14 @@ public:
   virtual double Now() const noexcept = 0;
   virtual Size
   MeasureText(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity()) = 0;
+  virtual std::unique_ptr<detail::TextLayout>
+  CreateTextLayout(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity());
+  virtual PlatformTextInput* TextInput() noexcept {
+    return nullptr;
+  }
+  virtual PlatformClipboard* Clipboard() noexcept {
+    return nullptr;
+  }
 };
 
 namespace detail {
@@ -68,6 +82,12 @@ public:
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
+  [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
+  bool PerformTextEditingAction(TextEditingAction action);
+  TextInputApplyResult HandleTextInputCommands(const TextInputCommandBatch& batch);
+  [[nodiscard]] TextInputContext
+  QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const;
+  [[nodiscard]] TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const;
 
 private:
   struct State;
@@ -98,6 +118,20 @@ private:
   detail::MountedNode* ActiveModalFocusRoot();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
   void MoveFocus(bool reverse);
+  bool BringTextInputIntoView();
+  bool SelectFocusedTextWord(Point position, bool show_overlay = true);
+  bool ExtendFocusedTextSelection(Point position, bool start_handle);
+  bool QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const;
+  bool HandleTextSelectionOverlayPointer(const PointerEvent& event);
+  void HandleTextSelectionClick(const PointerEvent& event);
+  void TrackTouchTextSelectionGesture(const PointerEvent& event);
+  void AdvanceTextSelectionLongPress(double timestamp);
+  void AdvanceTextSelectionOverlay(const FrameInfo& frame);
+  void PaintTextSelectionOverlay();
+  void ShowTextSelectionOverlay(bool show_handles);
+  void HideTextSelectionOverlay();
+  void RefreshTextInputSession();
+  void StopTextInputSession(TextInputEndReason reason);
   bool UpdateNodeExtensions(
       detail::MountedNode& node,
       const FrameInfo& frame,

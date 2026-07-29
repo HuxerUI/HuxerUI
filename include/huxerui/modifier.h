@@ -15,6 +15,8 @@
 
 namespace huxerui {
 
+class TextInputClient;
+
 struct FrameInfo {
   double timestamp = 0.0;
   double delta_time = 0.0;
@@ -76,6 +78,10 @@ public:
   virtual void OnKey(MountedNode& node, const KeyEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
+  }
+
+  [[nodiscard]] virtual std::shared_ptr<TextInputClient> GetTextInputClient() noexcept {
+    return {};
   }
 
   virtual PointerResult OnPointer(MountedNode& node, const PointerEvent& event) {

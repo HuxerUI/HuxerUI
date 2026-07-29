@@ -8,6 +8,11 @@
 
 namespace huxerui {
 
+enum class Axis {
+  Horizontal,
+  Vertical,
+};
+
 enum class ScrollAlignment {
   Start,
   Center,
@@ -24,13 +29,13 @@ struct ScrollMetrics {
 };
 
 namespace detail {
-struct ScrollStateAccess;
-class ScrollStateData;
+struct ScrollControllerAccess;
+class ScrollControllerData;
 } // namespace detail
 
-class ScrollState {
+class ScrollController {
 public:
-  explicit ScrollState(float initial_offset = 0.0F);
+  explicit ScrollController(float initial_offset = 0.0F);
 
   [[nodiscard]] ScrollMetrics Metrics() const;
   [[nodiscard]] float Offset() const;
@@ -43,23 +48,24 @@ public:
   bool ScrollBy(float delta) const;
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment = ScrollAlignment::Start) const;
 
-  bool operator==(const ScrollState&) const = default;
+  bool operator==(const ScrollController&) const = default;
 
 private:
-  std::shared_ptr<detail::ScrollStateData> data_;
+  std::shared_ptr<detail::ScrollControllerData> data_;
 
-  friend struct detail::ScrollStateAccess;
+  friend struct detail::ScrollControllerAccess;
 };
 
-inline ScrollState
-UseScrollState(float initial_offset = 0.0F, const std::source_location& location = std::source_location::current()) {
-  return UseState(ScrollState{initial_offset}, location).Get();
+inline ScrollController UseScrollController(
+    float initial_offset = 0.0F, const std::source_location& location = std::source_location::current()
+) {
+  return UseState(ScrollController{initial_offset}, location).Get();
 }
 
 namespace detail {
 
-struct ScrollStateBinding {
-  using Value = ScrollState;
+struct ScrollControllerBinding {
+  using Value = ScrollController;
 };
 
 } // namespace detail

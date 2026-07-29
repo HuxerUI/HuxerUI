@@ -1,4 +1,4 @@
-#include <huxerui/scroll_state.h>
+#include <huxerui/scroll.h>
 
 #include <algorithm>
 #include <cmath>
@@ -9,17 +9,17 @@
 
 namespace huxerui::detail {
 
-struct ScrollStateAccess {
-  static const std::shared_ptr<ScrollStateData>& Data(const ScrollState& state) noexcept {
-    return state.data_;
+struct ScrollControllerAccess {
+  static const std::shared_ptr<ScrollControllerData>& Data(const ScrollController& controller) noexcept {
+    return controller.data_;
   }
 };
 
-ScrollStateData::ScrollStateData(float initial_offset)
+ScrollControllerData::ScrollControllerData(float initial_offset)
     : metrics(std::make_shared<StateCell<ScrollMetrics>>(ScrollMetrics{initial_offset, 0.0F, 0.0F, 0.0F})),
       pending_offset(initial_offset) {}
 
-ScrollConnection::ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollStateData> data)
+ScrollConnection::ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerData> data)
     : runtime_(&runtime), node_(&node), data_(std::move(data)) {}
 
 bool ScrollConnection::IsCurrent() const noexcept {
@@ -115,17 +115,17 @@ void ScrollConnection::PublishMetrics() {
   NotifyState(data_->metrics);
 }
 
-void PrepareScrollState(MountedNode& node, Runtime& runtime) {
-  const auto found = node.layout_values.find(typeid(ScrollStateBinding));
+void PrepareScrollController(MountedNode& node, Runtime& runtime) {
+  const auto found = node.layout_values.find(typeid(ScrollControllerBinding));
   if (found == node.layout_values.end()) {
     node.scroll->connection.reset();
     return;
   }
-  const auto* state = std::any_cast<ScrollState>(&found->second);
-  if (state == nullptr) {
-    throw std::logic_error("HuxerUI scroll state binding type mismatch");
+  const auto* controller = std::any_cast<ScrollController>(&found->second);
+  if (controller == nullptr) {
+    throw std::logic_error("HuxerUI scroll controller binding type mismatch");
   }
-  const auto& data = ScrollStateAccess::Data(*state);
+  const auto& data = ScrollControllerAccess::Data(*controller);
   if (!node.scroll->connection || node.scroll->connection->Data() != data) {
     node.scroll->connection = std::make_shared<ScrollConnection>(runtime, node, data);
   }
@@ -134,7 +134,7 @@ void PrepareScrollState(MountedNode& node, Runtime& runtime) {
   node.scroll->connection->ApplyPending();
 }
 
-void CompleteScrollState(MountedNode& node) {
+void CompleteScrollController(MountedNode& node) {
   if (!node.scroll->connection) {
     return;
   }
@@ -146,40 +146,40 @@ void CompleteScrollState(MountedNode& node) {
 
 namespace huxerui {
 
-ScrollState::ScrollState(float initial_offset) {
+ScrollController::ScrollController(float initial_offset) {
   if (!std::isfinite(initial_offset) || initial_offset < 0.0F) {
     throw std::invalid_argument("HuxerUI initial scroll offset must be finite and non-negative");
   }
-  data_ = std::make_shared<detail::ScrollStateData>(initial_offset);
+  data_ = std::make_shared<detail::ScrollControllerData>(initial_offset);
 }
 
-ScrollMetrics ScrollState::Metrics() const {
+ScrollMetrics ScrollController::Metrics() const {
   detail::ObserveState(data_->metrics);
   return data_->metrics->value;
 }
 
-float ScrollState::Offset() const {
+float ScrollController::Offset() const {
   return Metrics().offset;
 }
 
-float ScrollState::MaxOffset() const {
+float ScrollController::MaxOffset() const {
   return Metrics().maximum_offset;
 }
 
-float ScrollState::ViewportExtent() const {
+float ScrollController::ViewportExtent() const {
   return Metrics().viewport_extent;
 }
 
-float ScrollState::ContentExtent() const {
+float ScrollController::ContentExtent() const {
   return Metrics().content_extent;
 }
 
-bool ScrollState::IsConnected() const noexcept {
+bool ScrollController::IsConnected() const noexcept {
   const auto connection = data_->connection.lock();
   return connection && connection->IsCurrent();
 }
 
-bool ScrollState::ScrollTo(float offset) const {
+bool ScrollController::ScrollTo(float offset) const {
   if (!std::isfinite(offset)) {
     throw std::invalid_argument("HuxerUI scroll offset must be finite");
   }
@@ -194,7 +194,7 @@ bool ScrollState::ScrollTo(float offset) const {
   return true;
 }
 
-bool ScrollState::ScrollBy(float delta) const {
+bool ScrollController::ScrollBy(float delta) const {
   if (!std::isfinite(delta)) {
     throw std::invalid_argument("HuxerUI scroll delta must be finite");
   }
@@ -209,7 +209,7 @@ bool ScrollState::ScrollBy(float delta) const {
   return true;
 }
 
-bool ScrollState::ScrollToItem(std::size_t index, ScrollAlignment alignment) const {
+bool ScrollController::ScrollToItem(std::size_t index, ScrollAlignment alignment) const {
   if (auto connection = data_->connection.lock(); connection && connection->IsCurrent()) {
     return connection->ScrollToItem(index, alignment);
   }

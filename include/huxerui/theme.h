@@ -110,6 +110,30 @@ struct ButtonStyleKey {
   static Value Default();
 };
 
+struct TextFieldStyle {
+  Color background = Color::White();
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color placeholder = Color::Rgb(87, 96, 106);
+  Color selection = Color::Rgb(31, 111, 235, 0.24F);
+  Color caret = Color::Rgb(31, 111, 235);
+  Color composition = Color::Rgb(31, 111, 235);
+  Color border = Color::Rgb(87, 96, 106, 0.55F);
+  Color focused_border = Color::Rgb(31, 111, 235);
+  float border_width = 1.0F;
+  float focused_border_width = 2.0F;
+  float font_size = 14.0F;
+  float corner_radius = 6.0F;
+  EdgeInsets padding = EdgeInsets::Symmetric(10.0F, 8.0F);
+  float minimum_height = 36.0F;
+  double caret_blink_interval = 0.5;
+};
+
+struct TextFieldStyleKey {
+  using Value = TextFieldStyle;
+
+  static Value Default();
+};
+
 struct CheckboxStyle {
   float size = 20.0F;
   Color checked_background = Color::Rgb(31, 111, 235);
@@ -250,6 +274,7 @@ ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment);
 const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key);
 TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
+TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
 ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);

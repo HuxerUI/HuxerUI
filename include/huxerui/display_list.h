@@ -76,7 +76,7 @@ struct PushTransformCommand {
 
 struct PopTransformCommand {};
 
-using DrawCommand = std::variant<
+using DisplayCommand = std::variant<
     DrawRectCommand,
     DrawTextCommand,
     DrawCircleCommand,
@@ -114,15 +114,17 @@ public:
       float width,
       StrokeCap cap = StrokeCap::Butt
   ) {
-    commands_.emplace_back(DrawArcCommand{
-        center,
-        radius,
-        start_angle,
-        sweep_angle,
-        color,
-        width,
-        cap,
-    });
+    commands_.emplace_back(
+        DrawArcCommand{
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            color,
+            width,
+            cap,
+        }
+    );
   }
 
   void DrawBorder(Rect rect, Color color, float width, float corner_radius = 0.0F) {
@@ -138,26 +140,28 @@ public:
   }
 
   void PushTransform(float m11, float m12, float m21, float m22, float translate_x, float translate_y) {
-    commands_.emplace_back(PushTransformCommand{
-        m11,
-        m12,
-        m21,
-        m22,
-        translate_x,
-        translate_y,
-    });
+    commands_.emplace_back(
+        PushTransformCommand{
+            m11,
+            m12,
+            m21,
+            m22,
+            translate_x,
+            translate_y,
+        }
+    );
   }
 
   void PopTransform() {
     commands_.emplace_back(PopTransformCommand{});
   }
 
-  [[nodiscard]] const std::vector<DrawCommand>& Commands() const noexcept {
+  [[nodiscard]] const std::vector<DisplayCommand>& Commands() const noexcept {
     return commands_;
   }
 
 private:
-  std::vector<DrawCommand> commands_;
+  std::vector<DisplayCommand> commands_;
 };
 
 } // namespace huxerui

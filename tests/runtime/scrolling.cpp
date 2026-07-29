@@ -4,24 +4,24 @@ namespace huxerui::test {
 
 std::string scroll_clicked;
 State<bool> show_controlled_scroll;
-ScrollState controlled_list_scroll;
-ScrollState controlled_grid_scroll;
-ScrollState controlled_view_scroll;
-ScrollState horizontal_view_scroll;
-ScrollState example_scroll;
+ScrollController controlled_list_scroll;
+ScrollController controlled_grid_scroll;
+ScrollController controlled_view_scroll;
+ScrollController horizontal_view_scroll;
+ScrollController example_scroll;
 int scroll_observer_compositions = 0;
 
 View ScrollViewApp() {
-  return ScrollView {
-    Column {
-      Button("First").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "First"; }),
-      Button("Second").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "Second"; }),
-      Button("Third").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "Third"; }),
-    },
+  return ScrollView{
+      Column{
+          Button("First").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "First"; }),
+          Button("Second").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "Second"; }),
+          Button("Third").With(huxerui::Frame{100.0F, 40.0F}).OnClick([] { scroll_clicked = "Third"; }),
+      },
   };
 }
 
-View ScrollObserverItem(int index, ScrollState scroll) {
+View ScrollObserverItem(int index, ScrollController scroll) {
   HUXERUI_SCOPE({
     if (index == 0) {
       ++scroll_observer_compositions;
@@ -32,7 +32,7 @@ View ScrollObserverItem(int index, ScrollState scroll) {
 
 View ControlledVirtualListApp() {
   auto visible = UseState(true);
-  auto scroll = UseScrollState(40.0F);
+  auto scroll = UseScrollController(40.0F);
   show_controlled_scroll = visible;
   controlled_list_scroll = scroll;
   if (!visible.Get()) {
@@ -45,39 +45,41 @@ View ControlledVirtualListApp() {
   )
       .ItemExtent(20.0F)
       .CacheExtent(40.0F)
-      .ScrollState(scroll);
+      .Controller(scroll);
 }
 
-View ScrollStateToolbar(ScrollState scroll) {
+View ScrollControllerToolbar(ScrollController scroll) {
   HUXERUI_SCOPE({
-    return Row {
-      Button("Top").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(0.0F)); }),
-      Button("Item 500").OnClick([scroll] { static_cast<void>(scroll.ScrollToItem(499, ScrollAlignment::Center)); }),
-      Spacer(),
-      Text::Format("Offset {}", static_cast<int>(scroll.Offset())),
-    }.With(huxerui::Spacing{12.0F}, huxerui::CrossAlign{CrossAxisAlignment::Center});
+    return Row{
+        Button("Top").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(0.0F)); }),
+        Button("Item 500").OnClick([scroll] { static_cast<void>(scroll.ScrollToItem(499, ScrollAlignment::Center)); }),
+        Spacer(),
+        Text::Format("Offset {}", static_cast<int>(scroll.Offset())),
+    }
+        .With(huxerui::Spacing{12.0F}, huxerui::CrossAlign{CrossAxisAlignment::Center});
   });
 }
 
-View ScrollStateExampleApp() {
-  auto scroll = UseScrollState();
+View ScrollControllerExampleApp() {
+  auto scroll = UseScrollController();
   example_scroll = scroll;
-  return Column {
-    ScrollStateToolbar(scroll),
-    VirtualList(
-        std::size_t{1000},
-        [](std::size_t index) {
-          return Text::Format("Item {}", index + 1).With(huxerui::Frame{100.0F, 40.0F}).Key(index);
-        }
-    ).ItemExtent(48.0F).ScrollState(scroll).With(
-        huxerui::Spacing{8.0F},
-        huxerui::Grow{}
-    ),
-  }.With(huxerui::Padding{24.0F}, huxerui::Spacing{12.0F});
+  return Column{
+      ScrollControllerToolbar(scroll),
+      VirtualList(
+          std::size_t{1000},
+          [](std::size_t index) {
+            return Text::Format("Item {}", index + 1).With(huxerui::Frame{100.0F, 40.0F}).Key(index);
+          }
+      )
+          .ItemExtent(48.0F)
+          .Controller(scroll)
+          .With(huxerui::Spacing{8.0F}, huxerui::Grow{}),
+  }
+      .With(huxerui::Padding{24.0F}, huxerui::Spacing{12.0F});
 }
 
 View ControlledVirtualGridApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   controlled_grid_scroll = scroll;
   return VirtualGrid(
              std::size_t{300},
@@ -88,36 +90,35 @@ View ControlledVirtualGridApp() {
       .Columns(GridColumns::Fixed(3))
       .RowExtent(20.0F)
       .RowSpacing(4.0F)
-      .ScrollState(scroll);
+      .Controller(scroll);
 }
 
 View ControlledScrollViewApp() {
-  auto scroll = UseScrollState(20.0F);
+  auto scroll = UseScrollController(20.0F);
   controlled_view_scroll = scroll;
   std::vector<int> items(20);
   std::iota(items.begin(), items.end(), 0);
-  return ScrollView {
-    Column {
-      ForEach(
-          items,
-          [](int index) {
-            return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F});
-          }
-      ),
-    },
-  }.ScrollState(scroll);
+  return ScrollView{
+      Column{
+          ForEach(items, [](int index) { return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 20.0F}); }),
+      },
+  }
+      .Controller(scroll);
 }
 
 View HorizontalScrollViewApp() {
-  auto scroll = UseScrollState();
+  auto scroll = UseScrollController();
   horizontal_view_scroll = scroll;
-  return ScrollView {
-    Row {
-      Button("First").With(huxerui::Frame{60.0F, 40.0F}),
-      Button("Second").With(huxerui::Frame{60.0F, 40.0F}),
-      Button("Third").With(huxerui::Frame{60.0F, 40.0F}),
-    },
-  }.ScrollAxis(Axis::Horizontal).ScrollState(scroll).With(huxerui::ScrollBar{});
+  return ScrollView{
+      Row{
+          Button("First").With(huxerui::Frame{60.0F, 40.0F}),
+          Button("Second").With(huxerui::Frame{60.0F, 40.0F}),
+          Button("Third").With(huxerui::Frame{60.0F, 40.0F}),
+      },
+  }
+      .ScrollAxis(Axis::Horizontal)
+      .Controller(scroll)
+      .With(huxerui::ScrollBar{});
 }
 
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
@@ -151,11 +152,13 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   REQUIRE(!ContainsText(initial, "Third"));
 
   const int requested_frames = platform.requested_frames;
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 30.0F},
-      0.0F,
-      45.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 30.0F},
+          0.0F,
+          45.0F,
+      }
+  );
   REQUIRE(platform.requested_frames == requested_frames + 1);
   runtime.BuildFrame();
 
@@ -171,11 +174,13 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   root = runtime.RootNode();
   REQUIRE(root->scroll->offset_y == 45.0F);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 30.0F},
-      0.0F,
-      100.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 30.0F},
+          0.0F,
+          100.0F,
+      }
+  );
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->scroll->offset_y == 60.0F);
@@ -204,11 +209,13 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   REQUIRE(scroll_bar.has_value());
   REQUIRE(scroll_bar->axis == Axis::Horizontal);
 
-  runtime.HandleScrollEvent(ScrollEvent{
-      {50.0F, 20.0F},
-      45.0F,
-      0.0F,
-  });
+  runtime.HandleScrollEvent(
+      ScrollEvent{
+          {50.0F, 20.0F},
+          45.0F,
+          0.0F,
+      }
+  );
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -218,7 +225,7 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   REQUIRE(horizontal_view_scroll.Offset() == 45.0F);
 }
 
-TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
+TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
   scroll_observer_compositions = 0;
 
   TestPlatform platform;
@@ -264,9 +271,9 @@ TEST_CASE("TestScrollStateControlsVirtualListAndDisconnects") {
   REQUIRE(!controlled_list_scroll.ScrollTo(100.0F));
 }
 
-TEST_CASE("TestScrollStateExampleButtonsAndFollowUpFrame") {
+TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   TestPlatform platform;
-  Runtime runtime{ScrollStateExampleApp, platform};
+  Runtime runtime{ScrollControllerExampleApp, platform};
   runtime.SetViewport({640.0F, 560.0F});
   const int frames_before_build = platform.requested_frames;
   runtime.BuildFrame();
@@ -305,7 +312,7 @@ TEST_CASE("TestScrollStateExampleButtonsAndFollowUpFrame") {
   REQUIRE(runtime.RootNode()->children[1]->scroll->offset_y == 0.0F);
 }
 
-TEST_CASE("TestScrollStateControlsVirtualGridItems") {
+TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
   TestPlatform platform;
   Runtime runtime{ControlledVirtualGridApp, platform};
   runtime.SetViewport({90.0F, 48.0F});
@@ -335,7 +342,7 @@ TEST_CASE("TestScrollStateControlsVirtualGridItems") {
   REQUIRE(root->children[item_position]->frame.y == 14.0F);
 }
 
-TEST_CASE("TestScrollStateControlsScrollView") {
+TEST_CASE("TestScrollControllerControlsScrollView") {
   TestPlatform platform;
   Runtime runtime{ControlledScrollViewApp, platform};
   runtime.SetViewport({100.0F, 100.0F});
