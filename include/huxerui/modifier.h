@@ -4,7 +4,6 @@
 #include <memory>
 #include <optional>
 #include <type_traits>
-#include <typeindex>
 #include <utility>
 
 #include <huxerui/color.h>
@@ -101,7 +100,6 @@ namespace detail {
 struct ViewSpec;
 
 struct ModifierDescriptor {
-  std::type_index type;
   void (*apply)(ViewSpec&, const void*) = nullptr;
   std::unique_ptr<NodeExtension> (*create_extension)(MountedNode&, const void*) = nullptr;
   void (*update_extension)(NodeExtension&, MountedNode&, const void*) = nullptr;
@@ -118,7 +116,6 @@ template <class Spec, class Extension>
            requires(Extension& extension, MountedNode& node, const Spec& spec) { extension.Update(node, spec); }
 const ModifierDescriptor& ModifierDescriptorFor() {
   static const ModifierDescriptor descriptor{
-      typeid(Spec),
       nullptr,
       [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<Extension>(node, *static_cast<const Spec*>(value));
@@ -182,14 +179,8 @@ struct ScrollBarStyle {
   float fade_out_duration = 0.22F;
   Color track_color = Color::Transparent();
   Color thumb_color = Color::Rgb(137, 143, 152, 0.8F);
-};
 
-struct ScrollBarStyleKey {
-  using Value = ScrollBarStyle;
-
-  static Value Default() {
-    return {};
-  }
+  static ScrollBarStyle Default();
 };
 
 struct ScrollPhysics {

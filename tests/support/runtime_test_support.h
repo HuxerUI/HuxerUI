@@ -20,10 +20,8 @@ using huxerui::AnimateTo;
 using huxerui::Axis;
 using huxerui::Button;
 using huxerui::ButtonStyle;
-using huxerui::ButtonStyleKey;
 using huxerui::Checkbox;
 using huxerui::CheckboxStyle;
-using huxerui::CheckboxStyleKey;
 using huxerui::Color;
 using huxerui::Column;
 using huxerui::CrossAxisAlignment;
@@ -64,7 +62,6 @@ using huxerui::PointerEventType;
 using huxerui::PopClipCommand;
 using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
-using huxerui::ProgressCircleStyleKey;
 using huxerui::PushClipCommand;
 using huxerui::PushTransformCommand;
 using huxerui::Rect;
@@ -83,14 +80,12 @@ using huxerui::State;
 using huxerui::StrokeCap;
 using huxerui::Switch;
 using huxerui::SwitchStyle;
-using huxerui::SwitchStyleKey;
 using huxerui::Text;
 using huxerui::TextEditingAction;
 using huxerui::TextEditingValue;
 using huxerui::TextField;
 using huxerui::TextFieldEvents;
 using huxerui::TextFieldStyle;
-using huxerui::TextFieldStyleKey;
 using huxerui::TextInputApplyResult;
 using huxerui::TextInputCommandBatch;
 using huxerui::TextInputContext;
@@ -120,6 +115,17 @@ using huxerui::VirtualLayout;
 using huxerui::VirtualLayoutContext;
 using huxerui::VirtualLayoutResult;
 using huxerui::VirtualList;
+
+template <huxerui::EnvironmentValue Value> Value ThemeDefinitionValue(const ThemeDefinition& definition) {
+  EnvironmentValues values;
+  huxerui::detail::ApplyThemeDefinition(values, definition);
+  const std::any* stored = huxerui::detail::FindLocalEnvironmentValue(values, typeid(Value));
+  const auto* typed = stored ? std::any_cast<Value>(stored) : nullptr;
+  if (!typed) {
+    throw std::logic_error("HuxerUI test theme definition does not contain the requested value");
+  }
+  return *typed;
+}
 
 class Runtime final {
 public:

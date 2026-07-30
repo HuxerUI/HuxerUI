@@ -934,12 +934,8 @@ struct TextFieldStyle {
   float validation_border_width = 2.0F;
   float validation_font_size = 12.0F;
   float validation_spacing = 4.0F;
-};
 
-struct TextFieldStyleKey {
-  using Value = TextFieldStyle;
-
-  static Value Default();
+  static TextFieldStyle Default();
 };
 ```
 
@@ -951,8 +947,8 @@ controls. A future field-specific hover treatment belongs to TextField style
 and must remain inside the editor frame. Disabled opacity continues to use the
 common interaction infrastructure.
 
-`TextFieldStyle` and `TextFieldStyleKey` belong in `theme.h` with the existing
-built-in component styles.
+`TextFieldStyle` belongs in `theme.h` with the existing built-in component
+styles. Its type is also its Theme override identity.
 
 Text input configuration, selection behavior, and placeholder content are not
 Theme values.
@@ -960,8 +956,8 @@ Theme values.
 The selection overlay resolves handle colors from the focused control:
 `TextFieldStyle::caret` for editable text and the current Theme primary color
 for `SelectionArea`. Menu surfaces, typography, shapes, and pressed states use
-the current Theme. `TextSelectionMenuLabelsKey` provides environment-overridable
-Cut, Copy, Paste, and Select All labels without coupling localization to Theme.
+the current Theme. `TextSelectionMenuLabels` is an Environment value providing
+overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme.
 Material menu items use the shared ripple indication, while Flat menu items use
 the shared hover and pressed state overlay. Editing actions execute on release;
 the menu becomes non-interactive until the indication exit animation finishes.
@@ -1257,7 +1253,7 @@ Existing public headers retain their current ownership:
 ```text
 include/huxerui/view.h        TextField
 include/huxerui/event.h       TextFieldEvents
-include/huxerui/theme.h       TextFieldStyle and TextFieldStyleKey
+include/huxerui/theme.h       TextFieldStyle
 include/huxerui/huxerui.h     umbrella export
 ```
 

@@ -414,11 +414,12 @@ platform visitor handles every variant alternative; never silently ignore a comm
 ## Environment, Theme, services, and layers
 
 Environment is typed hierarchical propagation. Providers create nested frames and consumers read
-`UseEnvironment<Key>()`. Use it for ambient values, not another context registry or repetitive parameter plumbing.
+`UseEnvironment<Value>()`. The value type owns its fallback through `Value::Default()` and is also its Environment
+identity. Use Environment for ambient values, not another context registry or repetitive parameter plumbing.
 
 Theme is a deferred Environment provider. Invoke its content after the nested Environment is active. Built-ins resolve
-semantic tokens or component StyleKeys from the nearest Theme; explicit modifiers apply afterward and win. A StyleKey
-represents coherent themeable appearance, not component state.
+semantic tokens or component style values from the nearest Theme; explicit modifiers apply afterward and win. A
+component style represents coherent themeable appearance, not component state.
 
 Root hooks install per-window services and may use LayerController; they do not replace the application root. Built-in
 Toast and Dialog services install automatically.

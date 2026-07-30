@@ -177,8 +177,8 @@ return Row {
 `On<ToggleEvents::Changed>()`. Pointer clicks, Enter, and Space all use the
 same activation path. Switch movement is retained by its node extension and
 uses the current Theme motion duration; reduced-motion themes update it
-immediately. `CheckboxStyleKey` and `SwitchStyleKey` allow a nested Theme to
-replace their semantic styles.
+immediately. `CheckboxStyle` and `SwitchStyle` values in a nested Theme replace
+their semantic styles.
 
 `ProgressCircle` supports both indeterminate and determinate progress:
 
@@ -291,7 +291,7 @@ multiline fields. `Newline` is reserved for multiline TextField.
 Determinate values are constrained to the `0` to `1` range. An indeterminate
 circle rotates using its node extension, while a determinate circle does not
 continuously request frames. Reduced-motion themes keep the indeterminate arc
-static. `ProgressCircleStyleKey` controls its intrinsic size, stroke width,
+static. `ProgressCircleStyle` controls its intrinsic size, stroke width,
 track and indicator colors, arc fraction, and animation duration. `Frame` can
 override the intrinsic size.
 
@@ -716,7 +716,7 @@ can override individual component styles:
 template <class Factory>
 View AccentTheme(Factory&& content) {
   ThemeDefinition definition;
-  definition.Set<ButtonStyleKey>(ButtonStyle{
+  definition.Set(ButtonStyle{
       .background = Color::Rgb(207, 34, 46),
       .foreground = Color::White(),
       .font_size = 14.0F,
@@ -748,8 +748,8 @@ is an inline View expression or a component call with arguments.
 `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` select semantic
 typography without hard-coding font sizes at the call site. Text, Button,
 Dialog, Toast, ScrollBar, and the default hover and pressed indication derive
-their defaults from the nearest `ThemeSpec`. Explicit component StyleKeys can
-replace those derived defaults locally. Explicit modifiers such as
+their defaults from the nearest `ThemeSpec`. Explicit component style values
+can replace those derived defaults locally. Explicit modifiers such as
 `Background`, `Foreground`, and `FontSize` are applied afterward and therefore
 take precedence over Theme values.
 
@@ -766,7 +766,7 @@ View BrandTheme(Factory&& content) {
 ```
 
 The `MaterialTheme(ThemeSpec, factory)` overload rebuilds the Material
-component StyleKeys from the customized tokens. Use a plain
+component styles from the customized tokens. Use a plain
 `ThemeDefinition{theme}` when only the generic semantic defaults are desired.
 HuxerUI currently maps the subset of Material tokens consumed by its available
 components; it does not claim to implement the complete Material component

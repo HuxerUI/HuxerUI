@@ -18,14 +18,14 @@ ScrollBarStyle ResolveScrollBarStyle(
   if (explicit_style.has_value()) {
     return *explicit_style;
   }
-  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(ScrollBarStyleKey))) {
+  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(ScrollBarStyle))) {
     if (const auto* style = std::any_cast<ScrollBarStyle>(value)) {
       return *style;
     }
     throw std::logic_error("HuxerUI scroll bar style environment value has an invalid type");
   }
   const ThemeSpec theme = detail::ResolveThemeSpec(environment);
-  ScrollBarStyle style = ScrollBarStyleKey::Default();
+  ScrollBarStyle style = ScrollBarStyle::Default();
   style.fade_in_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.fast);
   style.fade_out_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.normal);
   style.track_color = theme.colors.on_surface;
@@ -261,9 +261,12 @@ void ApplyScrollPhysics(detail::ViewSpec& spec, const ScrollPhysics& physics) {
 
 } // namespace
 
+ScrollBarStyle ScrollBarStyle::Default() {
+  return {};
+}
+
 const detail::ModifierDescriptor& ScrollPhysics::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      typeid(ScrollPhysics),
       [](detail::ViewSpec& spec, const void* value) {
         ApplyScrollPhysics(spec, *static_cast<const ScrollPhysics*>(value));
       },
@@ -275,7 +278,6 @@ const detail::ModifierDescriptor& ScrollPhysics::Descriptor() {
 
 const detail::ModifierDescriptor& ScrollBar::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      typeid(ScrollBar),
       [](detail::ViewSpec& spec, const void* value) { ApplyScrollBar(spec, *static_cast<const ScrollBar*>(value)); },
       [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<ScrollBarExtension>(node, *static_cast<const ScrollBar*>(value));

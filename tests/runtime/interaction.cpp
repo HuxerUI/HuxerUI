@@ -69,7 +69,7 @@ View ConfiguredDragScrollApp() {
 
 View ThemedScrollBarApp() {
   ThemeDefinition definition;
-  definition.Set<huxerui::ScrollBarStyleKey>(huxerui::ScrollBarStyle{
+  definition.Set(huxerui::ScrollBarStyle{
       .thickness = 9.0F,
       .minimum_thumb_extent = 30.0F,
       .margin = 4.0F,

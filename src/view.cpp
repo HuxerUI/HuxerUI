@@ -17,7 +17,6 @@ namespace {
 template <class Modifier, void (*Apply)(detail::ViewSpec&, const Modifier&)>
 const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
   static const detail::ModifierDescriptor descriptor{
-      typeid(Modifier),
       [](detail::ViewSpec& spec, const void* value) { Apply(spec, *static_cast<const Modifier*>(value)); },
       nullptr,
       nullptr,
@@ -169,8 +168,8 @@ public:
 
   void Update(MountedNode& node, const ToggleVisual& modifier) {
     kind_ = modifier.kind;
-    checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyleKey::Default());
-    switch_style_ = node.LayoutValueOr<ResolvedSwitchStyle>(SwitchStyleKey::Default());
+    checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyle::Default());
+    switch_style_ = node.LayoutValueOr<ResolvedSwitchStyle>(SwitchStyle::Default());
     if (!initialized_) {
       checked_ = modifier.checked;
       progress_.Set(checked_ ? 1.0F : 0.0F);
@@ -283,7 +282,7 @@ public:
   }
 
   void Update(MountedNode& node, const ProgressCircleVisual& modifier) {
-    style_ = node.LayoutValueOr<ResolvedProgressCircleStyle>(ProgressCircleStyleKey::Default());
+    style_ = node.LayoutValueOr<ResolvedProgressCircleStyle>(ProgressCircleStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
       animation_start_.reset();
@@ -356,11 +355,10 @@ const detail::ModifierDescriptor& ProgressCircleVisual::Descriptor() {
   return detail::ModifierDescriptorFor<ProgressCircleVisual, ProgressCircleVisualExtension>();
 }
 
-template <class Key>
-std::optional<typename Key::Value>
+template <class Style> std::optional<Style>
 ResolveStyleOverride(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
-  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Key))) {
-    if (const auto* style = std::any_cast<typename Key::Value>(value)) {
+  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
+    if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
     }
     throw std::logic_error("HuxerUI component style environment value has an invalid type");
@@ -375,14 +373,14 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   spec.style.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
     const TextStyle style =
-        ResolveStyleOverride<TextStyleKey>(spec.environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
+        ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
     spec.style.foreground = style.foreground;
     spec.style.font_size = style.font_size;
     return;
   }
   if (spec.kind == detail::NodeKind::Button) {
     const ButtonStyle style =
-        ResolveStyleOverride<ButtonStyleKey>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
+        ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
     spec.style.padding = style.padding;
     spec.style.background = style.background;
     spec.style.foreground = style.foreground;
@@ -392,7 +390,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   }
   if (spec.kind == detail::NodeKind::TextField) {
     const TextFieldStyle style =
-        ResolveStyleOverride<TextFieldStyleKey>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
+        ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
     spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), style);
     spec.style.focus_ring_width = 0.0F;
     spec.style.padding = style.padding;
@@ -405,7 +403,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   }
   if (spec.kind == detail::NodeKind::Checkbox) {
     const CheckboxStyle style =
-        ResolveStyleOverride<CheckboxStyleKey>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
+        ResolveStyleOverride<CheckboxStyle>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), style);
     spec.style.frame.width = std::max(0.0F, style.size);
     spec.style.frame.height = std::max(0.0F, style.size);
@@ -414,7 +412,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   }
   if (spec.kind == detail::NodeKind::Switch) {
     const SwitchStyle style =
-        ResolveStyleOverride<SwitchStyleKey>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
+        ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), style);
     spec.style.frame.width = std::max(0.0F, style.width);
     spec.style.frame.height = std::max(0.0F, style.height);
@@ -422,7 +420,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     return;
   }
   if (spec.kind == detail::NodeKind::ProgressCircle) {
-    const ProgressCircleStyle style = ResolveStyleOverride<ProgressCircleStyleKey>(spec.environment)
+    const ProgressCircleStyle style = ResolveStyleOverride<ProgressCircleStyle>(spec.environment)
                                           .value_or(detail::DefaultProgressCircleStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), style);
     spec.style.frame.width = std::max(0.0F, style.size);

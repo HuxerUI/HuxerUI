@@ -232,7 +232,7 @@ public:
     ConfigureScrollNode(node);
     placeholder_ = modifier.placeholder;
 
-    TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyleKey::Default());
+    TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyle::Default());
     next_style.background = node.style.background.value_or(next_style.background);
     next_style.foreground = node.style.foreground.value_or(next_style.foreground);
     next_style.font_size = node.style.font_size.value_or(next_style.font_size);

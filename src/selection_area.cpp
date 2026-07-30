@@ -20,7 +20,7 @@ struct TextEntry {
 };
 
 float ResolveFontSize(const detail::MountedNode& node) {
-  return node.style.font_size.value_or(TextStyleKey::Default().font_size);
+  return node.style.font_size.value_or(TextStyle::Default().font_size);
 }
 
 Rect ContentRect(const detail::MountedNode& node) {

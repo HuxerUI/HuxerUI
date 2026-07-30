@@ -13,34 +13,38 @@
 
 namespace huxerui {
 
+class EnvironmentValues;
+
 namespace detail {
 struct EnvironmentFrame;
+
+void SetEnvironmentValue(EnvironmentValues& values, std::type_index key, std::any value);
+void MergeEnvironmentValues(EnvironmentValues& target, const EnvironmentValues& source);
+const std::any* FindLocalEnvironmentValue(const EnvironmentValues& values, std::type_index key) noexcept;
 }
+
+template <class Value>
+concept EnvironmentValue = std::copy_constructible<Value> && requires {
+  { Value::Default() } -> std::convertible_to<Value>;
+};
 
 class EnvironmentValues {
 public:
-  template <class Key>
-    requires requires { typename Key::Value; }
-  EnvironmentValues& Set(typename Key::Value value) {
-    values_.insert_or_assign(typeid(Key), std::move(value));
+  template <EnvironmentValue Value> EnvironmentValues& Set(Value value) {
+    values_.insert_or_assign(typeid(Value), std::move(value));
     return *this;
-  }
-
-  void Merge(const EnvironmentValues& values);
-
-  [[nodiscard]] bool Empty() const noexcept {
-    return values_.empty();
-  }
-
-  [[nodiscard]] const std::any* Find(std::type_index key) const noexcept {
-    const auto found = values_.find(key);
-    return found == values_.end() ? nullptr : &found->second;
   }
 
 private:
   std::unordered_map<std::type_index, std::any> values_;
 
   friend struct detail::EnvironmentFrame;
+  friend void detail::SetEnvironmentValue(EnvironmentValues& values, std::type_index key, std::any value);
+  friend void detail::MergeEnvironmentValues(EnvironmentValues& target, const EnvironmentValues& source);
+  friend const std::any* detail::FindLocalEnvironmentValue(
+      const EnvironmentValues& values,
+      std::type_index key
+  ) noexcept;
 };
 
 namespace detail {
@@ -51,30 +55,24 @@ const std::any* FindEnvironmentValue(std::type_index key);
 
 } // namespace detail
 
-template <class Key>
-concept EnvironmentKey = requires {
-  typename Key::Value;
-  { Key::Default() } -> std::convertible_to<typename Key::Value>;
-};
-
-template <EnvironmentKey Key> const typename Key::Value& UseEnvironment() {
-  if (const std::any* value = detail::FindEnvironmentValue(typeid(Key))) {
-    if (const auto* typed = std::any_cast<typename Key::Value>(value)) {
+template <EnvironmentValue Value> const Value& UseEnvironment() {
+  if (const std::any* value = detail::FindEnvironmentValue(typeid(Value))) {
+    if (const auto* typed = std::any_cast<Value>(value)) {
       return *typed;
     }
-    throw std::logic_error("HuxerUI environment value type does not match its key");
+    throw std::logic_error("HuxerUI environment value has an invalid stored type");
   }
-  static const typename Key::Value fallback = Key::Default();
+  static const Value fallback = Value::Default();
   return fallback;
 }
 
 View ProvideEnvironment(EnvironmentValues values, std::function<View()> content);
 
-template <EnvironmentKey Key, class Factory>
+template <EnvironmentValue Value, class Factory>
   requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View ProvideEnvironment(typename Key::Value value, Factory&& content) {
+View ProvideEnvironment(Value value, Factory&& content) {
   EnvironmentValues values;
-  values.Set<Key>(std::move(value));
+  values.Set(std::move(value));
   return ProvideEnvironment(std::move(values), std::forward<Factory>(content));
 }
 

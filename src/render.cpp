@@ -11,13 +11,13 @@ namespace {
 
 Color ResolveForeground(const MountedNode& node) {
   return node.style.foreground.value_or(
-      node.kind == NodeKind::Button ? ButtonStyleKey::Default().foreground : TextStyleKey::Default().foreground
+      node.kind == NodeKind::Button ? ButtonStyle::Default().foreground : TextStyle::Default().foreground
   );
 }
 
 float ResolveFontSize(const MountedNode& node) {
   return node.style.font_size.value_or(
-      node.kind == NodeKind::Button ? ButtonStyleKey::Default().font_size : TextStyleKey::Default().font_size
+      node.kind == NodeKind::Button ? ButtonStyle::Default().font_size : TextStyle::Default().font_size
   );
 }
 

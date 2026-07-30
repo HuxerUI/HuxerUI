@@ -637,9 +637,29 @@ ScrollBar-specific animation or pointer functions.
 Environment is a typed, hierarchical value system:
 
 ```cpp
-template <class Key>
-const typename Key::Value& UseEnvironment();
+template <EnvironmentValue Value>
+const Value& UseEnvironment();
 ```
+
+The Environment value type is also its lookup identity and provides its
+fallback through `Value::Default()`.
+
+```cpp
+struct Locale {
+  std::string language;
+
+  static Locale Default() {
+    return {"en"};
+  }
+};
+
+const Locale& locale = UseEnvironment<Locale>();
+return ProvideEnvironment(Locale{"fr"}, Content);
+```
+
+Use a semantic wrapper when two ambient values share the same underlying
+representation. Primitive or third-party representation types are not
+separate Environment keys by themselves.
 
 Each Environment frame stores only local overrides and points to its parent:
 
@@ -650,8 +670,9 @@ struct EnvironmentFrame {
 };
 ```
 
-Composer records the concrete Environment keys read by a `RecomposeScope`.
-Changing one key invalidates only scopes that observed that key.
+Each composed subtree captures its current Environment frame. A nested
+provider shadows only the value type it supplies and inherits every other
+value from its parent frame.
 
 Environment carries:
 
@@ -744,7 +765,7 @@ that applications can use as the starting point for a branded flat theme.
 `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the token
 subset consumed by the current built-in components. Passing a customized
 Material ThemeSpec to `MaterialTheme(theme, factory)` rebuilds the Material
-component StyleKeys from those tokens.
+component styles from those tokens.
 
 ### Theme syntax
 
@@ -819,13 +840,13 @@ Material, flat, liquid, or third-party theme identity.
 `ThemeDefinition{}` only contributes its typed component values, so a nested
 style override does not replace the parent `ThemeSpec`. Text, Button, Dialog,
 Toast, ScrollBar, and default indications derive their semantic defaults from
-the nearest complete `ThemeSpec`. Component StyleKey lookup stops at that
+the nearest complete `ThemeSpec`. Component style lookup stops at that
 complete boundary, while a component-only `ThemeDefinition` continues to
 inherit from its parent. Explicit View modifiers run after semantic style
 resolution and win without a separate runtime style branch.
 
 Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select
-the corresponding typography token. A component StyleKey can still replace
+the corresponding typography token. A component `TextStyle` value can still replace
 the complete Text style for a local subtree.
 
 Theme switching initially updates values directly. Per-frame animated Theme

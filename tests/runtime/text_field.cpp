@@ -300,13 +300,13 @@ View NestedMultilineTextFieldApp() {
 }
 
 View TextSelectionOverlayApp() {
-  TextFieldStyle style = TextFieldStyleKey::Default();
+  TextFieldStyle style = TextFieldStyle::Default();
   style.caret = Color::Rgb(214, 55, 48);
   ThemeDefinition definition = FlatThemeDefinition();
-  definition.Set<TextFieldStyleKey>(style);
+  definition.Set(style);
   return Theme(std::move(definition), [] {
-    return ProvideEnvironment<TextSelectionMenuLabelsKey>(
-        {
+    return ProvideEnvironment(
+        TextSelectionMenuLabels{
             .cut = "剪切",
             .copy = "复制",
             .paste = "粘贴",
@@ -391,8 +391,8 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
 
   const DrawTextCommand* placeholder = FindText(display_list, "Name");
   REQUIRE(placeholder != nullptr);
-  REQUIRE(placeholder->font_size == TextFieldStyleKey::Default().font_size);
-  REQUIRE(placeholder->color.alpha == TextFieldStyleKey::Default().placeholder.alpha);
+  REQUIRE(placeholder->font_size == TextFieldStyle::Default().font_size);
+  REQUIRE(placeholder->color.alpha == TextFieldStyle::Default().placeholder.alpha);
 
   const auto border = std::ranges::find_if(display_list.Commands(), [](const DisplayCommand& command) {
     const auto* value = std::get_if<DrawBorderCommand>(&command);
@@ -401,10 +401,9 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   REQUIRE(border != display_list.Commands().end());
 
   const ThemeDefinition material = huxerui::MaterialThemeDefinition();
-  const auto* style = std::any_cast<TextFieldStyle>(material.Values().Find(typeid(TextFieldStyleKey)));
-  REQUIRE(style != nullptr);
-  REQUIRE(style->minimum_height == 56.0F);
-  REQUIRE(style->focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(material);
+  REQUIRE(style.minimum_height == 56.0F);
+  REQUIRE(style.focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
 }
 
 TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
@@ -414,7 +413,7 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   runtime.SetViewport({200.0F, 100.0F});
   const DisplayList& display_list = runtime.BuildFrame();
 
-  const TextFieldStyle style = TextFieldStyleKey::Default();
+  const TextFieldStyle style = TextFieldStyle::Default();
   const DrawTextCommand* message = FindText(display_list, "Email is required");
   REQUIRE(message != nullptr);
   REQUIRE(message->color.red == style.validation_error.red);
@@ -459,7 +458,7 @@ TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessag
   });
   const DisplayList& display_list = runtime.BuildFrame();
 
-  const TextFieldStyle style = TextFieldStyleKey::Default();
+  const TextFieldStyle style = TextFieldStyle::Default();
   REQUIRE(FindBorderWithColor(display_list, style.validation_error) != nullptr);
   REQUIRE(FindBorderWithColor(display_list, style.focused_border) == nullptr);
 }
@@ -492,8 +491,8 @@ TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
   const DisplayList& display_list = runtime.BuildFrame();
 
   REQUIRE(FindText(display_list, "Email is required") == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == TextFieldStyleKey::Default().minimum_height);
-  REQUIRE(FindBorderWithColor(display_list, TextFieldStyleKey::Default().validation_error) == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == TextFieldStyle::Default().minimum_height);
+  REQUIRE(FindBorderWithColor(display_list, TextFieldStyle::Default().validation_error) == nullptr);
 }
 
 TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
@@ -503,7 +502,7 @@ TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
   runtime.SetViewport({200.0F, 100.0F});
   const DisplayList& display_list = runtime.BuildFrame();
 
-  const TextFieldStyle style = TextFieldStyleKey::Default();
+  const TextFieldStyle style = TextFieldStyle::Default();
   const DrawTextCommand* message = FindText(display_list, "Checking");
   REQUIRE(message != nullptr);
   REQUIRE(message->color.red == style.placeholder.red);
@@ -1586,7 +1585,7 @@ TEST_CASE("TestTextFieldDragSelectionAndGeometry") {
   const DisplayList& display_list = runtime.BuildFrame();
   const DrawRectCommand* selection = FindRect(display_list, {20.0F, 10.0F, 30.0F, 20.0F});
   REQUIRE(selection != nullptr);
-  REQUIRE(selection->color.alpha == TextFieldStyleKey::Default().selection.alpha);
+  REQUIRE(selection->color.alpha == TextFieldStyle::Default().selection.alpha);
 
   const TextInputGeometry geometry = runtime.QueryTextInputGeometry(1, {1, 4});
   REQUIRE(geometry.result_code == TextInputResultCode::Ok);

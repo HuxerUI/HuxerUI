@@ -23,13 +23,13 @@ namespace huxerui {
 namespace {
 
 const TextSelectionMenuLabels& ResolveSelectionMenuLabels(const detail::MountedNode& node) {
-  if (const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(TextSelectionMenuLabelsKey))) {
+  if (const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(TextSelectionMenuLabels))) {
     if (const auto* labels = std::any_cast<TextSelectionMenuLabels>(value)) {
       return *labels;
     }
     throw std::logic_error("HuxerUI text selection menu labels have an invalid environment value");
   }
-  static const TextSelectionMenuLabels labels = TextSelectionMenuLabelsKey::Default();
+  static const TextSelectionMenuLabels labels = TextSelectionMenuLabels::Default();
   return labels;
 }
 

@@ -13,7 +13,7 @@ namespace huxerui {
 namespace {
 
 bool ReducedMotion(const detail::MountedNode& node) {
-  const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(ThemeKey));
+  const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(ThemeSpec));
   const auto* theme = value ? std::any_cast<ThemeSpec>(value) : nullptr;
   return theme && theme->motion.reduced_motion;
 }

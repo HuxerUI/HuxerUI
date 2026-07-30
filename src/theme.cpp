@@ -113,48 +113,55 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
 
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
-  definition.Set<ButtonStyleKey>(MaterialButtonStyle(theme));
-  definition.Set<TextFieldStyleKey>(MaterialTextFieldStyle(theme));
-  definition.Set<CheckboxStyleKey>(MaterialCheckboxStyle(theme));
-  definition.Set<SwitchStyleKey>(MaterialSwitchStyle(theme));
-  definition.Set<ProgressCircleStyleKey>(MaterialProgressCircleStyle(theme));
-  definition.Set<ToastStyleKey>(ToastStyle{
+  definition.Set(MaterialButtonStyle(theme));
+  definition.Set(MaterialTextFieldStyle(theme));
+  definition.Set(MaterialCheckboxStyle(theme));
+  definition.Set(MaterialSwitchStyle(theme));
+  definition.Set(MaterialProgressCircleStyle(theme));
+  definition.Set(ToastStyle{
       .background = theme.colors.inverse_surface,
       .foreground = theme.colors.inverse_on_surface,
       .padding = theme.spacing.small + theme.spacing.extra_small,
       .corner_radius = theme.shapes.small,
   });
-  definition.Set<DialogStyleKey>(DialogStyle{
+  definition.Set(DialogStyle{
       .scrim = theme.colors.scrim,
   });
-  definition.Set<ScrollBarStyleKey>(MaterialScrollBarStyle(theme));
+  definition.Set(MaterialScrollBarStyle(theme));
   return definition;
 }
 
 } // namespace
 
-ThemeSpec ThemeKey::Default() {
+ThemeSpec ThemeSpec::Default() {
   return FlatLightThemeSpec();
 }
 
 namespace detail {
 
+void ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition) {
+  if (definition.theme_.has_value()) {
+    values.Set(*definition.theme_);
+  }
+  MergeEnvironmentValues(values, definition.values_);
+}
+
 ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment) {
-  if (const std::any* value = FindEnvironmentValue(std::move(environment), typeid(ThemeKey))) {
+  if (const std::any* value = FindEnvironmentValue(std::move(environment), typeid(ThemeSpec))) {
     if (const auto* theme = std::any_cast<ThemeSpec>(value)) {
       return *theme;
     }
     throw std::logic_error("HuxerUI theme environment value has an invalid type");
   }
-  return ThemeKey::Default();
+  return ThemeSpec::Default();
 }
 
 const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key) {
   for (auto frame = std::move(environment); frame != nullptr; frame = frame->parent) {
-    if (const std::any* value = frame->overrides.Find(key)) {
+    if (const std::any* value = FindLocalEnvironmentValue(frame->overrides, key)) {
       return value;
     }
-    if (frame->overrides.Find(typeid(ThemeKey))) {
+    if (FindLocalEnvironmentValue(frame->overrides, typeid(ThemeSpec))) {
       return nullptr;
     }
   }
@@ -262,28 +269,28 @@ ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme) {
 
 } // namespace detail
 
-TextStyle TextStyleKey::Default() {
-  return detail::DefaultTextStyle(ThemeKey::Default());
+TextStyle TextStyle::Default() {
+  return detail::DefaultTextStyle(ThemeSpec::Default());
 }
 
-ButtonStyle ButtonStyleKey::Default() {
-  return detail::DefaultButtonStyle(ThemeKey::Default());
+ButtonStyle ButtonStyle::Default() {
+  return detail::DefaultButtonStyle(ThemeSpec::Default());
 }
 
-TextFieldStyle TextFieldStyleKey::Default() {
-  return detail::DefaultTextFieldStyle(ThemeKey::Default());
+TextFieldStyle TextFieldStyle::Default() {
+  return detail::DefaultTextFieldStyle(ThemeSpec::Default());
 }
 
-CheckboxStyle CheckboxStyleKey::Default() {
-  return detail::DefaultCheckboxStyle(ThemeKey::Default());
+CheckboxStyle CheckboxStyle::Default() {
+  return detail::DefaultCheckboxStyle(ThemeSpec::Default());
 }
 
-SwitchStyle SwitchStyleKey::Default() {
-  return detail::DefaultSwitchStyle(ThemeKey::Default());
+SwitchStyle SwitchStyle::Default() {
+  return detail::DefaultSwitchStyle(ThemeSpec::Default());
 }
 
-ProgressCircleStyle ProgressCircleStyleKey::Default() {
-  return detail::DefaultProgressCircleStyle(ThemeKey::Default());
+ProgressCircleStyle ProgressCircleStyle::Default() {
+  return detail::DefaultProgressCircleStyle(ThemeSpec::Default());
 }
 
 ThemeSpec FlatLightThemeSpec() {

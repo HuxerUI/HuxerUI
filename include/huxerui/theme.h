@@ -83,17 +83,15 @@ struct ThemeSpec {
   ElevationScheme elevation;
   MotionScheme motion;
   InteractionScheme interactions;
+
+  static ThemeSpec Default();
 };
 
 struct TextStyle {
   Color foreground = Color::Rgb(31, 35, 40);
   float font_size = 14.0F;
-};
 
-struct TextStyleKey {
-  using Value = TextStyle;
-
-  static Value Default();
+  static TextStyle Default();
 };
 
 struct ButtonStyle {
@@ -102,12 +100,8 @@ struct ButtonStyle {
   float font_size = 14.0F;
   EdgeInsets padding = EdgeInsets::Symmetric(14.0F, 8.0F);
   float corner_radius = 8.0F;
-};
 
-struct ButtonStyleKey {
-  using Value = ButtonStyle;
-
-  static Value Default();
+  static ButtonStyle Default();
 };
 
 struct TextFieldStyle {
@@ -130,12 +124,8 @@ struct TextFieldStyle {
   float validation_border_width = 2.0F;
   float validation_font_size = 12.0F;
   float validation_spacing = 4.0F;
-};
 
-struct TextFieldStyleKey {
-  using Value = TextFieldStyle;
-
-  static Value Default();
+  static TextFieldStyle Default();
 };
 
 struct CheckboxStyle {
@@ -145,12 +135,8 @@ struct CheckboxStyle {
   Color unchecked_border = Color::Rgb(87, 96, 106);
   float border_width = 2.0F;
   float corner_radius = 4.0F;
-};
 
-struct CheckboxStyleKey {
-  using Value = CheckboxStyle;
-
-  static Value Default();
+  static CheckboxStyle Default();
 };
 
 struct SwitchStyle {
@@ -163,12 +149,8 @@ struct SwitchStyle {
   float track_padding = 4.0F;
   float corner_radius = 12.0F;
   double animation_duration = 0.2;
-};
 
-struct SwitchStyleKey {
-  using Value = SwitchStyle;
-
-  static Value Default();
+  static SwitchStyle Default();
 };
 
 struct ProgressCircleStyle {
@@ -178,57 +160,44 @@ struct ProgressCircleStyle {
   Color indicator_color = Color::Rgb(31, 111, 235);
   float indeterminate_arc_fraction = 0.28F;
   double animation_duration = 0.9;
+
+  static ProgressCircleStyle Default();
 };
 
-struct ProgressCircleStyleKey {
-  using Value = ProgressCircleStyle;
+class ThemeDefinition;
 
-  static Value Default();
-};
+namespace detail {
 
-struct ThemeKey {
-  using Value = ThemeSpec;
+void ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition);
 
-  static Value Default();
-};
+} // namespace detail
 
 class ThemeDefinition {
 public:
   ThemeDefinition() = default;
   explicit ThemeDefinition(ThemeSpec theme) : theme_(std::move(theme)) {}
 
-  template <class Key>
-    requires requires { typename Key::Value; }
-  ThemeDefinition& Set(typename Key::Value value) {
-    values_.Set<Key>(std::move(value));
+  template <EnvironmentValue Value> ThemeDefinition& Set(Value value) {
+    values_.Set(std::move(value));
     return *this;
-  }
-
-  [[nodiscard]] const std::optional<ThemeSpec>& Spec() const noexcept {
-    return theme_;
-  }
-
-  [[nodiscard]] const EnvironmentValues& Values() const noexcept {
-    return values_;
   }
 
 private:
   std::optional<ThemeSpec> theme_;
   EnvironmentValues values_;
+
+  friend void detail::ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition);
 };
 
 inline const ThemeSpec& UseTheme() {
-  return UseEnvironment<ThemeKey>();
+  return UseEnvironment<ThemeSpec>();
 }
 
 template <class Factory>
   requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
 View Theme(ThemeDefinition definition, Factory&& content) {
   EnvironmentValues values;
-  if (definition.Spec().has_value()) {
-    values.Set<ThemeKey>(*definition.Spec());
-  }
-  values.Merge(definition.Values());
+  detail::ApplyThemeDefinition(values, definition);
   return ProvideEnvironment(std::move(values), std::forward<Factory>(content));
 }
 

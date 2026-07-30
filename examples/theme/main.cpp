@@ -7,7 +7,7 @@ constexpr Color explicit_button_color = Color::Rgb(88, 166, 255);
 template <class Factory> View AccentTheme(Factory&& content) {
   const ThemeSpec& theme = UseTheme();
   ThemeDefinition definition;
-  definition.Set<ButtonStyleKey>(ButtonStyle{
+  definition.Set(ButtonStyle{
       .background = theme.colors.error,
       .foreground = theme.colors.on_primary,
       .font_size = theme.typography.label,

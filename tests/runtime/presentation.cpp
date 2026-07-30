@@ -2,11 +2,11 @@
 
 namespace huxerui::test {
 
-struct TestEnvironmentKey {
-  using Value = std::string;
+struct TestEnvironmentValue {
+  std::string value;
 
-  static Value Default() {
-    return "fallback";
+  static TestEnvironmentValue Default() {
+    return {"fallback"};
   }
 };
 
@@ -52,20 +52,23 @@ State<float> progress_circle_value;
 
 View EnvironmentReader() {
   HUXERUI_SCOPE({
-    observed_environment_values.push_back(UseEnvironment<TestEnvironmentKey>());
-    return Text(UseEnvironment<TestEnvironmentKey>());
+    observed_environment_values.push_back(UseEnvironment<TestEnvironmentValue>().value);
+    return Text(UseEnvironment<TestEnvironmentValue>().value);
   });
 }
 
 View EnvironmentApp() {
   EnvironmentValues outer;
-  outer.Set<TestEnvironmentKey>("outer");
-  return huxerui::ProvideEnvironment(std::move(outer), [] {
-    return Column{
+  outer.Set(TestEnvironmentValue{"outer"});
+  return Column {
+    EnvironmentReader(),
+    huxerui::ProvideEnvironment(std::move(outer), [] {
+      return Column {
         EnvironmentReader(),
-        huxerui::ProvideEnvironment<TestEnvironmentKey>("inner", EnvironmentReader),
-    };
-  });
+        huxerui::ProvideEnvironment(TestEnvironmentValue{"inner"}, EnvironmentReader),
+      };
+    }),
+  };
 }
 
 View NestedThemeReader();
@@ -94,7 +97,7 @@ View NestedThemeReader() {
 
 View TestButtonTheme(std::function<View()> content) {
   ThemeDefinition definition;
-  definition.Set<ButtonStyleKey>(ButtonStyle{
+  definition.Set(ButtonStyle{
       .background = Color::Rgb(130, 80, 210),
       .foreground = Color::White(),
       .font_size = 21.0F,
@@ -278,13 +281,13 @@ View PresentationApp() {
 
 View PresentationThemeApp() {
   ThemeDefinition definition;
-  definition.Set<huxerui::ToastStyleKey>(huxerui::ToastStyle{
+  definition.Set(huxerui::ToastStyle{
       .background = Color::Rgb(20, 30, 40, 0.9F),
       .foreground = Color::Rgb(240, 245, 250),
       .padding = 10.0F,
       .corner_radius = 9.0F,
   });
-  definition.Set<huxerui::DialogStyleKey>(huxerui::DialogStyle{
+  definition.Set(huxerui::DialogStyle{
       .scrim = Color::Rgb(180, 20, 20, 0.3F),
   });
   return Theme(std::move(definition), PresentationApp);
@@ -377,9 +380,10 @@ TEST_CASE("TestNestedEnvironmentValues") {
   runtime.SetViewport({320.0F, 240.0F});
   runtime.BuildFrame();
 
-  REQUIRE(observed_environment_values.size() == 2);
-  REQUIRE(observed_environment_values[0] == "outer");
-  REQUIRE(observed_environment_values[1] == "inner");
+  REQUIRE(observed_environment_values.size() == 3);
+  REQUIRE(observed_environment_values[0] == "fallback");
+  REQUIRE(observed_environment_values[1] == "outer");
+  REQUIRE(observed_environment_values[2] == "inner");
 }
 
 TEST_CASE("TestThemeProviderUpdatesNestedContent") {
@@ -506,53 +510,41 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(light.interactions.indication == huxerui::IndicationKind::Ripple);
 
   const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
-  const auto* button_style = std::any_cast<ButtonStyle>(definition.Values().Find(typeid(ButtonStyleKey)));
-  REQUIRE(button_style != nullptr);
-  REQUIRE(button_style->corner_radius == 20.0F);
-  REQUIRE(button_style->padding.left == 24.0F);
-  REQUIRE(button_style->padding.top == 10.0F);
+  const ButtonStyle button_style = ThemeDefinitionValue<ButtonStyle>(definition);
+  REQUIRE(button_style.corner_radius == 20.0F);
+  REQUIRE(button_style.padding.left == 24.0F);
+  REQUIRE(button_style.padding.top == 10.0F);
 
-  const auto* checkbox_style = std::any_cast<CheckboxStyle>(definition.Values().Find(typeid(CheckboxStyleKey)));
-  REQUIRE(checkbox_style != nullptr);
-  REQUIRE(checkbox_style->size == 20.0F);
-  REQUIRE(checkbox_style->corner_radius == 2.0F);
-  REQUIRE(checkbox_style->checked_background.red == light.colors.primary.red);
+  const CheckboxStyle checkbox_style = ThemeDefinitionValue<CheckboxStyle>(definition);
+  REQUIRE(checkbox_style.size == 20.0F);
+  REQUIRE(checkbox_style.corner_radius == 2.0F);
+  REQUIRE(checkbox_style.checked_background.red == light.colors.primary.red);
 
-  const auto* switch_style = std::any_cast<SwitchStyle>(definition.Values().Find(typeid(SwitchStyleKey)));
-  REQUIRE(switch_style != nullptr);
-  REQUIRE(switch_style->width == 52.0F);
-  REQUIRE(switch_style->height == 32.0F);
-  REQUIRE(switch_style->thumb_radius == 12.0F);
+  const SwitchStyle switch_style = ThemeDefinitionValue<SwitchStyle>(definition);
+  REQUIRE(switch_style.width == 52.0F);
+  REQUIRE(switch_style.height == 32.0F);
+  REQUIRE(switch_style.thumb_radius == 12.0F);
 
-  const auto* progress_circle_style =
-      std::any_cast<ProgressCircleStyle>(definition.Values().Find(typeid(ProgressCircleStyleKey)));
-  REQUIRE(progress_circle_style != nullptr);
-  REQUIRE(progress_circle_style->size == 40.0F);
-  REQUIRE(progress_circle_style->stroke_width == 4.0F);
-  REQUIRE(progress_circle_style->indicator_color.red == light.colors.primary.red);
+  const ProgressCircleStyle progress_circle_style = ThemeDefinitionValue<ProgressCircleStyle>(definition);
+  REQUIRE(progress_circle_style.size == 40.0F);
+  REQUIRE(progress_circle_style.stroke_width == 4.0F);
+  REQUIRE(progress_circle_style.indicator_color.red == light.colors.primary.red);
 
-  const auto* toast_style =
-      std::any_cast<huxerui::ToastStyle>(definition.Values().Find(typeid(huxerui::ToastStyleKey)));
-  REQUIRE(toast_style != nullptr);
-  REQUIRE(toast_style->background.red == Color::Rgb(50, 47, 53).red);
+  const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
+  REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
 
-  const auto* dialog_style =
-      std::any_cast<huxerui::DialogStyle>(definition.Values().Find(typeid(huxerui::DialogStyleKey)));
-  REQUIRE(dialog_style != nullptr);
-  REQUIRE(dialog_style->scrim.alpha == light.colors.scrim.alpha);
+  const huxerui::DialogStyle dialog_style = ThemeDefinitionValue<huxerui::DialogStyle>(definition);
+  REQUIRE(dialog_style.scrim.alpha == light.colors.scrim.alpha);
 
-  const auto* scroll_bar_style =
-      std::any_cast<huxerui::ScrollBarStyle>(definition.Values().Find(typeid(huxerui::ScrollBarStyleKey)));
-  REQUIRE(scroll_bar_style != nullptr);
-  REQUIRE(scroll_bar_style->thickness == 4.0F);
-  REQUIRE(scroll_bar_style->corner_radius == 2.0F);
+  const huxerui::ScrollBarStyle scroll_bar_style = ThemeDefinitionValue<huxerui::ScrollBarStyle>(definition);
+  REQUIRE(scroll_bar_style.thickness == 4.0F);
+  REQUIRE(scroll_bar_style.corner_radius == 2.0F);
 
   ThemeSpec brand = light;
   brand.colors.primary = Color::Rgb(20, 110, 90);
   const ThemeDefinition brand_definition = huxerui::MaterialThemeDefinition(brand);
-  const auto* brand_button_style = std::any_cast<ButtonStyle>(brand_definition.Values().Find(typeid(ButtonStyleKey)));
-  REQUIRE(brand_button_style != nullptr);
-  REQUIRE(brand_button_style->background.green == brand.colors.primary.green);
+  const ButtonStyle brand_button_style = ThemeDefinitionValue<ButtonStyle>(brand_definition);
+  REQUIRE(brand_button_style.background.green == brand.colors.primary.green);
 
   TestPlatform platform;
   Runtime runtime{MaterialThemeApp, platform};

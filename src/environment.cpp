@@ -6,13 +6,22 @@
 
 namespace huxerui {
 
-void EnvironmentValues::Merge(const EnvironmentValues& values) {
-  for (const auto& [key, value] : values.values_) {
-    values_.insert_or_assign(key, value);
+namespace detail {
+
+void SetEnvironmentValue(EnvironmentValues& values, std::type_index key, std::any value) {
+  values.values_.insert_or_assign(key, std::move(value));
+}
+
+void MergeEnvironmentValues(EnvironmentValues& target, const EnvironmentValues& source) {
+  for (const auto& [key, value] : source.values_) {
+    target.values_.insert_or_assign(key, value);
   }
 }
 
-namespace detail {
+const std::any* FindLocalEnvironmentValue(const EnvironmentValues& values, std::type_index key) noexcept {
+  const auto found = values.values_.find(key);
+  return found == values.values_.end() ? nullptr : &found->second;
+}
 
 std::shared_ptr<const EnvironmentFrame> CurrentEnvironmentFrame() {
   Composer* composer = Composer::Current();
@@ -21,7 +30,7 @@ std::shared_ptr<const EnvironmentFrame> CurrentEnvironmentFrame() {
 
 const std::any* FindEnvironmentValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key) {
   for (auto frame = std::move(environment); frame; frame = frame->parent) {
-    if (const std::any* value = frame->overrides.Find(key)) {
+    if (const std::any* value = FindLocalEnvironmentValue(frame->overrides, key)) {
       return value;
     }
   }

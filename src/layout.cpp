@@ -53,7 +53,7 @@ struct VirtualContextState {
 
 float ResolveFontSize(const MountedNode& node) {
   return node.style.font_size.value_or(
-      node.kind == NodeKind::Button ? ButtonStyleKey::Default().font_size : TextStyleKey::Default().font_size
+      node.kind == NodeKind::Button ? ButtonStyle::Default().font_size : TextStyle::Default().font_size
   );
 }
 

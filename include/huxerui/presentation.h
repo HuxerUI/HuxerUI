@@ -19,22 +19,14 @@ struct ToastStyle {
   Color foreground = Color::White();
   float padding = 12.0F;
   float corner_radius = 8.0F;
-};
 
-struct ToastStyleKey {
-  using Value = ToastStyle;
-
-  static Value Default();
+  static ToastStyle Default();
 };
 
 struct DialogStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
-};
 
-struct DialogStyleKey {
-  using Value = DialogStyle;
-
-  static Value Default();
+  static DialogStyle Default();
 };
 
 struct ToastOptions {

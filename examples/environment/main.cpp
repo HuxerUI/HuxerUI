@@ -8,18 +8,14 @@ using namespace huxerui;
 struct Locale {
   std::string name;
   std::string greeting;
-};
 
-struct LocaleKey {
-  using Value = Locale;
-
-  static Value Default() {
+  static Locale Default() {
     return {"Default", "Hello"};
   }
 };
 
 View LocaleCard(std::string title) {
-  const auto& locale = UseEnvironment<LocaleKey>();
+  const auto& locale = UseEnvironment<Locale>();
   const auto& theme = UseTheme();
   return Column {
     Text(std::move(title), TextRole::Label),
@@ -39,7 +35,7 @@ View FrenchContent() {
 View ProvidedContent() {
   return Column {
     LocaleCard("Inherited from the nearest provider"),
-    ProvideEnvironment<LocaleKey>(Locale {"French", "Bonjour"}, FrenchContent),
+    ProvideEnvironment(Locale {"French", "Bonjour"}, FrenchContent),
   }.With(Spacing(UseTheme().spacing.medium));
 }
 
@@ -57,8 +53,8 @@ View EnvironmentContent() {
         "A provider supplies a typed value to its subtree. "
         "The closest provider wins."
     ),
-    LocaleCard("No provider uses LocaleKey::Default()"),
-    ProvideEnvironment<LocaleKey>(std::move(locale), ProvidedContent),
+    LocaleCard("No provider uses Locale::Default()"),
+    ProvideEnvironment(std::move(locale), ProvidedContent),
     Button("Toggle outer locale").OnClick([use_chinese] {
       use_chinese = !use_chinese;
     }),

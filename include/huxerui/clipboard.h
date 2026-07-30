@@ -18,12 +18,8 @@ struct TextSelectionMenuLabels {
   std::string copy = "Copy";
   std::string paste = "Paste";
   std::string select_all = "Select all";
-};
 
-struct TextSelectionMenuLabelsKey {
-  using Value = TextSelectionMenuLabels;
-
-  static Value Default() {
+  static TextSelectionMenuLabels Default() {
     return {};
   }
 };

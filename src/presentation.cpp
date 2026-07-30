@@ -84,12 +84,10 @@ DialogStyle DefaultDialogStyle(const ThemeSpec& theme) {
   };
 }
 
-template <class Key>
-typename Key::Value ResolvePresentationStyle(
-    const std::shared_ptr<const detail::EnvironmentFrame>& environment, typename Key::Value fallback
-) {
-  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Key))) {
-    if (const auto* style = std::any_cast<typename Key::Value>(value)) {
+template <class Style>
+Style ResolvePresentationStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment, Style fallback) {
+  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
+    if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
     }
     throw std::logic_error("HuxerUI presentation style environment value has an invalid type");
@@ -98,18 +96,18 @@ typename Key::Value ResolvePresentationStyle(
 }
 
 ToastStyle ResolveToastStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
-  return ResolvePresentationStyle<ToastStyleKey>(environment, DefaultToastStyle(detail::ResolveThemeSpec(environment)));
+  return ResolvePresentationStyle<ToastStyle>(environment, DefaultToastStyle(detail::ResolveThemeSpec(environment)));
 }
 
 DialogStyle ResolveDialogStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
-  return ResolvePresentationStyle<DialogStyleKey>(
+  return ResolvePresentationStyle<DialogStyle>(
       environment,
       DefaultDialogStyle(detail::ResolveThemeSpec(environment))
   );
 }
 
 std::shared_ptr<DialogService> DialogServiceFor(const detail::MountedNode& node) {
-  const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(ServiceEnvironmentKey<DialogService>));
+  const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(DialogService));
   if (!value) {
     throw std::logic_error("HuxerUI dialog service is not available");
   }
@@ -341,12 +339,12 @@ DialogHandle UseDialog() {
   };
 }
 
-ToastStyle ToastStyleKey::Default() {
-  return DefaultToastStyle(ThemeKey::Default());
+ToastStyle ToastStyle::Default() {
+  return DefaultToastStyle(ThemeSpec::Default());
 }
 
-DialogStyle DialogStyleKey::Default() {
-  return DefaultDialogStyle(ThemeKey::Default());
+DialogStyle DialogStyle::Default() {
+  return DefaultDialogStyle(ThemeSpec::Default());
 }
 
 const detail::ModifierDescriptor& Dialog::Descriptor() {

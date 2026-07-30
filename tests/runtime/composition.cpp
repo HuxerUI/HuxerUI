@@ -437,7 +437,7 @@ TEST_CASE("TestViewCopyOnWrite") {
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
   REQUIRE(root->children[0]->style.foreground.has_value());
-  REQUIRE(root->children[0]->style.foreground->red == huxerui::TextStyleKey::Default().foreground.red);
+  REQUIRE(root->children[0]->style.foreground->red == huxerui::TextStyle::Default().foreground.red);
   REQUIRE(root->children[1]->style.foreground.has_value());
   REQUIRE(root->children[1]->style.foreground->red == 1.0F);
 }
@@ -480,7 +480,7 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   const auto* copy_root = copy_runtime.RootNode();
   REQUIRE(copy_root != nullptr);
   REQUIRE(copy_root->children[0]->style.foreground.has_value());
-  REQUIRE(copy_root->children[0]->style.foreground->red == huxerui::TextStyleKey::Default().foreground.red);
+  REQUIRE(copy_root->children[0]->style.foreground->red == huxerui::TextStyle::Default().foreground.red);
   REQUIRE(copy_root->children[1]->style.foreground.has_value());
 }
 

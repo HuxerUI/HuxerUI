@@ -15,14 +15,6 @@ namespace huxerui {
 
 class Runtime;
 
-template <class Service> struct ServiceEnvironmentKey {
-  using Value = std::shared_ptr<Service>;
-
-  static Value Default() {
-    return {};
-  }
-};
-
 class RootContext {
 public:
   template <class Service> void Provide(std::shared_ptr<Service> service) {
@@ -33,7 +25,7 @@ public:
       throw std::logic_error("HuxerUI root service type was provided more than once");
     }
     services_->push_back(service);
-    environment_->Set<ServiceEnvironmentKey<Service>>(std::move(service));
+    detail::SetEnvironmentValue(*environment_, typeid(Service), std::move(service));
   }
 
   LayerController& Layers() noexcept {
@@ -60,11 +52,15 @@ private:
 using RootHook = std::function<void(RootContext&)>;
 
 template <class Service> std::shared_ptr<Service> UseService() {
-  auto service = UseEnvironment<ServiceEnvironmentKey<Service>>();
-  if (!service) {
+  const std::any* value = detail::FindEnvironmentValue(typeid(Service));
+  if (!value) {
     throw std::logic_error("HuxerUI requested root service is not installed");
   }
-  return service;
+  const auto* service = std::any_cast<std::shared_ptr<Service>>(value);
+  if (!service || !*service) {
+    throw std::logic_error("HuxerUI root service environment value has an invalid stored type");
+  }
+  return *service;
 }
 
 } // namespace huxerui
