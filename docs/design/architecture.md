@@ -1,38 +1,24 @@
-# HuxerUI Architecture Design
+# Architecture Design
 
 Status: implemented foundation with deferred follow-up work
 
-This document describes the implemented modifier, animation, interaction,
-theme, presentation, and root extension foundation, followed by explicitly
-identified follow-up work. Code examples in implemented sections match the
-current public API.
+This document describes the implemented modifier, animation, interaction, theme, presentation, and root extension foundation, followed by explicitly identified follow-up work. Code examples in implemented sections match the current public API.
 
 Current implementation status:
 
-- Generic View modifiers, node extension reconciliation, frame callbacks,
-  pointer observation, foreground painting, and third-party descriptors are
-  implemented.
-- ScrollBar animation, hit testing, dragging, and painting are implemented as
-  a node extension without Runtime feature branches.
-- Typed Environment, direct Theme providers, nested Theme propagation, and
-  reduced-motion animation resolution are implemented.
-- The synthetic RuntimeRoot, fixed LayerHost ordering, RootHook services,
-  Toast, command and declarative Dialog presentation are implemented.
-- Tween and spring animated Offset, Opacity, Scale, and Rotation values,
-  state-overlay indication, and multi-pointer ripple indication are
-  implemented.
-- Retained exit transitions, keyframes, decay animation, focus restoration,
-  platform Back handling, and advanced Toast queue policy remain follow-up
-  work.
+- Generic View modifiers, node extension reconciliation, frame callbacks, pointer observation, foreground painting, and third-party descriptors are implemented.
+- ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
+- Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
+- The synthetic RuntimeRoot, fixed LayerHost ordering, RootHook services, Toast, command and declarative Dialog presentation are implemented.
+- Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
+- Retained exit transitions, keyframes, decay animation, focus restoration, platform Back handling, and advanced Toast queue policy remain follow-up work.
 
 The design has four goals:
 
 - Keep the common View API small and declarative.
 - Give built-in and third-party features the same extension mechanisms.
-- Preserve mounted state across recomposition without adding feature-specific
-  branches to `Runtime`.
-- Reuse the existing Scope, Composer, reconciliation, layout, event, and
-  virtual layout systems.
+- Preserve mounted state across recomposition without adding feature-specific branches to `Runtime`.
+- Reuse the existing Scope, Composer, reconciliation, layout, event, and virtual layout systems.
 
 ## Architecture overview
 
@@ -56,8 +42,7 @@ The application still starts with the existing shape:
 HUXERUI_APP(App, {})
 ```
 
-`RuntimeRoot` is synthesized by the Runtime. It is not a public layout
-component and does not require applications to wrap their root View.
+`RuntimeRoot` is synthesized by the Runtime. It is not a public layout component and does not require applications to wrap their root View.
 
 The main data flow is:
 
@@ -97,8 +82,7 @@ public:
 };
 ```
 
-`OnClick()` remains a high-frequency convenience wrapper for the typed event
-API:
+`OnClick()` remains a high-frequency convenience wrapper for the typed event API:
 
 ```cpp
 template <class Handler>
@@ -109,8 +93,7 @@ View OnClick(Handler&& handler) &&
 }
 ```
 
-Visual effects, interaction behavior, animation, presentation, and parent
-layout data are modifier values passed to `With()`:
+Visual effects, interaction behavior, animation, presentation, and parent layout data are modifier values passed to `With()`:
 
 ```cpp
 return Button("Save")
@@ -147,17 +130,11 @@ return Card().With(
     });
 ```
 
-The target API does not require a dedicated `View` member function for every
-new modifier type.
+The target API does not require a dedicated `View` member function for every new modifier type.
 
 ### Modifier order
 
-Modifiers are processed from left to right, but the current property modifiers
-do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`,
-`FontSize`, alignment, spacing, and similar values apply directly to
-`ViewSpec`. A later modifier that writes the same property wins. `Frame`
-merges only explicitly supplied width, height, minimum, and maximum fields so
-independent declarations can constrain separate axes.
+Modifiers are processed from left to right, but the current property modifiers do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`, `FontSize`, alignment, spacing, and similar values apply directly to `ViewSpec`. A later modifier that writes the same property wins. `Frame` merges only explicitly supplied width, height, minimum, and maximum fields so independent declarations can constrain separate axes.
 
 ```cpp
 view.With(
@@ -168,44 +145,22 @@ view.With(
     Padding{12.0F});
 ```
 
-These declarations currently produce the same padding and background. They do
-not express inner and outer backgrounds.
+These declarations currently produce the same padding and background. They do not express inner and outer backgrounds.
 
-`Frame(width, height)` is the positional fixed-size form. Its six optional
-fields also support a single preferred axis and independent minimum or maximum
-bounds. The runtime validates local bounds when the modifier is applied, then
-intersects them with the parent `Constraints` before measuring content.
-Preferred dimensions collapse the resulting range to the closest permitted
-value. Frame constraints describe the outer node size, so Padding is deflated
-only after the frame range has been resolved.
+`Frame(width, height)` is the positional fixed-size form. Its six optional fields also support a single preferred axis and independent minimum or maximum bounds. The runtime validates local bounds when the modifier is applied, then intersects them with the parent `Constraints` before measuring content. Preferred dimensions collapse the resulting range to the closest permitted value. Frame constraints describe the outer node size, so Padding is deflated only after the frame range has been resolved.
 
-Grow is a parent layout policy rather than a frame constraint. Row and Column
-divide finite remaining main-axis space by grow factor and pass each grow
-child a tight allocation. An unbounded main axis has no remaining extent to
-divide, so Grow does not expand there.
+Grow is a parent layout policy rather than a frame constraint. Row and Column divide finite remaining main-axis space by grow factor and pass each grow child a tight allocation. An unbounded main axis has no remaining extent to divide, so Grow does not expand there.
 
-Flow uses the same public `Layout<Derived>` protocol as Row, Column, and Stack.
-It first measures children at their natural widths to form horizontal lines,
-then distributes finite remaining width among Grow children within each line.
-Main alignment is resolved separately per line, cross alignment applies within
-the line height, and the common Spacing value is used for both item and line
-gaps. An unbounded width produces one intrinsic-width line without Grow
-expansion.
+Flow uses the same public `Layout<Derived>` protocol as Row, Column, and Stack. It first measures children at their natural widths to form horizontal lines, then distributes finite remaining width among Grow children within each line. Main alignment is resolved separately per line, cross alignment applies within the line height, and the common Spacing value is used for both item and line gaps. An unbounded width produces one intrinsic-width line without Grow expansion.
 
-Retained modifiers such as `ScrollBar`, `Indication`, animated `Opacity`, and
-third-party modifiers with an extension preserve their relative order.
-Compatible retained entries reconcile by descriptor and position. Frame and
-foreground paint callbacks run in declaration order, while extension hit
-testing runs in reverse order.
+Retained modifiers such as `ScrollBar`, `Indication`, animated `Opacity`, and third-party modifiers with an extension preserve their relative order. Compatible retained entries reconcile by descriptor and position. Frame and foreground paint callbacks run in declaration order, while extension hit testing runs in reverse order.
 
 ## Modifier descriptions and node extensions
 
 There are two modifier categories:
 
-- A property modifier applies its value directly to `ViewSpec` and is not
-  retained afterward.
-- A retained modifier stores a type-erased `ModifierSpec` in `ViewSpec` and a
-  persistent `NodeExtension` in `MountedNode`.
+- A property modifier applies its value directly to `ViewSpec` and is not retained afterward.
+- A retained modifier stores a type-erased `ModifierSpec` in `ViewSpec` and a persistent `NodeExtension` in `MountedNode`.
 
 Conceptually:
 
@@ -217,19 +172,14 @@ Ripple / ScrollBar / Glow
                             └── reconciliation ──▶ NodeExtension
 ```
 
-Each modifier type has a stable descriptor identity. Reconciliation compares
-modifier type and position:
+Each modifier type has a stable descriptor identity. Reconciliation compares modifier type and position:
 
 - A compatible modifier updates its existing node extension.
-- An incompatible modifier destroys the previous node extension and creates
-  a new one.
-- Reusing a `MountedNode` also preserves compatible modifier animation,
-  gesture, and presentation state.
-- Reordering modifiers is a semantic change and may recreate affected node
-  extensions.
+- An incompatible modifier destroys the previous node extension and creates a new one.
+- Reusing a `MountedNode` also preserves compatible modifier animation, gesture, and presentation state.
+- Reordering modifiers is a semantic change and may recreate affected node extensions.
 
-A third-party modifier can expose its node extension without changing
-`View`:
+A third-party modifier can expose its node extension without changing `View`:
 
 ```cpp
 class GlowExtension;
@@ -242,8 +192,7 @@ struct Glow {
 };
 ```
 
-The framework-provided adapter performs type erasure and dispatches typed
-updates:
+The framework-provided adapter performs type erasure and dispatches typed updates:
 
 ```cpp
 class GlowExtension final : public NodeExtension {
@@ -258,14 +207,11 @@ public:
 };
 ```
 
-The framework detects `Glow::Extension`, creates the node extension, and
-dispatches typed updates without requiring the modifier to expose descriptor
-or type-erasure details.
+The framework detects `Glow::Extension`, creates the node extension, and dispatches typed updates without requiring the modifier to expose descriptor or type-erasure details.
 
 ## NodeExtension lifecycle
 
-`NodeExtension` operates directly on a controlled public `MountedNode`.
-There is no separate `ModifierHost` and no context object for every phase.
+`NodeExtension` operates directly on a controlled public `MountedNode`. There is no separate `ModifierHost` and no context object for every phase.
 
 The current public lifecycle is:
 
@@ -315,24 +261,15 @@ public:
 };
 ```
 
-`Paint()` is currently a foreground pass after the View content and children.
-`NodeExtension` does not wrap measure, layout, or paint, and it has no `Next`
-continuations. Custom child measurement and placement belong to
-`Layout<Derived>` or `VirtualLayout<Derived>`.
+`Paint()` is currently a foreground pass after the View content and children. `NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations. Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
 
-During `Paint()`, the DisplayList already contains the node's inherited
-presentation transform, so extension drawing uses `MountedNode::Frame()`.
-`PresentationFrame()` is the transformed axis-aligned window-space bounds.
-Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()`
-are mapped back into the coordinate space of `Frame()`.
+During `Paint()`, the DisplayList already contains the node's inherited presentation transform, so extension drawing uses `MountedNode::Frame()`. `PresentationFrame()` is the transformed axis-aligned window-space bounds. Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the coordinate space of `Frame()`.
 
-The existing `LayoutContext` and `VirtualLayoutContext` remain because they
-represent real child measurement sessions.
+The existing `LayoutContext` and `VirtualLayoutContext` remain because they represent real child measurement sessions.
 
 ## MountedNode capabilities
 
-The public `MountedNode` surface exposes controlled operations needed by
-layouts and modifiers:
+The public `MountedNode` surface exposes controlled operations needed by layouts and modifiers:
 
 ```cpp
 class MountedNode {
@@ -356,10 +293,7 @@ public:
 };
 ```
 
-It does not expose Runtime ownership, Environment storage, reconciliation
-internals, or direct child insertion and removal. A `NodeExtension` requests a
-continuing frame or a delayed wake-up through the `FrameResult` returned from
-`OnFrame()`. A general public measure/layout/paint invalidation API is deferred.
+It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()`. A general public measure/layout/paint invalidation API is deferred.
 
 ## Frame lifecycle
 
@@ -376,19 +310,13 @@ paint
 schedule the next frame or delayed wake-up
 ```
 
-The current Runtime measures and lays out the mounted tree on every produced
-frame. Node-extension frame traversal caches whether a subtree contains any
-extensions and skips extension-free subtrees. A modifier that is waiting for a
-delayed transition schedules one wake-up rather than running empty frames.
+The current Runtime measures and lays out the mounted tree on every produced frame. Node-extension frame traversal caches whether a subtree contains any extensions and skips extension-free subtrees. A modifier that is waiting for a delayed transition schedules one wake-up rather than running empty frames.
 
-Runtime calls fixed node and modifier lifecycle functions. It does not contain
-branches for concrete features such as ScrollBar, Ripple, Dialog, or a
-particular animation.
+Runtime calls fixed node and modifier lifecycle functions. It does not contain branches for concrete features such as ScrollBar, Ripple, Dialog, or a particular animation.
 
 ## Animation model
 
-Animation is separated into motion parameters, animated modifier values, and
-visibility transitions.
+Animation is separated into motion parameters, animated modifier values, and visibility transitions.
 
 ### AnimationSpec
 
@@ -419,8 +347,7 @@ SpringSpec{
 };
 ```
 
-`AnimationSpec` is a value. It is not a modifier and does not own runtime
-state.
+`AnimationSpec` is a value. It is not a modifier and does not own runtime state.
 
 ### Animated modifier values
 
@@ -465,12 +392,7 @@ return Panel().With(
     });
 ```
 
-The current value, velocity, start time, and target are stored in the
-compatible `NodeExtension`. Retargeting starts from the current presentation
-value. Advancing an animation does not recompose the component. Scale and
-Rotation default to the View center, use a normalized `TransformOrigin`, and
-share their transform with descendant drawing, clipping, foreground
-extensions, and pointer hit testing without changing Measure or Layout.
+The current value, velocity, start time, and target are stored in the compatible `NodeExtension`. Retargeting starts from the current presentation value. Advancing an animation does not recompose the component. Scale and Rotation default to the View center, use a normalized `TransformOrigin`, and share their transform with descendant drawing, clipping, foreground extensions, and pointer hit testing without changing Measure or Layout.
 
 ### TransitionSpec
 
@@ -494,8 +416,7 @@ TransitionSpec{
 };
 ```
 
-When a node with an exit transition disappears from the incoming tree, it
-enters a retained exit state:
+When a node with an exit transition disappears from the incoming tree, it enters a retained exit state:
 
 ```text
 remove from the logical composition
@@ -513,9 +434,7 @@ Layer entries use the same transition model.
 
 ### Reduced motion
 
-Accessibility and platform preferences enter through Environment. Theme motion
-resolution can replace animations with `SnapSpec` or shorter motion without
-changing each component.
+Accessibility and platform preferences enter through Environment. Theme motion resolution can replace animations with `SnapSpec` or shorter motion without changing each component.
 
 ## Interaction and indication
 
@@ -543,38 +462,17 @@ Release
 Cancel
 ```
 
-A Press records the pointer ID and local press position. Release and Cancel
-refer to the corresponding Press. This supports multiple simultaneous
-pointers and multiple active ripple instances.
+A Press records the pointer ID and local press position. Release and Cancel refer to the corresponding Press. This supports multiple simultaneous pointers and multiple active ripple instances.
 
-`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event.
-Adding a Click handler makes the View participate in click interaction.
-Flat themes use a state-overlay indication, while Material themes select a
-ripple with a hover state layer. Both resolve their colors from
-`InteractionScheme` and their transition durations from `MotionScheme`.
-Reduced-motion themes snap those transitions.
+`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Both resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`. Reduced-motion themes snap those transitions.
 
-`Enabled` is a semantic modifier. Effective enabled state is resolved from
-the root toward its descendants, so a child cannot re-enable itself beneath a
-disabled parent. Disabled controls remain hit-test barriers without receiving
-pointer, scroll, focus, or Click interaction. The renderer applies disabled
-opacity once at the boundary instead of repeatedly dimming every descendant.
+`Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. The renderer applies disabled opacity once at the boundary instead of repeatedly dimming every descendant.
 
-`Focusable` lets a custom View participate in the window focus order. Button
-is focusable by default. Runtime owns one focused mounted-node identity,
-dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or
-Shift+Tab. Enter activates a focused Button on key down; Space shows pressed
-indication and activates on key up. Focus ring color, width, disabled opacity,
-and key indication timing resolve from Theme.
+`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space shows pressed indication and activates on key up. Focus ring color, width, disabled opacity, and key indication timing resolve from Theme.
 
-The topmost modal Layer is the active focus traversal root. Opening a nested
-modal captures the current focus, and dismissing it restores the previously
-focused mounted node when that node still exists and remains enabled.
+The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 
-When a pointer drag crosses the scroll threshold, the selected scroll
-container wins gesture arbitration. The original click target receives
-PointerCancel, Click is suppressed, and its indication runs the cancellation
-animation.
+When a pointer drag crosses the scroll threshold, the selected scroll container wins gesture arbitration. The original click target receives PointerCancel, Click is suppressed, and its indication runs the cancellation animation.
 
 ### IndicationSpec
 
@@ -598,9 +496,7 @@ return Button("Save").With(
     });
 ```
 
-A ripple is one mounted instance per Press. It continues expanding and fading
-after Release or Cancel until its configured transition finishes. Its
-DisplayList clip uses the resolved component corner radius.
+A ripple is one mounted instance per Press. It continues expanding and fading after Release or Cancel until its configured transition finishes. Its DisplayList clip uses the resolved component corner radius.
 
 ## ScrollBar as a modifier
 
@@ -629,8 +525,7 @@ return VirtualList(items, ItemView).With(
 - Thumb geometry and pointer handling.
 - Foreground painting.
 
-Scroll activity, hover, and drag update this modifier. Runtime does not retain
-ScrollBar-specific animation or pointer functions.
+Scroll activity, hover, and drag update this modifier. Runtime does not retain ScrollBar-specific animation or pointer functions.
 
 ## Environment
 
@@ -641,8 +536,7 @@ template <EnvironmentValue Value>
 const Value& UseEnvironment();
 ```
 
-The Environment value type is also its lookup identity and provides its
-fallback through `Value::Default()`.
+The Environment value type is also its lookup identity and provides its fallback through `Value::Default()`.
 
 ```cpp
 struct Locale {
@@ -657,9 +551,7 @@ const Locale& locale = UseEnvironment<Locale>();
 return ProvideEnvironment(Locale{"fr"}, Content);
 ```
 
-Use a semantic wrapper when two ambient values share the same underlying
-representation. Primitive or third-party representation types are not
-separate Environment keys by themselves.
+Use a semantic wrapper when two ambient values share the same underlying representation. Primitive or third-party representation types are not separate Environment keys by themselves.
 
 Each Environment frame stores only local overrides and points to its parent:
 
@@ -670,9 +562,7 @@ struct EnvironmentFrame {
 };
 ```
 
-Each composed subtree captures its current Environment frame. A nested
-provider shadows only the value type it supplies and inherits every other
-value from its parent frame.
+Each composed subtree captures its current Environment frame. A nested provider shadows only the value type it supplies and inherits every other value from its parent frame.
 
 Environment carries:
 
@@ -681,8 +571,7 @@ Environment carries:
 - Per-window services.
 - Other typed third-party values.
 
-Theme and services reuse Environment rather than introducing parallel tree
-propagation systems.
+Theme and services reuse Environment rather than introducing parallel tree propagation systems.
 
 ## Theme
 
@@ -695,8 +584,7 @@ View Theme(
     Factory&& content);
 ```
 
-The content factory is stored and invoked only after the Theme Environment
-frame is active. This allows `UseTheme()` inside child component composition.
+The content factory is stored and invoked only after the Theme Environment frame is active. This allows `UseTheme()` inside child component composition.
 
 ### Theme systems
 
@@ -724,11 +612,9 @@ ToastStyle
 ScrollBarStyle
 ```
 
-Third-party components can define their own style keys without extending a
-single global style registry.
+Third-party components can define their own style keys without extending a single global style registry.
 
-Material, flat, liquid, and third-party themes are theme provider functions,
-not Runtime types and not subclasses:
+Material, flat, liquid, and third-party themes are theme provider functions, not Runtime types and not subclasses:
 
 ```cpp
 template <class Factory>
@@ -750,8 +636,7 @@ View XxxTheme(Factory&& content)
 }
 ```
 
-The built-in Flat and Material systems provide complete light and dark
-boundaries:
+The built-in Flat and Material systems provide complete light and dark boundaries:
 
 ```cpp
 FlatTheme(Content)
@@ -760,12 +645,7 @@ MaterialTheme(Content)
 MaterialDarkTheme(Content)
 ```
 
-`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values
-that applications can use as the starting point for a branded flat theme.
-`MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the token
-subset consumed by the current built-in components. Passing a customized
-Material ThemeSpec to `MaterialTheme(theme, factory)` rebuilds the Material
-component styles from those tokens.
+`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the token subset consumed by the current built-in components. Passing a customized Material ThemeSpec to `MaterialTheme(theme, factory)` rebuilds the Material component styles from those tokens.
 
 ### Theme syntax
 
@@ -783,8 +663,7 @@ return MaterialTheme([=] {
 });
 ```
 
-`HUXERUI_THEME` is optional syntax sugar for an inline View expression or a
-component call with arguments:
+`HUXERUI_THEME` is optional syntax sugar for an inline View expression or a component call with arguments:
 
 ```cpp
 #define HUXERUI_THEME(ThemeProvider, ...)                              \
@@ -832,30 +711,17 @@ root Theme
 platform defaults
 ```
 
-A complete Theme establishes a design system boundary. A Theme override
-inherits unspecified values from its parent. Runtime does not branch on
-Material, flat, liquid, or third-party theme identity.
+A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. Runtime does not branch on Material, flat, liquid, or third-party theme identity.
 
-`ThemeDefinition{ThemeSpec}` establishes a complete boundary.
-`ThemeDefinition{}` only contributes its typed component values, so a nested
-style override does not replace the parent `ThemeSpec`. Text, Button, Dialog,
-Toast, ScrollBar, and default indications derive their semantic defaults from
-the nearest complete `ThemeSpec`. Component style lookup stops at that
-complete boundary, while a component-only `ThemeDefinition` continues to
-inherit from its parent. Explicit View modifiers run after semantic style
-resolution and win without a separate runtime style branch.
+`ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent. Explicit View modifiers run after semantic style resolution and win without a separate runtime style branch.
 
-Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select
-the corresponding typography token. A component `TextStyle` value can still replace
-the complete Text style for a local subtree.
+Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select the corresponding typography token. A component `TextStyle` value can still replace the complete Text style for a local subtree.
 
-Theme switching initially updates values directly. Per-frame animated Theme
-interpolation is intentionally deferred.
+Theme switching initially updates values directly. Per-frame animated Theme interpolation is intentionally deferred.
 
 ## RuntimeRoot and LayerHost
 
-`RuntimeRoot` owns the application content and one shared LayerHost. LayerHost
-is the only global presentation container:
+`RuntimeRoot` owns the application content and one shared LayerHost. LayerHost is the only global presentation container:
 
 ```cpp
 enum class LayerKind {
@@ -880,8 +746,7 @@ struct LayerEntry {
 };
 ```
 
-Layer entries have their own `RecomposeScope`. Showing a Toast or Dialog does
-not invalidate the application root scope.
+Layer entries have their own `RecomposeScope`. Showing a Toast or Dialog does not invalidate the application root scope.
 
 Paint follows layer order. Hit testing walks layers in reverse paint order:
 
@@ -894,8 +759,7 @@ Removed entries remain mounted until their exit transition completes.
 
 ## RootHook
 
-A RootHook installs per-window services or persistent global components before
-the first application composition:
+A RootHook installs per-window services or persistent global components before the first application composition:
 
 ```cpp
 using RootHook = std::function<void(RootContext&)>;
@@ -953,8 +817,7 @@ RootHook InstallDebugPanel()
 }
 ```
 
-Services are stored in the root Environment and retrieved through a typed
-helper:
+Services are stored in the root Environment and retrieved through a typed helper:
 
 ```cpp
 auto service = UseService<XxxToastService>();
@@ -962,15 +825,9 @@ auto service = UseService<XxxToastService>();
 
 Duplicate service types are rejected rather than silently replaced.
 
-Root hooks run once in declaration order. Runtime owns the provided services
-and attached entries. On window destruction, Runtime removes content and
-layers before destroying services in reverse registration order. A service
-uses its destructor to release external subscriptions.
+Root hooks run once in declaration order. Runtime owns the provided services and attached entries. On window destruction, Runtime removes content and layers before destroying services in reverse registration order. A service uses its destructor to release external subscriptions.
 
-HuxerUI installs its built-in Toast and Dialog services for every Runtime
-before application root hooks run. Applications use `UseToast()` and
-`UseDialog()` directly; root hooks remain the extension mechanism for
-third-party services and global components.
+HuxerUI installs its built-in Toast and Dialog services for every Runtime before application root hooks run. Applications use `UseToast()` and `UseDialog()` directly; root hooks remain the extension mechanism for third-party services and global components.
 
 RootHook does not provide:
 
@@ -993,16 +850,11 @@ return Button("Save")
     });
 ```
 
-`UseToast()` returns a lightweight handle bound to the current window and
-captures the current Environment frame. A Toast shown from a nested Theme uses
-that Theme by default.
+`UseToast()` returns a lightweight handle bound to the current window and captures the current Environment frame. A Toast shown from a nested Theme uses that Theme by default.
 
-The Toast service manages queueing, deduplication, duration, and LayerEntry
-creation. The LayerHost owns composition, input behavior, transitions, and
-removal.
+The Toast service manages queueing, deduplication, duration, and LayerEntry creation. The LayerHost owns composition, input behavior, transitions, and removal.
 
-There is no process-global `Toast::Show()` because it would be ambiguous in
-multi-window and multi-Runtime applications.
+There is no process-global `Toast::Show()` because it would be ambiguous in multi-window and multi-Runtime applications.
 
 ## Dialog
 
@@ -1022,14 +874,9 @@ return Content().With(
     });
 ```
 
-`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the
-entry. Destroying the source modifier dismisses the entry, while LayerHost
-retains the presentation until its exit transition completes.
+`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry. Destroying the source modifier dismisses the entry, while LayerHost retains the presentation until its exit transition completes.
 
-An outside press requests dismissal instead of directly removing a
-declarative Dialog layer. The callback updates the source State, preserving
-one source of truth for both the component and LayerHost. A dismissible
-declarative Dialog must provide `on_dismiss_request`.
+An outside press requests dismissal instead of directly removing a declarative Dialog layer. The callback updates the source State, preserving one source of truth for both the component and LayerHost. A dismissible declarative Dialog must provide `on_dismiss_request`.
 
 Command-oriented presentation uses a per-window service:
 
@@ -1049,8 +896,7 @@ return Button("Delete")
     });
 ```
 
-`DialogContext` identifies the presented instance and lets command-created
-content dismiss itself without capturing a `LayerId` before `Show()` returns.
+`DialogContext` identifies the presented instance and lets command-created content dismiss itself without capturing a `LayerId` before `Show()` returns.
 
 Both forms use the same modal LayerEntry implementation:
 
@@ -1064,11 +910,9 @@ Dialog does not own a separate Runtime or presentation host.
 
 ## Theme and global presentation
 
-Root services are installed before application composition and inherited
-through nested Environment frames.
+Root services are installed before application composition and inherited through nested Environment frames.
 
-A global presentation handle obtained inside themed content captures the
-caller Environment:
+A global presentation handle obtained inside themed content captures the caller Environment:
 
 ```cpp
 View AppContent()
@@ -1089,11 +933,9 @@ View App()
 }
 ```
 
-The resulting Toast entry receives the Material Theme frame even though it is
-mounted in the window LayerHost outside the normal content layout hierarchy.
+The resulting Toast entry receives the Material Theme frame even though it is mounted in the window LayerHost outside the normal content layout hierarchy.
 
-A presentation API may explicitly request the root Theme for application-wide
-alerts, but caller Theme is the default.
+A presentation API may explicitly request the root Theme for application-wide alerts, but caller Theme is the default.
 
 ## Extension map
 
@@ -1112,28 +954,23 @@ The target extension points are:
 | Global component | RootHook and LayerHost |
 | Toast or Dialog library | A service backed by LayerHost |
 
-Built-in and third-party implementations use the same lifecycle and storage
-models.
+Built-in and third-party implementations use the same lifecycle and storage models.
 
 ## Performance rules
 
 The architecture follows these rules:
 
-- Animation advances mounted state and does not recompose components every
-  frame.
-- Node extension frame traversal skips subtrees that contain no retained
-  extensions after the extension-tree cache is rebuilt.
+- Animation advances mounted state and does not recompose components every frame.
+- Node extension frame traversal skips subtrees that contain no retained extensions after the extension-tree cache is rebuilt.
 - Delayed animation work schedules one wake-up instead of polling.
-- Environment values are captured during composition; the current runtime does
-  not maintain per-key Environment dependency subscriptions.
+- Environment values are captured during composition; the current runtime does not maintain per-key Environment dependency subscriptions.
 - Layer entries use independent scopes.
 - ScrollBar state exists only on Views that install the modifier.
 - Pointer interaction state is stored per pointer ID.
 - Explicit style values override Theme without mutating Theme.
 - A service belongs to one window root.
 
-Incremental Measure and Layout invalidation can be implemented using the same
-invalidation flags without changing the public API.
+Incremental Measure and Layout invalidation can be implemented using the same invalidation flags without changing the public API.
 
 ## Deliberately omitted abstractions
 

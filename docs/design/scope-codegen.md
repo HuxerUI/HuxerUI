@@ -1,12 +1,8 @@
-# HuxerUI Scope Code Generation Design
+# Scope Code Generation Design
 
 Status: initial implementation
 
-This document defines an opt-in CMake integration that transforms functions
-marked with `[[huxerui::scope]]` into the existing explicit HuxerUI scope
-form. The marker declares an independent local state and recomposition
-boundary. The transformation is build-time syntax sugar and does not introduce
-a new runtime scope, state model, or recomposition path.
+This document defines an opt-in CMake integration that transforms functions marked with `[[huxerui::scope]]` into the existing explicit HuxerUI scope form. The marker declares an independent local state and recomposition boundary. The transformation is build-time syntax sugar and does not introduce a new runtime scope, state model, or recomposition path.
 
 ## Goals
 
@@ -47,16 +43,11 @@ View Counter(int initial) {
 }
 ```
 
-The marker applies to a function definition, not to calls of that function.
-Calling `Counter()` produces a `Scope` View with the same behavior as the
-explicit macro form. Ordinary View-returning functions remain unmarked. The
-application root already owns an implicit root scope and should not use this
-marker.
+The marker applies to a function definition, not to calls of that function. Calling `Counter()` produces a `Scope` View with the same behavior as the explicit macro form. Ordinary View-returning functions remain unmarked. The application root already owns an implicit root scope and should not use this marker.
 
 ## Generated form
 
-The transformer removes the marker and wraps the original function body with
-the existing scope macros:
+The transformer removes the marker and wraps the original function body with the existing scope macros:
 
 ```cpp
 View Counter(int initial) {
@@ -90,9 +81,7 @@ View Counter(int initial) {
 }
 ```
 
-All returns in the original body therefore return from the deferred scope
-factory. Parameters and `this` follow the capture behavior of the existing
-`HUXERUI_SCOPE_BEGIN` macro.
+All returns in the original body therefore return from the deferred scope factory. Parameters and `this` follow the capture behavior of the existing `HUXERUI_SCOPE_BEGIN` macro.
 
 ## CMake integration
 
@@ -100,16 +89,14 @@ factory. Parameters and `this` follow the capture behavior of the existing
 
 - Reject a name that does not identify a build target.
 - Inspect C++ source files already attached to the target.
-- Create one generated source for every source that contains a scope
-  marker.
+- Create one generated source for every source that contains a scope marker.
 - Leave sources without a marker unchanged.
 - Compile generated sources instead of their marked originals.
 - Mark generated sources with the CMake `GENERATED` property.
 - Add dependencies on both the original source and the transformer executable.
 - Generate files under a target-specific directory in the binary tree.
 - Preserve the original source directory for quoted include lookup.
-- Support repeated CMake configuration without adding duplicate generated
-  sources.
+- Support repeated CMake configuration without adding duplicate generated sources.
 - Reject repeated activation for the same target with incompatible options.
 
 A representative output layout is:
@@ -118,28 +105,18 @@ A representative output layout is:
 <binary-dir>/huxerui-codegen/<target>/<source-path-hash>/<source-file-name>
 ```
 
-Combining a hash of the absolute input path with the original source basename
-prevents equal basenames in different directories from colliding.
+Combining a hash of the absolute input path with the original source basename prevents equal basenames in different directories from colliding.
 
-The integration is opt-in per application target. HuxerUI library sources are
-not transformed merely because the application links `HuxerUI::huxerui`.
-Codegen-enabled targets suppress the compiler warning for unknown C++
-attributes so editors that consume the CMake compilation database accept the
-scope marker in original sources. Unsupported header definitions remain
-outside the initial transformation contract.
+The integration is opt-in per application target. HuxerUI library sources are not transformed merely because the application links `HuxerUI::huxerui`. Codegen-enabled targets suppress the compiler warning for unknown C++ attributes so editors that consume the CMake compilation database accept the scope marker in original sources. Unsupported header definitions remain outside the initial transformation contract.
 
 ## Initial transformer
 
 The first implementation uses two layers:
 
 - Exact marker matching locates `[[huxerui::scope]]`.
-- A lightweight C++ lexical scanner locates and matches the marked function
-  body.
+- A lightweight C++ lexical scanner locates and matches the marked function body.
 
-Regular expressions may locate the marker, but must not determine the closing
-brace of a function body. Nested blocks, lambdas, aggregate initialization,
-comments, and string contents make brace matching with a regular expression
-unsafe.
+Regular expressions may locate the marker, but must not determine the closing brace of a function body. Nested blocks, lambdas, aggregate initialization, comments, and string contents make brace matching with a regular expression unsafe.
 
 The scanner needs the following lexical states:
 
@@ -152,9 +129,7 @@ character literal
 raw string literal
 ```
 
-Only braces encountered in normal source affect brace depth. Escaped
-characters, raw-string delimiters, and line continuations must be handled
-without interpreting their contents as C++ structure.
+Only braces encountered in normal source affect brace depth. Escaped characters, raw-string delimiters, and line continuations must be handled without interpreting their contents as C++ structure.
 
 For every marker, the transformer:
 
@@ -166,13 +141,11 @@ For every marker, the transformer:
 - Inserts `HUXERUI_SCOPE_BEGIN` after the opening brace.
 - Inserts `HUXERUI_SCOPE_END` before the matching closing brace.
 
-Edits are applied from the end of the source toward the beginning so earlier
-source offsets remain valid when a file contains multiple marked functions.
+Edits are applied from the end of the source toward the beginning so earlier source offsets remain valid when a file contains multiple marked functions.
 
 ## Source locations
 
-Generated sources should use `#line` directives around inserted text and
-original source regions:
+Generated sources should use `#line` directives around inserted text and original source regions:
 
 ```cpp
 #line 24 "/project/src/counter.cpp"
@@ -185,19 +158,13 @@ View Counter(int initial) {
 }
 ```
 
-Diagnostics for user-authored expressions should point to the original file
-and line whenever possible. Diagnostics originating in generated wrapper code
-may point to a generated location that clearly identifies the scope
-transformer.
+Diagnostics for user-authored expressions should point to the original file and line whenever possible. Diagnostics originating in generated wrapper code may point to a generated location that clearly identifies the scope transformer.
 
-The generated file must include the same public headers as the original
-source. The transformer does not inject `<huxerui/huxerui.h>` implicitly;
-missing HuxerUI declarations remain ordinary compiler errors in user code.
+The generated file must include the same public headers as the original source. The transformer does not inject `<huxerui/huxerui.h>` implicitly; missing HuxerUI declarations remain ordinary compiler errors in user code.
 
 ## Validation and diagnostics
 
-Finding a marker without a transformable function definition is a hard build
-error. The transformer must not silently remove or ignore a marker.
+Finding a marker without a transformable function definition is a hard build error. The transformer must not silently remove or ignore a marker.
 
 Diagnostics should include:
 
@@ -214,14 +181,11 @@ counter.cpp:31:1: scope-marked function definitions in headers are not supported
 counter.cpp:46:1: unable to match the scope-marked function body
 ```
 
-The generated source is retained after a failure that occurs during C++
-compilation so developers can inspect the transformation.
+The generated source is retained after a failure that occurs during C++ compilation so developers can inspect the transformation.
 
 ## Initial restrictions
 
-The first version supports scope-marked definitions in `.cpp`, `.cc`, and
-`.cxx` files. It supports ordinary free functions and non-template member
-functions whose bodies can be located without preprocessing their syntax.
+The first version supports scope-marked definitions in `.cpp`, `.cc`, and `.cxx` files. It supports ordinary free functions and non-template member functions whose bodies can be located without preprocessing their syntax.
 
 The first version does not support:
 
@@ -232,28 +196,22 @@ The first version does not support:
 - Functions generated by macros.
 - A marker generated by another macro.
 - Function bodies whose brace structure depends on conditional compilation.
-- Syntax between the marker and body that the lightweight scanner cannot
-  classify safely.
+- Syntax between the marker and body that the lightweight scanner cannot classify safely.
 
-Unsupported input must produce a transformer error. These restrictions can be
-relaxed independently without changing the user-facing marker or CMake API.
+Unsupported input must produce a transformer error. These restrictions can be relaxed independently without changing the user-facing marker or CMake API.
 
 ## Capture and lifetime semantics
 
-Generated components use the existing `[=]` scope capture. The code generator
-does not invent separate capture rules.
+Generated components use the existing `[=]` scope capture. The code generator does not invent separate capture rules.
 
 This means:
 
 - Referenced value parameters are copied into the deferred scope factory.
 - A referenced `this` is captured as a pointer under C++20 rules.
 - Reference parameters can outlive their referent and require care.
-- Move-only values cannot be captured when the resulting scope factory must be
-  stored in the current copyable `std::function<View()>`.
+- Move-only values cannot be captured when the resulting scope factory must be stored in the current copyable `std::function<View()>`.
 
-The transformer may add targeted diagnostics for unsupported captures later.
-The first version documents these constraints and otherwise relies on normal
-C++ compilation of the generated wrapper.
+The transformer may add targeted diagnostics for unsupported captures later. The first version documents these constraints and otherwise relies on normal C++ compilation of the generated wrapper.
 
 ## Interaction with explicit scopes
 
@@ -268,25 +226,17 @@ View Counter() {
 }
 ```
 
-Unmarked functions are never transformed. A marked function that already
-contains a top-level explicit HuxerUI scope should be rejected to prevent an
-accidental double scope boundary.
+Unmarked functions are never transformed. A marked function that already contains a top-level explicit HuxerUI scope should be rejected to prevent an accidental double scope boundary.
 
-`Scope(factory)` also remains available as the lower-level API when custom
-capture behavior is required.
+`Scope(factory)` also remains available as the lower-level API when custom capture behavior is required.
 
 ## Build and incremental behavior
 
-The generated source content should be deterministic for identical input and
-transformer versions. The custom command should avoid rewriting an unchanged
-output so incremental builds do not recompile unnecessarily.
+The generated source content should be deterministic for identical input and transformer versions. The custom command should avoid rewriting an unchanged output so incremental builds do not recompile unnecessarily.
 
-The transformer executable version participates in the generated output
-dependency. Updating the transformer regenerates affected target sources.
+The transformer executable version participates in the generated output dependency. Updating the transformer regenerates affected target sources.
 
-The CMake integration should expose generated files to IDE generators while
-keeping original files visible as non-compiled project sources. Developers
-edit original files only.
+The CMake integration should expose generated files to IDE generators while keeping original files visible as non-compiled project sources. Developers edit original files only.
 
 ## Testing
 
@@ -317,16 +267,11 @@ CMake integration tests should cover:
 - Failure when the requested target does not exist.
 - Failure when the same target is enabled incompatibly.
 
-Runtime tests should verify that generated components have the same state
-isolation, dependency tracking, local recomposition, key behavior, and lazy
-state restoration as their explicit-scope equivalents.
+Runtime tests should verify that generated components have the same state isolation, dependency tracking, local recomposition, key behavior, and lazy state restoration as their explicit-scope equivalents.
 
 ## Future evolution
 
-The lightweight scanner is an intentional first version, not a commitment to
-parse all future C++ syntax. If real usage requires header definitions,
-templates, complex constraints, or macro-aware transformation, the
-implementation can move to a Clang-based frontend while preserving:
+The lightweight scanner is an intentional first version, not a commitment to parse all future C++ syntax. If real usage requires header definitions, templates, complex constraints, or macro-aware transformation, the implementation can move to a Clang-based frontend while preserving:
 
 ```cpp
 [[huxerui::scope]]
@@ -338,5 +283,4 @@ and:
 huxerui_enable_codegen(target)
 ```
 
-The public component syntax and runtime model do not depend on which
-transformer implementation is used.
+The public component syntax and runtime model do not depend on which transformer implementation is used.
