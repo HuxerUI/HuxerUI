@@ -1,6 +1,24 @@
-# HuxerUI
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/HuxerUI-logo-dark.png"><source media="(prefers-color-scheme: light)" srcset="docs/HuxerUI-logo-light.png"><img src="docs/HuxerUI-logo-light.png" width="220" alt="HuxerUI logo"></picture></p>
 
-HuxerUI is a cross-platform declarative UI framework powered by C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, and display-list runtime while retaining native platform hosts and renderers.
+<h1 align="center">HuxerUI</h1>
+
+<p align="center"><strong>Declarative, native, cross-platform UI in modern C++.</strong></p>
+
+<p align="center">One runtime. Native hosts. Shared application code.</p>
+
+<p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
+
+HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and display-list runtime while retaining native platform hosts, text systems, and renderers.
+
+## Why HuxerUI
+
+| Declarative C++ | Shared Runtime | Native Integration |
+|---|---|---|
+| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
+
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, Toast, Dialog, custom layouts, and typed extension points.
+
+## Quick Start
 
 ```cpp
 #include <huxerui/huxerui.h>
@@ -36,23 +54,25 @@ HUXERUI_APP(
 )
 ```
 
-## Highlights
+Add the application target and enable scope generation:
 
-- Local state and dependency-tracked scope recomposition
-- Stable integer, string, and enum node keys
-- Typed component events and built-in interaction events
-- Row, Column, Flow, Stack, scrolling, virtual lists, and virtual grids
-- Public custom layout and virtual-layout protocols
-- Controlled single-line and multiline TextField with native IME integration
-- Selection, clipboard, validation, secure input, undo, and redo
-- Flat and Material light and dark themes
-- Retained interaction indications and presentation animation
-- Per-window Toast, Dialog, root services, and layers
-- Android View, AppKit, and Win32 hosts
-- StaticLayout, CoreText, and DirectWrite text layout
-- Canvas, CoreGraphics, and Direct2D rendering
+```cmake
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE HuxerUI::huxerui)
+huxerui_enable_codegen(my_app)
+```
 
-## Supported platforms
+Build the repository on macOS:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+See [Getting Started](docs/getting-started.md) for application setup, Windows and Android builds, CMake options, code generation, and example launch commands.
+
+## Platform Support
 
 | Platform | Status | Native integration |
 |---|---|---|
@@ -63,33 +83,6 @@ HUXERUI_APP(
 
 See [Platform Support](docs/platform-support.md) for backend responsibilities and integration details.
 
-## Build
-
-macOS:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-Windows:
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Debug --parallel
-ctest --test-dir build -C Debug --output-on-failure
-```
-
-Android:
-
-```bash
-cd platform/android
-./gradlew :demo:assembleDebug
-```
-
-For application setup, CMake integration, build options, and example launch commands, see [Getting Started](docs/getting-started.md).
-
 ## Documentation
 
 ### User guide
@@ -98,7 +91,7 @@ For application setup, CMake integration, build options, and example launch comm
 |---|---|
 | [Getting Started](docs/getting-started.md) | First app, CMake setup, builds, and examples |
 | [Core Concepts](docs/core-concepts.md) | Views, scopes, state, keys, events, modifiers, and Environment |
-| [Layout and Scrolling](docs/layout-and-scrolling.md) | Layout constraints, ScrollView, controllers, virtualization, and custom layout |
+| [Layout and Scrolling](docs/layout-and-scrolling.md) | Constraints, ScrollView, controllers, virtualization, and custom layout |
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
 | [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, indications, animation, Toast, and Dialog |
 | [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform hosts |
@@ -135,16 +128,18 @@ For application setup, CMake integration, build options, and example launch comm
 ## Architecture
 
 ```text
-component functions and State
+declarative components and State
   -> ViewSpec
   -> reconciliation
   -> MountedNode
-  -> measure, layout, and input
+  -> measure, layout, input, and animation
   -> DisplayList
-  -> Android, macOS, or Windows renderer
+  -> native renderer
 ```
 
 The native layer owns the window or host view, frame scheduling, platform input, text services, and drawing surface. Shared application code does not depend on native UI objects.
+
+Explore the complete runtime and extension model in [Architecture Design](docs/design/architecture.md).
 
 ## License
 
