@@ -48,6 +48,21 @@ TEST_CASE("TextEditingValueUsesUtf16Offsets") {
   REQUIRE_THROWS_AS(TextEditingValue::FromText(invalid_utf8), std::invalid_argument);
 }
 
+TEST_CASE("TextWordBoundariesUseUtf16Offsets") {
+  const std::string text = "go \xF0\x9F\x98\x80 now";
+
+  REQUIRE(detail::PreviousWordStart(text, 9) == 6);
+  REQUIRE(detail::PreviousWordStart(text, 6) == 3);
+  REQUIRE(detail::PreviousWordStart(text, 3) == 0);
+  REQUIRE(detail::NextWordEnd(text, 0) == 2);
+  REQUIRE(detail::NextWordEnd(text, 2) == 5);
+  REQUIRE(detail::NextWordStart(text, 0) == 3);
+  REQUIRE(detail::NextWordStart(text, 3) == 6);
+  REQUIRE_FALSE(detail::PreviousWordStart(text, 4).has_value());
+  REQUIRE_FALSE(detail::NextWordEnd(text, 4).has_value());
+  REQUIRE_FALSE(detail::NextWordStart(text, 4).has_value());
+}
+
 TEST_CASE("TextInputCommitReplacesSelection") {
   TextEditingValue value = TextEditingValue::FromText("Hello");
   value.selection = {1, 4};

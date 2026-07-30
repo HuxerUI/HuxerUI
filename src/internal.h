@@ -33,17 +33,12 @@ struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 
-struct TextHit {
-  TextOffset offset = 0;
-  TextAffinity affinity = TextAffinity::Downstream;
-};
-
 class TextLayout {
 public:
   virtual ~TextLayout() = default;
 
   [[nodiscard]] virtual Size Measure() const = 0;
-  [[nodiscard]] virtual TextHit HitTest(Point point) const = 0;
+  [[nodiscard]] virtual TextPosition HitTest(Point point) const = 0;
   [[nodiscard]] virtual Rect CaretRect(TextOffset offset, TextAffinity affinity) const = 0;
   [[nodiscard]] virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
   [[nodiscard]] virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
@@ -389,6 +384,8 @@ private:
 
 struct ScrollNodeState {
   Axis axis = Axis::Vertical;
+  bool touch_drag_only = false;
+  bool allows_automatic_reveal = true;
   float offset_y = 0.0F;
   float offset_x = 0.0F;
   float content_height = 0.0F;
@@ -680,8 +677,11 @@ struct NodeExtensionHandle {
   bool operator==(const NodeExtensionHandle&) const = default;
 };
 
+inline constexpr float touch_gesture_slop = 6.0F;
+
 struct PointerSession {
   std::optional<std::uint64_t> target_identity;
+  std::optional<std::uint64_t> pending_focus_identity;
   std::vector<std::uint64_t> scroll_chain;
   Point down_position;
   Point last_position;
@@ -689,6 +689,7 @@ struct PointerSession {
   double velocity_sample_timestamp = 0.0;
   float scroll_velocity = 0.0F;
   bool has_velocity_sample = false;
+  bool focus_pending = false;
   std::optional<Axis> drag_axis;
   std::size_t active_scroll = 0;
   std::optional<std::uint64_t> active_scroll_node;
@@ -720,6 +721,9 @@ struct TextSelectionOverlayState {
   bool tap_pending = false;
   std::int64_t tap_pointer_id = 0;
   Point tap_position;
+  bool double_tap_pending = false;
+  std::int64_t double_tap_pointer_id = 0;
+  std::optional<std::uint64_t> double_tap_node;
   std::optional<double> previous_tap_time;
   Point previous_tap_position;
   std::optional<std::uint64_t> previous_tap_node;
@@ -822,7 +826,6 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect);
 
 struct ScrollEventResult {
   std::vector<MountedNode*> scroll_chain;
-  std::vector<MountedNode*> scrolled_nodes;
 };
 
 ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event);

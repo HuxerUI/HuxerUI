@@ -1,6 +1,6 @@
 # HuxerUI Text Input and TextField Design
 
-Status: implemented foundation with Windows and Android platform adapters
+Status: implemented foundation with Android, macOS, and Windows platform adapters
 
 This document defines the target text editing model, input session lifecycle,
 platform IME boundary, and built-in `TextField` behavior for HuxerUI. The
@@ -30,8 +30,8 @@ direction.
   editable components.
 - Preserve UTF-8 strings in the public C++ API while using one explicit offset
   convention across platforms.
-- Keep the first implementation small enough to validate through a reliable
-  single-line TextField.
+- Grow the validated single-line foundation into multiline editing without
+  changing the platform input protocol.
 
 The initial design deliberately does not include:
 
@@ -277,6 +277,11 @@ public:
       TextRange range
   ) const = 0;
 
+  [[nodiscard]] virtual TextInputPositionResult QueryTextInputPosition(
+      TextInputSessionId session_id,
+      Point point
+  ) const = 0;
+
   virtual TextInputKeyResult HandleTextKey(const KeyEvent& event) = 0;
 
   virtual void EndTextInput(
@@ -361,9 +366,26 @@ Platform-specific behavior is not represented by untyped string properties.
 New common values can be added when at least one component and platform
 integration need them.
 
-Secure entry can use the same state and command protocol, but its context query
-and platform exposure rules require a separate security review before it is
-enabled.
+Submission actions have common Runtime semantics:
+
+| Action | Behavior |
+| --- | --- |
+| `Default` | Resolve to `Done` for single-line input or `Newline` for multiline input |
+| `Done`, `Go`, `Search`, `Send` | Trigger `OnSubmitted` |
+| `Next` | Trigger `OnSubmitted`, then move to the next focusable node without wrapping |
+| `Newline` | Insert a newline in a multiline TextField |
+
+Terminal soft-keyboard dismissal remains a platform responsibility. It does
+not clear HuxerUI focus merely to hide the keyboard. Native IME actions and
+hardware Enter both pass through the same focused TextInputClient key path.
+
+Secure entry uses the same state and command protocol. The retained
+`TextEditingValue` contains the real text, while TextField builds a separate
+single-line mask layout and draws one bullet per grapheme. Copy and Cut are
+disabled. Platform adapters prevent native surrounding-text and extracted-text
+queries from returning the value while preserving the internal context needed
+for command routing and composition. Secure and multiline configurations are
+mutually exclusive.
 
 ## Runtime session ownership
 
@@ -414,11 +436,16 @@ clearing the composition marker. Escape first cancels an active composition.
 When there is no active composition, Escape follows the existing Runtime focus
 behavior.
 
-The current pointer path focuses a node before its pointer extension receives
-the event. Starting native input immediately would expose the old caret
-position. Runtime therefore defers native start or update until the current
-input dispatch completes. The TextField places its caret first, and the
-platform sees the resulting selection and geometry.
+Mouse and pen presses focus a node before native input synchronization. Touch
+focus remains pending until the gesture resolves as a tap. TextField also
+defers its touch caret placement until release. If movement wins a scroll
+gesture, both pending operations are cancelled, so scrolling across an editor
+does not focus it or display the software keyboard. A recognized long press
+commits focus before opening text selection.
+
+Native input starts or updates after the current pointer dispatch completes.
+The platform therefore sees the resulting selection and geometry rather than
+the caret position from the previous frame.
 
 Modal focus capture and restoration use the same lifecycle. Restoring focus to
 an editable node creates a new native input session rather than reviving an old
@@ -453,6 +480,10 @@ public:
   ) = 0;
 
   virtual void Stop(TextInputSessionId session_id) = 0;
+
+  virtual void RequestShow(TextInputSessionId session_id) {
+    static_cast<void>(session_id);
+  }
 };
 ```
 
@@ -468,12 +499,20 @@ A test host, headless host, or incomplete platform does not need an empty input
 implementation. Hardware navigation can continue to use ordinary key events
 when no platform text input capability exists.
 
+Focus, input-session ownership, and software-keyboard visibility remain
+separate. Hiding a software keyboard does not clear HuxerUI focus or end the
+active session. A confirmed tap on the same focused text client calls
+`RequestShow()` with the active session ID. Platforms without a software
+keyboard keep the default no-op implementation.
+
 The platform adapter calls Runtime through session-aware entry points:
 
 ```text
 HandleTextInputCommands
+PerformTextInputAction
 QueryTextInputContext
 QueryTextInputGeometry
+QueryTextInputPosition
 ```
 
 It does not retain a raw TextField or `TextInputClient` pointer across native
@@ -567,8 +606,71 @@ struct TextFieldEvents {
 typed events.
 
 Text semantics such as placeholder, multiline behavior, keyboard type, and
-submission action are component configuration. Visual properties remain Theme
-styles or modifiers rather than growing one-off TextField styling methods.
+submission action are component configuration. Intrinsic line limits and input
+length limits follow the same rule:
+
+```cpp
+return TextField(message)
+    .LineLimits(TextFieldLineLimits::MultiLine(3, 8))
+    .MaxLength(200);
+```
+
+`TextFieldLineLimits::MultiLine()` uses the resolved text line height and can
+set an intrinsic minimum and maximum. It controls intrinsic sizing rather than
+replacing `Frame`; explicit parent constraints remain authoritative. Once
+content exceeds the maximum, TextField keeps its internal viewport scrollable.
+`TextFieldLineLimits::SingleLine()` represents the default single-line mode.
+
+`MaxLength()` counts grapheme clusters through the platform text layout
+boundaries. Commit and paste operations truncate only inserted text at a
+grapheme boundary. Deletion remains available when a controlled value already
+exceeds the limit, and such an external value is never silently rewritten.
+Active IME composition may temporarily exceed the limit and is constrained as
+one edit when committed or finished.
+
+Application validation is a separate pure operation:
+
+```cpp
+const ValidationResult validation = Validate(
+    email.text,
+    Required(),
+    EmailAddress()
+);
+
+return TextField(email).Validation(validation);
+```
+
+`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending`.
+TextField consumes the result only for presentation: an invalid result uses the
+Theme validation color, border width, and supporting message layout. It does
+not reject an edit, mutate the controlled value, or decide whether validation
+runs on change, focus loss, or submission. Those trigger policies remain
+application state and can later be coordinated by a Form layer without
+changing TextField.
+
+Synchronous rules return a `ValidationResult` and `Validate()` stops at the
+first result that is not valid. `Required` and `EmailAddress` provide common
+defaults while custom callables remain equally supported. `Pending` is
+supplied by asynchronous application state and may display a neutral
+supporting message without the invalid border; TextField does not own
+asynchronous work.
+
+Visual properties remain Theme styles or modifiers rather than growing one-off
+TextField styling methods.
+
+Password entry stays on the same component:
+
+```cpp
+return TextField(password)
+    .Secure()
+    .Placeholder("Password")
+    .OnChanged([password](const TextEditingValue& value) mutable {
+      password = value;
+    });
+```
+
+`Secure()` is a convenience for `TextInputConfiguration::secure`. It does not
+create a second value model or a separate PasswordField component.
 
 The public API should expose one value model. It should not provide a second
 string-only TextField with different change events. Simple applications use
@@ -612,6 +714,8 @@ latest declarative value
 working TextEditingValue
 last emitted value
 composition cancellation baseline
+composition history baseline
+bounded undo and redo history
 text layout cache
 horizontal scroll offset
 caret blink state
@@ -637,6 +741,9 @@ During reconciliation:
 - An incoming value different from the last emitted value is authoritative.
 - An authoritative replacement clears the old composition baseline, replaces
   the working value, and requests native synchronization.
+- An authoritative text replacement clears local undo and redo history.
+- An authoritative selection-only replacement preserves history but ends the
+  current merge group.
 - An authoritative replacement during active composition restarts the native
   input connection.
 - TextField never converts an authoritative replacement into inferred insert
@@ -670,9 +777,21 @@ Native `DeleteSurrounding` follows the explicit unit in the command. These
 paths must not be implemented with UTF-8 byte movement or average character
 width assumptions.
 
-The first reducer does not own undo history. Undo and redo can be introduced
-later as TextField-local history without changing the platform command
-protocol.
+The reducer does not own undo history. TextField keeps bounded undo and redo
+stacks beside its retained working value without changing the platform command
+protocol. Each entry stores the complete value before and after one edit so
+selection is restored with text.
+
+Consecutive single-code-point insertion, backward deletion, and forward
+deletion merge while their selection continuity, edit direction, and time
+window remain compatible. Navigation, focus changes, atomic edits, undo, and
+redo end the current merge group. Paste, cut, word deletion, and newline
+insertion remain individual history entries.
+
+Composition updates do not create intermediate entries. TextField captures one
+value before composition starts and commits one entry when composition
+finishes. Undo during active composition cancels it back to that baseline
+before consuming committed history.
 
 ## Text layout and geometry
 
@@ -687,20 +806,15 @@ candidate windows require:
 - Affinity at bidirectional boundaries.
 - Glyph cluster and grapheme boundaries.
 
-A minimal text layout capability is:
+A minimal text layout capability uses the public `TextPosition` value:
 
 ```cpp
-struct TextHit {
-  TextOffset offset = 0;
-  TextAffinity affinity = TextAffinity::Downstream;
-};
-
 class TextLayout {
 public:
   virtual ~TextLayout() = default;
 
   [[nodiscard]] virtual Size Measure() const = 0;
-  [[nodiscard]] virtual TextHit HitTest(Point point) const = 0;
+  [[nodiscard]] virtual TextPosition HitTest(Point point) const = 0;
   [[nodiscard]] virtual Rect CaretRect(
       TextOffset offset,
       TextAffinity affinity
@@ -710,6 +824,12 @@ public:
   ) const = 0;
 };
 ```
+
+Secure TextField creates grapheme boundaries from the platform text layout,
+then lays out only its mask string. A small mapped layout translates between
+real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry,
+selection rectangles, and deletion. The display list never receives the real
+text.
 
 The first implementation can keep this capability internal to HuxerUI.
 TextField needs it, but application code does not. A later public Canvas or
@@ -731,9 +851,9 @@ fails for emoji, ligatures, CJK text, combining marks, and bidirectional text.
 
 ## TextField layout and painting
 
-The first TextField is a single-line leaf node with an intrinsic height
-provided by its style. `Frame` and normal layout modifiers can override its
-size.
+TextField is a leaf node. A single-line field has the intrinsic height provided
+by its style. A multiline field wraps to the available width and grows to its
+content height unless `Frame` or its parent supplies a bounded height.
 
 The content pipeline is:
 
@@ -743,7 +863,7 @@ selection rectangles
 text or placeholder
 composition underline
 caret
-focus and interaction indication
+focused or validation border
 ```
 
 The current DisplayList already provides the necessary primitives:
@@ -758,6 +878,19 @@ The first implementation does not need a TextField-specific drawing command.
 A single-line field maintains a retained horizontal scroll offset and keeps the
 active caret visible. It does not create an internal ScrollView node.
 
+A multiline field maintains a retained vertical scroll offset when its content
+is taller than its viewport. Pointer hit testing, selection, composition,
+candidate geometry, and caret painting all resolve through the same translated
+text origin. Up and Down preserve a preferred horizontal caret position, while
+Home and End move to visual line boundaries.
+
+The field participates in the same retained scroll chain as other scrollable
+nodes. Wheel and touch movement scroll the field first and pass unconsumed
+movement to an enclosing scroll container. Mouse and pen dragging retain text
+selection semantics, and dragging a selection beyond the viewport advances the
+internal text offset. Manual scrolling temporarily suppresses automatic caret
+reveal until editing or navigation resumes.
+
 The caret blink timer is retained by the TextField extension. It requests
 frames through the existing mounted extension scheduling path and respects
 reduced motion where appropriate. Pointer or keyboard edits reset the visible
@@ -765,15 +898,16 @@ caret phase.
 
 The first pointer behavior includes:
 
-- Focus on press.
-- Place the caret using text layout hit testing.
+- Focus mouse and pen input on press.
+- Focus touch input and place its caret only after a completed tap.
 - Drag to extend selection.
 - Preserve pointer cancellation behavior when a parent scroll gesture wins.
 
-Mouse or pen double-click and touch double-tap select a word. The runtime also
-owns long-press word selection and paints the shared selection menu and handles
-above the mounted tree. Magnifiers and more advanced gesture behavior remain
-incremental.
+Mouse or pen double-click selects a word immediately. Touch double-tap selects
+on the second release so a drag beginning with the second press can still yield
+to scrolling. The runtime also owns long-press word selection and paints the
+shared selection menu and handles above the mounted tree. Magnifiers and more
+advanced gesture behavior remain incremental.
 
 ## Theme
 
@@ -796,6 +930,10 @@ struct TextFieldStyle {
   EdgeInsets padding;
   float minimum_height = 0.0F;
   double caret_blink_interval = 0.5;
+  Color validation_error;
+  float validation_border_width = 2.0F;
+  float validation_font_size = 12.0F;
+  float validation_spacing = 4.0F;
 };
 
 struct TextFieldStyleKey {
@@ -806,8 +944,12 @@ struct TextFieldStyleKey {
 ```
 
 Flat and Material Theme definitions provide their own TextField styles.
-Hover, press, focus ring, and disabled opacity continue to use the common
-interaction infrastructure where their semantics match other controls.
+TextField draws its focused and validation borders from `TextFieldStyle`, so
+the common node focus ring does not surround supporting text. TextField does
+not attach the generic hover and pressed indication used by activation
+controls. A future field-specific hover treatment belongs to TextField style
+and must remain inside the editor frame. Disabled opacity continues to use the
+common interaction infrastructure.
 
 `TextFieldStyle` and `TextFieldStyleKey` belong in `theme.h` with the existing
 built-in component styles.
@@ -845,24 +987,38 @@ Text-producing input and control keys remain separate:
 
 Default behavior is:
 
-| Key | Single-line TextField |
+| Key | TextField behavior |
 | --- | --- |
 | Left and Right | Move by grapheme cluster, or extend with Shift |
-| Home and End | Move to the beginning or end |
+| Ctrl+Left and Ctrl+Right | Move to the previous or next word start |
+| Option+Left and Option+Right | Move to the previous word start or next word end |
+| Command+Left and Command+Right | Move to the beginning or end of the visual line |
+| Up and Down | Move between visual lines in multiline fields |
+| Command+Up and Command+Down | Move to the beginning or end of the document |
+| Home and End | Move to visual line boundaries in multiline fields and document boundaries in single-line fields |
+| Ctrl/Command+Home and Ctrl/Command+End | Move to document boundaries |
+| Page Up and Page Down | Move by one visible field viewport in multiline fields |
 | Backspace and Delete | Delete selection or adjacent grapheme |
+| Ctrl/Option+Backspace and Ctrl/Option+Delete | Delete by the corresponding word boundary convention |
+| Command+Backspace and Command+Delete | Delete to the visual line boundary |
+| Ctrl/Command+Z | Undo the last TextField-local edit group |
+| Ctrl+Y or Ctrl/Command+Shift+Z | Redo the last undone edit group |
 | Tab and Shift+Tab | Move focus |
-| Enter | Submit |
+| Enter | Follow the configured input action; insert a newline for multiline `Newline`, otherwise submit |
 | Escape | Cancel composition, otherwise follow Runtime focus behavior |
 | Enter and Space activation | Not applied to TextField |
 
-Multiline TextField later changes Enter to newline insertion and defines
-line-aware Up, Down, Home, and End behavior.
+Shift extends the selection for movement commands. macOS `NSTextInputClient`
+selectors retain their word, line, page, and document semantics when converted
+to common key events.
 
 Clipboard uses the optional `PlatformClipboard` capability. Runtime maps
 Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values. TextField
 supports Select All, Copy, Paste, and Cut subject to its read-only and secure
-configuration; SelectionArea supports Select All and Copy. Undo and redo still
-require a dedicated history capability.
+configuration; SelectionArea supports Select All and Copy. Undo and redo stay
+inside TextField rather than expanding `TextEditingAction` or the common input
+protocol. Secure fields allow Select All and Paste but reject Copy and Cut.
+Complex text clients retain ownership of their own history.
 
 ## Android adapter
 
@@ -880,13 +1036,19 @@ The Android adapter:
 - Maps `finishComposingText()` to `FinishComposition`.
 - Maps `setSelection()` to `SetSelection`.
 - Maps both surrounding deletion variants with their explicit units.
+- Maps `performEditorAction()` to the typed common action and rejects stale or
+  mismatched session actions.
 - Uses `updateSelection()` to synchronize selection and composition.
 - Uses `CursorAnchorInfo` for candidate and insertion marker geometry.
 - Rejects callbacks carrying a stale HuxerUI session.
+- Revalidates the active session before honoring `RequestShow()` and asking
+  `InputMethodManager` to display a keyboard hidden without focus loss.
 - Resizes the logical viewport for visible IME insets and asks ancestor scroll
   containers to reveal the active caret.
 - Forwards raw touch input while Runtime owns long-press recognition, editing
   actions, and the HuxerUI-drawn selection overlay.
+- Uses password input type without suggestions and withholds surrounding,
+  selected, and extracted text from secure input connections.
 
 The adapter can retain a bounded surrounding-text mirror for Android query
 behavior. It does not own an authoritative copy of a complete SweetEditor
@@ -899,8 +1061,10 @@ updates.
 
 ## Apple adapter
 
-The HuxerUI host view conforms to `NSTextInputClient` on macOS and the matching
-UIKit text input protocols on iOS.
+An AppKit-specific client owned by `MacTextInput` conforms to
+`NSTextInputClient` on macOS. The host view remains the first responder and
+exposes the client's explicit `NSTextInputContext`. A future iOS adapter uses
+the matching UIKit text input protocols.
 
 The macOS adapter maps:
 
@@ -911,6 +1075,9 @@ The macOS adapter maps:
 - `attributedSubstringForProposedRange` to bounded context queries.
 - `firstRectForCharacterRange` to text geometry.
 - `characterIndexForPoint` to client hit testing.
+- Returns no attributed substring for secure input.
+- Enables Secure Event Input only while a secure field is active and the
+  application is active.
 
 The host view remains first responder while one HuxerUI editable node transfers
 focus to another. Runtime still creates a new logical input session so delayed
@@ -1055,6 +1222,7 @@ Runtime tests use a fake `PlatformTextInput` and cover:
 - External value changes request update or restart as appropriate.
 - Key events do not duplicate committed text.
 - Candidate geometry includes node and presentation transforms.
+- Text position queries reject stale sessions and preserve UTF-16 affinity.
 
 TextField tests cover:
 
@@ -1067,6 +1235,8 @@ TextField tests cover:
 - Pointer cancellation when scroll gesture ownership changes.
 - Theme style resolution.
 - Disabled and focus interaction state.
+- Secure grapheme masking, geometry, clipboard restrictions, and editing
+  history.
 
 Platform adapter tests and manual regression checks reuse the command-oriented
 portion of the SweetEditor IME regression matrix. Buffer-specific and
@@ -1118,7 +1288,7 @@ The foundation contains:
 
 The usable control contains:
 
-- Single-line controlled TextField.
+- Single-line and multiline controlled TextField.
 - Selection, caret, pointer placement, and drag selection.
 - Composition painting and cancellation.
 - Hardware navigation, deletion, and submission.
@@ -1126,17 +1296,17 @@ The usable control contains:
 - Flat and Material TextField styles.
 - Clipboard editing actions and native Android selection interaction.
 - Automatic caret reveal when the Android IME reduces the viewport.
+- Nested wheel and touch scrolling for fixed-height multiline fields.
+- Bounded TextField-local undo and redo with composition grouping.
 - Static selection through `SelectionArea`.
 
-Windows and Android now provide end-to-end native IME adapters. macOS native
-text input remains the next platform adapter milestone.
+Android, macOS, and Windows now provide end-to-end native IME adapters.
 
 The extension milestone validates one non-TextField client through a
 SweetEditor bridge or equivalent fake document client.
 
-Multiline editing, TextField-local history, secure input, accessibility
-semantics, iOS, OHOS, and TSF are incremental features built on the same
-protocol.
+Accessibility semantics, iOS, OHOS, and TSF are incremental features built on
+the same protocol.
 
 ## Final design constraints
 
@@ -1163,5 +1333,5 @@ The implementation should preserve these constraints:
   clients.
 - Text input protocol types remain concentrated in `text_input.h`; TextField,
   its events, and its style follow the ownership of existing built-in controls.
-- The initial implementation is a reliable single-line control rather than an
-  incomplete broad text editor.
+- TextField supports reliable single-line and multiline editing without
+  becoming a document-editor abstraction.

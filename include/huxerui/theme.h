@@ -126,6 +126,10 @@ struct TextFieldStyle {
   EdgeInsets padding = EdgeInsets::Symmetric(10.0F, 8.0F);
   float minimum_height = 36.0F;
   double caret_blink_interval = 0.5;
+  Color validation_error = Color::Rgb(207, 34, 46);
+  float validation_border_width = 2.0F;
+  float validation_font_size = 12.0F;
+  float validation_spacing = 4.0F;
 };
 
 struct TextFieldStyleKey {

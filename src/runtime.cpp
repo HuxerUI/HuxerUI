@@ -605,7 +605,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
   RequestFrame();
 }
 
-void Runtime::MoveFocus(bool reverse) {
+void Runtime::MoveFocus(bool reverse, bool wrap) {
   if (!state_->mounted_root_) {
     return;
   }
@@ -630,12 +630,18 @@ void Runtime::MoveFocus(bool reverse) {
   }
   if (reverse) {
     if (current == focusable.begin()) {
+      if (!wrap) {
+        return;
+      }
       current = focusable.end();
     }
     --current;
   } else {
     ++current;
     if (current == focusable.end()) {
+      if (!wrap) {
+        return;
+      }
       current = focusable.begin();
     }
   }
@@ -684,9 +690,37 @@ void Runtime::HandleScrollEvent(const ScrollEvent& event) {
   for (detail::MountedNode* node : result.scroll_chain) {
     node->scroll->motion.Stop();
   }
-  for (detail::MountedNode* node : result.scrolled_nodes) {
+  for (detail::MountedNode* node : result.scroll_chain) {
     NotifyScrollActivity(*node);
   }
+}
+
+bool Runtime::HandleFocusedTextInputKey(const KeyEvent& event) {
+  if (!state_->text_input_session_.has_value() || !state_->focused_node_identity_.has_value()) {
+    return false;
+  }
+  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
+  if (active.node_identity != *state_->focused_node_identity_) {
+    return false;
+  }
+
+  const bool next_action =
+      event.type == KeyEventType::Down && event.key == Key::Enter && !event.modifiers.shift &&
+      !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
+      active.configuration.action == TextInputAction::Next;
+  if (next_action && event.repeat) {
+    return true;
+  }
+  if (active.client->HandleTextKey(event) != TextInputKeyResult::Handled) {
+    return false;
+  }
+
+  RequestFrame();
+  if (next_action) {
+    MoveFocus(false, false);
+  }
+  RefreshTextInputSession();
+  return true;
 }
 
 void Runtime::HandleKeyEvent(const KeyEvent& event) {
@@ -738,10 +772,7 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
       return;
     }
   }
-  if (state_->text_input_session_.has_value() && state_->text_input_session_->node_identity == focused->identity &&
-      state_->text_input_session_->client->HandleTextKey(event) == TextInputKeyResult::Handled) {
-    RequestFrame();
-    RefreshTextInputSession();
+  if (HandleFocusedTextInputKey(event)) {
     return;
   }
   DispatchKey(*focused, event);

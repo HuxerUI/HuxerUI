@@ -12,7 +12,7 @@ include("${HUXERUI_ROOT_DIR}/cmake/HuxerUITargets.cmake")
 huxerui_resolve_host_tool("codegen" HUXERUI_CODEGEN_COMMAND)
 
 set(HUXERUI_THEME_SOURCE
-        "${HUXERUI_ROOT_DIR}/examples/theme/main.cpp"
+        "${HUXERUI_ROOT_DIR}/examples/ui_gallery/main.cpp"
 )
 set(HUXERUI_GENERATED_THEME_SOURCE
         "${CMAKE_CURRENT_BINARY_DIR}/generated/theme.cpp"

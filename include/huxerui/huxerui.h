@@ -18,5 +18,6 @@
 #include <huxerui/state.h>
 #include <huxerui/text_input.h>
 #include <huxerui/theme.h>
+#include <huxerui/validation.h>
 #include <huxerui/view.h>
 #include <huxerui/virtual_layout.h>

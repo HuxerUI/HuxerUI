@@ -394,6 +394,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     const TextFieldStyle style =
         ResolveStyleOverride<TextFieldStyleKey>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
     spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), style);
+    spec.style.focus_ring_width = 0.0F;
     spec.style.padding = style.padding;
     spec.style.background = style.background;
     spec.style.foreground = style.foreground;

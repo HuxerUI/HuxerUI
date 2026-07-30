@@ -19,6 +19,13 @@ enum class TextAffinity {
   Downstream,
 };
 
+struct TextPosition {
+  TextOffset offset = 0;
+  TextAffinity affinity = TextAffinity::Downstream;
+
+  bool operator==(const TextPosition&) const = default;
+};
+
 struct TextRange {
   TextOffset start = 0;
   TextOffset end = 0;
@@ -220,6 +227,14 @@ struct TextInputGeometry {
   }
 };
 
+struct TextInputPositionResult {
+  TextInputResultCode result_code = TextInputResultCode::Rejected;
+  TextInputSessionId session_id = 0;
+  TextPosition position;
+
+  bool operator==(const TextInputPositionResult&) const = default;
+};
+
 class TextInputClient {
 public:
   virtual ~TextInputClient() = default;
@@ -232,6 +247,8 @@ public:
   QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const = 0;
   [[nodiscard]] virtual TextInputGeometry
   QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const = 0;
+  [[nodiscard]] virtual TextInputPositionResult
+  QueryTextInputPosition(TextInputSessionId session_id, Point point) const = 0;
   virtual TextInputKeyResult HandleTextKey(const KeyEvent& event) = 0;
   virtual void EndTextInput(TextInputSessionId session_id, TextInputEndReason reason) = 0;
 };
@@ -247,6 +264,9 @@ public:
   virtual void
   Restart(TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state) = 0;
   virtual void Stop(TextInputSessionId session_id) = 0;
+  virtual void RequestShow(TextInputSessionId session_id) {
+    static_cast<void>(session_id);
+  }
 };
 
 } // namespace huxerui

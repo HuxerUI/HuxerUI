@@ -27,6 +27,7 @@
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>
 #include <huxerui/text_input.h>
+#include <huxerui/validation.h>
 #include <huxerui/virtual_layout.h>
 
 namespace huxerui {
@@ -498,6 +499,33 @@ public:
   explicit Button(const char* label);
 };
 
+class TextFieldLineLimits final {
+public:
+  static TextFieldLineLimits SingleLine() noexcept;
+  static TextFieldLineLimits MultiLine(std::size_t minimum = 1);
+  static TextFieldLineLimits MultiLine(std::size_t minimum, std::size_t maximum);
+
+  [[nodiscard]] bool IsMultiline() const noexcept {
+    return multiline_;
+  }
+
+  [[nodiscard]] std::size_t Minimum() const noexcept {
+    return minimum_;
+  }
+
+  [[nodiscard]] std::optional<std::size_t> Maximum() const noexcept {
+    return maximum_;
+  }
+
+private:
+  TextFieldLineLimits(bool multiline, std::size_t minimum, std::optional<std::size_t> maximum) noexcept
+      : multiline_(multiline), minimum_(minimum), maximum_(maximum) {}
+
+  bool multiline_ = false;
+  std::size_t minimum_ = 1;
+  std::optional<std::size_t> maximum_;
+};
+
 class TextField final : public detail::TypedView<TextField> {
 public:
   explicit TextField(TextEditingValue value);
@@ -506,6 +534,10 @@ public:
   TextField Placeholder(std::string value) &&;
   TextField Placeholder(std::string_view value) &&;
   TextField Placeholder(const char* value) &&;
+  TextField LineLimits(TextFieldLineLimits value) &&;
+  TextField MaxLength(std::size_t value) &&;
+  TextField Validation(ValidationResult value) &&;
+  TextField Secure() &&;
   TextField InputConfiguration(TextInputConfiguration configuration) &&;
 
   template <class Function> TextField OnChanged(Function&& function) && {
@@ -522,6 +554,9 @@ private:
   TextEditingValue value_;
   std::string placeholder_;
   TextInputConfiguration configuration_;
+  TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();
+  std::optional<std::size_t> max_length_;
+  ValidationResult validation_;
 };
 
 class Checkbox final : public detail::TypedView<Checkbox> {

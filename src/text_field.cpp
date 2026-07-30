@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
-
-#include <huxerui/indication.h>
+#include <vector>
 
 namespace huxerui {
 namespace {
@@ -27,12 +29,160 @@ Rect ContentRect(const detail::MountedNode& node) {
   };
 }
 
-void ValidateConfiguration(const TextInputConfiguration& configuration) {
-  if (configuration.multiline) {
-    throw std::invalid_argument("HuxerUI TextField currently supports single-line input only");
+bool IsSingleUtf8CodePoint(std::string_view text) noexcept {
+  if (text.empty()) {
+    return false;
   }
-  if (configuration.secure) {
-    throw std::invalid_argument("HuxerUI TextField secure input is not implemented");
+  const std::uint8_t first = static_cast<std::uint8_t>(text.front());
+  std::size_t length = 1;
+  if ((first & 0xE0U) == 0xC0U) {
+    length = 2;
+  } else if ((first & 0xF0U) == 0xE0U) {
+    length = 3;
+  } else if ((first & 0xF8U) == 0xF0U) {
+    length = 4;
+  }
+  return text.size() == length;
+}
+
+class SecureTextLayout final : public detail::TextLayout {
+public:
+  SecureTextLayout(std::unique_ptr<detail::TextLayout> visual_layout, std::vector<TextOffset> boundaries)
+      : visual_layout_(std::move(visual_layout)), boundaries_(std::move(boundaries)) {}
+
+  Size Measure() const override {
+    return visual_layout_->Measure();
+  }
+
+  TextPosition HitTest(Point point) const override {
+    const TextPosition visual = visual_layout_->HitTest(point);
+    const auto index = static_cast<std::size_t>(
+        std::clamp<TextOffset>(visual.offset, 0, static_cast<TextOffset>(boundaries_.size() - 1))
+    );
+    return {
+        boundaries_[index],
+        visual.affinity,
+    };
+  }
+
+  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
+    return visual_layout_->CaretRect(VisualOffset(offset, affinity == TextAffinity::Downstream), affinity);
+  }
+
+  std::vector<Rect> RangeRects(TextRange range) const override {
+    if (range.IsCollapsed()) {
+      return {};
+    }
+    return visual_layout_->RangeRects({
+        VisualOffset(range.start, false),
+        VisualOffset(range.end, true),
+    });
+  }
+
+  TextOffset PreviousCaretOffset(TextOffset offset) const override {
+    const auto found = std::lower_bound(boundaries_.begin(), boundaries_.end(), offset);
+    return found == boundaries_.begin() ? boundaries_.front() : *std::prev(found);
+  }
+
+  TextOffset NextCaretOffset(TextOffset offset) const override {
+    const auto found = std::upper_bound(boundaries_.begin(), boundaries_.end(), offset);
+    return found == boundaries_.end() ? boundaries_.back() : *found;
+  }
+
+private:
+  TextOffset VisualOffset(TextOffset offset, bool round_up) const {
+    const auto found = std::lower_bound(boundaries_.begin(), boundaries_.end(), offset);
+    if (found == boundaries_.end()) {
+      return static_cast<TextOffset>(boundaries_.size() - 1);
+    }
+    const TextOffset index = static_cast<TextOffset>(std::distance(boundaries_.begin(), found));
+    if (*found == offset || round_up || found == boundaries_.begin()) {
+      return index;
+    }
+    return index - 1;
+  }
+
+  std::unique_ptr<detail::TextLayout> visual_layout_;
+  std::vector<TextOffset> boundaries_;
+};
+
+struct TextFieldLayout {
+  std::unique_ptr<detail::TextLayout> layout;
+  std::string display_text;
+};
+
+std::vector<TextOffset> CollectGraphemeBoundaries(detail::TextLayout& layout, std::string_view text) {
+  const TextOffset length = detail::Utf16Length(text).value_or(0);
+  std::vector<TextOffset> boundaries{0};
+  while (boundaries.back() < length) {
+    const TextOffset next = layout.NextCaretOffset(boundaries.back());
+    if (next <= boundaries.back() || next > length) {
+      throw std::logic_error("HuxerUI platform returned an invalid text boundary");
+    }
+    boundaries.push_back(next);
+  }
+  return boundaries;
+}
+
+TextFieldLayout CreateTextFieldLayout(
+    PlatformHost& platform,
+    std::string_view text,
+    float font_size,
+    float max_width,
+    bool secure
+) {
+  if (!secure) {
+    return {
+        platform.CreateTextLayout(text, font_size, max_width),
+        std::string(text),
+    };
+  }
+
+  std::unique_ptr<detail::TextLayout> source = platform.CreateTextLayout(text, font_size, max_width);
+  if (!source) {
+    return {};
+  }
+  std::vector<TextOffset> boundaries = CollectGraphemeBoundaries(*source, text);
+
+  std::string display_text;
+  constexpr std::string_view bullet = "\xE2\x80\xA2";
+  display_text.reserve((boundaries.size() - 1) * bullet.size());
+  for (std::size_t index = 1; index < boundaries.size(); ++index) {
+    display_text.append(bullet);
+  }
+  std::unique_ptr<detail::TextLayout> visual =
+      platform.CreateTextLayout(display_text, font_size, max_width);
+  if (!visual) {
+    return {};
+  }
+  return {
+      std::make_unique<SecureTextLayout>(std::move(visual), std::move(boundaries)),
+      std::move(display_text),
+  };
+}
+
+void ValidateConfiguration(const TextInputConfiguration& configuration) {
+  if (configuration.secure && configuration.multiline) {
+    throw std::invalid_argument("HuxerUI TextField cannot be both secure and multiline");
+  }
+  if (!configuration.multiline && configuration.action == TextInputAction::Newline) {
+    throw std::invalid_argument("HuxerUI TextField newline action requires multiline input");
+  }
+}
+
+void ValidateLimits(
+    const TextInputConfiguration& configuration,
+    std::size_t min_lines,
+    const std::optional<std::size_t>& max_lines
+) {
+  if (min_lines == 0 || (max_lines.has_value() && *max_lines == 0)) {
+    throw std::invalid_argument("HuxerUI TextField line limits must be greater than zero");
+  }
+  if (max_lines.has_value() && min_lines > *max_lines) {
+    throw std::invalid_argument("HuxerUI TextField minimum lines cannot exceed maximum lines");
+  }
+  if (!configuration.multiline && (min_lines != 1 || (max_lines.has_value() && *max_lines != 1))) {
+    throw std::invalid_argument("HuxerUI TextField line limits greater than one require multiline input");
   }
 }
 
@@ -50,11 +200,15 @@ public:
 
   void Update(detail::MountedNode& node, const detail::TextFieldModifier& modifier) {
     ValidateConfiguration(modifier.configuration);
+    ValidateLimits(modifier.configuration, modifier.min_lines, modifier.max_lines);
     if (!detail::IsValidTextEditingValue(modifier.value)) {
       throw std::invalid_argument("HuxerUI TextField value is invalid");
     }
     if (!detail::Utf16Length(modifier.placeholder).has_value()) {
       throw std::invalid_argument("HuxerUI TextField placeholder must contain valid UTF-8");
+    }
+    if (!detail::Utf16Length(modifier.validation.message).has_value()) {
+      throw std::invalid_argument("HuxerUI TextField validation message must contain valid UTF-8");
     }
     if (!initialized_ && modifier.value.composition.has_value()) {
       throw std::invalid_argument("HuxerUI TextField initial value must not contain a composition");
@@ -62,7 +216,20 @@ public:
 
     Attach(node);
     event_bindings_ = node.event_bindings;
+    const bool layout_mode_changed =
+        initialized_ && (configuration_.multiline != modifier.configuration.multiline ||
+                         configuration_.secure != modifier.configuration.secure);
+    const bool length_limit_changed = initialized_ && max_length_ != modifier.max_length;
+    const bool validation_changed = validation_ != modifier.validation;
     configuration_ = modifier.configuration;
+    min_lines_ = modifier.min_lines;
+    max_lines_ = modifier.max_lines;
+    max_length_ = modifier.max_length;
+    validation_ = modifier.validation;
+    if (length_limit_changed) {
+      ClearHistory();
+    }
+    ConfigureScrollNode(node);
     placeholder_ = modifier.placeholder;
 
     TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyleKey::Default());
@@ -70,9 +237,17 @@ public:
     next_style.foreground = node.style.foreground.value_or(next_style.foreground);
     next_style.font_size = node.style.font_size.value_or(next_style.font_size);
     next_style.corner_radius = node.style.corner_radius;
-    if (!initialized_ || next_style.font_size != style_.font_size || placeholder_ != layout_placeholder_) {
+    if (!initialized_ || layout_mode_changed || next_style.font_size != style_.font_size ||
+        next_style.validation_font_size != style_.validation_font_size ||
+        placeholder_ != layout_placeholder_ || validation_changed) {
       layout_.reset();
       placeholder_layout_.reset();
+      validation_layout_.reset();
+    }
+    if (layout_mode_changed) {
+      horizontal_scroll_offset_ = 0.0F;
+      preferred_caret_x_.reset();
+      RequestCaretReveal();
     }
     style_ = next_style;
 
@@ -94,6 +269,12 @@ public:
       throw std::invalid_argument("HuxerUI TextField authoritative value must not introduce a composition");
     }
 
+    if (modifier.value.text != editing_.value.text) {
+      ClearHistory();
+    } else {
+      BreakHistoryMerge();
+    }
+    composition_history_start_.reset();
     editing_ = {
         modifier.value,
         std::nullopt,
@@ -101,18 +282,53 @@ public:
     last_emitted_.reset();
     ++revision_;
     layout_.reset();
+    preferred_caret_x_.reset();
+    RequestCaretReveal();
     ResetCaretBlink();
   }
 
   Size Measure(detail::MountedNode& node, PlatformHost& platform, Constraints constraints) {
     Attach(node);
     platform_ = &platform;
+    const float next_layout_width = ResolveLayoutWidth(platform, constraints);
+    if (next_layout_width != layout_width_) {
+      layout_width_ = next_layout_width;
+      layout_.reset();
+      placeholder_layout_.reset();
+      RequestCaretReveal();
+    }
+    const float next_validation_width =
+        constraints.HasBoundedWidth() ? std::max(1.0F, constraints.max_width)
+                                      : std::numeric_limits<float>::infinity();
+    if (next_validation_width != validation_layout_width_) {
+      validation_layout_width_ = next_validation_width;
+      validation_layout_.reset();
+    }
     EnsureLayouts(platform);
     const Size text_size = layout_->Measure();
     const Size placeholder_size = placeholder_layout_ ? placeholder_layout_->Measure() : Size{};
+    const Size validation_size = validation_layout_ ? validation_layout_->Measure() : Size{};
+    const float content_width = std::max({
+        text_size.width,
+        placeholder_size.width,
+        validation_size.width,
+    });
+    const float full_editor_height = std::max(text_size.height, placeholder_size.height);
+    if (node.scroll) {
+      node.scroll->content_width = text_size.width;
+      node.scroll->content_height = full_editor_height + ValidationAreaHeight();
+    }
+    float editor_height = full_editor_height;
+    if (configuration_.multiline) {
+      const float line_height = layout_->CaretRect(0, TextAffinity::Downstream).height;
+      editor_height = std::max(editor_height, line_height * static_cast<float>(min_lines_));
+      if (max_lines_.has_value()) {
+        editor_height = std::min(editor_height, line_height * static_cast<float>(*max_lines_));
+      }
+    }
     return constraints.Constrain({
-        std::max(text_size.width, placeholder_size.width),
-        std::max(text_size.height, placeholder_size.height),
+        content_width,
+        editor_height + ValidationAreaHeight(),
     });
   }
 
@@ -121,7 +337,8 @@ public:
       return;
     }
 
-    const Rect content = ContentRect(node);
+    const Rect editor_frame = EditorFrame(node);
+    const Rect content = EditorContentRect(node);
     const Point origin = TextOrigin(node);
     const float opacity = node.PresentationOpacity();
     display_list.PushClip(content, std::max(0.0F, style_.corner_radius));
@@ -154,7 +371,7 @@ public:
               std::max(content.width, size.width),
               size.height,
           },
-          editing_.value.text,
+          layout_text_,
           ApplyOpacity(style_.foreground, opacity),
           style_.font_size
       );
@@ -183,12 +400,41 @@ public:
     }
     display_list.PopClip();
 
-    const float border_width =
-        node.focused ? std::max(0.0F, style_.focused_border_width) : std::max(0.0F, style_.border_width);
-    const Color border = node.focused ? style_.focused_border : style_.border;
+    if (validation_layout_) {
+      const Rect node_content = ContentRect(node);
+      const Size size = validation_layout_->Measure();
+      display_list.PushClip(node.frame, std::max(0.0F, style_.corner_radius));
+      display_list.DrawText(
+          {
+              node_content.x,
+              editor_frame.y + editor_frame.height + std::max(0.0F, style_.validation_spacing),
+              node_content.width,
+              size.height,
+          },
+          validation_.message,
+          ApplyOpacity(validation_.IsInvalid() ? style_.validation_error : style_.placeholder, opacity),
+          style_.validation_font_size
+      );
+      display_list.PopClip();
+    }
+
+    const bool invalid = validation_.IsInvalid();
+    float border_width = std::max(0.0F, style_.border_width);
+    Color border = style_.border;
+    if (invalid) {
+      border_width = std::max(0.0F, style_.validation_border_width);
+      border = style_.validation_error;
+    } else if (node.focused) {
+      border_width = std::max(0.0F, style_.focused_border_width);
+      border = style_.focused_border;
+    }
     if (border_width > 0.0F && border.alpha > 0.0F) {
-      display_list
-          .DrawBorder(node.frame, ApplyOpacity(border, opacity), border_width, std::max(0.0F, style_.corner_radius));
+      display_list.DrawBorder(
+          editor_frame,
+          ApplyOpacity(border, opacity),
+          border_width,
+          std::max(0.0F, style_.corner_radius)
+      );
     }
   }
 
@@ -217,7 +463,9 @@ public:
   }
 
   void FocusChanged(bool focused) {
+    BreakHistoryMerge();
     if (focused) {
+      RequestCaretReveal();
       ResetCaretBlink();
     } else {
       caret_epoch_.reset();
@@ -231,25 +479,57 @@ public:
     }
     if (event.type == PointerEventType::Cancel) {
       pointer_anchor_.reset();
+      pending_touch_selection_.reset();
+      pending_touch_origin_.reset();
       return NodeExtension::PointerResult::Handled;
     }
     if (event.type == PointerEventType::Up) {
       pointer_anchor_.reset();
+      pending_touch_origin_.reset();
+      if (event.device_kind == PointerDeviceKind::Touch && pending_touch_selection_.has_value()) {
+        const TextPosition position = *pending_touch_selection_;
+        pending_touch_selection_.reset();
+        SetSelection({position.offset, position.offset, position.affinity});
+      }
       return NodeExtension::PointerResult::Handled;
     }
 
-    const Point origin = TextOrigin(*node_);
-    const detail::TextHit hit = layout_->HitTest({
-        event.position.x - origin.x,
-        event.position.y - origin.y,
-    });
+    if (event.device_kind == PointerDeviceKind::Touch) {
+      if (event.type == PointerEventType::Down) {
+        pending_touch_selection_ = PositionAt(event.position);
+        if (!pending_touch_selection_.has_value()) {
+          pending_touch_origin_.reset();
+          return NodeExtension::PointerResult::Ignored;
+        }
+        pending_touch_origin_ = event.position;
+        return NodeExtension::PointerResult::Observe;
+      }
+      if (event.type == PointerEventType::Move && pending_touch_origin_.has_value()) {
+        const float distance =
+            std::hypot(event.position.x - pending_touch_origin_->x, event.position.y - pending_touch_origin_->y);
+        if (distance >= detail::touch_gesture_slop) {
+          pending_touch_selection_.reset();
+          pending_touch_origin_.reset();
+        }
+      }
+      return pending_touch_selection_.has_value() ? NodeExtension::PointerResult::Observe
+                                                  : NodeExtension::PointerResult::Ignored;
+    }
+
+    if (event.type == PointerEventType::Move && pointer_anchor_.has_value()) {
+      ScrollSelectionAtEdge(event.position);
+    }
+    const std::optional<TextPosition> position = PositionAt(event.position);
+    if (!position.has_value()) {
+      return NodeExtension::PointerResult::Ignored;
+    }
     if (event.type == PointerEventType::Down) {
-      pointer_anchor_ = hit.offset;
-      SetSelection({hit.offset, hit.offset, hit.affinity});
+      pointer_anchor_ = position->offset;
+      SetSelection({position->offset, position->offset, position->affinity});
       return NodeExtension::PointerResult::Observe;
     }
     if (event.type == PointerEventType::Move && pointer_anchor_.has_value()) {
-      SetSelection({*pointer_anchor_, hit.offset, hit.affinity});
+      SetSelection({*pointer_anchor_, position->offset, position->affinity});
       return NodeExtension::PointerResult::Observe;
     }
     return NodeExtension::PointerResult::Ignored;
@@ -347,20 +627,46 @@ public:
     return result;
   }
 
+  TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const override {
+    TextInputPositionResult result;
+    result.session_id = session_id;
+    if (session_id != session_id_) {
+      result.result_code = TextInputResultCode::SessionMismatch;
+      return result;
+    }
+    if (!node_ || !layout_) {
+      result.result_code = TextInputResultCode::Rejected;
+      return result;
+    }
+
+    const std::optional<Point> local_point = node_->presentation.resolved_transform.Inverse(point);
+    if (!local_point.has_value()) {
+      result.result_code = TextInputResultCode::Rejected;
+      return result;
+    }
+    const std::optional<TextPosition> position = PositionAt(*local_point);
+    if (!position.has_value()) {
+      result.result_code = TextInputResultCode::Rejected;
+      return result;
+    }
+    result.result_code = TextInputResultCode::Ok;
+    result.position = *position;
+    return result;
+  }
+
   bool SelectWord(Point position) {
     if (!node_ || !layout_) {
       return false;
     }
-    const Point origin = TextOrigin(*node_);
-    const detail::TextHit hit = layout_->HitTest({
-        position.x - origin.x,
-        position.y - origin.y,
-    });
-    const std::optional<TextRange> range = detail::WordRangeAt(editing_.value.text, hit.offset);
+    const std::optional<TextPosition> text_position = PositionAt(position);
+    if (!text_position.has_value()) {
+      return false;
+    }
+    const std::optional<TextRange> range = detail::WordRangeAt(editing_.value.text, text_position->offset);
     if (!range.has_value()) {
       return false;
     }
-    SetSelection({range->start, range->end, hit.affinity});
+    SetSelection({range->start, range->end, text_position->affinity});
     return true;
   }
 
@@ -372,14 +678,15 @@ public:
     if (range.IsCollapsed()) {
       return false;
     }
-    const Point origin = TextOrigin(*node_);
-    const detail::TextHit hit = layout_->HitTest({
-        position.x - origin.x,
-        position.y - origin.y,
-    });
+    ScrollSelectionAtEdge(position);
+    const std::optional<TextPosition> text_position = PositionAt(position);
+    if (!text_position.has_value()) {
+      return false;
+    }
     SetSelection(
-        start_handle ? TextSelection{range.end, std::min(hit.offset, range.end), hit.affinity}
-                     : TextSelection{range.start, std::max(hit.offset, range.start), hit.affinity}
+        start_handle
+            ? TextSelection{range.end, std::min(text_position->offset, range.end), text_position->affinity}
+            : TextSelection{range.start, std::max(text_position->offset, range.start), text_position->affinity}
     );
     return true;
   }
@@ -401,6 +708,13 @@ public:
     return color;
   }
 
+  void ScrollActivity() noexcept {
+    caret_reveal_pending_ = false;
+    if (node_ && node_->scroll) {
+      node_->scroll->allows_automatic_reveal = false;
+    }
+  }
+
   TextInputKeyResult HandleTextKey(const KeyEvent& event) override {
     if (event.type != KeyEventType::Down) {
       return TextInputKeyResult::Unhandled;
@@ -408,34 +722,131 @@ public:
     if (configuration_.read_only) {
       return TextInputKeyResult::Unhandled;
     }
-    if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
-      return TextInputKeyResult::Unhandled;
+    const bool history_shortcut =
+        (event.modifiers.control || event.modifiers.meta) && !event.modifiers.alt;
+    if (history_shortcut && event.key == Key::Z) {
+      if (event.modifiers.shift) {
+        Redo();
+      } else {
+        Undo();
+      }
+      return TextInputKeyResult::Handled;
+    }
+    if (history_shortcut && event.key == Key::Y && !event.modifiers.shift) {
+      Redo();
+      return TextInputKeyResult::Handled;
     }
 
     switch (event.key) {
     case Key::ArrowLeft:
-      MoveCaret(false, event.modifiers.shift);
+      if (event.modifiers.meta) {
+        MoveCaretToLineBoundary(false, event.modifiers.shift);
+      } else if (event.modifiers.alt || event.modifiers.control) {
+        MoveCaretByWord(false, event.modifiers.shift, event.modifiers.control && !event.modifiers.alt);
+      } else {
+        MoveCaret(false, event.modifiers.shift);
+      }
       return TextInputKeyResult::Handled;
     case Key::ArrowRight:
-      MoveCaret(true, event.modifiers.shift);
+      if (event.modifiers.meta) {
+        MoveCaretToLineBoundary(true, event.modifiers.shift);
+      } else if (event.modifiers.alt || event.modifiers.control) {
+        MoveCaretByWord(true, event.modifiers.shift, event.modifiers.control && !event.modifiers.alt);
+      } else {
+        MoveCaret(true, event.modifiers.shift);
+      }
+      return TextInputKeyResult::Handled;
+    case Key::ArrowUp:
+      if (event.modifiers.meta) {
+        MoveCaretToDocumentBoundary(false, event.modifiers.shift);
+        return TextInputKeyResult::Handled;
+      }
+      if (event.modifiers.control || event.modifiers.alt) {
+        return TextInputKeyResult::Unhandled;
+      }
+      if (!configuration_.multiline) {
+        return TextInputKeyResult::Unhandled;
+      }
+      MoveCaretVertically(false, event.modifiers.shift);
+      return TextInputKeyResult::Handled;
+    case Key::ArrowDown:
+      if (event.modifiers.meta) {
+        MoveCaretToDocumentBoundary(true, event.modifiers.shift);
+        return TextInputKeyResult::Handled;
+      }
+      if (event.modifiers.control || event.modifiers.alt) {
+        return TextInputKeyResult::Unhandled;
+      }
+      if (!configuration_.multiline) {
+        return TextInputKeyResult::Unhandled;
+      }
+      MoveCaretVertically(true, event.modifiers.shift);
       return TextInputKeyResult::Handled;
     case Key::Home:
-      MoveCaretTo(0, event.modifiers.shift);
+      if (event.modifiers.alt) {
+        return TextInputKeyResult::Unhandled;
+      }
+      if (event.modifiers.control || event.modifiers.meta || !configuration_.multiline) {
+        MoveCaretToDocumentBoundary(false, event.modifiers.shift);
+      } else {
+        MoveCaretToLineBoundary(false, event.modifiers.shift);
+      }
       return TextInputKeyResult::Handled;
     case Key::End:
-      MoveCaretTo(detail::Utf16Length(editing_.value.text).value_or(0), event.modifiers.shift);
+      if (event.modifiers.alt) {
+        return TextInputKeyResult::Unhandled;
+      }
+      if (event.modifiers.control || event.modifiers.meta || !configuration_.multiline) {
+        MoveCaretToDocumentBoundary(true, event.modifiers.shift);
+      } else {
+        MoveCaretToLineBoundary(true, event.modifiers.shift);
+      }
+      return TextInputKeyResult::Handled;
+    case Key::PageUp:
+    case Key::PageDown:
+      if (!configuration_.multiline || event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+        return TextInputKeyResult::Unhandled;
+      }
+      MoveCaretByPage(event.key == Key::PageDown, event.modifiers.shift);
       return TextInputKeyResult::Handled;
     case Key::Backspace:
-      DeleteAdjacent(false);
+      if (event.modifiers.meta) {
+        DeleteToLineBoundary(false);
+      } else if (event.modifiers.alt || event.modifiers.control) {
+        DeleteByWord(false, event.modifiers.control && !event.modifiers.alt);
+      } else {
+        DeleteAdjacent(false);
+      }
       return TextInputKeyResult::Handled;
     case Key::Delete:
-      DeleteAdjacent(true);
+      if (event.modifiers.meta) {
+        DeleteToLineBoundary(true);
+      } else if (event.modifiers.alt || event.modifiers.control) {
+        DeleteByWord(true, event.modifiers.control && !event.modifiers.alt);
+      } else {
+        DeleteAdjacent(true);
+      }
       return TextInputKeyResult::Handled;
     case Key::Enter:
-      detail::EmitEvent<TextFieldEvents::Submitted>(event_bindings_);
-      ResetCaretBlink();
+      if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+        return TextInputKeyResult::Unhandled;
+      }
+      if (configuration_.multiline &&
+          (configuration_.action == TextInputAction::Default || configuration_.action == TextInputAction::Newline)) {
+        TextInputCommand command;
+        command.kind = TextInputCommandKind::CommitText;
+        command.text = "\n";
+        ApplyCommands({command});
+      } else {
+        BreakHistoryMerge();
+        detail::EmitEvent<TextFieldEvents::Submitted>(event_bindings_);
+        ResetCaretBlink();
+      }
       return TextInputKeyResult::Handled;
     case Key::Escape:
+      if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+        return TextInputKeyResult::Unhandled;
+      }
       if (editing_.value.composition.has_value()) {
         TextInputCommand command;
         command.kind = TextInputCommandKind::CancelComposition;
@@ -447,6 +858,9 @@ public:
       break;
     }
 
+    if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+      return TextInputKeyResult::Unhandled;
+    }
     if (!event.text.empty()) {
       TextInputCommand command;
       command.kind = TextInputCommandKind::CommitText;
@@ -471,9 +885,45 @@ public:
   }
 
 private:
+  enum class HistoryMergeKind {
+    None,
+    Typing,
+    BackwardDeletion,
+    ForwardDeletion,
+  };
+
+  struct HistoryEntry {
+    TextEditingValue before;
+    TextEditingValue after;
+    HistoryMergeKind merge_kind = HistoryMergeKind::None;
+    double timestamp = 0.0;
+  };
+
+  static constexpr std::size_t kHistoryLimit = 100;
+  static constexpr double kHistoryMergeInterval = 1.0;
+
+  std::optional<TextPosition> PositionAt(Point point) const {
+    if (!node_ || !layout_) {
+      return std::nullopt;
+    }
+    const Point origin = TextOrigin(*node_);
+    return layout_->HitTest({
+        point.x - origin.x,
+        point.y - origin.y,
+    });
+  }
+
   void EnsureLayouts(PlatformHost& platform) {
     if (!layout_) {
-      layout_ = platform.CreateTextLayout(editing_.value.text, style_.font_size);
+      TextFieldLayout result = CreateTextFieldLayout(
+          platform,
+          editing_.value.text,
+          style_.font_size,
+          layout_width_,
+          configuration_.secure
+      );
+      layout_ = std::move(result.layout);
+      layout_text_ = std::move(result.display_text);
     }
     if (!layout_) {
       throw std::logic_error("HuxerUI platform does not provide editable text layout");
@@ -482,16 +932,312 @@ private:
       placeholder_layout_.reset();
       layout_placeholder_.clear();
     } else if (!placeholder_layout_ || layout_placeholder_ != placeholder_) {
-      placeholder_layout_ = platform.CreateTextLayout(placeholder_, style_.font_size);
+      placeholder_layout_ = platform.CreateTextLayout(placeholder_, style_.font_size, layout_width_);
       layout_placeholder_ = placeholder_;
       if (!placeholder_layout_) {
         throw std::logic_error("HuxerUI platform does not provide editable text layout");
       }
     }
+    if (!ShowsSupportingMessage()) {
+      validation_layout_.reset();
+      layout_validation_message_.clear();
+    } else if (!validation_layout_ || layout_validation_message_ != validation_.message) {
+      validation_layout_ =
+          platform.CreateTextLayout(validation_.message, style_.validation_font_size, validation_layout_width_);
+      layout_validation_message_ = validation_.message;
+      if (!validation_layout_) {
+        throw std::logic_error("HuxerUI platform does not provide validation message layout");
+      }
+    }
+  }
+
+  float ValidationAreaHeight() const {
+    if (!validation_layout_) {
+      return 0.0F;
+    }
+    return std::max(0.0F, style_.validation_spacing) + validation_layout_->Measure().height;
+  }
+
+  bool ShowsSupportingMessage() const {
+    return !validation_.message.empty() &&
+           (validation_.status == ValidationStatus::Invalid || validation_.status == ValidationStatus::Pending);
+  }
+
+  Rect EditorFrame(const detail::MountedNode& node) const {
+    Rect frame = node.frame;
+    const float minimum_height = std::min(frame.height, std::max(0.0F, style_.minimum_height));
+    frame.height = std::clamp(frame.height - ValidationAreaHeight(), minimum_height, frame.height);
+    return frame;
+  }
+
+  Rect EditorContentRect(const detail::MountedNode& node) const {
+    const Rect frame = EditorFrame(node);
+    return {
+        frame.x + node.style.padding.left,
+        frame.y + node.style.padding.top,
+        std::max(0.0F, frame.width - node.style.padding.Horizontal()),
+        std::max(0.0F, frame.height - node.style.padding.Vertical()),
+    };
+  }
+
+  HistoryMergeKind ResolveHistoryMergeKind(
+      const std::vector<TextInputCommand>& commands,
+      const TextEditingValue& before,
+      const TextEditingValue& after
+  ) const {
+    if (commands.size() != 1 || before.composition.has_value() || after.composition.has_value()) {
+      return HistoryMergeKind::None;
+    }
+    const TextInputCommand& command = commands.front();
+    if (command.kind != TextInputCommandKind::CommitText || !before.selection.IsCollapsed()) {
+      return HistoryMergeKind::None;
+    }
+    if (!command.target.has_value()) {
+      return command.text.find('\n') == std::string::npos && IsSingleUtf8CodePoint(command.text)
+                 ? HistoryMergeKind::Typing
+                 : HistoryMergeKind::None;
+    }
+    if (!command.text.empty() || !layout_) {
+      return HistoryMergeKind::None;
+    }
+
+    const TextOffset active = before.selection.active;
+    if (*command.target == TextRange{layout_->PreviousCaretOffset(active), active}) {
+      return HistoryMergeKind::BackwardDeletion;
+    }
+    if (*command.target == TextRange{active, layout_->NextCaretOffset(active)}) {
+      return HistoryMergeKind::ForwardDeletion;
+    }
+    return HistoryMergeKind::None;
+  }
+
+  static void PushHistory(std::vector<HistoryEntry>& history, HistoryEntry entry) {
+    if (history.size() == kHistoryLimit) {
+      history.erase(history.begin());
+    }
+    history.push_back(std::move(entry));
+  }
+
+  void RecordHistory(
+      TextEditingValue before,
+      TextEditingValue after,
+      HistoryMergeKind merge_kind
+  ) {
+    redo_history_.clear();
+    const double timestamp = platform_ ? platform_->Now() : 0.0;
+    if (history_merge_allowed_ && merge_kind != HistoryMergeKind::None && !undo_history_.empty()) {
+      HistoryEntry& previous = undo_history_.back();
+      const double elapsed = timestamp - previous.timestamp;
+      if (previous.merge_kind == merge_kind && previous.after == before && elapsed >= 0.0 &&
+          elapsed <= kHistoryMergeInterval) {
+        previous.after = std::move(after);
+        previous.timestamp = timestamp;
+        return;
+      }
+    }
+
+    PushHistory(
+        undo_history_,
+        {
+            std::move(before),
+            std::move(after),
+            merge_kind,
+            timestamp,
+        }
+    );
+    history_merge_allowed_ = merge_kind != HistoryMergeKind::None;
+  }
+
+  void BreakHistoryMerge() noexcept {
+    history_merge_allowed_ = false;
+  }
+
+  void ClearHistory() {
+    undo_history_.clear();
+    redo_history_.clear();
+    composition_history_start_.reset();
+    BreakHistoryMerge();
+  }
+
+  bool RestoreHistoryValue(TextEditingValue value) {
+    value.composition.reset();
+    if (value == editing_.value) {
+      return false;
+    }
+
+    const bool text_changed = value.text != editing_.value.text;
+    editing_ = {
+        std::move(value),
+        std::nullopt,
+    };
+    composition_history_start_.reset();
+    preferred_caret_x_.reset();
+    RequestCaretReveal();
+    ++revision_;
+    last_emitted_ = editing_.value;
+    if (text_changed) {
+      layout_.reset();
+      if (platform_) {
+        EnsureLayouts(*platform_);
+      }
+    }
+    ResetCaretBlink();
+    detail::EmitEvent<TextFieldEvents::Changed>(event_bindings_, editing_.value);
+    return true;
+  }
+
+  bool Undo() {
+    BreakHistoryMerge();
+    if (editing_.value.composition.has_value()) {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::CancelComposition;
+      return ApplyCommands({command}).changed;
+    }
+    if (undo_history_.empty()) {
+      return false;
+    }
+
+    HistoryEntry entry = std::move(undo_history_.back());
+    undo_history_.pop_back();
+    TextEditingValue target = entry.before;
+    PushHistory(redo_history_, std::move(entry));
+    return RestoreHistoryValue(std::move(target));
+  }
+
+  bool Redo() {
+    BreakHistoryMerge();
+    if (editing_.value.composition.has_value() || redo_history_.empty()) {
+      return false;
+    }
+
+    HistoryEntry entry = std::move(redo_history_.back());
+    redo_history_.pop_back();
+    TextEditingValue target = entry.after;
+    PushHistory(undo_history_, std::move(entry));
+    return RestoreHistoryValue(std::move(target));
+  }
+
+  std::vector<TextOffset> GraphemeBoundaries(std::string_view text) const {
+    if (!platform_) {
+      throw std::logic_error("HuxerUI TextField cannot resolve text boundaries before layout");
+    }
+    std::unique_ptr<detail::TextLayout> layout =
+        platform_->CreateTextLayout(text, style_.font_size, std::numeric_limits<float>::infinity());
+    if (!layout) {
+      throw std::logic_error("HuxerUI platform does not provide editable text layout");
+    }
+    return CollectGraphemeBoundaries(*layout, text);
+  }
+
+  std::size_t GraphemeCount(std::string_view text) const {
+    return GraphemeBoundaries(text).size() - 1;
+  }
+
+  std::size_t LengthLimitBaseline(const detail::TextFieldEditingState& state) const {
+    if (!state.value.composition.has_value()) {
+      return GraphemeCount(state.value.text);
+    }
+    TextInputCommand cancel;
+    cancel.kind = TextInputCommandKind::CancelComposition;
+    const detail::TextInputReductionResult cancelled = detail::ReduceTextInputCommands(state, {cancel});
+    if (cancelled.status != detail::TextInputReductionStatus::Accepted) {
+      throw std::logic_error("HuxerUI TextField has an invalid composition baseline");
+    }
+    return GraphemeCount(cancelled.state.value.text);
+  }
+
+  TextInputCommand LimitCommitText(
+      const detail::TextFieldEditingState& state,
+      const TextInputCommand& command
+  ) const {
+    if (!max_length_.has_value()) {
+      return command;
+    }
+
+    const std::size_t allowed = std::max(*max_length_, LengthLimitBaseline(state));
+    const auto preview = [&state](const TextInputCommand& candidate) {
+      return detail::ReduceTextInputCommands(state, {candidate});
+    };
+    const detail::TextInputReductionResult full = preview(command);
+    if (full.status != detail::TextInputReductionStatus::Accepted ||
+        GraphemeCount(full.state.value.text) <= allowed) {
+      return command;
+    }
+
+    const std::vector<TextOffset> boundaries = GraphemeBoundaries(command.text);
+    TextInputCommand limited = command;
+    limited.selection_after.reset();
+    std::size_t accepted = 0;
+    std::size_t rejected = boundaries.size() - 1;
+    while (accepted < rejected) {
+      const std::size_t index = accepted + (rejected - accepted + 1) / 2;
+      limited.text = detail::Utf8TextInRange(command.text, {0, boundaries[index]}).value_or(std::string{});
+      const detail::TextInputReductionResult result = preview(limited);
+      if (result.status == detail::TextInputReductionStatus::Accepted &&
+          GraphemeCount(result.state.value.text) <= allowed) {
+        accepted = index;
+      } else {
+        rejected = index - 1;
+      }
+    }
+    limited.text = detail::Utf8TextInRange(command.text, {0, boundaries[accepted]}).value_or(std::string{});
+    return limited;
+  }
+
+  TextInputCommand PrepareLimitedCommand(
+      const detail::TextFieldEditingState& state,
+      const TextInputCommand& command
+  ) const {
+    if (!max_length_.has_value()) {
+      return command;
+    }
+    if (command.kind == TextInputCommandKind::CommitText) {
+      return LimitCommitText(state, command);
+    }
+    if (command.kind != TextInputCommandKind::FinishComposition || !state.value.composition.has_value()) {
+      return command;
+    }
+
+    const std::size_t allowed = std::max(*max_length_, LengthLimitBaseline(state));
+    if (GraphemeCount(state.value.text) <= allowed) {
+      return command;
+    }
+    TextInputCommand commit;
+    commit.kind = TextInputCommandKind::CommitText;
+    commit.text = detail::Utf8TextInRange(state.value.text, *state.value.composition).value_or(std::string{});
+    return LimitCommitText(state, commit);
+  }
+
+  detail::TextInputReductionResult ReduceCommands(
+      const std::vector<TextInputCommand>& commands,
+      std::vector<TextInputCommand>& applied_commands
+  ) const {
+    if (commands.empty()) {
+      return {};
+    }
+    detail::TextFieldEditingState state = editing_;
+    applied_commands.reserve(commands.size());
+    for (const TextInputCommand& command : commands) {
+      TextInputCommand applied = PrepareLimitedCommand(state, command);
+      detail::TextInputReductionResult reduced = detail::ReduceTextInputCommands(state, {applied});
+      if (reduced.status != detail::TextInputReductionStatus::Accepted) {
+        return reduced;
+      }
+      state = std::move(reduced.state);
+      applied_commands.push_back(std::move(applied));
+    }
+    const bool changed = state != editing_;
+    return {
+        detail::TextInputReductionStatus::Accepted,
+        std::move(state),
+        changed,
+    };
   }
 
   TextInputApplyResult ApplyCommands(const std::vector<TextInputCommand>& commands) {
-    const detail::TextInputReductionResult reduced = detail::ReduceTextInputCommands(editing_, commands);
+    const detail::TextFieldEditingState before = editing_;
+    std::vector<TextInputCommand> applied_commands;
+    const detail::TextInputReductionResult reduced = ReduceCommands(commands, applied_commands);
     if (reduced.status != detail::TextInputReductionStatus::Accepted) {
       return {
           TextInputResultCode::Rejected,
@@ -499,7 +1245,13 @@ private:
           false,
       };
     }
+    const bool selection_command = std::ranges::any_of(commands, [](const TextInputCommand& command) {
+      return command.kind == TextInputCommandKind::SetSelection;
+    });
     if (!reduced.changed) {
+      if (selection_command) {
+        BreakHistoryMerge();
+      }
       return {
           TextInputResultCode::Ok,
           TextInputSyncAction::None,
@@ -507,8 +1259,33 @@ private:
       };
     }
 
-    const bool text_changed = reduced.state.value.text != editing_.value.text;
+    const bool was_composing = before.value.composition.has_value();
+    const bool is_composing = reduced.state.value.composition.has_value();
+    const bool text_changed = reduced.state.value.text != before.value.text;
+    if (!was_composing && is_composing) {
+      composition_history_start_ = before.value;
+      BreakHistoryMerge();
+    } else if (was_composing && !is_composing) {
+      if (composition_history_start_.has_value() &&
+          composition_history_start_->text != reduced.state.value.text) {
+        RecordHistory(*composition_history_start_, reduced.state.value, HistoryMergeKind::None);
+      } else {
+        BreakHistoryMerge();
+      }
+      composition_history_start_.reset();
+    } else if (!was_composing && !is_composing && text_changed) {
+      RecordHistory(
+          before.value,
+          reduced.state.value,
+          ResolveHistoryMergeKind(applied_commands, before.value, reduced.state.value)
+      );
+    } else if (!text_changed || selection_command) {
+      BreakHistoryMerge();
+    }
+
     editing_ = reduced.state;
+    preferred_caret_x_.reset();
+    RequestCaretReveal();
     ++revision_;
     last_emitted_ = editing_.value;
     if (text_changed) {
@@ -526,11 +1303,15 @@ private:
     };
   }
 
-  void SetSelection(TextSelection selection) {
+  void SetSelection(TextSelection selection, bool preserve_preferred_x = false) {
+    const std::optional<float> preferred_x = preserve_preferred_x ? preferred_caret_x_ : std::nullopt;
     TextInputCommand command;
     command.kind = TextInputCommandKind::SetSelection;
     command.selection_after = selection;
     ApplyCommands({command});
+    if (preserve_preferred_x) {
+      preferred_caret_x_ = preferred_x;
+    }
   }
 
   void MoveCaret(bool forward, bool extend) {
@@ -547,9 +1328,79 @@ private:
     MoveCaretTo(offset, extend);
   }
 
+  void MoveCaretByWord(bool forward, bool extend, bool next_word_start) {
+    const TextRange selection = editing_.value.selection.Range();
+    TextOffset offset = editing_.value.selection.active;
+    if (!extend && !selection.IsCollapsed()) {
+      offset = forward ? selection.end : selection.start;
+    } else {
+      std::optional<TextOffset> boundary;
+      if (!forward) {
+        boundary = detail::PreviousWordStart(editing_.value.text, offset);
+      } else if (next_word_start) {
+        boundary = detail::NextWordStart(editing_.value.text, offset);
+      } else {
+        boundary = detail::NextWordEnd(editing_.value.text, offset);
+      }
+      if (!boundary.has_value()) {
+        return;
+      }
+      offset = *boundary;
+    }
+    MoveCaretTo(offset, extend);
+  }
+
   void MoveCaretTo(TextOffset offset, bool extend) {
     const TextOffset anchor = extend ? editing_.value.selection.anchor : offset;
     SetSelection({anchor, offset, TextAffinity::Downstream});
+  }
+
+  void MoveCaretTo(TextPosition position, bool extend, bool preserve_preferred_x) {
+    const TextOffset anchor = extend ? editing_.value.selection.anchor : position.offset;
+    SetSelection({anchor, position.offset, position.affinity}, preserve_preferred_x);
+  }
+
+  void MoveCaretVertically(bool forward, bool extend) {
+    if (!layout_) {
+      return;
+    }
+    const TextSelection selection = editing_.value.selection;
+    const Rect caret = layout_->CaretRect(selection.active, selection.affinity);
+    const float x = preferred_caret_x_.value_or(caret.x);
+    preferred_caret_x_ = x;
+    const float target_y = forward ? caret.y + caret.height * 1.5F : caret.y - caret.height * 0.5F;
+    MoveCaretTo(layout_->HitTest({x, target_y}), extend, true);
+  }
+
+  void MoveCaretByPage(bool forward, bool extend) {
+    if (!layout_ || !node_) {
+      return;
+    }
+    const TextSelection selection = editing_.value.selection;
+    const Rect caret = layout_->CaretRect(selection.active, selection.affinity);
+    const float x = preferred_caret_x_.value_or(caret.x);
+    preferred_caret_x_ = x;
+    const float distance = std::max(caret.height, EditorContentRect(*node_).height);
+    const float target_y = caret.y + caret.height * 0.5F + (forward ? distance : -distance);
+    MoveCaretTo(layout_->HitTest({x, target_y}), extend, true);
+  }
+
+  TextPosition LineBoundary(bool end) const {
+    const TextSelection selection = editing_.value.selection;
+    const Rect caret = layout_->CaretRect(selection.active, selection.affinity);
+    const float x = end ? layout_->Measure().width + 1.0F : -1.0F;
+    return layout_->HitTest({x, caret.y + caret.height * 0.5F});
+  }
+
+  void MoveCaretToLineBoundary(bool end, bool extend) {
+    if (!layout_) {
+      return;
+    }
+    MoveCaretTo(LineBoundary(end), extend, false);
+  }
+
+  void MoveCaretToDocumentBoundary(bool end, bool extend) {
+    MoveCaretTo(end ? detail::Utf16Length(editing_.value.text).value_or(0) : 0, extend);
   }
 
   void DeleteAdjacent(bool forward) {
@@ -562,7 +1413,51 @@ private:
       target = forward ? TextRange{active, layout_->NextCaretOffset(active)}
                        : TextRange{layout_->PreviousCaretOffset(active), active};
     }
+    DeleteRange(target);
+  }
+
+  void DeleteByWord(bool forward, bool next_word_start) {
+    TextRange target = editing_.value.selection.Range();
     if (target.IsCollapsed()) {
+      const TextOffset active = editing_.value.selection.active;
+      std::optional<TextOffset> boundary;
+      if (!forward) {
+        boundary = detail::PreviousWordStart(editing_.value.text, active);
+      } else if (next_word_start) {
+        boundary = detail::NextWordStart(editing_.value.text, active);
+      } else {
+        boundary = detail::NextWordEnd(editing_.value.text, active);
+      }
+      if (!boundary.has_value()) {
+        return;
+      }
+      target = {
+          std::min(active, *boundary),
+          std::max(active, *boundary),
+      };
+    }
+    DeleteRange(target);
+  }
+
+  void DeleteToLineBoundary(bool end) {
+    if (!layout_) {
+      return;
+    }
+    TextRange target = editing_.value.selection.Range();
+    if (target.IsCollapsed()) {
+      const TextOffset active = editing_.value.selection.active;
+      const TextOffset boundary = LineBoundary(end).offset;
+      target = {
+          std::min(active, boundary),
+          std::max(active, boundary),
+      };
+    }
+    DeleteRange(target);
+  }
+
+  void DeleteRange(TextRange target) {
+    if (target.IsCollapsed()) {
+      BreakHistoryMerge();
       ResetCaretBlink();
       return;
     }
@@ -583,21 +1478,56 @@ private:
   }
 
   Point TextOrigin(const detail::MountedNode& node) const {
-    const Rect content = ContentRect(node);
+    const Rect content = EditorContentRect(node);
     const Size size = layout_ ? layout_->Measure() : Size{};
-    const_cast<TextFieldClient*>(this)->UpdateScrollOffset(content);
+    const_cast<TextFieldClient*>(this)->UpdateScrollOffset(const_cast<detail::MountedNode&>(node), content);
+    if (configuration_.multiline) {
+      return {
+          content.x,
+          content.y - (node.scroll ? node.scroll->offset_y : 0.0F),
+      };
+    }
     return {
         content.x - horizontal_scroll_offset_,
         content.y + std::max(0.0F, (content.height - size.height) * 0.5F),
     };
   }
 
-  void UpdateScrollOffset(Rect content) {
-    if (!layout_ || content.width <= 0.0F) {
+  void UpdateScrollOffset(detail::MountedNode& node, Rect content) {
+    if (!layout_) {
       horizontal_scroll_offset_ = 0.0F;
+      if (node.scroll) {
+        node.scroll->offset_y = 0.0F;
+      }
       return;
     }
     const Rect caret = layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity);
+    if (configuration_.multiline) {
+      horizontal_scroll_offset_ = 0.0F;
+      if (!node.scroll || content.height <= 0.0F) {
+        if (node.scroll) {
+          node.scroll->offset_y = 0.0F;
+        }
+        return;
+      }
+      float& scroll_offset = node.scroll->offset_y;
+      const float maximum = std::max(0.0F, layout_->Measure().height - content.height);
+      scroll_offset = std::clamp(scroll_offset, 0.0F, maximum);
+      if (caret_reveal_pending_) {
+        if (caret.y < scroll_offset) {
+          scroll_offset = std::max(0.0F, caret.y);
+        } else if (caret.y + caret.height > scroll_offset + content.height) {
+          scroll_offset = caret.y + caret.height - content.height;
+        }
+        scroll_offset = std::clamp(scroll_offset, 0.0F, maximum);
+      }
+      caret_reveal_pending_ = false;
+      return;
+    }
+    if (content.width <= 0.0F) {
+      horizontal_scroll_offset_ = 0.0F;
+      return;
+    }
     if (caret.x < horizontal_scroll_offset_) {
       horizontal_scroll_offset_ = std::max(0.0F, caret.x);
     } else if (caret.x + caret.width > horizontal_scroll_offset_ + content.width) {
@@ -605,6 +1535,61 @@ private:
     }
     const float maximum = std::max(0.0F, layout_->Measure().width + caret.width - content.width);
     horizontal_scroll_offset_ = std::clamp(horizontal_scroll_offset_, 0.0F, maximum);
+  }
+
+  void ConfigureScrollNode(detail::MountedNode& node) {
+    if (!configuration_.multiline) {
+      node.scroll.reset();
+      return;
+    }
+    if (!node.scroll) {
+      node.scroll = std::make_unique<detail::ScrollNodeState>();
+    }
+    node.scroll->axis = Axis::Vertical;
+    node.scroll->touch_drag_only = true;
+  }
+
+  void ScrollSelectionAtEdge(Point position) {
+    if (!configuration_.multiline || !node_ || !node_->scroll) {
+      return;
+    }
+    const Rect content = EditorContentRect(*node_);
+    float delta = 0.0F;
+    if (position.y < content.y) {
+      delta = position.y - content.y;
+    } else if (position.y > content.y + content.height) {
+      delta = position.y - (content.y + content.height);
+    }
+    if (detail::ScrollNodeBy(*node_, delta) != 0.0F) {
+      caret_reveal_pending_ = false;
+    }
+  }
+
+  float ResolveLayoutWidth(PlatformHost& platform, Constraints constraints) const {
+    if (!configuration_.multiline) {
+      return std::numeric_limits<float>::infinity();
+    }
+    if (constraints.HasBoundedWidth()) {
+      return std::max(1.0F, constraints.max_width);
+    }
+
+    float width = std::max(1.0F, constraints.min_width);
+    auto measure_lines = [&](std::string_view text) {
+      std::size_t start = 0;
+      do {
+        const std::size_t end = text.find('\n', start);
+        const std::string_view line =
+            end == std::string_view::npos ? text.substr(start) : text.substr(start, end - start);
+        width = std::max(width, platform.MeasureText(line, style_.font_size).width);
+        if (end == std::string_view::npos) {
+          break;
+        }
+        start = end + 1;
+      } while (start <= text.size());
+    };
+    measure_lines(editing_.value.text);
+    measure_lines(placeholder_);
+    return width;
   }
 
   static Rect OffsetRect(Rect rect, Point offset) {
@@ -622,25 +1607,49 @@ private:
     caret_visible_ = true;
   }
 
+  void RequestCaretReveal() noexcept {
+    caret_reveal_pending_ = true;
+    if (node_ && node_->scroll) {
+      node_->scroll->allows_automatic_reveal = true;
+    }
+  }
+
   detail::MountedNode* node_ = nullptr;
   PlatformHost* platform_ = nullptr;
   detail::EventBindings event_bindings_;
   TextInputConfiguration configuration_;
+  std::size_t min_lines_ = 1;
+  std::optional<std::size_t> max_lines_;
+  std::optional<std::size_t> max_length_;
+  ValidationResult validation_;
   TextFieldStyle style_;
   detail::TextFieldEditingState editing_;
   std::optional<TextEditingValue> last_emitted_;
+  std::optional<TextEditingValue> composition_history_start_;
+  std::vector<HistoryEntry> undo_history_;
+  std::vector<HistoryEntry> redo_history_;
   std::string placeholder_;
+  std::string layout_text_;
   std::string layout_placeholder_;
+  std::string layout_validation_message_;
   std::unique_ptr<detail::TextLayout> layout_;
   std::unique_ptr<detail::TextLayout> placeholder_layout_;
+  std::unique_ptr<detail::TextLayout> validation_layout_;
   std::optional<TextOffset> pointer_anchor_;
+  std::optional<TextPosition> pending_touch_selection_;
+  std::optional<Point> pending_touch_origin_;
+  std::optional<float> preferred_caret_x_;
   std::optional<double> caret_epoch_;
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   float horizontal_scroll_offset_ = 0.0F;
+  float layout_width_ = std::numeric_limits<float>::infinity();
+  float validation_layout_width_ = std::numeric_limits<float>::infinity();
   bool initialized_ = false;
   bool caret_reset_pending_ = true;
   bool caret_visible_ = true;
+  bool caret_reveal_pending_ = true;
+  bool history_merge_allowed_ = false;
 };
 
 class TextFieldExtension final : public NodeExtension {
@@ -676,6 +1685,11 @@ public:
   void OnFocusChanged(MountedNode& node, bool focused) override {
     static_cast<void>(node);
     client_->FocusChanged(focused);
+  }
+
+  void OnScrollActivity(MountedNode& node) override {
+    static_cast<void>(node);
+    client_->ScrollActivity();
   }
 
   std::shared_ptr<TextInputClient> GetTextInputClient() noexcept override {
@@ -763,13 +1777,33 @@ Color TextFieldSelectionHandleColor(const MountedNode& node) {
 
 } // namespace detail
 
+TextFieldLineLimits TextFieldLineLimits::SingleLine() noexcept {
+  return TextFieldLineLimits(false, 1, std::nullopt);
+}
+
+TextFieldLineLimits TextFieldLineLimits::MultiLine(std::size_t minimum) {
+  if (minimum == 0) {
+    throw std::invalid_argument("HuxerUI TextField minimum lines must be greater than zero");
+  }
+  return TextFieldLineLimits(true, minimum, std::nullopt);
+}
+
+TextFieldLineLimits TextFieldLineLimits::MultiLine(std::size_t minimum, std::size_t maximum) {
+  if (minimum == 0 || maximum == 0) {
+    throw std::invalid_argument("HuxerUI TextField line limits must be greater than zero");
+  }
+  if (minimum > maximum) {
+    throw std::invalid_argument("HuxerUI TextField minimum lines cannot exceed maximum lines");
+  }
+  return TextFieldLineLimits(true, minimum, maximum);
+}
+
 TextField::TextField(TextEditingValue value)
     : detail::TypedView<TextField>(MakeTextFieldSpec()), value_(std::move(value)) {
   if (!detail::IsValidTextEditingValue(value_)) {
     throw std::invalid_argument("HuxerUI TextField value is invalid");
   }
   UpdateModifier();
-  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
 }
 
 TextField TextField::Placeholder(std::string value) && {
@@ -789,8 +1823,44 @@ TextField TextField::Placeholder(const char* value) && {
   return std::move(*this).Placeholder(value == nullptr ? std::string{} : std::string(value));
 }
 
+TextField TextField::LineLimits(TextFieldLineLimits value) && {
+  configuration_.multiline = value.IsMultiline();
+  if (configuration_.multiline && configuration_.action == TextInputAction::Default) {
+    configuration_.action = TextInputAction::Newline;
+  } else if (!configuration_.multiline && configuration_.action == TextInputAction::Newline) {
+    configuration_.action = TextInputAction::Default;
+  }
+  ValidateConfiguration(configuration_);
+  line_limits_ = std::move(value);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::MaxLength(std::size_t value) && {
+  max_length_ = value;
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::Validation(ValidationResult value) && {
+  validation_ = std::move(value);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::Secure() && {
+  configuration_.secure = true;
+  ValidateConfiguration(configuration_);
+  UpdateModifier();
+  return std::move(*this);
+}
+
 TextField TextField::InputConfiguration(TextInputConfiguration configuration) && {
   ValidateConfiguration(configuration);
+  if (configuration.multiline != line_limits_.IsMultiline()) {
+    line_limits_ =
+        configuration.multiline ? TextFieldLineLimits::MultiLine() : TextFieldLineLimits::SingleLine();
+  }
   configuration_ = configuration;
   UpdateModifier();
   return std::move(*this);
@@ -803,6 +1873,10 @@ void TextField::UpdateModifier() {
               value_,
               placeholder_,
               configuration_,
+              line_limits_.Minimum(),
+              line_limits_.Maximum(),
+              max_length_,
+              validation_,
           }
       )
   );

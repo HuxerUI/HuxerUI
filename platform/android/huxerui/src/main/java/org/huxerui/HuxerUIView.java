@@ -275,6 +275,19 @@ public final class HuxerUIView extends View {
         });
     }
 
+    private void requestShowTextInput(long sessionId) {
+        if (!hasTextInputSession(sessionId)) {
+            return;
+        }
+        post(() -> {
+            if (!hasTextInputSession(sessionId)) {
+                return;
+            }
+            requestFocus();
+            inputMethodManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
     private void replaceInputConnection(long sessionId, int type, int capitalization, int action, boolean multiline,
             boolean secure, boolean autocorrect, long anchor, long active, long composingStart, long composingEnd) {
         if (inputConnection != null) {
@@ -546,12 +559,22 @@ public final class HuxerUIView extends View {
 
         private long hitTest(float x, float y) {
             int line = layout.getLineForVertical((int) Math.max(0.0F, y));
-            return layout.getOffsetForHorizontal(line, x);
+            int offset = layout.getOffsetForHorizontal(line, x);
+            boolean upstream = line + 1 < layout.getLineCount()
+                    && offset == layout.getLineEnd(line)
+                    && layout.getLineStart(line + 1) == offset;
+            return upstream ? -(long) offset - 1L : offset;
         }
 
         private float[] caret(long requestedOffset, boolean upstream) {
             int offset = (int) Math.max(0L, Math.min(requestedOffset, text.length()));
             int line = layout.getLineForOffset(offset);
+            if (upstream
+                    && line > 0
+                    && layout.getLineStart(line) == offset
+                    && layout.getLineEnd(line - 1) == offset) {
+                --line;
+            }
             float x = upstream ? layout.getSecondaryHorizontal(offset) : layout.getPrimaryHorizontal(offset);
             return new float[] {
                     x,

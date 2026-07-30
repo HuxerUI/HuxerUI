@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace huxerui::detail {
 
@@ -21,6 +22,15 @@ float PointerDelta(Point previous, Point current, Axis axis) {
 
 bool SupportsHover(PointerDeviceKind device_kind) {
   return device_kind == PointerDeviceKind::Mouse || device_kind == PointerDeviceKind::Pen;
+}
+
+std::optional<std::uint64_t> FocusTarget(const std::vector<MountedNode*>& route) {
+  for (auto node = route.rbegin(); node != route.rend(); ++node) {
+    if ((*node)->enabled && (*node)->focusable) {
+      return (*node)->identity;
+    }
+  }
+  return std::nullopt;
 }
 
 void RecordScrollVelocity(PointerSession& session, float delta, double timestamp) {
@@ -182,6 +192,43 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
   RefreshTextInputSession();
 }
 
+bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, bool record_tap) {
+  if (!session.focus_pending) {
+    return false;
+  }
+  session.focus_pending = false;
+  const std::optional<std::uint64_t> pending = std::exchange(session.pending_focus_identity, std::nullopt);
+
+  std::vector<detail::MountedNode*> route;
+  const std::optional<std::uint64_t> released =
+      state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, position, route) ? FocusTarget(route)
+                                                                                          : std::nullopt;
+  if (released != pending) {
+    return false;
+  }
+
+  std::optional<TextInputSessionId> session_to_show;
+  if (pending.has_value() && state_->focused_node_identity_ == pending && state_->text_input_session_.has_value() &&
+      state_->text_input_session_->node_identity == *pending) {
+    session_to_show = state_->text_input_session_->session_id;
+  }
+  SetFocusedNode(pending, false);
+  if (record_tap && pending.has_value()) {
+    if (const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *pending);
+        focused && (focused->kind == detail::NodeKind::TextField || focused->kind == detail::NodeKind::SelectionArea)) {
+      state_->text_selection_overlay_.previous_tap_time = state_->platform_->Now();
+      state_->text_selection_overlay_.previous_tap_position = position;
+      state_->text_selection_overlay_.previous_tap_node = pending;
+    }
+  }
+  if (session_to_show.has_value()) {
+    if (PlatformTextInput* platform = state_->platform_->TextInput()) {
+      platform->RequestShow(*session_to_show);
+    }
+  }
+  return true;
+}
+
 void Runtime::HandlePointerDown(const PointerEvent& event) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured != state_->pointer_sessions_.end()) {
@@ -216,25 +263,24 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
     }
   }
 
-  std::optional<std::uint64_t> focus_target;
-  for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    if ((*node)->enabled && (*node)->focusable) {
-      focus_target = (*node)->identity;
-      break;
-    }
-  }
-  SetFocusedNode(focus_target, false);
-
   PointerSession session;
   session.down_position = event.position;
   session.last_position = event.position;
   session.device_kind = event.device_kind;
   session.velocity_sample_timestamp = state_->platform_->Now();
+  const std::optional<std::uint64_t> focus_target = FocusTarget(route);
+  if (event.device_kind == PointerDeviceKind::Touch) {
+    session.focus_pending = true;
+    session.pending_focus_identity = focus_target;
+  } else {
+    SetFocusedNode(focus_target, false);
+  }
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
     if (!session.target_identity.has_value() && (*node)->enabled && HandlesPointerEvents(**node)) {
       session.target_identity = (*node)->identity;
     }
-    if ((*node)->enabled && IsScrollContainer(**node)) {
+    if ((*node)->enabled && IsScrollContainer(**node) &&
+        (!(*node)->scroll->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
       session.scroll_chain.push_back((*node)->identity);
     }
   }
@@ -284,10 +330,12 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
     PointerEvent cancel = event;
     cancel.type = PointerEventType::Cancel;
     DispatchExtensionObservers(session, cancel, true);
-    return;
+    if (!session.focus_pending) {
+      return;
+    }
   }
   if (!session.target_identity.has_value() && session.scroll_chain.empty() && !session.extension_capture.has_value() &&
-      session.extension_observers.empty()) {
+      session.extension_observers.empty() && !session.focus_pending) {
     return;
   }
 
@@ -342,10 +390,13 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
 
     const float distance_x = event.position.x - session.down_position.x;
     const float distance_y = event.position.y - session.down_position.y;
-    constexpr float drag_slop = 6.0F;
-    if (std::max(std::abs(distance_x), std::abs(distance_y)) < drag_slop) {
+    if (std::max(std::abs(distance_x), std::abs(distance_y)) < detail::touch_gesture_slop) {
       session.last_position = event.position;
       return;
+    }
+    if (session.device_kind == PointerDeviceKind::Touch) {
+      session.focus_pending = false;
+      session.pending_focus_identity.reset();
     }
 
     const Axis axis = std::abs(distance_y) >= std::abs(distance_x) ? Axis::Vertical : Axis::Horizontal;
@@ -373,8 +424,10 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
     session.active_scroll = *scroll_candidate;
     const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
     if (!scrolled.empty()) {
-      for (detail::MountedNode* node : scrolled) {
-        NotifyScrollActivity(*node);
+      for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
+          NotifyScrollActivity(*node);
+        }
       }
       detail::MountedNode& active = *scrolled.back();
       session.active_scroll_node = active.identity;
@@ -388,8 +441,10 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   RecordScrollVelocity(session, delta, state_->platform_->Now());
   const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
   if (!scrolled.empty()) {
-    for (detail::MountedNode* node : scrolled) {
-      NotifyScrollActivity(*node);
+    for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
+      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
+        NotifyScrollActivity(*node);
+      }
     }
     detail::MountedNode& active = *scrolled.back();
     if (session.active_scroll_node != active.identity) {
@@ -462,6 +517,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
         extension->OnPointer(*node, LocalPointerEvent(*node, event));
       }
     }
+    CommitPendingTouchFocus(captured->second, event.position, true);
     ReleaseScrollGesture(captured->second);
     state_->pointer_sessions_.erase(captured);
     if (SupportsHover(event.device_kind)) {
@@ -478,6 +534,9 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   const bool should_start_momentum = was_dragging && captured->second.device_kind == PointerDeviceKind::Touch &&
                                      captured->second.has_velocity_sample && velocity_age >= 0.0 && velocity_age <= 0.1;
   const float scroll_velocity = captured->second.scroll_velocity;
+  if (!was_dragging) {
+    CommitPendingTouchFocus(captured->second, event.position, true);
+  }
   ReleaseScrollGesture(captured->second);
   state_->pointer_sessions_.erase(captured);
   if (should_start_momentum && momentum_identity.has_value()) {

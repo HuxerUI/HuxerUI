@@ -8,7 +8,8 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
 add_executable(huxerui_tests
         tests_main.cpp
-        text_input.cpp
+        unit/text_input.cpp
+        unit/validation.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
         runtime/layout.cpp
@@ -20,8 +21,15 @@ add_executable(huxerui_tests
         runtime/virtual_layout.cpp
 )
 
+if (APPLE)
+    target_sources(huxerui_tests PRIVATE
+            platform/macos_text_input.mm
+    )
+endif ()
+
 target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
+        "${HUXERUI_PROJECT_DIR}/platform/macos"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
 
@@ -30,7 +38,7 @@ target_link_libraries(huxerui_tests PRIVATE
         ${HUXERUI_TEST_LIBRARY}
 )
 
-add_test(NAME HuxerUIRuntimeTests COMMAND huxerui_tests)
+add_test(NAME HuxerUITests COMMAND huxerui_tests)
 
 set(HUXERUI_PUBLIC_HEADERS
         animation.h
@@ -52,6 +60,7 @@ set(HUXERUI_PUBLIC_HEADERS
         state.h
         text_input.h
         theme.h
+        validation.h
         view.h
         virtual_layout.h
 )

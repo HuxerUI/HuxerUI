@@ -18,6 +18,11 @@ struct Utf8CodePoint {
   std::size_t byte_length = 0;
 };
 
+struct WordSpan {
+  TextRange range;
+  bool word = false;
+};
+
 bool DecodeCodePoint(std::string_view text, std::size_t index, Utf8CodePoint& result) noexcept {
   if (index >= text.size()) {
     return false;
@@ -99,6 +104,30 @@ std::optional<std::size_t> ByteOffsetAt(std::string_view text, TextOffset utf16_
 
 bool IsBoundary(std::string_view text, TextOffset offset) noexcept {
   return ByteOffsetAt(text, offset).has_value();
+}
+
+bool IsWordCodePoint(std::uint32_t value) noexcept {
+  return value >= 0x80U || value == static_cast<std::uint32_t>('_') ||
+         (value <= 0x7FU && std::isalnum(static_cast<unsigned char>(value)) != 0);
+}
+
+std::optional<std::vector<WordSpan>> BuildWordSpans(std::string_view text) {
+  std::vector<WordSpan> spans;
+  TextOffset current = 0;
+  for (std::size_t byte_offset = 0; byte_offset < text.size();) {
+    Utf8CodePoint code_point;
+    if (!DecodeCodePoint(text, byte_offset, code_point)) {
+      return std::nullopt;
+    }
+    const TextOffset width = code_point.value > 0xFFFFU ? 2 : 1;
+    spans.push_back({
+        {current, current + width},
+        IsWordCodePoint(code_point.value),
+    });
+    current += width;
+    byte_offset += code_point.byte_length;
+  }
+  return spans;
 }
 
 std::optional<std::string> TextInRange(std::string_view text, TextRange range) {
@@ -560,33 +589,16 @@ std::optional<std::string> Utf8TextInRange(std::string_view text, TextRange rang
 }
 
 std::optional<TextRange> WordRangeAt(std::string_view text, TextOffset offset) {
-  struct Span {
-    TextRange range;
-    bool word = false;
-  };
-
   if (offset < 0 || text.empty()) {
     return std::nullopt;
   }
-  std::vector<Span> spans;
-  TextOffset current = 0;
-  for (std::size_t byte_offset = 0; byte_offset < text.size();) {
-    Utf8CodePoint code_point;
-    if (!DecodeCodePoint(text, byte_offset, code_point)) {
-      return std::nullopt;
-    }
-    const TextOffset width = code_point.value > 0xFFFFU ? 2 : 1;
-    const bool word = code_point.value >= 0x80U || code_point.value == static_cast<std::uint32_t>('_') ||
-                      (code_point.value <= 0x7FU && std::isalnum(static_cast<unsigned char>(code_point.value)) != 0);
-    spans.push_back({{current, current + width}, word});
-    current += width;
-    byte_offset += code_point.byte_length;
-  }
-  if (offset > current || spans.empty()) {
+  const std::optional<std::vector<WordSpan>> built = BuildWordSpans(text);
+  if (!built.has_value() || built->empty() || offset > built->back().range.end) {
     return std::nullopt;
   }
+  const std::vector<WordSpan>& spans = *built;
 
-  auto found = std::find_if(spans.begin(), spans.end(), [offset](const Span& span) {
+  auto found = std::find_if(spans.begin(), spans.end(), [offset](const WordSpan& span) {
     return offset >= span.range.start && offset < span.range.end;
   });
   if (found == spans.end()) {
@@ -605,6 +617,66 @@ std::optional<TextRange> WordRangeAt(std::string_view text, TextOffset offset) {
     ++last;
   }
   return TextRange{first->range.start, std::prev(last)->range.end};
+}
+
+std::optional<TextOffset> PreviousWordStart(std::string_view text, TextOffset offset) {
+  const std::optional<std::vector<WordSpan>> built = BuildWordSpans(text);
+  if (!built.has_value() || !IsBoundary(text, offset)) {
+    return std::nullopt;
+  }
+  const std::vector<WordSpan>& spans = *built;
+  std::size_t index = spans.size();
+  while (index > 0 && spans[index - 1].range.start >= offset) {
+    --index;
+  }
+  while (index > 0 && !spans[index - 1].word) {
+    --index;
+  }
+  while (index > 0 && spans[index - 1].word) {
+    --index;
+  }
+  return index < spans.size() ? spans[index].range.start : TextOffset{0};
+}
+
+std::optional<TextOffset> NextWordEnd(std::string_view text, TextOffset offset) {
+  const std::optional<std::vector<WordSpan>> built = BuildWordSpans(text);
+  if (!built.has_value() || !IsBoundary(text, offset)) {
+    return std::nullopt;
+  }
+  const std::vector<WordSpan>& spans = *built;
+  std::size_t index = 0;
+  while (index < spans.size() && spans[index].range.end <= offset) {
+    ++index;
+  }
+  while (index < spans.size() && !spans[index].word) {
+    ++index;
+  }
+  while (index < spans.size() && spans[index].word) {
+    ++index;
+  }
+  return index == 0 ? TextOffset{0} : spans[index - 1].range.end;
+}
+
+std::optional<TextOffset> NextWordStart(std::string_view text, TextOffset offset) {
+  const std::optional<std::vector<WordSpan>> built = BuildWordSpans(text);
+  if (!built.has_value() || !IsBoundary(text, offset)) {
+    return std::nullopt;
+  }
+  const std::vector<WordSpan>& spans = *built;
+  std::size_t index = 0;
+  while (index < spans.size() && spans[index].range.end <= offset) {
+    ++index;
+  }
+  while (index < spans.size() && spans[index].word) {
+    ++index;
+  }
+  while (index < spans.size() && !spans[index].word) {
+    ++index;
+  }
+  if (index < spans.size()) {
+    return spans[index].range.start;
+  }
+  return spans.empty() ? TextOffset{0} : spans.back().range.end;
 }
 
 bool IsValidTextEditingValue(const TextEditingValue& value) noexcept {

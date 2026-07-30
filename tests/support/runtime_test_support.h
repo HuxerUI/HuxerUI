@@ -152,6 +152,10 @@ public:
     runtime_.HandleKeyEvent(event);
   }
 
+  bool PerformTextInputAction(TextInputSessionId session_id, huxerui::TextInputAction action) {
+    return runtime_.PerformTextInputAction(session_id, action);
+  }
+
   bool CanPerformTextEditingAction(huxerui::TextEditingAction action) const {
     return runtime_.CanPerformTextEditingAction(action);
   }
@@ -172,6 +176,14 @@ public:
     return runtime_.QueryTextInputGeometry(session_id, range);
   }
 
+  huxerui::TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
+    return runtime_.QueryTextInputPosition(session_id, point);
+  }
+
+  huxerui::Runtime& NativeRuntime() noexcept {
+    return runtime_;
+  }
+
   void InvalidateRoot() {
     huxerui::detail::RuntimeAccess::InvalidateRoot(runtime_);
   }
@@ -188,11 +200,11 @@ class TestPlatform final : public huxerui::PlatformHost {
 public:
   class TextLayout final : public huxerui::detail::TextLayout {
   public:
-    explicit TextLayout(std::string_view text) {
+    TextLayout(std::string_view text, float max_width) {
+      lines_.push_back({});
       offsets_.push_back(0);
-      positions_.push_back(0.0F);
+      lines_.back().boundaries.push_back({0, 0.0F});
       TextOffset offset = 0;
-      float position = 0.0F;
       for (std::size_t index = 0; index < text.size();) {
         const unsigned char first = static_cast<unsigned char>(text[index]);
         std::uint32_t code_point = first;
@@ -211,45 +223,94 @@ public:
           code_point = (code_point << 6U) | (static_cast<unsigned char>(text[index + continuation]) & 0x3FU);
         }
         index += length;
-        offset += code_point > 0xFFFFU ? 2 : 1;
-        const bool combining = code_point >= 0x0300U && code_point <= 0x036FU;
-        if (!combining) {
-          position += code_point > 0xFFFFU ? 20.0F : 10.0F;
-        }
-        if (combining && offsets_.size() > 1) {
-          offsets_.back() = offset;
-        } else {
+        const TextOffset code_units = code_point > 0xFFFFU ? 2 : 1;
+        if (code_point == '\n') {
+          offset += code_units;
           offsets_.push_back(offset);
-          positions_.push_back(position);
+          lines_.back().hard_break = true;
+          lines_.push_back({});
+          lines_.back().boundaries.push_back({offset, 0.0F});
+          continue;
+        }
+
+        const bool combining = code_point >= 0x0300U && code_point <= 0x036FU;
+        const float width = code_point > 0xFFFFU ? 20.0F : 10.0F;
+        Line& line = lines_.back();
+        const float position = line.boundaries.back().x;
+        if (!combining && std::isfinite(max_width) && position > 0.0F && position + width > max_width) {
+          lines_.push_back({});
+          lines_.back().boundaries.push_back({offset, 0.0F});
+        }
+        offset += code_units;
+        if (!combining) {
+          offsets_.push_back(offset);
+          Line& target = lines_.back();
+          target.boundaries.push_back({offset, target.boundaries.back().x + width});
+        } else if (offsets_.size() > 1) {
+          offsets_.back() = offset;
+          lines_.back().boundaries.back().offset = offset;
         }
       }
     }
 
     Size Measure() const override {
-      return {positions_.back(), 20.0F};
+      float width = 0.0F;
+      for (const Line& line : lines_) {
+        width = std::max(width, line.boundaries.back().x);
+      }
+      return {width, static_cast<float>(lines_.size()) * 20.0F};
     }
 
-    huxerui::detail::TextHit HitTest(Point point) const override {
-      for (std::size_t index = 1; index < positions_.size(); ++index) {
-        if (point.x < (positions_[index - 1] + positions_[index]) * 0.5F) {
-          return {offsets_[index - 1], huxerui::TextAffinity::Downstream};
+    TextPosition HitTest(Point point) const override {
+      const std::size_t line_index = std::min(
+          lines_.size() - 1,
+          static_cast<std::size_t>(std::max(0.0F, std::floor(point.y / 20.0F)))
+      );
+      const Line& line = lines_[line_index];
+      for (std::size_t index = 1; index < line.boundaries.size(); ++index) {
+        if (point.x < (line.boundaries[index - 1].x + line.boundaries[index].x) * 0.5F) {
+          return {
+              line.boundaries[index - 1].offset,
+              huxerui::TextAffinity::Downstream,
+          };
         }
       }
-      return {offsets_.back(), huxerui::TextAffinity::Downstream};
+      return {
+          line.boundaries.back().offset,
+          line_index + 1 < lines_.size() && !line.hard_break &&
+                  lines_[line_index + 1].boundaries.front().offset == line.boundaries.back().offset
+              ? huxerui::TextAffinity::Upstream
+              : huxerui::TextAffinity::Downstream,
+      };
     }
 
     Rect CaretRect(TextOffset offset, huxerui::TextAffinity affinity) const override {
-      static_cast<void>(affinity);
-      return {Position(offset), 0.0F, 1.0F, 20.0F};
+      const std::size_t line_index = LineIndex(offset, affinity);
+      return {Position(lines_[line_index], offset), static_cast<float>(line_index) * 20.0F, 1.0F, 20.0F};
     }
 
     std::vector<Rect> RangeRects(huxerui::TextRange range) const override {
       if (range.IsCollapsed()) {
         return {};
       }
-      const float start = Position(range.start);
-      const float end = Position(range.end);
-      return {{start, 0.0F, end - start, 20.0F}};
+      std::vector<Rect> rects;
+      for (std::size_t index = 0; index < lines_.size(); ++index) {
+        const Line& line = lines_[index];
+        const TextOffset line_start = line.boundaries.front().offset;
+        const TextOffset line_end = line.boundaries.back().offset;
+        const TextOffset start = std::max(range.start, line_start);
+        const TextOffset end = std::min(range.end, line_end);
+        if (start < end) {
+          const float x = Position(line, start);
+          rects.push_back({
+              x,
+              static_cast<float>(index) * 20.0F,
+              Position(line, end) - x,
+              20.0F,
+          });
+        }
+      }
+      return rects;
     }
 
     TextOffset PreviousCaretOffset(TextOffset offset) const override {
@@ -263,16 +324,44 @@ public:
     }
 
   private:
-    float Position(TextOffset offset) const {
-      const auto found = std::lower_bound(offsets_.begin(), offsets_.end(), offset);
-      if (found == offsets_.end()) {
-        return positions_.back();
+    struct Boundary {
+      TextOffset offset = 0;
+      float x = 0.0F;
+    };
+
+    struct Line {
+      std::vector<Boundary> boundaries;
+      bool hard_break = false;
+    };
+
+    std::size_t LineIndex(TextOffset offset, huxerui::TextAffinity affinity) const {
+      for (std::size_t index = 0; index < lines_.size(); ++index) {
+        const Line& line = lines_[index];
+        const TextOffset start = line.boundaries.front().offset;
+        const TextOffset end = line.boundaries.back().offset;
+        if (offset < end || (offset == end && (affinity == huxerui::TextAffinity::Upstream ||
+                                               index + 1 == lines_.size() || line.hard_break))) {
+          return index;
+        }
+        if (offset < start) {
+          return index;
+        }
       }
-      return positions_[static_cast<std::size_t>(std::distance(offsets_.begin(), found))];
+      return lines_.size() - 1;
+    }
+
+    static float Position(const Line& line, TextOffset offset) {
+      const auto found = std::lower_bound(
+          line.boundaries.begin(),
+          line.boundaries.end(),
+          offset,
+          [](const Boundary& boundary, TextOffset value) { return boundary.offset < value; }
+      );
+      return found == line.boundaries.end() ? line.boundaries.back().x : found->x;
     }
 
     std::vector<TextOffset> offsets_;
-    std::vector<float> positions_;
+    std::vector<Line> lines_;
   };
 
   void RequestFrame(double delay_seconds) override {
@@ -307,8 +396,7 @@ public:
   std::unique_ptr<huxerui::detail::TextLayout>
   CreateTextLayout(std::string_view text, float font_size, float max_width) override {
     static_cast<void>(font_size);
-    static_cast<void>(max_width);
-    return std::make_unique<TextLayout>(text);
+    return std::make_unique<TextLayout>(text, max_width);
   }
 
   huxerui::PlatformTextInput* TextInput() noexcept override {

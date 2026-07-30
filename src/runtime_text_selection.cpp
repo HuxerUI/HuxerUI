@@ -142,6 +142,9 @@ bool Runtime::PerformTextEditingAction(TextEditingAction action) {
     }
     command.kind = TextInputCommandKind::CommitText;
     command.text = *text;
+    if (!session.state.composition.has_value()) {
+      command.target = selection;
+    }
   } else if (action == TextEditingAction::SelectAll) {
     const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
     if (context.result_code != TextInputResultCode::Ok || context.total_length <= 0) {
@@ -254,6 +257,14 @@ void Runtime::HandleTextSelectionClick(const PointerEvent& event) {
       (event.device_kind != PointerDeviceKind::Mouse && event.device_kind != PointerDeviceKind::Pen)) {
     return;
   }
+  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+    return;
+  }
+  const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (!focused ||
+      (focused->kind != detail::NodeKind::TextField && focused->kind != detail::NodeKind::SelectionArea)) {
+    return;
+  }
   PointerEvent cancel = event;
   cancel.type = PointerEventType::Cancel;
   HandlePointerCancel(cancel);
@@ -268,10 +279,20 @@ void Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
   if (event.type == PointerEventType::Down) {
     overlay.long_press_pending = false;
     overlay.tap_pending = false;
-    if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+    overlay.double_tap_pending = false;
+    overlay.double_tap_node.reset();
+    if (!state_->mounted_root_) {
       return;
     }
-    const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+    std::optional<std::uint64_t> gesture_node = state_->focused_node_identity_;
+    if (const auto session = state_->pointer_sessions_.find(event.pointer_id);
+        session != state_->pointer_sessions_.end() && session->second.focus_pending) {
+      gesture_node = session->second.pending_focus_identity;
+    }
+    if (!gesture_node.has_value()) {
+      return;
+    }
+    const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *gesture_node);
     if (!focused ||
         (focused->kind != detail::NodeKind::TextField && focused->kind != detail::NodeKind::SelectionArea)) {
       return;
@@ -279,7 +300,7 @@ void Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
     constexpr double double_tap_interval = 0.4;
     constexpr float double_tap_slop = 18.0F;
     const double now = state_->platform_->Now();
-    if (overlay.previous_tap_time.has_value() && overlay.previous_tap_node == state_->focused_node_identity_ &&
+    if (overlay.previous_tap_time.has_value() && overlay.previous_tap_node == gesture_node &&
         now - *overlay.previous_tap_time >= 0.0 && now - *overlay.previous_tap_time <= double_tap_interval &&
         std::hypot(
             event.position.x - overlay.previous_tap_position.x,
@@ -287,10 +308,9 @@ void Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
         ) <= double_tap_slop) {
       overlay.previous_tap_time.reset();
       overlay.previous_tap_node.reset();
-      PointerEvent cancel = event;
-      cancel.type = PointerEventType::Cancel;
-      HandlePointerCancel(cancel);
-      SelectFocusedTextWord(event.position);
+      overlay.double_tap_pending = true;
+      overlay.double_tap_pointer_id = event.pointer_id;
+      overlay.double_tap_node = gesture_node;
       return;
     }
     constexpr double delay = 0.5;
@@ -307,15 +327,28 @@ void Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
   if (event.type == PointerEventType::Move) {
     const float distance =
         std::hypot(event.position.x - overlay.tap_position.x, event.position.y - overlay.tap_position.y);
-    if (overlay.long_press_pending && overlay.long_press_pointer_id == event.pointer_id && distance >= 6.0F) {
+    if (overlay.long_press_pending && overlay.long_press_pointer_id == event.pointer_id &&
+        distance >= detail::touch_gesture_slop) {
       overlay.long_press_pending = false;
     }
     if (overlay.tap_pending && overlay.tap_pointer_id == event.pointer_id && distance >= 18.0F) {
       overlay.tap_pending = false;
     }
+    if (overlay.double_tap_pending && overlay.double_tap_pointer_id == event.pointer_id &&
+        distance >= detail::touch_gesture_slop) {
+      overlay.double_tap_pending = false;
+      overlay.double_tap_node.reset();
+    }
     return;
   }
   if (event.type == PointerEventType::Up) {
+    if (overlay.double_tap_pending && overlay.double_tap_pointer_id == event.pointer_id &&
+        overlay.double_tap_node == state_->focused_node_identity_) {
+      overlay.double_tap_pending = false;
+      overlay.double_tap_node.reset();
+      SelectFocusedTextWord(event.position);
+      return;
+    }
     if (overlay.tap_pending && overlay.tap_pointer_id == event.pointer_id) {
       overlay.previous_tap_time = state_->platform_->Now();
       overlay.previous_tap_position = event.position;
@@ -328,6 +361,8 @@ void Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
   if (event.type == PointerEventType::Cancel) {
     overlay.tap_pending = false;
     overlay.long_press_pending = false;
+    overlay.double_tap_pending = false;
+    overlay.double_tap_node.reset();
   }
 }
 
@@ -344,6 +379,10 @@ void Runtime::AdvanceTextSelectionLongPress(double timestamp) {
   const std::int64_t pointer_id = overlay.long_press_pointer_id;
   const Point position = overlay.long_press_position;
   overlay.long_press_pending = false;
+  if (const auto session = state_->pointer_sessions_.find(pointer_id); session != state_->pointer_sessions_.end()) {
+    CommitPendingTouchFocus(session->second, position);
+    RefreshTextInputSession();
+  }
   HandlePointerCancel({
       PointerEventType::Cancel,
       pointer_id,

@@ -701,7 +701,6 @@ ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event) 
     }
     const float consumed = ScrollNodeBy(**candidate, remaining);
     if (consumed != 0.0F) {
-      result.scrolled_nodes.push_back(*candidate);
       remaining -= consumed;
     }
   }

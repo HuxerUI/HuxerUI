@@ -184,7 +184,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
 
     @Override
     public CharSequence getTextBeforeCursor(int length, int flags) {
-        if (!isActive() || length < 0) {
+        if (!isActive() || textInputSecure || length < 0) {
             return null;
         }
         long end = Math.min(selectionAnchor, selectionActive);
@@ -194,7 +194,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
 
     @Override
     public CharSequence getTextAfterCursor(int length, int flags) {
-        if (!isActive() || length < 0) {
+        if (!isActive() || textInputSecure || length < 0) {
             return null;
         }
         long start = Math.max(selectionAnchor, selectionActive);
@@ -204,7 +204,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
 
     @Override
     public CharSequence getSelectedText(int flags) {
-        if (!isActive()) {
+        if (!isActive() || textInputSecure) {
             return null;
         }
         long start = Math.min(selectionAnchor, selectionActive);
@@ -214,7 +214,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
 
     @Override
     public int getCursorCapsMode(int reqModes) {
-        if (!isActive()) {
+        if (!isActive() || textInputSecure) {
             return 0;
         }
         long cursor = Math.min(selectionAnchor, selectionActive);
@@ -224,6 +224,9 @@ final class HuxerUIInputConnection extends BaseInputConnection {
 
     @Override
     public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
+        if (!isActive() || textInputSecure) {
+            return null;
+        }
         TextInputContextData context = queryContext(0L, Integer.MAX_VALUE);
         if (context == null) {
             return null;
@@ -378,21 +381,23 @@ final class HuxerUIInputConnection extends BaseInputConnection {
         if ((result & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
             if (textInputSecure) {
                 result = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
-            }
-            if (textInputAutocorrect) {
-                result |= InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
-            } else {
                 result |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
-            }
-            if (textInputMultiline) {
-                result |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
-            }
-            if (textCapitalization == 1) {
-                result |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
-            } else if (textCapitalization == 2) {
-                result |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
-            } else if (textCapitalization == 3) {
-                result |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+            } else {
+                if (textInputAutocorrect) {
+                    result |= InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
+                } else {
+                    result |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+                }
+                if (textInputMultiline) {
+                    result |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                }
+                if (textCapitalization == 1) {
+                    result |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
+                } else if (textCapitalization == 2) {
+                    result |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
+                } else if (textCapitalization == 3) {
+                    result |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+                }
             }
         }
         return result;

@@ -38,6 +38,9 @@ struct TextInputReductionResult {
 [[nodiscard]] std::optional<TextOffset> Utf16Length(std::string_view text) noexcept;
 [[nodiscard]] std::optional<std::string> Utf8TextInRange(std::string_view text, TextRange range);
 [[nodiscard]] std::optional<TextRange> WordRangeAt(std::string_view text, TextOffset offset);
+[[nodiscard]] std::optional<TextOffset> PreviousWordStart(std::string_view text, TextOffset offset);
+[[nodiscard]] std::optional<TextOffset> NextWordEnd(std::string_view text, TextOffset offset);
+[[nodiscard]] std::optional<TextOffset> NextWordStart(std::string_view text, TextOffset offset);
 [[nodiscard]] bool IsValidTextEditingValue(const TextEditingValue& value) noexcept;
 [[nodiscard]] TextInputReductionResult
 ReduceTextInputCommands(const TextFieldEditingState& state, const std::vector<TextInputCommand>& commands);

@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include "appkit_text_input.h"
 #include "internal.h"
 
 namespace huxerui::detail {
@@ -35,6 +36,10 @@ class MacPlatformHost;
 @end
 
 @interface HuxerUIApplicationDelegate : NSObject <NSApplicationDelegate>
+{
+@public
+  huxerui::detail::MacPlatformHost* huxeruiHost;
+}
 @end
 
 @interface HuxerUIFrameScheduler : NSObject
@@ -183,50 +188,6 @@ void SetStrokeColor(CGContextRef context, Color color) {
   CGContextSetRGBStrokeColor(context, color.red, color.green, color.blue, color.alpha);
 }
 
-Key TranslateKey(unsigned short key_code) {
-  switch (key_code) {
-  case 48:
-    return Key::Tab;
-  case 36:
-  case 76:
-    return Key::Enter;
-  case 49:
-    return Key::Space;
-  case 53:
-    return Key::Escape;
-  case 51:
-    return Key::Backspace;
-  case 117:
-    return Key::Delete;
-  case 123:
-    return Key::ArrowLeft;
-  case 124:
-    return Key::ArrowRight;
-  case 125:
-    return Key::ArrowDown;
-  case 126:
-    return Key::ArrowUp;
-  case 115:
-    return Key::Home;
-  case 119:
-    return Key::End;
-  case 116:
-    return Key::PageUp;
-  case 121:
-    return Key::PageDown;
-  case 0:
-    return Key::A;
-  case 8:
-    return Key::C;
-  case 9:
-    return Key::V;
-  case 7:
-    return Key::X;
-  default:
-    return Key::Unknown;
-  }
-}
-
 } // namespace
 
 class MacTextLayout final : public TextLayout {
@@ -251,7 +212,11 @@ public:
     }
 
     const float width = std::max(1.0F, max_width);
-    CFAttributedStringRef attributed = CreateAttributedString(text, font_size);
+    std::string layout_text{text};
+    if (!layout_text.empty() && layout_text.back() == '\n') {
+      layout_text.append("\xE2\x80\x8B");
+    }
+    CFAttributedStringRef attributed = CreateAttributedString(layout_text, font_size);
     CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
     const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
         framesetter,
@@ -287,7 +252,7 @@ public:
       });
     }
     if (line_records_.empty()) {
-      line_ = CreateLine(text, font_size);
+      line_ = CreateLine(layout_text, font_size);
     }
 
     CGPathRelease(path);
@@ -308,19 +273,22 @@ public:
     return size_;
   }
 
-  TextHit HitTest(Point point) const override {
+  TextPosition HitTest(Point point) const override {
     CTLineRef line = line_;
     CGPoint origin{};
     CFRange range = CFRangeMake(0, static_cast<CFIndex>(string_.length));
+    std::size_t selected_line = 0;
     if (!line_records_.empty()) {
       const LineRecord* selected = &line_records_.front();
       float distance = std::numeric_limits<float>::infinity();
-      for (const LineRecord& candidate : line_records_) {
+      for (std::size_t index = 0; index < line_records_.size(); ++index) {
+        const LineRecord& candidate = line_records_[index];
         const float bottom = candidate.top + candidate.height;
         const float candidate_distance =
             point.y < candidate.top ? candidate.top - point.y : (point.y > bottom ? point.y - bottom : 0.0F);
         if (candidate_distance < distance) {
           selected = &candidate;
+          selected_line = index;
           distance = candidate_distance;
         }
       }
@@ -332,9 +300,17 @@ public:
     if (index == kCFNotFound) {
       index = point.x <= origin.x ? range.location : range.location + range.length;
     }
+    const CFIndex line_end = range.location + range.length;
+    if (index == line_end && line_end <= static_cast<CFIndex>(string_.length) && range.length > 0 &&
+        [string_ characterAtIndex:static_cast<NSUInteger>(line_end - 1)] == '\n') {
+      --index;
+    }
+    const bool upstream =
+        index == line_end && selected_line + 1 < line_records_.size() &&
+        line_records_[selected_line + 1].range.location == line_end;
     return {
         static_cast<TextOffset>(std::clamp<CFIndex>(index, 0, static_cast<CFIndex>(string_.length))),
-        TextAffinity::Downstream,
+        upstream ? TextAffinity::Upstream : TextAffinity::Downstream,
     };
   }
 
@@ -461,6 +437,7 @@ public:
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
 
       delegate_ = [[HuxerUIApplicationDelegate alloc] init];
+      delegate_->huxeruiHost = this;
       application.delegate = delegate_;
 
       const NSRect frame = NSMakeRect(0.0, 0.0, options.width, options.height);
@@ -473,6 +450,7 @@ public:
       view_ = [[HuxerUIHostView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
       view_->huxeruiHost = this;
+      text_input_ = std::make_unique<MacTextInput>(runtime, view_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
@@ -485,6 +463,7 @@ public:
       [application run];
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiHost = nullptr;
+      delegate_->huxeruiHost = nullptr;
       [frame_scheduler_ shutdown];
       frame_scheduler_ = nil;
     }
@@ -539,6 +518,30 @@ public:
 
   std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
     return std::make_unique<MacTextLayout>(text, font_size, max_width);
+  }
+
+  PlatformTextInput* TextInput() noexcept override {
+    return text_input_.get();
+  }
+
+  NSTextInputContext* InputContext() const noexcept {
+    return text_input_ ? text_input_->InputContext() : nil;
+  }
+
+  bool HandleTextInputEvent(NSEvent* event) {
+    return text_input_ && text_input_->HandleEvent(event);
+  }
+
+  void ApplicationActiveChanged(bool active) {
+    if (text_input_) {
+      text_input_->ApplicationActiveChanged(active);
+    }
+  }
+
+  void InvalidateTextInputGeometry() {
+    if (text_input_) {
+      text_input_->InvalidateGeometry();
+    }
   }
 
   PlatformClipboard* Clipboard() noexcept override {
@@ -748,6 +751,7 @@ private:
   __strong HuxerUIHostView* view_ = nil;
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
+  std::unique_ptr<MacTextInput> text_input_;
 };
 
 int RunPlatformApp(AppDefinition definition) {
@@ -767,6 +771,16 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+
+- (NSTextInputContext*)inputContext {
+  if (huxeruiHost != nullptr) {
+    NSTextInputContext* context = huxeruiHost->InputContext();
+    if (context != nil) {
+      return context;
+    }
+  }
+  return [super inputContext];
 }
 
 - (void)updateTrackingAreas {
@@ -794,6 +808,7 @@ int RunPlatformApp(AppDefinition definition) {
       static_cast<float>(bounds.size.height),
   });
   const huxerui::DisplayList& displayList = huxeruiRuntime->BuildFrame();
+  huxeruiHost->InvalidateTextInputGeometry();
   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
   huxeruiHost->Render(displayList, context);
 }
@@ -835,20 +850,7 @@ int RunPlatformApp(AppDefinition definition) {
   if (huxeruiRuntime == nullptr) {
     return;
   }
-  const NSEventModifierFlags flags = event.modifierFlags;
-  const char* characters = event.characters == nil ? nullptr : event.characters.UTF8String;
-  huxeruiRuntime->HandleKeyEvent({
-      type,
-      huxerui::detail::TranslateKey(event.keyCode),
-      characters == nullptr ? std::string{} : std::string(characters),
-      {
-          static_cast<bool>(flags & NSEventModifierFlagShift),
-          static_cast<bool>(flags & NSEventModifierFlagControl),
-          static_cast<bool>(flags & NSEventModifierFlagOption),
-          static_cast<bool>(flags & NSEventModifierFlagCommand),
-      },
-      static_cast<bool>(event.isARepeat),
-  });
+  huxeruiRuntime->HandleKeyEvent(huxerui::detail::MakeMacKeyEvent(event, type));
 }
 
 - (void)mouseDown:(NSEvent*)event {
@@ -874,6 +876,9 @@ int RunPlatformApp(AppDefinition definition) {
 }
 
 - (void)keyDown:(NSEvent*)event {
+  if (huxeruiHost != nullptr && huxeruiHost->HandleTextInputEvent(event)) {
+    return;
+  }
   [self sendKeyEvent:event type:huxerui::KeyEventType::Down];
 }
 
@@ -913,6 +918,20 @@ int RunPlatformApp(AppDefinition definition) {
 @end
 
 @implementation HuxerUIApplicationDelegate
+
+- (void)applicationDidBecomeActive:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->ApplicationActiveChanged(true);
+  }
+}
+
+- (void)applicationDidResignActive:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->ApplicationActiveChanged(false);
+  }
+}
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
   static_cast<void>(sender);

@@ -82,12 +82,14 @@ public:
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
+  bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
   [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
   bool PerformTextEditingAction(TextEditingAction action);
   TextInputApplyResult HandleTextInputCommands(const TextInputCommandBatch& batch);
   [[nodiscard]] TextInputContext
   QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const;
   [[nodiscard]] TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const;
+  [[nodiscard]] TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const;
 
 private:
   struct State;
@@ -112,12 +114,14 @@ private:
   void HandlePointerMove(const PointerEvent& event);
   void HandlePointerCancel(const PointerEvent& event);
   void HandlePointerUp(const PointerEvent& event);
+  bool CommitPendingTouchFocus(detail::PointerSession& session, Point position, bool record_tap = false);
   void UpdateHoveredExtension(Point position);
   void RefreshInteractionTree();
+  bool HandleFocusedTextInputKey(const KeyEvent& event);
   [[nodiscard]] std::optional<LayerId> ActiveModalLayerId() const;
   detail::MountedNode* ActiveModalFocusRoot();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
-  void MoveFocus(bool reverse);
+  void MoveFocus(bool reverse, bool wrap = true);
   bool BringTextInputIntoView();
   bool SelectFocusedTextWord(Point position, bool show_overlay = true);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);

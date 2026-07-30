@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
 #include <string>
 
 #include <huxerui/modifier.h>
 #include <huxerui/text_input.h>
 #include <huxerui/theme.h>
+#include <huxerui/validation.h>
 
 namespace huxerui {
 class PlatformHost;
@@ -22,6 +25,10 @@ struct TextFieldModifier {
   TextEditingValue value;
   std::string placeholder;
   TextInputConfiguration configuration;
+  std::size_t min_lines = 1;
+  std::optional<std::size_t> max_lines;
+  std::optional<std::size_t> max_length;
+  ValidationResult validation;
 };
 
 [[nodiscard]] Size MeasureTextField(MountedNode& node, PlatformHost& platform, Constraints constraints);

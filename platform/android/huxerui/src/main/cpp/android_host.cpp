@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -23,6 +24,39 @@ namespace huxerui::detail {
 namespace {
 
 constexpr float kRadiansToDegrees = 57.2957795130823208768F;
+
+enum class AndroidEditorAction : jint {
+  Unspecified,
+  None,
+  Go,
+  Search,
+  Send,
+  Next,
+  Done,
+  Previous,
+};
+
+std::optional<TextInputAction> ToTextInputAction(jint action) {
+  switch (static_cast<AndroidEditorAction>(action)) {
+  case AndroidEditorAction::Unspecified:
+    return TextInputAction::Default;
+  case AndroidEditorAction::None:
+    return TextInputAction::Newline;
+  case AndroidEditorAction::Go:
+    return TextInputAction::Go;
+  case AndroidEditorAction::Search:
+    return TextInputAction::Search;
+  case AndroidEditorAction::Send:
+    return TextInputAction::Send;
+  case AndroidEditorAction::Next:
+    return TextInputAction::Next;
+  case AndroidEditorAction::Done:
+    return TextInputAction::Done;
+  case AndroidEditorAction::Previous:
+  default:
+    return std::nullopt;
+  }
+}
 
 enum class AndroidTextInputOperation : jint {
   CommitText,
@@ -104,6 +138,10 @@ Key TranslateKey(jint key_code) {
     return Key::V;
   case AKEYCODE_X:
     return Key::X;
+  case AKEYCODE_Y:
+    return Key::Y;
+  case AKEYCODE_Z:
+    return Key::Z;
   default:
     return Key::Unknown;
   }
@@ -154,14 +192,16 @@ public:
     return values.size() >= 2 ? Size{values[0], values[1]} : Size{};
   }
 
-  TextHit HitTest(Point point) const override {
+  TextPosition HitTest(Point point) const override {
     JNIEnv* environment = Environment();
     if (environment == nullptr) {
       return {};
     }
+    const jlong encoded = environment->CallLongMethod(layout_, hit_test_, point.x, point.y);
+    const bool upstream = encoded < 0;
     return {
-        static_cast<TextOffset>(environment->CallLongMethod(layout_, hit_test_, point.x, point.y)),
-        TextAffinity::Downstream,
+        static_cast<TextOffset>(upstream ? -encoded - 1 : encoded),
+        upstream ? TextAffinity::Upstream : TextAffinity::Downstream,
     };
   }
 
@@ -263,6 +303,7 @@ public:
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJ)V");
     stop_text_input_ = environment->GetMethodID(view_class, "stopTextInput", "(J)V");
+    request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
     read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
     write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
     draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
@@ -278,10 +319,10 @@ public:
 
     if (schedule_frame_ == nullptr || measure_text_ == nullptr || create_text_layout_ == nullptr ||
         start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
-        stop_text_input_ == nullptr || read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr ||
-        draw_rect_ == nullptr || draw_text_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr ||
-        draw_border_ == nullptr || push_clip_ == nullptr || pop_clip_ == nullptr || push_transform_ == nullptr ||
-        pop_transform_ == nullptr) {
+        stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
+        write_clipboard_text_ == nullptr || draw_rect_ == nullptr || draw_text_ == nullptr || draw_circle_ == nullptr ||
+        draw_arc_ == nullptr || draw_border_ == nullptr || push_clip_ == nullptr || pop_clip_ == nullptr ||
+        push_transform_ == nullptr || pop_transform_ == nullptr) {
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
       throw std::runtime_error("HuxerUI Android view methods do not match the native backend");
@@ -432,6 +473,13 @@ public:
     JNIEnv* environment = Environment();
     if (environment != nullptr && view_ != nullptr) {
       environment->CallVoidMethod(view_, stop_text_input_, static_cast<jlong>(session_id));
+    }
+  }
+
+  void RequestShow(TextInputSessionId session_id) override {
+    JNIEnv* environment = Environment();
+    if (environment != nullptr && view_ != nullptr) {
+      environment->CallVoidMethod(view_, request_show_text_input_, static_cast<jlong>(session_id));
     }
   }
 
@@ -611,6 +659,7 @@ private:
   jmethodID update_text_input_ = nullptr;
   jmethodID restart_text_input_ = nullptr;
   jmethodID stop_text_input_ = nullptr;
+  jmethodID request_show_text_input_ = nullptr;
   jmethodID read_clipboard_text_ = nullptr;
   jmethodID write_clipboard_text_ = nullptr;
   jmethodID draw_rect_ = nullptr;
@@ -785,25 +834,8 @@ public:
     return runtime_.QueryTextInputGeometry(session_id, range);
   }
 
-  bool PerformTextInputAction(TextInputSessionId session_id) {
-    if (runtime_.QueryTextInputContext(session_id, 0, 0).result_code != TextInputResultCode::Ok) {
-      return false;
-    }
-    runtime_.HandleKeyEvent({
-        KeyEventType::Down,
-        Key::Enter,
-        {},
-        {},
-        false,
-    });
-    runtime_.HandleKeyEvent({
-        KeyEventType::Up,
-        Key::Enter,
-        {},
-        {},
-        false,
-    });
-    return true;
+  bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+    return runtime_.PerformTextInputAction(session_id, action);
   }
 
   bool PerformTextEditingAction(TextInputSessionId session_id, TextEditingAction action) {
@@ -1029,9 +1061,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIInputConnection_na
     JNIEnv* environment, jclass, jlong handle, jlong session_id, jint editor_action
 ) {
   try {
-    static_cast<void>(editor_action);
     auto* session = huxerui::detail::Session(handle);
-    return session != nullptr && session->PerformTextInputAction(static_cast<huxerui::TextInputSessionId>(session_id))
+    const std::optional<huxerui::TextInputAction> action = huxerui::detail::ToTextInputAction(editor_action);
+    return session != nullptr && action.has_value() &&
+                   session->PerformTextInputAction(static_cast<huxerui::TextInputSessionId>(session_id), *action)
                ? JNI_TRUE
                : JNI_FALSE;
   } catch (const std::exception& exception) {

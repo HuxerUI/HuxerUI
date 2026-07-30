@@ -120,6 +120,10 @@ Key TranslateKey(WPARAM virtual_key) {
     return Key::V;
   case 'X':
     return Key::X;
+  case 'Y':
+    return Key::Y;
+  case 'Z':
+    return Key::Z;
   default:
     return Key::Unknown;
   }
@@ -196,7 +200,7 @@ public:
     };
   }
 
-  TextHit HitTest(Point point) const override {
+  TextPosition HitTest(Point point) const override {
     BOOL trailing = FALSE;
     BOOL inside = FALSE;
     DWRITE_HIT_TEST_METRICS metrics{};

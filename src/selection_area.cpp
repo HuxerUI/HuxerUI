@@ -283,7 +283,7 @@ private:
       return best->start;
     }
     const Rect content = ContentRect(*best->node);
-    const detail::TextHit hit = best->layout->HitTest({local->x - content.x, local->y - content.y});
+    const TextPosition hit = best->layout->HitTest({local->x - content.x, local->y - content.y});
     return std::clamp(best->start + hit.offset, best->start, best->start + best->length);
   }
 

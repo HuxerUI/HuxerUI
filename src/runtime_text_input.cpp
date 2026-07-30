@@ -104,6 +104,16 @@ bool IsValidConfiguration(const TextInputConfiguration& configuration) noexcept 
   return IsKnown(configuration.type) && IsKnown(configuration.capitalization) && IsKnown(configuration.action);
 }
 
+bool MatchesConfiguredAction(const TextInputConfiguration& configuration, TextInputAction requested) noexcept {
+  if (configuration.action == requested) {
+    return true;
+  }
+  if (configuration.action != TextInputAction::Default) {
+    return false;
+  }
+  return requested == (configuration.multiline ? TextInputAction::Newline : TextInputAction::Done);
+}
+
 bool IsValidSelectionShape(const TextSelection& selection) noexcept {
   return selection.anchor >= 0 && selection.active >= 0 && IsKnown(selection.affinity);
 }
@@ -145,6 +155,13 @@ TextInputGeometry SessionMismatchGeometry(TextInputSessionId session_id) {
   return result;
 }
 
+TextInputPositionResult SessionMismatchPosition(TextInputSessionId session_id) {
+  TextInputPositionResult result;
+  result.result_code = TextInputResultCode::SessionMismatch;
+  result.session_id = session_id;
+  return result;
+}
+
 } // namespace
 
 bool Runtime::BringTextInputIntoView() {
@@ -172,6 +189,9 @@ bool Runtime::BringTextInputIntoView() {
   };
   bool changed = false;
   for (auto ancestor = path.rbegin(); ancestor != path.rend(); ++ancestor) {
+    if ((*ancestor)->scroll && !(*ancestor)->scroll->allows_automatic_reveal) {
+      break;
+    }
     if (!detail::ScrollNodeRectIntoView(**ancestor, target)) {
       continue;
     }
@@ -358,6 +378,23 @@ TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatc
   return result;
 }
 
+bool Runtime::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+  if (!IsKnown(action) || !state_->text_input_session_.has_value()) {
+    return false;
+  }
+  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
+  if (session_id != active.session_id || !MatchesConfiguredAction(active.configuration, action)) {
+    return false;
+  }
+  return HandleFocusedTextInputKey({
+      KeyEventType::Down,
+      Key::Enter,
+      {},
+      {},
+      false,
+  });
+}
+
 TextInputContext
 Runtime::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
   if (!state_->text_input_session_.has_value() || session_id != state_->text_input_session_->session_id) {
@@ -391,6 +428,26 @@ TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id,
   TextInputGeometry result = state_->text_input_session_->client->QueryTextInputGeometry(session_id, range);
   if (!IsKnown(result.result_code) || result.session_id != session_id) {
     throw std::logic_error("HuxerUI text input client returned geometry for another session");
+  }
+  return result;
+}
+
+TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
+  if (!state_->text_input_session_.has_value() || session_id != state_->text_input_session_->session_id) {
+    return SessionMismatchPosition(session_id);
+  }
+  if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+    TextInputPositionResult result;
+    result.result_code = TextInputResultCode::Rejected;
+    result.session_id = session_id;
+    return result;
+  }
+
+  TextInputPositionResult result = state_->text_input_session_->client->QueryTextInputPosition(session_id, point);
+  if (!IsKnown(result.result_code) || result.session_id != session_id ||
+      (result.result_code == TextInputResultCode::Ok &&
+       (result.position.offset < 0 || !IsKnown(result.position.affinity)))) {
+    throw std::logic_error("HuxerUI text input client returned an invalid position result");
   }
   return result;
 }

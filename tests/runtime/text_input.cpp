@@ -77,6 +77,18 @@ public:
     };
   }
 
+  TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const override {
+    ++position_queries;
+    return {
+        TextInputResultCode::Ok,
+        session_id,
+        {
+            static_cast<TextOffset>(point.x / 10.0F),
+            TextAffinity::Downstream,
+        },
+    };
+  }
+
   TextInputKeyResult HandleTextKey(const KeyEvent& event) override {
     ++key_count;
     last_key = event.key;
@@ -107,6 +119,7 @@ public:
   int end_count = 0;
   mutable int context_queries = 0;
   mutable int geometry_queries = 0;
+  mutable int position_queries = 0;
   int key_count = 0;
   Key last_key = Key::Unknown;
   std::vector<TextInputSessionId> ended_sessions;
@@ -340,6 +353,34 @@ TEST_CASE("TestTextInputSessionSurvivesRecompositionAndSynchronizesState") {
   REQUIRE(text_input.restarted_configurations.back().action == TextInputAction::Search);
 }
 
+TEST_CASE("TestTextInputActionValidatesSessionConfigurationAndClientHandling") {
+  ResetTextInputProbes();
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+
+  Runtime runtime{TwoTextClientsApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  FocusNext(runtime);
+
+  REQUIRE_FALSE(runtime.PerformTextInputAction(2, TextInputAction::Done));
+  REQUIRE_FALSE(runtime.PerformTextInputAction(1, TextInputAction::Search));
+  REQUIRE_FALSE(runtime.PerformTextInputAction(1, TextInputAction::Done));
+  REQUIRE(first_text_client->key_count == 1);
+  REQUIRE(first_text_client->last_key == Key::Enter);
+
+  first_text_client->handle_keys = true;
+  REQUIRE(runtime.PerformTextInputAction(1, TextInputAction::Done));
+  REQUIRE(first_text_client->key_count == 2);
+
+  first_text_client->configuration.multiline = true;
+  runtime.BuildFrame();
+  REQUIRE_FALSE(runtime.PerformTextInputAction(1, TextInputAction::Done));
+  REQUIRE(runtime.PerformTextInputAction(1, TextInputAction::Newline));
+  REQUIRE(first_text_client->key_count == 3);
+}
+
 TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   ResetTextInputProbes();
   ProbePlatformTextInput text_input;
@@ -363,6 +404,7 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   REQUIRE(first_text_client->apply_count == 0);
   REQUIRE(runtime.QueryTextInputContext(2, 0, 2).result_code == TextInputResultCode::SessionMismatch);
   REQUIRE(runtime.QueryTextInputGeometry(2, {0, 0}).result_code == TextInputResultCode::SessionMismatch);
+  REQUIRE(runtime.QueryTextInputPosition(2, {20.0F, 0.0F}).result_code == TextInputResultCode::SessionMismatch);
 
   const TextInputApplyResult applied = runtime.HandleTextInputCommands({
       1,
@@ -382,6 +424,11 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   const TextInputGeometry geometry = runtime.QueryTextInputGeometry(1, {3, 3});
   REQUIRE(geometry.result_code == TextInputResultCode::Ok);
   REQUIRE(geometry.caret.x == 30.0F);
+
+  const TextInputPositionResult position = runtime.QueryTextInputPosition(1, {40.0F, 0.0F});
+  REQUIRE(position.result_code == TextInputResultCode::Ok);
+  REQUIRE(position.position.offset == 4);
+  REQUIRE(first_text_client->position_queries == 1);
 }
 
 TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {

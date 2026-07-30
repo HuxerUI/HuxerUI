@@ -22,6 +22,7 @@ View TextFieldDemo() {
   const auto theme = UseTheme();
   auto material_value = UseState(TextEditingValue::FromText(""));
   auto flat_value = UseState(TextEditingValue::FromText(""));
+  auto message = UseState(TextEditingValue::FromText(""));
   auto submission = UseState(std::string{"Type, drag to select, then press Enter to submit."});
 
   return Column{
@@ -33,6 +34,11 @@ View TextFieldDemo() {
             submission = std::string{"Material submitted: "} + material_value->text;
           }),
       Text(submission),
+      TextField(message)
+          .LineLimits(TextFieldLineLimits::MultiLine())
+          .Placeholder("Multiline message")
+          .OnChanged([message](const TextEditingValue& value) { message = value; })
+          .With(Frame{.height = 140.0F}),
       HUXERUI_THEME(
           FlatTheme,
           Column{

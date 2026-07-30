@@ -62,6 +62,8 @@ enum class Key {
   C,
   V,
   X,
+  Y,
+  Z,
 };
 
 enum class KeyEventType {

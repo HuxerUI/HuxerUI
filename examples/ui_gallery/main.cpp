@@ -1,170 +1,148 @@
 #include <huxerui/huxerui.h>
 
 #include <string>
+#include <utility>
 
 using namespace huxerui;
 
-constexpr Color primary_text_color = Color::Rgb(31, 35, 40);
-constexpr Color secondary_text_color = Color::Rgb(91, 98, 106);
+constexpr float gallery_width = 560.0F;
 
-View Chip(std::string label, Color color) {
-  return Text(std::move(label)).With(Padding(10.0F), Background(color), Foreground(Color::White()), CornerRadius(8.0F));
-}
-
-View Distribution(std::string title, MainAxisAlignment alignment) {
-  return Column {
-    Text(std::move(title)).With(FontSize(14.0F), Foreground(secondary_text_color)),
-    Row {
-      Chip("A", Color::Rgb(9, 105, 218)),
-      Chip("B", Color::Rgb(130, 80, 223)),
-      Chip("C", Color::Rgb(26, 127, 55)),
-    }.With(
-        Frame(640.0F, 56.0F),
-        Padding(8.0F),
-        Spacing(8.0F),
-        Background(Color::Rgb(246, 248, 250)),
-        CornerRadius(8.0F),
-        MainAlign(alignment),
-        CrossAlign(CrossAxisAlignment::Center)
-    ),
-  }.With(Spacing(6.0F));
-}
-
-[[huxerui::scope]] View ControlsDemo() {
-  auto checkbox_checked = UseState(true);
-  auto switch_checked = UseState(false);
-  auto progress = UseState(0.35F);
-
-  return Column {
-    Text("Controls").With(FontSize(20.0F), Foreground(primary_text_color)),
-    Row {
-      Button("Button").OnClick([] {}),
-      Button("Disabled").With(Enabled(false)).OnClick([] {}),
-    }.With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center)),
-    Row {
-      Checkbox(checkbox_checked).OnChanged([checkbox_checked](bool checked) { checkbox_checked = checked; }),
-      Text::Format("Checkbox: {}", checkbox_checked ? "checked" : "unchecked"),
-    }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Center)),
-    Row {
-      Switch(switch_checked).OnChanged([switch_checked](bool checked) { switch_checked = checked; }),
-      Text::Format("Switch: {}", switch_checked ? "on" : "off"),
-    }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Center)),
-    Row {
-      ProgressCircle(),
-      Text("Indeterminate"),
-    }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Center)),
-    Row {
-      ProgressCircle(progress),
-      Text::Format("Progress: {}", progress),
-      Button("Advance").OnClick([progress] {
-        progress.Update([](float& value) { value = value >= 0.95F ? 0.15F : value + 0.2F; });
-      }),
-    }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Center)),
-  }.With(
-      Frame{.width = 640.0F},
-      Padding(16.0F),
-      Spacing(14.0F),
-      Background(Color::Rgb(246, 248, 250)),
-      CornerRadius(12.0F),
-      CrossAlign(CrossAxisAlignment::Start)
+View Tag(std::string label, Color color) {
+  return Text(std::move(label)).With(
+      Padding(EdgeInsets::Symmetric(10.0F, 6.0F)),
+      Background(color),
+      Foreground(Color::White()),
+      CornerRadius(8.0F)
   );
 }
 
-[[huxerui::scope]] View TransformDemo() {
+View Panel(View content) {
+  const ThemeSpec& theme = UseTheme();
+  return std::move(content).With(
+      Frame{.width = gallery_width},
+      Padding(theme.spacing.medium),
+      Background(theme.colors.surface),
+      CornerRadius(theme.shapes.large)
+  );
+}
+
+[[huxerui::scope]]
+View ControlsDemo() {
+  const ThemeSpec& theme = UseTheme();
+  auto checkbox_checked = UseState(true);
+  auto switch_checked = UseState(false);
+  auto progress = UseState(0.35F);
+  auto password = UseState(TextEditingValue::FromText(""));
+  auto message = UseState(TextEditingValue::FromText(""));
+
+  return Panel(
+      Column {
+        Text("Controls", TextRole::Title),
+        Flow {
+          Button("Button").OnClick([] {}),
+          Button("Disabled").With(Enabled(false)).OnClick([] {}),
+          Row {
+            Checkbox(checkbox_checked).OnChanged(
+                [checkbox_checked](bool checked) { checkbox_checked = checked; }
+            ),
+            Text(checkbox_checked ? "Checked" : "Unchecked"),
+          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+          Row {
+            Switch(switch_checked).OnChanged([switch_checked](bool checked) { switch_checked = checked; }),
+            Text(switch_checked ? "On" : "Off"),
+          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          ProgressCircle(),
+          Text("Indeterminate"),
+          ProgressCircle(progress),
+          Text::Format("{}%", static_cast<int>(progress * 100.0F)),
+          Button("Advance").OnClick([progress] {
+            progress.Update([](float& value) { value = value >= 0.95F ? 0.15F : value + 0.2F; });
+          }),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        TextField(password)
+            .Secure()
+            .MaxLength(64)
+            .Placeholder("Password")
+            .Validation(Validate(password.Get().text, Required("Password is required")))
+            .OnChanged([password](const TextEditingValue& value) { password = value; })
+            .With(Frame{.width = gallery_width - theme.spacing.extra_large}),
+        TextField(message)
+            .LineLimits(TextFieldLineLimits::MultiLine(3, 5))
+            .MaxLength(240)
+            .Placeholder("Message")
+            .OnChanged([message](const TextEditingValue& value) { message = value; })
+            .With(Frame{.width = gallery_width - theme.spacing.extra_large}),
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+  );
+}
+
+View LayoutDemo() {
+  const ThemeSpec& theme = UseTheme();
+  return Panel(
+      Column {
+        Text("Layout", TextRole::Title),
+        Row {
+          Tag("Fixed", theme.colors.error),
+          Text("Grow").With(
+              Padding(EdgeInsets::Symmetric(10.0F, 6.0F)),
+              Background(theme.colors.primary),
+              Foreground(theme.colors.on_primary),
+              CornerRadius(theme.shapes.medium),
+              Grow()
+          ),
+          Tag("Trailing", Color::Rgb(26, 127, 55)),
+        }.With(
+            Frame{.width = gallery_width - theme.spacing.extra_large},
+            Spacing(theme.spacing.small),
+            CrossAlign(CrossAxisAlignment::Center)
+        ),
+        Flow {
+          Tag("Android", Color::Rgb(26, 127, 55)),
+          Tag("macOS", theme.colors.primary),
+          Tag("Windows", Color::Rgb(130, 80, 223)),
+          Tag("Declarative", theme.colors.error),
+          Tag("Native", theme.colors.primary),
+          Tag("C++", Color::Rgb(26, 127, 55)),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+  );
+}
+
+[[huxerui::scope]]
+View MotionDemo() {
+  const ThemeSpec& theme = UseTheme();
   auto transformed = UseState(false);
-  return Column {
-    Text("Animated presentation").With(FontSize(14.0F), Foreground(secondary_text_color)),
-    Row {
-      Button(transformed ? "Reset" : "Transform").OnClick([transformed] { transformed = !transformed; }),
-      Chip("Scale + rotation", Color::Rgb(130, 80, 223)).With(
-          Scale(AnimateTo(transformed ? 1.25F : 1.0F, TweenSpec(0.24, Easing::EaseOut))),
-          Rotation(AnimateTo(transformed ? 12.0F : 0.0F, SpringSpec()))
-      ),
-    }.With(Spacing(20.0F), CrossAlign(CrossAxisAlignment::Center)),
-  }.With(Spacing(10.0F));
+
+  return Panel(
+      Column {
+        Text("Motion", TextRole::Title),
+        Row {
+          Button(transformed ? "Reset" : "Transform").OnClick([transformed] { transformed = !transformed; }),
+          Tag("Scale + rotation", Color::Rgb(130, 80, 223)).With(
+              Scale(AnimateTo(transformed ? 1.2F : 1.0F, TweenSpec(theme.motion.normal, Easing::EaseOut))),
+              Rotation(AnimateTo(transformed ? 10.0F : 0.0F, SpringSpec()))
+          ),
+        }.With(Spacing(theme.spacing.large), CrossAlign(CrossAxisAlignment::Center)),
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+  );
 }
 
 View GalleryContent() {
+  const ThemeSpec& theme = UseTheme();
   return Column {
-    Text("UI Gallery").With(FontSize(30.0F), Foreground(primary_text_color)),
-    Text("Built-in controls, layout containers, typography, and presentation animations")
-        .With(FontSize(14.0F), Foreground(secondary_text_color)),
-    Column {
-      Text("Typography").With(FontSize(20.0F), Foreground(primary_text_color)),
-      Text("Title", TextRole::Title),
-      Text("Body text uses the active theme's semantic typography.", TextRole::Body),
-      Text("Label", TextRole::Label),
-    }.With(
-        Frame{.width = 640.0F},
-        Padding(16.0F),
-        Spacing(8.0F),
-        Background(Color::Rgb(246, 248, 250)),
-        CornerRadius(12.0F),
-        CrossAlign(CrossAxisAlignment::Start)
-    ),
+    Text("UI Gallery").With(FontSize(28.0F)),
+    Text("Controls, layout, and motion in one compact overview", TextRole::Label),
     ControlsDemo(),
-    Distribution("SpaceBetween", MainAxisAlignment::SpaceBetween),
-    Distribution("Center", MainAxisAlignment::Center),
-    Column {
-      Text("Spacer and Grow").With(FontSize(14.0F), Foreground(secondary_text_color)),
-      Row {
-        Chip("Fixed", Color::Rgb(188, 76, 0)),
-        Text("Grow").With(
-            Padding(10.0F),
-            Background(Color::Rgb(9, 105, 218)),
-            Foreground(Color::White()),
-            CornerRadius(8.0F),
-            Grow()
-        ),
-        Spacer(),
-        Chip("Trailing", Color::Rgb(26, 127, 55)),
-      }.With(
-          Frame(640.0F, 56.0F),
-          Padding(8.0F),
-          Spacing(8.0F),
-          Background(Color::Rgb(246, 248, 250)),
-          CornerRadius(8.0F),
-          CrossAlign(CrossAxisAlignment::Center)
-      ),
-    }.With(Spacing(6.0F)),
-    Column {
-      Text("Responsive Flow").With(FontSize(14.0F), Foreground(secondary_text_color)),
-      Flow {
-        Chip("Android", Color::Rgb(26, 127, 55)),
-        Chip("macOS", Color::Rgb(9, 105, 218)),
-        Chip("Windows", Color::Rgb(130, 80, 223)),
-        Chip("Desktop", Color::Rgb(188, 76, 0)),
-        Chip("Mobile", Color::Rgb(9, 105, 218)),
-        Chip("Declarative", Color::Rgb(26, 127, 55)),
-        Chip("Native", Color::Rgb(130, 80, 223)),
-        Chip("C++", Color::Rgb(188, 76, 0)),
-      }.With(
-          Frame{.max_width = 640.0F},
-          Padding(12.0F),
-          Spacing(8.0F),
-          Background(Color::Rgb(246, 248, 250)),
-          CornerRadius(8.0F),
-          CrossAlign(CrossAxisAlignment::Center)
-      ),
-    }.With(Spacing(6.0F)),
-    Column {
-      Text("Centered Stack").With(FontSize(14.0F), Foreground(secondary_text_color)),
-      Stack {
-        Chip("Centered", Color::Rgb(130, 80, 223)),
-      }.With(
-          Frame(640.0F, 88.0F),
-          Background(Color::Rgb(246, 248, 250)),
-          CornerRadius(8.0F),
-          Align(HorizontalAlignment::Center, VerticalAlignment::Center)
-      ),
-    }.With(Spacing(6.0F)),
-    TransformDemo(),
-    Text("This text verifies width constraints and automatic wrapping. "
-         "When the parent limits the available width, HuxerUI measures the text "
-         "in the C++ layout layer while the platform layer only provides "
-         "CoreText services and canvas drawing.")
-        .With(FontSize(15.0F), Foreground(primary_text_color)),
-  }.With(Padding(32.0F), Spacing(16.0F), CrossAlign(CrossAxisAlignment::Center));
+    LayoutDemo(),
+    MotionDemo(),
+  }.With(
+      Padding(theme.spacing.large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background),
+      CrossAlign(CrossAxisAlignment::Center)
+  );
 }
 
 View App() {
@@ -177,7 +155,7 @@ HUXERUI_APP(
     App,
     {
         .title = "HuxerUI UI Gallery",
-        .width = 720.0F,
-        .height = 660.0F,
+        .width = 640.0F,
+        .height = 640.0F,
     }
 )

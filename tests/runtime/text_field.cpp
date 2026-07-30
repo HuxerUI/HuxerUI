@@ -7,6 +7,15 @@ State<TextEditingValue> text_field_value;
 ScrollController text_field_scroll;
 std::vector<TextEditingValue> text_field_changes;
 int text_field_submissions = 0;
+State<TextEditingValue> multiline_text_field_value;
+State<TextEditingValue> nested_multiline_text_field_value;
+State<TextEditingValue> keyboard_text_field_value;
+State<TextEditingValue> undo_text_field_value;
+State<TextEditingValue> secure_text_field_value;
+State<TextEditingValue> limited_text_field_value;
+TextInputAction submission_action = TextInputAction::Default;
+int first_action_submissions = 0;
+int second_action_submissions = 0;
 
 class TextFieldPlatformInput final : public PlatformTextInput {
 public:
@@ -36,6 +45,10 @@ public:
     stopped_sessions.push_back(session_id);
   }
 
+  void RequestShow(TextInputSessionId session_id) override {
+    show_requests.push_back(session_id);
+  }
+
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputConfiguration> started_configurations;
   std::vector<TextInputState> started_states;
@@ -46,6 +59,7 @@ public:
   std::vector<TextInputConfiguration> restarted_configurations;
   std::vector<TextInputState> restarted_states;
   std::vector<TextInputSessionId> stopped_sessions;
+  std::vector<TextInputSessionId> show_requests;
 };
 
 class TextFieldClipboard final : public PlatformClipboard {
@@ -85,6 +99,203 @@ View TextFieldApp() {
 View EmptyTextFieldApp() {
   return Stack{
       TextField(TextEditingValue::FromText("")).Placeholder("Name").With(huxerui::Frame{160.0F, 40.0F}),
+  };
+}
+
+View InvalidTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText(""));
+  text_field_value = value;
+  return Stack {
+      TextField(value)
+          .Placeholder("Email")
+          .Validation(Validate(value.Get().text, Required("Email is required")))
+          .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+          .With(huxerui::Frame{.width = 160.0F}),
+  };
+}
+
+View ValidTextFieldApp() {
+  return Stack {
+      TextField(TextEditingValue::FromText(""))
+          .Placeholder("Email")
+          .Validation(ValidationResult::Valid())
+          .With(huxerui::Frame{.width = 160.0F}),
+  };
+}
+
+View PendingTextFieldApp() {
+  return Stack {
+      TextField(TextEditingValue::FromText(""))
+          .Placeholder("Email")
+          .Validation(ValidationResult::Pending("Checking"))
+          .With(huxerui::Frame{.width = 160.0F}),
+  };
+}
+
+View KeyboardTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText("alpha beta gamma"));
+  keyboard_text_field_value = value;
+  return Stack{
+      TextField(value)
+          .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+          .With(huxerui::Frame{240.0F, 40.0F}),
+  };
+}
+
+View UndoTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText(""));
+  undo_text_field_value = value;
+  return Stack{
+      TextField(value)
+          .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+          .With(huxerui::Frame{240.0F, 40.0F}),
+  };
+}
+
+View UndoDeletionTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText("abcd"));
+  undo_text_field_value = value;
+  return Stack{
+      TextField(value)
+          .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+          .With(huxerui::Frame{240.0F, 40.0F}),
+  };
+}
+
+View SecureTextFieldApp() {
+  auto value = UseState(
+      TextEditingValue::FromText(
+          "a\xF0\x9F\x98\x80"
+          "e\xCC\x81"
+      )
+  );
+  secure_text_field_value = value;
+  return Stack{
+      TextField(value)
+          .Secure()
+          .Placeholder("Password")
+          .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+          .With(huxerui::Frame{240.0F, 40.0F}),
+  };
+}
+
+View SubmissionTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText(""));
+  return TextField(value)
+      .InputConfiguration({.action = submission_action})
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+      .OnSubmitted([] { ++first_action_submissions; })
+      .With(huxerui::Frame{240.0F, 40.0F});
+}
+
+View NextTextFieldApp() {
+  auto first = UseState(TextEditingValue::FromText(""));
+  auto second = UseState(TextEditingValue::FromText(""));
+  return Column {
+    TextField(first)
+        .InputConfiguration({.action = TextInputAction::Next})
+        .OnChanged([first](const TextEditingValue& changed) mutable { first = changed; })
+        .OnSubmitted([] { ++first_action_submissions; })
+        .With(huxerui::Frame{240.0F, 40.0F}),
+    TextField(second)
+        .InputConfiguration({.action = TextInputAction::Next})
+        .OnChanged([second](const TextEditingValue& changed) mutable { second = changed; })
+        .OnSubmitted([] { ++second_action_submissions; })
+        .With(huxerui::Frame{240.0F, 40.0F}),
+  };
+}
+
+View MultilineTextFieldApp() {
+  auto value = UseState(TextEditingValue{
+      "ab\ncd\nef",
+      {0, 0},
+  });
+  multiline_text_field_value = value;
+  return Stack {
+      TextField(value)
+          .LineLimits(TextFieldLineLimits::MultiLine())
+          .Placeholder("Message")
+          .OnChanged([value](const TextEditingValue& changed) mutable {
+            text_field_changes.push_back(changed);
+            value = changed;
+          })
+          .OnSubmitted([] { ++text_field_submissions; })
+          .With(huxerui::Frame{80.0F, 56.0F}),
+  };
+}
+
+View GrowingMultilineTextFieldApp() {
+  TextEditingValue value{
+      "abcdefgh",
+      {0, 0},
+  };
+  return Stack {
+      TextField(std::move(value))
+          .LineLimits(TextFieldLineLimits::MultiLine())
+          .With(huxerui::Frame{.width = 80.0F}),
+  };
+}
+
+View MinimumLinesTextFieldApp() {
+  return Stack {
+      TextField(TextEditingValue::FromText(""))
+          .LineLimits(TextFieldLineLimits::MultiLine(3))
+          .With(huxerui::Frame{.width = 80.0F}),
+  };
+}
+
+View MaximumLinesTextFieldApp() {
+  return Stack {
+      TextField(TextEditingValue::FromText("a\nb\nc\nd\ne"))
+          .LineLimits(TextFieldLineLimits::MultiLine(2, 3))
+          .InputConfiguration({
+              .action = TextInputAction::Done,
+              .multiline = true,
+          })
+          .With(huxerui::Frame{.width = 80.0F}),
+  };
+}
+
+View FixedHeightLinesTextFieldApp() {
+  return Stack {
+      TextField(TextEditingValue::FromText(""))
+          .LineLimits(TextFieldLineLimits::MultiLine(3, 5))
+          .With(huxerui::Frame{.width = 80.0F, .height = 48.0F}),
+  };
+}
+
+View LimitedTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText(""));
+  limited_text_field_value = value;
+  return TextField(value)
+      .MaxLength(3)
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+      .With(huxerui::Frame{160.0F, 40.0F});
+}
+
+View OverLimitTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText("abcd"));
+  limited_text_field_value = value;
+  return TextField(value)
+      .MaxLength(3)
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+      .With(huxerui::Frame{160.0F, 40.0F});
+}
+
+View NestedMultilineTextFieldApp() {
+  auto value = UseState(TextEditingValue{
+      "aa\nbb\ncc\ndd\nee\nff",
+      {0, 0},
+  });
+  nested_multiline_text_field_value = value;
+  return ScrollView {
+      Column {
+          TextField(value)
+              .LineLimits(TextFieldLineLimits::MultiLine())
+              .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+              .With(huxerui::Frame{80.0F, 56.0F}),
+          Spacer{}.With(huxerui::Frame{80.0F, 160.0F}),
+      },
   };
 }
 
@@ -148,6 +359,15 @@ View OccludedTextFieldApp() {
 void ResetTextFieldState() {
   text_field_value = {};
   text_field_scroll = ScrollController{};
+  multiline_text_field_value = {};
+  nested_multiline_text_field_value = {};
+  keyboard_text_field_value = {};
+  undo_text_field_value = {};
+  secure_text_field_value = {};
+  limited_text_field_value = {};
+  submission_action = TextInputAction::Default;
+  first_action_submissions = 0;
+  second_action_submissions = 0;
   text_field_changes.clear();
   text_field_submissions = 0;
 }
@@ -185,6 +405,263 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   REQUIRE(style != nullptr);
   REQUIRE(style->minimum_height == 56.0F);
   REQUIRE(style->focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
+}
+
+TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{InvalidTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  const TextFieldStyle style = TextFieldStyleKey::Default();
+  const DrawTextCommand* message = FindText(display_list, "Email is required");
+  REQUIRE(message != nullptr);
+  REQUIRE(message->color.red == style.validation_error.red);
+  REQUIRE(message->color.green == style.validation_error.green);
+  REQUIRE(message->color.blue == style.validation_error.blue);
+  REQUIRE(message->font_size == style.validation_font_size);
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == 80.0F);
+
+  const DrawBorderCommand* border = FindBorderWithColor(display_list, style.validation_error);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->width == style.validation_border_width);
+  REQUIRE(border->rect.height == style.minimum_height);
+
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  const DisplayList& valid_display_list = runtime.BuildFrame();
+  REQUIRE(text_field_value.Get() == TextEditingValue::FromText("x"));
+  REQUIRE(FindText(valid_display_list, "Email is required") == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == style.minimum_height);
+}
+
+TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessage") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{InvalidTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+  });
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  const TextFieldStyle style = TextFieldStyleKey::Default();
+  REQUIRE(FindBorderWithColor(display_list, style.validation_error) != nullptr);
+  REQUIRE(FindBorderWithColor(display_list, style.focused_border) == nullptr);
+}
+
+TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{InvalidTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      701,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Mouse,
+  });
+  platform.AdvanceTime(FlatLightThemeSpec().motion.fast);
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  REQUIRE(FindText(display_list, "Email is required") != nullptr);
+  REQUIRE(FindRectWithColor(display_list, FlatLightThemeSpec().interactions.hover_overlay) == nullptr);
+}
+
+TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{ValidTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  REQUIRE(FindText(display_list, "Email is required") == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == TextFieldStyleKey::Default().minimum_height);
+  REQUIRE(FindBorderWithColor(display_list, TextFieldStyleKey::Default().validation_error) == nullptr);
+}
+
+TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{PendingTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  const TextFieldStyle style = TextFieldStyleKey::Default();
+  const DrawTextCommand* message = FindText(display_list, "Checking");
+  REQUIRE(message != nullptr);
+  REQUIRE(message->color.red == style.placeholder.red);
+  REQUIRE(message->color.green == style.placeholder.green);
+  REQUIRE(message->color.blue == style.placeholder.blue);
+  REQUIRE(FindBorderWithColor(display_list, style.validation_error) == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == 60.0F);
+}
+
+TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
+  ResetTextFieldState();
+  TextFieldClipboard clipboard;
+  clipboard.text = "paste";
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{SecureTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  REQUIRE(FindText(display_list, "a\xF0\x9F\x98\x80"
+                                 "e\xCC\x81") == nullptr);
+  REQUIRE(FindText(display_list, "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2") != nullptr);
+
+  Pointer(runtime, PointerEventType::Down, 230.0F);
+  REQUIRE(text_input.started_configurations.back().secure);
+  REQUIRE(secure_text_field_value.Get().selection == TextSelection{5, 5});
+  REQUIRE(runtime.QueryTextInputGeometry(1, {5, 5}).caret.x == 40.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+  });
+  REQUIRE(
+      secure_text_field_value.Get() ==
+      TextEditingValue::FromText(
+          "a\xF0\x9F\x98\x80"
+      )
+  );
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(
+      secure_text_field_value.Get() ==
+      TextEditingValue::FromText(
+          "a\xF0\x9F\x98\x80"
+          "e\xCC\x81"
+      )
+  );
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::A,
+      {},
+      {.control = true},
+  });
+  REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+  REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Cut));
+  REQUIRE(runtime.CanPerformTextEditingAction(TextEditingAction::Paste));
+  REQUIRE_FALSE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
+  REQUIRE(clipboard.text == "paste");
+}
+
+TEST_CASE("TestSecureTextFieldRejectsMultilineConfiguration") {
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText(""))
+          .Secure()
+          .LineLimits(TextFieldLineLimits::MultiLine()),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText(""))
+          .LineLimits(TextFieldLineLimits::MultiLine())
+          .Secure(),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText(""))
+          .InputConfiguration({
+              .multiline = true,
+              .secure = true,
+          }),
+      std::invalid_argument
+  );
+}
+
+TEST_CASE("TestTextFieldSubmissionActionsUseOneRuntimePath") {
+  for (const TextInputAction action : {
+           TextInputAction::Default,
+           TextInputAction::Done,
+           TextInputAction::Go,
+           TextInputAction::Search,
+           TextInputAction::Send,
+       }) {
+    ResetTextFieldState();
+    submission_action = action;
+    TextFieldPlatformInput text_input;
+    TestPlatform platform;
+    platform.platform_text_input = &text_input;
+    Runtime runtime{SubmissionTextFieldApp, platform};
+    runtime.SetViewport({280.0F, 80.0F});
+    runtime.BuildFrame();
+    Pointer(runtime, PointerEventType::Down, 20.0F);
+
+    const TextInputAction requested = action == TextInputAction::Default ? TextInputAction::Done : action;
+    REQUIRE(runtime.PerformTextInputAction(1, requested));
+    REQUIRE(first_action_submissions == 1);
+    REQUIRE(runtime.QueryTextInputContext(1, 0, 0).result_code == TextInputResultCode::Ok);
+  }
+}
+
+TEST_CASE("TestTextFieldNextSubmitsAndMovesFocusWithoutWrapping") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{NextTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 100.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 20.0F);
+
+  REQUIRE(runtime.PerformTextInputAction(1, TextInputAction::Next));
+  REQUIRE(first_action_submissions == 1);
+  REQUIRE(second_action_submissions == 0);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1, 2});
+  REQUIRE(runtime.QueryTextInputContext(1, 0, 0).result_code == TextInputResultCode::SessionMismatch);
+  REQUIRE(runtime.QueryTextInputContext(2, 0, 0).result_code == TextInputResultCode::Ok);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Enter,
+      {},
+      {},
+      true,
+  });
+  REQUIRE(second_action_submissions == 0);
+
+  REQUIRE_FALSE(runtime.PerformTextInputAction(1, TextInputAction::Next));
+  REQUIRE_FALSE(runtime.PerformTextInputAction(2, TextInputAction::Done));
+  REQUIRE(runtime.PerformTextInputAction(2, TextInputAction::Next));
+  REQUIRE(second_action_submissions == 1);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1, 2});
+  REQUIRE(runtime.QueryTextInputContext(2, 0, 0).result_code == TextInputResultCode::Ok);
+}
+
+TEST_CASE("TestTextFieldNewlineActionRequiresMultilineInput") {
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText(""))
+          .InputConfiguration({
+              .action = TextInputAction::Newline,
+          }),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("TestTextFieldPointerSelectionPrecedesPlatformStart") {
@@ -231,6 +708,828 @@ TEST_CASE("TestTextFieldHardwareEditingUsesTextClusters") {
       Key::Enter,
   });
   REQUIRE(text_field_submissions == 1);
+}
+
+TEST_CASE("TestTextFieldUsesPlatformWordNavigationAndDeletion") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{KeyboardTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 230.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowLeft,
+      {},
+      {.control = true},
+  });
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{11, 11});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowLeft,
+      {},
+      {.alt = true},
+  });
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{6, 6});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowRight,
+      {},
+      {
+          .shift = true,
+          .alt = true,
+      },
+  });
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{6, 10});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowRight,
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowRight,
+      {},
+      {.control = true},
+  });
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{11, 11});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+      {},
+      {.control = true},
+  });
+  REQUIRE(keyboard_text_field_value.Get().text == "alpha gamma");
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{6, 6});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Delete,
+      {},
+      {.alt = true},
+  });
+  REQUIRE(keyboard_text_field_value.Get().text == "alpha ");
+  REQUIRE(keyboard_text_field_value.Get().selection == TextSelection{6, 6});
+}
+
+TEST_CASE("TestTextFieldUndoRedoMergesContinuousTyping") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  for (const char* text : {"a", "b", "c"}) {
+    runtime.HandleKeyEvent({
+        KeyEventType::Down,
+        Key::Unknown,
+        text,
+    });
+    platform.AdvanceTime(0.1);
+  }
+  runtime.BuildFrame();
+  REQUIRE(undo_text_field_value.Get().text == "abc");
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {
+          .shift = true,
+          .meta = true,
+      },
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("abc"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.meta = true},
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Y,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("abc"));
+}
+
+TEST_CASE("TestTextFieldUndoSeparatesTimedAndRepositionedEdits") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "a",
+  });
+  platform.AdvanceTime(2.0);
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "b",
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("a"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowLeft,
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  REQUIRE(undo_text_field_value.Get().text == "xa");
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(
+      undo_text_field_value.Get() ==
+      TextEditingValue{
+          "a",
+          {0, 0},
+      }
+  );
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+}
+
+TEST_CASE("TestTextFieldUndoRedoMergesAdjacentDeletion") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{UndoDeletionTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 230.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("ab"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.meta = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("abcd"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Y,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("ab"));
+}
+
+TEST_CASE("TestTextFieldUndoTreatsCompositionAsOneEdit") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  TextInputCommand first;
+  first.kind = TextInputCommandKind::UpdateComposition;
+  first.text = "n";
+  runtime.HandleTextInputCommands({1, {first}});
+
+  TextInputCommand second;
+  second.kind = TextInputCommandKind::UpdateComposition;
+  second.text = "ni";
+  runtime.HandleTextInputCommands({1, {second}});
+
+  TextInputCommand commit;
+  commit.kind = TextInputCommandKind::CommitText;
+  commit.text = "你";
+  runtime.HandleTextInputCommands({1, {commit}});
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("你"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Y,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("你"));
+}
+
+TEST_CASE("TestTextFieldUndoCancelsActiveCompositionFirst") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  TextInputCommand update;
+  update.kind = TextInputCommandKind::UpdateComposition;
+  update.text = "ni";
+  runtime.HandleTextInputCommands({1, {update}});
+  REQUIRE(undo_text_field_value.Get().composition == TextRange{0, 2});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+}
+
+TEST_CASE("TestTextFieldExternalTextReplacementClearsUndoHistory") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "a",
+  });
+  runtime.BuildFrame();
+  undo_text_field_value = TextEditingValue::FromText("server");
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("server"));
+}
+
+TEST_CASE("TestTextFieldExternalSelectionPreservesHistoryAndNewEditsClearRedo") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "a",
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "b",
+  });
+  runtime.BuildFrame();
+
+  undo_text_field_value = TextEditingValue{
+      "ab",
+      {0, 0},
+  };
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Y,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("x"));
+}
+
+TEST_CASE("TestTextFieldUndoKeepsPasteSeparateFromTyping") {
+  ResetTextFieldState();
+  TextFieldClipboard clipboard;
+  clipboard.text = "p";
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  Runtime runtime{UndoTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Paste));
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("px"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText("p"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(undo_text_field_value.Get() == TextEditingValue::FromText(""));
+}
+
+TEST_CASE("TestTextFieldMaxLengthCountsGraphemeClusters") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{LimitedTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "a\xF0\x9F\x98\x80"
+      "e\xCC\x81"
+      "b",
+  });
+  REQUIRE(
+      limited_text_field_value.Get() ==
+      TextEditingValue::FromText(
+          "a\xF0\x9F\x98\x80"
+          "e\xCC\x81"
+      )
+  );
+}
+
+TEST_CASE("TestTextFieldMaxLengthTruncatesReplacementAndPreservesUndo") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{LimitedTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "abc",
+  });
+  TextInputCommand replace;
+  replace.kind = TextInputCommandKind::CommitText;
+  replace.target = TextRange{1, 2};
+  replace.text = "xy";
+  const TextInputApplyResult result = runtime.HandleTextInputCommands({1, {replace}});
+  REQUIRE(result.result_code == TextInputResultCode::Ok);
+  REQUIRE(result.changed);
+  REQUIRE(
+      limited_text_field_value.Get() ==
+      TextEditingValue{
+          "axc",
+          {2, 2},
+      }
+  );
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Z,
+      {},
+      {.control = true},
+  });
+  REQUIRE(limited_text_field_value.Get() == TextEditingValue::FromText("abc"));
+}
+
+TEST_CASE("TestTextFieldMaxLengthPreservesExternalOverLimitValuesAndAllowsDeletion") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{OverLimitTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 150.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Unknown,
+      "x",
+  });
+  REQUIRE(limited_text_field_value.Get() == TextEditingValue::FromText("abcd"));
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+  });
+  REQUIRE(limited_text_field_value.Get() == TextEditingValue::FromText("abc"));
+}
+
+TEST_CASE("TestTextFieldMaxLengthAllowsCompositionOverflowUntilFinish") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{LimitedTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  TextInputCommand update;
+  update.kind = TextInputCommandKind::UpdateComposition;
+  update.text = "abcd";
+  REQUIRE(runtime.HandleTextInputCommands({1, {update}}).changed);
+  REQUIRE(limited_text_field_value.Get().text == "abcd");
+  REQUIRE(limited_text_field_value.Get().composition == TextRange{0, 4});
+
+  TextInputCommand finish;
+  finish.kind = TextInputCommandKind::FinishComposition;
+  REQUIRE(runtime.HandleTextInputCommands({1, {finish}}).changed);
+  REQUIRE(limited_text_field_value.Get() == TextEditingValue::FromText("abc"));
+}
+
+TEST_CASE("TestMultilineTextFieldWrapsAndGrowsWithoutAHeight") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{GrowingMultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 120.0F});
+  const DisplayList& display_list = runtime.BuildFrame();
+
+  const DrawTextCommand* text = FindText(display_list, "abcdefgh");
+  REQUIRE(text != nullptr);
+  REQUIRE(text->rect.width == 60.0F);
+  REQUIRE(text->rect.height == 40.0F);
+  REQUIRE(std::ranges::any_of(display_list.Commands(), [](const DisplayCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->rect.width == 80.0F && border->rect.height == 56.0F;
+  }));
+}
+
+TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
+  ResetTextFieldState();
+  TestPlatform platform;
+
+  Runtime minimum{MinimumLinesTextFieldApp, platform};
+  minimum.SetViewport({200.0F, 120.0F});
+  minimum.BuildFrame();
+  REQUIRE(minimum.RootNode()->children.front()->frame.height == 76.0F);
+
+  Runtime maximum{MaximumLinesTextFieldApp, platform};
+  maximum.SetViewport({200.0F, 140.0F});
+  maximum.BuildFrame();
+  const auto* field = maximum.RootNode()->children.front().get();
+  REQUIRE(field->frame.height == 76.0F);
+  REQUIRE(field->scroll != nullptr);
+  REQUIRE(field->scroll->content_height == 100.0F);
+}
+
+TEST_CASE("TestTextFieldParentHeightOverridesIntrinsicLineLimits") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{FixedHeightLinesTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 120.0F});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.RootNode()->children.front()->frame.height == 48.0F);
+}
+
+TEST_CASE("TestTextFieldRejectsInvalidLineLimits") {
+  REQUIRE_THROWS_AS(TextFieldLineLimits::MultiLine(0), std::invalid_argument);
+  REQUIRE_THROWS_AS(TextFieldLineLimits::MultiLine(1, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(TextFieldLineLimits::MultiLine(3, 2), std::invalid_argument);
+}
+
+TEST_CASE("TestMultilineTextFieldNavigatesLinesAndKeepsCaretVisible") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+  REQUIRE(text_input.started_configurations.size() == 1);
+  REQUIRE(text_input.started_configurations.front().multiline);
+  REQUIRE(text_input.started_configurations.front().action == huxerui::TextInputAction::Newline);
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{1, 1});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{4, 4});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{7, 7});
+
+  runtime.BuildFrame();
+  const TextInputGeometry geometry = runtime.QueryTextInputGeometry(1, {7, 7});
+  REQUIRE(geometry.result_code == TextInputResultCode::Ok);
+  REQUIRE(geometry.caret.y >= 8.0F);
+  REQUIRE(geometry.caret.y + geometry.caret.height <= 48.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowUp,
+      {},
+      {.shift = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{7, 4});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{7, 7});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Home,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{6, 6});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::End,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{8, 8});
+}
+
+TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 38.0F);
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{4, 4});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowLeft,
+      {},
+      {.meta = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{3, 3});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowRight,
+      {},
+      {.meta = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{5, 5});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Home,
+      {},
+      {.control = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{0, 0});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::PageDown,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{6, 6});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::PageUp,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{0, 0});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::End,
+      {},
+      {.control = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{8, 8});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Home,
+      {},
+      {.control = true},
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowRight,
+  });
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{4, 4});
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Backspace,
+      {},
+      {.meta = true},
+  });
+  REQUIRE(multiline_text_field_value.Get().text == "ab\nd\nef");
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{3, 3});
+}
+
+TEST_CASE("TestMultilineTextFieldEnterInsertsNewlineInsteadOfSubmitting") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Enter,
+  });
+
+  REQUIRE(multiline_text_field_value.Get().text == "a\nb\ncd\nef");
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{2, 2});
+  REQUIRE(text_field_submissions == 0);
+}
+
+TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResumes") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+
+  runtime.HandleScrollEvent({
+      {20.0F, 20.0F},
+      0.0F,
+      20.0F,
+  });
+  runtime.BuildFrame();
+
+  const auto* field = runtime.RootNode()->children.front().get();
+  REQUIRE(field->scroll != nullptr);
+  REQUIRE(field->scroll->offset_y == 20.0F);
+  REQUIRE(runtime.QueryTextInputGeometry(1, {1, 1}).caret.y < 8.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Home,
+  });
+  runtime.BuildFrame();
+  REQUIRE(field->scroll->offset_y == 0.0F);
+}
+
+TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{NestedMultilineTextFieldApp, platform};
+  runtime.SetViewport({80.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+  Pointer(runtime, PointerEventType::Up, 20.0F, 18.0F);
+
+  runtime.HandleScrollEvent({
+      {40.0F, 20.0F},
+      0.0F,
+      100.0F,
+  });
+
+  const auto* root = runtime.RootNode();
+  const auto* field = root->children.front()->children.front().get();
+  REQUIRE(field->scroll != nullptr);
+  REQUIRE(field->scroll->offset_y == 80.0F);
+  REQUIRE(root->scroll->offset_y == 20.0F);
+
+  runtime.BuildFrame();
+  REQUIRE(field->scroll->offset_y == 80.0F);
+  REQUIRE(root->scroll->offset_y == 20.0F);
+}
+
+TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection") {
+  ResetTextFieldState();
+  TestPlatform touch_platform;
+  Runtime touch{MultilineTextFieldApp, touch_platform};
+  touch.SetViewport({200.0F, 100.0F});
+  touch.BuildFrame();
+  touch.HandlePointerEvent({
+      PointerEventType::Down,
+      710,
+      {20.0F, 38.0F},
+      PointerDeviceKind::Touch,
+  });
+  touch.HandlePointerEvent({
+      PointerEventType::Move,
+      710,
+      {20.0F, 8.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(touch.RootNode()->children.front()->scroll->offset_y == 20.0F);
+
+  ResetTextFieldState();
+  TestPlatform mouse_platform;
+  Runtime mouse{MultilineTextFieldApp, mouse_platform};
+  mouse.SetViewport({200.0F, 100.0F});
+  mouse.BuildFrame();
+  mouse.HandlePointerEvent({
+      PointerEventType::Down,
+      711,
+      {20.0F, 18.0F},
+      PointerDeviceKind::Mouse,
+  });
+  mouse.HandlePointerEvent({
+      PointerEventType::Move,
+      711,
+      {20.0F, 38.0F},
+      PointerDeviceKind::Mouse,
+  });
+  REQUIRE(mouse.RootNode()->children.front()->scroll->offset_y == 0.0F);
+  REQUIRE(multiline_text_field_value.Get().selection == TextSelection{1, 4});
+}
+
+TEST_CASE("TestMultilineTextFieldSelectionDragScrollsAtViewportEdge") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      712,
+      {20.0F, 18.0F},
+      PointerDeviceKind::Mouse,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      712,
+      {20.0F, 72.0F},
+      PointerDeviceKind::Mouse,
+  });
+
+  REQUIRE(runtime.RootNode()->children.front()->scroll->offset_y == 20.0F);
+  REQUIRE(multiline_text_field_value.Get().selection.active > 1);
 }
 
 TEST_CASE("TestTextFieldClipboardShortcutsUseEditingActions") {
@@ -297,6 +1596,10 @@ TEST_CASE("TestTextFieldDragSelectionAndGeometry") {
   REQUIRE(geometry.range_rects.front().y == 10.0F);
   REQUIRE(geometry.range_rects.front().width == 30.0F);
   REQUIRE(geometry.range_rects.front().height == 20.0F);
+
+  const TextInputPositionResult position = runtime.QueryTextInputPosition(1, {45.0F, 20.0F});
+  REQUIRE(position.result_code == TextInputResultCode::Ok);
+  REQUIRE(position.position.offset == 4);
 }
 
 TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
@@ -504,6 +1807,12 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
       {20.0F, 20.0F},
       PointerDeviceKind::Touch,
   });
+  touch.HandlePointerEvent({
+      PointerEventType::Up,
+      709,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
   REQUIRE(touch.QueryTextInputContext(1, 0, 10).selection == TextSelection{0, 5});
   REQUIRE(FindText(touch.BuildFrame(), "复制") != nullptr);
 }
@@ -562,6 +1871,135 @@ TEST_CASE("TestTextFieldPointerSelectionYieldsToParentScroll") {
 
   REQUIRE(text_field_value.Get().selection == TextSelection{1, 1});
   REQUIRE(text_field_scroll.Metrics().offset > 0.0F);
+}
+
+TEST_CASE("TestTouchScrollOverTextFieldDoesNotFocusOrStartTextInput") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{ScrollableTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      720,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(text_input.started_sessions.empty());
+  REQUIRE(text_field_value.Get().selection == TextSelection{6, 6});
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      720,
+      {20.0F, -20.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      720,
+      {20.0F, -20.0F},
+      PointerDeviceKind::Touch,
+  });
+
+  REQUIRE(text_input.started_sessions.empty());
+  REQUIRE(text_input.show_requests.empty());
+  REQUIRE(text_field_value.Get().selection == TextSelection{6, 6});
+  REQUIRE(text_field_scroll.Metrics().offset > 0.0F);
+}
+
+TEST_CASE("TestTouchTapStartsTextInputOnReleaseAndRetapRequestsKeyboard") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{ScrollableTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      721,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(text_input.started_sessions.empty());
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      721,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE(text_input.started_states.back().selection == TextSelection{1, 1});
+  REQUIRE(text_input.show_requests.empty());
+
+  platform.AdvanceTime(0.5);
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      722,
+      {30.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(text_input.show_requests.empty());
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      722,
+      {30.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
+  REQUIRE(text_field_value.Get().selection == TextSelection{2, 2});
+}
+
+TEST_CASE("TestTouchDragOverFocusedTextFieldDoesNotRequestKeyboard") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{ScrollableTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      723,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      723,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      724,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      724,
+      {20.0F, -20.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      724,
+      {20.0F, -20.0F},
+      PointerDeviceKind::Touch,
+  });
+
+  REQUIRE(text_input.show_requests.empty());
+  REQUIRE(text_field_value.Get().selection == TextSelection{1, 1});
 }
 
 TEST_CASE("TestTextFieldScrollsIntoReducedViewport") {

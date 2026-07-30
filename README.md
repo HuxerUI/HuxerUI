@@ -23,7 +23,7 @@ HuxerUI is a cross-platform declarative UI runtime powered by C++. Native backen
 - Padding, spacing, frames, foreground and background colors, and corner radii
 - Main-axis distribution, cross-axis alignment, stack alignment, and grow factors
 - Width-constrained multiline text measurement and rendering
-- Controlled text editing with native Windows and Android IME integration
+- Controlled single-line and multiline text editing with native Android, macOS, and Windows IME integration
 - Clipboard shortcuts, double-click or touch selection, and theme-aware selection menus and handles
 - C++ measurement, layout, and hit testing
 - Nested rectangular display-list clipping and paint culling
@@ -212,6 +212,81 @@ return TextField(value)
       value = changed;
     });
 ```
+
+Use the same component for multiline editing. It grows with its wrapped
+content when height is unconstrained and keeps the caret visible inside a
+fixed-height viewport. Wheel and touch scrolling consume the field's available
+range first, then pass remaining movement to an enclosing scroll container.
+Desktop editing supports grapheme, word, visual-line, page, and document
+navigation with the native Ctrl, Option, and Command conventions. TextField
+also keeps bounded local undo and redo history, grouping continuous typing,
+deletion, and one complete IME composition:
+
+```cpp
+return TextField(value)
+    .LineLimits(TextFieldLineLimits::MultiLine(3, 8))
+    .MaxLength(200)
+    .Placeholder("Message")
+    .OnChanged([value](const TextEditingValue& changed) {
+      value = changed;
+    });
+```
+
+`TextFieldLineLimits::MultiLine()` controls intrinsic growth and optionally
+sets its minimum and maximum line count. A maximum enables the existing
+internal viewport to scroll additional content. Explicit parent constraints
+still win. `MaxLength` counts user-visible
+grapheme clusters rather than UTF-8 bytes or UTF-16 code units. User edits and
+paste are truncated at a grapheme boundary; active IME composition may
+temporarily exceed the limit and is constrained when committed.
+
+Content validation remains separate from input filtering. `Validate()` applies
+pure rules in order and returns the first non-valid result. Passing that result
+to `TextField::Validation()` presents the themed error border and supporting
+message without rejecting input or changing the controlled value:
+
+```cpp
+const ValidationResult validation = Validate(
+    email.Get().text,
+    Required(),
+    EmailAddress()
+);
+
+return TextField(email)
+    .Placeholder("Email")
+    .Validation(validation)
+    .OnChanged([email](const TextEditingValue& changed) {
+      email = changed;
+    });
+```
+
+`Required` and `EmailAddress` are basic reusable rules. A custom callable can
+return `ValidationResult::Valid()`, `Invalid(message)`, or `Pending(message)`.
+Applications decide when to pass `ValidationResult::None()`, such as before a
+field is touched, and when to validate on change, focus loss, or submission.
+Invalid results use the Theme error treatment; pending results can show a
+neutral supporting message without an error border. Validation does not
+replace `MaxLength` and does not filter characters.
+
+Secure input uses the same controlled value and editing history while drawing
+one mask glyph per grapheme. It is intentionally single-line, disables Copy
+and Cut, and asks native input systems for password behavior:
+
+```cpp
+return TextField(password)
+    .Secure()
+    .MaxLength(64)
+    .Placeholder("Password")
+    .OnChanged([password](const TextEditingValue& changed) {
+      password = changed;
+    });
+```
+
+`TextInputAction::Next` submits and advances to the next focusable control
+without wrapping at the end. `Done`, `Go`, `Search`, and `Send` submit through
+`OnSubmitted`; mobile platforms dismiss the soft keyboard for terminal
+actions. `Default` resolves to `Done` for single-line fields and `Newline` for
+multiline fields. `Newline` is reserved for multiline TextField.
 
 Determinate values are constrained to the `0` to `1` range. An indeterminate
 circle rotates using its node extension, while a determinate circle does not
@@ -723,6 +798,8 @@ The platform layer handles windows or host views, frame scheduling, input forwar
 
 ## Building
 
+The commands below use `build` as an example build directory.
+
 macOS:
 
 ```bash
@@ -731,13 +808,16 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-Windows with Visual Studio 2022:
+Windows:
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --config Debug --parallel
 ctest --test-dir build -C Debug --output-on-failure
 ```
+
+CMake may select any available default generator. Pass generator, toolset, and architecture options when required by
+the current environment or target.
 
 Unit tests use the vendored Catch2 sources under `3dparty`, so configuring and
 building the test targets does not require downloading dependencies.
@@ -821,7 +901,7 @@ target-architecture code generator.
 Example applications:
 
 - `example_counter`: component scopes and local state
-- `example_ui_gallery`: built-in controls, layout containers, typography, and presentation animations
+- `example_ui_gallery`: a compact overview of built-in controls, layout, and motion
 - `example_dynamic_list`: `ForEach`, stable keys, and per-item local state
 - `example_scroll_view`: vertical scrolling, observable metrics, programmatic offsets, and local state after scrolling
 - `example_virtual_list`: a large virtualized variable-height list with programmatic item positioning
@@ -876,7 +956,7 @@ Windows:
 - Layout priority and intrinsic-size queries
 - General-purpose clipping modifiers
 - Event capture/bubbling and explicit user-controlled pointer capture
-- macOS native IME integration and advanced text editing behavior
+- Advanced text editing behavior
 - General saveable-state APIs, keyframe and decay animation, and overscroll effects
 - Semantics tree and accessibility
 - iOS, Linux, and Web backends

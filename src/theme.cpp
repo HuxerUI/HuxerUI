@@ -46,6 +46,10 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
       .minimum_height = 56.0F,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
+      .validation_error = theme.colors.error,
+      .validation_border_width = 2.0F,
+      .validation_font_size = theme.typography.label,
+      .validation_spacing = theme.spacing.extra_small,
   };
 }
 
@@ -207,6 +211,10 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
       .padding = EdgeInsets::Symmetric(10.0F, theme.spacing.small),
       .minimum_height = 36.0F,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
+      .validation_error = theme.colors.error,
+      .validation_border_width = 2.0F,
+      .validation_font_size = theme.typography.label,
+      .validation_spacing = theme.spacing.extra_small,
   };
 }
 

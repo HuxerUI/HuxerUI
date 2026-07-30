@@ -283,6 +283,37 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   REQUIRE(pointer_clicks == 2);
 }
 
+TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {
+  received_pointer_events.clear();
+  pointer_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{PointerInputApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  ClickAt(runtime, {50.0F, 20.0F}, 12);
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          12,
+          {50.0F, 20.0F},
+          PointerDeviceKind::Mouse,
+          2,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          12,
+          {50.0F, 20.0F},
+          PointerDeviceKind::Mouse,
+      }
+  );
+
+  REQUIRE(pointer_clicks == 2);
+}
+
 TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
   drag_item_clicks = 0;
   drag_item_cancels = 0;
