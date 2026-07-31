@@ -13,6 +13,8 @@ State<TextEditingValue> keyboard_text_field_value;
 State<TextEditingValue> undo_text_field_value;
 State<TextEditingValue> secure_text_field_value;
 State<TextEditingValue> limited_text_field_value;
+State<int> text_field_recompose_trigger;
+State<bool> text_field_offset;
 TextInputAction submission_action = TextInputAction::Default;
 int first_action_submissions = 0;
 int second_action_submissions = 0;
@@ -20,11 +22,15 @@ int second_action_submissions = 0;
 class TextFieldPlatformInput final : public PlatformTextInput {
 public:
   void Start(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     started_sessions.push_back(session_id);
     started_configurations.push_back(configuration);
     started_states.push_back(state);
+    started_geometry.push_back(geometry);
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
@@ -34,11 +40,15 @@ public:
   }
 
   void Restart(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     restarted_sessions.push_back(session_id);
     restarted_configurations.push_back(configuration);
     restarted_states.push_back(state);
+    restarted_geometry.push_back(geometry);
   }
 
   void Stop(TextInputSessionId session_id) override {
@@ -52,12 +62,14 @@ public:
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputConfiguration> started_configurations;
   std::vector<TextInputState> started_states;
+  std::vector<TextInputGeometry> started_geometry;
   std::vector<TextInputSessionId> updated_sessions;
   std::vector<TextInputState> updated_states;
   std::vector<TextInputGeometry> updated_geometry;
   std::vector<TextInputSessionId> restarted_sessions;
   std::vector<TextInputConfiguration> restarted_configurations;
   std::vector<TextInputState> restarted_states;
+  std::vector<TextInputGeometry> restarted_geometry;
   std::vector<TextInputSessionId> stopped_sessions;
   std::vector<TextInputSessionId> show_requests;
 };
@@ -102,6 +114,22 @@ View EmptyTextFieldApp() {
   };
 }
 
+View StableTextFieldApp() {
+  auto trigger = UseState(0);
+  text_field_recompose_trigger = trigger;
+  static_cast<void>(trigger.Get());
+  return TextField(TextEditingValue::FromText("stable")).With(huxerui::Frame{160.0F, 40.0F});
+}
+
+View OffsetTextFieldApp() {
+  auto offset = UseState(false);
+  text_field_offset = offset;
+  return Stack{
+      TextField(TextEditingValue::FromText("moving"))
+          .With(huxerui::Frame{160.0F, 40.0F}, Offset{Point{offset.Get() ? 40.0F : 0.0F, 0.0F}}),
+  };
+}
+
 View InvalidTextFieldApp() {
   auto value = UseState(TextEditingValue::FromText(""));
   text_field_value = value;
@@ -114,9 +142,21 @@ View InvalidTextFieldApp() {
   };
 }
 
+View MaterialSecureInvalidTextFieldApp() {
+  return MaterialTheme([] {
+    return Column {
+      TextField(TextEditingValue::FromText(""))
+          .Secure()
+          .Placeholder("Password")
+          .Validation(ValidationResult::Invalid("Password is required"))
+          .With(huxerui::Frame{.width = 160.0F}),
+    };
+  });
+}
+
 View ValidTextFieldApp() {
   return Stack {
-      TextField(TextEditingValue::FromText(""))
+    TextField(TextEditingValue::FromText(""))
           .Placeholder("Email")
           .Validation(ValidationResult::Valid())
           .With(huxerui::Frame{.width = 160.0F}),
@@ -365,6 +405,8 @@ void ResetTextFieldState() {
   undo_text_field_value = {};
   secure_text_field_value = {};
   limited_text_field_value = {};
+  text_field_recompose_trigger = State<int>{};
+  text_field_offset = State<bool>{};
   submission_action = TextInputAction::Default;
   first_action_submissions = 0;
   second_action_submissions = 0;
@@ -380,6 +422,20 @@ void Pointer(Runtime& runtime, PointerEventType type, float x, float y = 20.0F) 
   });
 }
 
+const RenderNode* FindRenderNodeById(const RenderNode& node, std::uint64_t id) {
+  if (node.id == id) {
+    return &node;
+  }
+  for (const RenderNode* child : node.children) {
+    if (child != nullptr) {
+      if (const RenderNode* found = FindRenderNodeById(*child, id)) {
+        return found;
+      }
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
@@ -387,18 +443,18 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   TestPlatform platform;
   Runtime runtime{EmptyTextFieldApp, platform};
   runtime.SetViewport({200.0F, 80.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  const DrawTextCommand* placeholder = FindText(display_list, "Name");
+  const DrawTextCommand* placeholder = FindText(scene, "Name");
   REQUIRE(placeholder != nullptr);
   REQUIRE(placeholder->font_size == TextFieldStyle::Default().font_size);
   REQUIRE(placeholder->color.alpha == TextFieldStyle::Default().placeholder.alpha);
 
-  const auto border = std::ranges::find_if(display_list.Commands(), [](const DisplayCommand& command) {
+  const auto border = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
     const auto* value = std::get_if<DrawBorderCommand>(&command);
     return value && value->rect.width == 160.0F && value->rect.height == 40.0F;
   });
-  REQUIRE(border != display_list.Commands().end());
+  REQUIRE(border != scene.Commands().end());
 
   const ThemeDefinition material = huxerui::MaterialThemeDefinition();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(material);
@@ -411,18 +467,18 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   TestPlatform platform;
   Runtime runtime{InvalidTextFieldApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
   const TextFieldStyle style = TextFieldStyle::Default();
-  const DrawTextCommand* message = FindText(display_list, "Email is required");
+  const DrawTextCommand* message = FindText(scene, "Email is required");
   REQUIRE(message != nullptr);
   REQUIRE(message->color.red == style.validation_error.red);
   REQUIRE(message->color.green == style.validation_error.green);
   REQUIRE(message->color.blue == style.validation_error.blue);
   REQUIRE(message->font_size == style.validation_font_size);
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == 80.0F);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == 80.0F);
 
-  const DrawBorderCommand* border = FindBorderWithColor(display_list, style.validation_error);
+  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
   REQUIRE(border != nullptr);
   REQUIRE(border->width == style.validation_border_width);
   REQUIRE(border->rect.height == style.minimum_height);
@@ -433,10 +489,31 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
       Key::Unknown,
       "x",
   });
-  const DisplayList& valid_display_list = runtime.BuildFrame();
+  const FlattenedScene& valid_scene = runtime.BuildFrame();
   REQUIRE(text_field_value.Get() == TextEditingValue::FromText("x"));
-  REQUIRE(FindText(valid_display_list, "Email is required") == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == style.minimum_height);
+  REQUIRE(FindText(valid_scene, "Email is required") == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == style.minimum_height);
+}
+
+TEST_CASE("TestMaterialSecureTextFieldReservesValidationHeight") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MaterialSecureInvalidTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 120.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+  const DrawTextCommand* message = FindText(scene, "Password is required");
+  REQUIRE(message != nullptr);
+
+  const detail::MountedNode* field = runtime.RootNode()->children.front()->children.front().get();
+  const float validation_height = style.validation_spacing + message->rect.height;
+  REQUIRE(field->bounds.height == style.minimum_height + validation_height);
+  REQUIRE(message->rect.y + message->rect.height == field->bounds.y + field->bounds.height);
+
+  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->rect.height == style.minimum_height);
 }
 
 TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessage") {
@@ -456,11 +533,11 @@ TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessag
       KeyEventType::Down,
       Key::Backspace,
   });
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
   const TextFieldStyle style = TextFieldStyle::Default();
-  REQUIRE(FindBorderWithColor(display_list, style.validation_error) != nullptr);
-  REQUIRE(FindBorderWithColor(display_list, style.focused_border) == nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.validation_error) != nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.focused_border) == nullptr);
 }
 
 TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
@@ -477,10 +554,10 @@ TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
       PointerDeviceKind::Mouse,
   });
   platform.AdvanceTime(FlatLightThemeSpec().motion.fast);
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  REQUIRE(FindText(display_list, "Email is required") != nullptr);
-  REQUIRE(FindRectWithColor(display_list, FlatLightThemeSpec().interactions.hover_overlay) == nullptr);
+  REQUIRE(FindText(scene, "Email is required") != nullptr);
+  REQUIRE(FindRectWithColor(scene, FlatLightThemeSpec().interactions.hover_overlay) == nullptr);
 }
 
 TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
@@ -488,11 +565,11 @@ TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
   TestPlatform platform;
   Runtime runtime{ValidTextFieldApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  REQUIRE(FindText(display_list, "Email is required") == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == TextFieldStyle::Default().minimum_height);
-  REQUIRE(FindBorderWithColor(display_list, TextFieldStyle::Default().validation_error) == nullptr);
+  REQUIRE(FindText(scene, "Email is required") == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == TextFieldStyle::Default().minimum_height);
+  REQUIRE(FindBorderWithColor(scene, TextFieldStyle::Default().validation_error) == nullptr);
 }
 
 TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
@@ -500,16 +577,16 @@ TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
   TestPlatform platform;
   Runtime runtime{PendingTextFieldApp, platform};
   runtime.SetViewport({200.0F, 100.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
   const TextFieldStyle style = TextFieldStyle::Default();
-  const DrawTextCommand* message = FindText(display_list, "Checking");
+  const DrawTextCommand* message = FindText(scene, "Checking");
   REQUIRE(message != nullptr);
   REQUIRE(message->color.red == style.placeholder.red);
   REQUIRE(message->color.green == style.placeholder.green);
   REQUIRE(message->color.blue == style.placeholder.blue);
-  REQUIRE(FindBorderWithColor(display_list, style.validation_error) == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == 60.0F);
+  REQUIRE(FindBorderWithColor(scene, style.validation_error) == nullptr);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == 60.0F);
 }
 
 TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
@@ -522,11 +599,11 @@ TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
   platform.platform_text_input = &text_input;
   Runtime runtime{SecureTextFieldApp, platform};
   runtime.SetViewport({280.0F, 80.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  REQUIRE(FindText(display_list, "a\xF0\x9F\x98\x80"
+  REQUIRE(FindText(scene, "a\xF0\x9F\x98\x80"
                                  "e\xCC\x81") == nullptr);
-  REQUIRE(FindText(display_list, "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2") != nullptr);
+  REQUIRE(FindText(scene, "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2") != nullptr);
 
   Pointer(runtime, PointerEventType::Down, 230.0F);
   REQUIRE(text_input.started_configurations.back().secure);
@@ -676,7 +753,49 @@ TEST_CASE("TestTextFieldPointerSelectionPrecedesPlatformStart") {
 
   REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
   REQUIRE(text_input.started_states.front().selection == TextSelection{3, 3});
+  REQUIRE(
+      text_input.started_geometry.front() ==
+      runtime.QueryTextInputGeometry(1, text_input.started_states.front().selection.Range())
+  );
   REQUIRE(text_field_value.Get().selection == TextSelection{3, 3});
+}
+
+TEST_CASE("TestTextFieldPresentationMovementUpdatesImeGeometryWithoutLayout") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{OffsetTextFieldApp, platform};
+  runtime.SetViewport({240.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+
+  const auto* field = runtime.RootNode()->children.front().get();
+  const std::uint64_t layout_revision = field->layout_revision;
+  const TextInputState initial_state = text_input.started_states.back();
+  const TextInputGeometry initial_geometry = text_input.started_geometry.back();
+  const TextInputPositionResult initial_position =
+      runtime.QueryTextInputPosition(1, {initial_geometry.caret.x, initial_geometry.caret.y});
+  text_input.updated_states.clear();
+  text_input.updated_geometry.clear();
+
+  text_field_offset = true;
+  runtime.BuildFrame();
+
+  field = runtime.RootNode()->children.front().get();
+  REQUIRE(field->layout_revision == layout_revision);
+  REQUIRE(text_input.updated_states.size() == 1);
+  REQUIRE(text_input.updated_states.back() == initial_state);
+  REQUIRE(text_input.updated_geometry.back().caret.x == initial_geometry.caret.x + 40.0F);
+  REQUIRE(
+      runtime.QueryTextInputPosition(
+          1,
+          {text_input.updated_geometry.back().caret.x, text_input.updated_geometry.back().caret.y}
+      ) == initial_position
+  );
+
+  runtime.BuildFrame();
+  REQUIRE(text_input.updated_states.size() == 1);
 }
 
 TEST_CASE("TestTextFieldHardwareEditingUsesTextClusters") {
@@ -1144,7 +1263,6 @@ TEST_CASE("TestTextFieldMaxLengthTruncatesReplacementAndPreservesUndo") {
   replace.text = "xy";
   const TextInputApplyResult result = runtime.HandleTextInputCommands({1, {replace}});
   REQUIRE(result.result_code == TextInputResultCode::Ok);
-  REQUIRE(result.changed);
   REQUIRE(
       limited_text_field_value.Get() ==
       TextEditingValue{
@@ -1195,13 +1313,13 @@ TEST_CASE("TestTextFieldMaxLengthAllowsCompositionOverflowUntilFinish") {
   TextInputCommand update;
   update.kind = TextInputCommandKind::UpdateComposition;
   update.text = "abcd";
-  REQUIRE(runtime.HandleTextInputCommands({1, {update}}).changed);
+  REQUIRE(runtime.HandleTextInputCommands({1, {update}}).result_code == TextInputResultCode::Ok);
   REQUIRE(limited_text_field_value.Get().text == "abcd");
   REQUIRE(limited_text_field_value.Get().composition == TextRange{0, 4});
 
   TextInputCommand finish;
   finish.kind = TextInputCommandKind::FinishComposition;
-  REQUIRE(runtime.HandleTextInputCommands({1, {finish}}).changed);
+  REQUIRE(runtime.HandleTextInputCommands({1, {finish}}).result_code == TextInputResultCode::Ok);
   REQUIRE(limited_text_field_value.Get() == TextEditingValue::FromText("abc"));
 }
 
@@ -1210,16 +1328,76 @@ TEST_CASE("TestMultilineTextFieldWrapsAndGrowsWithoutAHeight") {
   TestPlatform platform;
   Runtime runtime{GrowingMultilineTextFieldApp, platform};
   runtime.SetViewport({200.0F, 120.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  const DrawTextCommand* text = FindText(display_list, "abcdefgh");
+  const DrawTextCommand* text = FindText(scene, "abcdefgh");
   REQUIRE(text != nullptr);
   REQUIRE(text->rect.width == 60.0F);
   REQUIRE(text->rect.height == 40.0F);
-  REQUIRE(std::ranges::any_of(display_list.Commands(), [](const DisplayCommand& command) {
+  REQUIRE(std::ranges::any_of(scene.Commands(), [](const PaintCommand& command) {
     const auto* border = std::get_if<DrawBorderCommand>(&command);
     return border != nullptr && border->rect.width == 80.0F && border->rect.height == 56.0F;
   }));
+}
+
+TEST_CASE("TestMultilineTextFieldEditingInvalidatesLayout") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{GrowingMultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 120.0F});
+  runtime.BuildFrame();
+
+  const auto* field = runtime.RootNode()->children.front().get();
+  const float initial_height = field->bounds.height;
+  const std::uint64_t initial_measure_revision = field->measure_revision;
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+
+  TextInputCommand insert;
+  insert.kind = TextInputCommandKind::CommitText;
+  insert.text = "\nabcdefgh";
+  REQUIRE(runtime.HandleTextInputCommands({1, {insert}}).result_code == TextInputResultCode::Ok);
+  runtime.BuildFrame();
+
+  field = runtime.RootNode()->children.front().get();
+  REQUIRE(field->measure_revision > initial_measure_revision);
+  REQUIRE(field->bounds.height > initial_height);
+}
+
+TEST_CASE("TestIdenticalTextFieldRecompositionKeepsLayoutCache") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{StableTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+
+  const std::uint64_t initial_measure_revision = runtime.RootNode()->measure_revision;
+  text_field_recompose_trigger = 1;
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.RootNode()->measure_revision == initial_measure_revision);
+}
+
+TEST_CASE("TestTextFieldSelectionChangeKeepsLayoutCache") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{KeyboardTextFieldApp, platform};
+  runtime.SetViewport({280.0F, 80.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 100.0F);
+  runtime.BuildFrame();
+
+  const auto* field = runtime.RootNode()->children.front().get();
+  const std::uint64_t measure_revision = field->measure_revision;
+  const TextSelection selection = keyboard_text_field_value.Get().selection;
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowLeft,
+  });
+  runtime.BuildFrame();
+
+  field = runtime.RootNode()->children.front().get();
+  REQUIRE(keyboard_text_field_value.Get().selection != selection);
+  REQUIRE(field->measure_revision == measure_revision);
 }
 
 TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
@@ -1229,13 +1407,13 @@ TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
   Runtime minimum{MinimumLinesTextFieldApp, platform};
   minimum.SetViewport({200.0F, 120.0F});
   minimum.BuildFrame();
-  REQUIRE(minimum.RootNode()->children.front()->frame.height == 76.0F);
+  REQUIRE(minimum.RootNode()->children.front()->bounds.height == 76.0F);
 
   Runtime maximum{MaximumLinesTextFieldApp, platform};
   maximum.SetViewport({200.0F, 140.0F});
   maximum.BuildFrame();
   const auto* field = maximum.RootNode()->children.front().get();
-  REQUIRE(field->frame.height == 76.0F);
+  REQUIRE(field->bounds.height == 76.0F);
   REQUIRE(field->scroll != nullptr);
   REQUIRE(field->scroll->content_height == 100.0F);
 }
@@ -1247,7 +1425,7 @@ TEST_CASE("TestTextFieldParentHeightOverridesIntrinsicLineLimits") {
   runtime.SetViewport({200.0F, 120.0F});
   runtime.BuildFrame();
 
-  REQUIRE(runtime.RootNode()->children.front()->frame.height == 48.0F);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == 48.0F);
 }
 
 TEST_CASE("TestTextFieldRejectsInvalidLineLimits") {
@@ -1314,6 +1492,39 @@ TEST_CASE("TestMultilineTextFieldNavigatesLinesAndKeepsCaretVisible") {
       Key::End,
   });
   REQUIRE(multiline_text_field_value.Get().selection == TextSelection{8, 8});
+}
+
+TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::ArrowDown,
+  });
+
+  const auto& text_field = *runtime.RootNode()->children.front();
+  REQUIRE(text_field.scroll);
+  REQUIRE(text_field.scroll->offset_y == 0.0F);
+
+  PaintSequence sequence;
+  PaintContext context{sequence, text_field.bounds};
+  for (const detail::NodeExtensionEntry& entry : text_field.extensions) {
+    if (entry.extension) {
+      entry.extension->Paint(text_field, context);
+    }
+  }
+  context.Finish();
+
+  REQUIRE(text_field.scroll->offset_y == 0.0F);
 }
 
 TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
@@ -1439,6 +1650,64 @@ TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResume
   });
   runtime.BuildFrame();
   REQUIRE(field->scroll->offset_y == 0.0F);
+}
+
+TEST_CASE("TestMultilineTextFieldScrollUpdatesImeGeometry") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+  runtime.BuildFrame();
+
+  const TextInputGeometry initial = runtime.QueryTextInputGeometry(1, {1, 1});
+  const TextSelection selection = runtime.QueryTextInputContext(1, 0, 8).selection;
+  text_input.updated_states.clear();
+  text_input.updated_geometry.clear();
+
+  runtime.HandleScrollEvent({
+      {20.0F, 20.0F},
+      0.0F,
+      20.0F,
+  });
+  runtime.BuildFrame();
+
+  REQUIRE(text_input.updated_states.size() == 1);
+  REQUIRE(text_input.updated_states.back().selection == selection);
+  REQUIRE(text_input.updated_geometry.back().caret.y == initial.caret.y - 20.0F);
+}
+
+TEST_CASE("TestMultilineTextFieldScrollDuringCompositionDoesNotRestartInput") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{MultilineTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
+
+  TextInputCommand begin;
+  begin.kind = TextInputCommandKind::BeginComposition;
+  begin.target = TextRange{1, 1};
+  REQUIRE(runtime.HandleTextInputCommands({1, {begin}}).result_code == TextInputResultCode::Ok);
+  text_input.updated_states.clear();
+  text_input.updated_geometry.clear();
+  text_input.restarted_sessions.clear();
+
+  runtime.HandleScrollEvent({
+      {20.0F, 20.0F},
+      0.0F,
+      20.0F,
+  });
+  runtime.BuildFrame();
+
+  REQUIRE(text_input.restarted_sessions.empty());
+  REQUIRE(text_input.updated_states.size() == 1);
+  REQUIRE(text_input.updated_states.back().composition == TextRange{1, 1});
 }
 
 TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
@@ -1582,8 +1851,8 @@ TEST_CASE("TestTextFieldDragSelectionAndGeometry") {
   Pointer(runtime, PointerEventType::Move, 55.0F);
   REQUIRE(text_field_value.Get().selection == TextSelection{1, 4});
 
-  const DisplayList& display_list = runtime.BuildFrame();
-  const DrawRectCommand* selection = FindRect(display_list, {20.0F, 10.0F, 30.0F, 20.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const DrawRectCommand* selection = FindRect(scene, {20.0F, 10.0F, 30.0F, 20.0F});
   REQUIRE(selection != nullptr);
   REQUIRE(selection->color.alpha == TextFieldStyle::Default().selection.alpha);
 
@@ -1617,15 +1886,25 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
       PointerDeviceKind::Touch,
   });
   platform.AdvanceTime(0.5);
-  const DisplayList& overlay = runtime.BuildFrame();
+  const FlattenedScene& overlay = runtime.BuildFrame();
   const DrawTextCommand* copy = FindText(overlay, "复制");
   REQUIRE(copy != nullptr);
-  const std::size_t themed_handles = std::ranges::count_if(overlay.Commands(), [](const DisplayCommand& command) {
+  const std::size_t themed_handles = std::ranges::count_if(overlay.Commands(), [](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->color.red == Color::Rgb(214, 55, 48).red &&
            circle->color.green == Color::Rgb(214, 55, 48).green;
   });
   REQUIRE(themed_handles == 2);
+
+  const RenderFrame& first_render_frame = runtime.LastCommit().render_frame;
+  REQUIRE(first_render_frame.scene.root != nullptr);
+  const RenderNode* selection_overlay = FindRenderNodeById(*first_render_frame.scene.root, 0);
+  REQUIRE(selection_overlay != nullptr);
+  const std::uint64_t overlay_revision = selection_overlay->revision;
+  const RenderFrame& stable_frame = runtime.BuildRenderFrame();
+  selection_overlay = FindRenderNodeById(*stable_frame.scene.root, 0);
+  REQUIRE(selection_overlay != nullptr);
+  REQUIRE(selection_overlay->revision == overlay_revision);
 
   const Point copy_center{
       copy->rect.x + copy->rect.width * 0.5F,
@@ -1645,18 +1924,69 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
   });
   REQUIRE(clipboard.text == "alpha");
 
-  const DisplayList& feedback = runtime.BuildFrame();
+  const FlattenedScene& feedback = runtime.BuildFrame();
   REQUIRE(FindText(feedback, "复制") != nullptr);
   REQUIRE(FindRectWithColor(feedback, FlatLightThemeSpec().interactions.pressed_overlay) != nullptr);
 
   platform.AdvanceTime(0.3);
-  const DisplayList& dismissed = runtime.BuildFrame();
+  const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(FindText(dismissed, "复制") == nullptr);
-  REQUIRE(std::ranges::none_of(dismissed.Commands(), [](const DisplayCommand& command) {
+  REQUIRE(std::ranges::none_of(dismissed.Commands(), [](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->color.red == Color::Rgb(214, 55, 48).red &&
            circle->color.green == Color::Rgb(214, 55, 48).green;
   }));
+}
+
+TEST_CASE("TestTextFieldSelectionHandleDragExtendsSelection") {
+  ResetTextFieldState();
+  TextFieldClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  Runtime runtime{TextSelectionOverlayApp, platform};
+  runtime.SetViewport({240.0F, 120.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      710,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.5);
+  const FlattenedScene& overlay = runtime.BuildFrame();
+  std::vector<Point> handles;
+  for (const PaintCommand& command : overlay.Commands()) {
+    const auto* circle = std::get_if<DrawCircleCommand>(&command);
+    if (circle != nullptr && circle->radius == 6.0F) {
+      handles.push_back(circle->center);
+    }
+  }
+  REQUIRE(handles.size() == 2);
+  const Point end_handle = *std::ranges::max_element(handles, {}, &Point::x);
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      711,
+      end_handle,
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      711,
+      {end_handle.x + 40.0F, end_handle.y},
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      711,
+      {end_handle.x + 40.0F, end_handle.y},
+      PointerDeviceKind::Touch,
+  });
+
+  const TextSelection selection = runtime.QueryTextInputContext(1, 0, 10).selection;
+  REQUIRE(selection.Range().start == 0);
+  REQUIRE(selection.Range().end > 5);
 }
 
 TEST_CASE("TestEmptyTextFieldLongPressShowsPasteAtCaret") {
@@ -1676,10 +2006,10 @@ TEST_CASE("TestEmptyTextFieldLongPressShowsPasteAtCaret") {
       PointerDeviceKind::Touch,
   });
   platform.AdvanceTime(0.5);
-  const DisplayList& overlay = runtime.BuildFrame();
+  const FlattenedScene& overlay = runtime.BuildFrame();
   const DrawTextCommand* paste = FindText(overlay, "Paste");
   REQUIRE(paste != nullptr);
-  REQUIRE(std::ranges::none_of(overlay.Commands(), [](const DisplayCommand& command) {
+  REQUIRE(std::ranges::none_of(overlay.Commands(), [](const PaintCommand& command) {
     return std::holds_alternative<huxerui::DrawCircleCommand>(command);
   }));
 
@@ -1732,11 +2062,11 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(0.05);
-  const DisplayList& pressed = runtime.BuildFrame();
+  const FlattenedScene& pressed = runtime.BuildFrame();
   const ThemeSpec material = MaterialLightThemeSpec();
   Color expected_ripple = material.colors.on_surface;
   expected_ripple.alpha = material.interactions.ripple.alpha;
-  REQUIRE(std::ranges::any_of(pressed.Commands(), [expected_ripple](const DisplayCommand& command) {
+  REQUIRE(std::ranges::any_of(pressed.Commands(), [expected_ripple](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->radius > 0.0F && circle->color.red == expected_ripple.red &&
            circle->color.green == expected_ripple.green && circle->color.blue == expected_ripple.blue &&
@@ -1752,9 +2082,9 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
   REQUIRE(clipboard.text == "alpha");
   runtime.BuildFrame();
   platform.AdvanceTime(0.05);
-  const DisplayList& released = runtime.BuildFrame();
+  const FlattenedScene& released = runtime.BuildFrame();
   REQUIRE(FindText(released, "Copy") != nullptr);
-  REQUIRE(std::ranges::any_of(released.Commands(), [expected_ripple](const DisplayCommand& command) {
+  REQUIRE(std::ranges::any_of(released.Commands(), [expected_ripple](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->color.red == expected_ripple.red &&
            circle->color.green == expected_ripple.green && circle->color.blue == expected_ripple.blue &&
@@ -1812,7 +2142,8 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
       {20.0F, 20.0F},
       PointerDeviceKind::Touch,
   });
-  REQUIRE(touch.QueryTextInputContext(1, 0, 10).selection == TextSelection{0, 5});
+  const TextSelection double_tap_selection = touch.QueryTextInputContext(1, 0, 10).selection;
+  REQUIRE(double_tap_selection == TextSelection{0, 5});
   REQUIRE(FindText(touch.BuildFrame(), "复制") != nullptr);
 }
 
@@ -1838,7 +2169,6 @@ TEST_CASE("TestTextFieldImeCommandsAndAuthoritativeReplacement") {
       {begin, update},
   });
   REQUIRE(applied.result_code == TextInputResultCode::Ok);
-  REQUIRE(applied.changed);
   REQUIRE(
       text_field_value.Get().text == "a\xF0\x9F\x98\x80"
                                      "bx"

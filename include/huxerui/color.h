@@ -8,6 +8,8 @@ struct Color {
   float blue = 0.0F;
   float alpha = 1.0F;
 
+  bool operator==(const Color&) const = default;
+
   static constexpr Color Rgb(int red, int green, int blue, float alpha = 1.0F) noexcept {
     return {
         static_cast<float>(red) / 255.0F,

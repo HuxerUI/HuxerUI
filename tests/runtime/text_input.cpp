@@ -30,7 +30,6 @@ public:
       return {
           TextInputResultCode::SessionMismatch,
           TextInputSyncAction::None,
-          false,
       };
     }
     for (const TextInputCommand& command : batch.commands) {
@@ -42,7 +41,6 @@ public:
     return {
         TextInputResultCode::Ok,
         TextInputSyncAction::Update,
-        true,
     };
   }
 
@@ -70,7 +68,7 @@ public:
         {
             static_cast<float>(range.end * 10),
             0.0F,
-            1.0F,
+            invalid_geometry ? -1.0F : 1.0F,
             20.0F,
         },
         {},
@@ -107,6 +105,10 @@ public:
     ++state.revision;
   }
 
+  void AdvanceContentRevisionWithoutStateRevision() {
+    ++state.content_revision;
+  }
+
   void ChangeAction(TextInputAction action) {
     configuration.action = action;
   }
@@ -114,6 +116,7 @@ public:
   TextInputConfiguration configuration;
   TextInputState state;
   bool handle_keys = false;
+  bool invalid_geometry = false;
   int begin_count = 0;
   int apply_count = 0;
   int end_count = 0;
@@ -129,11 +132,15 @@ public:
 class ProbePlatformTextInput final : public huxerui::PlatformTextInput {
 public:
   void Start(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     started_sessions.push_back(session_id);
     started_configurations.push_back(configuration);
     started_states.push_back(state);
+    started_geometry.push_back(geometry);
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
@@ -143,11 +150,15 @@ public:
   }
 
   void Restart(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     restarted_sessions.push_back(session_id);
     restarted_configurations.push_back(configuration);
     restarted_states.push_back(state);
+    restarted_geometry.push_back(geometry);
   }
 
   void Stop(TextInputSessionId session_id) override {
@@ -157,12 +168,14 @@ public:
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputConfiguration> started_configurations;
   std::vector<TextInputState> started_states;
+  std::vector<TextInputGeometry> started_geometry;
   std::vector<TextInputSessionId> updated_sessions;
   std::vector<TextInputState> updated_states;
   std::vector<TextInputGeometry> updated_geometry;
   std::vector<TextInputSessionId> restarted_sessions;
   std::vector<TextInputConfiguration> restarted_configurations;
   std::vector<TextInputState> restarted_states;
+  std::vector<TextInputGeometry> restarted_geometry;
   std::vector<TextInputSessionId> stopped_sessions;
 };
 
@@ -334,23 +347,30 @@ TEST_CASE("TestTextInputSessionSurvivesRecompositionAndSynchronizesState") {
   runtime.SetViewport({200.0F, 100.0F});
   runtime.BuildFrame();
   FocusNext(runtime);
+  REQUIRE(first_text_client->geometry_queries == 1);
 
   runtime.InvalidateRoot();
   runtime.BuildFrame();
   REQUIRE(first_text_client->begin_count == 1);
   REQUIRE(text_input.started_sessions.size() == 1);
   REQUIRE(text_input.stopped_sessions.empty());
+  const int recomposed_geometry_queries = first_text_client->geometry_queries;
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->geometry_queries == recomposed_geometry_queries);
 
   first_text_client->SetSelection({2, 2});
   runtime.BuildFrame();
   REQUIRE(text_input.updated_sessions == std::vector<TextInputSessionId>{1});
   REQUIRE(text_input.updated_states.back().selection == TextSelection{2, 2});
   REQUIRE(text_input.updated_geometry.back().result_code == TextInputResultCode::Ok);
+  REQUIRE(first_text_client->geometry_queries == recomposed_geometry_queries + 1);
 
   first_text_client->ChangeAction(TextInputAction::Search);
   runtime.BuildFrame();
   REQUIRE(text_input.restarted_sessions == std::vector<TextInputSessionId>{1});
   REQUIRE(text_input.restarted_configurations.back().action == TextInputAction::Search);
+  REQUIRE(text_input.restarted_geometry.back() == text_input.updated_geometry.back());
+  REQUIRE(first_text_client->geometry_queries == recomposed_geometry_queries + 1);
 }
 
 TEST_CASE("TestTextInputActionValidatesSessionConfigurationAndClientHandling") {
@@ -411,7 +431,6 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
       {selection},
   });
   REQUIRE(applied.result_code == TextInputResultCode::Ok);
-  REQUIRE(applied.changed);
   REQUIRE(first_text_client->apply_count == 1);
   REQUIRE(first_text_client->state.selection == TextSelection{3, 3});
   REQUIRE(text_input.updated_states.back().selection == TextSelection{3, 3});
@@ -429,6 +448,31 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   REQUIRE(position.result_code == TextInputResultCode::Ok);
   REQUIRE(position.position.offset == 4);
   REQUIRE(first_text_client->position_queries == 1);
+}
+
+TEST_CASE("TestTextInputRejectsContentChangesWithoutStateRevision") {
+  ResetTextInputProbes();
+  TestPlatform platform;
+  Runtime runtime{TwoTextClientsApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+  FocusNext(runtime);
+
+  first_text_client->AdvanceContentRevisionWithoutStateRevision();
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
+}
+
+TEST_CASE("TestTextInputRejectsInvalidGeometry") {
+  ResetTextInputProbes();
+  first_text_client->invalid_geometry = true;
+  TestPlatform platform;
+  Runtime runtime{TwoTextClientsApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(FocusNext(runtime), std::logic_error);
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(first_text_client->end_count == 1);
 }
 
 TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {
@@ -451,6 +495,7 @@ TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {
 
   REQUIRE(text_input.started_states.size() == 1);
   REQUIRE(text_input.started_states.front().selection == TextSelection{2, 2});
+  REQUIRE(text_input.started_geometry.front().caret.x == 20.0F);
 }
 
 TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {

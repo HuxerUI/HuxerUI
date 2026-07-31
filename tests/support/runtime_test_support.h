@@ -16,6 +16,8 @@
 
 namespace huxerui::test {
 
+class Runtime;
+
 using huxerui::AnimateTo;
 using huxerui::Axis;
 using huxerui::Button;
@@ -28,7 +30,6 @@ using huxerui::CrossAxisAlignment;
 using huxerui::Dialog;
 using huxerui::DialogContext;
 using huxerui::DialogHandle;
-using huxerui::DisplayList;
 using huxerui::DrawArcCommand;
 using huxerui::DrawBorderCommand;
 using huxerui::DrawRectCommand;
@@ -40,6 +41,7 @@ using huxerui::Event;
 using huxerui::EventEmitter;
 using huxerui::Focusable;
 using huxerui::ForEach;
+using huxerui::FrameCommit;
 using huxerui::GridColumns;
 using huxerui::HorizontalAlignment;
 using huxerui::Key;
@@ -56,15 +58,21 @@ using huxerui::MountedNode;
 using huxerui::NodeExtension;
 using huxerui::Offset;
 using huxerui::Opacity;
+using huxerui::PaintCommand;
+using huxerui::PaintContext;
+using huxerui::PaintSequence;
 using huxerui::Point;
 using huxerui::PointerEvent;
 using huxerui::PointerEventType;
 using huxerui::PopClipCommand;
+using huxerui::PopTransformCommand;
 using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
 using huxerui::PushClipCommand;
 using huxerui::PushTransformCommand;
 using huxerui::Rect;
+using huxerui::RenderFrame;
+using huxerui::RenderNode;
 using huxerui::Rotation;
 using huxerui::Row;
 using huxerui::Scale;
@@ -82,6 +90,7 @@ using huxerui::Switch;
 using huxerui::SwitchStyle;
 using huxerui::Text;
 using huxerui::TextEditingAction;
+using huxerui::Transform2D;
 using huxerui::TextEditingValue;
 using huxerui::TextField;
 using huxerui::TextFieldEvents;
@@ -127,6 +136,70 @@ template <huxerui::EnvironmentValue Value> Value ThemeDefinitionValue(const Them
   return *typed;
 }
 
+class FlattenedScene {
+public:
+  [[nodiscard]] const std::vector<PaintCommand>& Commands() const noexcept {
+    return commands_;
+  }
+
+private:
+  void Append(const PaintSequence& sequence) {
+    commands_.insert(commands_.end(), sequence.Commands().begin(), sequence.Commands().end());
+  }
+
+  void Append(const RenderNode& node) {
+    if (!node.visible) {
+      return;
+    }
+    Transform2D transform = node.transform;
+    transform.translate_x += node.offset.x;
+    transform.translate_y += node.offset.y;
+    const bool transformed = !transform.IsIdentity();
+    if (transformed) {
+      commands_.emplace_back(PushTransformCommand{transform});
+    }
+    Append(node.content);
+    if (node.child_clip.has_value()) {
+      commands_.emplace_back(
+          PushClipCommand{
+              node.child_clip->rect,
+              node.child_clip->corner_radius,
+          }
+      );
+    }
+    const bool children_transformed = !node.children_transform.IsIdentity();
+    if (children_transformed) {
+      commands_.emplace_back(PushTransformCommand{node.children_transform});
+    }
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr) {
+        Append(*child);
+      }
+    }
+    if (children_transformed) {
+      commands_.emplace_back(PopTransformCommand{});
+    }
+    if (node.child_clip.has_value()) {
+      commands_.emplace_back(PopClipCommand{});
+    }
+    Append(node.foreground);
+    if (transformed) {
+      commands_.emplace_back(PopTransformCommand{});
+    }
+  }
+
+  void Update(const RenderFrame& frame) {
+    commands_.clear();
+    if (frame.scene.root != nullptr) {
+      Append(*frame.scene.root);
+    }
+  }
+
+  std::vector<PaintCommand> commands_;
+
+  friend class Runtime;
+};
+
 class Runtime final {
 public:
   Runtime(huxerui::RootFactory root_factory, huxerui::PlatformHost& platform, huxerui::AppOptions options = {})
@@ -142,8 +215,25 @@ public:
     runtime_.SetViewport(viewport);
   }
 
-  const DisplayList& BuildFrame() {
-    return runtime_.BuildFrame();
+  const FlattenedScene& BuildFrame() {
+    flattened_scene_.Update(BuildCommit().render_frame);
+    return flattened_scene_;
+  }
+
+  const RenderFrame& BuildRenderFrame() {
+    return BuildCommit().render_frame;
+  }
+
+  const FrameCommit& BuildCommit() {
+    last_commit_ = &runtime_.BuildFrame();
+    return *last_commit_;
+  }
+
+  [[nodiscard]] const FrameCommit& LastCommit() const {
+    if (last_commit_ == nullptr) {
+      throw std::logic_error("HuxerUI test Runtime has not built a frame");
+    }
+    return *last_commit_;
   }
 
   void HandlePointerEvent(const PointerEvent& event) {
@@ -200,6 +290,8 @@ public:
 
 private:
   huxerui::Runtime runtime_;
+  FlattenedScene flattened_scene_;
+  const FrameCommit* last_commit_ = nullptr;
 };
 
 class TestPlatform final : public huxerui::PlatformHost {
@@ -370,9 +462,9 @@ public:
     std::vector<Line> lines_;
   };
 
-  void RequestFrame(double delay_seconds) override {
+  void RequestFrameAt(double deadline) override {
     ++requested_frames;
-    requested_delays.push_back(delay_seconds);
+    requested_deadlines.push_back(deadline);
   }
 
   double Now() const noexcept override {
@@ -415,13 +507,13 @@ public:
 
   int requested_frames = 0;
   double current_time = 0.0;
-  std::vector<double> requested_delays;
+  std::vector<double> requested_deadlines;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
 };
 
-inline std::string FirstText(const DisplayList& display_list) {
-  for (const auto& command : display_list.Commands()) {
+inline std::string FirstText(const FlattenedScene& scene) {
+  for (const auto& command : scene.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
       return text->text;
     }
@@ -429,8 +521,8 @@ inline std::string FirstText(const DisplayList& display_list) {
   return {};
 }
 
-inline bool ContainsText(const DisplayList& display_list, std::string_view expected) {
-  for (const auto& command : display_list.Commands()) {
+inline bool ContainsText(const FlattenedScene& scene, std::string_view expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return true;
@@ -439,8 +531,8 @@ inline bool ContainsText(const DisplayList& display_list, std::string_view expec
   return false;
 }
 
-inline const DrawTextCommand* FindText(const DisplayList& display_list, std::string_view expected) {
-  for (const auto& command : display_list.Commands()) {
+inline const DrawTextCommand* FindText(const FlattenedScene& scene, std::string_view expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return text;
@@ -449,55 +541,69 @@ inline const DrawTextCommand* FindText(const DisplayList& display_list, std::str
   return nullptr;
 }
 
-inline const DrawRectCommand* FindRect(const DisplayList& display_list, Rect expected) {
-  for (const auto& command : display_list.Commands()) {
+inline const DrawRectCommand* FindRect(const FlattenedScene& scene, Rect expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
-        rect->rect.height == expected.height) {
+    if (rect && rect->rect == expected) {
       return rect;
     }
   }
   return nullptr;
 }
 
-inline const DrawRectCommand* FindRectWithColor(const DisplayList& display_list, Color expected) {
-  for (const auto& command : display_list.Commands()) {
+inline const DrawRectCommand* FindRectWithColor(const FlattenedScene& scene, Color expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color.red == expected.red && rect->color.green == expected.green &&
-        rect->color.blue == expected.blue && rect->color.alpha == expected.alpha) {
+    if (rect && rect->color == expected) {
       return rect;
     }
   }
   return nullptr;
 }
 
-inline const DrawBorderCommand* FindBorderWithColor(const DisplayList& display_list, Color expected) {
-  for (const auto& command : display_list.Commands()) {
+inline std::optional<Rect> FindPresentedRectWithColor(const FlattenedScene& scene, Color expected) {
+  std::vector<Transform2D> transform_stack{Transform2D{}};
+  for (const auto& command : scene.Commands()) {
+    if (const auto* transform = std::get_if<PushTransformCommand>(&command)) {
+      transform_stack.push_back(detail::ComposeTransform(transform_stack.back(), transform->transform));
+      continue;
+    }
+    if (std::holds_alternative<huxerui::PopTransformCommand>(command)) {
+      transform_stack.pop_back();
+      continue;
+    }
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    if (rect && rect->color == expected) {
+      return detail::TransformBounds(transform_stack.back(), rect->rect);
+    }
+  }
+  return std::nullopt;
+}
+
+inline const DrawBorderCommand* FindBorderWithColor(const FlattenedScene& scene, Color expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* border = std::get_if<DrawBorderCommand>(&command);
-    if (border && border->color.red == expected.red && border->color.green == expected.green &&
-        border->color.blue == expected.blue && border->color.alpha == expected.alpha) {
+    if (border && border->color == expected) {
       return border;
     }
   }
   return nullptr;
 }
 
-inline bool ContainsRect(const DisplayList& display_list, Rect expected) {
-  for (const auto& command : display_list.Commands()) {
+inline bool ContainsRect(const FlattenedScene& scene, Rect expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
-        rect->rect.height == expected.height) {
+    if (rect && rect->rect == expected) {
       return true;
     }
   }
   return false;
 }
 
-inline std::optional<float> RectAlpha(const DisplayList& display_list, Rect expected) {
-  for (const auto& command : display_list.Commands()) {
+inline std::optional<float> RectAlpha(const FlattenedScene& scene, Rect expected) {
+  for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->rect.x == expected.x && rect->rect.y == expected.y && rect->rect.width == expected.width &&
-        rect->rect.height == expected.height) {
+    if (rect && rect->rect == expected) {
       return rect->color.alpha;
     }
   }

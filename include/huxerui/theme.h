@@ -25,18 +25,24 @@ struct ColorScheme {
   Color inverse_on_surface = Color::White();
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
   Color error = Color::Rgb(207, 34, 46);
+
+  bool operator==(const ColorScheme&) const = default;
 };
 
 struct TypographyScheme {
   float body = 14.0F;
   float label = 14.0F;
   float title = 20.0F;
+
+  bool operator==(const TypographyScheme&) const = default;
 };
 
 struct ShapeScheme {
   float small = 4.0F;
   float medium = 8.0F;
   float large = 14.0F;
+
+  bool operator==(const ShapeScheme&) const = default;
 };
 
 struct SpacingScheme {
@@ -45,12 +51,16 @@ struct SpacingScheme {
   float medium = 16.0F;
   float large = 24.0F;
   float extra_large = 32.0F;
+
+  bool operator==(const SpacingScheme&) const = default;
 };
 
 struct ElevationScheme {
   float low = 2.0F;
   float medium = 8.0F;
   float high = 20.0F;
+
+  bool operator==(const ElevationScheme&) const = default;
 };
 
 struct MotionScheme {
@@ -58,6 +68,8 @@ struct MotionScheme {
   double normal = 0.2;
   double slow = 0.32;
   bool reduced_motion = false;
+
+  bool operator==(const MotionScheme&) const = default;
 };
 
 enum class IndicationKind {
@@ -73,6 +85,8 @@ struct InteractionScheme {
   std::optional<Color> focus_ring;
   float focus_ring_width = 2.0F;
   float disabled_opacity = 0.42F;
+
+  bool operator==(const InteractionScheme&) const = default;
 };
 
 struct ThemeSpec {
@@ -85,6 +99,8 @@ struct ThemeSpec {
   InteractionScheme interactions;
 
   static ThemeSpec Default();
+
+  bool operator==(const ThemeSpec&) const = default;
 };
 
 struct TextStyle {
@@ -92,6 +108,8 @@ struct TextStyle {
   float font_size = 14.0F;
 
   static TextStyle Default();
+
+  bool operator==(const TextStyle&) const = default;
 };
 
 struct ButtonStyle {
@@ -102,6 +120,8 @@ struct ButtonStyle {
   float corner_radius = 8.0F;
 
   static ButtonStyle Default();
+
+  bool operator==(const ButtonStyle&) const = default;
 };
 
 struct TextFieldStyle {
@@ -126,6 +146,8 @@ struct TextFieldStyle {
   float validation_spacing = 4.0F;
 
   static TextFieldStyle Default();
+
+  bool operator==(const TextFieldStyle&) const = default;
 };
 
 struct CheckboxStyle {
@@ -137,6 +159,8 @@ struct CheckboxStyle {
   float corner_radius = 4.0F;
 
   static CheckboxStyle Default();
+
+  bool operator==(const CheckboxStyle&) const = default;
 };
 
 struct SwitchStyle {
@@ -151,6 +175,8 @@ struct SwitchStyle {
   double animation_duration = 0.2;
 
   static SwitchStyle Default();
+
+  bool operator==(const SwitchStyle&) const = default;
 };
 
 struct ProgressCircleStyle {
@@ -162,6 +188,8 @@ struct ProgressCircleStyle {
   double animation_duration = 0.9;
 
   static ProgressCircleStyle Default();
+
+  bool operator==(const ProgressCircleStyle&) const = default;
 };
 
 class ThemeDefinition;

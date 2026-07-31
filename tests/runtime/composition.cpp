@@ -10,6 +10,7 @@ EventEmitter saved_event_emitter;
 std::string received_event;
 
 State<int> modifier_value;
+State<bool> modifier_style_changed;
 int extension_creations = 0;
 int extension_updates = 0;
 int extension_destroys = 0;
@@ -32,7 +33,36 @@ struct ProbeModifier {
   using Extension = ProbeModifierExtension;
 
   int value;
+
+  bool operator==(const ProbeModifier&) const = default;
 };
+
+struct OpaqueProbeModifier;
+
+int opaque_extension_updates = 0;
+
+class OpaqueProbeModifierExtension final : public NodeExtension {
+public:
+  OpaqueProbeModifierExtension(MountedNode& node, const OpaqueProbeModifier& modifier);
+  void Update(MountedNode& node, const OpaqueProbeModifier& modifier);
+};
+
+struct OpaqueProbeModifier {
+  using Extension = OpaqueProbeModifierExtension;
+
+  int value;
+};
+
+OpaqueProbeModifierExtension::OpaqueProbeModifierExtension(MountedNode& node, const OpaqueProbeModifier& modifier) {
+  static_cast<void>(node);
+  static_cast<void>(modifier);
+}
+
+void OpaqueProbeModifierExtension::Update(MountedNode& node, const OpaqueProbeModifier& modifier) {
+  static_cast<void>(node);
+  static_cast<void>(modifier);
+  ++opaque_extension_updates;
+}
 
 ProbeModifierExtension::ProbeModifierExtension(MountedNode& node, const ProbeModifier& modifier)
     : value(modifier.value) {
@@ -71,7 +101,8 @@ View EventApp() {
   }
 
   return Column{
-      EventSource().Key("source").On<SearchSubmitted>([](std::string value) { received_event = "replaced:" + value; }
+      EventSource().Key("source").On<SearchSubmitted>(
+                                     [](std::string value) { received_event = "replaced:" + value; }
       ).On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; }),
   };
 }
@@ -98,9 +129,15 @@ View CopyOnWriteApp() {
 
 View ModifierApp() {
   auto value = UseState(1);
+  auto style_changed = UseState(false);
   modifier_value = value;
+  modifier_style_changed = style_changed;
   return Text("Modifier")
-      .With(huxerui::Padding{5.0F}, huxerui::Background{huxerui::Color::White()}, ProbeModifier{value.Get()});
+      .With(
+          huxerui::Padding{5.0F},
+          huxerui::Background{style_changed.Get() ? huxerui::Color::Black() : huxerui::Color::White()},
+          ProbeModifier{value.Get()}
+      );
 }
 
 View ModifierCopyOnWriteApp() {
@@ -110,6 +147,10 @@ View ModifierCopyOnWriteApp() {
       original,
       modified,
   };
+}
+
+View OpaqueModifierApp() {
+  return Text("Opaque").With(OpaqueProbeModifier{1});
 }
 
 View LocalCounter() {
@@ -298,7 +339,7 @@ TEST_CASE("TestUseStateAndStateUpdate") {
   Runtime runtime{CounterApp, platform};
   runtime.SetViewport({320.0F, 240.0F});
 
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(FirstText(initial) == "1");
 
   const auto* root = runtime.RootNode();
@@ -306,14 +347,14 @@ TEST_CASE("TestUseStateAndStateUpdate") {
   const std::uint64_t root_identity = root->identity;
 
   runtime.InvalidateRoot();
-  const DisplayList& recomposed = runtime.BuildFrame();
+  const FlattenedScene& recomposed = runtime.BuildFrame();
   REQUIRE(FirstText(recomposed) == "1");
   REQUIRE(runtime.RootNode()->identity == root_identity);
 
   ClickAt(runtime, {10.0F, 42.0F});
   REQUIRE(platform.requested_frames > 0);
 
-  const DisplayList& updated = runtime.BuildFrame();
+  const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(FirstText(updated) == "2");
   REQUIRE(runtime.RootNode()->identity == root_identity);
 }
@@ -421,8 +462,8 @@ TEST_CASE("TestLayoutAndHitTest") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
-  REQUIRE(root->children[0]->frame.y == 0.0F);
-  REQUIRE(root->children[1]->frame.y == 24.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 0.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 24.0F);
   REQUIRE(root->children[1]->children.size() == 1);
   REQUIRE(huxerui::detail::HasEventBinding<ViewEvents::Click>(root->children[1]->children[0]->event_bindings));
 }
@@ -463,13 +504,29 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
     REQUIRE(extension_updates == 0);
     const std::uint64_t identity = root->identity;
 
-    modifier_value = 2;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+
+    root = runtime.RootNode();
+    REQUIRE(root->identity == identity);
+    REQUIRE(extension_creations == 1);
+    REQUIRE(extension_updates == 0);
+
+    modifier_style_changed = true;
     runtime.BuildFrame();
 
     root = runtime.RootNode();
     REQUIRE(root->identity == identity);
     REQUIRE(extension_creations == 1);
     REQUIRE(extension_updates == 1);
+
+    modifier_value = 2;
+    runtime.BuildFrame();
+
+    root = runtime.RootNode();
+    REQUIRE(root->identity == identity);
+    REQUIRE(extension_creations == 1);
+    REQUIRE(extension_updates == 2);
     REQUIRE(static_cast<ProbeModifierExtension*>(root->extensions[0].extension.get())->value == 2);
   }
   REQUIRE(extension_destroys == 1);
@@ -482,6 +539,20 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   REQUIRE(copy_root->children[0]->style.foreground.has_value());
   REQUIRE(copy_root->children[0]->style.foreground->red == huxerui::TextStyle::Default().foreground.red);
   REQUIRE(copy_root->children[1]->style.foreground.has_value());
+}
+
+TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
+  opaque_extension_updates = 0;
+
+  TestPlatform platform;
+  Runtime runtime{OpaqueModifierApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+  REQUIRE(opaque_extension_updates == 0);
+
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(opaque_extension_updates == 1);
 }
 
 TEST_CASE("TestScopeStateIsolation") {

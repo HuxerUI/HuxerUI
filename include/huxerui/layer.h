@@ -67,6 +67,9 @@ public:
         LayerOptions{
             .kind = kind,
             .input_policy = input_policy,
+            .dismiss_on_outside_press = false,
+            .on_dismiss_request = {},
+            .modal_scrim = std::nullopt,
         },
         ViewFactory(std::forward<Factory>(content))
     );

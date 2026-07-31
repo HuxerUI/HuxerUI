@@ -142,10 +142,10 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Measu
 
 Rect ContentRect(const MountedNode& node) {
   return {
-      node.frame.x + node.style.padding.left,
-      node.frame.y + node.style.padding.top,
-      std::max(0.0F, node.frame.width - node.style.padding.Horizontal()),
-      std::max(0.0F, node.frame.height - node.style.padding.Vertical()),
+      node.bounds.x + node.style.padding.left,
+      node.bounds.y + node.style.padding.top,
+      std::max(0.0F, node.bounds.width - node.style.padding.Horizontal()),
+      std::max(0.0F, node.bounds.height - node.style.padding.Vertical()),
   };
 }
 
@@ -162,7 +162,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
     return false;
   }
   const auto local_position = node.presentation.resolved_transform.Inverse(position);
-  if (!local_position.has_value() || !node.frame.Contains(*local_position)) {
+  if (!local_position.has_value() || !node.bounds.Contains(*local_position)) {
     return false;
   }
 
@@ -213,6 +213,12 @@ Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints con
 } // namespace
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost& platform, Runtime& runtime) {
+  // An invalidated ancestor may revisit a clean child. The child's cached result remains valid only for the exact
+  // parent constraints under which it was measured.
+  if (!node.measure_dirty && node.measured_constraints.has_value() && *node.measured_constraints == constraints) {
+    return node.measured_size;
+  }
+
   MeasureEnvironment environment{&platform, &runtime};
   if (node.kind == NodeKind::ScrollView) {
     node.scroll->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
@@ -285,7 +291,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
         MeasureVirtualItem
     );
     VirtualLayoutResult result = node.virtual_layout->measure(context, node, content_constraints);
-    session.Commit(result.Placements());
+    session.CommitRealization(result.Placements());
     node.virtual_state->placements = result.Placements();
     node.scroll->axis = result.ScrollAxis();
     node.scroll->content_width = result.ContentSize().width;
@@ -297,6 +303,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
         node.scroll->offset_x = *result.CorrectedScrollOffset();
       }
     }
+    node.virtual_state->viewport_dirty = false;
     content_size = content_constraints.Constrain(result.MeasuredSize());
     break;
   }
@@ -320,20 +327,40 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
     scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
     CompleteScrollController(node);
   }
+  node.measured_constraints = constraints;
+  node.measure_dirty = false;
+  node.layout_dirty = true;
+  ++node.measure_revision;
   return node.measured_size;
 }
 
-void LayoutNode(MountedNode& node, Point origin) {
-  node.frame = {
-      origin.x,
-      origin.y,
+void LayoutNode(MountedNode& node, Point offset) {
+  const bool size_changed =
+      node.bounds.width != node.measured_size.width || node.bounds.height != node.measured_size.height;
+  const bool offset_changed = node.layout_offset != offset;
+  if (size_changed) {
+    node.content_paint_dirty = true;
+    node.foreground_paint_dirty = true;
+  }
+  node.layout_offset = offset;
+  node.bounds = {
+      0.0F,
+      0.0F,
       node.measured_size.width,
       node.measured_size.height,
   };
+  // Moving a node in its parent does not change descendant placements. The revision still exposes the new resolved
+  // geometry to presentation, hit testing, and text-input queries.
+  if (!node.layout_dirty && !size_changed) {
+    if (offset_changed) {
+      ++node.layout_revision;
+    }
+    return;
+  }
 
   const Point content_origin{
-      origin.x + node.style.padding.left,
-      origin.y + node.style.padding.top,
+      node.style.padding.left,
+      node.style.padding.top,
   };
   switch (node.kind) {
   case NodeKind::Layout:
@@ -353,20 +380,14 @@ void LayoutNode(MountedNode& node, Point origin) {
       LayoutNode(*child, content_origin);
     }
     break;
-  case NodeKind::ScrollView: {
-    const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  case NodeKind::ScrollView:
     for (auto& child : node.children) {
-      LayoutNode(
-          *child,
-          {
-              content_origin.x - (vertical ? 0.0F : node.scroll->offset_x),
-              content_origin.y - (vertical ? node.scroll->offset_y : 0.0F),
-          }
-      );
+      LayoutNode(*child, content_origin);
     }
     break;
-  }
   case NodeKind::VirtualLayout: {
+    // Virtual scrolling changes which items are realized and their viewport-relative placements, so its offset is
+    // resolved during layout. A regular ScrollView retains its subtree and moves it with children_transform instead.
     const bool vertical = ScrollAxis(node) == Axis::Vertical;
     const float scroll_offset = vertical ? node.scroll->offset_y : node.scroll->offset_x;
     for (const auto& placement : node.virtual_state->placements) {
@@ -391,6 +412,8 @@ void LayoutNode(MountedNode& node, Point origin) {
   case NodeKind::Spacer:
     break;
   }
+  node.layout_dirty = false;
+  ++node.layout_revision;
 }
 
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
@@ -417,7 +440,7 @@ std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& nod
   if (binding == node.layout_values.end()) {
     return std::nullopt;
   }
-  const auto* style = std::any_cast<ScrollBarStyle>(&binding->second);
+  const auto* style = std::any_cast<ScrollBarStyle>(&binding->second.value);
   if (!style) {
     throw std::logic_error("HuxerUI scroll bar binding type mismatch");
   }
@@ -502,8 +525,13 @@ float ScrollNodeBy(MountedNode& node, float delta) {
   const float max_offset = std::max(0.0F, content_extent - viewport_extent);
   const float previous = scroll_offset;
   scroll_offset = std::clamp(scroll_offset + delta, 0.0F, max_offset);
-  if (scroll_offset != previous && node.scroll->connection) {
-    node.scroll->connection->PublishMetrics();
+  if (scroll_offset != previous) {
+    if (node.virtual_state) {
+      node.virtual_state->viewport_dirty = true;
+    }
+    if (node.scroll->connection) {
+      node.scroll->connection->PublishMetrics();
+    }
   }
   return scroll_offset - previous;
 }
@@ -513,13 +541,18 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
     return false;
   }
 
+  const std::optional<Rect> local_rect = InverseTransformBounds(node.presentation.resolved_transform, rect);
+  if (!local_rect.has_value()) {
+    return false;
+  }
+
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
   const Rect viewport = ContentRect(node);
   const float viewport_start = vertical ? viewport.y : viewport.x;
   const float viewport_extent = vertical ? viewport.height : viewport.width;
   const float viewport_end = viewport_start + viewport_extent;
-  const float rect_start = vertical ? rect.y : rect.x;
-  const float rect_extent = vertical ? rect.height : rect.width;
+  const float rect_start = vertical ? local_rect->y : local_rect->x;
+  const float rect_extent = vertical ? local_rect->height : local_rect->width;
   const float rect_end = rect_start + rect_extent;
 
   float delta = 0.0F;
@@ -532,11 +565,13 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
   if (applied == 0.0F) {
     return false;
   }
+  Rect moved = *local_rect;
   if (vertical) {
-    rect.y -= applied;
+    moved.y -= applied;
   } else {
-    rect.x -= applied;
+    moved.x -= applied;
   }
+  rect = TransformBounds(node.presentation.resolved_transform, moved);
   return true;
 }
 
@@ -546,7 +581,7 @@ const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {
     static const ScrollPhysics default_physics;
     return default_physics;
   }
-  const auto* physics = std::any_cast<ScrollPhysics>(&binding->second);
+  const auto* physics = std::any_cast<ScrollPhysics>(&binding->second.value);
   if (!physics) {
     throw std::logic_error("HuxerUI scroll physics binding type mismatch");
   }
@@ -1067,7 +1102,7 @@ float TotalSpacing(const MountedNode& node) {
 float SumMainSizes(const MountedNode& node, bool vertical) {
   float result = 0.0F;
   for (std::size_t index = 0; index < node.ChildCount(); ++index) {
-    result += LayoutMainSize(node.ChildAt(index).MeasuredSize(), vertical);
+    result += LayoutMainSize(node.ChildAt(index).LayoutSize(), vertical);
   }
   return result;
 }
@@ -1075,7 +1110,7 @@ float SumMainSizes(const MountedNode& node, bool vertical) {
 float MaxCrossSize(const MountedNode& node, bool vertical) {
   float result = 0.0F;
   for (std::size_t index = 0; index < node.ChildCount(); ++index) {
-    result = std::max(result, LayoutCrossSize(node.ChildAt(index).MeasuredSize(), vertical));
+    result = std::max(result, LayoutCrossSize(node.ChildAt(index).LayoutSize(), vertical));
   }
   return result;
 }
@@ -1194,7 +1229,7 @@ AxisPlacement ResolveFlowLinePlacement(const MountedNode& node, const FlowLine& 
   const std::size_t count = line.children.size();
   float used = count < 2 ? 0.0F : node.Spacing() * static_cast<float>(count - 1);
   for (const MountedNode* child : line.children) {
-    used += child->MeasuredSize().width;
+    used += child->LayoutSize().width;
   }
   return ResolveAxisPlacement(node.MainAlignment(), node.Spacing(), count, used, available);
 }
@@ -1245,7 +1280,7 @@ void MeasureFlowLine(
   float fixed_width = 0.0F;
   for (const MountedNode* child : line.children) {
     if (child->GrowFactor() <= 0.0F) {
-      fixed_width += child->MeasuredSize().width;
+      fixed_width += child->LayoutSize().width;
     }
   }
 
@@ -1262,7 +1297,7 @@ void MeasureFlowLine(
 
   line.height = 0.0F;
   for (const MountedNode* child : line.children) {
-    line.height = std::max(line.height, child->MeasuredSize().height);
+    line.height = std::max(line.height, child->LayoutSize().height);
   }
   if (node.CrossAlignment() != CrossAxisAlignment::Stretch) {
     return;
@@ -1270,7 +1305,7 @@ void MeasureFlowLine(
   for (MountedNode* child : line.children) {
     Constraints child_constraints = loose.TightHeight(line.height);
     if (child->GrowFactor() > 0.0F && line.total_grow > 0.0F && std::isfinite(width)) {
-      child_constraints = child_constraints.TightWidth(child->MeasuredSize().width);
+      child_constraints = child_constraints.TightWidth(child->LayoutSize().width);
     }
     static_cast<void>(context.Measure(*child, child_constraints));
   }
@@ -1302,7 +1337,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   float fixed_main = 0.0F;
   for (MountedNode& child : node.Children()) {
     if (child.GrowFactor() <= 0.0F) {
-      fixed_main += LayoutMainSize(child.MeasuredSize(), vertical);
+      fixed_main += LayoutMainSize(child.LayoutSize(), vertical);
     }
   }
 
@@ -1342,7 +1377,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   const AxisPlacement placement = ResolveAxisPlacement(node, target_main, vertical);
   float main = placement.leading;
   for (MountedNode& child : node.Children()) {
-    const Size child_size = child.MeasuredSize();
+    const Size child_size = child.LayoutSize();
     const float cross = CrossOffset(target_cross, LayoutCrossSize(child_size, vertical), node.CrossAlignment());
     result.Place(child, vertical ? Point{cross, main} : Point{main, cross});
     main += LayoutMainSize(child_size, vertical) + placement.gap;
@@ -1475,7 +1510,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
 
   for (std::size_t index = range.first; index < range.second; ++index) {
     MountedNode& item = context.Item(index);
-    const Size item_size = item.MeasuredSize();
+    const Size item_size = item.LayoutSize();
     const float cross = CrossOffset(measured_cross, LayoutCrossSize(item_size, vertical), node.CrossAlignment());
     const float main = metrics.Offset(index);
     result.Place(item, vertical ? Point{cross, main} : Point{main, cross});
@@ -1682,10 +1717,10 @@ LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraint
           *child,
           {
               x,
-              y + CrossOffset(line.height, child->MeasuredSize().height, node.CrossAlignment()),
+              y + CrossOffset(line.height, child->LayoutSize().height, node.CrossAlignment()),
           }
       );
-      x += child->MeasuredSize().width + placement.gap;
+      x += child->LayoutSize().width + placement.gap;
     }
     y += line.height + node.Spacing();
   }
@@ -1702,8 +1737,8 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
   float width = 0.0F;
   float height = 0.0F;
   for (MountedNode& child : node.Children()) {
-    width = std::max(width, child.MeasuredSize().width);
-    height = std::max(height, child.MeasuredSize().height);
+    width = std::max(width, child.LayoutSize().width);
+    height = std::max(height, child.LayoutSize().height);
   }
   width = constraints.ConstrainWidth(width);
   height = constraints.ConstrainHeight(height);
@@ -1716,7 +1751,7 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
     }
     height = 0.0F;
     for (MountedNode& child : node.Children()) {
-      height = std::max(height, child.MeasuredSize().height);
+      height = std::max(height, child.LayoutSize().height);
     }
     height = constraints.ConstrainHeight(height);
   }
@@ -1732,7 +1767,7 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
 
   LayoutResult result;
   for (MountedNode& child : node.Children()) {
-    const Size child_size = child.MeasuredSize();
+    const Size child_size = child.LayoutSize();
     result.Place(
         child,
         {

@@ -1,22 +1,34 @@
 #include "selection_area_internal.h"
 
+#include "geometry_internal.h"
 #include "text_input_internal.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 
 #include <huxerui/theme.h>
 
 namespace huxerui {
 namespace {
 
+struct TextEntryGeometry {
+  Rect content;
+  Transform2D to_owner;
+  float relative_opacity = 1.0F;
+  bool valid = false;
+
+  bool operator==(const TextEntryGeometry&) const = default;
+};
+
 struct TextEntry {
-  detail::MountedNode* node = nullptr;
+  std::uint64_t node_identity = 0;
   TextOffset start = 0;
   TextOffset length = 0;
   std::unique_ptr<detail::TextLayout> layout;
+  TextEntryGeometry geometry;
 };
 
 float ResolveFontSize(const detail::MountedNode& node) {
@@ -25,81 +37,65 @@ float ResolveFontSize(const detail::MountedNode& node) {
 
 Rect ContentRect(const detail::MountedNode& node) {
   return {
-      node.frame.x + node.style.padding.left,
-      node.frame.y + node.style.padding.top,
-      std::max(0.0F, node.frame.width - node.style.padding.Horizontal()),
-      std::max(0.0F, node.frame.height - node.style.padding.Vertical()),
+      node.bounds.x + node.style.padding.left,
+      node.bounds.y + node.style.padding.top,
+      std::max(0.0F, node.bounds.width - node.style.padding.Horizontal()),
+      std::max(0.0F, node.bounds.height - node.style.padding.Vertical()),
   };
 }
 
-std::optional<Rect> TransformBoundsBetween(
-    const detail::PresentationTransform& source, const detail::PresentationTransform& target, Rect rect
-) {
-  const auto transform = [&](Point point) { return target.Inverse(source.Apply(point)); };
-  const std::optional<Point> top_left = transform({rect.x, rect.y});
-  const std::optional<Point> top_right = transform({rect.x + rect.width, rect.y});
-  const std::optional<Point> bottom_left = transform({rect.x, rect.y + rect.height});
-  const std::optional<Point> bottom_right = transform({rect.x + rect.width, rect.y + rect.height});
-  if (!top_left.has_value() || !top_right.has_value() || !bottom_left.has_value() || !bottom_right.has_value()) {
-    return std::nullopt;
-  }
-  const float left = std::min({top_left->x, top_right->x, bottom_left->x, bottom_right->x});
-  const float right = std::max({top_left->x, top_right->x, bottom_left->x, bottom_right->x});
-  const float top = std::min({top_left->y, top_right->y, bottom_left->y, bottom_right->y});
-  const float bottom = std::max({top_left->y, top_right->y, bottom_left->y, bottom_right->y});
-  return Rect{
-      left,
-      top,
-      right - left,
-      bottom - top,
-  };
-}
-
-class SelectionAreaExtension final : public NodeExtension {
+class SelectionAreaExtension final : public NodeExtension, public TextSelectionClient {
 public:
-  SelectionAreaExtension(MountedNode& node, const detail::SelectionAreaModifier&) {
-    Update(node);
+  SelectionAreaExtension(MountedNode&, const detail::SelectionAreaModifier&) {}
+
+  void Update(MountedNode&, const detail::SelectionAreaModifier&) {}
+
+  bool PrepareGeometry(MountedNode& node) override {
+    return ResolveGeometry(static_cast<detail::MountedNode&>(node));
   }
 
-  void Update(MountedNode& node, const detail::SelectionAreaModifier&) {
-    Update(node);
+  TextSelectionClient* GetTextSelectionClient() noexcept override {
+    return this;
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
-    return node.IsEnabled() && node.Frame().Contains(position);
+    return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
   PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
     if (event.device_kind == PointerDeviceKind::Touch) {
       return event.type == PointerEventType::Down ? PointerResult::Observe : PointerResult::Ignored;
     }
-    const Point host_position = node_->presentation.resolved_transform.Apply(event.position);
     switch (event.type) {
     case PointerEventType::Down:
       pointer_active_ = true;
-      selection_ = TextSelection{HitOffset(host_position), HitOffset(host_position)};
+      selection_ = TextSelection{HitOffset(event.position), HitOffset(event.position)};
+      InvalidatePaint();
       return PointerResult::Capture;
     case PointerEventType::Move:
       if (pointer_active_) {
-        selection_.active = HitOffset(host_position);
+        selection_.active = HitOffset(event.position);
+        InvalidatePaint();
         return PointerResult::Handled;
       }
       break;
     case PointerEventType::Up:
       if (pointer_active_) {
-        selection_.active = HitOffset(host_position);
+        selection_.active = HitOffset(event.position);
         pointer_active_ = false;
+        InvalidatePaint();
         return PointerResult::Handled;
       }
       break;
     case PointerEventType::Cancel:
       pointer_active_ = false;
+      InvalidatePaint();
       return PointerResult::Handled;
     }
     return PointerResult::Ignored;
   }
 
-  void Paint(const MountedNode&, DisplayList& display_list) const override {
+  void Paint(const MountedNode&, PaintContext& context) const override {
     const TextRange selection = selection_.Range();
     if (selection.IsCollapsed()) {
       return;
@@ -109,23 +105,15 @@ public:
     for (const TextEntry& entry : entries_) {
       const TextOffset start = std::max(selection.start, entry.start);
       const TextOffset end = std::min(selection.end, entry.start + entry.length);
-      if (start >= end || !entry.layout) {
+      if (start >= end || !entry.layout || !entry.geometry.valid) {
         continue;
       }
-      const Point origin{ContentRect(*entry.node).x, ContentRect(*entry.node).y};
       Color entry_color = color;
-      entry_color.alpha *= std::clamp(entry.node->PresentationOpacity(), 0.0F, 1.0F);
+      entry_color.alpha *= entry.geometry.relative_opacity;
       for (Rect rect : entry.layout->RangeRects({start - entry.start, end - entry.start})) {
-        rect.x += origin.x;
-        rect.y += origin.y;
-        const std::optional<Rect> transformed = TransformBoundsBetween(
-            entry.node->presentation.resolved_transform,
-            node_->presentation.resolved_transform,
-            rect
-        );
-        if (transformed.has_value()) {
-          display_list.DrawRect(*transformed, entry_color);
-        }
+        rect.x += entry.geometry.content.x;
+        rect.y += entry.geometry.content.y;
+        context.DrawRect(detail::TransformBounds(entry.geometry.to_owner, rect), entry_color);
       }
     }
   }
@@ -139,7 +127,7 @@ public:
     return constraints.Constrain(size);
   }
 
-  bool CanPerform(TextEditingAction action, PlatformClipboard* clipboard) const {
+  bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const override {
     const TextRange selection = selection_.Range();
     switch (action) {
     case TextEditingAction::Copy:
@@ -153,8 +141,8 @@ public:
     return false;
   }
 
-  bool Perform(TextEditingAction action, PlatformClipboard* clipboard) {
-    if (!CanPerform(action, clipboard)) {
+  bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) override {
+    if (!CanPerformTextEditingAction(action, clipboard)) {
       return false;
     }
     if (action == TextEditingAction::SelectAll) {
@@ -165,7 +153,7 @@ public:
     return selected.has_value() && clipboard->WriteText(*selected);
   }
 
-  bool SelectWord(Point position) {
+  bool SelectWord(Point position) override {
     if (document_.empty()) {
       return false;
     }
@@ -177,7 +165,7 @@ public:
     return true;
   }
 
-  bool Extend(Point position, bool start_handle) {
+  bool ExtendSelection(Point position, bool start_handle) override {
     const TextRange range = selection_.Range();
     if (range.IsCollapsed()) {
       return false;
@@ -188,7 +176,7 @@ public:
     return true;
   }
 
-  bool QueryGeometry(Rect& start, Rect& end) const {
+  bool QuerySelectionGeometry(Rect& start, Rect& end) const override {
     const TextRange range = selection_.Range();
     if (range.IsCollapsed()) {
       return false;
@@ -203,19 +191,14 @@ public:
     return true;
   }
 
-  Color HandleColor() const noexcept {
-    Color color = selection_color_;
-    color.alpha *= node_ == nullptr ? 1.0F : std::clamp(node_->PresentationOpacity(), 0.0F, 1.0F);
-    return color;
+  Color SelectionHandleColor() const noexcept override {
+    return selection_color_;
   }
 
 private:
-  void Update(MountedNode& node) {
-    node_ = &static_cast<detail::MountedNode&>(node);
-  }
-
-  void CollectTextNodes(detail::MountedNode& node, std::vector<detail::MountedNode*>& nodes) {
-    if (&node != node_ && node.kind == detail::NodeKind::SelectionArea) {
+  static void
+  CollectTextNodes(detail::MountedNode& owner, detail::MountedNode& node, std::vector<detail::MountedNode*>& nodes) {
+    if (&node != &owner && node.kind == detail::NodeKind::SelectionArea) {
       return;
     }
     if (node.kind == detail::NodeKind::Text) {
@@ -223,13 +206,30 @@ private:
       return;
     }
     for (const std::unique_ptr<detail::MountedNode>& child : node.children) {
-      CollectTextNodes(*child, nodes);
+      CollectTextNodes(owner, *child, nodes);
+    }
+  }
+
+  static void CollectTextNodes(
+      detail::MountedNode& owner,
+      detail::MountedNode& node,
+      std::unordered_map<std::uint64_t, detail::MountedNode*>& nodes
+  ) {
+    if (&node != &owner && node.kind == detail::NodeKind::SelectionArea) {
+      return;
+    }
+    if (node.kind == detail::NodeKind::Text) {
+      nodes.emplace(node.identity, &node);
+      return;
+    }
+    for (const std::unique_ptr<detail::MountedNode>& child : node.children) {
+      CollectTextNodes(owner, *child, nodes);
     }
   }
 
   void Rebuild(detail::MountedNode& node, PlatformHost& platform) {
     std::vector<detail::MountedNode*> nodes;
-    CollectTextNodes(node, nodes);
+    CollectTextNodes(node, node, nodes);
     entries_.clear();
     document_.clear();
     total_length_ = 0;
@@ -241,17 +241,48 @@ private:
       const TextOffset length = detail::Utf16Length(text->text).value_or(0);
       const float width = std::max(0.0F, text->measured_size.width - text->style.padding.Horizontal());
       entries_.push_back({
-          text,
+          text->identity,
           total_length_,
           length,
           platform.CreateTextLayout(text->text, ResolveFontSize(*text), width),
+          {},
       });
       document_ += text->text;
       total_length_ += length;
     }
     selection_.anchor = std::clamp(selection_.anchor, TextOffset{0}, total_length_);
     selection_.active = std::clamp(selection_.active, TextOffset{0}, total_length_);
-    selection_color_ = detail::ResolveThemeSpec(node.environment).colors.primary;
+  }
+
+  bool ResolveGeometry(detail::MountedNode& owner) {
+    std::unordered_map<std::uint64_t, detail::MountedNode*> nodes;
+    nodes.reserve(entries_.size());
+    CollectTextNodes(owner, owner, nodes);
+    const std::optional<Transform2D> host_to_owner = detail::InverseTransform(owner.presentation.resolved_transform);
+    const float owner_opacity = owner.PresentationOpacity();
+    bool changed = false;
+    for (TextEntry& entry : entries_) {
+      TextEntryGeometry geometry;
+      const auto found = nodes.find(entry.node_identity);
+      if (host_to_owner.has_value() && found != nodes.end()) {
+        const detail::MountedNode& text = *found->second;
+        geometry.content = ContentRect(text);
+        geometry.to_owner = detail::ComposeTransform(*host_to_owner, text.presentation.resolved_transform);
+        geometry.relative_opacity =
+            owner_opacity > 0.0F ? std::clamp(text.PresentationOpacity() / owner_opacity, 0.0F, 1.0F) : 0.0F;
+        geometry.valid = true;
+      }
+      if (entry.geometry != geometry) {
+        entry.geometry = geometry;
+        changed = true;
+      }
+    }
+    const Color selection_color = detail::ResolveThemeSpec(owner.environment).colors.primary;
+    if (selection_color_ != selection_color) {
+      selection_color_ = selection_color;
+      changed = true;
+    }
+    return changed;
   }
 
   TextOffset HitOffset(Point position) const {
@@ -261,8 +292,10 @@ private:
     const TextEntry* best = nullptr;
     float best_distance = std::numeric_limits<float>::infinity();
     for (const TextEntry& entry : entries_) {
-      const Rect content =
-          detail::TransformBounds(entry.node->presentation.resolved_transform, ContentRect(*entry.node));
+      if (!entry.geometry.valid) {
+        continue;
+      }
+      const Rect content = detail::TransformBounds(entry.geometry.to_owner, entry.geometry.content);
       const float right = content.x + content.width;
       const float bottom = content.y + content.height;
       const float dx =
@@ -275,14 +308,14 @@ private:
         best_distance = distance;
       }
     }
-    if (best == nullptr || !best->layout) {
+    if (best == nullptr || !best->layout || !best->geometry.valid) {
       return 0;
     }
-    const std::optional<Point> local = best->node->presentation.resolved_transform.Inverse(position);
+    const std::optional<Point> local = best->geometry.to_owner.Inverse(position);
     if (!local.has_value()) {
       return best->start;
     }
-    const Rect content = ContentRect(*best->node);
+    const Rect content = best->geometry.content;
     const TextPosition hit = best->layout->HitTest({local->x - content.x, local->y - content.y});
     return std::clamp(best->start + hit.offset, best->start, best->start + best->length);
   }
@@ -305,18 +338,17 @@ private:
         selected = &entry;
       }
     }
-    if (selected == nullptr || !selected->layout) {
+    if (selected == nullptr || !selected->layout || !selected->geometry.valid) {
       return std::nullopt;
     }
     const TextOffset local = std::clamp(offset - selected->start, TextOffset{0}, selected->length);
     Rect rect = selected->layout->CaretRect(local, TextAffinity::Downstream);
-    const Rect content = ContentRect(*selected->node);
+    const Rect content = selected->geometry.content;
     rect.x += content.x;
     rect.y += content.y;
-    return detail::TransformBounds(selected->node->presentation.resolved_transform, rect);
+    return detail::TransformBounds(selected->geometry.to_owner, rect);
   }
 
-  detail::MountedNode* node_ = nullptr;
   std::vector<TextEntry> entries_;
   std::string document_;
   TextSelection selection_;
@@ -332,10 +364,6 @@ SelectionAreaExtension& FindSelectionAreaExtension(detail::MountedNode& node) {
     }
   }
   throw std::logic_error("HuxerUI SelectionArea has no retained selection extension");
-}
-
-const SelectionAreaExtension& FindSelectionAreaExtension(const detail::MountedNode& node) {
-  return FindSelectionAreaExtension(const_cast<detail::MountedNode&>(node));
 }
 
 std::shared_ptr<detail::ViewSpec> MakeSelectionAreaSpec(View content) {
@@ -357,30 +385,6 @@ const ModifierDescriptor& SelectionAreaModifier::Descriptor() {
 
 Size MeasureSelectionArea(MountedNode& node, PlatformHost& platform, Runtime& runtime, const Constraints& constraints) {
   return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints);
-}
-
-bool CanPerformSelectionAreaAction(const MountedNode& node, TextEditingAction action, PlatformClipboard* clipboard) {
-  return FindSelectionAreaExtension(node).CanPerform(action, clipboard);
-}
-
-bool PerformSelectionAreaAction(MountedNode& node, TextEditingAction action, PlatformClipboard* clipboard) {
-  return FindSelectionAreaExtension(node).Perform(action, clipboard);
-}
-
-bool SelectSelectionAreaWord(MountedNode& node, Point position) {
-  return FindSelectionAreaExtension(node).SelectWord(position);
-}
-
-bool ExtendSelectionArea(MountedNode& node, Point position, bool start_handle) {
-  return FindSelectionAreaExtension(node).Extend(position, start_handle);
-}
-
-bool QuerySelectionAreaGeometry(const MountedNode& node, Rect& start, Rect& end) {
-  return FindSelectionAreaExtension(node).QueryGeometry(start, end);
-}
-
-Color SelectionAreaHandleColor(const MountedNode& node) {
-  return FindSelectionAreaExtension(node).HandleColor();
 }
 
 } // namespace detail

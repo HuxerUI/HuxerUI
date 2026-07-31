@@ -127,7 +127,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   TestPlatform platform;
   Runtime runtime{ScrollViewApp, platform};
   runtime.SetViewport({100.0F, 60.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
@@ -137,7 +137,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   REQUIRE(root->scroll->content_height == 120.0F);
   REQUIRE(root->scroll->offset_y == 0.0F);
   REQUIRE(root->children[0]->scroll == nullptr);
-  REQUIRE(root->children[0]->frame.y == 0.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 0.0F);
 
   int push_clips = 0;
   int pop_clips = 0;
@@ -150,6 +150,10 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   REQUIRE(ContainsText(initial, "First"));
   REQUIRE(ContainsText(initial, "Second"));
   REQUIRE(!ContainsText(initial, "Third"));
+  const std::uint64_t scroll_measure_revision = root->measure_revision;
+  const std::uint64_t scroll_layout_revision = root->layout_revision;
+  const std::uint64_t content_measure_revision = root->children[0]->measure_revision;
+  const std::uint64_t content_layout_revision = root->children[0]->layout_revision;
 
   const int requested_frames = platform.requested_frames;
   runtime.HandleScrollEvent(
@@ -164,7 +168,12 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
 
   root = runtime.RootNode();
   REQUIRE(root->scroll->offset_y == 45.0F);
-  REQUIRE(root->children[0]->frame.y == -45.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 0.0F);
+  REQUIRE(root->render_node.children_transform.translate_y == -45.0F);
+  REQUIRE(root->measure_revision == scroll_measure_revision);
+  REQUIRE(root->layout_revision == scroll_layout_revision);
+  REQUIRE(root->children[0]->measure_revision == content_measure_revision);
+  REQUIRE(root->children[0]->layout_revision == content_layout_revision);
 
   ClickAt(runtime, {50.0F, 50.0F});
   REQUIRE(scroll_clicked == "Third");
@@ -221,7 +230,8 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   root = runtime.RootNode();
   REQUIRE(root->scroll->offset_x == 45.0F);
   REQUIRE(root->scroll->offset_y == 0.0F);
-  REQUIRE(root->children[0]->frame.x == -45.0F);
+  REQUIRE(root->children[0]->layout_offset.x == 0.0F);
+  REQUIRE(root->render_node.children_transform.translate_x == -45.0F);
   REQUIRE(horizontal_view_scroll.Offset() == 45.0F);
 }
 
@@ -259,7 +269,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(centered != root->virtual_state->child_indices.end());
   const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->child_indices.begin());
-  REQUIRE(root->children[centered_position]->frame.y == 40.0F);
+  REQUIRE(root->children[centered_position]->layout_offset.y == 40.0F);
 
   REQUIRE(controlled_list_scroll.ScrollTo(0.0F));
   runtime.BuildFrame();
@@ -278,7 +288,8 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   const int frames_before_build = platform.requested_frames;
   runtime.BuildFrame();
 
-  REQUIRE(platform.requested_frames == frames_before_build + 1);
+  REQUIRE(platform.requested_frames == frames_before_build);
+  REQUIRE(runtime.LastCommit().next_frame_deadline == platform.current_time);
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
@@ -286,12 +297,13 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   const auto* toolbar = root->children[0]->children[0].get();
   REQUIRE(toolbar->children.size() == 4);
   const auto* item_button = toolbar->children[1].get();
+  const Rect item_button_bounds = item_button->PresentationBounds();
 
   ClickAt(
       runtime,
       {
-          item_button->frame.x + item_button->frame.width * 0.5F,
-          item_button->frame.y + item_button->frame.height * 0.5F,
+          item_button_bounds.x + item_button_bounds.width * 0.5F,
+          item_button_bounds.y + item_button_bounds.height * 0.5F,
       }
   );
   REQUIRE(example_scroll.Offset() > 0.0F);
@@ -301,11 +313,12 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   root = runtime.RootNode();
   toolbar = root->children[0]->children[0].get();
   const auto* top_button = toolbar->children[0].get();
+  const Rect top_button_bounds = top_button->PresentationBounds();
   ClickAt(
       runtime,
       {
-          top_button->frame.x + top_button->frame.width * 0.5F,
-          top_button->frame.y + top_button->frame.height * 0.5F,
+          top_button_bounds.x + top_button_bounds.width * 0.5F,
+          top_button_bounds.y + top_button_bounds.height * 0.5F,
       }
   );
   REQUIRE(example_scroll.Offset() == 0.0F);
@@ -328,7 +341,7 @@ TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(item != root->virtual_state->child_indices.end());
   std::size_t item_position = static_cast<std::size_t>(item - root->virtual_state->child_indices.begin());
-  REQUIRE(root->children[item_position]->frame.y == 0.0F);
+  REQUIRE(root->children[item_position]->layout_offset.y == 0.0F);
 
   REQUIRE(controlled_grid_scroll.ScrollToItem(std::size_t{50}, ScrollAlignment::Center));
   runtime.BuildFrame();
@@ -339,7 +352,7 @@ TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
       std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
   REQUIRE(centered != root->virtual_state->child_indices.end());
   item_position = static_cast<std::size_t>(centered - root->virtual_state->child_indices.begin());
-  REQUIRE(root->children[item_position]->frame.y == 14.0F);
+  REQUIRE(root->children[item_position]->layout_offset.y == 14.0F);
 }
 
 TEST_CASE("TestScrollControllerControlsScrollView") {

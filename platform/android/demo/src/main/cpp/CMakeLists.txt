@@ -15,7 +15,7 @@ set(HUXERUI_THEME_SOURCE
         "${HUXERUI_ROOT_DIR}/examples/ui_gallery/main.cpp"
 )
 set(HUXERUI_GENERATED_THEME_SOURCE
-        "${CMAKE_CURRENT_BINARY_DIR}/generated/theme.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/ui_gallery.cpp"
 )
 
 add_custom_command(

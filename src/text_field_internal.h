@@ -29,12 +29,11 @@ struct TextFieldModifier {
   std::optional<std::size_t> max_lines;
   std::optional<std::size_t> max_length;
   ValidationResult validation;
+
+  bool operator==(const TextFieldModifier&) const = default;
+  static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);
 };
 
 [[nodiscard]] Size MeasureTextField(MountedNode& node, PlatformHost& platform, Constraints constraints);
-bool SelectTextFieldWord(MountedNode& node, Point position);
-bool ExtendTextFieldSelection(MountedNode& node, Point position, bool start_handle);
-bool QueryTextFieldSelectionGeometry(const MountedNode& node, Rect& start, Rect& end);
-Color TextFieldSelectionHandleColor(const MountedNode& node);
 
 } // namespace huxerui::detail

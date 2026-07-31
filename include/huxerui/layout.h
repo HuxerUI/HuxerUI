@@ -3,9 +3,9 @@
 #include <any>
 #include <concepts>
 #include <cstddef>
-#include <functional>
 #include <iterator>
 #include <stdexcept>
+#include <type_traits>
 #include <typeindex>
 #include <utility>
 #include <vector>
@@ -46,7 +46,33 @@ enum class VerticalAlignment {
 
 namespace detail {
 struct LayoutContextAccess;
+
+struct ErasedLayoutValue {
+  std::any value;
+  bool (*equals)(const std::any&, const std::any&) = nullptr;
+
+  [[nodiscard]] bool EquivalentForReconciliation(const ErasedLayoutValue& other) const {
+    return equals != nullptr && other.equals != nullptr && value.type() == other.value.type() &&
+           equals(value, other.value);
+  }
+};
+
+template <class T> ErasedLayoutValue MakeErasedLayoutValue(T&& value) {
+  using Value = std::remove_cvref_t<T>;
+  ErasedLayoutValue result{
+      std::any(std::forward<T>(value)),
+      nullptr,
+  };
+  if constexpr (std::equality_comparable<Value>) {
+    result.equals = [](const std::any& left, const std::any& right) {
+      const auto* typed_left = std::any_cast<Value>(&left);
+      const auto* typed_right = std::any_cast<Value>(&right);
+      return typed_left != nullptr && typed_right != nullptr && *typed_left == *typed_right;
+    };
+  }
+  return result;
 }
+} // namespace detail
 
 class MountedNode {
 public:
@@ -140,16 +166,20 @@ public:
     return ChildAtImpl(index);
   }
 
-  [[nodiscard]] Size MeasuredSize() const noexcept {
-    return MeasuredSizeImpl();
+  [[nodiscard]] Size LayoutSize() const noexcept {
+    return LayoutSizeImpl();
   }
 
-  [[nodiscard]] Rect Frame() const noexcept {
-    return FrameImpl();
+  [[nodiscard]] Rect Bounds() const noexcept {
+    return BoundsImpl();
   }
 
-  [[nodiscard]] Rect PresentationFrame() const noexcept {
-    return PresentationFrameImpl();
+  [[nodiscard]] Point LayoutOffset() const noexcept {
+    return LayoutOffsetImpl();
+  }
+
+  [[nodiscard]] Rect PresentationBounds() const noexcept {
+    return PresentationBoundsImpl();
   }
 
   [[nodiscard]] float PresentationOpacity() const noexcept {
@@ -218,9 +248,10 @@ protected:
   virtual std::size_t ChildCountImpl() const noexcept = 0;
   virtual MountedNode& ChildAtImpl(std::size_t index) = 0;
   virtual const MountedNode& ChildAtImpl(std::size_t index) const = 0;
-  virtual Size MeasuredSizeImpl() const noexcept = 0;
-  virtual Rect FrameImpl() const noexcept = 0;
-  virtual Rect PresentationFrameImpl() const noexcept = 0;
+  virtual Size LayoutSizeImpl() const noexcept = 0;
+  virtual Rect BoundsImpl() const noexcept = 0;
+  virtual Point LayoutOffsetImpl() const noexcept = 0;
+  virtual Rect PresentationBoundsImpl() const noexcept = 0;
   virtual float PresentationOpacityImpl() const noexcept = 0;
   virtual bool IsEnabledImpl() const noexcept = 0;
   virtual bool IsFocusedImpl() const noexcept = 0;

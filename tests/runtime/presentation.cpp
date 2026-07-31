@@ -1,5 +1,7 @@
 #include "runtime_test_support.h"
 
+#include "indication_internal.h"
+
 namespace huxerui::test {
 
 struct TestEnvironmentValue {
@@ -49,6 +51,18 @@ State<bool> switch_checked;
 int checkbox_changes = 0;
 int switch_changes = 0;
 State<float> progress_circle_value;
+
+const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
+  if (node.text == text) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (const detail::MountedNode* found = FindMountedText(*child, text)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
 
 View EnvironmentReader() {
   HUXERUI_SCOPE({
@@ -390,7 +404,7 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   TestPlatform platform;
   Runtime runtime{ThemeApp, platform};
   runtime.SetViewport({320.0F, 240.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
 
   REQUIRE(observed_theme_color.red == Color::Rgb(40, 100, 220).red);
   REQUIRE(observed_nested_theme_color.red == observed_theme_color.red);
@@ -428,7 +442,7 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   REQUIRE(explicit_text->color.red == Color::Rgb(255, 140, 0).red);
 
   alternate_theme = true;
-  const DisplayList& updated = runtime.BuildFrame();
+  const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(observed_theme_color.red == Color::Rgb(220, 70, 50).red);
   const DrawTextCommand* updated_button = FindText(updated, "theme button");
   REQUIRE(updated_button != nullptr);
@@ -441,22 +455,22 @@ TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   TestPlatform platform;
   Runtime runtime{FlatDarkThemeApp, platform};
   runtime.SetViewport({320.0F, 240.0F});
-  const DisplayList& display_list = runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
-  const DrawTextCommand* body = FindText(display_list, "dark body");
+  const DrawTextCommand* body = FindText(scene, "dark body");
   REQUIRE(body != nullptr);
   REQUIRE(body->color.red == dark.colors.on_surface.red);
   REQUIRE(body->font_size == dark.typography.body);
 
-  const DrawTextCommand* title = FindText(display_list, "dark title");
+  const DrawTextCommand* title = FindText(scene, "dark title");
   REQUIRE(title != nullptr);
   REQUIRE(title->font_size == dark.typography.title);
 
-  const DrawTextCommand* button = FindText(display_list, "dark button");
+  const DrawTextCommand* button = FindText(scene, "dark button");
   REQUIRE(button != nullptr);
   REQUIRE(button->color.red == dark.colors.on_primary.red);
-  const DrawRectCommand* background = FindRect(display_list, button->rect);
+  const DrawRectCommand* background = FindRect(scene, button->rect);
   REQUIRE(background != nullptr);
   REQUIRE(background->color.blue == dark.colors.primary.blue);
 }
@@ -472,7 +486,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   TestPlatform platform;
   Runtime runtime{FlatThemeInteractionApp, platform};
   runtime.SetViewport({200.0F, 80.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "flat interaction");
   REQUIRE(button != nullptr);
   const Point pointer{
@@ -487,7 +501,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.fast);
-  const DisplayList& hovered = runtime.BuildFrame();
+  const FlattenedScene& hovered = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(hovered, light.interactions.hover_overlay) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -495,7 +509,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
       105,
       pointer,
   });
-  const DisplayList& pressed = runtime.BuildFrame();
+  const FlattenedScene& pressed = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(pressed, light.interactions.pressed_overlay) != nullptr);
 }
 
@@ -549,7 +563,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   TestPlatform platform;
   Runtime runtime{MaterialThemeApp, platform};
   runtime.SetViewport({240.0F, 80.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "material button");
   REQUIRE(button != nullptr);
   REQUIRE(button->color.red == light.colors.on_primary.red);
@@ -570,7 +584,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.fast);
-  const DisplayList& hovered = runtime.BuildFrame();
+  const FlattenedScene& hovered = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(hovered, light.interactions.hover_overlay) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -580,7 +594,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.slow * 0.5);
-  const DisplayList& pressed = runtime.BuildFrame();
+  const FlattenedScene& pressed = runtime.BuildFrame();
   const huxerui::DrawCircleCommand* ripple = nullptr;
   const PushClipCommand* ripple_clip = nullptr;
   for (const auto& command : pressed.Commands()) {
@@ -618,7 +632,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.slow * 0.5);
-  const DisplayList& keyboard_pressed = runtime.BuildFrame();
+  const FlattenedScene& keyboard_pressed = runtime.BuildFrame();
   const huxerui::DrawCircleCommand* keyboard_ripple = nullptr;
   for (const auto& command : keyboard_pressed.Commands()) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
@@ -637,7 +651,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   Runtime dark_runtime{MaterialDarkThemeApp, platform};
   dark_runtime.SetViewport({240.0F, 80.0F});
-  const DisplayList& dark_display = dark_runtime.BuildFrame();
+  const FlattenedScene& dark_display = dark_runtime.BuildFrame();
   const DrawTextCommand* dark_button = FindText(dark_display, "material dark button");
   REQUIRE(dark_button != nullptr);
   const DrawRectCommand* dark_background = FindRect(dark_display, dark_button->rect);
@@ -652,7 +666,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   TestPlatform platform;
   Runtime runtime{ToggleApp, platform};
   runtime.SetViewport({160.0F, 64.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
@@ -677,28 +691,30 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   const float initial_thumb_x = initial_thumb->center.x;
 
   const std::uint64_t checkbox_identity = checkbox->identity;
+  const Rect checkbox_bounds = checkbox->PresentationBounds();
   ClickAt(
       runtime,
       {
-          checkbox->frame.x + checkbox->frame.width * 0.5F,
-          checkbox->frame.y + checkbox->frame.height * 0.5F,
+          checkbox_bounds.x + checkbox_bounds.width * 0.5F,
+          checkbox_bounds.y + checkbox_bounds.height * 0.5F,
       }
   );
-  const DisplayList& checked_display = runtime.BuildFrame();
+  const FlattenedScene& checked_display = runtime.BuildFrame();
   REQUIRE(checkbox_changes == 1);
   REQUIRE(checkbox_checked.Get());
   REQUIRE(FindText(checked_display, "✓") != nullptr);
   REQUIRE(runtime.RootNode()->children[0]->identity == checkbox_identity);
 
   switch_node = runtime.RootNode()->children[1].get();
+  const Rect switch_bounds = switch_node->PresentationBounds();
   ClickAt(
       runtime,
       {
-          switch_node->frame.x + switch_node->frame.width * 0.5F,
-          switch_node->frame.y + switch_node->frame.height * 0.5F,
+          switch_bounds.x + switch_bounds.width * 0.5F,
+          switch_bounds.y + switch_bounds.height * 0.5F,
       }
   );
-  const DisplayList& switch_start = runtime.BuildFrame();
+  const FlattenedScene& switch_start = runtime.BuildFrame();
   REQUIRE(switch_changes == 1);
   REQUIRE(switch_checked.Get());
 
@@ -713,7 +729,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   REQUIRE(std::abs(start_thumb->center.x - initial_thumb_x) < 0.001F);
 
   platform.AdvanceTime(0.1);
-  const DisplayList& switch_middle = runtime.BuildFrame();
+  const FlattenedScene& switch_middle = runtime.BuildFrame();
   const huxerui::DrawCircleCommand* middle_thumb = nullptr;
   for (const auto& command : switch_middle.Commands()) {
     if (const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command)) {
@@ -726,7 +742,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   const float middle_thumb_x = middle_thumb->center.x;
 
   platform.AdvanceTime(0.2);
-  const DisplayList& switch_end = runtime.BuildFrame();
+  const FlattenedScene& switch_end = runtime.BuildFrame();
   const huxerui::DrawCircleCommand* end_thumb = nullptr;
   for (const auto& command : switch_end.Commands()) {
     if (const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command)) {
@@ -766,9 +782,9 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
 
 TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   constexpr float pi = 3.14159265358979323846F;
-  const auto arcs = [](const DisplayList& display_list) {
+  const auto arcs = [](const FlattenedScene& scene) {
     std::vector<DrawArcCommand> result;
-    for (const auto& command : display_list.Commands()) {
+    for (const auto& command : scene.Commands()) {
       if (const auto* arc = std::get_if<DrawArcCommand>(&command)) {
         result.push_back(*arc);
       }
@@ -779,7 +795,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   TestPlatform platform;
   Runtime determinate{DeterminateProgressCircleApp, platform};
   determinate.SetViewport({64.0F, 64.0F});
-  const DisplayList& initial = determinate.BuildFrame();
+  const FlattenedScene& initial = determinate.BuildFrame();
   const auto initial_arcs = arcs(initial);
   REQUIRE(initial_arcs.size() == 2);
   REQUIRE(std::abs(initial_arcs[0].sweep_angle - pi * 2.0F) < 0.001F);
@@ -818,7 +834,8 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   const int requests_before = animated_platform.requested_frames;
   const auto animated_initial = arcs(animated.BuildFrame());
   REQUIRE(animated_initial.size() == 2);
-  REQUIRE(animated_platform.requested_frames > requests_before);
+  REQUIRE(animated_platform.requested_frames == requests_before);
+  REQUIRE(animated.LastCommit().next_frame_deadline == animated_platform.current_time);
   const float initial_start = animated_initial[1].start_angle;
 
   animated_platform.AdvanceTime(0.48);
@@ -833,6 +850,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   const auto reduced_arcs = arcs(reduced.BuildFrame());
   REQUIRE(reduced_arcs.size() == 2);
   REQUIRE(reduced_platform.requested_frames == reduced_requests_before);
+  REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
 }
 
 TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
@@ -848,7 +866,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       101,
       {20.0F, 20.0F},
   });
-  const DisplayList& hovered = runtime.BuildFrame();
+  const FlattenedScene& hovered = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(hovered, hover) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -856,7 +874,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       101,
       {20.0F, 20.0F},
   });
-  const DisplayList& down = runtime.BuildFrame();
+  const FlattenedScene& down = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(down, pressed) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -864,7 +882,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       101,
       {20.0F, 20.0F},
   });
-  const DisplayList& released = runtime.BuildFrame();
+  const FlattenedScene& released = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(released, hover) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -872,7 +890,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       101,
       {240.0F, 120.0F},
   });
-  const DisplayList& outside = runtime.BuildFrame();
+  const FlattenedScene& outside = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(outside, hover) == nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -881,7 +899,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       {20.0F, 20.0F},
       huxerui::PointerDeviceKind::Touch,
   });
-  const DisplayList& touch_down = runtime.BuildFrame();
+  const FlattenedScene& touch_down = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(touch_down, pressed) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -890,7 +908,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
       {20.0F, 20.0F},
       huxerui::PointerDeviceKind::Touch,
   });
-  const DisplayList& touch_released = runtime.BuildFrame();
+  const FlattenedScene& touch_released = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(touch_released, pressed) == nullptr);
   REQUIRE(FindRectWithColor(touch_released, hover) == nullptr);
 }
@@ -902,15 +920,16 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   TestPlatform platform;
   Runtime overlay{DisabledHitTestApp, platform};
   overlay.SetViewport({200.0F, 80.0F});
-  const DisplayList& display_list = overlay.BuildFrame();
-  const DrawTextCommand* disabled = FindText(display_list, "disabled overlay");
+  const FlattenedScene& scene = overlay.BuildFrame();
+  const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
   REQUIRE(disabled != nullptr);
-  REQUIRE(std::abs(disabled->color.alpha - 0.42F) < 0.001F);
+  REQUIRE(disabled->color.alpha == 1.0F);
 
   const auto* overlay_root = overlay.RootNode();
   REQUIRE(overlay_root != nullptr);
   REQUIRE(overlay_root->children.size() == 2);
   REQUIRE(!overlay_root->children[1]->IsEnabled());
+  REQUIRE(std::abs(overlay_root->children[1]->render_node.opacity - 0.42F) < 0.001F);
   ClickAt(
       overlay,
       {
@@ -924,7 +943,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
 
   Runtime subtree{DisabledSubtreeApp, platform};
   subtree.SetViewport({200.0F, 80.0F});
-  const DisplayList& subtree_display = subtree.BuildFrame();
+  const FlattenedScene& subtree_display = subtree.BuildFrame();
   const auto* subtree_root = subtree.RootNode();
   REQUIRE(subtree_root != nullptr);
   REQUIRE(!subtree_root->IsEnabled());
@@ -960,7 +979,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
       .type = KeyEventType::Down,
       .key = Key::Tab,
   });
-  const DisplayList& first_focused = runtime.BuildFrame();
+  const FlattenedScene& first_focused = runtime.BuildFrame();
   REQUIRE(focus_changes.size() == 1);
   REQUIRE(focus_changes.back() == "first:on");
   const DrawBorderCommand* first_border = FindBorderWithColor(first_focused, Color::Rgb(40, 180, 90));
@@ -978,11 +997,14 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   });
 
   first_focus_enabled = false;
-  const DisplayList& disabled_first = runtime.BuildFrame();
+  const FlattenedScene& disabled_first = runtime.BuildFrame();
   REQUIRE(focus_changes.back() == "first:off");
   const DrawTextCommand* first_text = FindText(disabled_first, "first");
   REQUIRE(first_text != nullptr);
-  REQUIRE(std::abs(first_text->color.alpha - 0.3F) < 0.001F);
+  REQUIRE(first_text->color.alpha == 1.0F);
+  const detail::MountedNode* first_node = FindMountedText(*runtime.RootNode(), "first");
+  REQUIRE(first_node != nullptr);
+  REQUIRE(std::abs(first_node->render_node.opacity - 0.3F) < 0.001F);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
@@ -996,7 +1018,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
       .key = Key::Space,
   });
   REQUIRE(third_keyboard_clicks == 0);
-  const DisplayList& space_down = runtime.BuildFrame();
+  const FlattenedScene& space_down = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(space_down, huxerui::FlatLightThemeSpec().interactions.pressed_overlay) != nullptr);
 
   runtime.HandleKeyEvent(KeyEvent{
@@ -1039,7 +1061,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
   TestPlatform platform;
   Runtime runtime{FocusApp, platform};
   runtime.SetViewport({240.0F, 180.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* first = FindText(initial, "first");
   REQUIRE(first != nullptr);
   const Point pointer{
@@ -1052,7 +1074,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
       104,
       pointer,
   });
-  const DisplayList& pointer_focused = runtime.BuildFrame();
+  const FlattenedScene& pointer_focused = runtime.BuildFrame();
   REQUIRE(focus_changes.size() == 1);
   REQUIRE(focus_changes.back() == "first:on");
   REQUIRE(FindBorderWithColor(pointer_focused, Color::Rgb(40, 180, 90)) == nullptr);
@@ -1066,7 +1088,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
       .type = KeyEventType::Down,
       .key = Key::Tab,
   });
-  const DisplayList& keyboard_focused = runtime.BuildFrame();
+  const FlattenedScene& keyboard_focused = runtime.BuildFrame();
   REQUIRE(focus_changes.back() == "third:on");
   REQUIRE(FindBorderWithColor(keyboard_focused, Color::Rgb(40, 180, 90)) != nullptr);
 }
@@ -1153,12 +1175,12 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   TestPlatform platform;
   Runtime runtime{RootHookApp, platform, std::move(options)};
   runtime.SetViewport({200.0F, 100.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(observed_root_service_value == 42);
   REQUIRE(ContainsText(initial, "application"));
 
   const LayerId toast = installed_root_service->layers->Attach(LayerKind::Toast, [] { return Text("toast"); });
-  const DisplayList& with_toast = runtime.BuildFrame();
+  const FlattenedScene& with_toast = runtime.BuildFrame();
   REQUIRE(ContainsText(with_toast, "application"));
   REQUIRE(ContainsText(with_toast, "toast"));
 
@@ -1173,7 +1195,7 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   REQUIRE(root_app_clicks == 1);
 
   REQUIRE(installed_root_service->layers->Dismiss(toast));
-  const DisplayList& dismissed = runtime.BuildFrame();
+  const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(dismissed, "toast"));
 }
 
@@ -1190,31 +1212,34 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(saved_dialogs.has_value());
 
   saved_toast->Show("saved", huxerui::ToastOptions{0.5});
-  const DisplayList& toast = runtime.BuildFrame();
+  const FlattenedScene& toast = runtime.BuildFrame();
   REQUIRE(ContainsText(toast, "saved"));
   const DrawRectCommand* toast_background = FindRectWithColor(toast, Color::Rgb(20, 30, 40, 0.9F));
   REQUIRE(toast_background != nullptr);
-  REQUIRE(toast_background->rect.x == 65.0F);
-  REQUIRE(toast_background->rect.y == 36.0F);
   REQUIRE(toast_background->rect.width == 70.0F);
   REQUIRE(toast_background->rect.height == 40.0F);
+  const std::optional<Rect> presented_toast_background =
+      FindPresentedRectWithColor(toast, Color::Rgb(20, 30, 40, 0.9F));
+  REQUIRE(presented_toast_background.has_value());
+  REQUIRE(presented_toast_background->x == 65.0F);
+  REQUIRE(presented_toast_background->y == 36.0F);
   const DrawTextCommand* toast_text = FindText(toast, "saved");
   REQUIRE(toast_text != nullptr);
   REQUIRE(toast_text->color.green == Color::Rgb(240, 245, 250).green);
   platform.AdvanceTime(0.5);
   runtime.BuildFrame();
-  const DisplayList& expired = runtime.BuildFrame();
+  const FlattenedScene& expired = runtime.BuildFrame();
   REQUIRE(!ContainsText(expired, "saved"));
 
   const LayerId dialog = saved_dialogs->Show([] { return Text("command dialog"); }, huxerui::DialogOptions{false});
-  const DisplayList& shown = runtime.BuildFrame();
+  const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "command dialog"));
   const DrawRectCommand* scrim = FindRect(shown, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);
   REQUIRE(scrim->color.red == Color::Rgb(180, 20, 20, 0.3F).red);
   REQUIRE(scrim->color.alpha == 0.3F);
   REQUIRE(saved_dialogs->Dismiss(dialog));
-  const DisplayList& dismissed = runtime.BuildFrame();
+  const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(dismissed, "command dialog"));
 
   const LayerId contextual_dialog = saved_dialogs->Show(
@@ -1224,7 +1249,7 @@ TEST_CASE("TestToastAndDialogPresentation") {
       },
       huxerui::DialogOptions{false}
   );
-  const DisplayList& contextual = runtime.BuildFrame();
+  const FlattenedScene& contextual = runtime.BuildFrame();
   REQUIRE(ContainsText(contextual, "context dialog"));
   REQUIRE(saved_dialog_context.has_value());
   REQUIRE(saved_dialog_context->Id() == contextual_dialog);
@@ -1234,19 +1259,19 @@ TEST_CASE("TestToastAndDialogPresentation") {
     saved_dialog_context = dialog_context;
     return Text("updated context dialog");
   }));
-  const DisplayList& updated_contextual = runtime.BuildFrame();
+  const FlattenedScene& updated_contextual = runtime.BuildFrame();
   REQUIRE(ContainsText(updated_contextual, "updated context dialog"));
   REQUIRE(saved_dialog_context.has_value());
   REQUIRE(saved_dialog_context->Id() == contextual_dialog);
   REQUIRE(saved_dialog_context->Dismiss());
-  const DisplayList& context_dismissed = runtime.BuildFrame();
+  const FlattenedScene& context_dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(context_dismissed, "updated context dialog"));
 
   const LayerId outside_dialog = saved_dialogs->Show([] { return Text("outside dismiss dialog"); });
-  const DisplayList& outside_shown = runtime.BuildFrame();
+  const FlattenedScene& outside_shown = runtime.BuildFrame();
   REQUIRE(ContainsText(outside_shown, "outside dismiss dialog"));
   ClickAt(runtime, {1.0F, 1.0F}, 85);
-  const DisplayList& outside_dismissed = runtime.BuildFrame();
+  const FlattenedScene& outside_dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(outside_dismissed, "outside dismiss dialog"));
   REQUIRE(!saved_dialogs->Dismiss(outside_dialog));
 }
@@ -1264,14 +1289,14 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   Color toast_background = dark.colors.on_surface;
   toast_background.alpha *= 0.94F;
   saved_toast->Show("dark toast", huxerui::ToastOptions{10.0});
-  const DisplayList& toast = runtime.BuildFrame();
+  const FlattenedScene& toast = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(toast, toast_background) != nullptr);
   const DrawTextCommand* toast_text = FindText(toast, "dark toast");
   REQUIRE(toast_text != nullptr);
   REQUIRE(toast_text->color.red == dark.colors.surface.red);
 
   saved_dialogs->Show([] { return Text("dark dialog"); }, huxerui::DialogOptions{false});
-  const DisplayList& dialog = runtime.BuildFrame();
+  const FlattenedScene& dialog = runtime.BuildFrame();
   const DrawRectCommand* scrim = FindRect(dialog, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);
   REQUIRE(scrim->color.alpha == dark.colors.scrim.alpha);
@@ -1284,16 +1309,16 @@ TEST_CASE("TestDeclarativeDialogModifier") {
   runtime.BuildFrame();
 
   declarative_dialog_visible = true;
-  const DisplayList& shown = runtime.BuildFrame();
+  const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "declarative dialog 1"));
 
   declarative_dialog_value = 2;
-  const DisplayList& updated = runtime.BuildFrame();
+  const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(ContainsText(updated, "declarative dialog 2"));
 
   ClickAt(runtime, {1.0F, 1.0F}, 84);
   REQUIRE(!declarative_dialog_visible);
-  const DisplayList& hidden = runtime.BuildFrame();
+  const FlattenedScene& hidden = runtime.BuildFrame();
   REQUIRE(!ContainsText(hidden, "declarative dialog 2"));
 }
 
@@ -1306,7 +1331,7 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
   animation_target = true;
   runtime.BuildFrame();
   platform.AdvanceTime(0.5);
-  const DisplayList& middle = runtime.BuildFrame();
+  const FlattenedScene& middle = runtime.BuildFrame();
 
   const DrawTextCommand* animated = nullptr;
   for (const auto& command : middle.Commands()) {
@@ -1319,16 +1344,17 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
   const PushTransformCommand* transform = nullptr;
   for (const auto& command : middle.Commands()) {
     if (const auto* candidate = std::get_if<PushTransformCommand>(&command);
-        candidate && std::abs(candidate->translate_x - 50.0F) < 0.01F) {
+        candidate && std::abs(candidate->transform.translate_x - 50.0F) < 0.01F) {
       transform = candidate;
       break;
     }
   }
   REQUIRE(transform != nullptr);
-  REQUIRE(std::abs(animated->color.alpha - 0.5F) < 0.01F);
+  REQUIRE(animated->color.alpha == 1.0F);
+  REQUIRE(std::abs(runtime.RootNode()->render_node.opacity - 0.5F) < 0.01F);
 
   platform.AdvanceTime(0.5);
-  const DisplayList& finished = runtime.BuildFrame();
+  const FlattenedScene& finished = runtime.BuildFrame();
   REQUIRE(!ContainsText(finished, "animated"));
 }
 
@@ -1342,38 +1368,38 @@ TEST_CASE("TestAnimatedScaleAndRotationModifiers") {
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 1);
   const auto* content = root->children[0].get();
-  REQUIRE(content->PresentationFrame().width == 80.0F);
-  REQUIRE(content->PresentationFrame().height == 40.0F);
+  REQUIRE(content->PresentationBounds().width == 80.0F);
+  REQUIRE(content->PresentationBounds().height == 40.0F);
 
   transform_animation_target = true;
   runtime.BuildFrame();
   platform.AdvanceTime(0.5);
-  const DisplayList& middle = runtime.BuildFrame();
+  const FlattenedScene& middle = runtime.BuildFrame();
 
   root = runtime.RootNode();
   content = root->children[0].get();
   constexpr float middle_extent = 127.27922F;
-  REQUIRE(std::abs(content->PresentationFrame().width - middle_extent) < 0.01F);
-  REQUIRE(std::abs(content->PresentationFrame().height - middle_extent) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().width - middle_extent) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().height - middle_extent) < 0.01F);
 
   const PushTransformCommand* transform = nullptr;
   for (const auto& command : middle.Commands()) {
     if (const auto* candidate = std::get_if<PushTransformCommand>(&command);
-        candidate && std::abs(candidate->m12) > 0.01F) {
+        candidate && std::abs(candidate->transform.m12) > 0.01F) {
       transform = candidate;
       break;
     }
   }
   REQUIRE(transform != nullptr);
-  REQUIRE(std::abs(transform->m11 - 1.06066F) < 0.01F);
-  REQUIRE(std::abs(transform->m12 - 1.06066F) < 0.01F);
+  REQUIRE(std::abs(transform->transform.m11 - 1.06066F) < 0.01F);
+  REQUIRE(std::abs(transform->transform.m12 - 1.06066F) < 0.01F);
 
   platform.AdvanceTime(0.5);
   runtime.BuildFrame();
   root = runtime.RootNode();
   content = root->children[0].get();
-  REQUIRE(std::abs(content->PresentationFrame().width - 80.0F) < 0.01F);
-  REQUIRE(std::abs(content->PresentationFrame().height - 160.0F) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().width - 80.0F) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().height - 160.0F) < 0.01F);
 }
 
 TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
@@ -1388,8 +1414,8 @@ TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 1);
   const auto* button = root->children[0].get();
-  REQUIRE(button->Frame().height == 40.0F);
-  REQUIRE(std::abs(button->PresentationFrame().height - 127.27922F) < 0.01F);
+  REQUIRE(button->Bounds().height == 40.0F);
+  REQUIRE(std::abs(button->PresentationBounds().height - 127.27922F) < 0.01F);
 
   ClickAt(runtime, {1.0F, 39.0F}, 94);
   REQUIRE(transformed_clicks == 0);
@@ -1412,7 +1438,7 @@ TEST_CASE("TestClickIndicationUsesPointerObservation") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(0.04);
-  const DisplayList& pressed = runtime.BuildFrame();
+  const FlattenedScene& pressed = runtime.BuildFrame();
 
   std::size_t rectangles = 0;
   for (const auto& command : pressed.Commands()) {
@@ -1440,8 +1466,9 @@ TEST_CASE("TestModifierPresentationGeometry") {
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 1);
   const auto* button = root->children[0].get();
-  REQUIRE(std::abs(button->PresentationFrame().x - 50.0F) < 0.01F);
+  REQUIRE(std::abs(button->PresentationBounds().x - 50.0F) < 0.01F);
   REQUIRE(std::abs(button->PresentationOpacity() - 0.5F) < 0.01F);
+  REQUIRE(std::abs(button->render_node.opacity - 0.5F) < 0.01F);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
@@ -1450,21 +1477,23 @@ TEST_CASE("TestModifierPresentationGeometry") {
   });
   runtime.BuildFrame();
   platform.AdvanceTime(0.04);
-  const DisplayList& pressed = runtime.BuildFrame();
+  const FlattenedScene& pressed = runtime.BuildFrame();
 
   std::size_t presented_rectangles = 0;
   bool translated = false;
   for (const auto& command : pressed.Commands()) {
     if (const auto* transform = std::get_if<PushTransformCommand>(&command);
-        transform && std::abs(transform->translate_x - 50.0F) < 0.01F) {
+        transform && std::abs(transform->transform.translate_x - 50.0F) < 0.01F) {
       translated = true;
     }
     if (const auto* rectangle = std::get_if<DrawRectCommand>(&command);
         rectangle && std::abs(rectangle->rect.x) < 0.01F) {
       ++presented_rectangles;
-      REQUIRE(rectangle->color.alpha <= 0.5F);
     }
   }
+  const DrawTextCommand* presented_text = FindText(pressed, "presented");
+  REQUIRE(presented_text != nullptr);
+  REQUIRE(presented_text->color.alpha == 1.0F);
   REQUIRE(translated);
   REQUIRE(presented_rectangles >= 2);
 }

@@ -26,11 +26,18 @@ public:
   void InvalidateGeometry();
   void ApplicationActiveChanged(bool active);
 
-  void
-  Start(TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state) override;
+  void Start(
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
+  ) override;
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override;
   void Restart(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override;
   void Stop(TextInputSessionId session_id) override;
 

@@ -34,12 +34,16 @@ struct PointerEvent {
   Point position;
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
   std::uint32_t click_count = 1;
+
+  bool operator==(const PointerEvent&) const = default;
 };
 
 struct ScrollEvent {
   Point position;
   float delta_x = 0.0F;
   float delta_y = 0.0F;
+
+  bool operator==(const ScrollEvent&) const = default;
 };
 
 enum class Key {
@@ -76,6 +80,8 @@ struct KeyModifiers {
   bool control = false;
   bool alt = false;
   bool meta = false;
+
+  bool operator==(const KeyModifiers&) const = default;
 };
 
 struct KeyEvent {
@@ -84,6 +90,8 @@ struct KeyEvent {
   std::string text;
   KeyModifiers modifiers;
   bool repeat = false;
+
+  bool operator==(const KeyEvent&) const = default;
 };
 
 template <class... Arguments> struct Event {

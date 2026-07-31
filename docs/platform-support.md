@@ -8,7 +8,7 @@
 | macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient |
 | Windows | Win32 | DirectWrite | Direct2D | Native keyboard and IME adapter |
 
-State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and display-list generation remain in the shared C++ runtime.
+State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
 
 ## Runtime and PlatformHost
 
@@ -29,10 +29,21 @@ Runtime runtime{
 };
 
 runtime.SetViewport({width, height});
-const DisplayList& display_list = runtime.BuildFrame();
+const FrameCommit& commit = runtime.BuildFrame();
+renderer.Render(commit.render_frame);
+if (commit.next_frame_deadline.has_value()) {
+  host.RequestFrameAt(*commit.next_frame_deadline);
+}
 ```
 
-Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, and renderer conventions. They do not duplicate component state machines or layout behavior.
+Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, and renderer conventions.
+They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
+`PlatformHost::RequestFrameAt()` accepts an absolute monotonic deadline.
+Runtime uses it for invalidations outside frame construction; work discovered while building is returned through `FrameCommit::next_frame_deadline`.
+The host presents the committed frame before scheduling that deadline, which prevents continuous animation from starving the native paint phase.
+macOS and Windows translate `DamageRegion` into native invalidation bounds.
+Android receives the same committed damage but invalidates the complete native View because current Android View APIs ignore dirty rectangles.
+All three backends replay only the committed scene during native paint callbacks.
 
 ## Android
 
@@ -51,17 +62,17 @@ public final class MainActivity extends HuxerUIActivity {}
 
 The application native library is named `huxerui_app`. Loading it registers the immutable `HUXERUI_APP` definition before the activity creates its `HuxerUIView`.
 
-Coordinates remain density independent. The host maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. The minimum supported Android API level is 23.
+Coordinates remain density independent. The host maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
 
 ## macOS
 
-The macOS backend creates an AppKit host, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries.
+The macOS backend creates an AppKit host, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries. Scheduled callbacks commit Runtime work before AppKit invalidation, while `drawRect:` only presents the committed scene.
 
 Example targets build as application bundles and can be launched from `build/bin`.
 
 ## Windows
 
-The Windows backend targets Windows 10 and later. It owns the Win32 window, uses DirectWrite for text layout, and emits shared display commands through Direct2D.
+The Windows backend targets Windows 10 and later. It owns the Win32 window, uses DirectWrite for text layout, and renders shared PaintCommands through Direct2D.
 
 ## Planned platforms
 

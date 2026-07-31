@@ -144,12 +144,12 @@ bool IndicationState::Advance(const FrameInfo& frame) {
   return needs_frame;
 }
 
-void IndicationState::Paint(DisplayList& display_list, Rect frame, float corner_radius, float opacity) const {
+void IndicationState::Paint(PaintContext& context, Rect frame, float corner_radius, float opacity) const {
   if (const auto* overlay = std::get_if<StateOverlayIndication>(&spec_); overlay && opacity_.Value() > 0.0F) {
     const bool pressed = !pressed_pointers_.empty() || (released_visual_ && !hovered_);
     Color color = pressed ? overlay->color : overlay->hover_color;
     color.alpha *= opacity_.Value() * opacity;
-    display_list.DrawRect(frame, color, corner_radius);
+    context.DrawRect(frame, color, corner_radius);
     return;
   }
   const auto* ripple_spec = std::get_if<RippleIndication>(&spec_);
@@ -160,10 +160,10 @@ void IndicationState::Paint(DisplayList& display_list, Rect frame, float corner_
   if (hover_opacity_.Value() > 0.0F && ripple_spec->hover_color.alpha > 0.0F) {
     Color hover_color = ripple_spec->hover_color;
     hover_color.alpha *= hover_opacity_.Value() * opacity;
-    display_list.DrawRect(frame, hover_color, corner_radius);
+    context.DrawRect(frame, hover_color, corner_radius);
   }
 
-  display_list.PushClip(frame, corner_radius);
+  context.PushClip(frame, corner_radius);
   for (const IndicationRippleState& ripple : ripples_) {
     if (!ripple.started_at.has_value()) {
       continue;
@@ -185,7 +185,7 @@ void IndicationState::Paint(DisplayList& display_list, Rect frame, float corner_
     Color color = ripple_spec->color;
     color.alpha = alpha * opacity;
     const float radius = std::hypot(frame.width, frame.height) * static_cast<float>(expansion);
-    display_list.DrawCircle(
+    context.DrawCircle(
         {
             frame.x + ripple.local_origin.x,
             frame.y + ripple.local_origin.y,
@@ -194,7 +194,7 @@ void IndicationState::Paint(DisplayList& display_list, Rect frame, float corner_
         color
     );
   }
-  display_list.PopClip();
+  context.PopClip();
 }
 
 bool IndicationState::HasVisuals() const noexcept {
@@ -231,7 +231,7 @@ public:
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
-    return node.IsEnabled() && node.Frame().Contains(position);
+    return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
   bool HoverHitTest(MountedNode& node, Point position) const override {
@@ -241,6 +241,7 @@ public:
   void OnHoverChanged(MountedNode& node, bool hovered) override {
     static_cast<void>(node);
     indication_.SetHovered(hovered);
+    InvalidatePaint();
   }
 
   void OnFocusChanged(MountedNode& node, bool focused) override {
@@ -248,6 +249,7 @@ public:
     if (!focused && keyboard_pressed_) {
       keyboard_pressed_ = false;
       indication_.Release(keyboard_pointer_id_);
+      InvalidatePaint();
     }
   }
 
@@ -265,7 +267,7 @@ public:
     }
     keyboard_pressed_ = pressed;
     if (pressed) {
-      const Rect frame = node.Frame();
+      const Rect frame = node.Bounds();
       indication_.Press(
           keyboard_pointer_id_,
           {
@@ -276,6 +278,7 @@ public:
     } else {
       indication_.Release(keyboard_pointer_id_);
     }
+    InvalidatePaint();
   }
 
   NodeExtension::PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
@@ -283,34 +286,38 @@ public:
       return NodeExtension::PointerResult::Ignored;
     }
     if (event.type == PointerEventType::Down) {
-      const Rect frame = node.Frame();
-      indication_.Press(
-          event.pointer_id,
-          {
-              event.position.x - frame.x,
-              event.position.y - frame.y,
-          }
-      );
+      indication_.Press(event.pointer_id, event.position);
+      InvalidatePaint();
       return NodeExtension::PointerResult::Observe;
     }
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
       indication_.Release(event.pointer_id);
+      InvalidatePaint();
     }
     return NodeExtension::PointerResult::Handled;
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     if (!node.IsEnabled()) {
+      const bool had_visuals = indication_.HasVisuals();
       indication_.Reset();
       keyboard_pressed_ = false;
+      if (had_visuals) {
+        InvalidatePaint();
+      }
       return {};
     }
-    return {indication_.Advance(frame), std::nullopt};
+    const bool needs_frame = indication_.Advance(frame);
+    if (needs_frame || paint_frame_active_) {
+      InvalidatePaint();
+    }
+    paint_frame_active_ = needs_frame;
+    return {needs_frame, std::nullopt};
   }
 
-  void Paint(const MountedNode& node, DisplayList& display_list) const override {
+  void Paint(const MountedNode& node, PaintContext& context) const override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    indication_.Paint(display_list, node.Frame(), mounted.style.corner_radius, node.PresentationOpacity());
+    indication_.Paint(context, node.Bounds(), mounted.style.corner_radius);
   }
 
 private:
@@ -319,6 +326,7 @@ private:
   IndicationSpec spec_ = StateOverlayIndication{};
   detail::IndicationState indication_;
   bool keyboard_pressed_ = false;
+  bool paint_frame_active_ = false;
 };
 
 } // namespace

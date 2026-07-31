@@ -113,7 +113,7 @@ Example targets use the `example_` prefix and a semantic snake-case name. A new 
 
 ## Architecture and ownership
 
-The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and DisplayList generation. Platform adapters own native lifecycle, frame scheduling, event conversion, text services, clipboard integration, and DisplayList rendering.
+The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and RenderScene generation. Platform adapters own native lifecycle, frame scheduling, event conversion, text services, clipboard integration, and RenderScene rendering.
 
 Use one shared `Runtime` implementation and one `PlatformHost` boundary per native host view. Do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
 
@@ -169,7 +169,7 @@ Choose the narrowest existing extension mechanism:
 - Typed event for semantic output.
 - Environment or Theme for inherited values.
 - Root service and `LayerController` for per-window presentation.
-- DisplayCommand for a new platform-neutral drawing primitive.
+- PaintCommand for a new platform-neutral drawing primitive.
 
 Do not add another host, registry, callback convention, context store, or plugin abstraction when an existing mechanism fits.
 
@@ -187,11 +187,11 @@ Layouts measure children only through their context, obey parent constraints, re
 
 Property modifiers apply left to right and do not create wrapper nodes. Retained modifiers preserve declaration order and reconcile compatible `NodeExtension` instances by descriptor and position.
 
-`NodeExtension` is behavior attached to one `MountedNode`, not a general plugin host. Update compatible declarative configuration without resetting retained state, do not retain raw node references, and request frame timing only through `FrameResult`. Runtime dispatches lifecycle capabilities without concrete modifier or component checks.
+`NodeExtension` is behavior attached to one `MountedNode`, not a general plugin host. Update compatible declarative configuration without resetting retained state, do not retain raw node references, and request frame timing only through `FrameResult`. Paint-visible retained state changes call the protected `InvalidatePaint()` operation; scheduling alone does not invalidate a PaintSequence. Runtime dispatches lifecycle capabilities without concrete modifier or component checks.
 
 Presentation modifiers affect drawing, descendants, clipping, foreground extensions, and pointer hit testing without changing measurement or parent layout. Honor reduced motion and avoid per-frame state recomposition.
 
-DisplayCommands contain platform-neutral immutable drawing data only. A new command updates its variant, type-safe DisplayList API, command tests, public rendering documentation, and every supported renderer. Balance clip and transform commands on all paths and handle every variant explicitly.
+PaintCommands contain platform-neutral immutable drawing data only. A new command updates its variant, type-safe PaintSequence API, command tests, public rendering documentation, and every supported renderer. Balance clip and transform commands on all paths and handle every variant explicitly.
 
 Environment is typed hierarchical propagation, Theme is its visual specialization, and root services own per-window capabilities. Use layers only for content outside the application tree while preserving captured Environment, modal focus, and restoration.
 
@@ -244,7 +244,7 @@ Validation depth is proportional to the affected contract:
 - Component or Runtime: focused tests, full common tests, and affected platform integration.
 - Layout or virtualization: geometry, constraints, state restoration, and common tests.
 - Modifier or NodeExtension: reconciliation, scheduling, input, paint order, and animation.
-- DisplayCommand: command tests, every renderer audit, and every available platform build.
+- PaintCommand: command tests, every renderer audit, and every available platform build.
 - Text input or TextLayout: reducer, TextField, Runtime session, native adapter, common, and affected platform tests.
 - Codegen: transform, generated Runtime behavior, common build, and required host tools.
 - CMake or packaging: an incremental build plus a separate clean configure and build.

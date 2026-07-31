@@ -66,6 +66,8 @@ struct Glow {
 
   Color color;
   float radius = 12.0F;
+
+  bool operator==(const Glow&) const = default;
 };
 ```
 
@@ -76,13 +78,21 @@ public:
 
   void Update(MountedNode& node, const Glow& spec);
 
-  void Paint(const MountedNode& node, DisplayList& display_list) const override;
+  void Paint(const MountedNode& node, PaintContext& context) const override;
 };
 ```
 
-The framework detects `Glow::Extension`, performs type erasure, and reconciles compatible extensions by descriptor and declaration position. `Update()` refreshes declarative configuration without discarding retained animation or gesture state.
+The framework detects `Glow::Extension`, performs type erasure, and reconciles compatible extensions by descriptor and declaration position.
+An equality-comparable modifier skips `Update()` when its declarative value and relevant node inputs are unchanged.
+`Update()` refreshes changed declarative configuration without discarding retained animation or gesture state.
 
-`NodeExtension` can receive frame, scroll, pointer, hover, focus, key, and paint callbacks. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
+`NodeExtension` can receive frame, resolved-geometry, scroll, pointer, hover, focus, key, and paint callbacks. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
+`PrepareGeometry()` runs after final presentation transforms are resolved and reports whether changed geometry requires foreground rerecording.
+After retained visual state changes, an extension calls the protected `InvalidatePaint()` operation so Runtime rerecords its foreground PaintSequence.
+Invalidation outside frame construction requests a frame, while invalidation from `OnFrame()` is consumed by the current frame and follow-up scheduling remains the responsibility of `FrameResult`.
+Paint commands use node-local coordinates and may extend beyond `MountedNode::Bounds()` unless the extension pushes an explicit clip. Runtime uses the recorded command bounds, rather than the layout bounds, for render visibility and damage.
+
+Custom editable or selectable components expose `TextInputClient`, `TextSelectionClient`, or both through their retained extension. Text input owns IME sessions; text selection owns word selection, handle geometry, and selection-menu actions without starting an IME session.
 
 ## Root hooks and services
 

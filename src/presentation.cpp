@@ -232,6 +232,9 @@ LayerId ToastService::Show(
       LayerOptions{
           .kind = LayerKind::Toast,
           .input_policy = LayerInputPolicy::PassThrough,
+          .dismiss_on_outside_press = false,
+          .on_dismiss_request = {},
+          .modal_scrim = std::nullopt,
       },
       [service, id, message = std::move(message), options, style] {
         return Text(message).With(

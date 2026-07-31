@@ -3,17 +3,22 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace huxerui {
 
 struct Point {
   float x = 0.0F;
   float y = 0.0F;
+
+  bool operator==(const Point&) const = default;
 };
 
 struct Size {
   float width = 0.0F;
   float height = 0.0F;
+
+  bool operator==(const Size&) const = default;
 };
 
 struct Rect {
@@ -21,6 +26,8 @@ struct Rect {
   float y = 0.0F;
   float width = 0.0F;
   float height = 0.0F;
+
+  bool operator==(const Rect&) const = default;
 
   [[nodiscard]] bool Contains(Point point) const noexcept {
     return point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height;
@@ -49,11 +56,49 @@ struct Rect {
   }
 };
 
+struct Transform2D {
+  float m11 = 1.0F;
+  float m12 = 0.0F;
+  float m21 = 0.0F;
+  float m22 = 1.0F;
+  float translate_x = 0.0F;
+  float translate_y = 0.0F;
+
+  bool operator==(const Transform2D&) const = default;
+
+  [[nodiscard]] bool IsIdentity() const noexcept {
+    return m11 == 1.0F && m12 == 0.0F && m21 == 0.0F && m22 == 1.0F && translate_x == 0.0F &&
+           translate_y == 0.0F;
+  }
+
+  [[nodiscard]] Point Apply(Point point) const noexcept {
+    return {
+        m11 * point.x + m21 * point.y + translate_x,
+        m12 * point.x + m22 * point.y + translate_y,
+    };
+  }
+
+  [[nodiscard]] std::optional<Point> Inverse(Point point) const noexcept {
+    const float determinant = m11 * m22 - m12 * m21;
+    if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
+      return std::nullopt;
+    }
+    const float x = point.x - translate_x;
+    const float y = point.y - translate_y;
+    return Point{
+        (m22 * x - m21 * y) / determinant,
+        (-m12 * x + m11 * y) / determinant,
+    };
+  }
+};
+
 struct EdgeInsets {
   float top = 0.0F;
   float right = 0.0F;
   float bottom = 0.0F;
   float left = 0.0F;
+
+  bool operator==(const EdgeInsets&) const = default;
 
   static EdgeInsets All(float value) noexcept {
     return {value, value, value, value};
@@ -77,6 +122,8 @@ struct Constraints {
   float max_width = std::numeric_limits<float>::infinity();
   float min_height = 0.0F;
   float max_height = std::numeric_limits<float>::infinity();
+
+  bool operator==(const Constraints&) const = default;
 
   [[nodiscard]] Size Constrain(Size size) const noexcept {
     return {

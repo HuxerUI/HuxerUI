@@ -41,6 +41,7 @@ function(huxerui_configure_compile_target target_name)
     target_compile_options(${target_name} PRIVATE
             "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
             "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+            "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"

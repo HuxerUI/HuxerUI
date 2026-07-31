@@ -33,10 +33,10 @@ class MacPlatformHost;
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
 - (void)cancelPointer;
+- (void)commitHuxerUIFrame;
 @end
 
-@interface HuxerUIApplicationDelegate : NSObject <NSApplicationDelegate>
-{
+@interface HuxerUIApplicationDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate> {
 @public
   huxerui::detail::MacPlatformHost* huxeruiHost;
 }
@@ -116,7 +116,7 @@ class MacPlatformHost;
 - (void)display {
   HuxerUIHostView* view = _view;
   if (view != nil && view.window != nil) {
-    [view setNeedsDisplay:YES];
+    [view commitHuxerUIFrame];
   }
 }
 
@@ -305,9 +305,8 @@ public:
         [string_ characterAtIndex:static_cast<NSUInteger>(line_end - 1)] == '\n') {
       --index;
     }
-    const bool upstream =
-        index == line_end && selected_line + 1 < line_records_.size() &&
-        line_records_[selected_line + 1].range.location == line_end;
+    const bool upstream = index == line_end && selected_line + 1 < line_records_.size() &&
+                          line_records_[selected_line + 1].range.location == line_end;
     return {
         static_cast<TextOffset>(std::clamp<CFIndex>(index, 0, static_cast<CFIndex>(string_.length))),
         upstream ? TextAffinity::Upstream : TextAffinity::Downstream,
@@ -433,6 +432,7 @@ class MacPlatformHost final : public PlatformHost, public PlatformClipboard {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     @autoreleasepool {
+      runtime_ = &runtime;
       NSApplication* application = [NSApplication sharedApplication];
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
 
@@ -446,6 +446,7 @@ public:
       window_ = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;
+      window_.delegate = delegate_;
 
       view_ = [[HuxerUIHostView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
@@ -459,26 +460,90 @@ public:
 
       [application finishLaunching];
       [application activateIgnoringOtherApps:YES];
-      [view_ setNeedsDisplay:YES];
+      Resize({
+          static_cast<float>(view_.bounds.size.width),
+          static_cast<float>(view_.bounds.size.height),
+      });
+      RequestFrameAt(Now());
       [application run];
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiHost = nullptr;
       delegate_->huxeruiHost = nullptr;
       [frame_scheduler_ shutdown];
       frame_scheduler_ = nil;
+      scheduled_frame_deadline_.reset();
+      committed_frame_ = nullptr;
+      runtime_ = nullptr;
     }
     return 0;
   }
 
-  void RequestFrame(double delay_seconds) override {
-    if (frame_scheduler_) {
-      [frame_scheduler_ requestFrameAfter:delay_seconds];
+  void RequestFrameAt(double deadline) override {
+    frame_build_pending_ = true;
+    const double now = Now();
+    if (std::isnan(deadline) || deadline <= now) {
+      deadline = now;
+    } else if (!std::isfinite(deadline)) {
+      deadline = std::numeric_limits<double>::max();
     }
+    if (paint_pending_ || paint_in_progress_ || frame_scheduler_ == nil || view_ == nil) {
+      if (!deferred_frame_deadline_.has_value() || deadline < *deferred_frame_deadline_) {
+        deferred_frame_deadline_ = deadline;
+      }
+      return;
+    }
+    ScheduleFrame(deadline);
   }
 
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void Resize(Size viewport) {
+    if (runtime_ != nullptr) {
+      runtime_->SetViewport({
+          std::max(0.0F, viewport.width),
+          std::max(0.0F, viewport.height),
+      });
+    }
+  }
+
+  void CommitFrameAndInvalidate() {
+    scheduled_frame_deadline_.reset();
+    if (!frame_build_pending_ || runtime_ == nullptr) {
+      return;
+    }
+    frame_build_pending_ = false;
+    deferred_frame_deadline_.reset();
+    const FrameCommit& commit = runtime_->BuildFrame();
+    committed_frame_ = &commit.render_frame;
+    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    if (commit.next_frame_deadline.has_value()) {
+      RequestFrameAt(*commit.next_frame_deadline);
+    }
+    FlushDeferredFrame();
+  }
+
+  void DrawCommittedFrame(CGContextRef context, NSRect dirty_rect) {
+    paint_in_progress_ = true;
+    CGContextSaveGState(context);
+    CGContextClipToRect(context, NSRectToCGRect(dirty_rect));
+    SetFillColor(context, Color::Rgb(247, 248, 250));
+    CGContextFillRect(context, NSRectToCGRect(dirty_rect));
+    if (committed_frame_ != nullptr && committed_frame_->scene.root != nullptr) {
+      RenderSceneNode(*committed_frame_->scene.root, context);
+    }
+    CGContextRestoreGState(context);
+    paint_in_progress_ = false;
+    paint_pending_ = false;
+    FlushDeferredFrame();
+  }
+
+  void InvalidateNativeSurface() {
+    if (view_ != nil) {
+      [view_ setNeedsDisplay:YES];
+    }
   }
 
   Size MeasureText(std::string_view text, float font_size, float max_width) override {
@@ -567,16 +632,131 @@ public:
     return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
   }
 
-  void Render(const DisplayList& display_list, CGContextRef context) {
-    SetFillColor(context, Color::Rgb(247, 248, 250));
-    CGContextFillRect(context, NSRectToCGRect(view_.bounds));
-
-    for (const DisplayCommand& command : display_list.Commands()) {
+  void RenderSequence(const PaintSequence& sequence, CGContextRef context) {
+    for (const PaintCommand& command : sequence.Commands()) {
       std::visit([this, context](const auto& value) { RenderCommand(context, value); }, command);
     }
   }
 
+  void RenderSceneNode(const RenderNode& node, CGContextRef context) {
+    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
+    if (!node.visible || opacity <= 0.0F) {
+      return;
+    }
+
+    Transform2D transform = node.transform;
+    transform.translate_x += node.offset.x;
+    transform.translate_y += node.offset.y;
+    const bool transformed = !transform.IsIdentity();
+    if (transformed) {
+      RenderCommand(context, PushTransformCommand{transform});
+    }
+
+    const bool translucent = opacity < 1.0F;
+    if (translucent) {
+      CGContextSaveGState(context);
+      CGContextSetAlpha(context, opacity);
+      CGContextBeginTransparencyLayer(context, nullptr);
+    }
+
+    RenderSequence(node.content, context);
+    if (node.child_clip.has_value()) {
+      RenderCommand(
+          context,
+          PushClipCommand{
+              node.child_clip->rect,
+              node.child_clip->corner_radius,
+          }
+      );
+    }
+    const bool children_transformed = !node.children_transform.IsIdentity();
+    if (children_transformed) {
+      RenderCommand(context, PushTransformCommand{node.children_transform});
+    }
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr) {
+        RenderSceneNode(*child, context);
+      }
+    }
+    if (children_transformed) {
+      RenderCommand(context, PopTransformCommand{});
+    }
+    if (node.child_clip.has_value()) {
+      RenderCommand(context, PopClipCommand{});
+    }
+    RenderSequence(node.foreground, context);
+    if (translucent) {
+      CGContextEndTransparencyLayer(context);
+      CGContextRestoreGState(context);
+    }
+    if (transformed) {
+      RenderCommand(context, PopTransformCommand{});
+    }
+  }
+
 private:
+  void ScheduleFrame(double deadline) {
+    if (frame_scheduler_ == nil) {
+      return;
+    }
+    if (scheduled_frame_deadline_.has_value() && *scheduled_frame_deadline_ <= deadline) {
+      return;
+    }
+    scheduled_frame_deadline_ = deadline;
+    const double maximum_delay =
+        static_cast<double>(std::numeric_limits<std::int64_t>::max()) / static_cast<double>(NSEC_PER_SEC);
+    [frame_scheduler_ requestFrameAfter:std::min(std::max(0.0, deadline - Now()), maximum_delay)];
+  }
+
+  void FlushDeferredFrame() {
+    if (paint_pending_ || paint_in_progress_ || !frame_build_pending_ || !deferred_frame_deadline_.has_value() ||
+        frame_scheduler_ == nil || view_ == nil) {
+      return;
+    }
+    const double deadline = *deferred_frame_deadline_;
+    deferred_frame_deadline_.reset();
+    ScheduleFrame(deadline);
+  }
+
+  bool InvalidateDamage(const DamageRegion& damage) {
+    if (view_ == nil) {
+      return false;
+    }
+    if (damage.full) {
+      [view_ setNeedsDisplay:YES];
+      paint_pending_ = true;
+      return true;
+    }
+
+    bool invalidated = false;
+    for (const Rect& rect : damage.rects) {
+      if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) ||
+          !std::isfinite(rect.height)) {
+        [view_ setNeedsDisplay:YES];
+        paint_pending_ = true;
+        return true;
+      }
+      if (rect.IsEmpty()) {
+        continue;
+      }
+      NSRect dirty_rect =
+          NSIntersectionRect(NSMakeRect(rect.x, rect.y, rect.width, rect.height), view_.bounds);
+      if (NSIsEmptyRect(dirty_rect)) {
+        continue;
+      }
+      NSRect backing_rect = [view_ convertRectToBacking:dirty_rect];
+      const CGFloat left = std::floor(NSMinX(backing_rect));
+      const CGFloat top = std::floor(NSMinY(backing_rect));
+      const CGFloat right = std::ceil(NSMaxX(backing_rect));
+      const CGFloat bottom = std::ceil(NSMaxY(backing_rect));
+      backing_rect = NSMakeRect(left, top, right - left, bottom - top);
+      [view_ setNeedsDisplayInRect:[view_ convertRectFromBacking:backing_rect]];
+      invalidated = true;
+    }
+    paint_pending_ = paint_pending_ || invalidated;
+    return invalidated;
+  }
+
   void RenderCommand(CGContextRef context, const DrawRectCommand& command) {
     SetFillColor(context, command.color);
     const CGRect rect = CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
@@ -591,10 +771,10 @@ private:
   }
 
   void RenderCommand(CGContextRef context, const DrawTextCommand& command) {
+    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.color.alpha <= 0.0F) {
+      return;
+    }
     if (command.align == TextAlign::Leading) {
-      if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
-        return;
-      }
       CFAttributedStringRef attributed = CreateAttributedString(command.text, command.font_size);
       CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
       CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, command.rect.width, command.rect.height), nullptr);
@@ -631,6 +811,10 @@ private:
     const CGFloat baseline_from_bottom = bottom_padding + descent;
 
     CGContextSaveGState(context);
+    CGContextClipToRect(
+        context,
+        CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height)
+    );
     CGContextTranslateCTM(context, 0.0, command.rect.y + command.rect.height);
     CGContextScaleCTM(context, 1.0, -1.0);
     CGContextSetTextMatrix(context, CGAffineTransformIdentity);
@@ -732,12 +916,12 @@ private:
     CGContextConcatCTM(
         context,
         CGAffineTransformMake(
-            command.m11,
-            command.m12,
-            command.m21,
-            command.m22,
-            command.translate_x,
-            command.translate_y
+            command.transform.m11,
+            command.transform.m12,
+            command.transform.m21,
+            command.transform.m22,
+            command.transform.translate_x,
+            command.transform.translate_y
         )
     );
   }
@@ -747,11 +931,18 @@ private:
     CGContextRestoreGState(context);
   }
 
+  Runtime* runtime_ = nullptr;
   __strong NSWindow* window_ = nil;
   __strong HuxerUIHostView* view_ = nil;
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
+  bool frame_build_pending_ = false;
+  bool paint_pending_ = false;
+  bool paint_in_progress_ = false;
+  std::optional<double> scheduled_frame_deadline_;
+  std::optional<double> deferred_frame_deadline_;
+  const RenderFrame* committed_frame_ = nullptr;
 };
 
 int RunPlatformApp(AppDefinition definition) {
@@ -771,6 +962,53 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+
+- (void)setFrameSize:(NSSize)newSize {
+  [super setFrameSize:newSize];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->Resize({
+        static_cast<float>(newSize.width),
+        static_cast<float>(newSize.height),
+    });
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)setFrameOrigin:(NSPoint)newOrigin {
+  [super setFrameOrigin:newOrigin];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)setBoundsOrigin:(NSPoint)newOrigin {
+  [super setBoundsOrigin:newOrigin];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)viewDidMoveToWindow {
+  [super viewDidMoveToWindow];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)viewDidMoveToSuperview {
+  [super viewDidMoveToSuperview];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)viewDidChangeBackingProperties {
+  [super viewDidChangeBackingProperties];
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateNativeSurface();
+    huxeruiHost->InvalidateTextInputGeometry();
+  }
 }
 
 - (NSTextInputContext*)inputContext {
@@ -796,21 +1034,20 @@ int RunPlatformApp(AppDefinition definition) {
   [super updateTrackingAreas];
 }
 
+- (void)commitHuxerUIFrame {
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->CommitFrameAndInvalidate();
+  }
+}
+
 - (void)drawRect:(NSRect)dirtyRect {
   [super drawRect:dirtyRect];
-  if (huxeruiRuntime == nullptr || huxeruiHost == nullptr) {
+  if (huxeruiHost == nullptr) {
     return;
   }
 
-  const NSRect bounds = self.bounds;
-  huxeruiRuntime->SetViewport({
-      static_cast<float>(bounds.size.width),
-      static_cast<float>(bounds.size.height),
-  });
-  const huxerui::DisplayList& displayList = huxeruiRuntime->BuildFrame();
-  huxeruiHost->InvalidateTextInputGeometry();
   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
-  huxeruiHost->Render(displayList, context);
+  huxeruiHost->DrawCommittedFrame(context, dirtyRect);
 }
 
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type {
@@ -930,6 +1167,13 @@ int RunPlatformApp(AppDefinition definition) {
   static_cast<void>(notification);
   if (huxeruiHost != nullptr) {
     huxeruiHost->ApplicationActiveChanged(false);
+  }
+}
+
+- (void)windowDidMove:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->InvalidateTextInputGeometry();
   }
 }
 

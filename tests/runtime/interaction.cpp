@@ -835,7 +835,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   TestPlatform platform;
   Runtime vertical{DragScrollApp, platform};
   vertical.SetViewport({100.0F, 100.0F});
-  const DisplayList& vertical_display = vertical.BuildFrame();
+  const FlattenedScene& vertical_display = vertical.BuildFrame();
 
   const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
   REQUIRE(vertical_bar.has_value());
@@ -897,7 +897,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 
   Runtime horizontal{HorizontalDragScrollApp, platform};
   horizontal.SetViewport({100.0F, 40.0F});
-  const DisplayList& horizontal_display = horizontal.BuildFrame();
+  const FlattenedScene& horizontal_display = horizontal.BuildFrame();
   const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
   REQUIRE(horizontal_bar.has_value());
   REQUIRE(horizontal_bar->axis == Axis::Horizontal);
@@ -993,26 +993,26 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   TestPlatform platform;
   Runtime runtime{DragScrollApp, platform};
   runtime.SetViewport({100.0F, 100.0F});
-  const DisplayList& initial = runtime.BuildFrame();
+  const FlattenedScene& initial = runtime.BuildFrame();
   const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
   REQUIRE(geometry.has_value());
   REQUIRE(ContainsRect(initial, geometry->thumb));
-  REQUIRE(!platform.requested_delays.empty());
-  REQUIRE(std::abs(platform.requested_delays.back() - 0.7) < 0.001);
+  REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
+  REQUIRE(std::abs(*runtime.LastCommit().next_frame_deadline - 0.7) < 0.001);
 
   platform.AdvanceTime(0.7);
   runtime.BuildFrame();
-  REQUIRE(platform.requested_delays.back() == 0.0);
+  REQUIRE(runtime.LastCommit().next_frame_deadline == platform.current_time);
 
   platform.AdvanceTime(0.11);
-  const DisplayList& fading = runtime.BuildFrame();
+  const FlattenedScene& fading = runtime.BuildFrame();
   const auto fading_alpha = RectAlpha(fading, geometry->thumb);
   REQUIRE(fading_alpha.has_value());
   REQUIRE(*fading_alpha > 0.0F);
   REQUIRE(*fading_alpha < geometry->style.thumb_color.alpha);
 
   platform.AdvanceTime(0.11);
-  const DisplayList& hidden = runtime.BuildFrame();
+  const FlattenedScene& hidden = runtime.BuildFrame();
   REQUIRE(!ContainsRect(hidden, geometry->thumb));
 
   ClickAt(runtime, {94.0F, 80.0F}, 60);
@@ -1027,7 +1027,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   );
   runtime.BuildFrame();
   platform.AdvanceTime(0.12);
-  const DisplayList& shown = runtime.BuildFrame();
+  const FlattenedScene& shown = runtime.BuildFrame();
   const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
   REQUIRE(shown_geometry.has_value());
   REQUIRE(ContainsRect(shown, shown_geometry->thumb));
@@ -1041,7 +1041,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   );
   runtime.BuildFrame();
   platform.AdvanceTime(2.0);
-  const DisplayList& held = runtime.BuildFrame();
+  const FlattenedScene& held = runtime.BuildFrame();
   REQUIRE(ContainsRect(held, shown_geometry->thumb));
 
   runtime.HandlePointerEvent(
@@ -1055,7 +1055,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   platform.AdvanceTime(0.7);
   runtime.BuildFrame();
   platform.AdvanceTime(0.22);
-  const DisplayList& hidden_after_exit = runtime.BuildFrame();
+  const FlattenedScene& hidden_after_exit = runtime.BuildFrame();
   REQUIRE(!ContainsRect(hidden_after_exit, shown_geometry->thumb));
 }
 

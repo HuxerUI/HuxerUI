@@ -11,6 +11,15 @@
 
 namespace huxerui::detail {
 
+struct DefaultIndication {
+  static const ModifierDescriptor& Descriptor();
+
+  bool operator==(const DefaultIndication&) const = default;
+};
+
+bool IsDefaultIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
+bool IsExplicitIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
+
 struct IndicationRippleState {
   std::int64_t pointer_id = 0;
   Point local_origin;
@@ -27,7 +36,7 @@ public:
   void Press(std::int64_t pointer_id, Point local_origin);
   void Release(std::int64_t pointer_id);
   [[nodiscard]] bool Advance(const FrameInfo& frame);
-  void Paint(DisplayList& display_list, Rect frame, float corner_radius, float opacity = 1.0F) const;
+  void Paint(PaintContext& context, Rect frame, float corner_radius, float opacity = 1.0F) const;
   [[nodiscard]] bool HasVisuals() const noexcept;
 
 private:

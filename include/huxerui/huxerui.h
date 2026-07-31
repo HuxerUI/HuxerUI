@@ -4,7 +4,6 @@
 #include <huxerui/app.h>
 #include <huxerui/clipboard.h>
 #include <huxerui/color.h>
-#include <huxerui/display_list.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/geometry.h>
@@ -12,7 +11,9 @@
 #include <huxerui/layout.h>
 #include <huxerui/layer.h>
 #include <huxerui/modifier.h>
+#include <huxerui/paint.h>
 #include <huxerui/presentation.h>
+#include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>

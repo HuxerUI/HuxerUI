@@ -40,6 +40,8 @@ final class HuxerUIInputConnection extends BaseInputConnection {
     private final boolean textInputMultiline;
     private final boolean textInputSecure;
     private final boolean textInputAutocorrect;
+    private final Matrix cursorAnchorMatrix = new Matrix();
+    private final Matrix candidateCursorAnchorMatrix = new Matrix();
 
     private boolean active = true;
     private long selectionAnchor;
@@ -54,6 +56,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
     private float caretY;
     private float caretWidth;
     private float caretHeight;
+    private boolean hasCursorAnchorMatrix;
 
     HuxerUIInputConnection(HuxerUIView view, long nativeHandle, long sessionId, int type, int capitalization,
             int action, boolean multiline, boolean secure, boolean autocorrect, long anchor, long active,
@@ -85,6 +88,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
         batchDepth = 0;
         stateNotificationPending = false;
         cursorUpdateMode = 0;
+        hasCursorAnchorMatrix = false;
     }
 
     void configureEditorInfo(EditorInfo outAttrs) {
@@ -321,6 +325,13 @@ final class HuxerUIInputConnection extends BaseInputConnection {
         }
     }
 
+    void updateCursorAnchorPosition() {
+        if (isActive() && (cursorUpdateMode & InputConnection.CURSOR_UPDATE_MONITOR) != 0
+                && updateCursorAnchorMatrix()) {
+            publishCursorAnchorInfo();
+        }
+    }
+
     private void publishCursorAnchorInfo() {
         if (!isActive()) {
             return;
@@ -334,21 +345,29 @@ final class HuxerUIInputConnection extends BaseInputConnection {
         if (!hasCaretGeometry) {
             return;
         }
-        int[] location = new int[2];
-        view.getLocationOnScreen(location);
-        Matrix matrix = new Matrix();
-        matrix.setTranslate(location[0], location[1]);
+        updateCursorAnchorMatrix();
         float left = caretX * density;
         float top = caretY * density;
         float bottom = top + Math.max(1.0F, caretHeight * density);
         CursorAnchorInfo info =
                 new CursorAnchorInfo.Builder()
-                        .setMatrix(matrix)
+                        .setMatrix(cursorAnchorMatrix)
                         .setSelectionRange(androidOffset(selectionAnchor), androidOffset(selectionActive))
                         .setInsertionMarkerLocation(
                                 left, top, bottom, bottom, CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION)
                         .build();
         inputMethodManager().updateCursorAnchorInfo(view, info);
+    }
+
+    private boolean updateCursorAnchorMatrix() {
+        candidateCursorAnchorMatrix.reset();
+        view.transformMatrixToGlobal(candidateCursorAnchorMatrix);
+        if (hasCursorAnchorMatrix && candidateCursorAnchorMatrix.equals(cursorAnchorMatrix)) {
+            return false;
+        }
+        cursorAnchorMatrix.set(candidateCursorAnchorMatrix);
+        hasCursorAnchorMatrix = true;
+        return true;
     }
 
     private InputMethodManager inputMethodManager() {

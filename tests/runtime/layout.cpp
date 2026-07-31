@@ -5,9 +5,20 @@
 namespace huxerui::test {
 
 State<bool> use_column_layout;
+State<bool> use_long_cached_text;
+State<bool> expand_cached_scope;
+State<bool> update_opaque_layout_value;
 
 struct FlowBreakBefore {
   using Value = bool;
+};
+
+struct OpaqueLayoutData {
+  int value;
+};
+
+struct OpaqueLayoutValue {
+  using Value = OpaqueLayoutData;
 };
 
 class TestFlow final : public Layout<TestFlow> {
@@ -267,6 +278,38 @@ View ReactiveStateApiApp() {
   };
 }
 
+View CachedLayoutApp() {
+  auto long_text = UseState(false);
+  use_long_cached_text = long_text;
+  return Column {
+    Text(long_text.Get() ? "Longer label" : "Short"),
+    Text("Stable").LayoutValue<FlowBreakBefore>(false),
+  };
+}
+
+View OpaqueLayoutValueApp() {
+  auto update = UseState(false);
+  update_opaque_layout_value = update;
+  return Text("Opaque")
+      .LayoutValue<OpaqueLayoutValue>(OpaqueLayoutData{1})
+      .With(Foreground{update.Get() ? Color::Black() : Color::White()});
+}
+
+View CachedScope() {
+  HUXERUI_SCOPE({
+    auto expanded = UseState(false);
+    expand_cached_scope = expanded;
+    return Text("Scoped").With(Frame{.height = expanded.Get() ? 40.0F : 20.0F});
+  });
+}
+
+View ScopedCachedLayoutApp() {
+  return Column {
+    CachedScope(),
+    Text("Stable"),
+  };
+}
+
 TEST_CASE("TestMainAndCrossAxisAlignment") {
   TestPlatform platform;
   Runtime runtime{AxisAlignmentApp, platform};
@@ -275,12 +318,12 @@ TEST_CASE("TestMainAndCrossAxisAlignment") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->frame.width == 100.0F);
-  REQUIRE(root->frame.height == 100.0F);
-  REQUIRE(root->children[0]->frame.x == 40.0F);
-  REQUIRE(root->children[0]->frame.y == 0.0F);
-  REQUIRE(root->children[1]->frame.x == 40.0F);
-  REQUIRE(root->children[1]->frame.y == 80.0F);
+  REQUIRE(root->bounds.width == 100.0F);
+  REQUIRE(root->bounds.height == 100.0F);
+  REQUIRE(root->children[0]->layout_offset.x == 40.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 0.0F);
+  REQUIRE(root->children[1]->layout_offset.x == 40.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 80.0F);
 }
 
 TEST_CASE("TestSpacerAndGrowLayout") {
@@ -291,21 +334,21 @@ TEST_CASE("TestSpacerAndGrowLayout") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->children[0]->frame.x == 0.0F);
-  REQUIRE(root->children[0]->frame.y == 20.0F);
-  REQUIRE(root->children[1]->frame.x == 20.0F);
-  REQUIRE(root->children[1]->frame.width == 150.0F);
-  REQUIRE(root->children[2]->frame.x == 170.0F);
-  REQUIRE(root->children[2]->frame.y == 20.0F);
+  REQUIRE(root->children[0]->layout_offset.x == 0.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 20.0F);
+  REQUIRE(root->children[1]->layout_offset.x == 20.0F);
+  REQUIRE(root->children[1]->bounds.width == 150.0F);
+  REQUIRE(root->children[2]->layout_offset.x == 170.0F);
+  REQUIRE(root->children[2]->layout_offset.y == 20.0F);
 
   Runtime grow_runtime{GrowLayoutApp, platform};
   grow_runtime.SetViewport({300.0F, 40.0F});
   grow_runtime.BuildFrame();
 
   root = grow_runtime.RootNode();
-  REQUIRE(root->children[0]->frame.width == 100.0F);
-  REQUIRE(root->children[1]->frame.x == 100.0F);
-  REQUIRE(root->children[1]->frame.width == 200.0F);
+  REQUIRE(root->children[0]->bounds.width == 100.0F);
+  REQUIRE(root->children[1]->layout_offset.x == 100.0F);
+  REQUIRE(root->children[1]->bounds.width == 200.0F);
 }
 
 TEST_CASE("TestStackAndStretchAlignment") {
@@ -316,15 +359,15 @@ TEST_CASE("TestStackAndStretchAlignment") {
 
   const auto* root = stack_runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->children[0]->frame.x == 80.0F);
-  REQUIRE(root->children[0]->frame.y == 35.0F);
+  REQUIRE(root->children[0]->layout_offset.x == 80.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 35.0F);
 
   Runtime stretch_runtime{StretchLayoutApp, platform};
   stretch_runtime.SetViewport({120.0F, 80.0F});
   stretch_runtime.BuildFrame();
 
   root = stretch_runtime.RootNode();
-  REQUIRE(root->children[0]->frame.width == 120.0F);
+  REQUIRE(root->children[0]->bounds.width == 120.0F);
 }
 
 TEST_CASE("TestWrappedTextMeasurement") {
@@ -335,8 +378,8 @@ TEST_CASE("TestWrappedTextMeasurement") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->children[0]->frame.width == 40.0F);
-  REQUIRE(root->children[0]->frame.height == 60.0F);
+  REQUIRE(root->children[0]->bounds.width == 40.0F);
+  REQUIRE(root->children[0]->bounds.height == 60.0F);
 }
 
 TEST_CASE("TestAdaptiveFrameConstraints") {
@@ -403,12 +446,12 @@ TEST_CASE("TestFlowWrapsAndAlignsChildrenWithinLines") {
   REQUIRE(flow.layout->type == std::type_index(typeid(Flow)));
   REQUIRE(flow.measured_size.width == 90.0F);
   REQUIRE(flow.measured_size.height == 40.0F);
-  REQUIRE(flow.children[0]->frame.x == 0.0F);
-  REQUIRE(flow.children[0]->frame.y == 5.0F);
-  REQUIRE(flow.children[1]->frame.x == 45.0F);
-  REQUIRE(flow.children[1]->frame.y == 0.0F);
-  REQUIRE(flow.children[2]->frame.x == 0.0F);
-  REQUIRE(flow.children[2]->frame.y == 25.0F);
+  REQUIRE(flow.children[0]->layout_offset.x == 0.0F);
+  REQUIRE(flow.children[0]->layout_offset.y == 5.0F);
+  REQUIRE(flow.children[1]->layout_offset.x == 45.0F);
+  REQUIRE(flow.children[1]->layout_offset.y == 0.0F);
+  REQUIRE(flow.children[2]->layout_offset.x == 0.0F);
+  REQUIRE(flow.children[2]->layout_offset.y == 25.0F);
 }
 
 TEST_CASE("TestFlowAppliesMainAlignmentPerLine") {
@@ -420,8 +463,8 @@ TEST_CASE("TestFlowAppliesMainAlignmentPerLine") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const auto& flow = *root->children[0];
-  REQUIRE(flow.children[0]->frame.x == 15.0F);
-  REQUIRE(flow.children[1]->frame.x == 55.0F);
+  REQUIRE(flow.children[0]->layout_offset.x == 15.0F);
+  REQUIRE(flow.children[1]->layout_offset.x == 55.0F);
 }
 
 TEST_CASE("TestFlowDistributesGrowWithinEachLine") {
@@ -434,12 +477,12 @@ TEST_CASE("TestFlowDistributesGrowWithinEachLine") {
   REQUIRE(root != nullptr);
   const auto& flow = *root->children[0];
   REQUIRE(flow.children[0]->measured_size.width == 30.0F);
-  REQUIRE(flow.children[0]->frame.y == 5.0F);
+  REQUIRE(flow.children[0]->layout_offset.y == 5.0F);
   REQUIRE(flow.children[1]->measured_size.width == 60.0F);
-  REQUIRE(flow.children[1]->frame.x == 40.0F);
+  REQUIRE(flow.children[1]->layout_offset.x == 40.0F);
   REQUIRE(flow.children[2]->measured_size.width == 80.0F);
-  REQUIRE(flow.children[2]->frame.x == 0.0F);
-  REQUIRE(flow.children[2]->frame.y == 30.0F);
+  REQUIRE(flow.children[2]->layout_offset.x == 0.0F);
+  REQUIRE(flow.children[2]->layout_offset.y == 30.0F);
 }
 
 TEST_CASE("TestFlowKeepsIntrinsicGrowSizesWithUnboundedWidth") {
@@ -454,7 +497,7 @@ TEST_CASE("TestFlowKeepsIntrinsicGrowSizesWithUnboundedWidth") {
   REQUIRE(flow.measured_size.width == 65.0F);
   REQUIRE(flow.children[0]->measured_size.width == 30.0F);
   REQUIRE(flow.children[1]->measured_size.width == 30.0F);
-  REQUIRE(flow.children[1]->frame.x == 35.0F);
+  REQUIRE(flow.children[1]->layout_offset.x == 35.0F);
 }
 
 TEST_CASE("TestForEachFlattensChildren") {
@@ -471,11 +514,11 @@ TEST_CASE("TestForEachFlattensChildren") {
   REQUIRE(root->children[2]->text == "Second");
   REQUIRE(root->children[3]->text == "Third");
   REQUIRE(root->children[4]->text == "Footer");
-  REQUIRE(root->children[0]->frame.y == 0.0F);
-  REQUIRE(root->children[1]->frame.y == 25.0F);
-  REQUIRE(root->children[2]->frame.y == 50.0F);
-  REQUIRE(root->children[3]->frame.y == 75.0F);
-  REQUIRE(root->children[4]->frame.y == 100.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 0.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 25.0F);
+  REQUIRE(root->children[2]->layout_offset.y == 50.0F);
+  REQUIRE(root->children[3]->layout_offset.y == 75.0F);
+  REQUIRE(root->children[4]->layout_offset.y == 100.0F);
 }
 
 TEST_CASE("TestForEachKeyedIdentity") {
@@ -536,6 +579,89 @@ TEST_CASE("TestReactiveStateApis") {
   REQUIRE(root->children[3]->text == "Charlie");
 }
 
+TEST_CASE("TestLayoutReusesUnchangedMeasurements") {
+  TestPlatform platform;
+  Runtime runtime{CachedLayoutApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 2);
+  const std::uint64_t root_measure_revision = root->measure_revision;
+  const std::uint64_t root_layout_revision = root->layout_revision;
+  const std::uint64_t changed_measure_revision = root->children[0]->measure_revision;
+  const std::uint64_t stable_measure_revision = root->children[1]->measure_revision;
+  const std::uint64_t stable_layout_revision = root->children[1]->layout_revision;
+
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision == root_measure_revision);
+  REQUIRE(root->layout_revision == root_layout_revision);
+  REQUIRE(root->children[0]->measure_revision == changed_measure_revision);
+  REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
+  REQUIRE(root->children[1]->layout_revision == stable_layout_revision);
+
+  use_long_cached_text = true;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision > root_measure_revision);
+  REQUIRE(root->children[0]->measure_revision > changed_measure_revision);
+  REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
+  REQUIRE(root->children[1]->layout_revision == stable_layout_revision);
+
+  runtime.SetViewport({240.0F, 100.0F});
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->children[1]->measure_revision > stable_measure_revision);
+}
+
+TEST_CASE("TestScopedLayoutInvalidationPropagatesToAncestors") {
+  TestPlatform platform;
+  Runtime runtime{ScopedCachedLayoutApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const std::uint64_t root_measure_revision = root->measure_revision;
+  const std::uint64_t scope_measure_revision = root->children[0]->measure_revision;
+  const std::uint64_t scoped_text_measure_revision = root->children[0]->children[0]->measure_revision;
+  const std::uint64_t stable_measure_revision = root->children[1]->measure_revision;
+  const std::uint64_t stable_layout_revision = root->children[1]->layout_revision;
+
+  expand_cached_scope = true;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision > root_measure_revision);
+  REQUIRE(root->children[0]->measure_revision > scope_measure_revision);
+  REQUIRE(root->children[0]->children[0]->measure_revision > scoped_text_measure_revision);
+  REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
+  REQUIRE(root->children[1]->layout_revision > stable_layout_revision);
+  REQUIRE(root->children[1]->layout_offset.y == 40.0F);
+}
+
+TEST_CASE("TestNonComparableLayoutValueInvalidatesConservatively") {
+  TestPlatform platform;
+  Runtime runtime{OpaqueLayoutValueApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const std::uint64_t measure_revision = root->measure_revision;
+
+  update_opaque_layout_value = true;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision > measure_revision);
+}
+
 TEST_CASE("TestCustomLayoutProtocol") {
   TestPlatform platform;
   Runtime runtime{CustomLayoutApp, platform};
@@ -547,12 +673,16 @@ TEST_CASE("TestCustomLayoutProtocol") {
   REQUIRE(root->kind == huxerui::detail::NodeKind::Layout);
   REQUIRE(root->layout->type == std::type_index(typeid(TestFlow)));
   REQUIRE(root->children.size() == 3);
-  REQUIRE(root->children[0]->frame.x == 5.0F);
-  REQUIRE(root->children[0]->frame.y == 5.0F);
-  REQUIRE(root->children[1]->frame.x == 5.0F);
-  REQUIRE(root->children[1]->frame.y == 20.0F);
-  REQUIRE(root->children[2]->frame.x == 50.0F);
-  REQUIRE(root->children[2]->frame.y == 20.0F);
+  REQUIRE(root->children[0]->bounds.x == 0.0F);
+  REQUIRE(root->children[0]->bounds.y == 0.0F);
+  REQUIRE(root->children[0]->layout_offset.x == 5.0F);
+  REQUIRE(root->children[0]->layout_offset.y == 5.0F);
+  REQUIRE(root->children[0]->PresentationBounds().x == 5.0F);
+  REQUIRE(root->children[0]->PresentationBounds().y == 5.0F);
+  REQUIRE(root->children[1]->layout_offset.x == 5.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 20.0F);
+  REQUIRE(root->children[2]->layout_offset.x == 50.0F);
+  REQUIRE(root->children[2]->layout_offset.y == 20.0F);
 }
 
 TEST_CASE("TestLayoutTypeParticipatesInIdentity") {

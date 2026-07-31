@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "text_input_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -41,31 +42,98 @@ bool ContainsStateSlots(const SavedNodeState& saved) {
   return std::ranges::any_of(saved.children, ContainsStateSlots);
 }
 
-bool SameLayoutType(const LayoutDescriptor* left, const LayoutDescriptor* right) {
+bool IsCompatibleLayout(const LayoutDescriptor* left, const LayoutDescriptor* right) {
   if (left == nullptr || right == nullptr) {
     return left == right;
   }
   return left->type == right->type;
 }
 
-bool SameVirtualLayoutType(const VirtualLayoutDescriptor* left, const VirtualLayoutDescriptor* right) {
+bool IsCompatibleVirtualLayout(const VirtualLayoutDescriptor* left, const VirtualLayoutDescriptor* right) {
   if (left == nullptr || right == nullptr) {
     return left == right;
   }
   return left->type == right->type;
 }
 
-bool SameNodeType(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.kind == incoming.kind && SameLayoutType(mounted.layout, incoming.layout) &&
-         SameVirtualLayoutType(mounted.virtual_layout, incoming.virtual_layout);
+bool IsCompatibleNode(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.kind == incoming.kind && IsCompatibleLayout(mounted.layout, incoming.layout) &&
+         IsCompatibleVirtualLayout(mounted.virtual_layout, incoming.virtual_layout);
 }
 
-bool SameSavedNodeType(const MountedNode& mounted, const SavedNodeState& saved) {
-  return mounted.kind == saved.kind && SameLayoutType(mounted.layout, saved.layout) &&
-         SameVirtualLayoutType(mounted.virtual_layout, saved.virtual_layout);
+bool IsCompatibleSavedNode(const MountedNode& mounted, const SavedNodeState& saved) {
+  return mounted.kind == saved.kind && IsCompatibleLayout(mounted.layout, saved.layout) &&
+         IsCompatibleVirtualLayout(mounted.virtual_layout, saved.virtual_layout);
 }
 
-void ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& incoming) {
+bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.text == incoming.text && mounted.style.ContentPaintEquals(incoming.style);
+}
+
+bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.style.ForegroundPaintEquals(incoming.style);
+}
+
+bool LayoutValuesEquivalent(
+    const std::unordered_map<std::type_index, ErasedLayoutValue>& left,
+    const std::unordered_map<std::type_index, ErasedLayoutValue>& right
+) {
+  if (left.size() != right.size()) {
+    return false;
+  }
+  return std::ranges::all_of(left, [&right](const auto& entry) {
+    const auto found = right.find(entry.first);
+    return found != right.end() && entry.second.EquivalentForReconciliation(found->second);
+  });
+}
+
+bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.text == incoming.text && mounted.style.LayoutEquals(incoming.style) &&
+         LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
+}
+
+bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.text == incoming.text && mounted.style == incoming.style &&
+         LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
+         mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
+         mounted.environment == incoming.environment &&
+         mounted.pointer_events_enabled == incoming.pointer_events_enabled &&
+         mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable;
+}
+
+bool MarkLayoutDirtyPath(MountedNode& node, std::uint64_t identity) {
+  if (node.identity == identity) {
+    node.measure_dirty = true;
+    return true;
+  }
+  for (auto& child : node.children) {
+    if (child && MarkLayoutDirtyPath(*child, identity)) {
+      node.measure_dirty = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool PropagateVirtualLayoutInvalidation(MountedNode& node) {
+  bool subtree_dirty = node.virtual_state && node.virtual_state->viewport_dirty;
+  for (auto& child : node.children) {
+    subtree_dirty = PropagateVirtualLayoutInvalidation(*child) || subtree_dirty;
+  }
+  if (subtree_dirty) {
+    node.measure_dirty = true;
+  }
+  return subtree_dirty;
+}
+
+struct ModifierChanges {
+  bool changed = false;
+  bool layout_changed = false;
+  bool structure_changed = false;
+};
+
+ModifierChanges
+ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& incoming, bool node_inputs_equal) {
   for (const ModifierSpec& spec : incoming) {
     if (spec.descriptor == nullptr || !spec.value) {
       throw std::logic_error("HuxerUI modifier descriptor and value must not be empty");
@@ -78,6 +146,11 @@ void ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpe
   std::vector<std::unique_ptr<NodeExtension>> created(incoming.size());
   std::vector<NodeExtensionEntry> next;
   next.reserve(incoming.size());
+  ModifierChanges changes{
+      mounted.extensions.size() != incoming.size(),
+      false,
+      mounted.extensions.size() != incoming.size(),
+  };
   for (std::size_t index = 0; index < incoming.size(); ++index) {
     const ModifierSpec& spec = incoming[index];
     if (index < mounted.extensions.size() && mounted.extensions[index].descriptor == spec.descriptor) {
@@ -86,6 +159,11 @@ void ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpe
       }
       continue;
     }
+    changes.changed = true;
+    changes.structure_changed = true;
+    changes.layout_changed =
+        changes.layout_changed || spec.descriptor->layout_affecting ||
+        (index < mounted.extensions.size() && mounted.extensions[index].descriptor->layout_affecting);
     created[index] = spec.descriptor->create_extension(mounted, spec.value.get());
     if (!created[index]) {
       throw std::logic_error("HuxerUI modifier must create a node extension");
@@ -98,20 +176,39 @@ void ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpe
         spec.descriptor->update_extension == nullptr) {
       continue;
     }
+    const bool equal = node_inputs_equal && spec.descriptor->equals != nullptr && mounted.extensions[index].value &&
+                       spec.descriptor->equals(mounted.extensions[index].value.get(), spec.value.get());
+    if (equal) {
+      continue;
+    }
+    changes.changed = true;
+    const bool layout_equal = !spec.descriptor->layout_affecting ||
+                              (spec.descriptor->layout_equals != nullptr && mounted.extensions[index].value &&
+                               spec.descriptor->layout_equals(mounted.extensions[index].value.get(), spec.value.get()));
+    changes.layout_changed = changes.layout_changed || !layout_equal;
     spec.descriptor->update_extension(*mounted.extensions[index].extension, mounted, spec.value.get());
+  }
+
+  for (std::size_t index = incoming.size(); index < mounted.extensions.size(); ++index) {
+    if (mounted.extensions[index].descriptor != nullptr) {
+      changes.layout_changed = changes.layout_changed || mounted.extensions[index].descriptor->layout_affecting;
+    }
   }
 
   for (std::size_t index = 0; index < incoming.size(); ++index) {
     if (index < mounted.extensions.size() && mounted.extensions[index].descriptor == incoming[index].descriptor) {
       next.push_back(std::move(mounted.extensions[index]));
+      next.back().value = incoming[index].value;
     } else {
       next.push_back({
           incoming[index].descriptor,
           std::move(created[index]),
+          incoming[index].value,
       });
     }
   }
   mounted.extensions = std::move(next);
+  return changes;
 }
 
 std::optional<NodeExtensionHandle> HitTestExtension(const std::vector<MountedNode*>& route, Point position) {
@@ -167,16 +264,39 @@ void DispatchKey(MountedNode& node, const KeyEvent& event) {
   }
 }
 
+void PrepareExtensionGeometry(MountedNode& node) {
+  if (!node.subtree_has_extensions) {
+    return;
+  }
+  for (NodeExtensionEntry& entry : node.extensions) {
+    if (entry.extension && entry.extension->PrepareGeometry(node)) {
+      node.foreground_paint_dirty = true;
+    }
+  }
+  for (const std::unique_ptr<MountedNode>& child : node.children) {
+    PrepareExtensionGeometry(*child);
+  }
+}
+
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
-  node.enabled = parent_enabled && node.local_enabled;
+  const bool enabled = parent_enabled && node.local_enabled;
+  if (node.enabled != enabled) {
+    node.foreground_paint_dirty = true;
+  }
+  node.enabled = enabled;
   for (auto& child : node.children) {
     ResolveEnabledTree(*child, node.enabled);
   }
 }
 
 void ResolveFocusedFlags(MountedNode& node, const std::optional<std::uint64_t>& focused_identity, bool focus_visible) {
-  node.focused = focused_identity.has_value() && node.identity == *focused_identity;
-  node.focus_visible = node.focused && focus_visible;
+  const bool focused = focused_identity.has_value() && node.identity == *focused_identity;
+  const bool resolved_focus_visible = focused && focus_visible;
+  if (node.focused != focused || node.focus_visible != resolved_focus_visible) {
+    node.foreground_paint_dirty = true;
+  }
+  node.focused = focused;
+  node.focus_visible = resolved_focus_visible;
   for (auto& child : node.children) {
     ResolveFocusedFlags(*child, focused_identity, focus_visible);
   }
@@ -333,19 +453,26 @@ bool Runtime::DismissLayer(LayerId id) {
 }
 
 void Runtime::SetViewport(Size viewport) {
-  if (state_->viewport_.width == viewport.width && state_->viewport_.height == viewport.height) {
+  if (state_->viewport_ == viewport) {
     return;
   }
   state_->viewport_ = viewport;
+  if (state_->text_selection_overlay_.state.visible) {
+    state_->text_selection_overlay_.state.paint_dirty = true;
+  }
   RequestFrame();
 }
 
+// Requests raised while a frame is being built are retained for its FrameCommit instead of re-entering the platform
+// scheduler. Requests raised outside a build notify the platform immediately.
 void Runtime::RequestFrame() {
   const double now = state_->platform_->Now();
   if (!state_->frame_requested_ || state_->frame_request_deadline_ > now) {
     state_->frame_requested_ = true;
     state_->frame_request_deadline_ = now;
-    state_->platform_->RequestFrame(0.0);
+    if (!state_->building_frame_) {
+      state_->platform_->RequestFrameAt(now);
+    }
   }
 }
 
@@ -358,24 +485,36 @@ void Runtime::RequestFrameAfter(double delay_seconds) {
   if (!state_->frame_requested_ || deadline < state_->frame_request_deadline_) {
     state_->frame_requested_ = true;
     state_->frame_request_deadline_ = deadline;
-    state_->platform_->RequestFrame(delay_seconds);
+    if (!state_->building_frame_) {
+      state_->platform_->RequestFrameAt(deadline);
+    }
   }
 }
 
 void Runtime::NotifyScrollActivity(detail::MountedNode& node) {
   DispatchScrollActivity(node);
+  if (state_->text_selection_overlay_.state.visible) {
+    state_->text_selection_overlay_.state.paint_dirty = true;
+  }
   RequestFrame();
 }
 
-const DisplayList& Runtime::BuildFrame() {
+const FrameCommit& Runtime::BuildFrame() {
   const double timestamp = state_->platform_->Now();
   const double delta_time = state_->previous_frame_timestamp_.has_value()
                                 ? std::clamp(timestamp - *state_->previous_frame_timestamp_, 0.0, 0.25)
                                 : 0.0;
-  return BuildFrame({timestamp, delta_time});
+  state_->building_frame_ = true;
+  try {
+    return BuildFrame({timestamp, delta_time});
+  } catch (...) {
+    state_->building_frame_ = false;
+    state_->frame_requested_ = false;
+    throw;
+  }
 }
 
-const DisplayList& Runtime::BuildFrame(FrameInfo frame) {
+const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   if (!std::isfinite(frame.timestamp)) {
     frame.timestamp = state_->platform_->Now();
   }
@@ -391,11 +530,18 @@ const DisplayList& Runtime::BuildFrame(FrameInfo frame) {
     RecomposeDirtyScopes(*state_->mounted_root_);
   }
 
-  state_->display_list_.Clear();
   if (!state_->mounted_root_ || state_->viewport_.width <= 0.0F || state_->viewport_.height <= 0.0F) {
     RefreshInteractionTree();
     RefreshTextInputSession();
-    return state_->display_list_;
+    state_->frame_commit_.render_frame.scene.root = nullptr;
+    state_->frame_commit_.render_frame.damage = {};
+    state_->committed_render_scene_.clear();
+    state_->has_committed_render_scene_ = false;
+    ++state_->frame_commit_.render_frame.revision;
+    state_->frame_commit_.next_frame_deadline =
+        state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
+    state_->building_frame_ = false;
+    return state_->frame_commit_;
   }
 
   bool needs_frame = false;
@@ -409,27 +555,58 @@ const DisplayList& Runtime::BuildFrame(FrameInfo frame) {
       state_->viewport_.height,
       state_->viewport_.height,
   };
+  PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
   MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
   LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
-  if (BringTextInputIntoView()) {
-    LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
-  }
   RefreshInteractionTree();
-  RefreshTextInputSession();
-  AdvanceTextSelectionLongPress(frame.timestamp);
 
   std::optional<double> next_wakeup;
   UpdateNodeExtensions(*state_->mounted_root_, frame, needs_frame, next_wakeup, state_->extension_tree_dirty_);
   state_->extension_tree_dirty_ = false;
+  ResolvePresentationTree(*state_->mounted_root_);
+
+  // The first layout establishes resolved caret geometry. Revealing that caret can change ancestor scroll offsets and
+  // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
+  if (BringTextInputIntoView()) {
+    if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
+      MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+    }
+    LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+    ResolvePresentationTree(*state_->mounted_root_);
+  }
+  // Text input clients prepare node-local geometry after the final layout, then the runtime converts it to host-view
+  // coordinates while synchronizing the platform IME session.
+  PrepareExtensionGeometry(*state_->mounted_root_);
+  RefreshTextInputSession();
+  // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
+  // so the handles and editing toolbar use the resulting selection geometry in this commit.
+  AdvanceTextSelectionLongPress(frame.timestamp);
+
   AdvanceTextSelectionOverlay(frame);
-  PaintNode(*state_->mounted_root_, state_->display_list_);
   PaintTextSelectionOverlay();
+  UpdateRenderScene(
+      *state_->mounted_root_,
+      state_->mounted_root_->bounds,
+      &state_->text_selection_overlay_.render_node
+  );
+  state_->frame_commit_.render_frame.scene.root = &state_->mounted_root_->render_node;
+  state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
+      state_->frame_commit_.render_frame.scene.root,
+      state_->viewport_,
+      state_->committed_render_scene_,
+      state_->committed_viewport_,
+      state_->has_committed_render_scene_
+  );
+  ++state_->frame_commit_.render_frame.revision;
   if (needs_frame) {
     RequestFrame();
   } else if (next_wakeup.has_value()) {
     RequestFrameAfter(*next_wakeup);
   }
-  return state_->display_list_;
+  state_->frame_commit_.next_frame_deadline =
+      state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
+  state_->building_frame_ = false;
+  return state_->frame_commit_;
 }
 
 const detail::MountedNode* Runtime::RootNode() const noexcept {
@@ -578,6 +755,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     if (identity.has_value() && state_->mounted_root_) {
       if (detail::MountedNode* focused = FindNode(*state_->mounted_root_, *identity)) {
         focused->focus_visible = state_->focus_visible_;
+        focused->foreground_paint_dirty = true;
       }
     }
     RequestFrame();
@@ -589,6 +767,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
       previous->focused = false;
       previous->focus_visible = false;
+      previous->foreground_paint_dirty = true;
       DispatchFocusChanged(*previous, false);
     }
   }
@@ -599,6 +778,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     if (detail::MountedNode* next = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
       next->focused = true;
       next->focus_visible = state_->focus_visible_;
+      next->foreground_paint_dirty = true;
       DispatchFocusChanged(*next, true);
     }
   }
@@ -682,6 +862,20 @@ bool Runtime::UpdateNodeExtensions(
   return subtree_has_extensions;
 }
 
+void Runtime::BindNodeExtensions(detail::MountedNode& node) {
+  for (NodeExtensionEntry& entry : node.extensions) {
+    if (!entry.extension) {
+      continue;
+    }
+    entry.extension->BindPaintInvalidation([this, owner = &node] {
+      owner->foreground_paint_dirty = true;
+      if (!state_->building_frame_) {
+        RequestFrame();
+      }
+    });
+  }
+}
+
 void Runtime::HandleScrollEvent(const ScrollEvent& event) {
   if (!state_->mounted_root_) {
     return;
@@ -703,19 +897,27 @@ bool Runtime::HandleFocusedTextInputKey(const KeyEvent& event) {
   if (active.node_identity != *state_->focused_node_identity_) {
     return false;
   }
+  const std::uint64_t node_identity = active.node_identity;
+  const TextInputSessionId session_id = active.session_id;
+  const std::shared_ptr<TextInputClient> client = active.client;
+  const TextInputState previous = active.state;
 
-  const bool next_action =
-      event.type == KeyEventType::Down && event.key == Key::Enter && !event.modifiers.shift &&
-      !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
-      active.configuration.action == TextInputAction::Next;
+  const bool next_action = event.type == KeyEventType::Down && event.key == Key::Enter && !event.modifiers.shift &&
+                           !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
+                           active.configuration.action == TextInputAction::Next;
   if (next_action && event.repeat) {
     return true;
   }
-  if (active.client->HandleTextKey(event) != TextInputKeyResult::Handled) {
+  if (client->HandleTextKey(event) != TextInputKeyResult::Handled) {
     return false;
   }
 
-  RequestFrame();
+  const TextInputState current = client->State();
+  if (!detail::IsValidTextInputState(current, session_id) ||
+      !detail::IsValidTextInputStateTransition(previous, current)) {
+    throw std::logic_error("HuxerUI text input client returned invalid state after handling a key event");
+  }
+  InvalidateTextInputStateChange(node_identity, previous, current);
   if (next_action) {
     MoveFocus(false, false);
   }
@@ -806,15 +1008,26 @@ void Runtime::InvalidateScope(std::uint64_t scope_id) {
   RequestFrame();
 }
 
-void Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
+void Runtime::InvalidateLayout(detail::MountedNode& mounted) {
+  if (state_->mounted_root_) {
+    MarkLayoutDirtyPath(*state_->mounted_root_, mounted.identity);
+  }
+  RequestFrame();
+}
+
+bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   if (mounted.kind == NodeKind::Scope && mounted.recompose_scope && mounted.recompose_scope->IsDirty()) {
-    ComposeScope(mounted);
-    return;
+    return ComposeScope(mounted);
   }
 
+  bool layout_changed = false;
   for (auto& child : mounted.children) {
-    RecomposeDirtyScopes(*child);
+    layout_changed = RecomposeDirtyScopes(*child) || layout_changed;
   }
+  if (layout_changed) {
+    mounted.measure_dirty = true;
+  }
+  return layout_changed;
 }
 
 void Runtime::ComposeRoot() {
@@ -824,6 +1037,8 @@ void Runtime::ComposeRoot() {
   bool scope_composing = false;
   bool children_split = false;
   bool application_reconciled = false;
+  bool application_layout_changed = false;
+  bool layer_layout_changed = false;
   const bool previous_has_application = state_->has_application_root_;
   bool next_has_application = previous_has_application;
   std::vector<std::unique_ptr<detail::MountedNode>> application_nodes;
@@ -880,7 +1095,7 @@ void Runtime::ComposeRoot() {
     if (application) {
       application_children.push_back(std::move(application));
     }
-    ReconcileChildren(application_nodes, application_children);
+    application_layout_changed = ReconcileChildren(application_nodes, application_children);
     application_reconciled = true;
 
     state_->layer_snapshot_taken_ = true;
@@ -951,8 +1166,11 @@ void Runtime::ComposeRoot() {
       layer_children.push_back(std::move(layer).Key("__huxerui_layer_" + std::to_string(entry->id)));
     }
 
-    ReconcileChildren(layer_nodes, layer_children);
+    layer_layout_changed = ReconcileChildren(layer_nodes, layer_children);
     restore_root_children();
+    if (application_layout_changed || layer_layout_changed) {
+      state_->mounted_root_->measure_dirty = true;
+    }
     state_->has_application_root_ = next_has_application;
     state_->composing_root_ = false;
     state_->layer_snapshot_taken_ = false;
@@ -971,10 +1189,12 @@ void Runtime::ComposeRoot() {
   }
 }
 
-void Runtime::ComposeScope(detail::MountedNode& mounted) {
+bool Runtime::ComposeScope(detail::MountedNode& mounted) {
   if (!mounted.scope_factory) {
+    const bool layout_changed = !mounted.children.empty();
     mounted.children.clear();
-    return;
+    mounted.measure_dirty = mounted.measure_dirty || layout_changed;
+    return layout_changed;
   }
   if (!mounted.recompose_scope) {
     mounted.recompose_scope = std::make_shared<RecomposeScope>(*this, state_->next_scope_identity_++);
@@ -1000,7 +1220,9 @@ void Runtime::ComposeScope(detail::MountedNode& mounted) {
     if (content) {
       children.push_back(std::move(content));
     }
-    ReconcileChildren(mounted.children, children);
+    const bool layout_changed = ReconcileChildren(mounted.children, children);
+    mounted.measure_dirty = mounted.measure_dirty || layout_changed;
+    return layout_changed;
   } catch (...) {
     if (scope_composing) {
       mounted.recompose_scope->AbortComposition();
@@ -1012,14 +1234,25 @@ void Runtime::ComposeScope(detail::MountedNode& mounted) {
   }
 }
 
-void Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming) {
-  state_->extension_tree_dirty_ = true;
-  const bool compatible = mounted && SameNodeType(*mounted, *incoming) && mounted->key == incoming->key;
+bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming) {
+  if (state_->text_selection_overlay_.state.visible) {
+    state_->text_selection_overlay_.state.paint_dirty = true;
+  }
+  const bool compatible = mounted && IsCompatibleNode(*mounted, *incoming) && mounted->key == incoming->key;
   if (!compatible) {
+    state_->extension_tree_dirty_ = true;
     mounted = Mount(incoming);
-    return;
+    return true;
   }
 
+  bool layout_changed = !LayoutInputsEqual(*mounted, *incoming);
+  if (!ContentPaintInputsEqual(*mounted, *incoming)) {
+    mounted->content_paint_dirty = true;
+  }
+  if (!ForegroundPaintInputsEqual(*mounted, *incoming)) {
+    mounted->foreground_paint_dirty = true;
+  }
+  const bool extension_node_inputs_equal = ExtensionNodeInputsEqual(*mounted, *incoming);
   mounted->text = incoming->text;
   mounted->style = incoming->style;
   mounted->scope_factory = incoming->scope_factory;
@@ -1032,9 +1265,18 @@ void Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   mounted->pointer_events_enabled = incoming->pointer_events_enabled;
   mounted->local_enabled = incoming->local_enabled;
   mounted->focusable = incoming->focusable;
-  ReconcileNodeExtensions(*mounted, incoming->modifiers);
+  const ModifierChanges modifier_changes =
+      ReconcileNodeExtensions(*mounted, incoming->modifiers, extension_node_inputs_equal);
+  layout_changed = layout_changed || modifier_changes.layout_changed;
+  if (modifier_changes.changed) {
+    mounted->foreground_paint_dirty = true;
+  }
+  if (modifier_changes.structure_changed) {
+    state_->extension_tree_dirty_ = true;
+    BindNodeExtensions(*mounted);
+  }
   if (mounted->kind == NodeKind::Scope) {
-    ComposeScope(*mounted);
+    layout_changed = ComposeScope(*mounted) || layout_changed;
   } else if (IsVirtualLayoutNode(*mounted)) {
     mounted->virtual_state->source = incoming->virtual_items;
     mounted->virtual_state->item_views.clear();
@@ -1048,9 +1290,12 @@ void Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
         mounted->virtual_state->saved_state.reset();
       }
     }
+    layout_changed = true;
   } else {
-    ReconcileChildren(mounted->children, incoming->children);
+    layout_changed = ReconcileChildren(mounted->children, incoming->children) || layout_changed;
   }
+  mounted->measure_dirty = mounted->measure_dirty || layout_changed;
+  return layout_changed;
 }
 
 std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming) {
@@ -1073,19 +1318,20 @@ std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSp
   mounted->pointer_events_enabled = incoming->pointer_events_enabled;
   mounted->local_enabled = incoming->local_enabled;
   mounted->focusable = incoming->focusable;
-  ReconcileNodeExtensions(*mounted, incoming->modifiers);
+  static_cast<void>(ReconcileNodeExtensions(*mounted, incoming->modifiers, false));
+  BindNodeExtensions(*mounted);
   if (mounted->kind == NodeKind::Scope) {
-    ComposeScope(*mounted);
+    static_cast<void>(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {
     mounted->virtual_state = std::make_unique<VirtualNodeState>();
     mounted->virtual_state->source = incoming->virtual_items;
   } else {
-    ReconcileChildren(mounted->children, incoming->children);
+    static_cast<void>(ReconcileChildren(mounted->children, incoming->children));
   }
   return mounted;
 }
 
-void Runtime::ReconcileChildren(
+bool Runtime::ReconcileChildren(
     std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
 ) {
   std::unordered_set<ViewKey> incoming_keys;
@@ -1103,6 +1349,8 @@ void Runtime::ReconcileChildren(
   next.reserve(incoming_children.size());
   origins.reserve(incoming_children.size());
   auto previous = std::move(mounted_children);
+  bool layout_changed = false;
+  bool structure_changed = previous.size() != incoming_children.size();
 
   try {
     for (std::size_t index = 0; index < incoming_children.size(); ++index) {
@@ -1115,24 +1363,27 @@ void Runtime::ReconcileChildren(
       if (child_view.spec_->key.has_value()) {
         for (std::size_t previous_index = 0; previous_index < previous.size(); ++previous_index) {
           const auto& old_child = previous[previous_index];
-          if (old_child && SameNodeType(*old_child, *child_view.spec_) && old_child->key == child_view.spec_->key) {
+          if (old_child && IsCompatibleNode(*old_child, *child_view.spec_) && old_child->key == child_view.spec_->key) {
             origin = previous_index;
             break;
           }
         }
       } else if (
           index < previous.size() && previous[index] && !previous[index]->key.has_value() &&
-          SameNodeType(*previous[index], *child_view.spec_)
+          IsCompatibleNode(*previous[index], *child_view.spec_)
       ) {
         origin = index;
       }
 
       if (origin.has_value()) {
-        Reconcile(previous[*origin], child_view.spec_);
+        layout_changed = Reconcile(previous[*origin], child_view.spec_) || layout_changed;
+        layout_changed = *origin != next.size() || layout_changed;
+        structure_changed = *origin != next.size() || structure_changed;
         next.push_back(std::move(previous[*origin]));
       } else {
         std::unique_ptr<detail::MountedNode> candidate;
-        Reconcile(candidate, child_view.spec_);
+        layout_changed = Reconcile(candidate, child_view.spec_) || layout_changed;
+        structure_changed = true;
         next.push_back(std::move(candidate));
       }
       origins.push_back(origin);
@@ -1147,7 +1398,12 @@ void Runtime::ReconcileChildren(
     throw;
   }
 
+  const bool removed = std::ranges::any_of(previous, [](const auto& child) { return child != nullptr; });
+  layout_changed = previous.size() != next.size() || removed || layout_changed;
+  structure_changed = previous.size() != next.size() || removed || structure_changed;
   mounted_children = std::move(next);
+  state_->extension_tree_dirty_ = state_->extension_tree_dirty_ || structure_changed;
+  return layout_changed;
 }
 
 SavedNodeState Runtime::SaveNodeState(detail::MountedNode& mounted) {
@@ -1168,7 +1424,7 @@ SavedNodeState Runtime::SaveNodeState(detail::MountedNode& mounted) {
 }
 
 void Runtime::RestoreNodeState(detail::MountedNode& mounted, SavedNodeState& saved) {
-  if (!SameSavedNodeType(mounted, saved) || mounted.key != saved.key) {
+  if (!IsCompatibleSavedNode(mounted, saved) || mounted.key != saved.key) {
     return;
   }
 
@@ -1186,7 +1442,7 @@ void Runtime::RestoreNodeState(detail::MountedNode& mounted, SavedNodeState& sav
 
     if (child.key.has_value()) {
       for (; saved_index < saved.children.size(); ++saved_index) {
-        if (!restored[saved_index] && SameSavedNodeType(child, saved.children[saved_index]) &&
+        if (!restored[saved_index] && IsCompatibleSavedNode(child, saved.children[saved_index]) &&
             saved.children[saved_index].key == child.key) {
           saved_child = &saved.children[saved_index];
           break;
@@ -1194,7 +1450,7 @@ void Runtime::RestoreNodeState(detail::MountedNode& mounted, SavedNodeState& sav
       }
     } else if (
         index < saved.children.size() && !restored[index] && !saved.children[index].key.has_value() &&
-        SameSavedNodeType(child, saved.children[index])
+        IsCompatibleSavedNode(child, saved.children[index])
     ) {
       saved_index = index;
       saved_child = &saved.children[index];
@@ -1257,7 +1513,7 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
   std::unique_ptr<MountedNode> candidate;
   if (item.spec_->key.has_value()) {
     for (auto& previous : previous_) {
-      if (previous && SameNodeType(*previous, *item.spec_) && previous->key == item.spec_->key) {
+      if (previous && IsCompatibleNode(*previous, *item.spec_) && previous->key == item.spec_->key) {
         candidate = std::move(previous);
         break;
       }
@@ -1326,7 +1582,7 @@ void VirtualMeasureSession::SaveUnmounted(std::unique_ptr<MountedNode> node, std
   }
 }
 
-void VirtualMeasureSession::Commit(const std::vector<VirtualLayoutResult::Placement>& placements) {
+void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements) {
   std::vector<std::unique_ptr<MountedNode>> next;
   std::vector<std::size_t> next_indices;
   next.reserve(placements.size());

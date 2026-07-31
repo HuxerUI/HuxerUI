@@ -297,11 +297,12 @@ public:
       throw std::runtime_error("HuxerUI could not inspect its Android view");
     }
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
+    invalidate_full_frame_ = environment->GetMethodID(view_class, "invalidateFullFrame", "()V");
     measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFF)[F");
     create_text_layout_ = environment->GetMethodID(view_class, "createTextLayout", "([BFF)Ljava/lang/Object;");
-    start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJ)V");
+    start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
-    restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJ)V");
+    restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     stop_text_input_ = environment->GetMethodID(view_class, "stopTextInput", "(J)V");
     request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
     read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
@@ -313,15 +314,18 @@ public:
     draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
     push_clip_ = environment->GetMethodID(view_class, "pushClip", "(Landroid/graphics/Canvas;FFFFF)V");
     pop_clip_ = environment->GetMethodID(view_class, "popClip", "(Landroid/graphics/Canvas;)V");
+    push_opacity_ = environment->GetMethodID(view_class, "pushOpacity", "(Landroid/graphics/Canvas;F)V");
+    pop_opacity_ = environment->GetMethodID(view_class, "popOpacity", "(Landroid/graphics/Canvas;)V");
     push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
     pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
     environment->DeleteLocalRef(view_class);
 
-    if (schedule_frame_ == nullptr || measure_text_ == nullptr || create_text_layout_ == nullptr ||
-        start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
-        stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
-        write_clipboard_text_ == nullptr || draw_rect_ == nullptr || draw_text_ == nullptr || draw_circle_ == nullptr ||
-        draw_arc_ == nullptr || draw_border_ == nullptr || push_clip_ == nullptr || pop_clip_ == nullptr ||
+    if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || measure_text_ == nullptr ||
+        create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
+        restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
+        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || draw_rect_ == nullptr ||
+        draw_text_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr ||
+        push_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr ||
         push_transform_ == nullptr || pop_transform_ == nullptr) {
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
@@ -336,11 +340,63 @@ public:
     }
   }
 
-  void RequestFrame(double delay_seconds) override {
+  void RequestFrameAt(double deadline) override {
+    frame_build_pending_ = true;
+    const double now = Now();
+    if (std::isnan(deadline) || deadline <= now) {
+      deadline = now;
+    } else if (!std::isfinite(deadline)) {
+      deadline = std::numeric_limits<double>::max();
+    }
+    if (paint_pending_ || paint_in_progress_) {
+      if (!deferred_frame_deadline_.has_value() || deadline < *deferred_frame_deadline_) {
+        deferred_frame_deadline_ = deadline;
+      }
+      return;
+    }
+    ScheduleFrame(deadline);
+  }
+
+  bool BeginFrameCommit() {
+    if (!frame_build_pending_) {
+      return false;
+    }
+    frame_build_pending_ = false;
+    deferred_frame_deadline_.reset();
+    return true;
+  }
+
+  void CommitFrame(const FrameCommit& commit) {
+    committed_frame_ = &commit.render_frame;
+    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    if (commit.next_frame_deadline.has_value()) {
+      RequestFrameAt(*commit.next_frame_deadline);
+    }
+    FlushDeferredFrame();
+  }
+
+  void Draw(JNIEnv* environment, jobject canvas) {
+    paint_in_progress_ = true;
+    if (committed_frame_ != nullptr) {
+      Render(environment, canvas, *committed_frame_);
+    }
+    paint_in_progress_ = false;
+    paint_pending_ = false;
+    FlushDeferredFrame();
+  }
+
+  double Now() const noexcept override {
+    using Clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+private:
+  void ScheduleFrame(double deadline) {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return;
     }
+    const double delay_seconds = std::max(0.0, deadline - Now());
     double delay_milliseconds = std::ceil(delay_seconds * 1000.0);
     if (!std::isfinite(delay_milliseconds) || delay_milliseconds <= 0.0) {
       delay_milliseconds = 0.0;
@@ -349,11 +405,26 @@ public:
     environment->CallVoidMethod(view_, schedule_frame_, static_cast<jlong>(bounded));
   }
 
-  double Now() const noexcept override {
-    using Clock = std::chrono::steady_clock;
-    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  void FlushDeferredFrame() {
+    if (paint_pending_ || paint_in_progress_ || !frame_build_pending_ || !deferred_frame_deadline_.has_value()) {
+      return;
+    }
+    const double deadline = *deferred_frame_deadline_;
+    deferred_frame_deadline_.reset();
+    ScheduleFrame(deadline);
   }
 
+  bool InvalidateDamage(const DamageRegion& damage) {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr || (!damage.full && damage.rects.empty())) {
+      return false;
+    }
+    environment->CallVoidMethod(view_, invalidate_full_frame_);
+    paint_pending_ = !environment->ExceptionCheck();
+    return paint_pending_;
+  }
+
+public:
   Size MeasureText(std::string_view text, float font_size, float max_width) override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
@@ -434,9 +505,12 @@ public:
   }
 
   void Start(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
-    CallTextInput(start_text_input_, session_id, configuration, state);
+    CallTextInput(start_text_input_, session_id, configuration, state, geometry);
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
@@ -464,9 +538,12 @@ public:
   }
 
   void Restart(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
-    CallTextInput(restart_text_input_, session_id, configuration, state);
+    CallTextInput(restart_text_input_, session_id, configuration, state, geometry);
   }
 
   void Stop(TextInputSessionId session_id) override {
@@ -483,16 +560,106 @@ public:
     }
   }
 
-  void Render(JNIEnv* environment, jobject canvas, const DisplayList& display_list) {
-    for (const DisplayCommand& command : display_list.Commands()) {
+  void Render(JNIEnv* environment, jobject canvas, const RenderFrame& frame) {
+    if (frame.scene.root != nullptr) {
+      RenderSceneNode(environment, canvas, *frame.scene.root);
+    }
+  }
+
+  bool RenderSequence(JNIEnv* environment, jobject canvas, const PaintSequence& sequence) {
+    for (const PaintCommand& command : sequence.Commands()) {
       std::visit(
           [this, environment, canvas](const auto& value) { RenderCommand(environment, canvas, value); },
           command
       );
       if (environment->ExceptionCheck()) {
-        return;
+        return false;
       }
     }
+    return true;
+  }
+
+  bool RenderSceneNode(JNIEnv* environment, jobject canvas, const RenderNode& node) {
+    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
+    if (!node.visible || opacity <= 0.0F || environment->ExceptionCheck()) {
+      return !environment->ExceptionCheck();
+    }
+
+    Transform2D transform = node.transform;
+    transform.translate_x += node.offset.x;
+    transform.translate_y += node.offset.y;
+    const bool transformed = !transform.IsIdentity();
+    if (transformed) {
+      RenderCommand(environment, canvas, PushTransformCommand{transform});
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+
+    const bool translucent = opacity < 1.0F;
+    if (translucent) {
+      environment->CallVoidMethod(view_, push_opacity_, canvas, opacity);
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+
+    if (!RenderSequence(environment, canvas, node.content)) {
+      return false;
+    }
+    if (node.child_clip.has_value()) {
+      RenderCommand(
+          environment,
+          canvas,
+          PushClipCommand{
+              node.child_clip->rect,
+              node.child_clip->corner_radius,
+          }
+      );
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    const bool children_transformed = !node.children_transform.IsIdentity();
+    if (children_transformed) {
+      RenderCommand(environment, canvas, PushTransformCommand{node.children_transform});
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr && !RenderSceneNode(environment, canvas, *child)) {
+        return false;
+      }
+    }
+    if (children_transformed) {
+      RenderCommand(environment, canvas, PopTransformCommand{});
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    if (node.child_clip.has_value()) {
+      RenderCommand(environment, canvas, PopClipCommand{});
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    if (!RenderSequence(environment, canvas, node.foreground)) {
+      return false;
+    }
+    if (translucent) {
+      environment->CallVoidMethod(view_, pop_opacity_, canvas);
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    if (transformed) {
+      RenderCommand(environment, canvas, PopTransformCommand{});
+      if (environment->ExceptionCheck()) {
+        return false;
+      }
+    }
+    return true;
   }
 
 private:
@@ -500,7 +667,8 @@ private:
       jmethodID method,
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
-      const TextInputState& state
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
@@ -522,7 +690,12 @@ private:
         static_cast<jlong>(state.selection.active),
         static_cast<jint>(state.selection.affinity),
         static_cast<jlong>(composition.start),
-        static_cast<jlong>(composition.end)
+        static_cast<jlong>(composition.end),
+        static_cast<jint>(geometry.result_code),
+        geometry.caret.x,
+        geometry.caret.y,
+        geometry.caret.width,
+        geometry.caret.height
     );
   }
 
@@ -637,12 +810,12 @@ private:
         view_,
         push_transform_,
         canvas,
-        command.m11,
-        command.m12,
-        command.m21,
-        command.m22,
-        command.translate_x,
-        command.translate_y
+        command.transform.m11,
+        command.transform.m12,
+        command.transform.m21,
+        command.transform.m22,
+        command.transform.translate_x,
+        command.transform.translate_y
     );
   }
 
@@ -653,6 +826,7 @@ private:
   JavaVM* virtual_machine_ = nullptr;
   jobject view_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
+  jmethodID invalidate_full_frame_ = nullptr;
   jmethodID measure_text_ = nullptr;
   jmethodID create_text_layout_ = nullptr;
   jmethodID start_text_input_ = nullptr;
@@ -669,8 +843,15 @@ private:
   jmethodID draw_border_ = nullptr;
   jmethodID push_clip_ = nullptr;
   jmethodID pop_clip_ = nullptr;
+  jmethodID push_opacity_ = nullptr;
+  jmethodID pop_opacity_ = nullptr;
   jmethodID push_transform_ = nullptr;
   jmethodID pop_transform_ = nullptr;
+  bool frame_build_pending_ = false;
+  bool paint_pending_ = false;
+  bool paint_in_progress_ = false;
+  std::optional<double> deferred_frame_deadline_;
+  const RenderFrame* committed_frame_ = nullptr;
 };
 
 std::optional<TextSelection> AndroidCursorSelection(
@@ -712,7 +893,13 @@ public:
   }
 
   void Draw(JNIEnv* environment, jobject canvas) {
-    platform_.Render(environment, canvas, runtime_.BuildFrame());
+    platform_.Draw(environment, canvas);
+  }
+
+  void CommitFrame() {
+    if (platform_.BeginFrameCommit()) {
+      platform_.CommitFrame(runtime_.BuildFrame());
+    }
   }
 
   void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y) {
@@ -881,6 +1068,17 @@ Java_org_huxerui_HuxerUIView_nativeResize(JNIEnv* environment, jclass, jlong han
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
       session->Resize(width, height);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_huxerui_HuxerUIView_nativeCommitFrame(JNIEnv* environment, jclass, jlong handle) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->CommitFrame();
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

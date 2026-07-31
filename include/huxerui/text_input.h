@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <huxerui/clipboard.h>
+#include <huxerui/color.h>
 #include <huxerui/event.h>
 #include <huxerui/geometry.h>
 
@@ -178,6 +180,7 @@ enum class TextInputKeyResult {
 struct TextInputState {
   TextInputSessionId session_id = 0;
   std::uint64_t revision = 0;
+  std::uint64_t content_revision = 0;
   TextSelection selection;
   std::optional<TextRange> composition;
 
@@ -187,7 +190,6 @@ struct TextInputState {
 struct TextInputApplyResult {
   TextInputResultCode result_code = TextInputResultCode::Rejected;
   TextInputSyncAction sync_action = TextInputSyncAction::None;
-  bool changed = false;
 
   bool operator==(const TextInputApplyResult&) const = default;
 };
@@ -210,21 +212,7 @@ struct TextInputGeometry {
   Rect caret;
   std::vector<Rect> range_rects;
 
-  bool operator==(const TextInputGeometry& other) const {
-    const auto same_rect = [](const Rect& left, const Rect& right) {
-      return left.x == right.x && left.y == right.y && left.width == right.width && left.height == right.height;
-    };
-    if (result_code != other.result_code || session_id != other.session_id || !same_rect(caret, other.caret) ||
-        range_rects.size() != other.range_rects.size()) {
-      return false;
-    }
-    for (std::size_t index = 0; index < range_rects.size(); ++index) {
-      if (!same_rect(range_rects[index], other.range_rects[index])) {
-        return false;
-      }
-    }
-    return true;
-  }
+  bool operator==(const TextInputGeometry&) const = default;
 };
 
 struct TextInputPositionResult {
@@ -245,24 +233,58 @@ public:
   virtual TextInputApplyResult ApplyTextInput(const TextInputCommandBatch& batch) = 0;
   [[nodiscard]] virtual TextInputContext
   QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const = 0;
+  // Geometry returned by a client is expressed in the owning node's local logical coordinates.
   [[nodiscard]] virtual TextInputGeometry
   QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const = 0;
+  // The point supplied to a client is expressed in the owning node's local logical coordinates.
   [[nodiscard]] virtual TextInputPositionResult
   QueryTextInputPosition(TextInputSessionId session_id, Point point) const = 0;
   virtual TextInputKeyResult HandleTextKey(const KeyEvent& event) = 0;
   virtual void EndTextInput(TextInputSessionId session_id, TextInputEndReason reason) = 0;
 };
 
+class TextSelectionClient {
+public:
+  virtual ~TextSelectionClient() = default;
+
+  [[nodiscard]] virtual bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const {
+    static_cast<void>(action);
+    static_cast<void>(clipboard);
+    return false;
+  }
+
+  virtual bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) {
+    static_cast<void>(action);
+    static_cast<void>(clipboard);
+    return false;
+  }
+
+  // Points and geometry use the owning node's local logical coordinates.
+  virtual bool SelectWord(Point position) = 0;
+  virtual bool ExtendSelection(Point position, bool start_handle) = 0;
+  [[nodiscard]] virtual bool QuerySelectionGeometry(Rect& start, Rect& end) const = 0;
+  [[nodiscard]] virtual Color SelectionHandleColor() const noexcept = 0;
+};
+
 class PlatformTextInput {
 public:
   virtual ~PlatformTextInput() = default;
 
-  virtual void
-  Start(TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state) = 0;
+  // Platform geometry is expressed in logical coordinates relative to the HuxerUI host view.
+  virtual void Start(
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
+  ) = 0;
   virtual void
   Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) = 0;
-  virtual void
-  Restart(TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state) = 0;
+  virtual void Restart(
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
+  ) = 0;
   virtual void Stop(TextInputSessionId session_id) = 0;
   virtual void RequestShow(TextInputSessionId session_id) {
     static_cast<void>(session_id);

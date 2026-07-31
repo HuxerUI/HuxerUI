@@ -1,7 +1,10 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
+#include <unordered_set>
+#include <utility>
 
 #include <huxerui/theme.h>
 
@@ -23,120 +26,400 @@ float ResolveFontSize(const MountedNode& node) {
 
 Rect ContentRect(const MountedNode& node) {
   return {
-      node.frame.x + node.style.padding.left,
-      node.frame.y + node.style.padding.top,
-      std::max(0.0F, node.frame.width - node.style.padding.Horizontal()),
-      std::max(0.0F, node.frame.height - node.style.padding.Vertical()),
+      node.bounds.x + node.style.padding.left,
+      node.bounds.y + node.style.padding.top,
+      std::max(0.0F, node.bounds.width - node.style.padding.Horizontal()),
+      std::max(0.0F, node.bounds.height - node.style.padding.Vertical()),
   };
-}
-
-Color ApplyOpacity(Color color, float opacity) {
-  color.alpha *= std::clamp(opacity, 0.0F, 1.0F);
-  return color;
 }
 
 bool ClipsChildren(const MountedNode& node) {
   return IsScrollContainer(node);
 }
 
-void ResolvePresentationTree(
-    MountedNode& node, const PresentationTransform& inherited_transform, float inherited_opacity, bool inherited_enabled
-) {
-  node.presentation.resolved_transform = ComposeTransform(inherited_transform, node.presentation.local_transform);
-  float opacity = inherited_opacity * node.presentation.local_opacity;
-  if (inherited_enabled && !node.enabled) {
-    opacity *= node.style.disabled_opacity;
+Transform2D ResolveChildrenTransform(const MountedNode& node) {
+  if (node.kind != NodeKind::ScrollView || node.scroll == nullptr) {
+    return {};
   }
-  node.presentation.resolved_opacity = opacity;
-  for (auto& child : node.children) {
-    ResolvePresentationTree(*child, node.presentation.resolved_transform, opacity, node.enabled);
+  return ScrollAxis(node) == Axis::Vertical ? TranslationTransform({0.0F, -node.scroll->offset_y})
+                                            : TranslationTransform({-node.scroll->offset_x, 0.0F});
+}
+
+std::optional<Rect> UnionBounds(std::optional<Rect> left, Rect right) {
+  if (right.IsEmpty()) {
+    return left;
+  }
+  if (!left.has_value() || left->IsEmpty()) {
+    return right;
+  }
+  const float min_x = std::min(left->x, right.x);
+  const float min_y = std::min(left->y, right.y);
+  const float max_x = std::max(left->x + left->width, right.x + right.width);
+  const float max_y = std::max(left->y + left->height, right.y + right.height);
+  return Rect{
+      min_x,
+      min_y,
+      max_x - min_x,
+      max_y - min_y,
+  };
+}
+
+std::optional<Rect> ClipBounds(std::optional<Rect> bounds, const std::optional<Rect>& clip) {
+  if (!bounds.has_value() || !clip.has_value()) {
+    return bounds;
+  }
+  const Rect intersection = bounds->Intersection(*clip);
+  return intersection.IsEmpty() ? std::nullopt : std::optional<Rect>{intersection};
+}
+
+std::optional<Rect> ResolveClip(
+    const std::optional<Rect>& inherited_clip,
+    const Transform2D& world_transform,
+    const std::optional<RenderClip>& local_clip
+) {
+  if (!local_clip.has_value()) {
+    return inherited_clip;
+  }
+  const Rect world_clip = TransformBounds(world_transform, local_clip->rect);
+  if (!inherited_clip.has_value()) {
+    return world_clip;
+  }
+  return inherited_clip->Intersection(world_clip);
+}
+
+std::optional<Rect> SnapshotRenderNode(
+    const RenderNode& node,
+    const Transform2D& inherited_transform,
+    const std::optional<Rect>& inherited_clip,
+    RenderSceneSnapshot& snapshot
+) {
+  RenderNodeSnapshot node_snapshot;
+  node_snapshot.content_revision = node.content.Revision();
+  node_snapshot.foreground_revision = node.foreground.Revision();
+  node_snapshot.visible = node.visible;
+  node_snapshot.opacity = node.opacity;
+  node_snapshot.world_clip = inherited_clip;
+  if (node.child_clip.has_value()) {
+    node_snapshot.child_clip_corner_radius = node.child_clip->corner_radius;
+  }
+  node_snapshot.children.reserve(node.children.size());
+  for (const RenderNode* child : node.children) {
+    if (child != nullptr) {
+      node_snapshot.children.push_back(child->id);
+    }
+  }
+
+  const Transform2D local_transform = ComposeTransform(TranslationTransform(node.offset), node.transform);
+  node_snapshot.world_transform = ComposeTransform(inherited_transform, local_transform);
+  node_snapshot.world_children_transform = ComposeTransform(node_snapshot.world_transform, node.children_transform);
+  if (!node.visible) {
+    snapshot.insert_or_assign(node.id, std::move(node_snapshot));
+    return std::nullopt;
+  }
+
+  std::optional<Rect> own_bounds;
+  own_bounds = UnionBounds(std::move(own_bounds), node.content.Bounds());
+  own_bounds = UnionBounds(std::move(own_bounds), node.foreground.Bounds());
+  if (own_bounds.has_value()) {
+    own_bounds = TransformBounds(node_snapshot.world_transform, *own_bounds);
+    own_bounds = ClipBounds(std::move(own_bounds), inherited_clip);
+  }
+  if (own_bounds.has_value()) {
+    node_snapshot.own_bounds = *own_bounds;
+    node_snapshot.has_own_bounds = true;
+  }
+
+  node_snapshot.world_child_clip = ResolveClip(inherited_clip, node_snapshot.world_transform, node.child_clip);
+  std::optional<Rect> subtree_bounds = own_bounds;
+  for (const RenderNode* child : node.children) {
+    if (child == nullptr) {
+      continue;
+    }
+    const std::optional<Rect> child_bounds =
+        SnapshotRenderNode(*child, node_snapshot.world_children_transform, node_snapshot.world_child_clip, snapshot);
+    if (child_bounds.has_value()) {
+      subtree_bounds = UnionBounds(std::move(subtree_bounds), *child_bounds);
+    }
+  }
+  if (subtree_bounds.has_value()) {
+    node_snapshot.subtree_bounds = *subtree_bounds;
+    node_snapshot.has_subtree_bounds = true;
+  }
+  snapshot.insert_or_assign(node.id, std::move(node_snapshot));
+  return subtree_bounds;
+}
+
+bool TouchesOrIntersects(Rect left, Rect right) {
+  return left.x <= right.x + right.width && left.x + left.width >= right.x && left.y <= right.y + right.height &&
+         left.y + left.height >= right.y;
+}
+
+void AddDamageRect(DamageRegion& damage, Rect rect, Rect viewport) {
+  if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) || !std::isfinite(rect.height)) {
+    damage.full = true;
+    damage.rects = {viewport};
+    return;
+  }
+  rect = rect.Intersection(viewport);
+  if (rect.IsEmpty()) {
+    return;
+  }
+
+  for (std::size_t index = 0; index < damage.rects.size();) {
+    if (!TouchesOrIntersects(damage.rects[index], rect)) {
+      ++index;
+      continue;
+    }
+    rect = *UnionBounds(damage.rects[index], rect);
+    damage.rects.erase(damage.rects.begin() + static_cast<std::ptrdiff_t>(index));
+    index = 0;
+  }
+  damage.rects.push_back(rect);
+}
+
+void AddSnapshotBounds(DamageRegion& damage, const RenderNodeSnapshot& snapshot, bool subtree, Rect viewport) {
+  if (subtree ? snapshot.has_subtree_bounds : snapshot.has_own_bounds) {
+    AddDamageRect(damage, subtree ? snapshot.subtree_bounds : snapshot.own_bounds, viewport);
   }
 }
 
-void PaintNodeExtensions(MountedNode& node, DisplayList& display_list) {
+bool CommonChildOrderChanged(const std::vector<std::uint64_t>& previous, const std::vector<std::uint64_t>& current) {
+  if (previous == current) {
+    return false;
+  }
+  const std::unordered_set<std::uint64_t> previous_ids(previous.begin(), previous.end());
+  const std::unordered_set<std::uint64_t> current_ids(current.begin(), current.end());
+  std::vector<std::uint64_t> previous_common;
+  std::vector<std::uint64_t> current_common;
+  previous_common.reserve(previous.size());
+  current_common.reserve(current.size());
+  for (std::uint64_t id : previous) {
+    if (current_ids.contains(id)) {
+      previous_common.push_back(id);
+    }
+  }
+  for (std::uint64_t id : current) {
+    if (previous_ids.contains(id)) {
+      current_common.push_back(id);
+    }
+  }
+  return previous_common != current_common;
+}
+
+void ResolvePresentationTreeImpl(
+    MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity, bool inherited_enabled
+) {
+  const Transform2D node_transform =
+      ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
+  node.presentation.resolved_transform = ComposeTransform(inherited_transform, node_transform);
+  // render_opacity is emitted as this node's group opacity. resolved_opacity is the inherited product used for
+  // visibility and descendant geometry without baking ancestor opacity into retained paint commands.
+  float render_opacity = std::clamp(node.presentation.local_opacity, 0.0F, 1.0F);
+  // Apply disabled opacity only when entering a disabled subtree; descendants inherit the result without multiplying
+  // the same disabled state again.
+  if (inherited_enabled && !node.enabled) {
+    render_opacity *= node.style.disabled_opacity;
+  }
+  node.presentation.render_opacity = render_opacity;
+  node.presentation.resolved_opacity = inherited_opacity * render_opacity;
+  const Transform2D children_transform =
+      ComposeTransform(node.presentation.resolved_transform, ResolveChildrenTransform(node));
+  for (auto& child : node.children) {
+    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity, node.enabled);
+  }
+}
+
+void PaintNodeExtensions(MountedNode& node, PaintContext& context) {
   for (const auto& entry : node.extensions) {
     if (entry.extension) {
-      entry.extension->Paint(node, display_list);
+      entry.extension->Paint(node, context);
     }
   }
 }
 
-void PaintFocusRing(const MountedNode& node, const Rect& frame, float opacity, DisplayList& display_list) {
+void PaintFocusRing(const MountedNode& node, const Rect& bounds, PaintContext& context) {
   if (!node.focus_visible || !node.enabled || node.style.focus_ring_width <= 0.0F) {
     return;
   }
-  display_list.DrawBorder(
-      frame,
-      ApplyOpacity(node.style.focus_ring, opacity),
-      node.style.focus_ring_width,
-      node.style.corner_radius
-  );
+  context.DrawBorder(bounds, node.style.focus_ring, node.style.focus_ring_width, node.style.corner_radius);
 }
 
-void PaintNodeWithinClip(MountedNode& node, DisplayList& display_list, const Rect& clip) {
-  const PresentationTransform& transform = node.presentation.resolved_transform;
+void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
+  RenderNode& render_node = node.render_node;
+  const Transform2D& local_transform = node.presentation.local_transform;
+  const Transform2D children_transform = ResolveChildrenTransform(node);
+  const Transform2D& transform = node.presentation.resolved_transform;
   const float opacity = node.presentation.resolved_opacity;
-  const Rect presentation_frame = TransformBounds(transform, node.frame);
-  if (!presentation_frame.Intersects(clip) || opacity <= 0.0F) {
-    return;
-  }
 
-  const bool transformed = !node.presentation.local_transform.IsIdentity();
-  if (transformed) {
-    const auto& value = node.presentation.local_transform;
-    display_list.PushTransform(value.m11, value.m12, value.m21, value.m22, value.translate_x, value.translate_y);
-  }
-
-  const Rect frame = node.frame;
-  if (node.style.background.has_value() && node.style.background->alpha > 0.0F) {
-    display_list.DrawRect(frame, ApplyOpacity(*node.style.background, opacity), node.style.corner_radius);
-  }
-
-  if (node.kind == NodeKind::Text) {
-    display_list
-        .DrawText(ContentRect(node), node.text, ApplyOpacity(ResolveForeground(node), opacity), ResolveFontSize(node));
-  } else if (node.kind == NodeKind::Button) {
-    display_list.DrawText(
-        frame,
-        node.text,
-        ApplyOpacity(ResolveForeground(node), opacity),
-        ResolveFontSize(node),
-        TextAlign::Center
-    );
-  }
-
+  Rect child_clip = clip;
+  std::optional<RenderClip> render_clip;
   if (ClipsChildren(node)) {
     const Rect viewport = ContentRect(node);
-    const Rect child_clip = clip.Intersection(TransformBounds(transform, viewport));
-    if (!child_clip.IsEmpty()) {
-      display_list.PushClip(viewport);
-      for (const auto& child : node.children) {
-        PaintNodeWithinClip(*child, display_list, child_clip);
-      }
-      display_list.PopClip();
-    }
-    PaintNodeExtensions(node, display_list);
-    PaintFocusRing(node, frame, opacity, display_list);
-  } else {
-    for (const auto& child : node.children) {
-      PaintNodeWithinClip(*child, display_list, clip);
-    }
-    PaintNodeExtensions(node, display_list);
-    PaintFocusRing(node, frame, opacity, display_list);
+    render_clip = RenderClip{
+        viewport,
+        0.0F,
+    };
+    child_clip = clip.Intersection(TransformBounds(transform, viewport));
   }
-  if (transformed) {
-    display_list.PopTransform();
+
+  bool changed = false;
+  if (node.content_paint_dirty) {
+    PaintContext content{render_node.content, node.bounds};
+    const Rect bounds = node.bounds;
+    if (node.style.background.has_value() && node.style.background->alpha > 0.0F) {
+      content.DrawRect(bounds, *node.style.background, node.style.corner_radius);
+    }
+    if (node.kind == NodeKind::Text) {
+      content.DrawText(ContentRect(node), node.text, ResolveForeground(node), ResolveFontSize(node));
+    } else if (node.kind == NodeKind::Button) {
+      content.DrawText(bounds, node.text, ResolveForeground(node), ResolveFontSize(node), TextAlign::Center);
+    }
+    content.Finish();
+    node.content_paint_dirty = false;
+    changed = true;
+  }
+
+  if (node.foreground_paint_dirty) {
+    const Rect bounds = node.bounds;
+    PaintContext foreground{render_node.foreground, node.bounds};
+    PaintNodeExtensions(node, foreground);
+    PaintFocusRing(node, bounds, foreground);
+    foreground.Finish();
+    node.foreground_paint_dirty = false;
+    changed = true;
+  }
+
+  std::optional<Rect> own_paint_bounds;
+  own_paint_bounds = UnionBounds(std::move(own_paint_bounds), render_node.content.Bounds());
+  own_paint_bounds = UnionBounds(std::move(own_paint_bounds), render_node.foreground.Bounds());
+  const bool own_visible =
+      opacity > 0.0F && own_paint_bounds.has_value() && TransformBounds(transform, *own_paint_bounds).Intersects(clip);
+
+  std::vector<const RenderNode*> children;
+  children.reserve(node.children.size());
+  for (const auto& child : node.children) {
+    PaintNodeWithinClip(*child, child_clip);
+    children.push_back(&child->render_node);
+  }
+  if (extra_child != nullptr) {
+    children.push_back(extra_child);
+  }
+  const bool visible = own_visible || std::any_of(children.begin(), children.end(), [](const RenderNode* child) {
+                         return child != nullptr && child->visible;
+                       });
+
+  if (render_node.id != node.identity) {
+    render_node.id = node.identity;
+    changed = true;
+  }
+  if (render_node.offset != node.layout_offset) {
+    render_node.offset = node.layout_offset;
+    changed = true;
+  }
+  if (render_node.transform != local_transform) {
+    render_node.transform = local_transform;
+    changed = true;
+  }
+  if (render_node.opacity != node.presentation.render_opacity) {
+    render_node.opacity = node.presentation.render_opacity;
+    changed = true;
+  }
+  if (render_node.child_clip != render_clip) {
+    render_node.child_clip = render_clip;
+    changed = true;
+  }
+  if (render_node.children_transform != children_transform) {
+    render_node.children_transform = children_transform;
+    changed = true;
+  }
+  if (render_node.children != children) {
+    render_node.children = std::move(children);
+    changed = true;
+  }
+  if (render_node.visible != visible) {
+    render_node.visible = visible;
+    changed = true;
+  }
+  if (changed) {
+    ++render_node.revision;
   }
 }
 
 } // namespace
 
-void PaintNode(MountedNode& node, DisplayList& display_list) {
-  if (node.frame.IsEmpty()) {
-    return;
+void ResolvePresentationTree(MountedNode& node) {
+  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F, true);
+}
+
+void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay) {
+  PaintNodeWithinClip(node, clip, overlay);
+}
+
+DamageRegion ComputeDamageRegion(
+    const RenderNode* root,
+    Size viewport,
+    RenderSceneSnapshot& committed_scene,
+    Size& committed_viewport,
+    bool& has_committed_scene
+) {
+  const Rect viewport_bounds{
+      0.0F,
+      0.0F,
+      viewport.width,
+      viewport.height,
+  };
+  RenderSceneSnapshot current_scene;
+  if (root != nullptr) {
+    SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene);
   }
-  ResolvePresentationTree(node, PresentationTransform{}, 1.0F, true);
-  PaintNodeWithinClip(node, display_list, node.frame);
+
+  DamageRegion damage;
+  if (!has_committed_scene || committed_viewport != viewport) {
+    damage.full = true;
+    if (!viewport_bounds.IsEmpty()) {
+      damage.rects.push_back(viewport_bounds);
+    }
+  } else {
+    for (const auto& [id, current] : current_scene) {
+      const auto previous_entry = committed_scene.find(id);
+      if (previous_entry == committed_scene.end()) {
+        AddSnapshotBounds(damage, current, true, viewport_bounds);
+        continue;
+      }
+
+      const RenderNodeSnapshot& previous = previous_entry->second;
+      const bool presentation_changed = current.visible != previous.visible || current.opacity != previous.opacity ||
+                                        current.world_transform != previous.world_transform ||
+                                        current.world_children_transform != previous.world_children_transform ||
+                                        current.world_clip != previous.world_clip ||
+                                        current.world_child_clip != previous.world_child_clip ||
+                                        current.child_clip_corner_radius != previous.child_clip_corner_radius;
+      if (presentation_changed || CommonChildOrderChanged(previous.children, current.children)) {
+        // Presentation and ordering changes can move or recomposite descendant pixels, so both old and new subtree
+        // bounds must be invalidated.
+        AddSnapshotBounds(damage, previous, true, viewport_bounds);
+        AddSnapshotBounds(damage, current, true, viewport_bounds);
+      } else if (
+          current.content_revision != previous.content_revision ||
+          current.foreground_revision != previous.foreground_revision
+      ) {
+        // A rerecorded sequence affects this node's content or foreground only; unchanged descendants remain valid.
+        AddSnapshotBounds(damage, previous, false, viewport_bounds);
+        AddSnapshotBounds(damage, current, false, viewport_bounds);
+      }
+    }
+
+    for (const auto& [id, previous] : committed_scene) {
+      if (!current_scene.contains(id)) {
+        AddSnapshotBounds(damage, previous, true, viewport_bounds);
+      }
+    }
+  }
+
+  committed_scene = std::move(current_scene);
+  committed_viewport = viewport;
+  has_committed_scene = true;
+  return damage;
 }
 
 } // namespace huxerui::detail

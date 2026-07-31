@@ -25,6 +25,7 @@
 
 #include "internal.h"
 #include "text_input_internal.h"
+#include "win32_damage_internal.h"
 
 namespace huxerui::detail {
 
@@ -344,14 +345,31 @@ public:
     }
   }
 
-  void RequestFrame(double delay_seconds) override {
-    if (window_ == nullptr) {
+  void RequestFrameAt(double deadline) override {
+    frame_build_pending_ = true;
+    const double now = Now();
+    if (std::isnan(deadline) || deadline <= now) {
+      deadline = now;
+    } else if (!std::isfinite(deadline)) {
+      deadline = std::numeric_limits<double>::max();
+    }
+    if (paint_pending_ || paint_in_progress_ || window_ == nullptr) {
+      if (!deferred_frame_deadline_.has_value() || deadline < *deferred_frame_deadline_) {
+        deferred_frame_deadline_ = deadline;
+      }
       return;
     }
-    if (!std::isfinite(delay_seconds) || delay_seconds <= 0.0) {
+
+    ScheduleFrame(deadline);
+  }
+
+  void ScheduleFrame(double deadline) {
+    const double delay_seconds = std::max(0.0, deadline - Now());
+    if (delay_seconds <= 0.0) {
       if (timer_armed_) {
         KillTimer(window_, kFrameTimer);
         timer_armed_ = false;
+        timer_deadline_.reset();
       }
       if (!render_message_posted_) {
         render_message_posted_ = PostMessageW(window_, kRenderMessage, 0, 0) != FALSE;
@@ -362,12 +380,22 @@ public:
     if (render_message_posted_) {
       return;
     }
+    if (timer_armed_ && timer_deadline_.has_value() && *timer_deadline_ <= deadline) {
+      return;
+    }
     if (timer_armed_) {
       KillTimer(window_, kFrameTimer);
+      timer_armed_ = false;
+      timer_deadline_.reset();
     }
     const double milliseconds = std::ceil(delay_seconds * 1000.0);
     const double bounded = std::clamp(milliseconds, 1.0, static_cast<double>(std::numeric_limits<UINT>::max()));
     timer_armed_ = SetTimer(window_, kFrameTimer, static_cast<UINT>(bounded), nullptr) != 0;
+    if (timer_armed_) {
+      timer_deadline_ = deadline;
+    } else if (!render_message_posted_) {
+      render_message_posted_ = PostMessageW(window_, kRenderMessage, 0, 0) != FALSE;
+    }
   }
 
   double Now() const noexcept override {
@@ -491,7 +519,10 @@ public:
   }
 
   void Start(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     static_cast<void>(configuration);
     text_input_session_id_ = session_id;
@@ -499,7 +530,7 @@ public:
     ime_composing_ = state.composition.has_value();
     pending_high_surrogate_ = 0;
     pending_ime_result_.clear();
-    UpdateImePosition(QueryTextInputGeometry());
+    UpdateImePosition(geometry);
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
@@ -512,7 +543,10 @@ public:
   }
 
   void Restart(
-      TextInputSessionId session_id, const TextInputConfiguration& configuration, const TextInputState& state
+      TextInputSessionId session_id,
+      const TextInputConfiguration& configuration,
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) override {
     static_cast<void>(configuration);
     CancelNativeComposition();
@@ -521,7 +555,7 @@ public:
     ime_composing_ = state.composition.has_value();
     pending_high_surrogate_ = 0;
     pending_ime_result_.clear();
-    UpdateImePosition(QueryTextInputGeometry());
+    UpdateImePosition(geometry);
   }
 
   void Stop(TextInputSessionId session_id) override {
@@ -620,6 +654,7 @@ private:
     ime_composing_ = false;
     pending_high_surrogate_ = 0;
     pending_ime_result_.clear();
+    committed_frame_ = nullptr;
     if (window_ != nullptr) {
       DestroyWindow(window_);
       window_ = nullptr;
@@ -636,6 +671,66 @@ private:
 
   float DpiScale() const noexcept {
     return std::max(dpi_, 1.0F) / kDipsPerInch;
+  }
+
+  void UpdateRuntimeViewport() {
+    if (runtime_ == nullptr || window_ == nullptr) {
+      return;
+    }
+    RECT client{};
+    GetClientRect(window_, &client);
+    const float scale = DpiScale();
+    runtime_->SetViewport({
+        static_cast<float>(client.right - client.left) / scale,
+        static_cast<float>(client.bottom - client.top) / scale,
+    });
+  }
+
+  void FlushDeferredFrame() {
+    if (paint_pending_ || paint_in_progress_ || !frame_build_pending_ || !deferred_frame_deadline_.has_value() ||
+        window_ == nullptr) {
+      return;
+    }
+    const double deadline = *deferred_frame_deadline_;
+    deferred_frame_deadline_.reset();
+    ScheduleFrame(deadline);
+  }
+
+  bool InvalidateFullWindow() {
+    const bool invalidated = window_ != nullptr && InvalidateRect(window_, nullptr, FALSE) != FALSE;
+    paint_pending_ = paint_pending_ || invalidated;
+    return invalidated;
+  }
+
+  bool InvalidateDamage(const DamageRegion& damage) {
+    RECT client{};
+    GetClientRect(window_, &client);
+    if (force_full_repaint_) {
+      return InvalidateFullWindow();
+    }
+
+    const Win32DamageRegion resolved = ResolveWin32Damage(damage, DpiScale(), client);
+    if (resolved.full) {
+      return InvalidateFullWindow();
+    }
+    bool invalidated = false;
+    for (const RECT& rect : resolved.rects) {
+      invalidated = InvalidateRect(window_, &rect, FALSE) != FALSE || invalidated;
+    }
+    paint_pending_ = paint_pending_ || invalidated;
+    return invalidated;
+  }
+
+  void CommitFrameAndInvalidate() {
+    frame_build_pending_ = false;
+    deferred_frame_deadline_.reset();
+    const FrameCommit& commit = runtime_->BuildFrame();
+    committed_frame_ = &commit.render_frame;
+    static_cast<void>(InvalidateDamage(committed_frame_->damage));
+    if (commit.next_frame_deadline.has_value()) {
+      RequestFrameAt(*commit.next_frame_deadline);
+    }
+    FlushDeferredFrame();
   }
 
   Point ClientPoint(LPARAM position) const noexcept {
@@ -707,6 +802,7 @@ private:
       DiscardDeviceResources();
       return false;
     }
+    force_full_repaint_ = true;
     return true;
   }
 
@@ -715,9 +811,11 @@ private:
     transform_stack_.clear();
     brush_.Reset();
     render_target_.Reset();
+    force_full_repaint_ = true;
   }
 
   void ResizeRenderTarget() {
+    force_full_repaint_ = true;
     if (!render_target_) {
       return;
     }
@@ -730,27 +828,122 @@ private:
     }
   }
 
-  void Render(const DisplayList& display_list) {
+  void Render(const RenderFrame& frame, const RECT& paint_rect) {
+    if (paint_rect.left >= paint_rect.right || paint_rect.top >= paint_rect.bottom) {
+      return;
+    }
     if (!EnsureRenderTarget()) {
       return;
     }
 
+    RECT client{};
+    GetClientRect(window_, &client);
+    const Rect paint_bounds = Win32PixelRectToDips(paint_rect, DpiScale());
+    const Rect client_bounds = Win32PixelRectToDips(client, DpiScale());
     clip_stack_.clear();
+    transform_stack_.clear();
     render_target_->BeginDraw();
     render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
-    render_target_->Clear(D2D1::ColorF(247.0F / 255.0F, 248.0F / 255.0F, 250.0F / 255.0F, 1.0F));
+    render_target_->PushAxisAlignedClip(ToD2DRect(paint_bounds), D2D1_ANTIALIAS_MODE_ALIASED);
+    SetBrushColor(Color::Rgb(247, 248, 250));
+    render_target_->FillRectangle(ToD2DRect(client_bounds), brush_.Get());
 
-    for (const DisplayCommand& command : display_list.Commands()) {
-      std::visit([this](const auto& value) { RenderCommand(value); }, command);
+    if (frame.scene.root != nullptr) {
+      RenderSceneNode(*frame.scene.root);
+    }
+    while (!transform_stack_.empty()) {
+      RenderCommand(PopTransformCommand{});
     }
     while (!clip_stack_.empty()) {
       PopClip();
     }
+    render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
+    render_target_->PopAxisAlignedClip();
 
     const HRESULT result = render_target_->EndDraw();
     if (result == D2DERR_RECREATE_TARGET) {
       DiscardDeviceResources();
-      InvalidateRect(window_, nullptr, FALSE);
+      InvalidateFullWindow();
+      return;
+    }
+    ThrowIfFailed(result, "HuxerUI could not render the Windows frame");
+    if (force_full_repaint_) {
+      if (Win32RectCovers(paint_rect, client)) {
+        force_full_repaint_ = false;
+      } else {
+        InvalidateFullWindow();
+      }
+    }
+  }
+
+  void RenderSequence(const PaintSequence& sequence) {
+    for (const PaintCommand& command : sequence.Commands()) {
+      std::visit([this](const auto& value) { RenderCommand(value); }, command);
+    }
+  }
+
+  void RenderSceneNode(const RenderNode& node) {
+    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
+    if (!node.visible || opacity <= 0.0F) {
+      return;
+    }
+
+    Transform2D transform = node.transform;
+    transform.translate_x += node.offset.x;
+    transform.translate_y += node.offset.y;
+    const bool transformed = !transform.IsIdentity();
+    if (transformed) {
+      RenderCommand(PushTransformCommand{transform});
+    }
+
+    ComPtr<ID2D1Layer> opacity_layer;
+    if (opacity < 1.0F) {
+      ThrowIfFailed(
+          render_target_->CreateLayer(nullptr, opacity_layer.GetAddressOf()),
+          "HuxerUI could not create a Direct2D opacity layer"
+      );
+      render_target_->PushLayer(
+          D2D1::LayerParameters(
+              D2D1::InfiniteRect(),
+              nullptr,
+              D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+              D2D1::IdentityMatrix(),
+              opacity
+          ),
+          opacity_layer.Get()
+      );
+    }
+
+    RenderSequence(node.content);
+    if (node.child_clip.has_value()) {
+      RenderCommand(
+          PushClipCommand{
+              node.child_clip->rect,
+              node.child_clip->corner_radius,
+          }
+      );
+    }
+    const bool children_transformed = !node.children_transform.IsIdentity();
+    if (children_transformed) {
+      RenderCommand(PushTransformCommand{node.children_transform});
+    }
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr) {
+        RenderSceneNode(*child);
+      }
+    }
+    if (children_transformed) {
+      RenderCommand(PopTransformCommand{});
+    }
+    if (node.child_clip.has_value()) {
+      RenderCommand(PopClipCommand{});
+    }
+    RenderSequence(node.foreground);
+    if (opacity_layer != nullptr) {
+      render_target_->PopLayer();
+    }
+    if (transformed) {
+      RenderCommand(PopTransformCommand{});
     }
   }
 
@@ -950,8 +1143,14 @@ private:
     D2D1_MATRIX_3X2_F previous;
     render_target_->GetTransform(&previous);
     transform_stack_.push_back(previous);
-    const D2D1::Matrix3x2F
-        transform(command.m11, command.m12, command.m21, command.m22, command.translate_x, command.translate_y);
+    const D2D1::Matrix3x2F transform(
+        command.transform.m11,
+        command.transform.m12,
+        command.transform.m21,
+        command.transform.m22,
+        command.transform.translate_x,
+        command.transform.translate_y
+    );
     render_target_->SetTransform(transform * previous);
   }
 
@@ -1251,16 +1450,19 @@ private:
     switch (message) {
     case WM_CREATE:
       dpi_ = static_cast<float>(GetDpiForWindow(window));
+      RequestFrameAt(Now());
       return 0;
     case WM_DESTROY:
       window_ = nullptr;
+      committed_frame_ = nullptr;
       PostQuitMessage(0);
       return 0;
     case WM_ERASEBKGND:
       return 1;
     case WM_SIZE:
       ResizeRenderTarget();
-      InvalidateRect(window, nullptr, FALSE);
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
       return 0;
     case WM_DPICHANGED: {
       dpi_ = static_cast<float>(HIWORD(w_param));
@@ -1277,36 +1479,45 @@ private:
           suggested->bottom - suggested->top,
           SWP_NOACTIVATE | SWP_NOZORDER
       );
-      InvalidateRect(window, nullptr, FALSE);
+      force_full_repaint_ = true;
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
       return 0;
     }
     case WM_DISPLAYCHANGE:
       DiscardDeviceResources();
-      InvalidateRect(window, nullptr, FALSE);
+      RequestFrameAt(Now());
       return 0;
     case WM_PAINT: {
+      paint_in_progress_ = true;
+      if (committed_frame_ == nullptr || (frame_build_pending_ && !paint_pending_)) {
+        CommitFrameAndInvalidate();
+      } else {
+        UpdateRuntimeViewport();
+      }
       PAINTSTRUCT paint{};
       BeginPaint(window, &paint);
-      RECT client{};
-      GetClientRect(window, &client);
-      const float scale = DpiScale();
-      runtime_->SetViewport({
-          static_cast<float>(client.right - client.left) / scale,
-          static_cast<float>(client.bottom - client.top) / scale,
-      });
-      Render(runtime_->BuildFrame());
+      paint_pending_ = false;
+      Render(*committed_frame_, paint.rcPaint);
       EndPaint(window, &paint);
+      paint_in_progress_ = false;
+      FlushDeferredFrame();
       return 0;
     }
     case kRenderMessage:
       render_message_posted_ = false;
-      InvalidateRect(window, nullptr, FALSE);
+      if (frame_build_pending_) {
+        CommitFrameAndInvalidate();
+      }
       return 0;
     case WM_TIMER:
       if (w_param == kFrameTimer) {
         KillTimer(window, kFrameTimer);
         timer_armed_ = false;
-        InvalidateRect(window, nullptr, FALSE);
+        timer_deadline_.reset();
+        if (frame_build_pending_) {
+          CommitFrameAndInvalidate();
+        }
         return 0;
       }
       break;
@@ -1431,6 +1642,10 @@ private:
   float dpi_ = kDipsPerInch;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
+  bool frame_build_pending_ = true;
+  bool paint_pending_ = false;
+  bool paint_in_progress_ = false;
+  bool force_full_repaint_ = true;
   bool mouse_tracking_ = false;
   bool pointer_down_ = false;
   bool ime_composing_ = false;
@@ -1440,6 +1655,9 @@ private:
   wchar_t pending_high_surrogate_ = 0;
   std::wstring pending_ime_result_;
   std::exception_ptr failure_;
+  std::optional<double> timer_deadline_;
+  std::optional<double> deferred_frame_deadline_;
+  const RenderFrame* committed_frame_ = nullptr;
   ComPtr<ID2D1Factory> d2d_factory_;
   ComPtr<IDWriteFactory> write_factory_;
   ComPtr<ID2D1HwndRenderTarget> render_target_;

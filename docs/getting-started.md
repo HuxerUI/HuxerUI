@@ -1,6 +1,6 @@
 # Getting Started
 
-HuxerUI applications use C++20 and share the same declarative UI code across Android, macOS, and Windows. The platform-independent runtime owns state, recomposition, layout, input routing, and display-list generation; each native backend owns its window or host view, text services, and rendering surface.
+HuxerUI applications use C++20 and share the same declarative UI code across Android, macOS, and Windows. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each native backend owns its window or host view, text services, and rendering surface.
 
 ## Requirements
 

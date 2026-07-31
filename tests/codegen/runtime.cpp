@@ -12,9 +12,11 @@
 
 namespace {
 
-using huxerui::DisplayList;
 using huxerui::DrawTextCommand;
+using huxerui::FrameCommit;
 using huxerui::PlatformHost;
+using huxerui::RenderFrame;
+using huxerui::RenderNode;
 using huxerui::Runtime;
 using huxerui::Size;
 using huxerui::State;
@@ -23,8 +25,8 @@ using huxerui::UseState;
 using huxerui::View;
 class TestPlatform final : public PlatformHost {
 public:
-  void RequestFrame(double delay_seconds) override {
-    static_cast<void>(delay_seconds);
+  void RequestFrameAt(double deadline) override {
+    static_cast<void>(deadline);
     ++requested_frames;
   }
 
@@ -65,13 +67,34 @@ View GeneratedApp() {
   return GeneratedCounter(3);
 }
 
-[[nodiscard]] std::string FirstText(const DisplayList& display_list) {
-  for (const auto& command : display_list.Commands()) {
+[[nodiscard]] std::string FirstText(const RenderNode& node) {
+  for (const auto& command : node.content.Commands()) {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
+      return text->text;
+    }
+  }
+  for (const RenderNode* child : node.children) {
+    if (child != nullptr) {
+      std::string text = FirstText(*child);
+      if (!text.empty()) {
+        return text;
+      }
+    }
+  }
+  for (const auto& command : node.foreground.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
       return text->text;
     }
   }
   return {};
+}
+
+[[nodiscard]] std::string FirstText(const RenderFrame& frame) {
+  return frame.scene.root != nullptr ? FirstText(*frame.scene.root) : std::string{};
+}
+
+[[nodiscard]] std::string FirstText(const FrameCommit& commit) {
+  return FirstText(commit.render_frame);
 }
 
 } // namespace

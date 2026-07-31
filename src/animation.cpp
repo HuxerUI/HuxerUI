@@ -25,7 +25,7 @@ void ValidateOrigin(TransformOrigin origin) {
 }
 
 Point ResolveOrigin(const MountedNode& node, TransformOrigin origin) {
-  const Rect frame = node.Frame();
+  const Rect frame = node.Bounds();
   return {
       frame.x + frame.width * origin.x,
       frame.y + frame.height * origin.y,
@@ -122,7 +122,7 @@ public:
     const bool running = value_.Advance(frame.timestamp, frame.delta_time, ReducedMotion(mounted));
     const Point origin = ResolveOrigin(node, origin_);
     const float value = value_.Value();
-    const detail::PresentationTransform scale{
+    const Transform2D scale{
         value,
         0.0F,
         0.0F,
@@ -171,7 +171,7 @@ public:
     const float radians = degrees_.Value() * degrees_to_radians;
     const float cosine = std::cos(radians);
     const float sine = std::sin(radians);
-    const detail::PresentationTransform rotation{
+    const Transform2D rotation{
         cosine,
         sine,
         -sine,

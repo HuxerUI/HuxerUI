@@ -2,7 +2,7 @@
 
 Status: implemented foundation with Android, macOS, and Windows platform adapters
 
-This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformHost`, retained `NodeExtension` state, typed events, and DisplayList rendering.
+This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformHost`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
 The design also defines the extension boundary required by complex editable components. SweetEditor is the reference integration: it should reuse the HuxerUI focus and platform input path without replacing its document model with the built-in TextField state.
 
@@ -262,6 +262,9 @@ The result and state types are public because `TextInputClient` is a public exte
 - A request to update or restart the native input connection.
 - Caret, range, and point hit-test geometry.
 
+`TextInputApplyResult` reports only the result code and any required native synchronization action.
+Runtime derives whether state changed from `TextInputState` revisions instead of accepting a second, potentially inconsistent changed flag.
+
 A `NodeExtension` exposes the capability through one optional hook:
 
 ```cpp
@@ -275,6 +278,34 @@ A focusable node can expose at most one client. Multiple text input clients on t
 The extension returns a stable shared client. Runtime retains that client only for the active input session, allowing it to call `EndTextInput()` after the owning extension is reconciled away without retaining a raw extension pointer.
 
 The built-in TextField installs one retained extension. A future SweetEditor component installs its own retained extension and returns its bridge from the same hook.
+
+## Text selection client
+
+Editable and read-only selectable content share selection gestures and overlay presentation without sharing IME ownership.
+`TextSelectionClient` is therefore a separate capability from `TextInputClient`:
+
+```cpp
+class TextSelectionClient {
+public:
+  virtual ~TextSelectionClient() = default;
+
+  virtual bool SelectWord(Point position) = 0;
+  virtual bool ExtendSelection(Point position, bool start_handle) = 0;
+  virtual bool QuerySelectionGeometry(Rect& start, Rect& end) const = 0;
+  virtual Color SelectionHandleColor() const noexcept = 0;
+};
+```
+
+Selection points and geometry use the owning node's local logical coordinates.
+Runtime maps them through the node's resolved presentation transform exactly once at the host boundary.
+The optional editing-action methods allow read-only clients to expose Copy and Select All through the shared clipboard menu without pretending to be IME clients.
+
+A `NodeExtension` exposes at most one selection client through `GetTextSelectionClient()`.
+Runtime borrows this pointer only during dispatch and never retains it beyond the owning extension's lifetime.
+TextField exposes both input and selection clients; `SelectionArea` exposes only a selection client and never starts an IME session.
+
+`SelectionArea` prepares descendant text-layout and relative-transform value snapshots after presentation resolution.
+It does not retain descendant node pointers, and unchanged descendant geometry keeps its foreground PaintSequence clean.
 
 ## Input configuration
 
@@ -394,7 +425,8 @@ public:
   virtual void Start(
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
-      const TextInputState& state
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) = 0;
 
   virtual void Update(
@@ -406,7 +438,8 @@ public:
   virtual void Restart(
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
-      const TextInputState& state
+      const TextInputState& state,
+      const TextInputGeometry& geometry
   ) = 0;
 
   virtual void Stop(TextInputSessionId session_id) = 0;
@@ -428,6 +461,9 @@ virtual PlatformTextInput* TextInput() noexcept {
 A test host, headless host, or incomplete platform does not need an empty input implementation. Hardware navigation can continue to use ordinary key events when no platform text input capability exists.
 
 Focus, input-session ownership, and software-keyboard visibility remain separate. Hiding a software keyboard does not clear HuxerUI focus or end the active session. A confirmed tap on the same focused text client calls `RequestShow()` with the active session ID. Platforms without a software keyboard keep the default no-op implementation.
+
+Start, Update, and Restart receive state and geometry from the same Runtime snapshot.
+Platform adapters do not call back into Runtime merely to recover the current caret during Start or Restart.
 
 The platform adapter calls Runtime through session-aware entry points:
 
@@ -452,9 +488,14 @@ active session ID
 selection
 optional composition
 client synchronization revision
+text-content revision
 ```
 
-The client revision is a Runtime synchronization detail. It is not a mutation precondition and does not appear in `TextEditingValue`.
+The client synchronization revision increases for every observable selection, composition, text-content, or client-owned geometry change.
+Client-owned geometry includes an editor's internal text scrolling but not ancestor layout, scrolling, or presentation transforms.
+The text-content revision increases only when text changes, allowing Runtime to distinguish layout-affecting edits from selection and composition-marker updates.
+Both revisions are Runtime synchronization details.
+They are not mutation preconditions and do not appear in `TextEditingValue`.
 
 The platform can request a bounded `TextInputContext`:
 
@@ -468,7 +509,10 @@ optional composition
 
 Large document clients return only the requested surrounding context. TextField can return the complete short value when appropriate. Platform adapters must tolerate partial context and request another range when needed.
 
-Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the client revision. Runtime synchronizes the new state after reconciliation. A configuration or ownership change requests a native restart; an ordinary selection change requests only an update.
+Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the appropriate revisions.
+Runtime synchronizes the new state after reconciliation.
+A configuration or ownership change requests a native restart; an ordinary selection change requests only an update and paint invalidation.
+Client-owned geometry changes update candidate geometry without restarting an active native composition.
 
 ## TextField API
 
@@ -598,6 +642,7 @@ horizontal scroll offset
 caret blink state
 pointer selection state
 client synchronization revision
+text-content revision
 ```
 
 When a command batch succeeds:
@@ -673,15 +718,24 @@ public:
 };
 ```
 
-Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The display list never receives the real text.
+Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The PaintSequence never receives the real text.
 
-The first implementation can keep this capability internal to HuxerUI. TextField needs it, but application code does not. A later public Canvas or custom text control API can expose it after the lifetime and caching model is proven.
+The built-in text-layout capability remains internal to HuxerUI. A later public Canvas or custom text control API can expose it after the lifetime and caching model is proven.
 
 The TextField caches layout by text, font, available width, multiline configuration, and relevant style values.
 
 SweetEditor supplies its own geometry from its existing layout engine. It does not use the built-in TextField text layout.
 
-Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform host converts those coordinates to native screen units.
+Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform host converts those coordinates to the native coordinate space required by its input API.
+
+`TextInputClient::QueryTextInputPosition` receives a point in the owning node's local logical coordinates.
+`Runtime::QueryTextInputPosition` accepts host-view logical coordinates and applies the inverse node transform before calling the client.
+
+An active session retains the last platform-published host-view geometry and, when needed, one prepared snapshot that has not yet been published.
+Both snapshots carry the client synchronization revision, node layout revision, and node-to-host transform that produced them.
+Runtime queries geometry again only when none of those keys match, and notifies the platform only when state or the resulting geometry changed.
+Caret reveal may prepare geometry before scrolling; the next platform synchronization promotes the still-matching snapshot only after it is published.
+The cache belongs to the active session and is discarded when that session ends.
 
 Average character width must not be used for caret or hit-test behavior. It fails for emoji, ligatures, CJK text, combining marks, and bidirectional text.
 
@@ -700,14 +754,14 @@ caret
 focused or validation border
 ```
 
-The current DisplayList already provides the necessary primitives:
+The current `PaintContext` already provides the necessary primitives:
 
 - `DrawRect` for selection, caret, and a thin composition underline.
 - `DrawText` for text and placeholder.
 - `DrawBorder` for the field border.
 - `PushClip` and `PopClip` for content clipping.
 
-The first implementation does not need a TextField-specific drawing command.
+TextField does not require a component-specific drawing command.
 
 A single-line field maintains a retained horizontal scroll offset and keeps the active caret visible. It does not create an internal ScrollView node.
 
@@ -724,7 +778,7 @@ The first pointer behavior includes:
 - Drag to extend selection.
 - Preserve pointer cancellation behavior when a parent scroll gesture wins.
 
-Mouse or pen double-click selects a word immediately. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles above the mounted tree. Magnifiers and more advanced gesture behavior remain incremental.
+Mouse or pen double-click selects a word immediately. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned system overlay above application layers. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application node. It is not a public Layer entry and does not participate in application layer focus or dismissal policy. Magnifiers and more advanced gesture behavior remain incremental.
 
 ## Theme
 
@@ -819,6 +873,7 @@ The Android adapter:
 - Maps `performEditorAction()` to the typed common action and rejects stale or mismatched session actions.
 - Uses `updateSelection()` to synchronize selection and composition.
 - Uses `CursorAnchorInfo` for candidate and insertion marker geometry.
+- Uses the complete Android View-to-screen matrix, including ancestor transforms and scrolling, and re-publishes monitored cursor geometry when a pre-draw detects that matrix changed.
 - Rejects callbacks carrying a stale HuxerUI session.
 - Revalidates the active session before honoring `RequestShow()` and asking `InputMethodManager` to display a keyboard hidden without focus loss.
 - Resizes the logical viewport for visible IME insets and asks ancestor scroll containers to reveal the active caret.
@@ -966,6 +1021,8 @@ Runtime tests use a fake `PlatformTextInput` and cover:
 - External value changes request update or restart as appropriate.
 - Key events do not duplicate committed text.
 - Candidate geometry includes node and presentation transforms.
+- Stable frames reuse the active-session geometry snapshot.
+- Internal editor scrolling updates candidate geometry without forcing layout.
 - Text position queries reject stale sessions and preserve UTF-16 affinity.
 
 TextField tests cover:
@@ -1015,7 +1072,7 @@ src/selection_area.cpp
 
 Platform adapters remain in their existing platform directories. Generic input behavior must not move into Android, Apple, or Windows helper libraries.
 
-## Initial delivery
+## Implemented delivery
 
 The foundation contains:
 

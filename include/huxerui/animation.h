@@ -14,16 +14,22 @@ enum class Easing {
   EaseOut,
 };
 
-struct SnapSpec {};
+struct SnapSpec {
+  bool operator==(const SnapSpec&) const = default;
+};
 
 struct TweenSpec {
   double duration = 0.2;
   Easing easing = Easing::EaseOut;
+
+  bool operator==(const TweenSpec&) const = default;
 };
 
 struct SpringSpec {
   float stiffness = 320.0F;
   float damping_ratio = 0.82F;
+
+  bool operator==(const SpringSpec&) const = default;
 };
 
 using AnimationSpec = std::variant<SnapSpec, TweenSpec, SpringSpec>;
@@ -31,11 +37,15 @@ using AnimationSpec = std::variant<SnapSpec, TweenSpec, SpringSpec>;
 struct TransformOrigin {
   float x = 0.5F;
   float y = 0.5F;
+
+  bool operator==(const TransformOrigin&) const = default;
 };
 
 template <class T> struct Animated {
   T target;
   AnimationSpec animation;
+
+  bool operator==(const Animated&) const = default;
 };
 
 template <class T, class Spec>
@@ -54,6 +64,8 @@ struct Opacity {
   static const detail::ModifierDescriptor& Descriptor();
 
   std::variant<float, Animated<float>> value;
+
+  bool operator==(const Opacity&) const = default;
 };
 
 struct Offset {
@@ -63,6 +75,8 @@ struct Offset {
   static const detail::ModifierDescriptor& Descriptor();
 
   std::variant<Point, Animated<Point>> value;
+
+  bool operator==(const Offset&) const = default;
 };
 
 struct Scale {
@@ -74,6 +88,8 @@ struct Scale {
 
   std::variant<float, Animated<float>> value;
   TransformOrigin origin;
+
+  bool operator==(const Scale&) const = default;
 };
 
 struct Rotation {
@@ -86,6 +102,8 @@ struct Rotation {
 
   std::variant<float, Animated<float>> degrees;
   TransformOrigin origin;
+
+  bool operator==(const Rotation&) const = default;
 };
 
 } // namespace huxerui

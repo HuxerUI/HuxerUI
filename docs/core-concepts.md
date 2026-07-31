@@ -139,7 +139,7 @@ component functions
   -> MountedNode
   -> measure and layout
   -> hit testing and interaction
-  -> DisplayList
+  -> RenderScene
   -> native renderer
 ```
 

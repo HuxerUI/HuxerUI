@@ -8,7 +8,7 @@
 
 <p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
 
-HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and display-list runtime while retaining native platform hosts, text systems, and renderers.
+HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining native platform hosts, text systems, and renderers.
 
 ## Why HuxerUI
 
@@ -103,6 +103,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Document | Contents |
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
+| [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and native adapter contracts |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and NativeView |
@@ -133,7 +134,7 @@ declarative components and State
   -> reconciliation
   -> MountedNode
   -> measure, layout, input, and animation
-  -> DisplayList
+  -> RenderScene
   -> native renderer
 ```
 

@@ -38,6 +38,8 @@ struct VirtualViewport {
   Point offset;
   Size size;
 
+  bool operator==(const VirtualViewport&) const = default;
+
   [[nodiscard]] Rect Bounds() const noexcept {
     return {
         offset.x,
@@ -175,50 +177,6 @@ template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorF
   };
   return descriptor;
 }
-
-struct ScrollAxisBinding {
-  using Value = Axis;
-};
-
-struct VirtualListItemExtent {
-  using Value = float;
-};
-
-struct VirtualListEstimatedItemExtent {
-  using Value = float;
-};
-
-struct VirtualListCacheExtent {
-  using Value = float;
-};
-
-struct VirtualGridColumns {
-  using Value = GridColumns;
-};
-
-struct VirtualGridRowExtent {
-  using Value = float;
-};
-
-struct VirtualGridEstimatedRowExtent {
-  using Value = float;
-};
-
-struct VirtualGridRowSpacing {
-  using Value = float;
-};
-
-struct VirtualGridColumnSpacing {
-  using Value = float;
-};
-
-struct VirtualGridCacheExtent {
-  using Value = float;
-};
-
-struct VirtualGridItemSpans {
-  using Value = std::vector<std::size_t>;
-};
 
 } // namespace detail
 

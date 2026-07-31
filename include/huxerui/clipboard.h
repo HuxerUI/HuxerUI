@@ -22,6 +22,8 @@ struct TextSelectionMenuLabels {
   static TextSelectionMenuLabels Default() {
     return {};
   }
+
+  bool operator==(const TextSelectionMenuLabels&) const = default;
 };
 
 class PlatformClipboard {

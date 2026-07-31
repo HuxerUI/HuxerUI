@@ -8,12 +8,14 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
 add_executable(huxerui_tests
         tests_main.cpp
+        unit/paint.cpp
         unit/text_input.cpp
         unit/validation.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
         runtime/layout.cpp
         runtime/presentation.cpp
+        runtime/render_scene.cpp
         runtime/scrolling.cpp
         runtime/selection_area.cpp
         runtime/text_field.cpp
@@ -27,15 +29,29 @@ if (APPLE)
     )
 endif ()
 
+if (WIN32)
+    target_sources(huxerui_tests PRIVATE
+            platform/windows_damage.cpp
+    )
+    target_compile_definitions(huxerui_tests PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+    )
+endif ()
+
 target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
         "${HUXERUI_PROJECT_DIR}/platform/macos"
+        "${HUXERUI_PROJECT_DIR}/platform/windows"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
 
 target_link_libraries(huxerui_tests PRIVATE
         HuxerUI3p::Catch2
         ${HUXERUI_TEST_LIBRARY}
+)
+target_compile_options(huxerui_tests PRIVATE
+        "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
 )
 
 add_test(NAME HuxerUITests COMMAND huxerui_tests)
@@ -45,7 +61,6 @@ set(HUXERUI_PUBLIC_HEADERS
         app.h
         clipboard.h
         color.h
-        display_list.h
         environment.h
         event.h
         geometry.h
@@ -54,7 +69,9 @@ set(HUXERUI_PUBLIC_HEADERS
         layer.h
         layout.h
         modifier.h
+        paint.h
         presentation.h
+        render_scene.h
         root.h
         scroll.h
         state.h
@@ -104,6 +121,7 @@ target_include_directories(huxerui_codegen_tests PRIVATE
 target_compile_options(huxerui_codegen_tests PRIVATE
         "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
         "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+        "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"

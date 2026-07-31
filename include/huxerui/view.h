@@ -21,7 +21,6 @@
 #include <huxerui/color.h>
 #include <huxerui/event.h>
 #include <huxerui/geometry.h>
-#include <huxerui/indication.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
 #include <huxerui/scroll.h>
@@ -43,9 +42,6 @@ enum class TextRole {
 namespace detail {
 struct ViewSpec;
 class VirtualMeasureSession;
-struct ScrollBarBinding {
-  using Value = ScrollBarStyle;
-};
 } // namespace detail
 
 class View {
@@ -117,7 +113,7 @@ protected:
         )
     );
     if constexpr (std::same_as<Key, ViewEvents::Click>) {
-      AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
+      AddDefaultIndication();
     }
   }
 
@@ -125,12 +121,17 @@ protected:
     SetLayoutValue(typeid(Key), std::move(value));
   }
 
+  template <class Value> void SetLayoutValue(std::type_index key, Value&& value) {
+    SetErasedLayoutValue(key, detail::MakeErasedLayoutValue(std::forward<Value>(value)));
+  }
+
   template <ViewModifier... Modifiers> void ApplyModifiers(Modifiers&&... modifiers) {
     (AddModifier(detail::MakeModifierSpec(std::forward<Modifiers>(modifiers))), ...);
   }
 
   void SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler);
-  void SetLayoutValue(std::type_index key, std::any value);
+  void SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue value);
+  void AddDefaultIndication();
   void AddModifier(detail::ModifierSpec modifier);
   void SetModifier(detail::ModifierSpec modifier);
   void SetKey(std::int64_t value);
@@ -516,6 +517,8 @@ public:
   [[nodiscard]] std::optional<std::size_t> Maximum() const noexcept {
     return maximum_;
   }
+
+  bool operator==(const TextFieldLineLimits&) const = default;
 
 private:
   TextFieldLineLimits(bool multiline, std::size_t minimum, std::optional<std::size_t> maximum) noexcept

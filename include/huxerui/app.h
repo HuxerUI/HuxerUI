@@ -8,8 +8,8 @@
 #include <vector>
 
 #include <huxerui/clipboard.h>
-#include <huxerui/display_list.h>
 #include <huxerui/event.h>
+#include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
@@ -38,7 +38,7 @@ class PlatformHost {
 public:
   virtual ~PlatformHost() = default;
 
-  virtual void RequestFrame(double delay_seconds) = 0;
+  virtual void RequestFrameAt(double deadline) = 0;
   virtual double Now() const noexcept = 0;
   virtual Size
   MeasureText(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity()) = 0;
@@ -78,7 +78,7 @@ public:
   Runtime& operator=(Runtime&&) = delete;
 
   void SetViewport(Size viewport);
-  const DisplayList& BuildFrame();
+  const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
@@ -88,7 +88,9 @@ public:
   TextInputApplyResult HandleTextInputCommands(const TextInputCommandBatch& batch);
   [[nodiscard]] TextInputContext
   QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const;
+  // Geometry is returned in logical coordinates relative to the HuxerUI host view.
   [[nodiscard]] TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const;
+  // The point is expressed in logical coordinates relative to the HuxerUI host view.
   [[nodiscard]] TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const;
 
 private:
@@ -136,6 +138,9 @@ private:
   void HideTextSelectionOverlay();
   void RefreshTextInputSession();
   void StopTextInputSession(TextInputEndReason reason);
+  void InvalidateTextInputStateChange(
+      std::uint64_t node_identity, const TextInputState& previous, const TextInputState& current
+  );
   bool UpdateNodeExtensions(
       detail::MountedNode& node,
       const FrameInfo& frame,
@@ -143,15 +148,17 @@ private:
       std::optional<double>& next_wakeup,
       bool rebuild_cache
   );
-  const DisplayList& BuildFrame(FrameInfo frame);
+  void BindNodeExtensions(detail::MountedNode& node);
+  const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
   void InvalidateScope(std::uint64_t scope_id);
+  void InvalidateLayout(detail::MountedNode& mounted);
   void ComposeRoot();
-  void ComposeScope(detail::MountedNode& mounted);
-  void RecomposeDirtyScopes(detail::MountedNode& mounted);
-  void Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<detail::ViewSpec>& incoming);
+  bool ComposeScope(detail::MountedNode& mounted);
+  bool RecomposeDirtyScopes(detail::MountedNode& mounted);
+  bool Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<detail::ViewSpec>& incoming);
   std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec>& incoming);
-  void ReconcileChildren(
+  bool ReconcileChildren(
       std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
   );
   detail::SavedNodeState SaveNodeState(detail::MountedNode& mounted);

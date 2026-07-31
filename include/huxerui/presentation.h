@@ -21,16 +21,22 @@ struct ToastStyle {
   float corner_radius = 8.0F;
 
   static ToastStyle Default();
+
+  bool operator==(const ToastStyle&) const = default;
 };
 
 struct DialogStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
 
   static DialogStyle Default();
+
+  bool operator==(const DialogStyle&) const = default;
 };
 
 struct ToastOptions {
   double duration = 2.0;
+
+  bool operator==(const ToastOptions&) const = default;
 };
 
 class ToastService;

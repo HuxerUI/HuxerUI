@@ -21,17 +21,66 @@
 
 #include <huxerui/animation.h>
 #include <huxerui/app.h>
-#include <huxerui/display_list.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
 #include <huxerui/state.h>
 #include <huxerui/view.h>
+
+#include "geometry_internal.h"
 
 namespace huxerui::detail {
 
 struct MountedNode;
 class ScrollConnection;
 class IndicationState;
+
+struct ScrollBarBinding {
+  using Value = ScrollBarStyle;
+};
+
+struct ScrollAxisBinding {
+  using Value = Axis;
+};
+
+struct VirtualListItemExtent {
+  using Value = float;
+};
+
+struct VirtualListEstimatedItemExtent {
+  using Value = float;
+};
+
+struct VirtualListCacheExtent {
+  using Value = float;
+};
+
+struct VirtualGridColumns {
+  using Value = GridColumns;
+};
+
+struct VirtualGridRowExtent {
+  using Value = float;
+};
+
+struct VirtualGridEstimatedRowExtent {
+  using Value = float;
+};
+
+struct VirtualGridRowSpacing {
+  using Value = float;
+};
+
+struct VirtualGridColumnSpacing {
+  using Value = float;
+};
+
+struct VirtualGridCacheExtent {
+  using Value = float;
+};
+
+struct VirtualGridItemSpans {
+  using Value = std::vector<std::size_t>;
+};
 
 class TextLayout {
 public:
@@ -44,86 +93,6 @@ public:
   [[nodiscard]] virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
   [[nodiscard]] virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
 };
-
-struct PresentationTransform {
-  float m11 = 1.0F;
-  float m12 = 0.0F;
-  float m21 = 0.0F;
-  float m22 = 1.0F;
-  float translate_x = 0.0F;
-  float translate_y = 0.0F;
-
-  [[nodiscard]] bool IsIdentity() const noexcept {
-    return m11 == 1.0F && m12 == 0.0F && m21 == 0.0F && m22 == 1.0F && translate_x == 0.0F && translate_y == 0.0F;
-  }
-
-  [[nodiscard]] Point Apply(Point point) const noexcept {
-    return {
-        m11 * point.x + m21 * point.y + translate_x,
-        m12 * point.x + m22 * point.y + translate_y,
-    };
-  }
-
-  [[nodiscard]] std::optional<Point> Inverse(Point point) const noexcept {
-    const float determinant = m11 * m22 - m12 * m21;
-    if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
-      return std::nullopt;
-    }
-    const float x = point.x - translate_x;
-    const float y = point.y - translate_y;
-    return Point{
-        (m22 * x - m21 * y) / determinant,
-        (-m12 * x + m11 * y) / determinant,
-    };
-  }
-};
-
-inline PresentationTransform
-ComposeTransform(const PresentationTransform& outer, const PresentationTransform& inner) noexcept {
-  return {
-      outer.m11 * inner.m11 + outer.m21 * inner.m12,
-      outer.m12 * inner.m11 + outer.m22 * inner.m12,
-      outer.m11 * inner.m21 + outer.m21 * inner.m22,
-      outer.m12 * inner.m21 + outer.m22 * inner.m22,
-      outer.m11 * inner.translate_x + outer.m21 * inner.translate_y + outer.translate_x,
-      outer.m12 * inner.translate_x + outer.m22 * inner.translate_y + outer.translate_y,
-  };
-}
-
-inline PresentationTransform TranslationTransform(Point offset) noexcept {
-  return {
-      1.0F,
-      0.0F,
-      0.0F,
-      1.0F,
-      offset.x,
-      offset.y,
-  };
-}
-
-inline PresentationTransform AroundOriginTransform(const PresentationTransform& linear, Point origin) noexcept {
-  return ComposeTransform(
-      TranslationTransform(origin),
-      ComposeTransform(linear, TranslationTransform({-origin.x, -origin.y}))
-  );
-}
-
-inline Rect TransformBounds(const PresentationTransform& transform, Rect rect) noexcept {
-  const Point top_left = transform.Apply({rect.x, rect.y});
-  const Point top_right = transform.Apply({rect.x + rect.width, rect.y});
-  const Point bottom_left = transform.Apply({rect.x, rect.y + rect.height});
-  const Point bottom_right = transform.Apply({rect.x + rect.width, rect.y + rect.height});
-  const float left = std::min({top_left.x, top_right.x, bottom_left.x, bottom_right.x});
-  const float right = std::max({top_left.x, top_right.x, bottom_left.x, bottom_right.x});
-  const float top = std::min({top_left.y, top_right.y, bottom_left.y, bottom_right.y});
-  const float bottom = std::max({top_left.y, top_right.y, bottom_left.y, bottom_right.y});
-  return {
-      left,
-      top,
-      right - left,
-      bottom - top,
-  };
-}
 
 struct EnvironmentFrame {
   std::shared_ptr<const EnvironmentFrame> parent;
@@ -275,17 +244,8 @@ enum class NodeKind {
 using ViewKey = std::variant<std::int64_t, std::uint64_t, std::string>;
 
 struct ViewStyle {
-  struct FrameConstraints {
-    std::optional<float> width;
-    std::optional<float> height;
-    std::optional<float> min_width;
-    std::optional<float> max_width;
-    std::optional<float> min_height;
-    std::optional<float> max_height;
-  };
-
   EdgeInsets padding;
-  FrameConstraints frame;
+  Frame frame;
   std::optional<Color> background;
   std::optional<Color> foreground;
   std::optional<float> font_size;
@@ -299,6 +259,25 @@ struct ViewStyle {
   Color focus_ring = Color::Rgb(31, 111, 235);
   float focus_ring_width = 2.0F;
   float disabled_opacity = 0.42F;
+
+  bool operator==(const ViewStyle&) const = default;
+
+  [[nodiscard]] bool LayoutEquals(const ViewStyle& other) const {
+    return padding == other.padding && frame == other.frame && font_size == other.font_size &&
+           spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
+           cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
+           vertical_alignment == other.vertical_alignment;
+  }
+
+  [[nodiscard]] bool ContentPaintEquals(const ViewStyle& other) const {
+    return padding == other.padding && background == other.background && foreground == other.foreground &&
+           font_size == other.font_size && corner_radius == other.corner_radius;
+  }
+
+  [[nodiscard]] bool ForegroundPaintEquals(const ViewStyle& other) const {
+    return corner_radius == other.corner_radius && focus_ring == other.focus_ring &&
+           focus_ring_width == other.focus_ring_width;
+  }
 };
 
 struct ViewSpec {
@@ -314,7 +293,7 @@ struct ViewSpec {
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
   VirtualItemSource virtual_items;
-  std::unordered_map<std::type_index, std::any> layout_values;
+  std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
   std::vector<ModifierSpec> modifiers;
@@ -363,6 +342,7 @@ struct VirtualNodeState {
   std::vector<VirtualLayoutResult::Placement> placements;
   std::unique_ptr<VirtualStateCache> saved_state;
   bool source_dirty = true;
+  bool viewport_dirty = true;
 };
 
 struct ScrollMotionFrameResult {
@@ -397,12 +377,14 @@ struct ScrollNodeState {
 struct NodeExtensionEntry {
   const ModifierDescriptor* descriptor = nullptr;
   std::unique_ptr<huxerui::NodeExtension> extension;
+  std::shared_ptr<const void> value;
 };
 
 struct NodePresentation {
-  PresentationTransform local_transform;
+  Transform2D local_transform;
   float local_opacity = 1.0F;
-  PresentationTransform resolved_transform;
+  float render_opacity = 1.0F;
+  Transform2D resolved_transform;
   float resolved_opacity = 1.0F;
 };
 
@@ -415,15 +397,26 @@ struct MountedNode final : public huxerui::MountedNode {
   std::function<View()> scope_factory;
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
-  std::unordered_map<std::type_index, std::any> layout_values;
+  std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   std::unordered_map<std::type_index, std::any> layout_cache;
   std::vector<LayoutResult::Placement> layout_placements;
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
   std::shared_ptr<RecomposeScope> recompose_scope;
+  std::optional<Constraints> measured_constraints;
   Size measured_size;
-  Rect frame;
+  // Bounds stay at the node-local origin; layout_offset places the node in its parent's local coordinates.
+  Rect bounds;
+  Point layout_offset;
   NodePresentation presentation;
+  RenderNode render_node;
+  std::uint64_t measure_revision = 0;
+  std::uint64_t layout_revision = 0;
+  // Measurement, descendant placement, content recording, and foreground recording are invalidated independently.
+  bool measure_dirty = true;
+  bool layout_dirty = true;
+  bool content_paint_dirty = true;
+  bool foreground_paint_dirty = true;
   std::unique_ptr<ScrollNodeState> scroll;
   std::unique_ptr<VirtualNodeState> virtual_state;
   std::vector<NodeExtensionEntry> extensions;
@@ -450,16 +443,20 @@ protected:
     return *children[index];
   }
 
-  [[nodiscard]] Size MeasuredSizeImpl() const noexcept override {
+  [[nodiscard]] Size LayoutSizeImpl() const noexcept override {
     return measured_size;
   }
 
-  [[nodiscard]] Rect FrameImpl() const noexcept override {
-    return frame;
+  [[nodiscard]] Rect BoundsImpl() const noexcept override {
+    return bounds;
   }
 
-  [[nodiscard]] Rect PresentationFrameImpl() const noexcept override {
-    return TransformBounds(presentation.resolved_transform, frame);
+  [[nodiscard]] Point LayoutOffsetImpl() const noexcept override {
+    return layout_offset;
+  }
+
+  [[nodiscard]] Rect PresentationBoundsImpl() const noexcept override {
+    return TransformBounds(presentation.resolved_transform, bounds);
   }
 
   [[nodiscard]] float PresentationOpacityImpl() const noexcept override {
@@ -500,13 +497,32 @@ protected:
 
   [[nodiscard]] const std::any* FindLayoutValue(std::type_index key_value) const noexcept override {
     const auto found = layout_values.find(key_value);
-    return found == layout_values.end() ? nullptr : &found->second;
+    return found == layout_values.end() ? nullptr : &found->second.value;
   }
 
   std::any& EnsureCacheEntry(std::type_index key_value) override {
     return layout_cache[key_value];
   }
 };
+
+struct RenderNodeSnapshot {
+  std::uint64_t content_revision = 0;
+  std::uint64_t foreground_revision = 0;
+  Transform2D world_transform;
+  Transform2D world_children_transform;
+  std::optional<Rect> world_clip;
+  std::optional<Rect> world_child_clip;
+  std::optional<float> child_clip_corner_radius;
+  Rect own_bounds;
+  Rect subtree_bounds;
+  std::vector<std::uint64_t> children;
+  float opacity = 1.0F;
+  bool has_own_bounds = false;
+  bool has_subtree_bounds = false;
+  bool visible = false;
+};
+
+using RenderSceneSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapshot>;
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
@@ -548,7 +564,7 @@ public:
 
   [[nodiscard]] std::size_t ItemCount() const noexcept;
   MountedNode& Item(std::size_t index);
-  void Commit(const std::vector<VirtualLayoutResult::Placement>& placements);
+  void CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
@@ -698,22 +714,23 @@ struct PointerSession {
 };
 
 struct ActiveTextInputSession {
+  struct GeometrySnapshot {
+    std::uint64_t client_revision = 0;
+    std::uint64_t layout_revision = 0;
+    Transform2D node_to_host;
+    TextInputGeometry geometry;
+  };
+
   std::uint64_t node_identity = 0;
   TextInputSessionId session_id = 0;
   std::shared_ptr<TextInputClient> client;
   TextInputConfiguration configuration;
   TextInputState state;
+  std::optional<GeometrySnapshot> published_geometry;
+  std::optional<GeometrySnapshot> prepared_geometry;
 };
 
-struct TextSelectionOverlayState {
-  bool visible = false;
-  bool dragging = false;
-  bool dragging_start_handle = false;
-  bool show_handles = false;
-  bool dismissing = false;
-  std::optional<std::int64_t> pointer_id;
-  std::optional<std::size_t> pressed_action;
-  std::optional<std::size_t> hovered_action;
+struct TextSelectionGestureState {
   bool long_press_pending = false;
   std::int64_t long_press_pointer_id = 0;
   Point long_press_position;
@@ -727,8 +744,24 @@ struct TextSelectionOverlayState {
   std::optional<double> previous_tap_time;
   Point previous_tap_position;
   std::optional<std::uint64_t> previous_tap_node;
+};
+
+struct TextSelectionOverlayState {
+  bool visible = false;
+  bool paint_dirty = true;
+  bool indication_frame_active = false;
+  bool has_painted_geometry = false;
+  bool dragging = false;
+  bool dragging_start_handle = false;
+  bool show_handles = false;
+  bool dismissing = false;
+  std::optional<std::int64_t> pointer_id;
+  std::optional<std::size_t> pressed_action;
+  std::optional<std::size_t> hovered_action;
   Rect start_handle_hit_rect;
   Rect end_handle_hit_rect;
+  Rect painted_start;
+  Rect painted_end;
   Rect toolbar_rect;
   Color toolbar_background;
   Color toolbar_foreground;
@@ -739,6 +772,12 @@ struct TextSelectionOverlayState {
   std::vector<Rect> action_rects;
   std::vector<std::string> action_labels;
   std::vector<std::shared_ptr<IndicationState>> action_indications;
+};
+
+struct TextSelectionOverlay {
+  // The framework-owned selection overlay is rendered above application layers without becoming part of their tree.
+  RenderNode render_node;
+  TextSelectionOverlayState state;
 };
 
 struct LayerEntry {
@@ -773,12 +812,16 @@ struct Runtime::State {
   std::shared_ptr<const detail::EnvironmentFrame> root_environment_;
   std::vector<detail::LayerEntry> layers_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
-  DisplayList display_list_;
+  FrameCommit frame_commit_;
+  detail::RenderSceneSnapshot committed_render_scene_;
+  Size committed_viewport_;
+  bool has_committed_render_scene_ = false;
   bool composition_dirty_ = true;
   bool composing_root_ = false;
   bool layer_snapshot_taken_ = false;
   bool extension_tree_dirty_ = true;
   bool scroll_motion_active_ = false;
+  bool building_frame_ = false;
   bool frame_requested_ = false;
   double frame_request_deadline_ = 0.0;
   std::optional<double> previous_frame_timestamp_;
@@ -792,7 +835,8 @@ struct Runtime::State {
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
   std::optional<detail::ActiveTextInputSession> text_input_session_;
-  detail::TextSelectionOverlayState text_selection_overlay_;
+  detail::TextSelectionGestureState text_selection_gesture_;
+  detail::TextSelectionOverlay text_selection_overlay_;
   TextInputSessionId next_text_input_session_id_ = 1;
   std::optional<LayerId> active_modal_focus_layer_;
   std::unordered_map<LayerId, std::optional<std::uint64_t>> modal_focus_restore_;
@@ -813,8 +857,17 @@ struct RuntimeAccess {
 };
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost& platform, Runtime& runtime);
-void LayoutNode(MountedNode& node, Point origin);
-void PaintNode(MountedNode& node, DisplayList& display_list);
+void LayoutNode(MountedNode& node, Point offset);
+TextSelectionClient* FindTextSelectionClient(MountedNode& node);
+void ResolvePresentationTree(MountedNode& node);
+void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);
+DamageRegion ComputeDamageRegion(
+    const RenderNode* root,
+    Size viewport,
+    RenderSceneSnapshot& committed_scene,
+    Size& committed_viewport,
+    bool& has_committed_scene
+);
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
 std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);

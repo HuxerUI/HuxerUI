@@ -17,6 +17,7 @@ import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -51,20 +52,30 @@ public final class HuxerUIView extends View {
     private final Matrix transform = new Matrix();
     private final float[] transformValues = new float[9];
     private final float density;
+    private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
+    private final Runnable frameCallback = new Runnable() {
+        @Override
+        public void run() {
+            frameScheduled = false;
+            frameTime = 0L;
+            if (nativeHandle != 0L) {
+                nativeCommitFrame(nativeHandle);
+            }
+        }
+    };
 
     private long nativeHandle;
     private boolean frameScheduled;
     private long frameTime;
     private HuxerUIInputConnection inputConnection;
     private int imeInsetBottom;
-    private final Runnable frameCallback = new Runnable() {
-        @Override
-        public void run() {
-            frameScheduled = false;
-            frameTime = 0L;
-            invalidate();
+
+    private boolean updateTextInputGeometry() {
+        if (inputConnection != null) {
+            inputConnection.updateCursorAnchorPosition();
         }
-    };
+        return true;
+    }
 
     public HuxerUIView(Context context) {
         this(context, null);
@@ -85,6 +96,7 @@ public final class HuxerUIView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        getViewTreeObserver().addOnPreDrawListener(textInputGeometryListener);
         if (nativeHandle == 0L) {
             nativeHandle = nativeCreate(this);
             resizeNativeState(getWidth(), getHeight());
@@ -93,6 +105,10 @@ public final class HuxerUIView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
+        ViewTreeObserver observer = getViewTreeObserver();
+        if (observer.isAlive()) {
+            observer.removeOnPreDrawListener(textInputGeometryListener);
+        }
         removeCallbacks(frameCallback);
         frameScheduled = false;
         frameTime = 0L;
@@ -111,6 +127,14 @@ public final class HuxerUIView extends View {
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         resizeNativeState(width, height);
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        if (changed && inputConnection != null) {
+            inputConnection.updateCursorAnchorPosition();
+        }
     }
 
     @Override
@@ -222,9 +246,11 @@ public final class HuxerUIView extends View {
 
     private void startTextInput(long sessionId, int type, int capitalization, int action, boolean multiline,
             boolean secure, boolean autocorrect, long revision, long anchor, long active, int affinity,
-            long composingStart, long composingEnd) {
+            long composingStart, long composingEnd, int geometryResult, float caretX, float caretY, float caretWidth,
+            float caretHeight) {
         replaceInputConnection(sessionId, type, capitalization, action, multiline, secure, autocorrect, anchor, active,
                 composingStart, composingEnd);
+        inputConnection.updateCaretGeometry(geometryResult, caretX, caretY, caretWidth, caretHeight);
         post(() -> {
             if (!hasTextInputSession(sessionId)) {
                 return;
@@ -249,12 +275,14 @@ public final class HuxerUIView extends View {
 
     private void restartTextInput(long sessionId, int type, int capitalization, int action, boolean multiline,
             boolean secure, boolean autocorrect, long revision, long anchor, long active, int affinity,
-            long composingStart, long composingEnd) {
+            long composingStart, long composingEnd, int geometryResult, float caretX, float caretY, float caretWidth,
+            float caretHeight) {
         if (!hasTextInputSession(sessionId)) {
             return;
         }
         replaceInputConnection(sessionId, type, capitalization, action, multiline, secure, autocorrect, anchor, active,
                 composingStart, composingEnd);
+        inputConnection.updateCaretGeometry(geometryResult, caretX, caretY, caretWidth, caretHeight);
         post(() -> {
             if (hasTextInputSession(sessionId)) {
                 inputMethodManager().restartInput(this);
@@ -377,6 +405,10 @@ public final class HuxerUIView extends View {
         }
     }
 
+    private void invalidateFullFrame() {
+        invalidate();
+    }
+
     private float[] measureText(byte[] utf8, float fontSize, float maxWidth) {
         String text = new String(utf8, StandardCharsets.UTF_8);
         prepareTextPaint(fontSize, 0xFF000000);
@@ -492,6 +524,15 @@ public final class HuxerUIView extends View {
         canvas.restore();
     }
 
+    private void pushOpacity(Canvas canvas, float opacity) {
+        int alpha = Math.round(Math.max(0.0F, Math.min(opacity, 1.0F)) * 255.0F);
+        canvas.saveLayerAlpha(null, alpha);
+    }
+
+    private void popOpacity(Canvas canvas) {
+        canvas.restore();
+    }
+
     private void pushTransform(
             Canvas canvas, float m11, float m12, float m21, float m22, float translateX, float translateY) {
         canvas.save();
@@ -528,7 +569,7 @@ public final class HuxerUIView extends View {
     private StaticLayout createTextLayout(String text, int width, Layout.Alignment alignment) {
         return StaticLayout.Builder.obtain(text, 0, text.length(), textPaint, width)
                 .setAlignment(alignment)
-                .setIncludePad(false)
+                .setIncludePad(true)
                 .build();
     }
 
@@ -543,7 +584,7 @@ public final class HuxerUIView extends View {
             float desiredWidth = StaticLayout.getDesiredWidth(text, paint);
             int width = Math.max(
                     1, (int) Math.ceil(Float.isFinite(maxWidth) ? Math.min(maxWidth, desiredWidth) : desiredWidth));
-            layout = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width).setIncludePad(false).build();
+            layout = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width).setIncludePad(true).build();
         }
 
         private float[] measure() {
@@ -636,6 +677,8 @@ public final class HuxerUIView extends View {
     private static native void nativeDestroy(long handle);
 
     private static native void nativeResize(long handle, float width, float height);
+
+    private static native void nativeCommitFrame(long handle);
 
     private static native void nativeDraw(long handle, Canvas canvas);
 

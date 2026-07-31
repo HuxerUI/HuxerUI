@@ -60,8 +60,8 @@ PointerEvent LocalPointerEvent(const MountedNode& node, const PointerEvent& even
     local.position = *position;
   } else {
     local.position = {
-        node.frame.x + node.frame.width * 0.5F,
-        node.frame.y + node.frame.height * 0.5F,
+        node.bounds.x + node.bounds.width * 0.5F,
+        node.bounds.y + node.bounds.height * 0.5F,
     };
   }
   return local;
@@ -214,11 +214,11 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, b
   }
   SetFocusedNode(pending, false);
   if (record_tap && pending.has_value()) {
-    if (const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *pending);
-        focused && (focused->kind == detail::NodeKind::TextField || focused->kind == detail::NodeKind::SelectionArea)) {
-      state_->text_selection_overlay_.previous_tap_time = state_->platform_->Now();
-      state_->text_selection_overlay_.previous_tap_position = position;
-      state_->text_selection_overlay_.previous_tap_node = pending;
+    if (detail::MountedNode* focused = FindNode(*state_->mounted_root_, *pending);
+        focused && detail::FindTextSelectionClient(*focused)) {
+      state_->text_selection_gesture_.previous_tap_time = state_->platform_->Now();
+      state_->text_selection_gesture_.previous_tap_position = position;
+      state_->text_selection_gesture_.previous_tap_node = pending;
     }
   }
   if (session_to_show.has_value()) {

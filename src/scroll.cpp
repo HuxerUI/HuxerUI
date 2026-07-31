@@ -48,10 +48,13 @@ float ScrollConnection::CurrentOffset() const noexcept {
 }
 
 void ScrollConnection::SetCurrentOffset(float offset) noexcept {
-  if (IsVertical()) {
-    node_->scroll->offset_y = offset;
-  } else {
-    node_->scroll->offset_x = offset;
+  float& current = IsVertical() ? node_->scroll->offset_y : node_->scroll->offset_x;
+  if (current == offset) {
+    return;
+  }
+  current = offset;
+  if (node_->virtual_state) {
+    node_->virtual_state->viewport_dirty = true;
   }
 }
 
@@ -121,7 +124,7 @@ void PrepareScrollController(MountedNode& node, Runtime& runtime) {
     node.scroll->connection.reset();
     return;
   }
-  const auto* controller = std::any_cast<ScrollController>(&found->second);
+  const auto* controller = std::any_cast<ScrollController>(&found->second.value);
   if (controller == nullptr) {
     throw std::logic_error("HuxerUI scroll controller binding type mismatch");
   }

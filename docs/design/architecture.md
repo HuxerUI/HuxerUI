@@ -11,7 +11,8 @@ Current implementation status:
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
 - The synthetic RuntimeRoot, fixed LayerHost ordering, RootHook services, Toast, command and declarative Dialog presentation are implemented.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
-- Retained exit transitions, keyframes, decay animation, focus restoration, platform Back handling, and advanced Toast queue policy remain follow-up work.
+- Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
+- Retained exit transitions, keyframes, decay animation, platform Back handling, and advanced Toast queue policy remain follow-up work.
 
 The design has four goals:
 
@@ -59,12 +60,12 @@ MountedNode and NodeExtension
     ↓
 frame, measure, layout, hit testing, and paint
     ↓
-DisplayList
+RenderScene
 ```
 
 ## Public View surface
 
-The target `View` API has four primary extension points:
+The current `View` API has four primary extension points:
 
 ```cpp
 class View {
@@ -130,7 +131,7 @@ return Card().With(
     });
 ```
 
-The target API does not require a dedicated `View` member function for every new modifier type.
+The current API does not require a dedicated `View` member function for every new modifier type.
 
 ### Modifier order
 
@@ -203,7 +204,7 @@ public:
 
   void Paint(
       const MountedNode& node,
-      DisplayList& display_list) const override;
+      PaintContext& context) const override;
 };
 ```
 
@@ -236,6 +237,8 @@ public:
       MountedNode& node,
       const FrameInfo& frame);
 
+  virtual bool PrepareGeometry(MountedNode& node);
+
   virtual void OnScrollActivity(MountedNode& node);
   virtual void OnScrollGesture(MountedNode& node, bool active);
 
@@ -257,13 +260,21 @@ public:
 
   virtual void Paint(
       const MountedNode& node,
-      DisplayList& display_list) const;
+      PaintContext& context) const;
+
+protected:
+  void InvalidatePaint();
 };
 ```
 
 `Paint()` is currently a foreground pass after the View content and children. `NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations. Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
 
-During `Paint()`, the DisplayList already contains the node's inherited presentation transform, so extension drawing uses `MountedNode::Frame()`. `PresentationFrame()` is the transformed axis-aligned window-space bounds. Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the coordinate space of `Frame()`.
+`PrepareGeometry()` runs after final presentation transforms are resolved and before text services and paint consume geometry. It returns true only when the extension's foreground paint inputs changed. This phase lets geometry-dependent extensions retain value snapshots without storing raw mounted-node references or forcing clean PaintSequences to rerecord.
+
+During `Paint()`, extensions append node-local PaintCommands through `PaintContext`. Runtime stores the resulting foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene. Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants. `PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds. Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.
+
+Clean content and foreground PaintSequences remain attached to their stable RenderNode. An extension calls `InvalidatePaint()` after changing paint-visible retained state; the operation invalidates only its owner's foreground sequence and schedules a frame when called outside frame construction.
+During frame construction, the current recording pass consumes that invalidation and `FrameResult` remains the only extension-controlled source of follow-up scheduling.
 
 The existing `LayoutContext` and `VirtualLayoutContext` remain because they represent real child measurement sessions.
 
@@ -274,10 +285,11 @@ The public `MountedNode` surface exposes controlled operations needed by layouts
 ```cpp
 class MountedNode {
 public:
-  Rect Frame() const;
-  Rect PresentationFrame() const;
+  Size LayoutSize() const;
+  Rect Bounds() const;
+  Point LayoutOffset() const;
+  Rect PresentationBounds() const;
   float PresentationOpacity() const;
-  Size MeasuredSize() const;
   bool IsEnabled() const;
   bool IsFocused() const;
 
@@ -293,30 +305,47 @@ public:
 };
 ```
 
-It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()`. A general public measure/layout/paint invalidation API is deferred.
+`Bounds()` has a zero origin and the node's layout size. `LayoutOffset()` is parent-relative. `PresentationBounds()` is derived from the committed ancestor transform chain for native-boundary queries and diagnostics.
+
+It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()` and uses its protected paint invalidation operation when retained visual state changes. General application-facing measure and layout invalidation APIs are deferred.
 
 ## Frame lifecycle
 
-The target frame sequence is:
+The frame sequence is:
 
 ```text
 apply State invalidations
 recompose dirty scopes
 reconcile ViewSpec and MountedNode
+advance scroll motion
 measure
 layout
-advance retained node extensions
-paint
-schedule the next frame or delayed wake-up
+refresh interaction state
+advance retained node extensions and prepare geometry
+resolve presentation properties
+bring focused text input into view
+refresh the text-input session
+record dirty PaintSequences
+compute damage
+return FrameCommit with RenderFrame and an optional absolute deadline
+invalidate and present native damage
+schedule the returned deadline
 ```
 
-The current Runtime measures and lays out the mounted tree on every produced frame. Node-extension frame traversal caches whether a subtree contains any extensions and skips extension-free subtrees. A modifier that is waiting for a delayed transition schedules one wake-up rather than running empty frames.
+The current Runtime reuses clean measurement and placement results, retains clean content and foreground PaintSequences, and changes a RenderNode revision only when its commands or scene properties change. PaintSequence revisions and lightweight committed-scene snapshots produce conservative DamageRegion rectangles. Node-extension frame traversal caches whether a subtree contains any extensions and skips extension-free subtrees. A modifier that is waiting for a delayed transition schedules one wake-up rather than running empty frames.
+Runtime may request a platform frame when state changes outside frame construction, but never calls the platform scheduler from inside `BuildFrame()`.
+Continuous animation and delayed extension work are returned in `FrameCommit::next_frame_deadline`, allowing each host to present the current commit before arming the next frame.
 
 Runtime calls fixed node and modifier lifecycle functions. It does not contain branches for concrete features such as ScrollBar, Ripple, Dialog, or a particular animation.
 
+The retained scene and incremental invalidation architecture are defined in [Incremental Layout and Rendering Design](incremental-rendering.md).
+Local geometry, the scene boundary, PaintSequence reuse, transform and opacity presentation updates, retained ScrollView movement, layout and virtual-realization caching, equality-aware modifier and layout-value diffs, and precise shared-runtime damage are implemented.
+macOS and Windows consume shared DamageRegion output for native partial redraw.
+Android retains the same shared damage calculation and committed-scene path but currently invalidates its complete native View.
+
 ## Animation model
 
-Animation is separated into motion parameters, animated modifier values, and visibility transitions.
+Animation is separated into motion parameters and animated modifier values. Visibility transitions are deferred.
 
 ### AnimationSpec
 
@@ -394,9 +423,9 @@ return Panel().With(
 
 The current value, velocity, start time, and target are stored in the compatible `NodeExtension`. Retargeting starts from the current presentation value. Advancing an animation does not recompose the component. Scale and Rotation default to the View center, use a normalized `TransformOrigin`, and share their transform with descendant drawing, clipping, foreground extensions, and pointer hit testing without changing Measure or Layout.
 
-### TransitionSpec
+### Deferred transition model
 
-`TransitionSpec` describes insertion and removal:
+`TransitionSpec` is a proposed insertion and removal model, not a current public API:
 
 ```cpp
 TransitionSpec{
@@ -430,7 +459,7 @@ run the exit transition
 unmount after completion
 ```
 
-Layer entries use the same transition model.
+A future Layer transition contract should reuse the same model instead of adding a second animation system.
 
 ### Reduced motion
 
@@ -496,7 +525,7 @@ return Button("Save").With(
     });
 ```
 
-A ripple is one mounted instance per Press. It continues expanding and fading after Release or Cancel until its configured transition finishes. Its DisplayList clip uses the resolved component corner radius.
+A ripple is one mounted instance per Press. It continues expanding and fading after Release or Cancel until its configured transition finishes. Its PaintSequence clip uses the resolved component corner radius.
 
 ## ScrollBar as a modifier
 
@@ -737,12 +766,9 @@ Each entry owns independent identity and composition:
 ```cpp
 struct LayerEntry {
   LayerId id;
-  LayerKind kind;
+  LayerOptions options;
   ViewFactory content;
-  EnvironmentFrame environment;
-  InputPolicy input_policy;
-  DismissPolicy dismiss_policy;
-  TransitionSpec transition;
+  std::shared_ptr<const EnvironmentFrame> environment;
 };
 ```
 
@@ -755,7 +781,7 @@ Paint follows layer order. Hit testing walks layers in reverse paint order:
 - A modal barrier prevents input from reaching lower layers.
 - The System layer is reserved for framework and diagnostic UI.
 
-Removed entries remain mounted until their exit transition completes.
+Dismissed entries are currently removed immediately. Retained exit presentation belongs to the deferred transition model.
 
 ## RootHook
 
@@ -852,7 +878,7 @@ return Button("Save")
 
 `UseToast()` returns a lightweight handle bound to the current window and captures the current Environment frame. A Toast shown from a nested Theme uses that Theme by default.
 
-The Toast service manages queueing, deduplication, duration, and LayerEntry creation. The LayerHost owns composition, input behavior, transitions, and removal.
+The Toast service creates one LayerEntry per call and manages its duration. The LayerHost owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
 
 There is no process-global `Toast::Show()` because it would be ambiguous in multi-window and multi-Runtime applications.
 
@@ -874,7 +900,7 @@ return Content().With(
     });
 ```
 
-`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry. Destroying the source modifier dismisses the entry, while LayerHost retains the presentation until its exit transition completes.
+`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry. Destroying the source modifier dismisses the entry immediately.
 
 An outside press requests dismissal instead of directly removing a declarative Dialog layer. The callback updates the source State, preserving one source of truth for both the component and LayerHost. A dismissible declarative Dialog must provide `on_dismiss_request`.
 
@@ -904,7 +930,6 @@ Both forms use the same modal LayerEntry implementation:
 - Focus capture and restoration.
 - Outside-press dismissal policy.
 - Captured Environment and Theme.
-- Enter and exit transitions.
 
 Dialog does not own a separate Runtime or presentation host.
 
@@ -915,16 +940,15 @@ Root services are installed before application composition and inherited through
 A global presentation handle obtained inside themed content captures the caller Environment:
 
 ```cpp
+[[huxerui::scope]]
 View AppContent()
 {
-  HUXERUI_SCOPE_BEGIN
-    auto toast = UseToast();
+  auto toast = UseToast();
 
-    return Button("Save")
-        .OnClick([toast] {
-          toast.Show("Saved");
-        });
-  HUXERUI_SCOPE_END
+  return Button("Save")
+      .OnClick([toast] {
+        toast.Show("Saved");
+      });
 }
 
 View App()
@@ -939,7 +963,7 @@ A presentation API may explicitly request the root Theme for application-wide al
 
 ## Extension map
 
-The target extension points are:
+The current extension points are:
 
 | Requirement | Extension mechanism |
 | --- | --- |
@@ -949,6 +973,7 @@ The target extension points are:
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `IndicationSpec` and `NodeExtension` |
+| Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
 | Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and LayerHost |
@@ -970,11 +995,12 @@ The architecture follows these rules:
 - Explicit style values override Theme without mutating Theme.
 - A service belongs to one window root.
 
-Incremental Measure and Layout invalidation can be implemented using the same invalidation flags without changing the public API.
+Incremental layout and retained rendering are specified separately in [Incremental Layout and Rendering Design](incremental-rendering.md).
+The implemented pipeline coordinates mounted geometry, extension painting, Runtime frame output, and platform renderers under that contract.
 
 ## Deliberately omitted abstractions
 
-The target design does not introduce:
+The current design does not introduce:
 
 - `ModifierHost`.
 - A context class for every modifier lifecycle phase.
@@ -992,9 +1018,9 @@ The target design does not introduce:
 - Arbitrary numeric layer z-index.
 - Animated Theme interpolation in the initial implementation.
 
-## Adoption sequence
+## Implemented adoption sequence
 
-The design can be introduced without combining all changes into one rewrite:
+The foundation was introduced through the following sequence:
 
 - Add the generic modifier descriptor and node extension reconciliation.
 - Move ScrollBar frame, pointer, and paint state into a node extension.

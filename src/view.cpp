@@ -8,6 +8,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "indication_internal.h"
 #include "text_field_internal.h"
 
 namespace huxerui {
@@ -46,7 +47,7 @@ void ValidateFrameValue(const std::optional<float>& value, const char* name) {
   }
 }
 
-void ValidateFrameConstraints(const detail::ViewStyle::FrameConstraints& frame) {
+void ValidateFrameConstraints(const Frame& frame) {
   ValidateFrameValue(frame.width, "width");
   ValidateFrameValue(frame.height, "height");
   ValidateFrameValue(frame.min_width, "minimum width");
@@ -62,7 +63,7 @@ void ValidateFrameConstraints(const detail::ViewStyle::FrameConstraints& frame) 
 }
 
 void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
-  detail::ViewStyle::FrameConstraints frame = spec.style.frame;
+  Frame frame = spec.style.frame;
   if (modifier.width.has_value()) {
     frame.width = modifier.width;
   }
@@ -121,11 +122,6 @@ void ApplyFocusable(detail::ViewSpec& spec, const Focusable& modifier) {
   spec.focusable = modifier.value;
 }
 
-Color ApplyOpacity(Color color, float opacity) {
-  color.alpha *= std::clamp(opacity, 0.0F, 1.0F);
-  return color;
-}
-
 Color InterpolateColor(Color from, Color to, float progress) {
   const float value = std::clamp(progress, 0.0F, 1.0F);
   return {
@@ -158,6 +154,8 @@ struct ToggleVisual {
 
   ToggleVisualKind kind;
   bool checked;
+
+  bool operator==(const ToggleVisual&) const = default;
 };
 
 class ToggleVisualExtension final : public NodeExtension {
@@ -184,9 +182,13 @@ public:
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
+    const float previous_progress = progress_.Value();
     if (kind_ != ToggleVisualKind::Switch) {
       progress_.Set(checked_ ? 1.0F : 0.0F);
       target_pending_ = false;
+      if (progress_.Value() != previous_progress) {
+        InvalidatePaint();
+      }
       return {};
     }
     if (target_pending_) {
@@ -194,65 +196,63 @@ public:
       target_pending_ = false;
     }
     progress_.Advance(frame.timestamp, frame.delta_time);
+    if (progress_.Value() != previous_progress) {
+      InvalidatePaint();
+    }
     return {
         .needs_frame = progress_.IsRunning(),
+        .wake_after = std::nullopt,
     };
   }
 
-  void Paint(const MountedNode& node, DisplayList& display_list) const override {
+  void Paint(const MountedNode& node, PaintContext& context) const override {
     if (kind_ == ToggleVisualKind::Checkbox) {
-      PaintCheckbox(node, display_list);
+      PaintCheckbox(node, context);
     } else {
-      PaintSwitch(node, display_list);
+      PaintSwitch(node, context);
     }
   }
 
 private:
-  void PaintCheckbox(const MountedNode& node, DisplayList& display_list) const {
-    const Rect frame = node.Frame();
-    const float opacity = node.PresentationOpacity();
+  void PaintCheckbox(const MountedNode& node, PaintContext& context) const {
+    const Rect frame = node.Bounds();
     if (checked_) {
-      display_list.DrawRect(
-          frame,
-          ApplyOpacity(checkbox_style_.checked_background, opacity),
-          std::max(0.0F, checkbox_style_.corner_radius)
-      );
-      display_list.DrawText(
+      context.DrawRect(frame, checkbox_style_.checked_background, std::max(0.0F, checkbox_style_.corner_radius));
+      context.DrawText(
           frame,
           "✓",
-          ApplyOpacity(checkbox_style_.checkmark, opacity),
+          checkbox_style_.checkmark,
           std::max(0.0F, checkbox_style_.size * 0.72F),
           TextAlign::Center
       );
       return;
     }
-    display_list.DrawBorder(
+    context.DrawBorder(
         frame,
-        ApplyOpacity(checkbox_style_.unchecked_border, opacity),
+        checkbox_style_.unchecked_border,
         std::max(0.0F, checkbox_style_.border_width),
         std::max(0.0F, checkbox_style_.corner_radius)
     );
   }
 
-  void PaintSwitch(const MountedNode& node, DisplayList& display_list) const {
-    const Rect frame = node.Frame();
-    const float opacity = node.PresentationOpacity();
+  void PaintSwitch(const MountedNode& node, PaintContext& context) const {
+    const Rect frame = node.Bounds();
     const float progress = progress_.Value();
     const Color track = InterpolateColor(switch_style_.unchecked_track, switch_style_.checked_track, progress);
-    display_list.DrawRect(frame, ApplyOpacity(track, opacity), std::max(0.0F, switch_style_.corner_radius));
+    context.DrawRect(frame, track, std::max(0.0F, switch_style_.corner_radius));
 
     const float padding = std::max(0.0F, switch_style_.track_padding);
     const float maximum_radius = std::max(0.0F, std::min(frame.height * 0.5F - padding, frame.width * 0.5F - padding));
     const float radius = std::clamp(switch_style_.thumb_radius, 0.0F, maximum_radius);
     const float start_x = frame.x + padding + radius;
     const float travel = std::max(0.0F, frame.width - 2.0F * (padding + radius));
-    display_list.DrawCircle(
+    context.DrawCircle(
         {
             start_x + travel * progress,
             frame.y + frame.height * 0.5F,
         },
         radius,
-        ApplyOpacity(switch_style_.thumb, opacity)
+        switch_style_.thumb
     );
   }
 
@@ -273,6 +273,8 @@ struct ProgressCircleVisual {
   static const detail::ModifierDescriptor& Descriptor();
 
   std::optional<float> progress;
+
+  bool operator==(const ProgressCircleVisual&) const = default;
 };
 
 class ProgressCircleVisualExtension final : public NodeExtension {
@@ -292,9 +294,13 @@ public:
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
+    const float previous_phase = phase_;
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
       animation_start_.reset();
       phase_ = 0.0F;
+      if (phase_ != previous_phase) {
+        InvalidatePaint();
+      }
       return {};
     }
     if (!animation_start_.has_value()) {
@@ -302,16 +308,20 @@ public:
     }
     const double elapsed = std::max(0.0, frame.timestamp - *animation_start_);
     phase_ = static_cast<float>(std::fmod(elapsed, style_.animation_duration) / style_.animation_duration);
+    if (phase_ != previous_phase) {
+      InvalidatePaint();
+    }
     return {
         .needs_frame = true,
+        .wake_after = std::nullopt,
     };
   }
 
-  void Paint(const MountedNode& node, DisplayList& display_list) const override {
+  void Paint(const MountedNode& node, PaintContext& context) const override {
     constexpr float pi = 3.14159265358979323846F;
     constexpr float full_circle = pi * 2.0F;
 
-    const Rect frame = node.Frame();
+    const Rect frame = node.Bounds();
     const float stroke_width = std::max(0.0F, style_.stroke_width);
     const float radius = std::max(0.0F, std::min(frame.width, frame.height) * 0.5F - stroke_width * 0.5F);
     if (radius <= 0.0F || stroke_width <= 0.0F) {
@@ -322,10 +332,8 @@ public:
         frame.x + frame.width * 0.5F,
         frame.y + frame.height * 0.5F,
     };
-    const float opacity = node.PresentationOpacity();
     if (style_.track_color.alpha > 0.0F) {
-      display_list
-          .DrawArc(center, radius, -pi * 0.5F, full_circle, ApplyOpacity(style_.track_color, opacity), stroke_width);
+      context.DrawArc(center, radius, -pi * 0.5F, full_circle, style_.track_color, stroke_width);
     }
 
     const float progress = progress_.value_or(std::clamp(style_.indeterminate_arc_fraction, 0.0F, 1.0F));
@@ -333,15 +341,8 @@ public:
       return;
     }
     const float start = -pi * 0.5F + (progress_.has_value() ? 0.0F : phase_ * full_circle);
-    display_list.DrawArc(
-        center,
-        radius,
-        start,
-        progress * full_circle,
-        ApplyOpacity(style_.indicator_color, opacity),
-        stroke_width,
-        StrokeCap::Round
-    );
+    context
+        .DrawArc(center, radius, start, progress * full_circle, style_.indicator_color, stroke_width, StrokeCap::Round);
   }
 
 private:
@@ -355,8 +356,8 @@ const detail::ModifierDescriptor& ProgressCircleVisual::Descriptor() {
   return detail::ModifierDescriptorFor<ProgressCircleVisual, ProgressCircleVisualExtension>();
 }
 
-template <class Style> std::optional<Style>
-ResolveStyleOverride(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
+template <class Style>
+std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
     if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
@@ -391,7 +392,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::TextField) {
     const TextFieldStyle style =
         ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), style);
+    spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), detail::MakeErasedLayoutValue(style));
     spec.style.focus_ring_width = 0.0F;
     spec.style.padding = style.padding;
     spec.style.background = style.background;
@@ -404,7 +405,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::Checkbox) {
     const CheckboxStyle style =
         ResolveStyleOverride<CheckboxStyle>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), style);
+    spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), detail::MakeErasedLayoutValue(style));
     spec.style.frame.width = std::max(0.0F, style.size);
     spec.style.frame.height = std::max(0.0F, style.size);
     spec.style.corner_radius = std::max(0.0F, style.corner_radius);
@@ -413,16 +414,16 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::Switch) {
     const SwitchStyle style =
         ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), style);
+    spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), detail::MakeErasedLayoutValue(style));
     spec.style.frame.width = std::max(0.0F, style.width);
     spec.style.frame.height = std::max(0.0F, style.height);
     spec.style.corner_radius = std::max(0.0F, style.corner_radius);
     return;
   }
   if (spec.kind == detail::NodeKind::ProgressCircle) {
-    const ProgressCircleStyle style = ResolveStyleOverride<ProgressCircleStyle>(spec.environment)
-                                          .value_or(detail::DefaultProgressCircleStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), style);
+    const ProgressCircleStyle style =
+        ResolveStyleOverride<ProgressCircleStyle>(spec.environment).value_or(detail::DefaultProgressCircleStyle(theme));
+    spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), detail::MakeErasedLayoutValue(style));
     spec.style.frame.width = std::max(0.0F, style.size);
     spec.style.frame.height = std::max(0.0F, style.size);
   }
@@ -580,9 +581,13 @@ void View::SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHan
   spec_->event_bindings.insert_or_assign(key, std::move(handler));
 }
 
-void View::SetLayoutValue(std::type_index key, std::any value) {
+void View::SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue value) {
   EnsureUniqueSpec();
   spec_->layout_values.insert_or_assign(key, std::move(value));
+}
+
+void View::AddDefaultIndication() {
+  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
 }
 
 void View::AddModifier(detail::ModifierSpec modifier) {

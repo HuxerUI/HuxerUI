@@ -35,8 +35,8 @@ ScrollBarStyle ResolveScrollBarStyle(
   return style;
 }
 
-std::optional<detail::ScrollBarGeometry> ResolveLocalScrollBarGeometry(MountedNode& node) {
-  return detail::ResolveScrollBarGeometry(static_cast<detail::MountedNode&>(node));
+std::optional<detail::ScrollBarGeometry> ResolveLocalScrollBarGeometry(const MountedNode& node) {
+  return detail::ResolveScrollBarGeometry(static_cast<const detail::MountedNode&>(node));
 }
 
 class ScrollBarExtension final : public NodeExtension {
@@ -52,10 +52,17 @@ public:
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
+    const float previous_opacity = opacity_.Value();
+    const auto finish = [&](NodeExtension::FrameResult result) {
+      if (opacity_.Value() != previous_opacity) {
+        InvalidatePaint();
+      }
+      return result;
+    };
     if (!node.IsEnabled() || !detail::ResolveScrollBarGeometry(mounted).has_value()) {
       opacity_.Set(0.0F);
       initialized_ = false;
-      return {};
+      return finish({});
     }
 
     if (!initialized_) {
@@ -82,23 +89,24 @@ public:
 
     opacity_.Advance(frame.timestamp, frame.delta_time);
     if (opacity_.IsRunning()) {
-      return {
+      return finish({
           true,
           std::nullopt,
-      };
+      });
     }
     if (!held && opacity_.Value() > 0.0F && frame.timestamp < hide_deadline_) {
-      return {
+      return finish({
           false,
           hide_deadline_ - frame.timestamp,
-      };
+      });
     }
-    return {};
+    return finish({});
   }
 
   void OnScrollActivity(MountedNode& node) override {
     static_cast<void>(node);
     activity_pending_ = true;
+    InvalidatePaint();
   }
 
   void OnScrollGesture(MountedNode& node, bool active) override {
@@ -176,6 +184,7 @@ public:
       const float current = pointer_axis_ == Axis::Vertical ? mounted.scroll->offset_y : mounted.scroll->offset_x;
       if (detail::ScrollNodeBy(mounted, desired - current) != 0.0F) {
         activity_pending_ = true;
+        InvalidatePaint();
       }
       return NodeExtension::PointerResult::Handled;
     }
@@ -191,22 +200,21 @@ public:
     return NodeExtension::PointerResult::Handled;
   }
 
-  void Paint(const MountedNode& node, DisplayList& display_list) const override {
-    auto& mutable_node = const_cast<MountedNode&>(node);
-    const auto geometry = ResolveLocalScrollBarGeometry(mutable_node);
+  void Paint(const MountedNode& node, PaintContext& context) const override {
+    const auto geometry = ResolveLocalScrollBarGeometry(node);
     if (!geometry.has_value() || opacity_.Value() <= 0.0F) {
       return;
     }
 
     Color track_color = geometry->style.track_color;
-    track_color.alpha *= opacity_.Value() * node.PresentationOpacity();
+    track_color.alpha *= opacity_.Value();
     Color thumb_color = geometry->style.thumb_color;
-    thumb_color.alpha *= opacity_.Value() * node.PresentationOpacity();
+    thumb_color.alpha *= opacity_.Value();
     if (track_color.alpha > 0.0F) {
-      display_list.DrawRect(geometry->track, track_color, geometry->style.corner_radius);
+      context.DrawRect(geometry->track, track_color, geometry->style.corner_radius);
     }
     if (thumb_color.alpha > 0.0F) {
-      display_list.DrawRect(geometry->thumb, thumb_color, geometry->style.corner_radius);
+      context.DrawRect(geometry->thumb, thumb_color, geometry->style.corner_radius);
     }
   }
 
@@ -242,7 +250,7 @@ void ValidateScrollBarStyle(const ScrollBarStyle& style) {
 void ApplyScrollBar(detail::ViewSpec& spec, const ScrollBar& modifier) {
   const ScrollBarStyle style = ResolveScrollBarStyle(spec.environment, modifier.style);
   ValidateScrollBarStyle(style);
-  spec.layout_values.insert_or_assign(typeid(detail::ScrollBarBinding), style);
+  spec.layout_values.insert_or_assign(typeid(detail::ScrollBarBinding), detail::MakeErasedLayoutValue(style));
 }
 
 void ValidateScrollPhysics(const ScrollPhysics& physics) {
@@ -256,7 +264,7 @@ void ValidateScrollPhysics(const ScrollPhysics& physics) {
 
 void ApplyScrollPhysics(detail::ViewSpec& spec, const ScrollPhysics& physics) {
   ValidateScrollPhysics(physics);
-  spec.layout_values.insert_or_assign(typeid(ScrollPhysics), physics);
+  spec.layout_values.insert_or_assign(typeid(ScrollPhysics), detail::MakeErasedLayoutValue(physics));
 }
 
 } // namespace
@@ -285,6 +293,8 @@ const detail::ModifierDescriptor& ScrollBar::Descriptor() {
       [](NodeExtension& extension, MountedNode& node, const void* value) {
         static_cast<ScrollBarExtension&>(extension).Update(node, *static_cast<const ScrollBar*>(value));
       },
+      false,
+      detail::ErasedEqualsFor<ScrollBar>(),
   };
   return descriptor;
 }
