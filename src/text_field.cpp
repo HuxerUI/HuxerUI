@@ -120,16 +120,22 @@ std::vector<TextOffset> CollectGraphemeBoundaries(detail::TextLayout& layout, st
   return boundaries;
 }
 
-TextFieldLayout
-CreateTextFieldLayout(PlatformHost& platform, std::string_view text, float font_size, float max_width, bool secure) {
+TextFieldLayout CreateTextFieldLayout(
+    PlatformHost& platform,
+    std::string_view text,
+    const TextStyle& style,
+    float max_width,
+    bool secure,
+    const TextLayoutOptions& options
+) {
   if (!secure) {
     return {
-        platform.CreateTextLayout(text, font_size, max_width),
+        platform.CreateTextLayout(text, style, max_width, options),
         std::string(text),
     };
   }
 
-  std::unique_ptr<detail::TextLayout> source = platform.CreateTextLayout(text, font_size, max_width);
+  std::unique_ptr<detail::TextLayout> source = platform.CreateTextLayout(text, style, max_width, options);
   if (!source) {
     return {};
   }
@@ -141,7 +147,7 @@ CreateTextFieldLayout(PlatformHost& platform, std::string_view text, float font_
   for (std::size_t index = 1; index < boundaries.size(); ++index) {
     display_text.append(bullet);
   }
-  std::unique_ptr<detail::TextLayout> visual = platform.CreateTextLayout(display_text, font_size, max_width);
+  std::unique_ptr<detail::TextLayout> visual = platform.CreateTextLayout(display_text, style, max_width, options);
   if (!visual) {
     return {};
   }
@@ -219,12 +225,12 @@ public:
 
     TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyle::Default());
     next_style.background = node.style.background.value_or(next_style.background);
-    next_style.foreground = node.style.foreground.value_or(next_style.foreground);
-    next_style.font_size = node.style.font_size.value_or(next_style.font_size);
+    next_style.text_style = node.style.text_style;
     next_style.corner_radius = node.style.corner_radius;
-    if (!initialized_ || layout_mode_changed || next_style.font_size != style_.font_size ||
-        next_style.validation_font_size != style_.validation_font_size || placeholder_ != layout_placeholder_ ||
-        validation_changed) {
+    if (!initialized_ || layout_mode_changed || next_style.text_style.font != style_.text_style.font ||
+        next_style.placeholder_style.font != style_.placeholder_style.font ||
+        next_style.validation_text_style.font != style_.validation_text_style.font ||
+        placeholder_ != layout_placeholder_ || validation_changed) {
       layout_.reset();
       placeholder_layout_.reset();
       validation_layout_.reset();
@@ -360,8 +366,7 @@ public:
               size.height,
           },
           placeholder_,
-          style_.placeholder,
-          style_.font_size
+          style_.placeholder_style
       );
     } else {
       const Size size = layout_->Measure();
@@ -373,8 +378,7 @@ public:
               size.height,
           },
           layout_text_,
-          style_.foreground,
-          style_.font_size
+          style_.text_style
       );
     }
 
@@ -404,6 +408,10 @@ public:
     if (validation_layout_) {
       const Rect node_content = ContentRect(node);
       const Size size = validation_layout_->Measure();
+      TextStyle validation_style = style_.validation_text_style;
+      if (!validation_.IsInvalid()) {
+        validation_style.foreground = style_.placeholder_style.foreground;
+      }
       context.PushClip(node.bounds, std::max(0.0F, style_.corner_radius));
       context.DrawText(
           {
@@ -413,8 +421,7 @@ public:
               size.height,
           },
           validation_.message,
-          validation_.IsInvalid() ? style_.validation_error : style_.placeholder,
-          style_.validation_font_size
+          std::move(validation_style)
       );
       context.PopClip();
     }
@@ -936,9 +943,18 @@ private:
   }
 
   void EnsureLayouts(PlatformHost& platform) {
+    const TextLayoutOptions layout_options{
+        .wrap = configuration_.multiline ? TextWrap::Word : TextWrap::NoWrap,
+    };
     if (!layout_) {
-      TextFieldLayout result =
-          CreateTextFieldLayout(platform, editing_.value.text, style_.font_size, layout_width_, configuration_.secure);
+      TextFieldLayout result = CreateTextFieldLayout(
+          platform,
+          editing_.value.text,
+          style_.text_style,
+          layout_width_,
+          configuration_.secure,
+          layout_options
+      );
       layout_ = std::move(result.layout);
       layout_text_ = std::move(result.display_text);
     }
@@ -949,7 +965,8 @@ private:
       placeholder_layout_.reset();
       layout_placeholder_.clear();
     } else if (!placeholder_layout_ || layout_placeholder_ != placeholder_) {
-      placeholder_layout_ = platform.CreateTextLayout(placeholder_, style_.font_size, layout_width_);
+      placeholder_layout_ =
+          platform.CreateTextLayout(placeholder_, style_.placeholder_style, layout_width_, layout_options);
       layout_placeholder_ = placeholder_;
       if (!placeholder_layout_) {
         throw std::logic_error("HuxerUI platform does not provide editable text layout");
@@ -959,8 +976,12 @@ private:
       validation_layout_.reset();
       layout_validation_message_.clear();
     } else if (!validation_layout_ || layout_validation_message_ != validation_.message) {
-      validation_layout_ =
-          platform.CreateTextLayout(validation_.message, style_.validation_font_size, validation_layout_width_);
+      validation_layout_ = platform.CreateTextLayout(
+          validation_.message,
+          style_.validation_text_style,
+          validation_layout_width_,
+          TextLayoutOptions{.wrap = TextWrap::Word}
+      );
       layout_validation_message_ = validation_.message;
       if (!validation_layout_) {
         throw std::logic_error("HuxerUI platform does not provide validation message layout");
@@ -1137,8 +1158,12 @@ private:
     if (!platform_) {
       throw std::logic_error("HuxerUI TextField cannot resolve text boundaries before layout");
     }
-    std::unique_ptr<detail::TextLayout> layout =
-        platform_->CreateTextLayout(text, style_.font_size, std::numeric_limits<float>::infinity());
+    std::unique_ptr<detail::TextLayout> layout = platform_->CreateTextLayout(
+        text,
+        style_.text_style,
+        std::numeric_limits<float>::infinity(),
+        TextLayoutOptions{.wrap = TextWrap::NoWrap}
+    );
     if (!layout) {
       throw std::logic_error("HuxerUI platform does not provide editable text layout");
     }
@@ -1597,7 +1622,17 @@ private:
         const std::size_t end = text.find('\n', start);
         const std::string_view line =
             end == std::string_view::npos ? text.substr(start) : text.substr(start, end - start);
-        width = std::max(width, platform.MeasureText(line, style_.font_size).width);
+        width = std::max(
+            width,
+            platform
+                .MeasureText(
+                    line,
+                    style_.text_style,
+                    std::numeric_limits<float>::infinity(),
+                    TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                )
+                .size.width
+        );
         if (end == std::string_view::npos) {
           break;
         }

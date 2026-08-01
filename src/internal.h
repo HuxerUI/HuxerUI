@@ -87,6 +87,10 @@ struct EnvironmentFrame {
   EnvironmentValues overrides;
 };
 
+struct TextMeasurerService {
+  TextMeasurer* measurer = nullptr;
+};
+
 void InstallBuiltinPresentation(RootContext& root);
 
 struct LayerControllerState {
@@ -221,6 +225,7 @@ enum class NodeKind {
   Checkbox,
   Switch,
   ProgressCircle,
+  Canvas,
   Spacer,
   Scope,
   SelectionArea,
@@ -236,8 +241,7 @@ struct ViewStyle {
   Frame frame;
   std::optional<Color> background;
   std::optional<Shadow> shadow;
-  std::optional<Color> foreground;
-  std::optional<float> font_size;
+  TextStyle text_style;
   float corner_radius = 0.0F;
   float spacing = 0.0F;
   float grow = 0.0F;
@@ -252,7 +256,7 @@ struct ViewStyle {
   bool operator==(const ViewStyle&) const = default;
 
   [[nodiscard]] bool LayoutEquals(const ViewStyle& other) const {
-    return padding == other.padding && frame == other.frame && font_size == other.font_size &&
+    return padding == other.padding && frame == other.frame && text_style.font == other.text_style.font &&
            spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
            cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
            vertical_alignment == other.vertical_alignment;
@@ -260,7 +264,7 @@ struct ViewStyle {
 
   [[nodiscard]] bool ContentPaintEquals(const ViewStyle& other) const {
     return padding == other.padding && background == other.background && shadow == other.shadow &&
-           foreground == other.foreground && font_size == other.font_size && corner_radius == other.corner_radius;
+           text_style == other.text_style && corner_radius == other.corner_radius;
   }
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewStyle& other) const {
@@ -279,6 +283,7 @@ struct ViewSpec {
   ViewStyle style;
   std::vector<View> children;
   std::function<View()> scope_factory;
+  CanvasPainter canvas_painter;
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
   VirtualItemSource virtual_items;
@@ -384,6 +389,7 @@ struct MountedNode final : public huxerui::MountedNode {
   std::string text;
   ViewStyle style;
   std::function<View()> scope_factory;
+  CanvasPainter canvas_painter;
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
@@ -753,10 +759,9 @@ struct TextSelectionOverlayState {
   Rect painted_end;
   Rect toolbar_rect;
   Color toolbar_background;
-  Color toolbar_foreground;
   Color toolbar_border;
   float toolbar_corner_radius = 0.0F;
-  float toolbar_font_size = 14.0F;
+  TextStyle toolbar_text_style;
   std::vector<TextEditingAction> actions;
   std::vector<Rect> action_rects;
   std::vector<std::string> action_labels;

@@ -14,10 +14,12 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "path_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
 #include "win32_internal.h"
@@ -55,6 +57,60 @@ D2D1_CAP_STYLE ToD2DCap(StrokeCap cap) {
   default:
     return D2D1_CAP_STYLE_FLAT;
   }
+}
+
+D2D1_LINE_JOIN ToD2DJoin(StrokeJoin join) {
+  switch (join) {
+  case StrokeJoin::Round:
+    return D2D1_LINE_JOIN_ROUND;
+  case StrokeJoin::Bevel:
+    return D2D1_LINE_JOIN_BEVEL;
+  case StrokeJoin::Miter:
+  default:
+    return D2D1_LINE_JOIN_MITER;
+  }
+}
+
+void CombineHash(std::size_t& seed, std::size_t value) noexcept {
+  seed ^= value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+}
+
+std::size_t HashFont(const Font& font) noexcept {
+  std::size_t result = std::hash<FontFamilyKind>{}(font.FamilyKind());
+  CombineHash(result, std::hash<std::string_view>{}(font.FamilyName()));
+  CombineHash(result, std::hash<float>{}(font.Size()));
+  CombineHash(result, std::hash<FontWeight>{}(font.Weight()));
+  CombineHash(result, std::hash<FontSlant>{}(font.Slant()));
+  return result;
+}
+
+std::size_t HashShaping(const TextShapingOptions& shaping) noexcept {
+  std::size_t result = std::hash<TextDirection>{}(shaping.direction);
+  CombineHash(result, std::hash<std::string>{}(shaping.locale));
+  return result;
+}
+
+TextDirection ResolveTextDirection(std::wstring_view text, TextDirection requested) {
+  if (requested != TextDirection::Auto) {
+    return requested;
+  }
+  if (text.empty() || text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return TextDirection::LeftToRight;
+  }
+
+  std::vector<WORD> character_types(text.size());
+  if (GetStringTypeW(CT_CTYPE2, text.data(), static_cast<int>(text.size()), character_types.data()) == 0) {
+    return TextDirection::LeftToRight;
+  }
+  for (WORD type : character_types) {
+    if (type == C2_RIGHTTOLEFT) {
+      return TextDirection::RightToLeft;
+    }
+    if (type == C2_LEFTTORIGHT) {
+      return TextDirection::LeftToRight;
+    }
+  }
+  return TextDirection::LeftToRight;
 }
 
 } // namespace
@@ -204,14 +260,161 @@ struct Win32Renderer::State {
     ComPtr<ID2D1Geometry> exterior_clip;
   };
 
-  Size MeasureText(std::string_view text, float font_size, float max_width) {
+  struct CachedPathGeometry {
+    Path path;
+    PathFillRule fill_rule = PathFillRule::NonZero;
+    ComPtr<ID2D1PathGeometry> geometry;
+  };
+
+  struct FontHash {
+    std::size_t operator()(const Font& font) const noexcept {
+      return HashFont(font);
+    }
+  };
+
+  struct TextRunKey {
+    std::string text;
+    Font font;
+    TextDecoration decoration = TextDecoration::None;
+    TextShapingOptions shaping;
+
+    bool operator==(const TextRunKey&) const = default;
+  };
+
+  struct TextRunKeyView {
+    std::string_view text;
+    const Font& font;
+    TextDecoration decoration;
+    const TextShapingOptions& shaping;
+  };
+
+  struct TextRunKeyHash {
+    using is_transparent = void;
+
+    std::size_t operator()(const TextRunKey& key) const noexcept {
+      return Hash(key.text, key.font, key.decoration, key.shaping);
+    }
+
+    std::size_t operator()(const TextRunKeyView& key) const noexcept {
+      return Hash(key.text, key.font, key.decoration, key.shaping);
+    }
+
+  private:
+    static std::size_t Hash(
+        std::string_view text, const Font& font, TextDecoration decoration, const TextShapingOptions& shaping
+    ) noexcept {
+      std::size_t result = std::hash<std::string_view>{}(text);
+      CombineHash(result, HashFont(font));
+      CombineHash(result, std::hash<TextDecoration>{}(decoration));
+      CombineHash(result, HashShaping(shaping));
+      return result;
+    }
+  };
+
+  struct TextRunKeyEqual {
+    using is_transparent = void;
+
+    bool operator()(const TextRunKey& left, const TextRunKey& right) const noexcept {
+      return left == right;
+    }
+
+    bool operator()(const TextRunKey& left, const TextRunKeyView& right) const noexcept {
+      return std::string_view(left.text) == right.text && left.font == right.font &&
+             left.decoration == right.decoration && left.shaping == right.shaping;
+    }
+
+    bool operator()(const TextRunKeyView& left, const TextRunKey& right) const noexcept {
+      return (*this)(right, left);
+    }
+  };
+
+  struct CachedTextRun {
+    ComPtr<IDWriteTextLayout> layout;
+    TextRunMetrics metrics;
+    float baseline = 0.0F;
+  };
+
+  struct ParagraphKey {
+    std::string text;
+    Font font;
+    TextDecoration decoration = TextDecoration::None;
+    TextLayoutOptions options;
+    Size size;
+
+    bool operator==(const ParagraphKey&) const = default;
+  };
+
+  struct ParagraphKeyView {
+    std::string_view text;
+    const Font& font;
+    TextDecoration decoration;
+    const TextLayoutOptions& options;
+    Size size;
+  };
+
+  struct ParagraphKeyHash {
+    using is_transparent = void;
+
+    std::size_t operator()(const ParagraphKey& key) const noexcept {
+      return Hash(key.text, key.font, key.decoration, key.options, key.size);
+    }
+
+    std::size_t operator()(const ParagraphKeyView& key) const noexcept {
+      return Hash(key.text, key.font, key.decoration, key.options, key.size);
+    }
+
+  private:
+    static std::size_t Hash(
+        std::string_view text, const Font& font, TextDecoration decoration, const TextLayoutOptions& options, Size size
+    ) noexcept {
+      std::size_t result = std::hash<std::string_view>{}(text);
+      CombineHash(result, HashFont(font));
+      CombineHash(result, std::hash<TextDecoration>{}(decoration));
+      CombineHash(result, HashShaping(options.shaping));
+      CombineHash(result, std::hash<TextAlign>{}(options.align));
+      CombineHash(result, std::hash<TextWrap>{}(options.wrap));
+      CombineHash(result, std::hash<float>{}(size.width));
+      CombineHash(result, std::hash<float>{}(size.height));
+      return result;
+    }
+  };
+
+  struct ParagraphKeyEqual {
+    using is_transparent = void;
+
+    bool operator()(const ParagraphKey& left, const ParagraphKey& right) const noexcept {
+      return left == right;
+    }
+
+    bool operator()(const ParagraphKey& left, const ParagraphKeyView& right) const noexcept {
+      return std::string_view(left.text) == right.text && left.font == right.font &&
+             left.decoration == right.decoration && left.options == right.options && left.size == right.size;
+    }
+
+    bool operator()(const ParagraphKeyView& left, const ParagraphKey& right) const noexcept {
+      return (*this)(right, left);
+    }
+  };
+
+  struct CachedParagraph {
+    ComPtr<IDWriteTextLayout> layout;
+  };
+
+  TextLayoutMetrics
+  MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
     const std::wstring wide = Utf8ToWide(text);
-    ComPtr<IDWriteTextFormat> format = CreateTextFormat(font_size);
+    ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
     if (constrained && max_width <= 0.0F) {
       return {};
     }
-    format->SetWordWrapping(constrained ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    TextLayoutOptions measurement_options = options;
+    // Alignment does not affect intrinsic metrics. Keeping text at the physical left avoids precision loss when an
+    // unbounded DirectWrite layout uses its maximum finite width.
+    const TextDirection direction = ResolveTextDirection(wide, options.shaping.direction);
+    measurement_options.shaping.direction = direction;
+    measurement_options.align = direction == TextDirection::RightToLeft ? TextAlign::Trailing : TextAlign::Leading;
+    ConfigureTextFormat(*format.Get(), measurement_options, wide);
 
     const float layout_width = constrained ? max_width : std::numeric_limits<float>::max();
     ComPtr<IDWriteTextLayout> layout;
@@ -231,17 +434,42 @@ struct Win32Renderer::State {
     ThrowIfFailed(layout->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text layout");
     const float width = constrained ? std::min(metrics.widthIncludingTrailingWhitespace, max_width)
                                     : metrics.widthIncludingTrailingWhitespace;
+    UINT32 line_count = 0;
+    layout->GetLineMetrics(nullptr, 0, &line_count);
+    std::vector<DWRITE_LINE_METRICS> lines(line_count);
+    if (line_count > 0) {
+      ThrowIfFailed(
+          layout->GetLineMetrics(lines.data(), line_count, &line_count),
+          "HuxerUI could not query DirectWrite line metrics"
+      );
+    }
+    const float first_baseline = lines.empty() ? 0.0F : lines.front().baseline;
+    const float last_baseline = lines.empty() ? 0.0F : metrics.height - lines.back().height + lines.back().baseline;
+    const Size size{std::ceil(width), std::ceil(metrics.height)};
     return {
-        std::ceil(width),
-        std::ceil(metrics.height),
+        .size = size,
+        .first_baseline = first_baseline,
+        .last_baseline = last_baseline,
+        .line_count = line_count,
     };
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) {
+  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
+    if (text.find_first_of("\r\n") != std::string_view::npos) {
+      throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
+    }
+    if (text.empty()) {
+      return {.font_metrics = Metrics(style.font)};
+    }
+    return TextRunFor(text, style, options).metrics;
+  }
+
+  std::unique_ptr<TextLayout>
+  CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
     std::wstring wide = Utf8ToWide(text);
-    ComPtr<IDWriteTextFormat> format = CreateTextFormat(font_size);
+    ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
-    format->SetWordWrapping(constrained ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    ConfigureTextFormat(*format.Get(), options, wide);
 
     ComPtr<IDWriteTextLayout> layout;
     ThrowIfFailed(
@@ -283,27 +511,268 @@ struct Win32Renderer::State {
     return std::max(dpi_, 1.0F) / kDipsPerInch;
   }
 
-  ComPtr<IDWriteTextFormat> CreateTextFormat(float font_size) const {
+  std::wstring FontFamilyName(const Font& font) const {
+    if (font.FamilyKind() == FontFamilyKind::Monospace) {
+      return L"Consolas";
+    }
+    if (font.FamilyKind() == FontFamilyKind::Named) {
+      return Utf8ToWide(font.FamilyName());
+    }
+    return L"Segoe UI";
+  }
+
+  ComPtr<IDWriteTextFormat> CreateTextFormat(const Font& font, std::string_view locale = {}) const {
     wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
-    if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) == 0) {
-      wcscpy_s(locale_name, L"en-us");
+    std::wstring requested_locale;
+    if (locale.empty()) {
+      if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) == 0) {
+        wcscpy_s(locale_name, L"en-us");
+      }
+    } else {
+      requested_locale = Utf8ToWide(locale);
     }
 
     ComPtr<IDWriteTextFormat> format;
+    const std::wstring family = FontFamilyName(font);
     ThrowIfFailed(
         write_factory_->CreateTextFormat(
-            L"Segoe UI",
+            family.c_str(),
             nullptr,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL,
+            static_cast<DWRITE_FONT_WEIGHT>(font.Weight()),
+            font.Slant() == FontSlant::Italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            std::max(font_size, 0.1F),
-            locale_name,
+            font.Size(),
+            requested_locale.empty() ? locale_name : requested_locale.c_str(),
             format.GetAddressOf()
         ),
         "HuxerUI could not create a DirectWrite text format"
     );
     return format;
+  }
+
+  static void ConfigureTextFormat(IDWriteTextFormat& format, const TextLayoutOptions& options, std::wstring_view text) {
+    format.SetWordWrapping(options.wrap == TextWrap::Word ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    switch (options.align) {
+    case TextAlign::Center:
+      format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+      break;
+    case TextAlign::Trailing:
+      format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+      break;
+    case TextAlign::Leading:
+      format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+      break;
+    }
+    if (ResolveTextDirection(text, options.shaping.direction) == TextDirection::RightToLeft) {
+      format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
+    } else {
+      format.SetReadingDirection(DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+    }
+  }
+
+  CachedTextRun& TextRunFor(std::string_view text, const TextStyle& style, const TextShapingOptions& shaping) {
+    const auto cached = text_runs_.find(TextRunKeyView{text, style.font, style.decoration, shaping});
+    if (cached != text_runs_.end()) {
+      return cached->second;
+    }
+
+    const std::wstring wide = Utf8ToWide(text);
+    ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, shaping.locale);
+    ConfigureTextFormat(*format.Get(), TextLayoutOptions{.shaping = shaping, .wrap = TextWrap::NoWrap}, wide);
+    ComPtr<IDWriteTextLayout> layout;
+    ThrowIfFailed(
+        write_factory_->CreateTextLayout(
+            wide.data(),
+            static_cast<UINT32>(wide.size()),
+            format.Get(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            layout.GetAddressOf()
+        ),
+        "HuxerUI could not create a DirectWrite text run layout"
+    );
+    if (HasTextDecoration(style.decoration, TextDecoration::Underline)) {
+      ThrowIfFailed(
+          layout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(wide.size())}),
+          "HuxerUI could not configure DirectWrite text run underline"
+      );
+    }
+    if (HasTextDecoration(style.decoration, TextDecoration::StrikeThrough)) {
+      ThrowIfFailed(
+          layout->SetStrikethrough(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(wide.size())}),
+          "HuxerUI could not configure DirectWrite text run strikethrough"
+      );
+    }
+
+    DWRITE_TEXT_METRICS text_metrics{};
+    ThrowIfFailed(layout->GetMetrics(&text_metrics), "HuxerUI could not measure a DirectWrite text run");
+    UINT32 line_count = 0;
+    layout->GetLineMetrics(nullptr, 0, &line_count);
+    DWRITE_LINE_METRICS line{};
+    if (line_count == 0 || FAILED(layout->GetLineMetrics(&line, 1, &line_count))) {
+      throw std::runtime_error("HuxerUI could not query DirectWrite text run baseline");
+    }
+    const float advance = text_metrics.widthIncludingTrailingWhitespace;
+    const float layout_width = std::max(1.0F, advance);
+    const float layout_height = std::max(1.0F, line.height);
+    ThrowIfFailed(layout->SetMaxWidth(layout_width), "HuxerUI could not constrain DirectWrite text run width");
+    ThrowIfFailed(layout->SetMaxHeight(layout_height), "HuxerUI could not constrain DirectWrite text run height");
+
+    DWRITE_OVERHANG_METRICS overhang{};
+    ThrowIfFailed(layout->GetOverhangMetrics(&overhang), "HuxerUI could not query DirectWrite text run bounds");
+    const float left = std::max(0.0F, overhang.left);
+    const float top = std::max(0.0F, overhang.top);
+    const float right = std::max(0.0F, overhang.right);
+    const float bottom = std::max(0.0F, overhang.bottom);
+    Rect visual_bounds{
+        -left,
+        -line.baseline - top,
+        layout_width + left + right,
+        layout_height + top + bottom,
+    };
+    const FontMetrics font_metrics = Metrics(style.font);
+    const auto include_decoration = [&](float center, float thickness) {
+      if (advance <= 0.0F || thickness <= 0.0F) {
+        return;
+      }
+      const Rect decoration{0.0F, center - thickness * 0.5F, advance, thickness};
+      const float left_edge = std::min(visual_bounds.x, decoration.x);
+      const float top_edge = std::min(visual_bounds.y, decoration.y);
+      const float right_edge = std::max(visual_bounds.x + visual_bounds.width, decoration.x + decoration.width);
+      const float bottom_edge = std::max(visual_bounds.y + visual_bounds.height, decoration.y + decoration.height);
+      visual_bounds = {left_edge, top_edge, right_edge - left_edge, bottom_edge - top_edge};
+    };
+    if (HasTextDecoration(style.decoration, TextDecoration::Underline)) {
+      include_decoration(font_metrics.underline_position, font_metrics.underline_thickness);
+    }
+    if (HasTextDecoration(style.decoration, TextDecoration::StrikeThrough)) {
+      include_decoration(-font_metrics.strike_through_position, font_metrics.strike_through_thickness);
+    }
+
+    constexpr std::size_t maximum_text_runs = 1024;
+    if (text_runs_.size() >= maximum_text_runs) {
+      text_runs_.erase(text_runs_.begin());
+    }
+    auto [inserted, was_inserted] = text_runs_.emplace(
+        TextRunKey{std::string(text), style.font, style.decoration, shaping},
+        CachedTextRun{
+            std::move(layout),
+            {advance, visual_bounds, font_metrics},
+            line.baseline,
+        }
+    );
+    static_cast<void>(was_inserted);
+    return inserted->second;
+  }
+
+  ComPtr<IDWriteTextLayout> ParagraphFor(const DrawTextCommand& command) {
+    const Size size{command.rect.width, command.rect.height};
+    const auto cached = paragraphs_.find(
+        ParagraphKeyView{command.text, command.style.font, command.style.decoration, command.options, size}
+    );
+    if (cached != paragraphs_.end()) {
+      return cached->second.layout;
+    }
+
+    const std::wstring text = Utf8ToWide(command.text);
+    ComPtr<IDWriteTextFormat> format = CreateTextFormat(command.style.font, command.options.shaping.locale);
+    ConfigureTextFormat(*format.Get(), command.options, text);
+    if (command.options.wrap == TextWrap::NoWrap) {
+      ThrowIfFailed(
+          format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER),
+          "HuxerUI could not center a DirectWrite text paragraph"
+      );
+    }
+    ComPtr<IDWriteTextLayout> layout;
+    ThrowIfFailed(
+        write_factory_->CreateTextLayout(
+            text.data(),
+            static_cast<UINT32>(text.size()),
+            format.Get(),
+            command.rect.width,
+            command.rect.height,
+            layout.GetAddressOf()
+        ),
+        "HuxerUI could not create a DirectWrite text paragraph"
+    );
+    if (HasTextDecoration(command.style.decoration, TextDecoration::Underline)) {
+      ThrowIfFailed(
+          layout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(text.size())}),
+          "HuxerUI could not configure DirectWrite paragraph underline"
+      );
+    }
+    if (HasTextDecoration(command.style.decoration, TextDecoration::StrikeThrough)) {
+      ThrowIfFailed(
+          layout->SetStrikethrough(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(text.size())}),
+          "HuxerUI could not configure DirectWrite paragraph strikethrough"
+      );
+    }
+    constexpr std::size_t maximum_paragraphs = 256;
+    if (paragraphs_.size() >= maximum_paragraphs) {
+      paragraphs_.erase(paragraphs_.begin());
+    }
+    paragraphs_.emplace(
+        ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
+        CachedParagraph{layout}
+    );
+    return layout;
+  }
+
+  FontMetrics Metrics(const Font& font) {
+    const auto cached = font_metrics_.find(font);
+    if (cached != font_metrics_.end()) {
+      return cached->second;
+    }
+    ComPtr<IDWriteFontCollection> collection;
+    ThrowIfFailed(
+        write_factory_->GetSystemFontCollection(collection.GetAddressOf()),
+        "HuxerUI could not access the DirectWrite font collection"
+    );
+    const std::wstring family_name = FontFamilyName(font);
+    UINT32 family_index = 0;
+    BOOL exists = FALSE;
+    ThrowIfFailed(
+        collection->FindFamilyName(family_name.c_str(), &family_index, &exists),
+        "HuxerUI could not resolve a DirectWrite font family"
+    );
+    if (exists == FALSE) {
+      collection->FindFamilyName(L"Segoe UI", &family_index, &exists);
+    }
+    ComPtr<IDWriteFontFamily> family;
+    ThrowIfFailed(
+        collection->GetFontFamily(family_index, family.GetAddressOf()),
+        "HuxerUI could not access a font family"
+    );
+    ComPtr<IDWriteFont> resolved;
+    ThrowIfFailed(
+        family->GetFirstMatchingFont(
+            static_cast<DWRITE_FONT_WEIGHT>(font.Weight()),
+            DWRITE_FONT_STRETCH_NORMAL,
+            font.Slant() == FontSlant::Italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+            resolved.GetAddressOf()
+        ),
+        "HuxerUI could not resolve a DirectWrite font"
+    );
+    ComPtr<IDWriteFontFace> face;
+    ThrowIfFailed(resolved->CreateFontFace(face.GetAddressOf()), "HuxerUI could not create a DirectWrite font face");
+    DWRITE_FONT_METRICS metrics{};
+    face->GetMetrics(&metrics);
+    const float scale = font.Size() / static_cast<float>(metrics.designUnitsPerEm);
+    const FontMetrics result{
+        .ascent = metrics.ascent * scale,
+        .descent = metrics.descent * scale,
+        .leading = metrics.lineGap * scale,
+        .underline_position = -metrics.underlinePosition * scale,
+        .underline_thickness = metrics.underlineThickness * scale,
+        .strike_through_position = metrics.strikethroughPosition * scale,
+        .strike_through_thickness = metrics.strikethroughThickness * scale,
+    };
+    constexpr std::size_t maximum_font_metrics = 64;
+    if (font_metrics_.size() >= maximum_font_metrics) {
+      font_metrics_.erase(font_metrics_.begin());
+    }
+    font_metrics_.emplace(font, result);
+    return result;
   }
 
   bool EnsureDeviceResources() {
@@ -497,6 +966,7 @@ struct Win32Renderer::State {
     transform_stack_.clear();
     DiscardSizeDependentResources();
     DiscardShadowResources();
+    path_geometries_.clear();
     brush_.Reset();
     swap_chain_.Reset();
     device_context_.Reset();
@@ -685,31 +1155,11 @@ struct Win32Renderer::State {
   }
 
   void RenderCommand(const DrawTextCommand& command) {
-    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.style.foreground.alpha <= 0.0F) {
       return;
     }
-    const std::wstring text = Utf8ToWide(command.text);
-    ComPtr<IDWriteTextFormat> format = CreateTextFormat(command.font_size);
-    format->SetWordWrapping(
-        command.align == TextAlign::Leading ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP
-    );
-    if (command.align == TextAlign::Center) {
-      format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-      format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    }
-
-    ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(write_factory_->CreateTextLayout(
-            text.data(),
-            static_cast<UINT32>(text.size()),
-            format.Get(),
-            command.rect.width,
-            command.rect.height,
-            layout.GetAddressOf()
-        ))) {
-      return;
-    }
-    SetBrushColor(command.color);
+    ComPtr<IDWriteTextLayout> layout = ParagraphFor(command);
+    SetBrushColor(command.style.foreground);
     device_context_->DrawTextLayout(
         D2D1::Point2F(command.rect.x, command.rect.y),
         layout.Get(),
@@ -718,15 +1168,32 @@ struct Win32Renderer::State {
     );
   }
 
-  ComPtr<ID2D1StrokeStyle> CreateStrokeStyle(StrokeCap cap) const {
+  void RenderCommand(const DrawTextRunsCommand& command) {
+    for (const TextRun& run : command.runs) {
+      if (run.text.empty() || run.bounds.IsEmpty() || run.style.foreground.alpha <= 0.0F) {
+        continue;
+      }
+      CachedTextRun& cached = TextRunFor(run.text, run.style, run.shaping);
+      SetBrushColor(run.style.foreground);
+      device_context_->DrawTextLayout(
+          D2D1::Point2F(run.baseline_origin.x, run.baseline_origin.y - cached.baseline),
+          cached.layout.Get(),
+          brush_.Get(),
+          D2D1_DRAW_TEXT_OPTIONS_NONE
+      );
+    }
+  }
+
+  ComPtr<ID2D1StrokeStyle>
+  CreateStrokeStyle(StrokeCap cap, StrokeJoin join = StrokeJoin::Miter, float miter_limit = 10.0F) const {
     ComPtr<ID2D1StrokeStyle> style;
     const D2D1_CAP_STYLE d2d_cap = ToD2DCap(cap);
     const D2D1_STROKE_STYLE_PROPERTIES properties{
         d2d_cap,
         d2d_cap,
         d2d_cap,
-        D2D1_LINE_JOIN_MITER,
-        10.0F,
+        ToD2DJoin(join),
+        miter_limit,
         D2D1_DASH_STYLE_SOLID,
         0.0F,
     };
@@ -734,6 +1201,80 @@ struct Win32Renderer::State {
       return {};
     }
     return style;
+  }
+
+  ComPtr<ID2D1PathGeometry> CreatePathGeometry(const Path& path, PathFillRule fill_rule) const {
+    ComPtr<ID2D1PathGeometry> geometry;
+    if (FAILED(d2d_factory_->CreatePathGeometry(geometry.GetAddressOf()))) {
+      return {};
+    }
+    ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(geometry->Open(sink.GetAddressOf()))) {
+      return {};
+    }
+    sink->SetFillMode(fill_rule == PathFillRule::EvenOdd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING);
+    bool figure_open = false;
+    for (const PathElement& element : PathAccess::Elements(path)) {
+      switch (element.verb) {
+      case PathVerb::MoveTo:
+        if (figure_open) {
+          sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        }
+        sink->BeginFigure(D2D1::Point2F(element.points[0].x, element.points[0].y), D2D1_FIGURE_BEGIN_FILLED);
+        figure_open = true;
+        break;
+      case PathVerb::LineTo:
+        sink->AddLine(D2D1::Point2F(element.points[0].x, element.points[0].y));
+        break;
+      case PathVerb::QuadraticTo:
+        sink->AddQuadraticBezier(
+            D2D1::QuadraticBezierSegment(
+                D2D1::Point2F(element.points[0].x, element.points[0].y),
+                D2D1::Point2F(element.points[1].x, element.points[1].y)
+            )
+        );
+        break;
+      case PathVerb::CubicTo:
+        sink->AddBezier(
+            D2D1::BezierSegment(
+                D2D1::Point2F(element.points[0].x, element.points[0].y),
+                D2D1::Point2F(element.points[1].x, element.points[1].y),
+                D2D1::Point2F(element.points[2].x, element.points[2].y)
+            )
+        );
+        break;
+      case PathVerb::Close:
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        figure_open = false;
+        break;
+      }
+    }
+    if (figure_open) {
+      sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    }
+    if (FAILED(sink->Close())) {
+      return {};
+    }
+    return geometry;
+  }
+
+  ComPtr<ID2D1PathGeometry> PathGeometryFor(const Path& path, PathFillRule fill_rule) {
+    const auto existing = std::find_if(path_geometries_.begin(), path_geometries_.end(), [&](const auto& entry) {
+      return entry.fill_rule == fill_rule && entry.path == path;
+    });
+    if (existing != path_geometries_.end()) {
+      return existing->geometry;
+    }
+    ComPtr<ID2D1PathGeometry> geometry = CreatePathGeometry(path, fill_rule);
+    if (!geometry) {
+      return {};
+    }
+    constexpr std::size_t maximum_path_geometries = 128;
+    if (path_geometries_.size() >= maximum_path_geometries) {
+      path_geometries_.erase(path_geometries_.begin());
+    }
+    path_geometries_.push_back({path, fill_rule, geometry});
+    return geometry;
   }
 
   void RenderCommand(const DrawCircleCommand& command) {
@@ -855,6 +1396,124 @@ struct Win32Renderer::State {
         D2D1::LayerParameters1(
             D2D1::InfiniteRect(),
             mask->exterior_clip.Get(),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),
+            1.0F,
+            nullptr,
+            D2D1_LAYER_OPTIONS1_NONE
+        ),
+        shadow_clip_layer_.Get()
+    );
+    device_context_->DrawImage(shadow_effect_.Get());
+    device_context_->PopLayer();
+    device_context_->SetTransform(previous);
+    shadow_effect_->SetInput(0, nullptr);
+  }
+
+  void RenderCommand(const FillPathCommand& command) {
+    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
+      return;
+    }
+    ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
+    if (!geometry) {
+      return;
+    }
+    SetBrushColor(command.color);
+    device_context_->FillGeometry(geometry.Get(), brush_.Get());
+  }
+
+  void RenderCommand(const StrokePathCommand& command) {
+    if (command.path.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
+      return;
+    }
+    ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
+    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.cap, command.join, command.miter_limit);
+    if (!geometry || !stroke_style) {
+      return;
+    }
+    SetBrushColor(command.color);
+    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.width, stroke_style.Get());
+  }
+
+  void RenderCommand(const DrawPathShadowCommand& command) {
+    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
+      return;
+    }
+    ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
+    if (!geometry) {
+      return;
+    }
+
+    D2D1_MATRIX_3X2_F previous;
+    device_context_->GetTransform(&previous);
+    const D2D1_MATRIX_3X2_F translation = D2D1::Matrix3x2F::Translation(command.offset.x, command.offset.y);
+    if (command.blur_radius <= 0.0F) {
+      device_context_->SetTransform(translation * previous);
+      SetBrushColor(command.color);
+      device_context_->FillGeometry(geometry.Get(), brush_.Get());
+      device_context_->SetTransform(previous);
+      return;
+    }
+    if (!EnsureShadowResources()) {
+      return;
+    }
+
+    ComPtr<ID2D1CommandList> commands;
+    if (FAILED(shadow_context_->CreateCommandList(commands.GetAddressOf()))) {
+      return;
+    }
+    shadow_context_->SetTarget(commands.Get());
+    shadow_context_->BeginDraw();
+    shadow_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+    shadow_context_->FillGeometry(geometry.Get(), shadow_brush_.Get());
+    const HRESULT draw_result = shadow_context_->EndDraw();
+    shadow_context_->SetTarget(nullptr);
+    if (FAILED(draw_result) || FAILED(commands->Close())) {
+      return;
+    }
+
+    const Rect bounds = command.path.Bounds();
+    ComPtr<ID2D1RectangleGeometry> outer;
+    ComPtr<ID2D1PathGeometry> exterior;
+    ComPtr<ID2D1GeometrySink> exterior_sink;
+    if (FAILED(d2d_factory_->CreateRectangleGeometry(
+            D2D1::RectF(
+                bounds.x - command.blur_radius,
+                bounds.y - command.blur_radius,
+                bounds.x + bounds.width + command.blur_radius,
+                bounds.y + bounds.height + command.blur_radius
+            ),
+            outer.GetAddressOf()
+        )) ||
+        FAILED(d2d_factory_->CreatePathGeometry(exterior.GetAddressOf())) ||
+        FAILED(exterior->Open(exterior_sink.GetAddressOf())) ||
+        FAILED(outer->CombineWithGeometry(
+            geometry.Get(),
+            D2D1_COMBINE_MODE_EXCLUDE,
+            nullptr,
+            D2D1_DEFAULT_FLATTENING_TOLERANCE,
+            exterior_sink.Get()
+        )) ||
+        FAILED(exterior_sink->Close())) {
+      return;
+    }
+
+    shadow_effect_->SetInput(0, commands.Get());
+    if (FAILED(shadow_effect_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, command.blur_radius / 3.0F)) ||
+        FAILED(shadow_effect_->SetValue(
+            D2D1_SHADOW_PROP_COLOR,
+            D2D1_VECTOR_4F{command.color.red, command.color.green, command.color.blue, command.color.alpha}
+        )) ||
+        FAILED(shadow_effect_->SetValue(D2D1_SHADOW_PROP_OPTIMIZATION, D2D1_SHADOW_OPTIMIZATION_BALANCED))) {
+      shadow_effect_->SetInput(0, nullptr);
+      return;
+    }
+
+    device_context_->SetTransform(translation * previous);
+    device_context_->PushLayer(
+        D2D1::LayerParameters1(
+            D2D1::InfiniteRect(),
+            exterior.Get(),
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
             D2D1::Matrix3x2F::Identity(),
             1.0F,
@@ -995,6 +1654,22 @@ struct Win32Renderer::State {
     clip_stack_.push_back(std::move(state));
   }
 
+  void RenderCommand(const PushPathClipCommand& command) {
+    ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
+    ComPtr<ID2D1Layer> layer;
+    if (!geometry || FAILED(device_context_->CreateLayer(nullptr, layer.GetAddressOf()))) {
+      device_context_->PushAxisAlignedClip(D2D1::RectF(0.0F, 0.0F, 0.0F, 0.0F), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+      clip_stack_.push_back({});
+      return;
+    }
+    device_context_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry.Get()), layer.Get());
+    ClipState state;
+    state.uses_layer = true;
+    state.layer = std::move(layer);
+    state.geometry = std::move(geometry);
+    clip_stack_.push_back(std::move(state));
+  }
+
   void RenderCommand(const PopClipCommand& command) {
     static_cast<void>(command);
     PopClip();
@@ -1054,6 +1729,10 @@ struct Win32Renderer::State {
   ComPtr<ID2D1Effect> shadow_effect_;
   ComPtr<ID2D1Layer> shadow_clip_layer_;
   std::vector<ShadowMask> shadow_masks_;
+  std::vector<CachedPathGeometry> path_geometries_;
+  std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
+  std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
+  std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
   std::vector<ClipState> clip_stack_;
   std::vector<D2D1_MATRIX_3X2_F> transform_stack_;
 };
@@ -1068,6 +1747,9 @@ void Win32Renderer::Initialize() {
 
 void Win32Renderer::Discard() noexcept {
   state_->DiscardDeviceResources();
+  state_->paragraphs_.clear();
+  state_->text_runs_.clear();
+  state_->font_metrics_.clear();
   state_->write_factory_.Reset();
   state_->d2d_factory_.Reset();
   state_->window_ = nullptr;
@@ -1097,12 +1779,25 @@ void Win32Renderer::DpiChanged(HWND window, float dpi) {
   state_->force_full_repaint_ = true;
 }
 
-Size Win32Renderer::MeasureText(std::string_view text, float font_size, float max_width) {
-  return state_->MeasureText(text, font_size, max_width);
+FontMetrics Win32Renderer::Metrics(const Font& font) {
+  return state_->Metrics(font);
 }
 
-std::unique_ptr<TextLayout> Win32Renderer::CreateTextLayout(std::string_view text, float font_size, float max_width) {
-  return state_->CreateTextLayout(text, font_size, max_width);
+TextRunMetrics
+Win32Renderer::MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
+  return state_->MeasureRun(text, style, options);
+}
+
+TextLayoutMetrics Win32Renderer::MeasureText(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+) {
+  return state_->MeasureText(text, style, max_width, options);
+}
+
+std::unique_ptr<TextLayout> Win32Renderer::CreateTextLayout(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+) {
+  return state_->CreateTextLayout(text, style, max_width, options);
 }
 
 Win32RenderResult Win32Renderer::Render(HWND window, float dpi, const RenderFrame& frame, const RECT& paint_rect) {

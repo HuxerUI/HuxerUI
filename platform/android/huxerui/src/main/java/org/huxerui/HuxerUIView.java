@@ -7,13 +7,17 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.os.SystemClock;
 import android.os.Build;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.TextDirectionHeuristics;
 import android.util.AttributeSet;
+import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -24,6 +28,9 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Objects;
 
 public final class HuxerUIView extends View {
     static {
@@ -40,14 +47,35 @@ public final class HuxerUIView extends View {
     private static final int POINTER_DEVICE_PEN = 2;
 
     private static final int TEXT_ALIGN_CENTER = 1;
+    private static final int TEXT_ALIGN_TRAILING = 2;
+    private static final int TEXT_WRAP_WORD = 1;
+    private static final int TEXT_DIRECTION_LEFT_TO_RIGHT = 1;
+    private static final int TEXT_DIRECTION_RIGHT_TO_LEFT = 2;
+    private static final int FONT_FAMILY_MONOSPACE = 1;
+    private static final int FONT_FAMILY_NAMED = 2;
+    private static final int TEXT_DECORATION_UNDERLINE = 1;
+    private static final int TEXT_DECORATION_STRIKE_THROUGH = 2;
     private static final int STROKE_CAP_ROUND = 1;
     private static final int STROKE_CAP_SQUARE = 2;
+    private static final int STROKE_JOIN_ROUND = 1;
+    private static final int STROKE_JOIN_BEVEL = 2;
+    private static final int PATH_FILL_EVEN_ODD = 1;
+
+    private static final int PATH_MOVE_TO = 0;
+    private static final int PATH_LINE_TO = 1;
+    private static final int PATH_QUADRATIC_TO = 2;
+    private static final int PATH_CUBIC_TO = 3;
+    private static final int PATH_CLOSE = 4;
 
     private static final float SCROLL_STEP = 48.0F;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+    private final Rect textBounds = new Rect();
     private final RectF rect = new RectF();
-    private final Path path = new Path();
+    private final Path clipPath = new Path();
+    private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
+    private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
+    private final LruCache<ParagraphKey, StaticLayout> paragraphCache = new LruCache<>(256);
     private final Matrix transform = new Matrix();
     private final float[] transformValues = new float[9];
     private final float density;
@@ -114,6 +142,8 @@ public final class HuxerUIView extends View {
             shadowRenderer.clear();
             shadowRenderer = null;
         }
+        pathCache.evictAll();
+        paragraphCache.evictAll();
         frameScheduled = false;
         frameTime = 0L;
         if (inputConnection != null) {
@@ -413,17 +443,34 @@ public final class HuxerUIView extends View {
         invalidate();
     }
 
-    private float[] measureText(byte[] utf8, float fontSize, float maxWidth) {
+    private float[] fontMetrics(float fontSize, int familyKind, byte[] familyName, int weight, int slant) {
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, null);
+        Paint.FontMetrics metrics = textPaint.getFontMetrics();
+        float underlineThickness = Math.max(1.0F, fontSize / 16.0F);
+        return new float[] {
+                -metrics.ascent,
+                metrics.descent,
+                metrics.leading,
+                Math.max(0.0F, metrics.descent * 0.5F),
+                underlineThickness,
+                -metrics.ascent * 0.5F,
+                underlineThickness,
+        };
+    }
+
+    private float[] measureText(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
+            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale) {
         String text = new String(utf8, StandardCharsets.UTF_8);
-        prepareTextPaint(fontSize, 0xFF000000);
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, utf8Locale);
         boolean constrained = !Float.isInfinite(maxWidth) && !Float.isNaN(maxWidth);
         if (constrained && maxWidth <= 0.0F) {
-            return new float[] {0.0F, 0.0F};
+            return new float[5];
         }
 
         float desiredWidth = StaticLayout.getDesiredWidth(text, textPaint);
-        int layoutWidth = Math.max(1, (int) Math.ceil(constrained ? maxWidth : desiredWidth));
-        StaticLayout layout = createTextLayout(text, layoutWidth, Layout.Alignment.ALIGN_NORMAL);
+        float requestedWidth = constrained && wrap == TEXT_WRAP_WORD ? maxWidth : desiredWidth;
+        int layoutWidth = Math.max(1, (int) Math.ceil(requestedWidth));
+        StaticLayout layout = createTextLayout(text, layoutWidth, toTextAlignment(alignment), direction);
         float measuredWidth = 0.0F;
         for (int line = 0; line < layout.getLineCount(); ++line) {
             measuredWidth = Math.max(measuredWidth, layout.getLineWidth(line));
@@ -431,15 +478,57 @@ public final class HuxerUIView extends View {
         if (constrained) {
             measuredWidth = Math.min(measuredWidth, maxWidth);
         }
+        float width = (float) Math.ceil(measuredWidth);
+        float height = (float) Math.ceil(layout.getHeight());
+        return new float[] {width, height, layout.getLineBaseline(0), layout.getLineBaseline(layout.getLineCount() - 1),
+                layout.getLineCount()};
+    }
+
+    private float[] measureTextRun(byte[] utf8, float fontSize, int familyKind, byte[] familyName, int weight,
+            int slant, int decoration, int direction, byte[] utf8Locale) {
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, decoration, utf8Locale);
+        String text = new String(utf8, StandardCharsets.UTF_8);
+        boolean rightToLeft = isTextRightToLeft(text, direction);
+        float advance = textPaint.getRunAdvance(text, 0, text.length(), 0, text.length(), rightToLeft, text.length());
+        Paint.FontMetrics metrics = textPaint.getFontMetrics();
+        textBounds.setEmpty();
+        textPaint.getTextBounds(text, 0, text.length(), textBounds);
+        float left = Math.min(0.0F, textBounds.left);
+        float top = Math.min(metrics.ascent, textBounds.top);
+        float right = Math.max(advance, textBounds.right);
+        float bottom = Math.max(metrics.descent, textBounds.bottom);
+        float decorationThickness = Math.max(1.0F, fontSize / 16.0F);
+        if ((decoration & TEXT_DECORATION_UNDERLINE) != 0) {
+            float center = Math.max(0.0F, metrics.descent * 0.5F);
+            top = Math.min(top, center - decorationThickness * 0.5F);
+            bottom = Math.max(bottom, center + decorationThickness * 0.5F);
+        }
+        if ((decoration & TEXT_DECORATION_STRIKE_THROUGH) != 0) {
+            float center = metrics.ascent * 0.5F;
+            top = Math.min(top, center - decorationThickness * 0.5F);
+            bottom = Math.max(bottom, center + decorationThickness * 0.5F);
+        }
         return new float[] {
-                (float) Math.ceil(measuredWidth),
-                (float) Math.ceil(layout.getHeight()),
+                advance,
+                left,
+                top,
+                right - left,
+                bottom - top,
+                -metrics.ascent,
+                metrics.descent,
+                metrics.leading,
+                Math.max(0.0F, metrics.descent * 0.5F),
+                decorationThickness,
+                -metrics.ascent * 0.5F,
+                decorationThickness,
         };
     }
 
-    private Object createTextLayout(byte[] utf8, float fontSize, float maxWidth) {
-        prepareTextPaint(fontSize, 0xFF000000);
-        return new HuxerUITextLayout(new String(utf8, StandardCharsets.UTF_8), new TextPaint(textPaint), maxWidth);
+    private Object createTextLayout(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
+            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale) {
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, utf8Locale);
+        return new HuxerUITextLayout(new String(utf8, StandardCharsets.UTF_8), new TextPaint(textPaint), maxWidth,
+                toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
     }
 
     private void drawRect(Canvas canvas, float x, float y, float width, float height, int color, float cornerRadius) {
@@ -452,26 +541,68 @@ public final class HuxerUIView extends View {
     }
 
     private void drawText(Canvas canvas, byte[] utf8, float x, float y, float width, float height, int color,
-            float fontSize, int alignment) {
+            float fontSize, int familyKind, byte[] familyName, int weight, int slant, int decoration, int alignment,
+            int wrap, int direction, byte[] utf8Locale) {
         if (width <= 0.0F || height <= 0.0F) {
             return;
         }
         String text = new String(utf8, StandardCharsets.UTF_8);
-        prepareTextPaint(fontSize, color);
+        String resolvedFamily = new String(familyName, StandardCharsets.UTF_8);
+        String locale = new String(utf8Locale, StandardCharsets.UTF_8);
+        prepareTextPaint(fontSize, color, familyKind, resolvedFamily, weight, slant, decoration, locale);
         int saveCount = canvas.save();
         canvas.clipRect(x, y, x + width, y + height);
-        if (alignment == TEXT_ALIGN_CENTER) {
-            Paint.FontMetrics metrics = textPaint.getFontMetrics();
-            float textWidth = textPaint.measureText(text);
-            float baseline = y + (height - metrics.descent + metrics.ascent) * 0.5F - metrics.ascent;
-            canvas.drawText(text, x + Math.max(0.0F, (width - textWidth) * 0.5F), baseline, textPaint);
-        } else {
-            StaticLayout layout =
-                    createTextLayout(text, Math.max(1, (int) Math.ceil(width)), Layout.Alignment.ALIGN_NORMAL);
-            canvas.translate(x, y);
-            layout.draw(canvas);
+        boolean wraps = wrap == TEXT_WRAP_WORD;
+        float desiredWidth = StaticLayout.getDesiredWidth(text, textPaint);
+        int layoutWidth = Math.max(1, (int) Math.ceil(wraps ? width : Math.max(width, desiredWidth)));
+        Layout.Alignment layoutAlignment = toTextAlignment(alignment);
+        ParagraphKey key = new ParagraphKey(text, fontSize, familyKind, resolvedFamily, weight, slant, decoration,
+                alignment, wrap, direction, locale, layoutWidth);
+        StaticLayout layout = paragraphCache.get(key);
+        if (layout == null) {
+            layout = createTextLayout(text, layoutWidth, layoutAlignment, direction, new TextPaint(textPaint));
+            paragraphCache.put(key, layout);
         }
+        layout.getPaint().setColor(color);
+        float horizontalOffset = 0.0F;
+        if (!wraps) {
+            boolean rightToLeft = isTextRightToLeft(text, direction);
+            if (alignment == TEXT_ALIGN_CENTER) {
+                horizontalOffset = (width - layoutWidth) * 0.5F;
+            } else if ((alignment != TEXT_ALIGN_TRAILING && rightToLeft)
+                    || (alignment == TEXT_ALIGN_TRAILING && !rightToLeft)) {
+                horizontalOffset = width - layoutWidth;
+            }
+        }
+        float verticalOffset = wraps ? 0.0F : (height - layout.getHeight()) * 0.5F;
+        canvas.translate(x + horizontalOffset, y + verticalOffset);
+        layout.draw(canvas);
         canvas.restoreToCount(saveCount);
+    }
+
+    private void drawTextRuns(Canvas canvas, byte[] textData, int[] textRanges, float[] baselines, int[] colors,
+            float[] fontSizes, int[] styles, byte[] metadata, int[] metadataRanges) {
+        int count = colors.length;
+        if (textRanges.length != count * 2 || baselines.length != count * 2 || fontSizes.length != count
+                || styles.length != count * 5 || metadataRanges.length != count * 4) {
+            throw new IllegalArgumentException("HuxerUI received malformed text run data");
+        }
+        for (int index = 0; index < count; ++index) {
+            int textIndex = index * 2;
+            int styleIndex = index * 5;
+            int metadataIndex = index * 4;
+            String text =
+                    new String(textData, textRanges[textIndex], textRanges[textIndex + 1], StandardCharsets.UTF_8);
+            String familyName = new String(
+                    metadata, metadataRanges[metadataIndex], metadataRanges[metadataIndex + 1], StandardCharsets.UTF_8);
+            String locale = new String(metadata, metadataRanges[metadataIndex + 2], metadataRanges[metadataIndex + 3],
+                    StandardCharsets.UTF_8);
+            prepareTextPaint(fontSizes[index], colors[index], styles[styleIndex], familyName, styles[styleIndex + 1],
+                    styles[styleIndex + 2], styles[styleIndex + 3], locale);
+            boolean rightToLeft = isTextRightToLeft(text, styles[styleIndex + 4]);
+            canvas.drawTextRun(text, 0, text.length(), 0, text.length(), baselines[textIndex], baselines[textIndex + 1],
+                    rightToLeft, textPaint);
+        }
     }
 
     private void drawCircle(Canvas canvas, float centerX, float centerY, float radius, int color) {
@@ -519,6 +650,43 @@ public final class HuxerUIView extends View {
         shadowRenderer.draw(canvas, x, y, width, height, color, blurRadius, cornerRadius);
     }
 
+    private void fillPath(Canvas canvas, float[] elements, int color, int fillRule) {
+        Path drawPath = preparePath(elements, fillRule);
+        preparePaint(color, Paint.Style.FILL, 0.0F);
+        canvas.drawPath(drawPath, paint);
+    }
+
+    private void strokePath(
+            Canvas canvas, float[] elements, int color, float width, int cap, int join, float miterLimit) {
+        if (width <= 0.0F) {
+            return;
+        }
+        Path drawPath = preparePath(elements, 0);
+        preparePaint(color, Paint.Style.STROKE, width);
+        if (cap == STROKE_CAP_ROUND) {
+            paint.setStrokeCap(Paint.Cap.ROUND);
+        } else if (cap == STROKE_CAP_SQUARE) {
+            paint.setStrokeCap(Paint.Cap.SQUARE);
+        }
+        if (join == STROKE_JOIN_ROUND) {
+            paint.setStrokeJoin(Paint.Join.ROUND);
+        } else if (join == STROKE_JOIN_BEVEL) {
+            paint.setStrokeJoin(Paint.Join.BEVEL);
+        }
+        paint.setStrokeMiter(miterLimit);
+        canvas.drawPath(drawPath, paint);
+    }
+
+    private void drawPathShadow(Canvas canvas, float[] elements, float x, float y, float width, float height, int color,
+            float offsetX, float offsetY, float blurRadius, int fillRule) {
+        Path drawPath = preparePath(elements, fillRule);
+        if (shadowRenderer == null) {
+            shadowRenderer = new HuxerUIShadowRenderer(density);
+        }
+        rect.set(x, y, x + width, y + height);
+        shadowRenderer.drawPath(canvas, drawPath, rect, color, offsetX, offsetY, blurRadius);
+    }
+
     private void pushClip(Canvas canvas, float x, float y, float width, float height, float cornerRadius) {
         canvas.save();
         rect.set(x, y, x + width, y + height);
@@ -527,9 +695,14 @@ public final class HuxerUIView extends View {
             return;
         }
         float radius = Math.min(cornerRadius, Math.min(width, height) * 0.5F);
-        path.reset();
-        path.addRoundRect(rect, radius, radius, Path.Direction.CW);
-        canvas.clipPath(path);
+        clipPath.reset();
+        clipPath.addRoundRect(rect, radius, radius, Path.Direction.CW);
+        canvas.clipPath(clipPath);
+    }
+
+    private void pushPathClip(Canvas canvas, float[] elements, int fillRule) {
+        canvas.save();
+        canvas.clipPath(preparePath(elements, fillRule));
     }
 
     private void popClip(Canvas canvas) {
@@ -570,19 +743,234 @@ public final class HuxerUIView extends View {
         paint.setStyle(style);
         paint.setStrokeWidth(strokeWidth);
         paint.setStrokeCap(Paint.Cap.BUTT);
+        paint.setStrokeJoin(Paint.Join.MITER);
+        paint.setStrokeMiter(4.0F);
     }
 
-    private void prepareTextPaint(float fontSize, int color) {
+    private Path preparePath(float[] elements, int fillRule) {
+        PathKey key = new PathKey(elements, fillRule);
+        Path cached = pathCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        Path result = new Path();
+        result.setFillType(fillRule == PATH_FILL_EVEN_ODD ? Path.FillType.EVEN_ODD : Path.FillType.WINDING);
+        int index = 0;
+        while (index < elements.length) {
+            int verb = (int) elements[index++];
+            if (verb == PATH_MOVE_TO) {
+                result.moveTo(elements[index++], elements[index++]);
+            } else if (verb == PATH_LINE_TO) {
+                result.lineTo(elements[index++], elements[index++]);
+            } else if (verb == PATH_QUADRATIC_TO) {
+                result.quadTo(elements[index++], elements[index++], elements[index++], elements[index++]);
+            } else if (verb == PATH_CUBIC_TO) {
+                result.cubicTo(elements[index++], elements[index++], elements[index++], elements[index++],
+                        elements[index++], elements[index++]);
+            } else if (verb == PATH_CLOSE) {
+                result.close();
+            } else {
+                throw new IllegalArgumentException("HuxerUI path contains an unsupported verb");
+            }
+        }
+        pathCache.put(key, result);
+        return result;
+    }
+
+    private static final class PathKey {
+        final float[] elements;
+        final int fillRule;
+        final int hashCode;
+
+        PathKey(float[] elements, int fillRule) {
+            this.elements = elements;
+            this.fillRule = fillRule;
+            hashCode = 31 * Arrays.hashCode(elements) + fillRule;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof PathKey)) {
+                return false;
+            }
+            PathKey key = (PathKey) other;
+            return fillRule == key.fillRule && Arrays.equals(elements, key.elements);
+        }
+
+        @Override
+        public int hashCode() {
+            return hashCode;
+        }
+    }
+
+    private static final class FontKey {
+        final int familyKind;
+        final String familyName;
+        final int weight;
+        final int slant;
+
+        FontKey(int familyKind, String familyName, int weight, int slant) {
+            this.familyKind = familyKind;
+            this.familyName = familyName;
+            this.weight = weight;
+            this.slant = slant;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof FontKey)) {
+                return false;
+            }
+            FontKey key = (FontKey) other;
+            return familyKind == key.familyKind && weight == key.weight && slant == key.slant
+                    && Objects.equals(familyName, key.familyName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(familyKind, familyName, weight, slant);
+        }
+    }
+
+    private void prepareTextPaint(float fontSize, int color, int familyKind, byte[] utf8FamilyName, int weight,
+            int slant, int decoration, byte[] utf8Locale) {
+        String familyName = utf8FamilyName == null ? "" : new String(utf8FamilyName, StandardCharsets.UTF_8);
+        String locale = utf8Locale == null ? "" : new String(utf8Locale, StandardCharsets.UTF_8);
+        prepareTextPaint(fontSize, color, familyKind, familyName, weight, slant, decoration, locale);
+    }
+
+    private static final class ParagraphKey {
+        final String text;
+        final float fontSize;
+        final int familyKind;
+        final String familyName;
+        final int weight;
+        final int slant;
+        final int decoration;
+        final int alignment;
+        final int wrap;
+        final int direction;
+        final String locale;
+        final int width;
+
+        ParagraphKey(String text, float fontSize, int familyKind, String familyName, int weight, int slant,
+                int decoration, int alignment, int wrap, int direction, String locale, int width) {
+            this.text = text;
+            this.fontSize = fontSize;
+            this.familyKind = familyKind;
+            this.familyName = familyName;
+            this.weight = weight;
+            this.slant = slant;
+            this.decoration = decoration;
+            this.alignment = alignment;
+            this.wrap = wrap;
+            this.direction = direction;
+            this.locale = locale;
+            this.width = width;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ParagraphKey)) {
+                return false;
+            }
+            ParagraphKey key = (ParagraphKey) other;
+            return Float.compare(fontSize, key.fontSize) == 0 && familyKind == key.familyKind && weight == key.weight
+                    && slant == key.slant && decoration == key.decoration && alignment == key.alignment
+                    && wrap == key.wrap && direction == key.direction && width == key.width
+                    && Objects.equals(text, key.text) && Objects.equals(familyName, key.familyName)
+                    && Objects.equals(locale, key.locale);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(text, fontSize, familyKind, familyName, weight, slant, decoration, alignment, wrap,
+                    direction, locale, width);
+        }
+    }
+
+    private void prepareTextPaint(float fontSize, int color, int familyKind, String familyName, int weight, int slant,
+            int decoration, String locale) {
+        FontKey key = new FontKey(familyKind, familyName, weight, slant);
+        Typeface typeface = fontCache.get(key);
+        if (typeface == null) {
+            Typeface base;
+            if (familyKind == FONT_FAMILY_MONOSPACE) {
+                base = Typeface.MONOSPACE;
+            } else if (familyKind == FONT_FAMILY_NAMED) {
+                base = Typeface.create(familyName, Typeface.NORMAL);
+            } else {
+                base = Typeface.DEFAULT;
+            }
+            boolean italic = slant != 0;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                typeface = Typeface.create(base, Math.max(1, Math.min(weight, 1000)), italic);
+            } else {
+                int style = weight >= 600 ? Typeface.BOLD : Typeface.NORMAL;
+                if (italic) {
+                    style |= Typeface.ITALIC;
+                }
+                typeface = Typeface.create(base, style);
+            }
+            fontCache.put(key, typeface);
+        }
         textPaint.setTextSize(fontSize);
         textPaint.setColor(color);
         textPaint.setStyle(Paint.Style.FILL);
+        textPaint.setTypeface(typeface);
+        textPaint.setUnderlineText((decoration & TEXT_DECORATION_UNDERLINE) != 0);
+        textPaint.setStrikeThruText((decoration & TEXT_DECORATION_STRIKE_THROUGH) != 0);
+        textPaint.setTextAlign(Paint.Align.LEFT);
+        if (locale == null || locale.isEmpty()) {
+            textPaint.setTextLocale(Locale.getDefault());
+        } else {
+            textPaint.setTextLocale(Locale.forLanguageTag(locale));
+        }
     }
 
-    private StaticLayout createTextLayout(String text, int width, Layout.Alignment alignment) {
-        return StaticLayout.Builder.obtain(text, 0, text.length(), textPaint, width)
-                .setAlignment(alignment)
-                .setIncludePad(true)
-                .build();
+    private Layout.Alignment toTextAlignment(int alignment) {
+        if (alignment == TEXT_ALIGN_CENTER) {
+            return Layout.Alignment.ALIGN_CENTER;
+        }
+        if (alignment == TEXT_ALIGN_TRAILING) {
+            return Layout.Alignment.ALIGN_OPPOSITE;
+        }
+        return Layout.Alignment.ALIGN_NORMAL;
+    }
+
+    private static boolean isTextRightToLeft(String text, int direction) {
+        return direction == TEXT_DIRECTION_RIGHT_TO_LEFT
+                || (direction != TEXT_DIRECTION_LEFT_TO_RIGHT
+                        && TextDirectionHeuristics.FIRSTSTRONG_LTR.isRtl(text, 0, text.length()));
+    }
+
+    private StaticLayout createTextLayout(String text, int width, Layout.Alignment alignment, int direction) {
+        return createTextLayout(text, width, alignment, direction, textPaint);
+    }
+
+    private StaticLayout createTextLayout(
+            String text, int width, Layout.Alignment alignment, int direction, TextPaint layoutPaint) {
+        StaticLayout.Builder builder = StaticLayout.Builder.obtain(text, 0, text.length(), layoutPaint, width)
+                                               .setAlignment(alignment)
+                                               .setIncludePad(true);
+        if (direction == TEXT_DIRECTION_LEFT_TO_RIGHT) {
+            builder.setTextDirection(TextDirectionHeuristics.LTR);
+        } else if (direction == TEXT_DIRECTION_RIGHT_TO_LEFT) {
+            builder.setTextDirection(TextDirectionHeuristics.RTL);
+        } else {
+            builder.setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_LTR);
+        }
+        return builder.build();
     }
 
     private static native long nativeCreate(HuxerUIView view);

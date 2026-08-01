@@ -169,8 +169,11 @@ public:
 
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
     invalidate_full_frame_ = environment->GetMethodID(view_class, "invalidateFullFrame", "()V");
-    measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFF)[F");
-    create_text_layout_ = environment->GetMethodID(view_class, "createTextLayout", "([BFF)Ljava/lang/Object;");
+    font_metrics_ = environment->GetMethodID(view_class, "fontMetrics", "(FI[BII)[F");
+    measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFFI[BIIIII[B)[F");
+    measure_text_run_ = environment->GetMethodID(view_class, "measureTextRun", "([BFI[BIIII[B)[F");
+    create_text_layout_ =
+        environment->GetMethodID(view_class, "createTextLayout", "([BFFI[BIIIII[B)Ljava/lang/Object;");
     start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
@@ -179,10 +182,11 @@ public:
     read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
     write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
 
-    if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || measure_text_ == nullptr ||
-        create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
-        restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
-        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr) {
+    if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || font_metrics_ == nullptr ||
+        measure_text_ == nullptr || measure_text_run_ == nullptr || create_text_layout_ == nullptr ||
+        start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
+        stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
+        write_clipboard_text_ == nullptr) {
       environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
@@ -276,41 +280,228 @@ private:
   }
 
 public:
-  Size MeasureText(std::string_view text, float font_size, float max_width) override {
+  FontMetrics Metrics(const Font& font) override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
-    jbyteArray bytes = ToByteArray(environment, text);
-    if (bytes == nullptr) {
+    jbyteArray family = ToByteArray(environment, font.FamilyName());
+    if (family == nullptr) {
       return {};
     }
-    auto* result =
-        static_cast<jfloatArray>(environment->CallObjectMethod(view_, measure_text_, bytes, font_size, max_width));
-    environment->DeleteLocalRef(bytes);
-    if (result == nullptr || environment->GetArrayLength(result) < 2) {
+    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(
+        view_,
+        font_metrics_,
+        font.Size(),
+        static_cast<jint>(font.FamilyKind()),
+        family,
+        static_cast<jint>(font.Weight()),
+        static_cast<jint>(font.Slant())
+    ));
+    environment->DeleteLocalRef(family);
+    if (environment->ExceptionCheck()) {
       if (result != nullptr) {
         environment->DeleteLocalRef(result);
       }
       return {};
     }
-    jfloat values[2]{};
-    environment->GetFloatArrayRegion(result, 0, 2, values);
+    if (result == nullptr || environment->GetArrayLength(result) < 7) {
+      if (result != nullptr) {
+        environment->DeleteLocalRef(result);
+      }
+      return {};
+    }
+    jfloat values[7]{};
+    environment->GetFloatArrayRegion(result, 0, 7, values);
     environment->DeleteLocalRef(result);
-    return {values[0], values[1]};
+    if (environment->ExceptionCheck()) {
+      return {};
+    }
+    return {values[0], values[1], values[2], values[3], values[4], values[5], values[6]};
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
+  TextRunMetrics
+  MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options = {}) override {
+    if (text.find_first_of("\r\n") != std::string_view::npos) {
+      throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
+    }
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
     jbyteArray bytes = ToByteArray(environment, text);
-    if (bytes == nullptr) {
+    jbyteArray family = ToByteArray(environment, style.font.FamilyName());
+    jbyteArray locale = ToByteArray(environment, options.locale);
+    if (bytes == nullptr || family == nullptr || locale == nullptr) {
+      if (bytes != nullptr) {
+        environment->DeleteLocalRef(bytes);
+      }
+      if (family != nullptr) {
+        environment->DeleteLocalRef(family);
+      }
+      if (locale != nullptr) {
+        environment->DeleteLocalRef(locale);
+      }
       return {};
     }
-    jobject layout = environment->CallObjectMethod(view_, create_text_layout_, bytes, font_size, max_width);
+    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(
+        view_,
+        measure_text_run_,
+        bytes,
+        style.font.Size(),
+        static_cast<jint>(style.font.FamilyKind()),
+        family,
+        static_cast<jint>(style.font.Weight()),
+        static_cast<jint>(style.font.Slant()),
+        static_cast<jint>(style.decoration),
+        static_cast<jint>(options.direction),
+        locale
+    ));
+    environment->DeleteLocalRef(locale);
+    environment->DeleteLocalRef(family);
     environment->DeleteLocalRef(bytes);
+    if (environment->ExceptionCheck()) {
+      if (result != nullptr) {
+        environment->DeleteLocalRef(result);
+      }
+      return {};
+    }
+    if (result == nullptr || environment->GetArrayLength(result) < 12) {
+      if (result != nullptr) {
+        environment->DeleteLocalRef(result);
+      }
+      return {};
+    }
+    jfloat values[12]{};
+    environment->GetFloatArrayRegion(result, 0, 12, values);
+    environment->DeleteLocalRef(result);
+    if (environment->ExceptionCheck()) {
+      return {};
+    }
+    const FontMetrics metrics{
+        values[5],
+        values[6],
+        values[7],
+        values[8],
+        values[9],
+        values[10],
+        values[11],
+    };
+    return {values[0], {values[1], values[2], values[3], values[4]}, metrics};
+  }
+
+  TextLayoutMetrics MeasureText(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
+  ) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return {};
+    }
+    jbyteArray bytes = ToByteArray(environment, text);
+    jbyteArray family = ToByteArray(environment, style.font.FamilyName());
+    jbyteArray locale = ToByteArray(environment, options.shaping.locale);
+    if (bytes == nullptr || family == nullptr || locale == nullptr) {
+      if (bytes != nullptr) {
+        environment->DeleteLocalRef(bytes);
+      }
+      if (family != nullptr) {
+        environment->DeleteLocalRef(family);
+      }
+      if (locale != nullptr) {
+        environment->DeleteLocalRef(locale);
+      }
+      return {};
+    }
+    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(
+        view_,
+        measure_text_,
+        bytes,
+        style.font.Size(),
+        max_width,
+        static_cast<jint>(style.font.FamilyKind()),
+        family,
+        static_cast<jint>(style.font.Weight()),
+        static_cast<jint>(style.font.Slant()),
+        static_cast<jint>(options.align),
+        static_cast<jint>(options.wrap),
+        static_cast<jint>(options.shaping.direction),
+        locale
+    ));
+    environment->DeleteLocalRef(locale);
+    environment->DeleteLocalRef(family);
+    environment->DeleteLocalRef(bytes);
+    if (environment->ExceptionCheck()) {
+      if (result != nullptr) {
+        environment->DeleteLocalRef(result);
+      }
+      return {};
+    }
+    if (result == nullptr || environment->GetArrayLength(result) < 5) {
+      if (result != nullptr) {
+        environment->DeleteLocalRef(result);
+      }
+      return {};
+    }
+    jfloat values[5]{};
+    environment->GetFloatArrayRegion(result, 0, 5, values);
+    environment->DeleteLocalRef(result);
+    if (environment->ExceptionCheck()) {
+      return {};
+    }
+    return {
+        {values[0], values[1]},
+        values[2],
+        values[3],
+        static_cast<std::size_t>(std::max(0.0F, values[4])),
+    };
+  }
+
+  std::unique_ptr<TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
+  ) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return {};
+    }
+    jbyteArray bytes = ToByteArray(environment, text);
+    jbyteArray family = ToByteArray(environment, style.font.FamilyName());
+    jbyteArray locale = ToByteArray(environment, options.shaping.locale);
+    if (bytes == nullptr || family == nullptr || locale == nullptr) {
+      if (bytes != nullptr) {
+        environment->DeleteLocalRef(bytes);
+      }
+      if (family != nullptr) {
+        environment->DeleteLocalRef(family);
+      }
+      if (locale != nullptr) {
+        environment->DeleteLocalRef(locale);
+      }
+      return {};
+    }
+    jobject layout = environment->CallObjectMethod(
+        view_,
+        create_text_layout_,
+        bytes,
+        style.font.Size(),
+        max_width,
+        static_cast<jint>(style.font.FamilyKind()),
+        family,
+        static_cast<jint>(style.font.Weight()),
+        static_cast<jint>(style.font.Slant()),
+        static_cast<jint>(options.align),
+        static_cast<jint>(options.wrap),
+        static_cast<jint>(options.shaping.direction),
+        locale
+    );
+    environment->DeleteLocalRef(locale);
+    environment->DeleteLocalRef(family);
+    environment->DeleteLocalRef(bytes);
+    if (environment->ExceptionCheck()) {
+      if (layout != nullptr) {
+        environment->DeleteLocalRef(layout);
+      }
+      return {};
+    }
     if (layout == nullptr) {
       return {};
     }
@@ -468,7 +659,9 @@ private:
   jobject view_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
   jmethodID invalidate_full_frame_ = nullptr;
+  jmethodID font_metrics_ = nullptr;
   jmethodID measure_text_ = nullptr;
+  jmethodID measure_text_run_ = nullptr;
   jmethodID create_text_layout_ = nullptr;
   jmethodID start_text_input_ = nullptr;
   jmethodID update_text_input_ = nullptr;

@@ -51,12 +51,6 @@ struct VirtualContextState {
   VirtualViewport viewport;
 };
 
-float ResolveFontSize(const MountedNode& node) {
-  return node.style.font_size.value_or(
-      node.kind == NodeKind::Button ? ButtonStyle::Default().font_size : TextStyle::Default().font_size
-  );
-}
-
 std::pair<float, float> ResolveAxisConstraints(
     float parent_min,
     float parent_max,
@@ -232,10 +226,17 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
 
   switch (node.kind) {
   case NodeKind::Text:
-    content_size = platform.MeasureText(node.text, ResolveFontSize(node), content_constraints.max_width);
+    content_size = platform.MeasureText(node.text, node.style.text_style, content_constraints.max_width).size;
     break;
   case NodeKind::Button:
-    content_size = platform.MeasureText(node.text, ResolveFontSize(node));
+    content_size = platform
+                       .MeasureText(
+                           node.text,
+                           node.style.text_style,
+                           std::numeric_limits<float>::infinity(),
+                           TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                       )
+                       .size;
     break;
   case NodeKind::TextField:
     content_size = MeasureTextField(node, platform, content_constraints);
@@ -243,6 +244,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
   case NodeKind::Checkbox:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
+  case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;
   case NodeKind::Layout: {
@@ -409,6 +411,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::Checkbox:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
+  case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;
   }

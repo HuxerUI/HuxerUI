@@ -14,8 +14,14 @@ State<bool> modifier_style_changed;
 int extension_creations = 0;
 int extension_updates = 0;
 int extension_destroys = 0;
+TextMeasurer* observed_text_measurer = nullptr;
 
 struct ProbeModifier;
+
+View TextMeasurerApp() {
+  observed_text_measurer = &UseTextMeasurer();
+  return Text("measured");
+}
 
 class ProbeModifierExtension final : public NodeExtension {
 public:
@@ -125,6 +131,16 @@ View CopyOnWriteApp() {
       original,
       modified,
   };
+}
+
+View TextStyleApp() {
+  return Text("Styled")
+      .Style({
+          Font::Monospace(18.0F).WithWeight(FontWeight::Bold),
+          Color::Rgb(10, 20, 30),
+          TextDecoration::Underline,
+      })
+      .With(Foreground{Color::Rgb(40, 50, 60)}, FontSize{22.0F});
 }
 
 View ModifierApp() {
@@ -477,10 +493,23 @@ TEST_CASE("TestViewCopyOnWrite") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
-  REQUIRE(root->children[0]->style.foreground.has_value());
-  REQUIRE(root->children[0]->style.foreground->red == huxerui::TextStyle::Default().foreground.red);
-  REQUIRE(root->children[1]->style.foreground.has_value());
-  REQUIRE(root->children[1]->style.foreground->red == 1.0F);
+  REQUIRE(root->children[0]->style.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
+  REQUIRE(root->children[1]->style.text_style.foreground.red == 1.0F);
+}
+
+TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
+  TestPlatform platform;
+  Runtime runtime{TextStyleApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->style.text_style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(root->style.text_style.font.Weight() == FontWeight::Bold);
+  REQUIRE(root->style.text_style.font.Size() == 22.0F);
+  REQUIRE(root->style.text_style.foreground == Color::Rgb(40, 50, 60));
+  REQUIRE(root->style.text_style.decoration == TextDecoration::Underline);
 }
 
 TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
@@ -536,9 +565,8 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   copy_runtime.BuildFrame();
   const auto* copy_root = copy_runtime.RootNode();
   REQUIRE(copy_root != nullptr);
-  REQUIRE(copy_root->children[0]->style.foreground.has_value());
-  REQUIRE(copy_root->children[0]->style.foreground->red == huxerui::TextStyle::Default().foreground.red);
-  REQUIRE(copy_root->children[1]->style.foreground.has_value());
+  REQUIRE(copy_root->children[0]->style.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
+  REQUIRE(copy_root->children[1]->style.text_style.foreground.red == 1.0F);
 }
 
 TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
@@ -737,6 +765,16 @@ TEST_CASE("TestTypedScopeEvents") {
   REQUIRE(!saved_event_emitter.IsConnected());
   saved_event_emitter.Emit<SearchSubmitted>("ignored");
   REQUIRE(received_event == "second:query");
+}
+
+TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
+  observed_text_measurer = nullptr;
+  TestPlatform platform;
+  Runtime runtime{TextMeasurerApp, platform};
+  runtime.SetViewport({120.0F, 40.0F});
+  runtime.BuildFrame();
+
+  REQUIRE(observed_text_measurer == &platform);
 }
 
 } // namespace huxerui::test

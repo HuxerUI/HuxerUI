@@ -84,6 +84,13 @@ The complete shadow overflow participates in visibility and damage calculation.
 Component-specific configuration remains on the component:
 
 ```cpp
+Text("Diagnostic")
+    .Style({
+        Font::Monospace(14.0F).WithWeight(FontWeight::SemiBold),
+        Color::Rgb(207, 34, 46),
+        TextDecoration::Underline,
+    });
+
 TextField(value)
     .Placeholder("Email")
     .MaxLength(200)
@@ -92,7 +99,33 @@ TextField(value)
     });
 ```
 
+`Text::Style` replaces the complete theme-resolved text style, while later `Foreground` and `FontSize` modifiers update only their corresponding members.
+
 Controllers and events are methods because they bind behavior or an external handle rather than describe a reusable generic property.
+
+## Canvas and Path drawing
+
+`Canvas` is a leaf View that records custom drawing through the same `PaintContext` used by built-in components and NodeExtensions.
+Its painter receives a content-local Size and draws from `(0, 0)` without depending on a native platform Canvas:
+
+```cpp
+Canvas([](PaintContext& paint, Size size) {
+  Path triangle;
+  triangle.MoveTo({size.width * 0.5F, 0.0F})
+      .LineTo({size.width, size.height})
+      .LineTo({0.0F, size.height})
+      .Close();
+
+  paint.DrawPathShadow(triangle, Color::Rgb(0, 0, 0, 0.24F), {0.0F, 6.0F}, 16.0F);
+  paint.FillPath(triangle, Color::Rgb(103, 80, 164));
+  paint.StrokePath(triangle, Color::White(), 2.0F, StrokeCap::Round, StrokeJoin::Round);
+}).With(Frame{.height = 180.0F});
+```
+
+Canvas has no intrinsic size and is not clipped automatically.
+Use `Frame`, `Grow`, or parent constraints for layout and explicit rectangle or Path clips when drawing must stay inside a shape.
+Clean Canvas PaintSequences are retained, while a changed painter or Canvas size rerecords only that node.
+See [Canvas and Path Design](design/canvas.md) for command semantics and native renderer ownership.
 
 ## Typed events
 

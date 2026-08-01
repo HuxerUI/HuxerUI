@@ -10,6 +10,8 @@ add_executable(huxerui_tests
         tests_main.cpp
         unit/host_frame.cpp
         unit/paint.cpp
+        unit/path.cpp
+        unit/text.cpp
         unit/text_input.cpp
         unit/validation.cpp
         platform/android_text_input.cpp
@@ -34,6 +36,7 @@ endif ()
 if (WIN32)
     target_sources(huxerui_tests PRIVATE
             platform/windows_damage.cpp
+            platform/windows_renderer.cpp
     )
     target_compile_definitions(huxerui_tests PRIVATE
             NOMINMAX
@@ -78,6 +81,7 @@ set(HUXERUI_PUBLIC_HEADERS
         root.h
         scroll.h
         state.h
+        text.h
         text_input.h
         theme.h
         validation.h

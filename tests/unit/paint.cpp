@@ -72,6 +72,42 @@ TEST_CASE("PaintContextRejectsCrossedCommandStacks") {
   REQUIRE_THROWS_AS(context.PopClip(), std::logic_error);
 }
 
+TEST_CASE("PaintContextCoalescesAdjacentTextRuns") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  const TextStyle style{Font::Monospace(14.0F), Color::White(), TextDecoration::Underline};
+  context.DrawTextRun({10.0F, 12.0F, 20.0F, 16.0F}, {10.0F, 24.0F}, "first", style);
+  context.DrawTextRun({30.0F, 12.0F, 24.0F, 16.0F}, {30.0F, 24.0F}, "second", style);
+  context.DrawTextRuns({TextRun{{54.0F, 12.0F, 12.0F, 16.0F}, {54.0F, 24.0F}, "third", style, {}}});
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto* command = std::get_if<DrawTextRunsCommand>(&sequence.Commands().front());
+  REQUIRE(command != nullptr);
+  REQUIRE(command->runs.size() == 3);
+  REQUIRE(command->runs[0].baseline_origin == Point{10.0F, 24.0F});
+  REQUIRE(command->runs[1].bounds == Rect{30.0F, 12.0F, 24.0F, 16.0F});
+  REQUIRE(sequence.Bounds() == Rect{10.0F, 12.0F, 56.0F, 16.0F});
+}
+
+TEST_CASE("PaintContextOmitsTextRunsWithoutVisibleBounds") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  const TextStyle style{Font::Monospace(14.0F), Color::White()};
+  context.DrawTextRun({}, {10.0F, 24.0F}, "hidden", style);
+  context.DrawTextRuns({
+      TextRun{{10.0F, 12.0F, 20.0F, 16.0F}, {10.0F, 24.0F}, "visible", style, {}},
+      TextRun{{30.0F, 12.0F, 0.0F, 16.0F}, {30.0F, 24.0F}, "hidden", style, {}},
+  });
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto& command = std::get<DrawTextRunsCommand>(sequence.Commands().front());
+  REQUIRE(command.runs.size() == 1);
+  REQUIRE(command.runs.front().text == "visible");
+  REQUIRE(sequence.Bounds() == Rect{10.0F, 12.0F, 20.0F, 16.0F});
+}
+
 TEST_CASE("PaintContextTracksTransformedAndClippedBounds") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
@@ -154,7 +190,11 @@ TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
 
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   REQUIRE_THROWS_AS(context.DrawRect({0.0F, 0.0F, nan, 10.0F}, Color::White()), std::invalid_argument);
-  REQUIRE_THROWS_AS(context.DrawText({}, "Text", Color::White(), 0.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(Font::System(0.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.DrawTextRun({0.0F, 0.0F, 10.0F, 10.0F}, {0.0F, 8.0F}, "first\nsecond", TextStyle{}),
+      std::invalid_argument
+  );
   REQUIRE_THROWS_AS(context.DrawCircle({}, -1.0F, Color::White()), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawArc({}, 10.0F, 0.0F, nan, Color::White(), 1.0F), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawBorder({}, Color::White(), -1.0F), std::invalid_argument);
@@ -165,6 +205,29 @@ TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
   REQUIRE_THROWS_AS(context.PushClip({}, -1.0F), std::invalid_argument);
   REQUIRE_THROWS_AS(context.PushTransform(Transform2D{1.0F, 0.0F, 0.0F, 1.0F, nan, 0.0F}), std::invalid_argument);
   context.Finish();
+}
+
+TEST_CASE("PaintContextRecordsPathCommandsAndBounds") {
+  Path path;
+  path.MoveTo({10.0F, 20.0F}).LineTo({40.0F, 20.0F}).LineTo({25.0F, 50.0F}).Close();
+
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.FillPath(path, Color::White(), PathFillRule::EvenOdd);
+  context.StrokePath(path, Color::Black(), 2.0F, StrokeCap::Round, StrokeJoin::Round);
+  context.DrawPathShadow(path, Color::Rgb(0, 0, 0, 0.25F), {4.0F, 6.0F}, 8.0F);
+  context.PushPathClip(path);
+  context.DrawRect({0.0F, 0.0F, 100.0F, 80.0F}, Color::White());
+  context.PopClip();
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 6);
+  REQUIRE(std::holds_alternative<FillPathCommand>(sequence.Commands()[0]));
+  REQUIRE(std::holds_alternative<StrokePathCommand>(sequence.Commands()[1]));
+  REQUIRE(std::holds_alternative<DrawPathShadowCommand>(sequence.Commands()[2]));
+  REQUIRE(std::holds_alternative<PushPathClipCommand>(sequence.Commands()[3]));
+  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[5]));
+  REQUIRE(sequence.Bounds() == Rect{6.0F, 18.0F, 46.0F, 46.0F});
 }
 
 } // namespace huxerui::test

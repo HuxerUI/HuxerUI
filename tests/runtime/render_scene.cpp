@@ -20,6 +20,8 @@ State<bool> retained_opacity_faded;
 State<bool> child_order_reversed;
 State<bool> overflowing_paint_changed;
 State<bool> shadow_changed;
+State<bool> canvas_changed;
+int canvas_paint_count = 0;
 
 struct OverflowPaint;
 struct FramePaintInvalidation;
@@ -107,18 +109,32 @@ View ShadowApp() {
   auto changed = UseState(false);
   shadow_changed = changed;
   return Row {
-    Spacer().With(
-        Frame{40.0F, 20.0F},
-        Background{Color::White()},
-        CornerRadius{6.0F},
-        Shadow{
-            .color = Color::Rgb(0, 0, 0, changed.Get() ? 0.4F : 0.2F),
-            .offset = {4.0F, 5.0F},
-            .blur_radius = 6.0F,
-            .spread = 2.0F,
-        }
-    ),
+      Spacer().With(
+          Frame{40.0F, 20.0F},
+          Background{Color::White()},
+          CornerRadius{6.0F},
+          Shadow{
+              .color = Color::Rgb(0, 0, 0, changed.Get() ? 0.4F : 0.2F),
+              .offset = {4.0F, 5.0F},
+              .blur_radius = 6.0F,
+              .spread = 2.0F,
+          }
+      ),
   }.With(CrossAlign{CrossAxisAlignment::Start});
+}
+
+View CanvasApp() {
+  auto changed = UseState(false);
+  canvas_changed = changed;
+  const Color color = changed.Get() ? Color::White() : Color::Black();
+  return Row {
+      Canvas([color](PaintContext& paint, Size size) {
+        ++canvas_paint_count;
+        REQUIRE(size == Size{60.0F, 40.0F});
+        REQUIRE(paint.Bounds() == Rect{0.0F, 0.0F, 60.0F, 40.0F});
+        paint.DrawRect({0.0F, 0.0F, size.width, size.height}, color);
+      }).With(Frame{80.0F, 60.0F}, Padding(10.0F)),
+  };
 }
 
 View PresentationReuseApp() {
@@ -418,7 +434,7 @@ TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
   REQUIRE(checkbox->render_node.foreground.Revision() == checkbox_foreground_revision);
   REQUIRE(text->render_node.content.Commands().data() == text_commands);
   REQUIRE(checkbox->render_node.foreground.Commands().data() == checkbox_commands);
-  REQUIRE(std::get<DrawTextCommand>(text->render_node.content.Commands().front()).color.alpha == 1.0F);
+  REQUIRE(std::get<DrawTextCommand>(text->render_node.content.Commands().front()).style.foreground.alpha == 1.0F);
   REQUIRE_FALSE(middle.damage.full);
   REQUIRE_FALSE(middle.damage.rects.empty());
 }
@@ -632,6 +648,43 @@ TEST_CASE("ShadowsPaintBehindContentAndInvalidateTheirOverflow") {
   REQUIRE(shadow->color.alpha == 0.4F);
   REQUIRE_FALSE(changed.damage.full);
   REQUIRE(DamageContains(changed.damage, Rect{0.0F, 0.0F, 160.0F, 33.0F}));
+}
+
+TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
+  canvas_paint_count = 0;
+  TestPlatform platform;
+  Runtime runtime{CanvasApp, platform};
+  runtime.SetViewport({160.0F, 100.0F});
+
+  const RenderFrame& first = runtime.BuildRenderFrame();
+  const auto* mounted_root = runtime.RootNode();
+  REQUIRE(mounted_root != nullptr);
+  REQUIRE(mounted_root->children.size() == 1);
+  const auto* mounted = mounted_root->children.front().get();
+  const RenderNode* render_node = FindRenderNode(*first.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(canvas_paint_count == 1);
+  REQUIRE(render_node->content.Commands().size() == 3);
+  REQUIRE(std::holds_alternative<PushTransformCommand>(render_node->content.Commands()[0]));
+  REQUIRE(std::get<PushTransformCommand>(render_node->content.Commands()[0]).transform.translate_x == 10.0F);
+  REQUIRE(std::get<PushTransformCommand>(render_node->content.Commands()[0]).transform.translate_y == 10.0F);
+  REQUIRE(std::get<DrawRectCommand>(render_node->content.Commands()[1]).color == Color::Black());
+  REQUIRE(std::holds_alternative<PopTransformCommand>(render_node->content.Commands()[2]));
+  REQUIRE(render_node->content.Bounds() == Rect{10.0F, 10.0F, 60.0F, 40.0F});
+  const std::uint64_t first_revision = render_node->revision;
+
+  runtime.BuildRenderFrame();
+  REQUIRE(canvas_paint_count == 1);
+
+  canvas_changed = true;
+  const RenderFrame& changed = runtime.BuildRenderFrame();
+  render_node = FindRenderNode(*changed.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(canvas_paint_count == 2);
+  REQUIRE(render_node->revision > first_revision);
+  REQUIRE(std::get<DrawRectCommand>(render_node->content.Commands()[1]).color == Color::White());
+  REQUIRE_FALSE(changed.damage.full);
+  REQUIRE(DamageContains(changed.damage, Rect{10.0F, 10.0F, 60.0F, 40.0F}));
 }
 
 TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {

@@ -41,6 +41,8 @@ using huxerui::EnvironmentValues;
 using huxerui::Event;
 using huxerui::EventEmitter;
 using huxerui::Focusable;
+using huxerui::Font;
+using huxerui::FontMetrics;
 using huxerui::ForEach;
 using huxerui::FrameCommit;
 using huxerui::GridColumns;
@@ -91,7 +93,6 @@ using huxerui::Switch;
 using huxerui::SwitchStyle;
 using huxerui::Text;
 using huxerui::TextEditingAction;
-using huxerui::Transform2D;
 using huxerui::TextEditingValue;
 using huxerui::TextField;
 using huxerui::TextFieldEvents;
@@ -101,13 +102,20 @@ using huxerui::TextInputCommandBatch;
 using huxerui::TextInputContext;
 using huxerui::TextInputGeometry;
 using huxerui::TextInputSessionId;
+using huxerui::TextLayoutMetrics;
+using huxerui::TextLayoutOptions;
 using huxerui::TextOffset;
 using huxerui::TextRole;
+using huxerui::TextRunMetrics;
+using huxerui::TextShapingOptions;
+using huxerui::TextStyle;
+using huxerui::TextWrap;
 using huxerui::Theme;
 using huxerui::ThemeDefinition;
 using huxerui::ThemeSpec;
 using huxerui::ToastHandle;
 using huxerui::ToggleEvents;
+using huxerui::Transform2D;
 using huxerui::TweenSpec;
 using huxerui::UseDialog;
 using huxerui::UseEnvironment;
@@ -476,26 +484,66 @@ public:
     current_time += seconds;
   }
 
-  Size MeasureText(std::string_view text, float font_size, float max_width) override {
-    static_cast<void>(font_size);
-    const float natural_width = static_cast<float>(text.size()) * 10.0F;
-    if (!std::isfinite(max_width)) {
-      return {natural_width, 20.0F};
-    }
-    if (max_width <= 0.0F) {
-      return {};
-    }
-    const float line_count = std::max(1.0F, std::ceil(natural_width / max_width));
+  FontMetrics Metrics(const Font& font) override {
+    static_cast<void>(font);
     return {
-        std::min(natural_width, max_width),
-        line_count * 20.0F,
+        .ascent = 15.0F,
+        .descent = 5.0F,
+        .underline_position = 2.0F,
+        .underline_thickness = 1.0F,
+        .strike_through_position = 7.0F,
+        .strike_through_thickness = 1.0F,
     };
   }
 
-  std::unique_ptr<huxerui::detail::TextLayout>
-  CreateTextLayout(std::string_view text, float font_size, float max_width) override {
-    static_cast<void>(font_size);
-    return std::make_unique<TextLayout>(text, max_width);
+  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) override {
+    static_cast<void>(options);
+    const float width = static_cast<float>(text.size()) * 10.0F;
+    const FontMetrics metrics = Metrics(style.font);
+    const Rect bounds{0.0F, -metrics.ascent, width, metrics.LineHeight()};
+    return {width, bounds, metrics};
+  }
+
+  TextLayoutMetrics MeasureText(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    static_cast<void>(style);
+    if (max_width <= 0.0F) {
+      return {};
+    }
+
+    std::vector<std::size_t> hard_lines{0};
+    for (char character : text) {
+      if (character == '\n') {
+        hard_lines.push_back(0);
+      } else {
+        ++hard_lines.back();
+      }
+    }
+    const auto widest = std::max_element(hard_lines.begin(), hard_lines.end());
+    const float natural_width = static_cast<float>(*widest) * 10.0F;
+    const bool wraps = std::isfinite(max_width) && options.wrap == TextWrap::Word;
+    std::size_t line_count = hard_lines.size();
+    if (wraps) {
+      line_count = 0;
+      for (std::size_t length : hard_lines) {
+        const float width = static_cast<float>(length) * 10.0F;
+        line_count += static_cast<std::size_t>(std::max(1.0F, std::ceil(width / max_width)));
+      }
+    }
+    const float measured_width = std::isfinite(max_width) ? std::min(natural_width, max_width) : natural_width;
+    const Size size{measured_width, static_cast<float>(line_count) * 20.0F};
+    return {size, 15.0F, size.height - 5.0F, line_count};
+  }
+
+  std::unique_ptr<huxerui::detail::TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    static_cast<void>(style);
+    return std::make_unique<TextLayout>(
+        text,
+        options.wrap == TextWrap::NoWrap ? std::numeric_limits<float>::infinity() : max_width
+    );
   }
 
   huxerui::PlatformTextInput* TextInput() noexcept override {

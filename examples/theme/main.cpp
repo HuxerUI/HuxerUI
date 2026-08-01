@@ -9,8 +9,7 @@ template <class Factory> View AccentTheme(Factory&& content) {
   ThemeDefinition definition;
   definition.Set(ButtonStyle{
       .background = theme.colors.error,
-      .foreground = theme.colors.on_primary,
-      .font_size = theme.typography.label,
+      .label_style = TextStyle{Font::System(theme.typography.label), theme.colors.on_primary},
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
       .corner_radius = theme.shapes.large,
   });

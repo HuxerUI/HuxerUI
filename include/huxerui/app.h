@@ -1,6 +1,5 @@
 #pragma once
 
-#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -11,6 +10,7 @@
 #include <huxerui/event.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
+#include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
 
@@ -34,16 +34,15 @@ struct AppDefinition {
   AppOptions options;
 };
 
-class PlatformHost {
+class PlatformHost : public TextMeasurer {
 public:
   virtual ~PlatformHost() = default;
 
   virtual void RequestFrameAt(double deadline) = 0;
   virtual double Now() const noexcept = 0;
-  virtual Size
-  MeasureText(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity()) = 0;
-  virtual std::unique_ptr<detail::TextLayout>
-  CreateTextLayout(std::string_view text, float font_size, float max_width = std::numeric_limits<float>::infinity());
+  virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
+  );
   virtual PlatformTextInput* TextInput() noexcept {
     return nullptr;
   }

@@ -285,12 +285,24 @@ public:
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
   }
 
-  Size MeasureText(std::string_view text, float font_size, float max_width) override {
-    return renderer_.MeasureText(text, font_size, max_width);
+  FontMetrics Metrics(const Font& font) override {
+    return renderer_.Metrics(font);
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width) override {
-    return renderer_.CreateTextLayout(text, font_size, max_width);
+  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) override {
+    return renderer_.MeasureRun(text, style, options);
+  }
+
+  TextLayoutMetrics MeasureText(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    return renderer_.MeasureText(text, style, max_width, options);
+  }
+
+  std::unique_ptr<TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    return renderer_.CreateTextLayout(text, style, max_width, options);
   }
 
   PlatformTextInput* TextInput() noexcept override {

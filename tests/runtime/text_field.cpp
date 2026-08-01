@@ -114,6 +114,17 @@ View EmptyTextFieldApp() {
   };
 }
 
+View IndependentPlaceholderFontApp() {
+  TextFieldStyle style = TextFieldStyle::Default();
+  style.text_style.font = Font::System(18.0F);
+  style.placeholder_style.font = Font::Monospace(11.0F).WithWeight(FontWeight::Bold);
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme(std::move(definition), [] {
+    return TextField(TextEditingValue::FromText("")).Placeholder("Independent").With(huxerui::Frame{160.0F, 40.0F});
+  });
+}
+
 View StableTextFieldApp() {
   auto trigger = UseState(0);
   text_field_recompose_trigger = trigger;
@@ -447,8 +458,10 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
 
   const DrawTextCommand* placeholder = FindText(scene, "Name");
   REQUIRE(placeholder != nullptr);
-  REQUIRE(placeholder->font_size == TextFieldStyle::Default().font_size);
-  REQUIRE(placeholder->color.alpha == TextFieldStyle::Default().placeholder.alpha);
+  REQUIRE(placeholder->style.font == TextFieldStyle::Default().placeholder_style.font);
+  REQUIRE(
+      placeholder->style.foreground.alpha == TextFieldStyle::Default().placeholder_style.foreground.alpha
+  );
 
   const auto border = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
     const auto* value = std::get_if<DrawBorderCommand>(&command);
@@ -462,6 +475,19 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   REQUIRE(style.focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
 }
 
+TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
+  TestPlatform platform;
+  Runtime runtime{IndependentPlaceholderFontApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const DrawTextCommand* placeholder = FindText(scene, "Independent");
+  REQUIRE(placeholder != nullptr);
+  REQUIRE(placeholder->style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(placeholder->style.font.Size() == 11.0F);
+  REQUIRE(placeholder->style.font.Weight() == FontWeight::Bold);
+}
+
 TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   ResetTextFieldState();
   TestPlatform platform;
@@ -472,10 +498,10 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   const TextFieldStyle style = TextFieldStyle::Default();
   const DrawTextCommand* message = FindText(scene, "Email is required");
   REQUIRE(message != nullptr);
-  REQUIRE(message->color.red == style.validation_error.red);
-  REQUIRE(message->color.green == style.validation_error.green);
-  REQUIRE(message->color.blue == style.validation_error.blue);
-  REQUIRE(message->font_size == style.validation_font_size);
+  REQUIRE(message->style.foreground.red == style.validation_text_style.foreground.red);
+  REQUIRE(message->style.foreground.green == style.validation_text_style.foreground.green);
+  REQUIRE(message->style.foreground.blue == style.validation_text_style.foreground.blue);
+  REQUIRE(message->style.font == style.validation_text_style.font);
   REQUIRE(runtime.RootNode()->children.front()->bounds.height == 80.0F);
 
   const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
@@ -582,9 +608,9 @@ TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
   const TextFieldStyle style = TextFieldStyle::Default();
   const DrawTextCommand* message = FindText(scene, "Checking");
   REQUIRE(message != nullptr);
-  REQUIRE(message->color.red == style.placeholder.red);
-  REQUIRE(message->color.green == style.placeholder.green);
-  REQUIRE(message->color.blue == style.placeholder.blue);
+  REQUIRE(message->style.foreground.red == style.placeholder_style.foreground.red);
+  REQUIRE(message->style.foreground.green == style.placeholder_style.foreground.green);
+  REQUIRE(message->style.foreground.blue == style.placeholder_style.foreground.blue);
   REQUIRE(FindBorderWithColor(scene, style.validation_error) == nullptr);
   REQUIRE(runtime.RootNode()->children.front()->bounds.height == 60.0F);
 }

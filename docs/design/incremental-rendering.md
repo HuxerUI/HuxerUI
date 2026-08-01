@@ -12,7 +12,7 @@ It intentionally removes the legacy absolute-frame and flat-DisplayList runtime 
 - Move, clip, fade, and scroll retained content without recording its drawing commands again.
 - Keep component state machines, layout behavior, and rendering data in the shared C++ runtime.
 - Keep platform adapters limited to native lifecycle, scheduling, event conversion, text services, and scene rendering.
-- Establish one drawing path for built-in components, retained modifiers, and a future `Canvas` component.
+- Establish one drawing path for built-in components, retained modifiers, and the `Canvas` component.
 - Support conservative damage tracking without requiring components to calculate host-view dirty rectangles.
 - Preserve deterministic behavior and make invalidation observable in focused tests.
 
@@ -278,7 +278,7 @@ It remains true when local paint or an unclipped descendant contributes visible 
 An effective child clip can still make that descendant and therefore the clipped subtree invisible.
 
 `PaintSequence` contains immutable platform-neutral `PaintCommand` values in node-local coordinates.
-`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, borders, clips, transforms, shadows, and future primitives.
+`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, and future primitives.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
 Platform renderers traverse `RenderScene`, maintain the native transform and clip stacks, and replay only the records referenced by the scene.
@@ -293,20 +293,29 @@ class PaintContext {
 public:
   Rect Bounds() const;
   void DrawRect(Rect rect, Color color, float corner_radius = 0.0F);
-  void DrawText(Rect rect, std::string text, Color color, float font_size, TextAlign align);
+  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
+  void DrawTextRun(
+      Rect bounds,
+      Point baseline_origin,
+      std::string text,
+      TextStyle style,
+      TextShapingOptions shaping = {});
   void PushClip(Rect rect, float corner_radius = 0.0F);
   void PopClip();
 };
 ```
 
 The exact public surface follows the available `PaintCommand` set.
+Paragraph text owns a layout rectangle, while exact text runs own an already measured visual bound and baseline origin.
+Renderers may shape a run into native glyphs but must not replace its supplied geometry with a second text measurement.
 `PaintContext` owns command balancing validation and records local bounds for damage calculation.
 It rejects non-finite geometry, colors, transforms, and negative dimensions, radii, or stroke widths at the recording boundary with `std::invalid_argument`.
 Arc start and sweep angles are expressed in radians.
 Its transform and clip stacks are reflected in those bounds, so the recorded rectangle conservatively contains the pixels produced by replay.
-`PaintContext::Bounds()` supplies the owning node's local layout bounds as a geometry reference; it does not clip drawing to that rectangle.
-Dirty sequences are recorded before visibility is resolved, allowing extensions, shadows, and future Canvas primitives to paint beyond layout bounds correctly.
-Built-in nodes, `NodeExtension::Paint`, and the future `Canvas` component use this same API.
+`PaintContext::Bounds()` supplies the owning node's local layout bounds as a geometry reference; Canvas instead receives its Padding-deflated content bounds with a `(0, 0)` origin.
+Neither form clips drawing to that rectangle.
+Dirty sequences are recorded before visibility is resolved, allowing extensions, shadows, and Canvas primitives to paint beyond layout bounds correctly.
+Built-in nodes, `NodeExtension::Paint`, and the `Canvas` component use this same API.
 
 Paint callbacks are pure:
 
@@ -519,10 +528,11 @@ Implemented stages:
 - Retain clean virtual policy, realization, and placement state, and reuse stable item measurements while scrolling.
 - Consume DamageRegion as native update bounds on macOS and Windows, while Android uses the same committed scene with full View invalidation.
 - Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its native blur resources.
+- Record Canvas callbacks into retained PaintSequences and replay filled, stroked, clipped, and shadowed Paths through every renderer.
 
 The migration stages defined in this document are implemented.
 
-Canvas, page transitions, and embedded native views should build on this foundation rather than introduce competing rendering or invalidation paths.
+Page transitions and embedded native views should build on this foundation rather than introduce competing rendering or invalidation paths.
 
 ## Validation
 

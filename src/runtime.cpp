@@ -67,6 +67,9 @@ bool IsCompatibleSavedNode(const MountedNode& mounted, const SavedNodeState& sav
 }
 
 bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  if (incoming.kind == NodeKind::Canvas) {
+    return false;
+  }
   return mounted.text == incoming.text && mounted.style.ContentPaintEquals(incoming.style);
 }
 
@@ -352,6 +355,7 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
       state_->root_service_types_,
       state_->root_services_
   };
+  root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   InstallBuiltinPresentation(root);
   for (RootHook& hook : definition.options.root_hooks) {
     if (!hook) {
@@ -1256,6 +1260,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   mounted->text = incoming->text;
   mounted->style = incoming->style;
   mounted->scope_factory = incoming->scope_factory;
+  mounted->canvas_painter = incoming->canvas_painter;
   mounted->layout = incoming->layout;
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;
@@ -1309,6 +1314,7 @@ std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSp
   mounted->text = incoming->text;
   mounted->style = incoming->style;
   mounted->scope_factory = incoming->scope_factory;
+  mounted->canvas_painter = incoming->canvas_painter;
   mounted->layout = incoming->layout;
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;

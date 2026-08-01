@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
 
@@ -42,6 +43,19 @@ void RequireColor(Color color) {
   }
 }
 
+void RequireTextStyle(const TextStyle& style) {
+  RequireColor(style.foreground);
+  if (!std::isfinite(style.font.Size()) || style.font.Size() <= 0.0F) {
+    throw std::invalid_argument("HuxerUI paint font size must be finite and greater than zero");
+  }
+}
+
+void RequireTextRun(std::string_view text) {
+  if (text.find_first_of("\r\n") != std::string_view::npos) {
+    throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
+  }
+}
+
 void RequireNonNegative(float value, const char* message) {
   if (!std::isfinite(value) || value < 0.0F) {
     throw std::invalid_argument(message);
@@ -65,15 +79,67 @@ void PaintContext::DrawRect(Rect rect, Color color, float corner_radius) {
   Include(rect);
 }
 
-void PaintContext::DrawText(Rect rect, std::string text, Color color, float font_size, TextAlign align) {
+void PaintContext::DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options) {
   RequireOpen();
   RequireRect(rect);
-  RequireColor(color);
-  if (!std::isfinite(font_size) || font_size <= 0.0F) {
-    throw std::invalid_argument("HuxerUI paint font size must be finite and greater than zero");
-  }
-  sequence_.commands_.emplace_back(DrawTextCommand{rect, std::move(text), color, font_size, align});
+  RequireTextStyle(style);
+  sequence_.commands_.emplace_back(DrawTextCommand{rect, std::move(text), std::move(style), std::move(options)});
   Include(rect);
+}
+
+void PaintContext::DrawTextRun(
+    Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping
+) {
+  RequireOpen();
+  RequireRect(bounds);
+  if (!IsFinite(baseline_origin)) {
+    throw std::invalid_argument("HuxerUI text run baseline origin must be finite");
+  }
+  RequireTextStyle(style);
+  RequireTextRun(text);
+  if (text.empty() || bounds.IsEmpty()) {
+    return;
+  }
+  TextRun run{bounds, baseline_origin, std::move(text), std::move(style), std::move(shaping)};
+  if (!sequence_.commands_.empty()) {
+    if (auto* command = std::get_if<DrawTextRunsCommand>(&sequence_.commands_.back())) {
+      command->runs.push_back(std::move(run));
+      Include(bounds);
+      return;
+    }
+  }
+  sequence_.commands_.emplace_back(DrawTextRunsCommand{{std::move(run)}});
+  Include(bounds);
+}
+
+void PaintContext::DrawTextRuns(std::vector<TextRun> runs) {
+  RequireOpen();
+  if (runs.empty()) {
+    return;
+  }
+  for (const TextRun& run : runs) {
+    RequireRect(run.bounds);
+    if (!IsFinite(run.baseline_origin)) {
+      throw std::invalid_argument("HuxerUI text run baseline origin must be finite");
+    }
+    RequireTextStyle(run.style);
+    RequireTextRun(run.text);
+  }
+  std::erase_if(runs, [](const TextRun& run) { return run.text.empty() || run.bounds.IsEmpty(); });
+  if (runs.empty()) {
+    return;
+  }
+  for (const TextRun& run : runs) {
+    Include(run.bounds);
+  }
+  if (!sequence_.commands_.empty()) {
+    if (auto* command = std::get_if<DrawTextRunsCommand>(&sequence_.commands_.back())) {
+      command->runs
+          .insert(command->runs.end(), std::make_move_iterator(runs.begin()), std::make_move_iterator(runs.end()));
+      return;
+    }
+  }
+  sequence_.commands_.emplace_back(DrawTextRunsCommand{std::move(runs)});
 }
 
 void PaintContext::DrawCircle(Point center, float radius, Color color) {
@@ -165,6 +231,83 @@ void PaintContext::DrawShadow(
   }
 }
 
+void PaintContext::FillPath(Path path, Color color, PathFillRule fill_rule) {
+  RequireOpen();
+  RequireColor(color);
+  sequence_.commands_.emplace_back(FillPathCommand{std::move(path), color, fill_rule});
+  const auto& command = std::get<FillPathCommand>(sequence_.commands_.back());
+  if (!command.path.IsEmpty()) {
+    Include(command.path.Bounds());
+  }
+}
+
+void PaintContext::StrokePath(Path path, Color color, float width, StrokeCap cap, StrokeJoin join, float miter_limit) {
+  RequireOpen();
+  RequireColor(color);
+  RequireNonNegative(width, "HuxerUI path stroke width must be finite and non-negative");
+  if (!std::isfinite(miter_limit) || miter_limit <= 0.0F) {
+    throw std::invalid_argument("HuxerUI path stroke miter limit must be finite and greater than zero");
+  }
+  sequence_.commands_.emplace_back(
+      StrokePathCommand{
+          std::move(path),
+          color,
+          width,
+          cap,
+          join,
+          miter_limit,
+      }
+  );
+  const auto& command = std::get<StrokePathCommand>(sequence_.commands_.back());
+  if (command.path.IsEmpty() || width <= 0.0F) {
+    return;
+  }
+  const Rect bounds = command.path.Bounds();
+  float outset_multiplier = 1.0F;
+  if (join == StrokeJoin::Miter) {
+    outset_multiplier = std::max(outset_multiplier, miter_limit);
+  }
+  if (cap == StrokeCap::Square) {
+    outset_multiplier = std::max(outset_multiplier, 1.41421356237F);
+  }
+  const float outset = width * 0.5F * outset_multiplier;
+  Include({
+      bounds.x - outset,
+      bounds.y - outset,
+      bounds.width + outset * 2.0F,
+      bounds.height + outset * 2.0F,
+  });
+}
+
+void PaintContext::DrawPathShadow(Path path, Color color, Point offset, float blur_radius, PathFillRule fill_rule) {
+  RequireOpen();
+  RequireColor(color);
+  if (!IsFinite(offset)) {
+    throw std::invalid_argument("HuxerUI path shadow offset must be finite");
+  }
+  RequireNonNegative(blur_radius, "HuxerUI path shadow blur radius must be finite and non-negative");
+  sequence_.commands_.emplace_back(
+      DrawPathShadowCommand{
+          std::move(path),
+          color,
+          offset,
+          blur_radius,
+          fill_rule,
+      }
+  );
+  const auto& command = std::get<DrawPathShadowCommand>(sequence_.commands_.back());
+  if (command.path.IsEmpty()) {
+    return;
+  }
+  const Rect bounds = command.path.Bounds();
+  Include({
+      bounds.x + offset.x - blur_radius,
+      bounds.y + offset.y - blur_radius,
+      bounds.width + blur_radius * 2.0F,
+      bounds.height + blur_radius * 2.0F,
+  });
+}
+
 void PaintContext::PushClip(Rect rect, float corner_radius) {
   RequireOpen();
   RequireRect(rect);
@@ -173,6 +316,16 @@ void PaintContext::PushClip(Rect rect, float corner_radius) {
   clip_stack_.push_back(clip_);
   command_stack_.push_back(StackEntry::Clip);
   const Rect transformed = detail::TransformBounds(transform_, rect);
+  clip_ = clip_.has_value() ? std::optional<Rect>{clip_->Intersection(transformed)} : transformed;
+}
+
+void PaintContext::PushPathClip(Path path, PathFillRule fill_rule) {
+  RequireOpen();
+  const Rect bounds = path.Bounds();
+  sequence_.commands_.emplace_back(PushPathClipCommand{std::move(path), fill_rule});
+  clip_stack_.push_back(clip_);
+  command_stack_.push_back(StackEntry::Clip);
+  const Rect transformed = detail::TransformBounds(transform_, bounds);
   clip_ = clip_.has_value() ? std::optional<Rect>{clip_->Intersection(transformed)} : transformed;
 }
 

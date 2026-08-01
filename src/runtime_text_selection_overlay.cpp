@@ -5,6 +5,7 @@
 #include <any>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -328,9 +329,8 @@ void Runtime::PaintTextSelectionOverlay() {
         context.DrawText(
             overlay.action_rects[index],
             overlay.action_labels[index],
-            overlay.toolbar_foreground,
-            overlay.toolbar_font_size,
-            TextAlign::Center
+            overlay.toolbar_text_style,
+            TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
         );
       }
     }
@@ -450,6 +450,7 @@ void Runtime::PaintTextSelectionOverlay() {
   }
 
   const float font_size = theme.typography.label;
+  const TextStyle toolbar_text_style{Font::System(font_size), theme.colors.on_surface};
   constexpr float item_padding = 12.0F;
   constexpr float toolbar_height = 40.0F;
   constexpr float viewport_padding = 8.0F;
@@ -461,7 +462,15 @@ void Runtime::PaintTextSelectionOverlay() {
   for (TextEditingAction action : overlay.actions) {
     const std::string_view label = LabelForAction(labels, action);
     overlay.action_labels.emplace_back(label);
-    const float width = state_->platform_->MeasureText(label, font_size).width + item_padding * 2.0F;
+    const float width = state_->platform_
+                            ->MeasureText(
+                                label,
+                                toolbar_text_style,
+                                std::numeric_limits<float>::infinity(),
+                                TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                            )
+                            .size.width +
+                        item_padding * 2.0F;
     item_widths.push_back(width);
     toolbar_width += width;
   }
@@ -493,9 +502,8 @@ void Runtime::PaintTextSelectionOverlay() {
   const float toolbar_y = above_gap >= 0.0F || above_gap >= below_gap ? above_y : below_y;
   overlay.toolbar_rect = {toolbar_x, toolbar_y, toolbar_width, toolbar_height};
   overlay.toolbar_background = theme.colors.surface;
-  overlay.toolbar_foreground = theme.colors.on_surface;
   overlay.toolbar_corner_radius = theme.shapes.small;
-  overlay.toolbar_font_size = font_size;
+  overlay.toolbar_text_style = toolbar_text_style;
   Color border = theme.colors.on_surface;
   border.alpha *= 0.16F;
   overlay.toolbar_border = border;

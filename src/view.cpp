@@ -44,11 +44,14 @@ void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
 }
 
 void ApplyForeground(detail::ViewSpec& spec, const Foreground& modifier) {
-  spec.style.foreground = modifier.color;
+  spec.style.text_style.foreground = modifier.color;
 }
 
 void ApplyFontSize(detail::ViewSpec& spec, const FontSize& modifier) {
-  spec.style.font_size = modifier.value;
+  if (!std::isfinite(modifier.value) || modifier.value <= 0.0F) {
+    throw std::invalid_argument("HuxerUI font size must be finite and greater than zero");
+  }
+  spec.style.text_style.font = spec.style.text_style.font.WithSize(modifier.value);
 }
 
 void ValidateFrameValue(const std::optional<float>& value, const char* name) {
@@ -231,9 +234,8 @@ private:
       context.DrawText(
           frame,
           "✓",
-          checkbox_style_.checkmark,
-          std::max(0.0F, checkbox_style_.size * 0.72F),
-          TextAlign::Center
+          TextStyle{Font::System(std::max(0.1F, checkbox_style_.size * 0.72F)), checkbox_style_.checkmark},
+          TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
       );
       return;
     }
@@ -383,10 +385,8 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   spec.style.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
   spec.style.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
-    const TextStyle style =
+    spec.style.text_style =
         ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
-    spec.style.foreground = style.foreground;
-    spec.style.font_size = style.font_size;
     return;
   }
   if (spec.kind == detail::NodeKind::Button) {
@@ -394,8 +394,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
         ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
     spec.style.padding = style.padding;
     spec.style.background = style.background;
-    spec.style.foreground = style.foreground;
-    spec.style.font_size = style.font_size;
+    spec.style.text_style = style.label_style;
     spec.style.corner_radius = style.corner_radius;
     return;
   }
@@ -406,8 +405,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.style.focus_ring_width = 0.0F;
     spec.style.padding = style.padding;
     spec.style.background = style.background;
-    spec.style.foreground = style.foreground;
-    spec.style.font_size = style.font_size;
+    spec.style.text_style = style.text_style;
     spec.style.corner_radius = style.corner_radius;
     spec.style.frame.min_height = std::max(0.0F, style.minimum_height);
     return;
@@ -480,6 +478,15 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressCircle);
   spec->modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeCanvasSpec(CanvasPainter painter) {
+  if (!painter) {
+    throw std::invalid_argument("HuxerUI canvas painter must not be empty");
+  }
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Canvas);
+  spec->canvas_painter = std::move(painter);
   return spec;
 }
 
@@ -652,6 +659,11 @@ void View::SetModifier(detail::ModifierSpec modifier) {
   }
 }
 
+void View::SetTextStyle(TextStyle style) {
+  EnsureUniqueSpec();
+  spec_->style.text_style = std::move(style);
+}
+
 void View::SetKey(std::int64_t value) {
   EnsureUniqueSpec();
   spec_->key = value;
@@ -708,6 +720,11 @@ Text::Text(std::string_view value, TextRole role) : Text(std::string(value), rol
 
 Text::Text(const char* value, TextRole role) : Text(value == nullptr ? std::string{} : std::string(value), role) {}
 
+Text Text::Style(TextStyle style) && {
+  SetTextStyle(std::move(style));
+  return std::move(*this);
+}
+
 Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
 
 Button::Button(std::string_view label) : Button(std::string(label)) {}
@@ -723,6 +740,8 @@ Switch::Switch(bool checked)
 ProgressCircle::ProgressCircle() : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(std::nullopt)) {}
 
 ProgressCircle::ProgressCircle(float progress) : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(progress)) {}
+
+Canvas::Canvas(CanvasPainter painter) : View(MakeCanvasSpec(std::move(painter))) {}
 
 Scope::Scope(std::function<View()> factory) : View(MakeScopeSpec(std::move(factory))) {}
 

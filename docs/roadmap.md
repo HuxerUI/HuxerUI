@@ -1,6 +1,6 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, shadows, layers, controlled text editing, and Android, macOS, and Windows backends.
+The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, shadows, Canvas and Path drawing, layers, controlled text editing, and Android, macOS, and Windows backends.
 
 Runtime foundation work:
 
@@ -10,7 +10,7 @@ Runtime foundation work:
 Framework capability work:
 
 - Composition-scoped effects with post-commit setup and cleanup semantics
-- Canvas and demand-driven PaintCommand expansion
+- Demand-driven PaintCommand expansion for gradients, images, and advanced strokes
 - Navigation stacks, scoped navigation controllers, platform back handling, and page transitions
 - General-purpose clipping modifiers
 - Event capture, bubbling, and explicit pointer capture
@@ -26,7 +26,7 @@ SDK, native integration, and distribution work:
 - Versioned SDK distribution and signing support
 - iOS, OHOS, Linux, and Web backends
 
-The completed Runtime invalidation foundation enables rendering-heavy Canvas, page-transition, and NativeView expansion.
+The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and NativeView expansion.
 SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before NativeView modules and versioned distribution.
 
 Detailed design constraints and delivery sequences live in [`docs/design`](design/).

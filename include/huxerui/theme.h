@@ -11,6 +11,7 @@
 
 #include <huxerui/color.h>
 #include <huxerui/environment.h>
+#include <huxerui/text.h>
 #include <huxerui/view.h>
 
 namespace huxerui {
@@ -103,19 +104,9 @@ struct ThemeSpec {
   bool operator==(const ThemeSpec&) const = default;
 };
 
-struct TextStyle {
-  Color foreground = Color::Rgb(31, 35, 40);
-  float font_size = 14.0F;
-
-  static TextStyle Default();
-
-  bool operator==(const TextStyle&) const = default;
-};
-
 struct ButtonStyle {
   Color background = Color::Rgb(31, 111, 235);
-  Color foreground = Color::White();
-  float font_size = 14.0F;
+  TextStyle label_style{Font::System(14.0F), Color::White()};
   EdgeInsets padding = EdgeInsets::Symmetric(14.0F, 8.0F);
   float corner_radius = 8.0F;
 
@@ -126,8 +117,8 @@ struct ButtonStyle {
 
 struct TextFieldStyle {
   Color background = Color::White();
-  Color foreground = Color::Rgb(31, 35, 40);
-  Color placeholder = Color::Rgb(87, 96, 106);
+  TextStyle text_style;
+  TextStyle placeholder_style{Font::System(14.0F), Color::Rgb(87, 96, 106)};
   Color selection = Color::Rgb(31, 111, 235, 0.24F);
   Color caret = Color::Rgb(31, 111, 235);
   Color composition = Color::Rgb(31, 111, 235);
@@ -135,14 +126,13 @@ struct TextFieldStyle {
   Color focused_border = Color::Rgb(31, 111, 235);
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
-  float font_size = 14.0F;
   float corner_radius = 6.0F;
   EdgeInsets padding = EdgeInsets::Symmetric(10.0F, 8.0F);
   float minimum_height = 36.0F;
   double caret_blink_interval = 0.5;
   Color validation_error = Color::Rgb(207, 34, 46);
   float validation_border_width = 2.0F;
-  float validation_font_size = 12.0F;
+  TextStyle validation_text_style{Font::System(12.0F), Color::Rgb(207, 34, 46)};
   float validation_spacing = 4.0F;
 
   static TextFieldStyle Default();

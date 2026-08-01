@@ -25,12 +25,14 @@
 #include <huxerui/modifier.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>
+#include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/validation.h>
 #include <huxerui/virtual_layout.h>
 
 namespace huxerui {
 
+class PaintContext;
 class Runtime;
 
 enum class TextRole {
@@ -134,6 +136,7 @@ protected:
   void AddDefaultIndication();
   void AddModifier(detail::ModifierSpec modifier);
   void SetModifier(detail::ModifierSpec modifier);
+  void SetTextStyle(TextStyle style);
   void SetKey(std::int64_t value);
   void SetKey(std::uint64_t value);
   void SetKey(std::string value);
@@ -480,6 +483,8 @@ public:
   explicit Text(std::string_view value, TextRole role = TextRole::Body);
   explicit Text(const char* value, TextRole role = TextRole::Body);
 
+  Text Style(TextStyle style) &&;
+
   template <class... Arguments> static Text Format(std::string_view format, const Arguments&... arguments) {
     return Text(detail::InterpolateText(format, arguments...));
   }
@@ -498,6 +503,13 @@ public:
   explicit Button(std::string label);
   explicit Button(std::string_view label);
   explicit Button(const char* label);
+};
+
+using CanvasPainter = std::function<void(PaintContext&, Size)>;
+
+class Canvas final : public View {
+public:
+  explicit Canvas(CanvasPainter painter);
 };
 
 class TextFieldLineLimits final {

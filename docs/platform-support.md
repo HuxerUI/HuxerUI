@@ -37,6 +37,7 @@ if (commit.next_frame_deadline.has_value()) {
 ```
 
 Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, and renderer conventions.
+PlatformHost also implements the shared `TextMeasurer` service, resolving platform-neutral Font and TextStyle values through the native text stack.
 They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
 `PlatformHost::RequestFrameAt()` accepts an absolute monotonic deadline.
 Runtime uses it for invalidations outside frame construction; work discovered while building is returned through `FrameCommit::next_frame_deadline`.
@@ -44,6 +45,8 @@ The host presents the committed frame before scheduling that deadline, which pre
 macOS and Windows translate `DamageRegion` into native invalidation bounds.
 Android receives the same committed damage but invalidates the complete native View because current Android View APIs ignore dirty rectangles.
 All three backends replay only the committed scene during native paint callbacks.
+Exact `DrawTextRunsCommand` geometry is supplied by TextMeasurer and is not replaced by renderer-side layout decisions.
+Native font and layout caches are host-owned, bounded, and keyed by complete value inputs; see [Text and Font Design](design/text.md).
 
 ## Android
 
@@ -64,12 +67,14 @@ The application native library is named `huxerui_app`. Loading it registers the 
 
 Coordinates remain density independent. The host maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
 Rounded-rectangle shadows use hardware shadow layers on API 28 and later, with density-aware cached alpha masks on older supported versions.
+Arbitrary Paths use the same native Canvas, and Path shadows use hardware layers on API 28 and later with a bounded software mask fallback on older supported versions.
 Neither path disables hardware acceleration for the complete host View.
 
 ## macOS
 
 The macOS backend creates an AppKit host, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries. Scheduled callbacks commit Runtime work before AppKit invalidation, while `drawRect:` only presents the committed scene.
 Core Graphics resolves retained shadow commands with native blurred path shadows.
+Canvas Paths map directly to Core Graphics fill, stroke, clip, and shadow operations.
 
 Example targets build as application bundles and can be launched from `build/bin`.
 
@@ -79,6 +84,7 @@ The Windows backend targets Windows 10 and later by default.
 It owns the Win32 window, uses DirectWrite for text layout, and renders shared PaintCommands through a Direct2D device context backed by D3D11 and a DXGI swap chain.
 Partial Runtime damage updates a retained scene bitmap before the affected pixels are presented.
 Direct2D Shadow effects consume cached rounded-rectangle masks while color, opacity, and offset remain draw-time properties.
+Canvas Paths map to Direct2D path geometry for fill, stroke, geometric clipping, and blurred shadow masks.
 
 `HUXERUI_WINDOWS_7_COMPAT=ON` builds an opt-in binary for Windows 7 SP1 with Platform Update or later.
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
@@ -9,18 +10,60 @@
 
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
+#include <huxerui/text.h>
 
 namespace huxerui {
 
-enum class TextAlign {
-  Leading,
-  Center,
+namespace detail {
+class PathAccess;
+}
+
+class Path {
+public:
+  Path();
+  Path(const Path&) = default;
+  Path(Path&&) noexcept = default;
+  Path& operator=(const Path&) = default;
+  Path& operator=(Path&&) noexcept = default;
+  ~Path() = default;
+
+  Path& MoveTo(Point point);
+  Path& LineTo(Point point);
+  Path& QuadraticTo(Point control, Point end);
+  Path& CubicTo(Point first_control, Point second_control, Point end);
+  Path& Close();
+  void Reset();
+
+  [[nodiscard]] bool IsEmpty() const noexcept;
+  [[nodiscard]] Rect Bounds() const noexcept;
+
+  bool operator==(const Path& other) const noexcept;
+
+private:
+  struct Data;
+
+  void EnsureUnique();
+
+  std::shared_ptr<Data> data_;
+
+  friend class detail::PathAccess;
+};
+
+enum class PathFillRule {
+  NonZero,
+  EvenOdd,
 };
 
 enum class StrokeCap {
   Butt,
   Round,
   Square,
+};
+
+enum class StrokeJoin {
+  Miter,
+  Round,
+  Bevel,
 };
 
 struct DrawRectCommand {
@@ -34,11 +77,27 @@ struct DrawRectCommand {
 struct DrawTextCommand {
   Rect rect;
   std::string text;
-  Color color;
-  float font_size = 15.0F;
-  TextAlign align = TextAlign::Leading;
+  TextStyle style;
+  TextLayoutOptions options;
 
   bool operator==(const DrawTextCommand&) const = default;
+};
+
+struct TextRun {
+  // Bounds are positioned visual bounds used for culling and damage; the platform must not remeasure them.
+  Rect bounds;
+  Point baseline_origin;
+  std::string text;
+  TextStyle style;
+  TextShapingOptions shaping;
+
+  bool operator==(const TextRun&) const = default;
+};
+
+struct DrawTextRunsCommand {
+  std::vector<TextRun> runs;
+
+  bool operator==(const DrawTextRunsCommand&) const = default;
 };
 
 struct DrawCircleCommand {
@@ -81,6 +140,35 @@ struct DrawShadowCommand {
   bool operator==(const DrawShadowCommand&) const = default;
 };
 
+struct FillPathCommand {
+  Path path;
+  Color color;
+  PathFillRule fill_rule = PathFillRule::NonZero;
+
+  bool operator==(const FillPathCommand&) const = default;
+};
+
+struct StrokePathCommand {
+  Path path;
+  Color color;
+  float width = 1.0F;
+  StrokeCap cap = StrokeCap::Butt;
+  StrokeJoin join = StrokeJoin::Miter;
+  float miter_limit = 4.0F;
+
+  bool operator==(const StrokePathCommand&) const = default;
+};
+
+struct DrawPathShadowCommand {
+  Path path;
+  Color color;
+  Point offset;
+  float blur_radius = 0.0F;
+  PathFillRule fill_rule = PathFillRule::NonZero;
+
+  bool operator==(const DrawPathShadowCommand&) const = default;
+};
+
 struct PushClipCommand {
   Rect rect;
   float corner_radius = 0.0F;
@@ -90,6 +178,13 @@ struct PushClipCommand {
 
 struct PopClipCommand {
   bool operator==(const PopClipCommand&) const = default;
+};
+
+struct PushPathClipCommand {
+  Path path;
+  PathFillRule fill_rule = PathFillRule::NonZero;
+
+  bool operator==(const PushPathClipCommand&) const = default;
 };
 
 struct PushTransformCommand {
@@ -105,11 +200,16 @@ struct PopTransformCommand {
 using PaintCommand = std::variant<
     DrawRectCommand,
     DrawTextCommand,
+    DrawTextRunsCommand,
     DrawCircleCommand,
     DrawArcCommand,
     DrawBorderCommand,
     DrawShadowCommand,
+    FillPathCommand,
+    StrokePathCommand,
+    DrawPathShadowCommand,
     PushClipCommand,
+    PushPathClipCommand,
     PopClipCommand,
     PushTransformCommand,
     PopTransformCommand>;
@@ -152,7 +252,10 @@ public:
   }
 
   void DrawRect(Rect rect, Color color, float corner_radius = 0.0F);
-  void DrawText(Rect rect, std::string text, Color color, float font_size, TextAlign align = TextAlign::Leading);
+  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
+  void
+  DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});
+  void DrawTextRuns(std::vector<TextRun> runs);
   void DrawCircle(Point center, float radius, Color color);
   // Arc angles are expressed in radians.
   void DrawArc(
@@ -166,15 +269,22 @@ public:
   );
   void DrawBorder(Rect rect, Color color, float width, float corner_radius = 0.0F);
   // blur_radius is the outer falloff extent around the spread shadow shape; spread may contract the caster.
-  void DrawShadow(
-      Rect rect,
+  void
+  DrawShadow(Rect rect, Color color, Point offset, float blur_radius, float spread = 0.0F, float corner_radius = 0.0F);
+  void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
+  void StrokePath(
+      Path path,
       Color color,
-      Point offset,
-      float blur_radius,
-      float spread = 0.0F,
-      float corner_radius = 0.0F
+      float width,
+      StrokeCap cap = StrokeCap::Butt,
+      StrokeJoin join = StrokeJoin::Miter,
+      float miter_limit = 4.0F
+  );
+  void DrawPathShadow(
+      Path path, Color color, Point offset, float blur_radius, PathFillRule fill_rule = PathFillRule::NonZero
   );
   void PushClip(Rect rect, float corner_radius = 0.0F);
+  void PushPathClip(Path path, PathFillRule fill_rule = PathFillRule::NonZero);
   void PopClip();
   void PushTransform(Transform2D transform);
   void PopTransform();

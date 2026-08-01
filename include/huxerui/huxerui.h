@@ -17,6 +17,7 @@
 #include <huxerui/root.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>
+#include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/theme.h>
 #include <huxerui/validation.h>

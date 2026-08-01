@@ -34,20 +34,57 @@ public:
     return 0.0;
   }
 
-  Size MeasureText(std::string_view text, float font_size, float max_width) override {
-    static_cast<void>(font_size);
-    const float natural_width = static_cast<float>(text.size()) * 10.0F;
-    if (!std::isfinite(max_width)) {
-      return {natural_width, 20.0F};
-    }
+  huxerui::FontMetrics Metrics(const huxerui::Font& font) override {
+    static_cast<void>(font);
+    return {.ascent = 15.0F, .descent = 5.0F};
+  }
+
+  huxerui::TextRunMetrics MeasureRun(
+      std::string_view text, const huxerui::TextStyle& style, const huxerui::TextShapingOptions& options
+  ) override {
+    static_cast<void>(options);
+    const float width = static_cast<float>(text.size()) * 10.0F;
+    const huxerui::FontMetrics metrics = Metrics(style.font);
+    return {width, {0.0F, -15.0F, width, 20.0F}, metrics};
+  }
+
+  huxerui::TextLayoutMetrics MeasureText(
+      std::string_view text, const huxerui::TextStyle& style, float max_width, const huxerui::TextLayoutOptions& options
+  ) override {
+    static_cast<void>(style);
     if (max_width <= 0.0F) {
       return {};
     }
-    const float line_count = std::max(1.0F, std::ceil(natural_width / max_width));
-    return {
-        std::min(natural_width, max_width),
-        line_count * 20.0F,
+
+    std::size_t hard_line_count = 1;
+    std::size_t current_length = 0;
+    std::size_t maximum_length = 0;
+    std::size_t wrapped_line_count = 0;
+    const auto finish_hard_line = [&] {
+      maximum_length = std::max(maximum_length, current_length);
+      if (std::isfinite(max_width) && options.wrap == huxerui::TextWrap::Word) {
+        const float width = static_cast<float>(current_length) * 10.0F;
+        wrapped_line_count += static_cast<std::size_t>(std::max(1.0F, std::ceil(width / max_width)));
+      }
+      current_length = 0;
     };
+    for (char character : text) {
+      if (character == '\n') {
+        finish_hard_line();
+        ++hard_line_count;
+      } else {
+        ++current_length;
+      }
+    }
+    finish_hard_line();
+
+    const float natural_width = static_cast<float>(maximum_length) * 10.0F;
+    const std::size_t line_count = std::isfinite(max_width) && options.wrap == huxerui::TextWrap::Word
+                                     ? wrapped_line_count
+                                     : hard_line_count;
+    const float measured_width = std::isfinite(max_width) ? std::min(natural_width, max_width) : natural_width;
+    const Size size{measured_width, static_cast<float>(line_count) * 20.0F};
+    return {size, 15.0F, size.height - 5.0F, line_count};
   }
 
   int requested_frames = 0;

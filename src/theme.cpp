@@ -11,11 +11,10 @@ namespace {
 
 ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   return {
-      theme.colors.primary,
-      theme.colors.on_primary,
-      theme.typography.label,
-      EdgeInsets::Symmetric(24.0F, 10.0F),
-      20.0F,
+      .background = theme.colors.primary,
+      .label_style = TextStyle{Font::System(theme.typography.label), theme.colors.on_primary},
+      .padding = EdgeInsets::Symmetric(24.0F, 10.0F),
+      .corner_radius = 20.0F,
   };
 }
 
@@ -26,8 +25,8 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   border.alpha *= 0.38F;
   return {
       .background = theme.colors.surface,
-      .foreground = theme.colors.on_surface,
-      .placeholder = placeholder,
+      .text_style = TextStyle{Font::System(theme.typography.body), theme.colors.on_surface},
+      .placeholder_style = TextStyle{Font::System(theme.typography.body), placeholder},
       .selection =
           Color{
               theme.colors.primary.red,
@@ -41,14 +40,13 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
       .focused_border = theme.colors.primary,
       .border_width = 1.0F,
       .focused_border_width = 2.0F,
-      .font_size = theme.typography.body,
       .corner_radius = theme.shapes.small,
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
       .minimum_height = 56.0F,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
       .validation_error = theme.colors.error,
       .validation_border_width = 2.0F,
-      .validation_font_size = theme.typography.label,
+      .validation_text_style = TextStyle{Font::System(theme.typography.label), theme.colors.error},
       .validation_spacing = theme.spacing.extra_small,
   };
 }
@@ -176,18 +174,17 @@ TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role) {
     font_size = theme.typography.title;
   }
   return {
+      Font::System(font_size),
       theme.colors.on_surface,
-      font_size,
   };
 }
 
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme) {
   return {
-      theme.colors.primary,
-      theme.colors.on_primary,
-      theme.typography.label,
-      EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
-      theme.shapes.medium,
+      .background = theme.colors.primary,
+      .label_style = TextStyle{Font::System(theme.typography.label), theme.colors.on_primary},
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .corner_radius = theme.shapes.medium,
   };
 }
 
@@ -198,8 +195,8 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
   border.alpha *= 0.4F;
   return {
       .background = theme.colors.surface,
-      .foreground = theme.colors.on_surface,
-      .placeholder = placeholder,
+      .text_style = TextStyle{Font::System(theme.typography.body), theme.colors.on_surface},
+      .placeholder_style = TextStyle{Font::System(theme.typography.body), placeholder},
       .selection =
           Color{
               theme.colors.primary.red,
@@ -213,14 +210,13 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
       .focused_border = theme.colors.primary,
       .border_width = 1.0F,
       .focused_border_width = 2.0F,
-      .font_size = theme.typography.body,
       .corner_radius = theme.shapes.small + 2.0F,
       .padding = EdgeInsets::Symmetric(10.0F, theme.spacing.small),
       .minimum_height = 36.0F,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
       .validation_error = theme.colors.error,
       .validation_border_width = 2.0F,
-      .validation_font_size = theme.typography.label,
+      .validation_text_style = TextStyle{Font::System(theme.typography.label), theme.colors.error},
       .validation_spacing = theme.spacing.extra_small,
   };
 }

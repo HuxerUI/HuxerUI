@@ -1,0 +1,110 @@
+# Canvas and Path Design
+
+Status: implemented
+
+This document defines HuxerUI's platform-neutral Path value, custom Canvas component, and their integration with retained PaintSequences.
+
+## Goals
+
+- Express arbitrary filled, stroked, clipped, and shadowed vector geometry in shared application code.
+- Keep Canvas on the existing View, layout, paint invalidation, RenderScene, and native renderer path.
+- Preserve node-local logical coordinates and conservative damage bounds.
+- Keep native geometry and blur resources inside platform renderers.
+- Avoid a second imperative rendering surface or public render-object hierarchy.
+
+## Path
+
+`Path` is a copy-on-write value containing one or more contours.
+It supports move, line, quadratic curve, cubic curve, and close elements.
+Copying a Path is inexpensive, and mutating one copy detaches it before changing the shared data.
+A PaintCommand therefore retains a stable geometry snapshot even when the caller later changes the original Path.
+
+Path coordinates must be finite.
+Commands that extend or close a contour require a preceding `MoveTo()`.
+`Close()` ends the active contour, so another contour starts with a new `MoveTo()`.
+Move-only contours do not contribute to Path bounds because they produce no pixels.
+Path equality compares geometry by value and uses shared storage identity as a fast path.
+Bounds include curve extrema rather than only curve endpoints.
+
+`PathFillRule::NonZero` and `PathFillRule::EvenOdd` are painting properties supplied by fill, clip, and shadow commands.
+They do not change the underlying geometry value.
+
+## Paint commands
+
+`PaintContext` records Path operations through explicit methods:
+
+```cpp
+paint.FillPath(path, color, PathFillRule::NonZero);
+paint.StrokePath(path, color, width, StrokeCap::Round, StrokeJoin::Round);
+paint.DrawPathShadow(path, shadow_color, offset, blur_radius);
+paint.PushPathClip(path, PathFillRule::EvenOdd);
+paint.PopClip();
+```
+
+The corresponding immutable commands are `FillPathCommand`, `StrokePathCommand`, `DrawPathShadowCommand`, and `PushPathClipCommand`.
+Path clips share the existing balanced clip stack and `PopClipCommand`.
+Stroke bounds conservatively include cap, join, width, and miter-limit overflow.
+Path shadows include offset and blur overflow but intentionally do not expose spread.
+Reliable spread for an arbitrary path requires a separately defined geometry-offset operation for concave contours and holes.
+
+Blurred Path shadows exclude the shifted caster interior, matching rectangular shadow semantics and avoiding a second solid shape.
+
+Canvas uses the same text vocabulary as built-in controls.
+`DrawText()` lays out a paragraph inside a rectangle, while `DrawTextRun()` and `DrawTextRuns()` replay baseline-positioned runs whose bounds were produced by `TextMeasurer`.
+The run path is intended for syntax highlighting, diagnostics, and other callers that already own line layout.
+See [Text and Font Design](text.md) for the measurement and replay contract.
+
+## Canvas
+
+`Canvas` is an ordinary leaf View with a pure painter callback:
+
+```cpp
+Canvas([](PaintContext& paint, Size size) {
+  // Paint in local coordinates from (0, 0) to (size.width, size.height).
+});
+```
+
+Canvas has no intrinsic size.
+Its size comes from `Frame`, `Grow`, or parent constraints.
+The painter receives the content size after Padding and always uses a content-local origin of `(0, 0)`.
+For the uncommon case where Canvas itself has Padding, Runtime records a translation around the callback; a zero-Padding Canvas records no extra transform.
+
+The node's Shadow and Background paint before the callback and continue to use the complete node bounds.
+Foreground NodeExtensions and focus visuals paint afterward.
+Canvas drawing is not clipped to its size automatically, allowing intentional overflow whose bounds participate in visibility and damage.
+The painter can use `PushClip()` or `PushPathClip()` when clipping is required.
+
+Canvas remains a normal interaction node.
+Pointer hit testing uses its rectangular node bounds and does not infer a hit shape from painted Paths.
+
+## Retention and invalidation
+
+The painter runs when the Canvas content PaintSequence is dirty.
+Mounting, reconciling a new painter, changing Canvas size, or changing a content-paint modifier marks that sequence dirty.
+An unchanged frame reuses the recorded commands without invoking the callback.
+Presentation-only changes such as offset, scale, rotation, opacity, and scrolling continue to reuse the same PaintSequence.
+
+Painter callables are not compared by captured value.
+When a scope recomposes and produces the same Canvas node, its content is conservatively rerecorded because the new callback may capture different declarative inputs.
+This invalidation remains local to that Canvas and does not repaint clean siblings.
+
+Canvas painters may append commands only to the supplied PaintContext.
+They must not retain the context, mutate layout or interaction state, schedule frames, or query native coordinates.
+Animated retained behavior continues to use NodeExtension frame callbacks and paint invalidation rather than a Canvas-specific scheduler.
+
+## Native rendering
+
+Platform renderers convert Path elements to native geometry while preserving fill rules, stroke caps, joins, transforms, and clip balance:
+
+- Android uses `android.graphics.Path` and the host Canvas.
+- macOS uses Core Graphics paths.
+- Windows uses Direct2D path geometry.
+
+Path shadow masks reuse each backend's existing blur machinery.
+Platform-native geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
+
+## Deferred capabilities
+
+The initial Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradients, images, or Path-based pointer hit testing.
+Those capabilities can extend Path or PaintCommand without changing Canvas ownership or invalidation.
+A generic Brush abstraction should be introduced when a second real paint source such as gradients is implemented, not in anticipation of one.

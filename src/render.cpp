@@ -12,18 +12,6 @@ namespace huxerui::detail {
 
 namespace {
 
-Color ResolveForeground(const MountedNode& node) {
-  return node.style.foreground.value_or(
-      node.kind == NodeKind::Button ? ButtonStyle::Default().foreground : TextStyle::Default().foreground
-  );
-}
-
-float ResolveFontSize(const MountedNode& node) {
-  return node.style.font_size.value_or(
-      node.kind == NodeKind::Button ? ButtonStyle::Default().font_size : TextStyle::Default().font_size
-  );
-}
-
 Rect ContentRect(const MountedNode& node) {
   return {
       node.bounds.x + node.style.padding.left,
@@ -264,26 +252,42 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
 
   bool changed = false;
   if (node.content_paint_dirty) {
-    PaintContext content{render_node.content, node.bounds};
     const Rect bounds = node.bounds;
+    const Rect canvas_bounds = node.kind == NodeKind::Canvas
+                                   ? Rect{
+                                         0.0F,
+                                         0.0F,
+                                         std::max(0.0F, bounds.width - node.style.padding.Horizontal()),
+                                         std::max(0.0F, bounds.height - node.style.padding.Vertical()),
+                                     }
+                                   : bounds;
+    PaintContext content{render_node.content, canvas_bounds};
     if (node.style.shadow.has_value() && node.style.shadow->color.alpha > 0.0F) {
       const Shadow& shadow = *node.style.shadow;
-      content.DrawShadow(
-          bounds,
-          shadow.color,
-          shadow.offset,
-          shadow.blur_radius,
-          shadow.spread,
-          node.style.corner_radius
-      );
+      content
+          .DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread, node.style.corner_radius);
     }
     if (node.style.background.has_value() && node.style.background->alpha > 0.0F) {
       content.DrawRect(bounds, *node.style.background, node.style.corner_radius);
     }
     if (node.kind == NodeKind::Text) {
-      content.DrawText(ContentRect(node), node.text, ResolveForeground(node), ResolveFontSize(node));
+      content.DrawText(ContentRect(node), node.text, node.style.text_style);
     } else if (node.kind == NodeKind::Button) {
-      content.DrawText(bounds, node.text, ResolveForeground(node), ResolveFontSize(node), TextAlign::Center);
+      content.DrawText(
+          bounds,
+          node.text,
+          node.style.text_style,
+          TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
+      );
+    } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
+      const Point content_origin{node.style.padding.left, node.style.padding.top};
+      if (content_origin != Point{}) {
+        content.PushTransform(TranslationTransform(content_origin));
+      }
+      node.canvas_painter(content, {canvas_bounds.width, canvas_bounds.height});
+      if (content_origin != Point{}) {
+        content.PopTransform();
+      }
     }
     content.Finish();
     node.content_paint_dirty = false;

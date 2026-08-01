@@ -3,8 +3,10 @@ package org.huxerui;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.TextDirectionHeuristics;
 
 import java.util.Arrays;
 
@@ -13,13 +15,24 @@ final class HuxerUITextLayout {
     private final TextPaint paint;
     private final StaticLayout layout;
 
-    HuxerUITextLayout(String text, TextPaint paint, float maxWidth) {
+    HuxerUITextLayout(
+            String text, TextPaint paint, float maxWidth, Layout.Alignment alignment, boolean wrap, int direction) {
         this.text = text;
         this.paint = paint;
         float desiredWidth = StaticLayout.getDesiredWidth(text, paint);
-        int width = Math.max(
-                1, (int) Math.ceil(Float.isFinite(maxWidth) ? Math.min(maxWidth, desiredWidth) : desiredWidth));
-        layout = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width).setIncludePad(true).build();
+        float requestedWidth = wrap && Float.isFinite(maxWidth) ? Math.min(maxWidth, desiredWidth) : desiredWidth;
+        int width = Math.max(1, (int) Math.ceil(requestedWidth));
+        StaticLayout.Builder builder = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
+                                               .setAlignment(alignment)
+                                               .setIncludePad(true);
+        if (direction == 1) {
+            builder.setTextDirection(TextDirectionHeuristics.LTR);
+        } else if (direction == 2) {
+            builder.setTextDirection(TextDirectionHeuristics.RTL);
+        } else {
+            builder.setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_LTR);
+        }
+        layout = builder.build();
     }
 
     private float[] measure() {

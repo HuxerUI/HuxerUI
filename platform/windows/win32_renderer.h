@@ -7,6 +7,7 @@
 
 #include <huxerui/geometry.h>
 #include <huxerui/render_scene.h>
+#include <huxerui/text.h>
 
 namespace huxerui::detail {
 
@@ -31,8 +32,13 @@ public:
   void ResetDeviceResources() noexcept;
   void Resize(HWND window, float dpi);
   void DpiChanged(HWND window, float dpi);
-  [[nodiscard]] Size MeasureText(std::string_view text, float font_size, float max_width);
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, float font_size, float max_width);
+  [[nodiscard]] FontMetrics Metrics(const Font& font);
+  [[nodiscard]] TextRunMetrics
+  MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options);
+  [[nodiscard]] TextLayoutMetrics
+  MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
+  [[nodiscard]] std::unique_ptr<TextLayout>
+  CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   [[nodiscard]] Win32RenderResult Render(HWND window, float dpi, const RenderFrame& frame, const RECT& paint_rect);
 
 private:

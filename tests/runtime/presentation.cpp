@@ -111,13 +111,21 @@ View NestedThemeReader() {
 
 View TestButtonTheme(std::function<View()> content) {
   ThemeDefinition definition;
-  definition.Set(ButtonStyle{
-      .background = Color::Rgb(130, 80, 210),
-      .foreground = Color::White(),
-      .font_size = 21.0F,
-      .padding = huxerui::EdgeInsets::All(11.0F),
-      .corner_radius = 13.0F,
-  });
+  definition.Set(
+      ButtonStyle{
+          .background = Color::Rgb(130, 80, 210),
+          .label_style =
+              huxerui::TextStyle{
+                  huxerui::Font::Monospace(21.0F)
+                      .WithWeight(huxerui::FontWeight::Bold)
+                      .WithSlant(huxerui::FontSlant::Italic),
+                  Color::White(),
+                  huxerui::TextDecoration::Underline,
+              },
+          .padding = huxerui::EdgeInsets::All(11.0F),
+          .corner_radius = 13.0F,
+      }
+  );
   return Theme(std::move(definition), std::move(content));
 }
 
@@ -411,35 +419,39 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
 
   const DrawTextCommand* theme_text = FindText(initial, "theme text");
   REQUIRE(theme_text != nullptr);
-  REQUIRE(theme_text->color.green == Color::Rgb(30, 90, 55).green);
-  REQUIRE(theme_text->font_size == 18.0F);
+  REQUIRE(theme_text->style.foreground.green == Color::Rgb(30, 90, 55).green);
+  REQUIRE(theme_text->style.font.Size() == 18.0F);
 
   const DrawTextCommand* theme_title = FindText(initial, "theme title");
   REQUIRE(theme_title != nullptr);
-  REQUIRE(theme_title->font_size == 25.0F);
+  REQUIRE(theme_title->style.font.Size() == 25.0F);
 
   const DrawTextCommand* theme_label = FindText(initial, "theme label");
   REQUIRE(theme_label != nullptr);
-  REQUIRE(theme_label->font_size == 16.0F);
+  REQUIRE(theme_label->style.font.Size() == 16.0F);
 
   const DrawTextCommand* theme_button = FindText(initial, "theme button");
   REQUIRE(theme_button != nullptr);
-  REQUIRE(theme_button->font_size == 16.0F);
+  REQUIRE(theme_button->style.font.Size() == 16.0F);
   const DrawRectCommand* theme_button_background = FindRect(initial, theme_button->rect);
   REQUIRE(theme_button_background != nullptr);
   REQUIRE(theme_button_background->color.blue == Color::Rgb(40, 100, 220).blue);
 
   const DrawTextCommand* nested_button = FindText(initial, "nested button");
   REQUIRE(nested_button != nullptr);
-  REQUIRE(nested_button->font_size == 21.0F);
+  REQUIRE(nested_button->style.font.Size() == 21.0F);
+  REQUIRE(nested_button->style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(nested_button->style.font.Weight() == FontWeight::Bold);
+  REQUIRE(nested_button->style.font.Slant() == FontSlant::Italic);
+  REQUIRE(nested_button->style.decoration == TextDecoration::Underline);
   const DrawRectCommand* nested_button_background = FindRect(initial, nested_button->rect);
   REQUIRE(nested_button_background != nullptr);
   REQUIRE(nested_button_background->corner_radius == 13.0F);
 
   const DrawTextCommand* explicit_text = FindText(initial, "explicit text");
   REQUIRE(explicit_text != nullptr);
-  REQUIRE(explicit_text->font_size == 29.0F);
-  REQUIRE(explicit_text->color.red == Color::Rgb(255, 140, 0).red);
+  REQUIRE(explicit_text->style.font.Size() == 29.0F);
+  REQUIRE(explicit_text->style.foreground.red == Color::Rgb(255, 140, 0).red);
 
   alternate_theme = true;
   const FlattenedScene& updated = runtime.BuildFrame();
@@ -460,16 +472,16 @@ TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
   const DrawTextCommand* body = FindText(scene, "dark body");
   REQUIRE(body != nullptr);
-  REQUIRE(body->color.red == dark.colors.on_surface.red);
-  REQUIRE(body->font_size == dark.typography.body);
+  REQUIRE(body->style.foreground.red == dark.colors.on_surface.red);
+  REQUIRE(body->style.font.Size() == dark.typography.body);
 
   const DrawTextCommand* title = FindText(scene, "dark title");
   REQUIRE(title != nullptr);
-  REQUIRE(title->font_size == dark.typography.title);
+  REQUIRE(title->style.font.Size() == dark.typography.title);
 
   const DrawTextCommand* button = FindText(scene, "dark button");
   REQUIRE(button != nullptr);
-  REQUIRE(button->color.red == dark.colors.on_primary.red);
+  REQUIRE(button->style.foreground.red == dark.colors.on_primary.red);
   const DrawRectCommand* background = FindRect(scene, button->rect);
   REQUIRE(background != nullptr);
   REQUIRE(background->color.blue == dark.colors.primary.blue);
@@ -566,8 +578,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "material button");
   REQUIRE(button != nullptr);
-  REQUIRE(button->color.red == light.colors.on_primary.red);
-  REQUIRE(button->font_size == light.typography.label);
+  REQUIRE(button->style.foreground.red == light.colors.on_primary.red);
+  REQUIRE(button->style.font.Size() == light.typography.label);
   const DrawRectCommand* background = FindRect(initial, button->rect);
   REQUIRE(background != nullptr);
   REQUIRE(background->color.red == light.colors.primary.red);
@@ -923,7 +935,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   const FlattenedScene& scene = overlay.BuildFrame();
   const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
   REQUIRE(disabled != nullptr);
-  REQUIRE(disabled->color.alpha == 1.0F);
+  REQUIRE(disabled->style.foreground.alpha == 1.0F);
 
   const auto* overlay_root = overlay.RootNode();
   REQUIRE(overlay_root != nullptr);
@@ -1001,7 +1013,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   REQUIRE(focus_changes.back() == "first:off");
   const DrawTextCommand* first_text = FindText(disabled_first, "first");
   REQUIRE(first_text != nullptr);
-  REQUIRE(first_text->color.alpha == 1.0F);
+  REQUIRE(first_text->style.foreground.alpha == 1.0F);
   const detail::MountedNode* first_node = FindMountedText(*runtime.RootNode(), "first");
   REQUIRE(first_node != nullptr);
   REQUIRE(std::abs(first_node->render_node.opacity - 0.3F) < 0.001F);
@@ -1225,7 +1237,7 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(presented_toast_background->y == 36.0F);
   const DrawTextCommand* toast_text = FindText(toast, "saved");
   REQUIRE(toast_text != nullptr);
-  REQUIRE(toast_text->color.green == Color::Rgb(240, 245, 250).green);
+  REQUIRE(toast_text->style.foreground.green == Color::Rgb(240, 245, 250).green);
   platform.AdvanceTime(0.5);
   runtime.BuildFrame();
   const FlattenedScene& expired = runtime.BuildFrame();
@@ -1293,7 +1305,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   REQUIRE(FindRectWithColor(toast, toast_background) != nullptr);
   const DrawTextCommand* toast_text = FindText(toast, "dark toast");
   REQUIRE(toast_text != nullptr);
-  REQUIRE(toast_text->color.red == dark.colors.surface.red);
+  REQUIRE(toast_text->style.foreground.red == dark.colors.surface.red);
 
   saved_dialogs->Show([] { return Text("dark dialog"); }, huxerui::DialogOptions{false});
   const FlattenedScene& dialog = runtime.BuildFrame();
@@ -1350,7 +1362,7 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
     }
   }
   REQUIRE(transform != nullptr);
-  REQUIRE(animated->color.alpha == 1.0F);
+  REQUIRE(animated->style.foreground.alpha == 1.0F);
   REQUIRE(std::abs(runtime.RootNode()->render_node.opacity - 0.5F) < 0.01F);
 
   platform.AdvanceTime(0.5);
@@ -1493,7 +1505,7 @@ TEST_CASE("TestModifierPresentationGeometry") {
   }
   const DrawTextCommand* presented_text = FindText(pressed, "presented");
   REQUIRE(presented_text != nullptr);
-  REQUIRE(presented_text->color.alpha == 1.0F);
+  REQUIRE(presented_text->style.foreground.alpha == 1.0F);
   REQUIRE(translated);
   REQUIRE(presented_rectangles >= 2);
 }

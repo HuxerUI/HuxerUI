@@ -29,8 +29,7 @@ View AccentTheme(Factory&& content) {
   ThemeDefinition definition;
   definition.Set(ButtonStyle{
       .background = Color::Rgb(207, 34, 46),
-      .foreground = Color::White(),
-      .font_size = 14.0F,
+      .label_style = TextStyle{Font::System(14.0F), Color::White()},
       .padding = EdgeInsets::Symmetric(16.0F, 8.0F),
       .corner_radius = 12.0F,
   });

@@ -18,11 +18,13 @@ std::optional<AppDefinition>& AppRegistration() {
 
 } // namespace
 
-std::unique_ptr<detail::TextLayout>
-PlatformHost::CreateTextLayout(std::string_view text, float font_size, float max_width) {
+std::unique_ptr<detail::TextLayout> PlatformHost::CreateTextLayout(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+) {
   static_cast<void>(text);
-  static_cast<void>(font_size);
+  static_cast<void>(style);
   static_cast<void>(max_width);
+  static_cast<void>(options);
   return {};
 }
 

@@ -32,10 +32,6 @@ struct TextEntry {
   TextEntryGeometry geometry;
 };
 
-float ResolveFontSize(const detail::MountedNode& node) {
-  return node.style.font_size.value_or(TextStyle::Default().font_size);
-}
-
 Rect ContentRect(const detail::MountedNode& node) {
   return {
       node.bounds.x + node.style.padding.left,
@@ -245,7 +241,7 @@ private:
           text->identity,
           total_length_,
           length,
-          platform.CreateTextLayout(text->text, ResolveFontSize(*text), width),
+          platform.CreateTextLayout(text->text, text->style.text_style, width),
           {},
       });
       document_ += text->text;

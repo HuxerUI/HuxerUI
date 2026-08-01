@@ -720,11 +720,11 @@ public:
 
 Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The PaintSequence never receives the real text.
 
-The built-in text-layout capability remains internal to HuxerUI. A later public Canvas or custom text control API can expose it after the lifetime and caching model is proven.
+Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and native editable layouts.
 
 The TextField caches layout by text, font, available width, multiline configuration, and relevant style values.
 
-SweetEditor supplies its own geometry from its existing layout engine. It does not use the built-in TextField text layout.
+Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
 
 Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform host converts those coordinates to the native coordinate space required by its input API.
 
@@ -787,8 +787,8 @@ TextField uses a semantic style key:
 ```cpp
 struct TextFieldStyle {
   Color background;
-  Color foreground;
-  Color placeholder;
+  TextStyle text_style;
+  TextStyle placeholder_style;
   Color selection;
   Color caret;
   Color composition;
@@ -796,14 +796,13 @@ struct TextFieldStyle {
   Color focused_border;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
-  float font_size = 14.0F;
   float corner_radius = 0.0F;
   EdgeInsets padding;
   float minimum_height = 0.0F;
   double caret_blink_interval = 0.5;
   Color validation_error;
   float validation_border_width = 2.0F;
-  float validation_font_size = 12.0F;
+  TextStyle validation_text_style;
   float validation_spacing = 4.0F;
 
   static TextFieldStyle Default();
