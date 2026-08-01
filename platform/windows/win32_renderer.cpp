@@ -198,7 +198,10 @@ struct Win32Renderer::State {
   struct ShadowMask {
     Size size;
     float corner_radius = 0.0F;
+    float blur_radius = 0.0F;
     ComPtr<ID2D1CommandList> commands;
+    // The exterior clip removes the caster from the blurred mask so offsets never form a solid duplicate shape.
+    ComPtr<ID2D1Geometry> exterior_clip;
   };
 
   Size MeasureText(std::string_view text, float font_size, float max_width) {
@@ -358,7 +361,7 @@ struct Win32Renderer::State {
   }
 
   bool EnsureShadowResources() {
-    if (shadow_context_ && shadow_brush_ && shadow_effect_) {
+    if (shadow_context_ && shadow_brush_ && shadow_effect_ && shadow_clip_layer_) {
       return true;
     }
     DiscardShadowResources();
@@ -366,12 +369,11 @@ struct Win32Renderer::State {
     ComPtr<ID2D1DeviceContext> shadow_context;
     ComPtr<ID2D1SolidColorBrush> shadow_brush;
     ComPtr<ID2D1Effect> shadow_effect;
+    ComPtr<ID2D1Layer> shadow_clip_layer;
     if (FAILED(d2d_device_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, shadow_context.GetAddressOf())) ||
-        FAILED(shadow_context->CreateSolidColorBrush(
-            D2D1::ColorF(D2D1::ColorF::White),
-            shadow_brush.GetAddressOf()
-        )) ||
-        FAILED(device_context_->CreateEffect(CLSID_D2D1Shadow, shadow_effect.GetAddressOf()))) {
+        FAILED(shadow_context->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), shadow_brush.GetAddressOf())) ||
+        FAILED(device_context_->CreateEffect(CLSID_D2D1Shadow, shadow_effect.GetAddressOf())) ||
+        FAILED(device_context_->CreateLayer(nullptr, shadow_clip_layer.GetAddressOf()))) {
       return false;
     }
 
@@ -379,6 +381,7 @@ struct Win32Renderer::State {
     shadow_context_ = std::move(shadow_context);
     shadow_brush_ = std::move(shadow_brush);
     shadow_effect_ = std::move(shadow_effect);
+    shadow_clip_layer_ = std::move(shadow_clip_layer);
     return true;
   }
 
@@ -485,6 +488,7 @@ struct Win32Renderer::State {
     shadow_masks_.clear();
     shadow_effect_.Reset();
     shadow_brush_.Reset();
+    shadow_clip_layer_.Reset();
     shadow_context_.Reset();
   }
 
@@ -828,11 +832,11 @@ struct Win32Renderer::State {
       return;
     }
 
-    ComPtr<ID2D1CommandList> mask = ShadowMaskFor(resolved);
+    const ShadowMask* mask = ShadowMaskFor(resolved, command.blur_radius);
     if (mask == nullptr) {
       return;
     }
-    shadow_effect_->SetInput(0, mask.Get());
+    shadow_effect_->SetInput(0, mask->commands.Get());
     if (FAILED(shadow_effect_->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, resolved.standard_deviation)) ||
         FAILED(shadow_effect_->SetValue(
             D2D1_SHADOW_PROP_COLOR,
@@ -846,23 +850,37 @@ struct Win32Renderer::State {
     D2D1_MATRIX_3X2_F previous;
     device_context_->GetTransform(&previous);
     device_context_->SetTransform(D2D1::Matrix3x2F::Translation(resolved.caster.x, resolved.caster.y) * previous);
+
+    device_context_->PushLayer(
+        D2D1::LayerParameters1(
+            D2D1::InfiniteRect(),
+            mask->exterior_clip.Get(),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::Matrix3x2F::Identity(),
+            1.0F,
+            nullptr,
+            D2D1_LAYER_OPTIONS1_NONE
+        ),
+        shadow_clip_layer_.Get()
+    );
     device_context_->DrawImage(shadow_effect_.Get());
+    device_context_->PopLayer();
     device_context_->SetTransform(previous);
     shadow_effect_->SetInput(0, nullptr);
   }
 
-  ComPtr<ID2D1CommandList> ShadowMaskFor(const ResolvedShadow& shadow) {
+  ShadowMask* ShadowMaskFor(const ResolvedShadow& shadow, float blur_radius) {
     const Size size{shadow.caster.width, shadow.caster.height};
     const auto existing = std::find_if(shadow_masks_.begin(), shadow_masks_.end(), [&](const ShadowMask& mask) {
-      return mask.size == size && mask.corner_radius == shadow.corner_radius;
+      return mask.size == size && mask.corner_radius == shadow.corner_radius && mask.blur_radius == blur_radius;
     });
     if (existing != shadow_masks_.end()) {
-      return existing->commands;
+      return &*existing;
     }
 
     ComPtr<ID2D1CommandList> commands;
     if (FAILED(shadow_context_->CreateCommandList(commands.GetAddressOf()))) {
-      return {};
+      return nullptr;
     }
     shadow_context_->SetTarget(commands.Get());
     shadow_context_->BeginDraw();
@@ -882,15 +900,66 @@ struct Win32Renderer::State {
     const HRESULT result = shadow_context_->EndDraw();
     shadow_context_->SetTarget(nullptr);
     if (FAILED(result) || FAILED(commands->Close())) {
-      return {};
+      return nullptr;
+    }
+
+    ComPtr<ID2D1RectangleGeometry> outer;
+    ComPtr<ID2D1PathGeometry> outside_path;
+    ComPtr<ID2D1GeometrySink> outside_sink;
+    const D2D1_RECT_F outer_rect =
+        D2D1::RectF(-blur_radius, -blur_radius, size.width + blur_radius, size.height + blur_radius);
+    if (FAILED(d2d_factory_->CreateRectangleGeometry(outer_rect, outer.GetAddressOf())) ||
+        FAILED(d2d_factory_->CreatePathGeometry(outside_path.GetAddressOf())) ||
+        FAILED(outside_path->Open(outside_sink.GetAddressOf()))) {
+      return nullptr;
+    }
+
+    HRESULT combine_result = E_FAIL;
+    if (shadow.corner_radius > 0.0F) {
+      ComPtr<ID2D1RoundedRectangleGeometry> caster;
+      if (FAILED(d2d_factory_->CreateRoundedRectangleGeometry(
+              D2D1::RoundedRect(
+                  D2D1::RectF(0.0F, 0.0F, size.width, size.height),
+                  shadow.corner_radius,
+                  shadow.corner_radius
+              ),
+              caster.GetAddressOf()
+          ))) {
+        return nullptr;
+      }
+      combine_result = outer->CombineWithGeometry(
+          caster.Get(),
+          D2D1_COMBINE_MODE_EXCLUDE,
+          nullptr,
+          D2D1_DEFAULT_FLATTENING_TOLERANCE,
+          outside_sink.Get()
+      );
+    } else {
+      ComPtr<ID2D1RectangleGeometry> caster;
+      if (FAILED(d2d_factory_->CreateRectangleGeometry(
+              D2D1::RectF(0.0F, 0.0F, size.width, size.height),
+              caster.GetAddressOf()
+          ))) {
+        return nullptr;
+      }
+      combine_result = outer->CombineWithGeometry(
+          caster.Get(),
+          D2D1_COMBINE_MODE_EXCLUDE,
+          nullptr,
+          D2D1_DEFAULT_FLATTENING_TOLERANCE,
+          outside_sink.Get()
+      );
+    }
+    if (FAILED(combine_result) || FAILED(outside_sink->Close())) {
+      return nullptr;
     }
 
     constexpr std::size_t maximum_shadow_masks = 64;
     if (shadow_masks_.size() >= maximum_shadow_masks) {
       shadow_masks_.erase(shadow_masks_.begin());
     }
-    shadow_masks_.push_back({size, shadow.corner_radius, commands});
-    return commands;
+    shadow_masks_.push_back({size, shadow.corner_radius, blur_radius, commands, outside_path});
+    return &shadow_masks_.back();
   }
 
   void RenderCommand(const PushClipCommand& command) {
@@ -983,6 +1052,7 @@ struct Win32Renderer::State {
   ComPtr<ID2D1SolidColorBrush> brush_;
   ComPtr<ID2D1SolidColorBrush> shadow_brush_;
   ComPtr<ID2D1Effect> shadow_effect_;
+  ComPtr<ID2D1Layer> shadow_clip_layer_;
   std::vector<ShadowMask> shadow_masks_;
   std::vector<ClipState> clip_stack_;
   std::vector<D2D1_MATRIX_3X2_F> transform_stack_;

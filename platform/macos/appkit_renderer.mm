@@ -573,12 +573,6 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawShadowCommand
   CGContextFillPath(context);
   CGContextRestoreGState(context);
 
-  CGContextSaveGState(context);
-  CGContextSetFillColorWithColor(context, shadow_color);
-  CGContextAddPath(context, caster_path);
-  CGContextFillPath(context);
-  CGContextRestoreGState(context);
-
   CGColorRelease(shadow_color);
   CGPathRelease(outer_clip);
   CGPathRelease(caster_path);

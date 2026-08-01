@@ -57,7 +57,6 @@ final class HuxerUIShadowRenderer {
         } else {
             drawCachedShadow(canvas, x, y, width, height, color, blurRadius, cornerRadius);
         }
-        drawCaster(canvas, color, cornerRadius);
     }
 
     private void drawCachedShadow(Canvas canvas, float x, float y, float width, float height, int color,

@@ -76,7 +76,7 @@ Button("Save").With(
 ```
 
 `Shadow` paints a Gaussian-blurred copy of the node's rectangular or rounded-rectangular shape behind its background.
-The shadow includes the caster interior; a node background is painted afterward and normally covers that portion.
+Blurred shadows exclude the caster interior so offsets produce a soft exterior elevation instead of a second solid shape.
 It follows presentation transforms and group opacity without changing measurement, layout, clipping, or hit testing.
 The blur radius is the outer falloff extent in logical units, while positive and negative spread expand and contract the shadow caster.
 The complete shadow overflow participates in visibility and damage calculation.
