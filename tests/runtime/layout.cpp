@@ -1,6 +1,9 @@
 #include "runtime_test_support.h"
 
 #include <limits>
+#include <vector>
+
+#include "image_test_support.h"
 
 namespace huxerui::test {
 
@@ -8,6 +11,22 @@ State<bool> use_column_layout;
 State<bool> use_long_cached_text;
 State<bool> expand_cached_scope;
 State<bool> update_opaque_layout_value;
+ImageAsset layout_test_image;
+ImageFit layout_test_image_fit = ImageFit::Contain;
+HorizontalAlignment layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
+VerticalAlignment layout_test_image_vertical_alignment = VerticalAlignment::Center;
+ImageSampling layout_test_image_sampling = ImageSampling::Linear;
+Size layout_test_image_frame{100.0F, 100.0F};
+
+View ImageLayoutApp() {
+  return Column {
+    Image(layout_test_image)
+        .Fit(layout_test_image_fit)
+        .Align(layout_test_image_horizontal_alignment, layout_test_image_vertical_alignment)
+        .Sampling(layout_test_image_sampling)
+        .With(Frame{.width = layout_test_image_frame.width, .height = layout_test_image_frame.height}),
+  };
+}
 
 struct FlowBreakBefore {
   using Value = bool;
@@ -134,11 +153,11 @@ View StackAlignmentApp() {
   return Stack {
     Text("A").With(huxerui::Frame{20.0F, 10.0F}),
   }.With(
-      huxerui::Align{
-          HorizontalAlignment::End,
-          VerticalAlignment::Center,
-      }
-  );
+          huxerui::Align{
+              HorizontalAlignment::End,
+              VerticalAlignment::Center,
+          }
+      );
 }
 
 View StretchLayoutApp() {
@@ -274,7 +293,7 @@ View ReactiveStateApiApp() {
     Button("Update").OnClick([taps, items] {
       taps += 1;
       items.Update([](auto& values) { values.push_back("Charlie"); });
-    }),
+      }),
   };
 }
 
@@ -324,6 +343,101 @@ TEST_CASE("TestMainAndCrossAxisAlignment") {
   REQUIRE(root->children[0]->layout_offset.y == 0.0F);
   REQUIRE(root->children[1]->layout_offset.x == 40.0F);
   REQUIRE(root->children[1]->layout_offset.y == 80.0F);
+}
+
+TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {
+  layout_test_image = ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
+  layout_test_image_fit = ImageFit::Contain;
+  layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
+  layout_test_image_vertical_alignment = VerticalAlignment::Center;
+  layout_test_image_sampling = ImageSampling::Linear;
+  layout_test_image_frame = {100.0F, 100.0F};
+
+  TestPlatform platform;
+  Runtime runtime{ImageLayoutApp, platform};
+  runtime.SetViewport({200.0F, 200.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto image = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<DrawImageCommand>(command);
+  });
+  REQUIRE(image != scene.Commands().end());
+  const auto& command = std::get<DrawImageCommand>(*image);
+  REQUIRE(command.source == Rect{0.0F, 0.0F, 20.0F, 10.0F});
+  REQUIRE(command.destination == Rect{0.0F, 25.0F, 100.0F, 50.0F});
+}
+
+TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {
+  layout_test_image = ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
+  layout_test_image_sampling = ImageSampling::Linear;
+  layout_test_image_frame = {100.0F, 100.0F};
+  TestPlatform platform;
+
+  const auto render = [&platform](ImageFit fit, HorizontalAlignment horizontal, VerticalAlignment vertical) {
+    layout_test_image_fit = fit;
+    layout_test_image_horizontal_alignment = horizontal;
+    layout_test_image_vertical_alignment = vertical;
+    Runtime runtime{ImageLayoutApp, platform};
+    runtime.SetViewport({200.0F, 200.0F});
+    const FlattenedScene& scene = runtime.BuildFrame();
+    const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
+      return std::holds_alternative<DrawImageCommand>(value);
+    });
+    REQUIRE(command != scene.Commands().end());
+    return std::get<DrawImageCommand>(*command);
+  };
+
+  const DrawImageCommand fill = render(ImageFit::Fill, HorizontalAlignment::Center, VerticalAlignment::Center);
+  REQUIRE(fill.source == Rect{0.0F, 0.0F, 20.0F, 10.0F});
+  REQUIRE(fill.destination == Rect{0.0F, 0.0F, 100.0F, 100.0F});
+
+  const DrawImageCommand cover = render(ImageFit::Cover, HorizontalAlignment::End, VerticalAlignment::Start);
+  REQUIRE(cover.source == Rect{10.0F, 0.0F, 10.0F, 10.0F});
+  REQUIRE(cover.destination == Rect{0.0F, 0.0F, 100.0F, 100.0F});
+
+  const DrawImageCommand none = render(ImageFit::None, HorizontalAlignment::End, VerticalAlignment::Start);
+  REQUIRE(none.source == Rect{0.0F, 0.0F, 20.0F, 10.0F});
+  REQUIRE(none.destination == Rect{80.0F, 0.0F, 20.0F, 10.0F});
+
+  const DrawImageCommand scale_down =
+      render(ImageFit::ScaleDown, HorizontalAlignment::Center, VerticalAlignment::Center);
+  REQUIRE(scale_down.destination == Rect{40.0F, 45.0F, 20.0F, 10.0F});
+
+  layout_test_image_frame = {10.0F, 10.0F};
+  const DrawImageCommand constrained_scale_down =
+      render(ImageFit::ScaleDown, HorizontalAlignment::Center, VerticalAlignment::Center);
+  REQUIRE(constrained_scale_down.destination == Rect{0.0F, 2.5F, 10.0F, 5.0F});
+}
+
+TEST_CASE("TestImagePaintOnlyChangesReuseMeasuredLayout") {
+  layout_test_image = ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
+  layout_test_image_fit = ImageFit::Contain;
+  layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
+  layout_test_image_vertical_alignment = VerticalAlignment::Center;
+  layout_test_image_sampling = ImageSampling::Linear;
+  layout_test_image_frame = {100.0F, 100.0F};
+  TestPlatform platform;
+  Runtime runtime{ImageLayoutApp, platform};
+  runtime.SetViewport({200.0F, 200.0F});
+  runtime.BuildFrame();
+
+  const detail::MountedNode* image = runtime.RootNode()->children.front().get();
+  const std::uint64_t measure_revision = image->measure_revision;
+  const std::uint64_t layout_revision = image->layout_revision;
+  const std::uint64_t content_revision = image->render_node.content.Revision();
+
+  layout_test_image = ImageAsset::FromEncoded(MakeTestPng(80, 40), 4.0F);
+  layout_test_image_fit = ImageFit::Cover;
+  layout_test_image_horizontal_alignment = HorizontalAlignment::End;
+  layout_test_image_vertical_alignment = VerticalAlignment::Start;
+  layout_test_image_sampling = ImageSampling::Nearest;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+
+  image = runtime.RootNode()->children.front().get();
+  REQUIRE(image->measure_revision == measure_revision);
+  REQUIRE(image->layout_revision == layout_revision);
+  REQUIRE(image->render_node.content.Revision() > content_revision);
 }
 
 TEST_CASE("TestSpacerAndGrowLayout") {

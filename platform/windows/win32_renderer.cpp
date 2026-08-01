@@ -6,12 +6,14 @@
 #include <d3d11.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -20,6 +22,7 @@
 #include <vector>
 
 #include "path_internal.h"
+#include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
 #include "win32_internal.h"
@@ -266,6 +269,12 @@ struct Win32Renderer::State {
     ComPtr<ID2D1PathGeometry> geometry;
   };
 
+  struct CachedImage {
+    std::uint64_t identity = 0;
+    std::size_t byte_size = 0;
+    ComPtr<ID2D1Bitmap1> bitmap;
+  };
+
   struct FontHash {
     std::size_t operator()(const Font& font) const noexcept {
       return HashFont(font);
@@ -505,6 +514,12 @@ struct Win32Renderer::State {
         ),
         "HuxerUI could not create a DirectWrite factory"
     );
+    static_cast<void>(CoCreateInstance(
+        CLSID_WICImagingFactory,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(wic_factory_.GetAddressOf())
+    ));
   }
 
   [[nodiscard]] float DpiScale() const noexcept {
@@ -967,6 +982,8 @@ struct Win32Renderer::State {
     DiscardSizeDependentResources();
     DiscardShadowResources();
     path_geometries_.clear();
+    images_.clear();
+    image_cache_bytes_ = 0;
     brush_.Reset();
     swap_chain_.Reset();
     device_context_.Reset();
@@ -1182,6 +1199,100 @@ struct Win32Renderer::State {
           D2D1_DRAW_TEXT_OPTIONS_NONE
       );
     }
+  }
+
+  ComPtr<ID2D1Bitmap1> ImageBitmapFor(const ImageAsset& image) {
+    const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
+    const auto cached =
+        std::ranges::find_if(images_, [identity](const CachedImage& entry) { return entry.identity == identity; });
+    if (cached != images_.end()) {
+      std::rotate(cached, cached + 1, images_.end());
+      return images_.back().bitmap;
+    }
+    if (!wic_factory_ && FAILED(CoCreateInstance(
+                             CLSID_WICImagingFactory,
+                             nullptr,
+                             CLSCTX_INPROC_SERVER,
+                             IID_PPV_ARGS(wic_factory_.GetAddressOf())
+                         ))) {
+      return {};
+    }
+    const std::span<const std::byte> bytes = image.EncodedBytes();
+    if (bytes.empty() || bytes.size() > std::numeric_limits<DWORD>::max()) {
+      return {};
+    }
+    ComPtr<IWICStream> stream;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICFormatConverter> converter;
+    ComPtr<ID2D1Bitmap1> bitmap;
+    if (FAILED(wic_factory_->CreateStream(stream.GetAddressOf())) ||
+        FAILED(stream->InitializeFromMemory(
+            reinterpret_cast<BYTE*>(const_cast<std::byte*>(bytes.data())),
+            static_cast<DWORD>(bytes.size())
+        )) ||
+        FAILED(
+            wic_factory_
+                ->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, decoder.GetAddressOf())
+        ) ||
+        FAILED(decoder->GetFrame(0, frame.GetAddressOf())) ||
+        FAILED(wic_factory_->CreateFormatConverter(converter.GetAddressOf())) ||
+        FAILED(converter->Initialize(
+            frame.Get(),
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeMedianCut
+        )) ||
+        FAILED(device_context_->CreateBitmapFromWicBitmap(converter.Get(), nullptr, bitmap.GetAddressOf()))) {
+      return {};
+    }
+    const D2D1_SIZE_U pixel_size = bitmap->GetPixelSize();
+    const std::size_t byte_size =
+        pixel_size.width > std::numeric_limits<std::size_t>::max() / 4U / std::max(1U, pixel_size.height)
+            ? std::numeric_limits<std::size_t>::max()
+            : static_cast<std::size_t>(pixel_size.width) * pixel_size.height * 4U;
+    constexpr std::size_t image_cache_budget = 64U * 1024U * 1024U;
+    if (byte_size > image_cache_budget) {
+      // Retain one oversized image so repeated frames do not decode it again; the next insertion evicts it.
+      images_.clear();
+      images_.push_back({identity, byte_size, bitmap});
+      image_cache_bytes_ = byte_size;
+      return images_.back().bitmap;
+    }
+    while (!images_.empty() && image_cache_bytes_ > image_cache_budget - byte_size) {
+      image_cache_bytes_ -= images_.front().byte_size;
+      images_.erase(images_.begin());
+    }
+    images_.push_back({identity, byte_size, bitmap});
+    image_cache_bytes_ += byte_size;
+    return bitmap;
+  }
+
+  void RenderCommand(const DrawImageCommand& command) {
+    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
+      return;
+    }
+    ComPtr<ID2D1Bitmap1> bitmap = ImageBitmapFor(command.image);
+    if (!bitmap) {
+      return;
+    }
+    const float scale = command.image.Scale();
+    const D2D1_RECT_F source = D2D1::RectF(
+        command.source.x * scale,
+        command.source.y * scale,
+        (command.source.x + command.source.width) * scale,
+        (command.source.y + command.source.height) * scale
+    );
+    device_context_->DrawBitmap(
+        bitmap.Get(),
+        ToD2DRect(command.destination),
+        command.opacity,
+        command.sampling == ImageSampling::Nearest ? D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
+                                                   : D2D1_INTERPOLATION_MODE_LINEAR,
+        source
+    );
   }
 
   ComPtr<ID2D1StrokeStyle>
@@ -1717,6 +1828,7 @@ struct Win32Renderer::State {
   bool supports_dirty_present_ = false;
   ComPtr<ID2D1Factory1> d2d_factory_;
   ComPtr<IDWriteFactory> write_factory_;
+  ComPtr<IWICImagingFactory> wic_factory_;
   ComPtr<ID3D11Device> d3d_device_;
   ComPtr<ID2D1Device> d2d_device_;
   ComPtr<ID2D1DeviceContext> device_context_;
@@ -1730,6 +1842,8 @@ struct Win32Renderer::State {
   ComPtr<ID2D1Layer> shadow_clip_layer_;
   std::vector<ShadowMask> shadow_masks_;
   std::vector<CachedPathGeometry> path_geometries_;
+  std::vector<CachedImage> images_;
+  std::size_t image_cache_bytes_ = 0;
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;

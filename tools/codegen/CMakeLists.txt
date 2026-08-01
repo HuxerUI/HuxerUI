@@ -18,5 +18,6 @@ target_compile_options(huxerui_codegen PRIVATE
 )
 
 set_target_properties(huxerui_codegen PROPERTIES
+        CXX_EXTENSIONS OFF
         OUTPUT_NAME "huxerui-codegen"
 )

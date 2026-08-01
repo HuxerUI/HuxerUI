@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <objbase.h>
 
 #include <algorithm>
 #include <chrono>
@@ -7,6 +8,8 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -20,6 +23,7 @@
 #include <huxerui/app.h>
 
 #include "host_frame_internal.h"
+#include "resource_internal.h"
 #include "text_layout_internal.h"
 #include "win32_internal.h"
 #include "win32_renderer.h"
@@ -200,7 +204,9 @@ std::string TranslateKeyText(WPARAM virtual_key, LPARAM key_data) {
   return WideToUtf8(std::wstring_view(characters, static_cast<std::size_t>(length)));
 }
 } // namespace
-class Win32PlatformHost final : public huxerui::PlatformHost, public huxerui::PlatformClipboard {
+class Win32PlatformHost final : public huxerui::PlatformHost,
+                                public huxerui::PlatformClipboard,
+                                public huxerui::PlatformResources {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     runtime_ = &runtime;
@@ -208,9 +214,15 @@ public:
     win32_api_.ConfigureProcessDpiAwareness();
 
     try {
+      const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+      if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) {
+        throw std::runtime_error("HuxerUI could not initialize Windows COM services");
+      }
+      com_initialized_ = SUCCEEDED(com_result);
       renderer_.Initialize();
       RegisterWindowClass();
       CreateApplicationWindow(options);
+      runtime_->UpdateResourceContext(Context());
 
       ShowWindow(window_, SW_SHOW);
       UpdateWindow(window_);
@@ -311,6 +323,55 @@ public:
 
   PlatformClipboard* Clipboard() noexcept override {
     return this;
+  }
+
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  ResourceContext Context() const override {
+    wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
+    Locale locale = Locale::Default();
+    if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) > 0) {
+      locale = Locale::FromLanguageTag(WideToUtf8(locale_name));
+    }
+    const UINT dpi = window_ != nullptr ? win32_api_.WindowDpi(window_) : win32_api_.SystemDpi();
+    return {std::move(locale), static_cast<float>(dpi) / kDipsPerInch};
+  }
+
+  RawAsset Read(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI Windows resource path is invalid");
+    }
+    std::wstring executable_path(32768, L'\0');
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable_path.data(), static_cast<DWORD>(executable_path.size()));
+    if (length == 0 || length >= executable_path.size()) {
+      throw std::logic_error("HuxerUI Windows executable path could not be resolved");
+    }
+    executable_path.resize(length);
+    std::filesystem::path resource_root(executable_path);
+    resource_root.replace_extension(L".resources");
+    const std::wstring wide_package_path = Utf8ToWide(package_path);
+    if (wide_package_path.empty()) {
+      throw std::logic_error("HuxerUI Windows resource path is not valid UTF-8");
+    }
+    const std::filesystem::path path = resource_root / std::filesystem::path(wide_package_path);
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+      return {};
+    }
+    stream.seekg(0, std::ios::end);
+    const std::streamoff size = stream.tellg();
+    if (size < 0) {
+      throw std::logic_error("HuxerUI Windows resource size is invalid: " + WideToUtf8(path.native()));
+    }
+    stream.seekg(0, std::ios::beg);
+    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+    if (!bytes.empty() && !stream.read(reinterpret_cast<char*>(bytes.data()), size)) {
+      throw std::logic_error("HuxerUI Windows resource could not be read: " + WideToUtf8(path.native()));
+    }
+    return RawAsset::FromBytes(std::move(bytes));
   }
 
   std::optional<std::string> ReadText() override {
@@ -432,6 +493,10 @@ private:
       window_ = nullptr;
     }
     renderer_.Discard();
+    if (com_initialized_) {
+      CoUninitialize();
+      com_initialized_ = false;
+    }
     if (class_atom_ != 0 && instance_ != nullptr) {
       UnregisterClassW(kWindowClassName, instance_);
       class_atom_ = 0;
@@ -602,9 +667,13 @@ private:
           SWP_NOACTIVATE | SWP_NOZORDER
       );
       UpdateRuntimeViewport();
+      runtime_->UpdateResourceContext(Context());
       RequestFrameAt(Now());
       return 0;
     }
+    case WM_SETTINGCHANGE:
+      runtime_->UpdateResourceContext(Context());
+      return 0;
     case WM_DISPLAYCHANGE:
       renderer_.ResetDeviceResources();
       RequestFrameAt(Now());
@@ -771,6 +840,7 @@ private:
   HostFrameState frame_state_;
   bool mouse_tracking_ = false;
   bool pointer_down_ = false;
+  bool com_initialized_ = false;
   Point last_pointer_position_;
   Win32TextInput text_input_;
   std::exception_ptr failure_;

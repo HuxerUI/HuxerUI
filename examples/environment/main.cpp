@@ -5,17 +5,17 @@
 
 using namespace huxerui;
 
-struct Locale {
+struct GreetingLocale {
   std::string name;
   std::string greeting;
 
-  static Locale Default() {
+  static GreetingLocale Default() {
     return {"Default", "Hello"};
   }
 };
 
 View LocaleCard(std::string title) {
-  const auto& locale = UseEnvironment<Locale>();
+  const auto& locale = UseEnvironment<GreetingLocale>();
   const auto& theme = UseTheme();
   return Column {
     Text(std::move(title), TextRole::Label),
@@ -35,7 +35,7 @@ View FrenchContent() {
 View ProvidedContent() {
   return Column {
     LocaleCard("Inherited from the nearest provider"),
-    ProvideEnvironment(Locale {"French", "Bonjour"}, FrenchContent),
+    ProvideEnvironment(GreetingLocale {"French", "Bonjour"}, FrenchContent),
   }.With(Spacing(UseTheme().spacing.medium));
 }
 
@@ -43,9 +43,9 @@ View ProvidedContent() {
 View EnvironmentContent() {
   auto use_chinese = UseState(true);
   const ThemeSpec& theme = UseTheme();
-  Locale locale = use_chinese
-      ? Locale {"Chinese", "你好"}
-      : Locale {"English", "Hello"};
+  GreetingLocale locale = use_chinese
+      ? GreetingLocale {"Chinese", "你好"}
+      : GreetingLocale {"English", "Hello"};
 
   return Column {
     Text("Environment", TextRole::Title),
@@ -53,7 +53,7 @@ View EnvironmentContent() {
         "A provider supplies a typed value to its subtree. "
         "The closest provider wins."
     ),
-    LocaleCard("No provider uses Locale::Default()"),
+    LocaleCard("No provider uses GreetingLocale::Default()"),
     ProvideEnvironment(std::move(locale), ProvidedContent),
     Button("Toggle outer locale").OnClick([use_chinese] {
       use_chinese = !use_chinese;

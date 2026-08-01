@@ -23,6 +23,7 @@
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
+#include <huxerui/resource.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>
 #include <huxerui/text.h>
@@ -39,6 +40,14 @@ enum class TextRole {
   Body,
   Label,
   Title,
+};
+
+enum class ImageFit {
+  None,
+  Contain,
+  Cover,
+  Fill,
+  ScaleDown,
 };
 
 namespace detail {
@@ -137,6 +146,9 @@ protected:
   void AddModifier(detail::ModifierSpec modifier);
   void SetModifier(detail::ModifierSpec modifier);
   void SetTextStyle(TextStyle style);
+  void SetImageFit(ImageFit fit);
+  void SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment vertical);
+  void SetImageSampling(ImageSampling sampling);
   void SetKey(std::int64_t value);
   void SetKey(std::uint64_t value);
   void SetKey(std::string value);
@@ -479,6 +491,7 @@ protected:
 
 class Text final : public View {
 public:
+  explicit Text(StringResource resource, TextRole role = TextRole::Body);
   explicit Text(std::string value, TextRole role = TextRole::Body);
   explicit Text(std::string_view value, TextRole role = TextRole::Body);
   explicit Text(const char* value, TextRole role = TextRole::Body);
@@ -489,9 +502,18 @@ public:
     return Text(detail::InterpolateText(format, arguments...));
   }
 
+  template <class... Arguments> static Text Format(StringResource resource, const Arguments&... arguments) {
+    return Text(UseString(std::move(resource), arguments...));
+  }
+
   template <class... Arguments>
   static Text Format(TextRole role, std::string_view format, const Arguments&... arguments) {
     return Text(detail::InterpolateText(format, arguments...), role);
+  }
+
+  template <class... Arguments>
+  static Text Format(TextRole role, StringResource resource, const Arguments&... arguments) {
+    return Text(UseString(std::move(resource), arguments...), role);
   }
 
   template <class T>
@@ -503,6 +525,16 @@ public:
   explicit Button(std::string label);
   explicit Button(std::string_view label);
   explicit Button(const char* label);
+};
+
+class Image final : public View {
+public:
+  explicit Image(ImageResource resource);
+  explicit Image(ImageAsset asset);
+
+  Image Fit(ImageFit fit) &&;
+  Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;
+  Image Sampling(ImageSampling sampling) &&;
 };
 
 using CanvasPainter = std::function<void(PaintContext&, Size)>;

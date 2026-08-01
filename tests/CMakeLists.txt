@@ -11,6 +11,7 @@ add_executable(huxerui_tests
         unit/host_frame.cpp
         unit/paint.cpp
         unit/path.cpp
+        unit/resource.cpp
         unit/text.cpp
         unit/text_input.cpp
         unit/validation.cpp
@@ -20,6 +21,7 @@ add_executable(huxerui_tests
         runtime/layout.cpp
         runtime/presentation.cpp
         runtime/render_scene.cpp
+        runtime/resources.cpp
         runtime/scrolling.cpp
         runtime/selection_area.cpp
         runtime/text_field.cpp
@@ -78,6 +80,7 @@ set(HUXERUI_PUBLIC_HEADERS
         paint.h
         presentation.h
         render_scene.h
+        resource.h
         root.h
         scroll.h
         state.h
@@ -137,6 +140,34 @@ target_compile_options(huxerui_codegen_tests PRIVATE
 target_link_libraries(huxerui_codegen_tests PRIVATE HuxerUI3p::Catch2)
 
 add_test(NAME HuxerUICodegenTests COMMAND huxerui_codegen_tests)
+
+add_executable(huxerui_resource_codegen_tests
+        tests_main.cpp
+        resource_codegen/generator.cpp
+        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen/generator.cpp"
+)
+
+target_compile_features(huxerui_resource_codegen_tests PRIVATE cxx_std_20)
+target_include_directories(huxerui_resource_codegen_tests PRIVATE
+        "${HUXERUI_PROJECT_DIR}/src"
+        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen"
+        "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+target_compile_options(huxerui_resource_codegen_tests PRIVATE
+        "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+        "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+)
+
+target_link_libraries(huxerui_resource_codegen_tests PRIVATE
+        HuxerUI3p::Catch2
+        ${HUXERUI_TEST_LIBRARY}
+)
+
+add_test(NAME HuxerUIResourceCodegenTests COMMAND huxerui_resource_codegen_tests)
 
 add_executable(huxerui_codegen_runtime_tests
         tests_main.cpp

@@ -568,16 +568,16 @@ const Value& UseEnvironment();
 The Environment value type is also its lookup identity and provides its fallback through `Value::Default()`.
 
 ```cpp
-struct Locale {
+struct GreetingLocale {
   std::string language;
 
-  static Locale Default() {
+  static GreetingLocale Default() {
     return {"en"};
   }
 };
 
-const Locale& locale = UseEnvironment<Locale>();
-return ProvideEnvironment(Locale{"fr"}, Content);
+const GreetingLocale& locale = UseEnvironment<GreetingLocale>();
+return ProvideEnvironment(GreetingLocale{"fr"}, Content);
 ```
 
 Use a semantic wrapper when two ambient values share the same underlying representation. Primitive or third-party representation types are not separate Environment keys by themselves.

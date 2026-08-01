@@ -105,6 +105,7 @@ Platform-native geometry, masks, layers, and device-dependent caches never enter
 
 ## Deferred capabilities
 
-The initial Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradients, images, or Path-based pointer hit testing.
+The initial Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradients, or Path-based pointer hit testing.
 Those capabilities can extend Path or PaintCommand without changing Canvas ownership or invalidation.
+ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
 A generic Brush abstraction should be introduced when a second real paint source such as gradients is implemented, not in anticipation of one.

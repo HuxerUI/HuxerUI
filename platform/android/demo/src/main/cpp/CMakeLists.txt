@@ -4,37 +4,27 @@ project(huxerui_android_demo LANGUAGES CXX)
 if (NOT HUXERUI_ROOT_DIR)
     message(FATAL_ERROR "HUXERUI_ROOT_DIR is required")
 endif ()
-
 find_package(huxerui REQUIRED CONFIG)
 
 set(HUXERUI_PROJECT_DIR "${HUXERUI_ROOT_DIR}")
 include("${HUXERUI_ROOT_DIR}/cmake/HuxerUITargets.cmake")
-huxerui_resolve_host_tool("codegen" HUXERUI_CODEGEN_COMMAND)
+include("${HUXERUI_ROOT_DIR}/cmake/HuxerUIExamples.cmake")
 
-set(HUXERUI_THEME_SOURCE
-        "${HUXERUI_ROOT_DIR}/examples/ui_gallery/main.cpp"
-)
-set(HUXERUI_GENERATED_THEME_SOURCE
-        "${CMAKE_CURRENT_BINARY_DIR}/generated/ui_gallery.cpp"
-)
+set(HUXERUI_DEMO_EXAMPLE "ui_gallery" CACHE STRING "Example displayed by the Android demo")
+if (NOT HUXERUI_DEMO_EXAMPLE MATCHES "^[a-z0-9_]+$")
+    message(FATAL_ERROR "HUXERUI_DEMO_EXAMPLE must be a snake-case example directory name")
+endif ()
 
-add_custom_command(
-        OUTPUT "${HUXERUI_GENERATED_THEME_SOURCE}"
-        COMMAND "${HUXERUI_CODEGEN_COMMAND}"
-                --input "${HUXERUI_THEME_SOURCE}"
-                --output "${HUXERUI_GENERATED_THEME_SOURCE}"
-        DEPENDS
-                "${HUXERUI_THEME_SOURCE}"
-                "${HUXERUI_CODEGEN_COMMAND}"
-        COMMENT "Generating HuxerUI Android demo source"
-        VERBATIM
+set(HUXERUI_DEMO_EXAMPLE_DIR
+        "${HUXERUI_ROOT_DIR}/examples/${HUXERUI_DEMO_EXAMPLE}"
 )
+if (NOT EXISTS "${HUXERUI_DEMO_EXAMPLE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+            "HuxerUI Android demo example does not exist: ${HUXERUI_DEMO_EXAMPLE}"
+    )
+endif ()
 
-add_library(huxerui_app SHARED
-        "${HUXERUI_GENERATED_THEME_SOURCE}"
-)
-
-target_compile_features(huxerui_app PRIVATE cxx_std_20)
-target_link_libraries(huxerui_app PRIVATE
-        huxerui::huxerui
+add_subdirectory(
+        "${HUXERUI_DEMO_EXAMPLE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}/example"
 )

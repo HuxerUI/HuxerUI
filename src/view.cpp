@@ -659,9 +659,37 @@ void View::SetModifier(detail::ModifierSpec modifier) {
   }
 }
 
+std::shared_ptr<detail::ViewSpec> MakeImageSpec(ImageAsset image) {
+  if (!image.HasValue()) {
+    throw std::invalid_argument("HuxerUI image view asset must not be empty");
+  }
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
+  spec->image.asset = std::move(image);
+  return spec;
+}
+
 void View::SetTextStyle(TextStyle style) {
   EnsureUniqueSpec();
   spec_->style.text_style = std::move(style);
+}
+
+void View::SetImageFit(ImageFit fit) {
+  EnsureUniqueSpec();
+  spec_->image.fit = fit;
+}
+
+void View::SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment vertical) {
+  if (horizontal == HorizontalAlignment::Stretch || vertical == VerticalAlignment::Stretch) {
+    throw std::invalid_argument("HuxerUI image content alignment must not use Stretch");
+  }
+  EnsureUniqueSpec();
+  spec_->image.horizontal_alignment = horizontal;
+  spec_->image.vertical_alignment = vertical;
+}
+
+void View::SetImageSampling(ImageSampling sampling) {
+  EnsureUniqueSpec();
+  spec_->image.sampling = sampling;
 }
 
 void View::SetKey(std::int64_t value) {
@@ -714,6 +742,8 @@ void View::EnsureUniqueSpec() {
   }
 }
 
+Text::Text(StringResource resource, TextRole role) : Text(UseString(std::move(resource)), role) {}
+
 Text::Text(std::string value, TextRole role) : View(MakeTextSpec(std::move(value), role)) {}
 
 Text::Text(std::string_view value, TextRole role) : Text(std::string(value), role) {}
@@ -730,6 +760,25 @@ Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
 Button::Button(std::string_view label) : Button(std::string(label)) {}
 
 Button::Button(const char* label) : Button(label == nullptr ? std::string{} : std::string(label)) {}
+
+Image::Image(ImageResource resource) : Image(UseImage(std::move(resource))) {}
+
+Image::Image(ImageAsset asset) : View(MakeImageSpec(std::move(asset))) {}
+
+Image Image::Fit(ImageFit fit) && {
+  SetImageFit(fit);
+  return std::move(*this);
+}
+
+Image Image::Align(HorizontalAlignment horizontal, VerticalAlignment vertical) && {
+  SetImageAlignment(horizontal, vertical);
+  return std::move(*this);
+}
+
+Image Image::Sampling(ImageSampling sampling) && {
+  SetImageSampling(sampling);
+  return std::move(*this);
+}
 
 Checkbox::Checkbox(bool checked)
     : detail::TypedView<Checkbox>(MakeToggleSpec(detail::NodeKind::Checkbox, ToggleVisualKind::Checkbox, checked)) {}

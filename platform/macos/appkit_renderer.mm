@@ -2,11 +2,13 @@
 
 #import <AppKit/AppKit.h>
 #import <CoreText/CoreText.h>
+#import <ImageIO/ImageIO.h>
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -15,6 +17,7 @@
 #include <vector>
 
 #include "path_internal.h"
+#include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
 
@@ -358,6 +361,12 @@ void FillCurrentPath(CGContextRef context, PathFillRule fill_rule) {
 } // namespace
 
 struct AppKitRenderer::State {
+  struct CachedImage {
+    std::uint64_t identity = 0;
+    std::size_t byte_size = 0;
+    CFRef<CGImageRef> native_image;
+  };
+
   struct FontHash {
     std::size_t operator()(const Font& font) const noexcept {
       return HashFont(font);
@@ -619,9 +628,8 @@ struct AppKitRenderer::State {
     );
     const float content_height =
         std::max(cached_font.metrics.LineHeight(), std::ceil(static_cast<float>(suggested.height)));
-    const float frame_height = command.options.wrap == TextWrap::NoWrap
-                                   ? std::max(size.height, content_height)
-                                   : size.height;
+    const float frame_height =
+        command.options.wrap == TextWrap::NoWrap ? std::max(size.height, content_height) : size.height;
     CFRef<CGPathRef> path{CGPathCreateWithRect(CGRectMake(0.0, 0.0, size.width, frame_height), nullptr)};
     CFRef<CTFrameRef> frame{CTFramesetterCreateFrame(framesetter.Get(), CFRangeMake(0, 0), path.Get(), nullptr)};
 
@@ -637,9 +645,61 @@ struct AppKitRenderer::State {
     return inserted->second;
   }
 
+  CGImageRef ImageFor(const ImageAsset& image) {
+    const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
+    const auto cached =
+        std::ranges::find_if(images, [identity](const CachedImage& entry) { return entry.identity == identity; });
+    if (cached != images.end()) {
+      std::rotate(cached, cached + 1, images.end());
+      return images.back().native_image.Get();
+    }
+    const std::span<const std::byte> bytes = image.EncodedBytes();
+    if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
+      return nullptr;
+    }
+    CFRef<CFDataRef> data{CFDataCreate(
+        kCFAllocatorDefault,
+        reinterpret_cast<const UInt8*>(bytes.data()),
+        static_cast<CFIndex>(bytes.size())
+    )};
+    if (data.Get() == nullptr) {
+      return nullptr;
+    }
+    CFRef<CGImageSourceRef> source{CGImageSourceCreateWithData(data.Get(), nullptr)};
+    if (source.Get() == nullptr) {
+      return nullptr;
+    }
+    CFRef<CGImageRef> native_image{CGImageSourceCreateImageAtIndex(source.Get(), 0, nullptr)};
+    if (native_image.Get() == nullptr) {
+      return nullptr;
+    }
+    const std::size_t row_bytes = CGImageGetBytesPerRow(native_image.Get());
+    const std::size_t height = CGImageGetHeight(native_image.Get());
+    const std::size_t byte_size = height > 0 && row_bytes > std::numeric_limits<std::size_t>::max() / height
+                                      ? std::numeric_limits<std::size_t>::max()
+                                      : row_bytes * height;
+    constexpr std::size_t image_cache_budget = 64U * 1024U * 1024U;
+    if (byte_size > image_cache_budget) {
+      // Retain one oversized image so repeated frames do not decode it again; the next insertion evicts it.
+      images.clear();
+      images.push_back({identity, byte_size, std::move(native_image)});
+      image_cache_bytes = byte_size;
+      return images.back().native_image.Get();
+    }
+    while (!images.empty() && image_cache_bytes > image_cache_budget - byte_size) {
+      image_cache_bytes -= images.front().byte_size;
+      images.erase(images.begin());
+    }
+    images.push_back({identity, byte_size, std::move(native_image)});
+    image_cache_bytes += byte_size;
+    return images.back().native_image.Get();
+  }
+
   std::unordered_map<Font, CachedFont, FontHash> fonts;
   std::unordered_map<RunKey, CachedRun, RunKeyHash, RunKeyEqual> runs;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs;
+  std::vector<CachedImage> images;
+  std::size_t image_cache_bytes = 0;
 };
 
 class MacTextLayout final : public TextLayout {
@@ -1024,17 +1084,12 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& 
     return;
   }
   State::CachedParagraph& paragraph = state_->ParagraphFor(command);
-  const float vertical_offset = command.options.wrap == TextWrap::NoWrap
-                                  ? (command.rect.height - paragraph.content_height) * 0.5F
-                                  : 0.0F;
+  const float vertical_offset =
+      command.options.wrap == TextWrap::NoWrap ? (command.rect.height - paragraph.content_height) * 0.5F : 0.0F;
 
   CGContextSaveGState(context);
   CGContextClipToRect(context, CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height));
-  CGContextTranslateCTM(
-      context,
-      command.rect.x,
-      command.rect.y + paragraph.frame_height + vertical_offset
-  );
+  CGContextTranslateCTM(context, command.rect.x, command.rect.y + paragraph.frame_height + vertical_offset);
   CGContextScaleCTM(context, 1.0, -1.0);
   CGContextSetTextMatrix(context, CGAffineTransformIdentity);
   SetFillColor(context, command.style.foreground);
@@ -1057,6 +1112,48 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextRunsComma
     CTLineDraw(cached.line.Get(), context);
     CGContextRestoreGState(context);
   }
+}
+
+void AppKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& command) {
+  if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
+    return;
+  }
+  CGImageRef image = state_->ImageFor(command.image);
+  if (image == nullptr) {
+    return;
+  }
+  const float scale = command.image.Scale();
+  const CGRect source_rect = CGRectMake(
+      command.source.x * scale,
+      static_cast<float>(CGImageGetHeight(image)) - (command.source.y + command.source.height) * scale,
+      command.source.width * scale,
+      command.source.height * scale
+  );
+  CGContextSaveGState(context);
+  CGContextSetAlpha(context, command.opacity);
+  CGContextSetInterpolationQuality(
+      context,
+      command.sampling == ImageSampling::Nearest ? kCGInterpolationNone : kCGInterpolationHigh
+  );
+  CGContextClipToRect(
+      context,
+      CGRectMake(command.destination.x, command.destination.y, command.destination.width, command.destination.height)
+  );
+  CGContextTranslateCTM(context, command.destination.x, command.destination.y + command.destination.height);
+  CGContextScaleCTM(context, 1.0, -1.0);
+  const CGFloat horizontal_scale = command.destination.width / source_rect.size.width;
+  const CGFloat vertical_scale = command.destination.height / source_rect.size.height;
+  CGContextDrawImage(
+      context,
+      CGRectMake(
+          -source_rect.origin.x * horizontal_scale,
+          -source_rect.origin.y * vertical_scale,
+          static_cast<CGFloat>(CGImageGetWidth(image)) * horizontal_scale,
+          static_cast<CGFloat>(CGImageGetHeight(image)) * vertical_scale
+      ),
+      image
+  );
+  CGContextRestoreGState(context);
 }
 
 void AppKitRenderer::RenderCommand(CGContextRef context, const DrawCircleCommand& command) {

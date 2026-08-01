@@ -33,7 +33,9 @@ function(huxerui_platform_configure)
             dxguid
             dxgi
             imm32
+            ole32
             user32
+            windowscodecs
             PARENT_SCOPE
     )
 endfunction()

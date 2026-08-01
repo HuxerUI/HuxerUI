@@ -23,6 +23,7 @@
 #include <huxerui/app.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
+#include <huxerui/resource.h>
 #include <huxerui/state.h>
 #include <huxerui/view.h>
 
@@ -33,6 +34,7 @@ namespace huxerui::detail {
 struct MountedNode;
 class ScrollConnection;
 class IndicationState;
+class AppResourcesService;
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -225,6 +227,7 @@ enum class NodeKind {
   Checkbox,
   Switch,
   ProgressCircle,
+  Image,
   Canvas,
   Spacer,
   Scope,
@@ -255,6 +258,8 @@ struct ViewStyle {
 
   bool operator==(const ViewStyle&) const = default;
 
+  // Reconciliation compares the inputs consumed by layout, content paint, and foreground paint independently.
+  // New style fields must participate in every projection whose stage reads them.
   [[nodiscard]] bool LayoutEquals(const ViewStyle& other) const {
     return padding == other.padding && frame == other.frame && text_style.font == other.text_style.font &&
            spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
@@ -273,6 +278,23 @@ struct ViewStyle {
   }
 };
 
+struct ImageViewData {
+  ImageAsset asset;
+  ImageFit fit = ImageFit::Contain;
+  HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
+  VerticalAlignment vertical_alignment = VerticalAlignment::Center;
+  ImageSampling sampling = ImageSampling::Linear;
+
+  // Only intrinsic logical size affects measurement; image contents, fit, alignment, and sampling are paint inputs.
+  [[nodiscard]] bool LayoutEquals(const ImageViewData& other) const noexcept {
+    return asset.IntrinsicSize() == other.asset.IntrinsicSize();
+  }
+
+  bool operator==(const ImageViewData&) const = default;
+};
+
+// ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
+// fields unrelated to that kind stay at their defaults and are ignored by the corresponding Runtime stages.
 struct ViewSpec {
   explicit ViewSpec(NodeKind kind_value) : kind(kind_value) {}
 
@@ -284,6 +306,7 @@ struct ViewSpec {
   std::vector<View> children;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
+  ImageViewData image;
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
   VirtualItemSource virtual_items;
@@ -382,6 +405,8 @@ struct NodePresentation {
   float resolved_opacity = 1.0F;
 };
 
+// MountedNode is the retained counterpart of ViewSpec. Runtime reads copied component payloads only from matching
+// NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::MountedNode {
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
@@ -390,6 +415,7 @@ struct MountedNode final : public huxerui::MountedNode {
   ViewStyle style;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
+  ImageViewData image;
   const LayoutDescriptor* layout = nullptr;
   const VirtualLayoutDescriptor* virtual_layout = nullptr;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
@@ -803,7 +829,8 @@ struct Runtime::State {
   std::vector<std::shared_ptr<void>> root_services_;
   EnvironmentValues root_environment_values_;
   std::unordered_set<std::type_index> root_service_types_;
-  std::shared_ptr<const detail::EnvironmentFrame> root_environment_;
+  std::shared_ptr<detail::EnvironmentFrame> root_environment_;
+  std::shared_ptr<detail::AppResourcesService> app_resources_;
   std::vector<detail::LayerEntry> layers_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;

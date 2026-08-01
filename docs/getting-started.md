@@ -56,6 +56,51 @@ huxerui_enable_codegen(my_app)
 
 Call `huxerui_enable_codegen()` after adding all sources to the target. The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
 
+## App resources
+
+Place packaged resources under one target-owned root:
+
+```text
+assets/
+  images/logo.png
+  images/logo@2x.png
+  images/logo@3x.png
+  raw/config.json
+  strings/default.properties
+  strings/zh.properties
+```
+
+String catalogs are UTF-8 `.properties` files with `key = value` entries and indexed placeholders such as `{0}`.
+Image scale suffixes must preserve the same intrinsic logical size; for example, 418-pixel, 836-pixel, and 1254-pixel square images form matching 1x, 2x, and 3x variants.
+
+Register the root after creating the target:
+
+```cmake
+huxerui_add_resources(my_app
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        NAMESPACE "app"
+)
+```
+
+The generated `app_resources.h` contains typed ImageResource, RawResource, and StringResource constants.
+Desktop targets stage the generated package beside the executable or inside the application bundle.
+Android CMake builds generate a resource package inside each ABI build directory.
+The Gradle integration waits for native builds, selects one package, and synchronizes it into a generated assets
+source so concurrent ABI builds never mutate the same directory.
+
+```cpp
+#include <app_resources.h>
+
+const ImageAsset logo = UseImage(app_resources::images::logo);
+
+return Column {
+  Text::Format(app_resources::strings::welcome, "Ada"),
+  Image(logo).Fit(ImageFit::Contain),
+};
+```
+
+See [App Resources, Images, and Localization Design](design/resources.md) and `example_image` for the complete contract.
+
 ## Build the repository
 
 The following commands use `build` as the build directory.
@@ -83,9 +128,13 @@ Android:
 ```bash
 cd platform/android
 ./gradlew :demo:assembleDebug
+./gradlew :demo:assembleDebug -PhuxeruiDemoExample=image
 ```
 
-The Android project contains the reusable `huxerui` library and a `demo` application. Cross-compilation resolves the matching host code generator from `tools/prebuilt/<system>/<architecture>`.
+The Android project contains the reusable `huxerui` library and a `demo` application.
+The demo uses `ui_gallery` by default and accepts any example directory through the `huxeruiDemoExample` Gradle property.
+It adds that example with CMake `add_subdirectory()`, emits `libhuxerui_app.so`, and registers the example's generated resources as variant assets.
+Cross-compilation resolves the matching host code generators from `tools/prebuilt/<system>/<architecture>`.
 
 ## Run examples
 

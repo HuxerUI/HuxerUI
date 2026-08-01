@@ -20,6 +20,7 @@
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
 #include "host_frame_internal.h"
+#include "resource_internal.h"
 #include "text_input_internal.h"
 #include "text_layout_internal.h"
 
@@ -149,7 +150,10 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
     environment->DeleteLocalRef(exception_class);
   }
 }
-class AndroidViewPlatformHost final : public PlatformHost, public PlatformTextInput, public PlatformClipboard {
+class AndroidViewPlatformHost final : public PlatformHost,
+                                      public PlatformTextInput,
+                                      public PlatformClipboard,
+                                      public PlatformResources {
 public:
   AndroidViewPlatformHost(JNIEnv* environment, jobject view) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
@@ -181,12 +185,16 @@ public:
     request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
     read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
     write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
+    resource_locale_ = environment->GetMethodID(view_class, "resourceLocale", "()[B");
+    resource_scale_ = environment->GetMethodID(view_class, "resourceScale", "()F");
+    read_resource_ = environment->GetMethodID(view_class, "readResource", "([B)[B");
 
     if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || font_metrics_ == nullptr ||
         measure_text_ == nullptr || measure_text_run_ == nullptr || create_text_layout_ == nullptr ||
         start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
         stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
-        write_clipboard_text_ == nullptr) {
+        write_clipboard_text_ == nullptr || resource_locale_ == nullptr || resource_scale_ == nullptr ||
+        read_resource_ == nullptr) {
       environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
@@ -518,6 +526,63 @@ public:
     return this;
   }
 
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  ResourceContext Context() const override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return {};
+    }
+    auto* locale_bytes = static_cast<jbyteArray>(environment->CallObjectMethod(view_, resource_locale_));
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android resource locale could not be read");
+    }
+    const std::string language_tag =
+        locale_bytes == nullptr ? std::string{"en"} : FromByteArray(environment, locale_bytes);
+    if (locale_bytes != nullptr) {
+      environment->DeleteLocalRef(locale_bytes);
+    }
+    const float scale = environment->CallFloatMethod(view_, resource_scale_);
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android resource scale could not be read");
+    }
+    return {Locale::FromLanguageTag(language_tag), scale};
+  }
+
+  RawAsset Read(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI Android resource path is invalid");
+    }
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return {};
+    }
+    jbyteArray path = ToByteArray(environment, package_path);
+    if (path == nullptr) {
+      return {};
+    }
+    auto* payload = static_cast<jbyteArray>(environment->CallObjectMethod(view_, read_resource_, path));
+    environment->DeleteLocalRef(path);
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android packaged resource could not be read");
+    }
+    if (payload == nullptr) {
+      return {};
+    }
+    const jsize length = environment->GetArrayLength(payload);
+    std::vector<std::byte> bytes(static_cast<std::size_t>(length));
+    if (length > 0) {
+      environment->GetByteArrayRegion(payload, 0, length, reinterpret_cast<jbyte*>(bytes.data()));
+    }
+    environment->DeleteLocalRef(payload);
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android packaged resource bytes could not be copied");
+    }
+    return RawAsset::FromBytes(std::move(bytes));
+  }
+
   std::optional<std::string> ReadText() override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
@@ -670,6 +735,9 @@ private:
   jmethodID request_show_text_input_ = nullptr;
   jmethodID read_clipboard_text_ = nullptr;
   jmethodID write_clipboard_text_ = nullptr;
+  jmethodID resource_locale_ = nullptr;
+  jmethodID resource_scale_ = nullptr;
+  jmethodID read_resource_ = nullptr;
   HostFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
 };
@@ -684,6 +752,10 @@ public:
         std::max(0.0F, width),
         std::max(0.0F, height),
     });
+  }
+
+  void UpdateResourceContext(std::string language_tag, float display_scale) {
+    runtime_.UpdateResourceContext({Locale::FromLanguageTag(language_tag), display_scale});
   }
 
   void Draw(JNIEnv* environment, jobject canvas) {
@@ -862,6 +934,18 @@ Java_org_huxerui_HuxerUIView_nativeResize(JNIEnv* environment, jclass, jlong han
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
       session->Resize(width, height);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateResourceContext(
+    JNIEnv* environment, jclass, jlong handle, jbyteArray language_tag, jfloat display_scale
+) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->UpdateResourceContext(huxerui::detail::FromByteArray(environment, language_tag), display_scale);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

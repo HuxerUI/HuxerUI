@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "path_internal.h"
+#include "resource_internal.h"
 #include "shadow_internal.h"
 
 namespace huxerui::detail {
@@ -35,6 +37,22 @@ jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
   }
   environment
       ->SetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
+  return bytes;
+}
+
+jbyteArray ToByteArray(JNIEnv* environment, std::span<const std::byte> values) {
+  if (values.size() > static_cast<std::size_t>(std::numeric_limits<jsize>::max())) {
+    return nullptr;
+  }
+  auto* bytes = environment->NewByteArray(static_cast<jsize>(values.size()));
+  if (bytes != nullptr && !values.empty()) {
+    environment->SetByteArrayRegion(
+        bytes,
+        0,
+        static_cast<jsize>(values.size()),
+        reinterpret_cast<const jbyte*>(values.data())
+    );
+  }
   return bytes;
 }
 
@@ -105,6 +123,7 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_text_ = environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFIFI[BIIIIII[B)V");
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
+  draw_image_ = environment->GetMethodID(view_class, "drawImage", "(Landroid/graphics/Canvas;J[BFFFFFFFFFI)Z");
   draw_circle_ = environment->GetMethodID(view_class, "drawCircle", "(Landroid/graphics/Canvas;FFFI)V");
   draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFI)V");
   draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
@@ -120,11 +139,11 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
 
-  if (draw_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_circle_ == nullptr ||
-      draw_arc_ == nullptr || draw_border_ == nullptr || draw_shadow_ == nullptr || fill_path_ == nullptr ||
-      stroke_path_ == nullptr || draw_path_shadow_ == nullptr || push_clip_ == nullptr || push_path_clip_ == nullptr ||
-      pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr || push_transform_ == nullptr ||
-      pop_transform_ == nullptr) {
+  if (draw_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
+      draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr || draw_shadow_ == nullptr ||
+      fill_path_ == nullptr || stroke_path_ == nullptr || draw_path_shadow_ == nullptr || push_clip_ == nullptr ||
+      push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr ||
+      push_transform_ == nullptr || pop_transform_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the native backend");
   }
 }
@@ -374,6 +393,41 @@ void AndroidRenderer::RenderCommand(
     if (reference != nullptr) {
       environment->DeleteLocalRef(reference);
     }
+  }
+}
+
+void AndroidRenderer::RenderCommand(
+    JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command
+) {
+  const std::uint64_t identity = ResourceAccess::ImageIdentity(command.image);
+  const float scale = command.image.Scale();
+  const auto draw = [&](jbyteArray encoded) {
+    return environment->CallBooleanMethod(
+               view,
+               draw_image_,
+               canvas,
+               static_cast<jlong>(identity),
+               encoded,
+               command.source.x * scale,
+               command.source.y * scale,
+               command.source.width * scale,
+               command.source.height * scale,
+               command.destination.x,
+               command.destination.y,
+               command.destination.width,
+               command.destination.height,
+               command.opacity,
+               static_cast<jint>(command.sampling)
+           ) == JNI_TRUE;
+  };
+  // Probe the Java Bitmap cache without allocating or copying encoded bytes; transfer the payload only on a miss.
+  if (draw(nullptr) || environment->ExceptionCheck()) {
+    return;
+  }
+  jbyteArray encoded = ToByteArray(environment, command.image.EncodedBytes());
+  if (encoded != nullptr) {
+    static_cast<void>(draw(encoded));
+    environment->DeleteLocalRef(encoded);
   }
 }
 

@@ -39,6 +39,7 @@ private:
   void RenderCommand(CGContextRef context, const DrawRectCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextRunsCommand& command);
+  void RenderCommand(CGContextRef context, const DrawImageCommand& command);
   void RenderCommand(CGContextRef context, const DrawCircleCommand& command);
   void RenderCommand(CGContextRef context, const DrawArcCommand& command);
   void RenderCommand(CGContextRef context, const DrawBorderCommand& command);

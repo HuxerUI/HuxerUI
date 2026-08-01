@@ -308,3 +308,154 @@ function(huxerui_enable_codegen target_name)
             "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd5030>"
     )
 endfunction()
+
+function(huxerui_add_resources target_name)
+    if (NOT TARGET ${target_name})
+        message(FATAL_ERROR
+                "huxerui_add_resources() target does not exist: ${target_name}"
+        )
+    endif ()
+
+    cmake_parse_arguments(HUXERUI_RESOURCES
+            ""
+            "ROOT;NAMESPACE"
+            ""
+            ${ARGN}
+    )
+    if (NOT HUXERUI_RESOURCES_ROOT OR NOT HUXERUI_RESOURCES_NAMESPACE)
+        message(FATAL_ERROR
+                "huxerui_add_resources() requires ROOT and NAMESPACE"
+        )
+    endif ()
+    if (NOT HUXERUI_RESOURCES_NAMESPACE MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+        message(FATAL_ERROR
+                "huxerui_add_resources() NAMESPACE must be a C++ identifier"
+        )
+    endif ()
+
+    get_target_property(HUXERUI_RESOURCES_ALREADY_ENABLED
+            ${target_name}
+            HUXERUI_RESOURCES_ENABLED
+    )
+    if (HUXERUI_RESOURCES_ALREADY_ENABLED)
+        message(FATAL_ERROR
+                "huxerui_add_resources() may only be called once for ${target_name}"
+        )
+    endif ()
+    set_property(TARGET ${target_name} PROPERTY HUXERUI_RESOURCES_ENABLED TRUE)
+
+    get_filename_component(HUXERUI_RESOURCE_ROOT
+            "${HUXERUI_RESOURCES_ROOT}"
+            ABSOLUTE
+            BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    if (NOT IS_DIRECTORY "${HUXERUI_RESOURCE_ROOT}")
+        message(FATAL_ERROR
+                "huxerui_add_resources() ROOT is not a directory: ${HUXERUI_RESOURCE_ROOT}"
+        )
+    endif ()
+
+    huxerui_resolve_host_tool("resource-codegen" HUXERUI_RESOURCE_CODEGEN_COMMAND)
+    set(HUXERUI_RESOURCE_OUTPUT
+            "${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/${target_name}"
+    )
+    set(HUXERUI_RESOURCE_STAMP
+            "${HUXERUI_RESOURCE_OUTPUT}/resources.stamp"
+    )
+    set(HUXERUI_RESOURCE_HEADER
+            "${HUXERUI_RESOURCE_OUTPUT}/include/${HUXERUI_RESOURCES_NAMESPACE}_resources.h"
+    )
+    set(HUXERUI_RESOURCE_INDEX
+            "${HUXERUI_RESOURCE_OUTPUT}/package/huxerui/resources.bin"
+    )
+    set(HUXERUI_RESOURCE_INPUT_STAMP
+            "${HUXERUI_RESOURCE_OUTPUT}/resource-inputs.stamp"
+    )
+
+    file(GLOB_RECURSE HUXERUI_RESOURCE_INPUTS
+            CONFIGURE_DEPENDS
+            LIST_DIRECTORIES FALSE
+            "${HUXERUI_RESOURCE_ROOT}/*"
+    )
+    list(SORT HUXERUI_RESOURCE_INPUTS)
+    string(REPLACE ";" "\n"
+            HUXERUI_RESOURCE_INPUT_LIST
+            "${HUXERUI_RESOURCE_INPUTS}"
+    )
+    file(MAKE_DIRECTORY "${HUXERUI_RESOURCE_OUTPUT}")
+    # The generated membership stamp makes resource additions and removals invalidate the custom command after CMake
+    # reconfigures the glob.
+    file(GENERATE
+            OUTPUT "${HUXERUI_RESOURCE_INPUT_STAMP}"
+            CONTENT "${HUXERUI_RESOURCE_INPUT_LIST}\n"
+    )
+    add_custom_command(
+            OUTPUT
+                    "${HUXERUI_RESOURCE_STAMP}"
+                    "${HUXERUI_RESOURCE_HEADER}"
+                    "${HUXERUI_RESOURCE_INDEX}"
+            COMMAND "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+                    --root "${HUXERUI_RESOURCE_ROOT}"
+                    --output "${HUXERUI_RESOURCE_OUTPUT}"
+                    --namespace "${HUXERUI_RESOURCES_NAMESPACE}"
+            DEPENDS
+                    ${HUXERUI_RESOURCE_INPUTS}
+                    "${HUXERUI_RESOURCE_INPUT_STAMP}"
+                    "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+            COMMENT "Generating HuxerUI resources for ${target_name}"
+            VERBATIM
+    )
+    add_custom_target(${target_name}_huxerui_resources
+            DEPENDS
+                    "${HUXERUI_RESOURCE_STAMP}"
+                    "${HUXERUI_RESOURCE_HEADER}"
+                    "${HUXERUI_RESOURCE_INDEX}"
+    )
+    add_dependencies(${target_name} ${target_name}_huxerui_resources)
+    target_include_directories(${target_name} PRIVATE
+            "${HUXERUI_RESOURCE_OUTPUT}/include"
+    )
+
+    set(HUXERUI_RESOURCE_STAGE_DIRECTORY)
+    # Gradle stages Android packages after all ABI builds; CMake stages desktop targets with one output package.
+    if (APPLE)
+        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
+        )
+    elseif (WIN32)
+        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
+        )
+    endif ()
+
+    if (HUXERUI_RESOURCE_STAGE_DIRECTORY)
+        set(HUXERUI_RESOURCE_STAGE_STAMP
+                "${HUXERUI_RESOURCE_OUTPUT}/stage-$<CONFIG>.stamp"
+        )
+        add_custom_command(
+                OUTPUT "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                COMMAND ${CMAKE_COMMAND} -E rm -f
+                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                COMMAND ${CMAKE_COMMAND} -E remove_directory
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${HUXERUI_RESOURCE_OUTPUT}/package"
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E touch
+                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                DEPENDS
+                        "${HUXERUI_RESOURCE_STAMP}"
+                        "${HUXERUI_RESOURCE_INDEX}"
+                COMMENT "Staging HuxerUI resources for ${target_name}"
+                VERBATIM
+        )
+        add_custom_target(${target_name}_huxerui_resource_staging
+                DEPENDS "${HUXERUI_RESOURCE_STAGE_STAMP}"
+        )
+        add_dependencies(${target_name}
+                ${target_name}_huxerui_resource_staging
+        )
+    endif ()
+endfunction()

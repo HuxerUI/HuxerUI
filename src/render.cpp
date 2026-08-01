@@ -21,6 +21,60 @@ Rect ContentRect(const MountedNode& node) {
   };
 }
 
+float AlignOffset(float available, float extent, HorizontalAlignment alignment) noexcept {
+  if (alignment == HorizontalAlignment::End) {
+    return available - extent;
+  }
+  return alignment == HorizontalAlignment::Center ? (available - extent) * 0.5F : 0.0F;
+}
+
+float AlignOffset(float available, float extent, VerticalAlignment alignment) noexcept {
+  if (alignment == VerticalAlignment::End) {
+    return available - extent;
+  }
+  return alignment == VerticalAlignment::Center ? (available - extent) * 0.5F : 0.0F;
+}
+
+void PaintImage(const MountedNode& node, PaintContext& context) {
+  const Size intrinsic = node.image.asset.IntrinsicSize();
+  const Rect content = ContentRect(node);
+  if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
+    return;
+  }
+  const Rect full_source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
+  if (node.image.fit == ImageFit::Fill) {
+    context.DrawImageRect(node.image.asset, full_source, content, node.image.sampling);
+    return;
+  }
+  if (node.image.fit == ImageFit::Cover) {
+    const float scale = std::max(content.width / intrinsic.width, content.height / intrinsic.height);
+    const Size source_size{content.width / scale, content.height / scale};
+    const Rect source{
+        AlignOffset(intrinsic.width, source_size.width, node.image.horizontal_alignment),
+        AlignOffset(intrinsic.height, source_size.height, node.image.vertical_alignment),
+        source_size.width,
+        source_size.height,
+    };
+    context.DrawImageRect(node.image.asset, source, content, node.image.sampling);
+    return;
+  }
+  float scale = 1.0F;
+  if (node.image.fit == ImageFit::Contain || node.image.fit == ImageFit::ScaleDown) {
+    scale = std::min(content.width / intrinsic.width, content.height / intrinsic.height);
+    if (node.image.fit == ImageFit::ScaleDown) {
+      scale = std::min(1.0F, scale);
+    }
+  }
+  const Size destination_size{intrinsic.width * scale, intrinsic.height * scale};
+  const Rect destination{
+      content.x + AlignOffset(content.width, destination_size.width, node.image.horizontal_alignment),
+      content.y + AlignOffset(content.height, destination_size.height, node.image.vertical_alignment),
+      destination_size.width,
+      destination_size.height,
+  };
+  context.DrawImageRect(node.image.asset, full_source, destination, node.image.sampling);
+}
+
 bool ClipsChildren(const MountedNode& node) {
   return IsScrollContainer(node);
 }
@@ -279,6 +333,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
           node.style.text_style,
           TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
       );
+    } else if (node.kind == NodeKind::Image) {
+      PaintImage(node, content);
     } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
       const Point content_origin{node.style.padding.left, node.style.padding.top};
       if (content_origin != Point{}) {

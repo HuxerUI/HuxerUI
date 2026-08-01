@@ -7,10 +7,20 @@
 #include <numbers>
 #include <stdexcept>
 #include <variant>
+#include <vector>
 
+#include "image_test_support.h"
 #include "shadow_internal.h"
 
 namespace huxerui::test {
+
+namespace {
+
+ImageAsset TestImage() {
+  return ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
+}
+
+} // namespace
 
 static_assert(std::equality_comparable<Color>);
 static_assert(std::equality_comparable<Rect>);
@@ -88,6 +98,32 @@ TEST_CASE("PaintContextCoalescesAdjacentTextRuns") {
   REQUIRE(command->runs[0].baseline_origin == Point{10.0F, 24.0F});
   REQUIRE(command->runs[1].bounds == Rect{30.0F, 12.0F, 24.0F, 16.0F});
   REQUIRE(sequence.Bounds() == Rect{10.0F, 12.0F, 56.0F, 16.0F});
+}
+
+TEST_CASE("PaintContextRecordsResolvedImageGeometry") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context
+      .DrawImageRect(TestImage(), {2.0F, 1.0F, 8.0F, 4.0F}, {10.0F, 20.0F, 40.0F, 20.0F}, ImageSampling::Nearest, 0.5F);
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto& command = std::get<DrawImageCommand>(sequence.Commands().front());
+  REQUIRE(command.source == Rect{2.0F, 1.0F, 8.0F, 4.0F});
+  REQUIRE(command.destination == Rect{10.0F, 20.0F, 40.0F, 20.0F});
+  REQUIRE(command.sampling == ImageSampling::Nearest);
+  REQUIRE(command.opacity == 0.5F);
+  REQUIRE(sequence.Bounds() == command.destination);
+}
+
+TEST_CASE("PaintContextValidatesImageSourceAndOpacity") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  REQUIRE_THROWS_AS(context.DrawImageRect(TestImage(), {19.0F, 0.0F, 2.0F, 2.0F}, {}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.DrawImage(TestImage(), {0.0F, 0.0F, 10.0F, 10.0F}, ImageSampling::Linear, 1.1F),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("PaintContextOmitsTextRunsWithoutVisibleBounds") {

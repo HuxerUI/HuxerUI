@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "resource_internal.h"
 #include "text_input_internal.h"
 
 #include <algorithm>
@@ -70,7 +71,8 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
   if (incoming.kind == NodeKind::Canvas) {
     return false;
   }
-  return mounted.text == incoming.text && mounted.style.ContentPaintEquals(incoming.style);
+  return mounted.text == incoming.text && mounted.image == incoming.image &&
+         mounted.style.ContentPaintEquals(incoming.style);
 }
 
 bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
@@ -91,12 +93,13 @@ bool LayoutValuesEquivalent(
 }
 
 bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.style.LayoutEquals(incoming.style) &&
+  return mounted.text == incoming.text && mounted.image.LayoutEquals(incoming.image) &&
+         mounted.style.LayoutEquals(incoming.style) &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
 }
 
 bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.style == incoming.style &&
+  return mounted.text == incoming.text && mounted.image == incoming.image && mounted.style == incoming.style &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
          mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
          mounted.environment == incoming.environment &&
@@ -355,6 +358,10 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
       state_->root_service_types_,
       state_->root_services_
   };
+  state_->app_resources_ = std::make_shared<AppResourcesService>(platform.Resources());
+  const ResourceContext resource_context = state_->app_resources_->Context();
+  state_->root_environment_values_.Set(resource_context.locale);
+  root.Provide(state_->app_resources_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   InstallBuiltinPresentation(root);
   for (RootHook& hook : definition.options.root_hooks) {
@@ -516,6 +523,16 @@ const FrameCommit& Runtime::BuildFrame() {
     state_->frame_requested_ = false;
     throw;
   }
+}
+
+void Runtime::UpdateResourceContext(ResourceContext context) {
+  if (state_->app_resources_->Context() == context) {
+    return;
+  }
+  state_->app_resources_->UpdateContext(context);
+  // Mutate the shared root frame so environments already captured by layers observe the new system locale.
+  detail::SetEnvironmentValue(state_->root_environment_->overrides, typeid(Locale), context.locale);
+  InvalidateRoot();
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
@@ -1261,6 +1278,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   mounted->style = incoming->style;
   mounted->scope_factory = incoming->scope_factory;
   mounted->canvas_painter = incoming->canvas_painter;
+  mounted->image = incoming->image;
   mounted->layout = incoming->layout;
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;
@@ -1315,6 +1333,7 @@ std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSp
   mounted->style = incoming->style;
   mounted->scope_factory = incoming->scope_factory;
   mounted->canvas_painter = incoming->canvas_painter;
+  mounted->image = incoming->image;
   mounted->layout = incoming->layout;
   mounted->virtual_layout = incoming->virtual_layout;
   mounted->layout_values = incoming->layout_values;

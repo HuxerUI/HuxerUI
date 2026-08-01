@@ -36,7 +36,7 @@ if (commit.next_frame_deadline.has_value()) {
 }
 ```
 
-Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, and renderer conventions.
+Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, packaged resource reads, and renderer conventions.
 PlatformHost also implements the shared `TextMeasurer` service, resolving platform-neutral Font and TextStyle values through the native text stack.
 They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
 `PlatformHost::RequestFrameAt()` accepts an absolute monotonic deadline.
@@ -46,7 +46,7 @@ macOS and Windows translate `DamageRegion` into native invalidation bounds.
 Android receives the same committed damage but invalidates the complete native View because current Android View APIs ignore dirty rectangles.
 All three backends replay only the committed scene during native paint callbacks.
 Exact `DrawTextRunsCommand` geometry is supplied by TextMeasurer and is not replaced by renderer-side layout decisions.
-Native font and layout caches are host-owned, bounded, and keyed by complete value inputs; see [Text and Font Design](design/text.md).
+Native font, layout, and decoded-image caches are host-owned and bounded; see [Text and Font Design](design/text.md) and [App Resources, Images, and Localization Design](design/resources.md).
 
 ## Android
 
@@ -69,12 +69,14 @@ Coordinates remain density independent. The host maps multi-touch, mouse hover, 
 Rounded-rectangle shadows use hardware shadow layers on API 28 and later, with density-aware cached alpha masks on older supported versions.
 Arbitrary Paths use the same native Canvas, and Path shadows use hardware layers on API 28 and later with a bounded software mask fallback on older supported versions.
 Neither path disables hardware acceleration for the complete host View.
+Packaged resources are read from Android assets, system configuration changes proactively update the Runtime resource context, and encoded images are transferred to Java only on a Bitmap cache miss.
 
 ## macOS
 
 The macOS backend creates an AppKit host, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries. Scheduled callbacks commit Runtime work before AppKit invalidation, while `drawRect:` only presents the committed scene.
 Core Graphics resolves retained shadow commands with native blurred path shadows.
 Canvas Paths map directly to Core Graphics fill, stroke, clip, and shadow operations.
+Packaged resources are read from the application bundle, locale and backing-scale changes proactively update the Runtime resource context, and ImageIO-backed decoded images remain renderer-owned.
 
 Example targets build as application bundles and can be launched from `build/bin`.
 
@@ -85,6 +87,7 @@ It owns the Win32 window, uses DirectWrite for text layout, and renders shared P
 Partial Runtime damage updates a retained scene bitmap before the affected pixels are presented.
 Direct2D Shadow effects consume cached rounded-rectangle masks while color, opacity, and offset remain draw-time properties.
 Canvas Paths map to Direct2D path geometry for fill, stroke, geometric clipping, and blurred shadow masks.
+Packaged resources are read from the executable-specific `<name>.resources` directory, locale and DPI changes proactively update the Runtime resource context, and WIC decoding produces device-dependent Direct2D bitmap cache entries.
 
 `HUXERUI_WINDOWS_7_COMPAT=ON` builds an opt-in binary for Windows 7 SP1 with Platform Update or later.
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.

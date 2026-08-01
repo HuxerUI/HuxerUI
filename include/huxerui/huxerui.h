@@ -14,6 +14,7 @@
 #include <huxerui/paint.h>
 #include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>
+#include <huxerui/resource.h>
 #include <huxerui/root.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>

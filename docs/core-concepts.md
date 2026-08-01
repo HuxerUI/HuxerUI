@@ -159,16 +159,16 @@ SearchBox().On<SearchSubmitted>([](std::string query) {
 Environment values propagate through a subtree. Their value type is also the lookup identity and owns its fallback:
 
 ```cpp
-struct Locale {
+struct GreetingLocale {
   std::string language;
 
-  static Locale Default() {
+  static GreetingLocale Default() {
     return {"en"};
   }
 };
 
-const Locale& locale = UseEnvironment<Locale>();
-return ProvideEnvironment(Locale{"fr"}, Content);
+const GreetingLocale& locale = UseEnvironment<GreetingLocale>();
+return ProvideEnvironment(GreetingLocale{"fr"}, Content);
 ```
 
 Use a semantic wrapper when two values have the same underlying representation but different meanings.

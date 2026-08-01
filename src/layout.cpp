@@ -244,6 +244,20 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost
   case NodeKind::Checkbox:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
+    break;
+  case NodeKind::Image: {
+    content_size = node.image.asset.IntrinsicSize();
+    float scale = 1.0F;
+    if (content_size.width > 0.0F && content_constraints.HasBoundedWidth()) {
+      scale = std::min(scale, content_constraints.max_width / content_size.width);
+    }
+    if (content_size.height > 0.0F && content_constraints.HasBoundedHeight()) {
+      scale = std::min(scale, content_constraints.max_height / content_size.height);
+    }
+    content_size.width *= scale;
+    content_size.height *= scale;
+    break;
+  }
   case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;
@@ -393,13 +407,13 @@ void LayoutNode(MountedNode& node, Point offset) {
     const bool vertical = ScrollAxis(node) == Axis::Vertical;
     const float scroll_offset = vertical ? node.scroll->offset_y : node.scroll->offset_x;
     for (const auto& placement : node.virtual_state->placements) {
-      const Point offset = vertical ? Point{placement.offset.x, placement.offset.y - scroll_offset}
-                                    : Point{placement.offset.x - scroll_offset, placement.offset.y};
+      const Point item_offset = vertical ? Point{placement.offset.x, placement.offset.y - scroll_offset}
+                                         : Point{placement.offset.x - scroll_offset, placement.offset.y};
       LayoutNode(
           static_cast<MountedNode&>(*placement.item),
           {
-              content_origin.x + offset.x,
-              content_origin.y + offset.y,
+              content_origin.x + item_offset.x,
+              content_origin.y + item_offset.y,
           }
       );
     }
@@ -411,6 +425,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::Checkbox:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
+  case NodeKind::Image:
   case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;

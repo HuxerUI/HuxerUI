@@ -10,6 +10,7 @@
 
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
+#include <huxerui/resource.h>
 #include <huxerui/text.h>
 
 namespace huxerui {
@@ -98,6 +99,17 @@ struct DrawTextRunsCommand {
   std::vector<TextRun> runs;
 
   bool operator==(const DrawTextRunsCommand&) const = default;
+};
+
+struct DrawImageCommand {
+  ImageAsset image;
+  // Source uses the image's logical coordinates; renderers apply ImageAsset::Scale() at the native boundary.
+  Rect source;
+  Rect destination;
+  ImageSampling sampling = ImageSampling::Linear;
+  float opacity = 1.0F;
+
+  bool operator==(const DrawImageCommand&) const = default;
 };
 
 struct DrawCircleCommand {
@@ -201,6 +213,7 @@ using PaintCommand = std::variant<
     DrawRectCommand,
     DrawTextCommand,
     DrawTextRunsCommand,
+    DrawImageCommand,
     DrawCircleCommand,
     DrawArcCommand,
     DrawBorderCommand,
@@ -256,6 +269,15 @@ public:
   void
   DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});
   void DrawTextRuns(std::vector<TextRun> runs);
+  void
+  DrawImage(ImageAsset image, Rect destination, ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
+  void DrawImageRect(
+      ImageAsset image,
+      Rect source,
+      Rect destination,
+      ImageSampling sampling = ImageSampling::Linear,
+      float opacity = 1.0F
+  );
   void DrawCircle(Point center, float radius, Color color);
   // Arc angles are expressed in radians.
   void DrawArc(

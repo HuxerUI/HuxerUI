@@ -14,6 +14,7 @@ function(huxerui_platform_configure)
             "-framework Carbon"
             "-framework CoreGraphics"
             "-framework CoreText"
+            "-framework ImageIO"
             "-framework QuartzCore"
             PARENT_SCOPE
     )

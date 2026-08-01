@@ -155,6 +155,9 @@ huxerui-camera = "1.0.0"
 
 `app.sdk` initially resolves an exact SDK version. Version ranges and a lock file can be introduced when remote SDK and module resolution are implemented. The first implementation should prefer deterministic exact versions.
 
+Asset roots feed the typed resource index, generated resource keys, and target staging pipeline defined in [App Resources, Images, and Localization Design](resources.md).
+Managed projects do not expose Android resource identifiers, application-bundle paths, or Windows package paths to shared application code.
+
 Platform identifiers are stable lowercase values shared by the CLI, project manifest, module manifest, generated metadata, and SDK packages:
 
 ```text

@@ -16,6 +16,9 @@
 
 namespace huxerui {
 
+class PlatformResources;
+struct ResourceContext;
+
 namespace detail {
 class TextLayout;
 }
@@ -49,6 +52,9 @@ public:
   virtual PlatformClipboard* Clipboard() noexcept {
     return nullptr;
   }
+  virtual PlatformResources* Resources() noexcept {
+    return nullptr;
+  }
 };
 
 namespace detail {
@@ -77,6 +83,7 @@ public:
   Runtime& operator=(Runtime&&) = delete;
 
   void SetViewport(Size viewport);
+  void UpdateResourceContext(ResourceContext context);
   const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);

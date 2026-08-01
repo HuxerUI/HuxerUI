@@ -17,6 +17,7 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawCircleCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawArcCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawBorderCommand& command);
@@ -33,6 +34,7 @@ private:
   jmethodID draw_rect_ = nullptr;
   jmethodID draw_text_ = nullptr;
   jmethodID draw_text_runs_ = nullptr;
+  jmethodID draw_image_ = nullptr;
   jmethodID draw_circle_ = nullptr;
   jmethodID draw_arc_ = nullptr;
   jmethodID draw_border_ = nullptr;

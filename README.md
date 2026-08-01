@@ -16,7 +16,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and 
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
 
-HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, Toast, Dialog, custom layouts, and typed extension points.
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, custom layouts, and typed extension points.
 
 ## Quick Start
 
@@ -106,6 +106,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, native replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
+| [App Resources, Images, and Localization Design](docs/design/resources.md) | Typed resources, Image, raw assets, packaging, locale, and formatted strings |
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and native adapter contracts |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and NativeView |
@@ -127,6 +128,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_theme` | Material, Flat, nested themes, and style precedence |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Path fill, stroke, clipping, shadows, and Canvas-local drawing |
+| `example_image` | Generated resource keys, localized strings, density variants, packaged bytes, and Image fitting |
 | `platform/android/demo` | Android native host and application packaging |
 
 ## Architecture

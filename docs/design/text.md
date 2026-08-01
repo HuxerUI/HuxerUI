@@ -3,6 +3,7 @@
 Status: implemented
 
 This document defines the shared text values, measurement boundary, paint commands, and native resource ownership used by Text, TextField, Canvas, and text-oriented component libraries.
+Localized string resolution and the root Locale Environment are defined in [App Resources, Images, and Localization Design](resources.md); applying the inherited Locale automatically to otherwise-unspecified text shaping remains deferred.
 
 ## Ownership
 

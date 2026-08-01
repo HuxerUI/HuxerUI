@@ -3,7 +3,10 @@ package org.huxerui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -27,6 +30,9 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Locale;
@@ -66,6 +72,7 @@ public final class HuxerUIView extends View {
     private static final int PATH_QUADRATIC_TO = 2;
     private static final int PATH_CUBIC_TO = 3;
     private static final int PATH_CLOSE = 4;
+    private static final int IMAGE_CACHE_BUDGET = 64 * 1024 * 1024;
 
     private static final float SCROLL_STEP = 48.0F;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -76,9 +83,16 @@ public final class HuxerUIView extends View {
     private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
     private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
     private final LruCache<ParagraphKey, StaticLayout> paragraphCache = new LruCache<>(256);
+    private final LruCache<Long, Bitmap> imageCache = new LruCache<Long, Bitmap>(IMAGE_CACHE_BUDGET) {
+        @Override
+        protected int sizeOf(Long identity, Bitmap bitmap) {
+            // Cap one entry at the budget so an oversized image remains cached until another image evicts it.
+            return Math.min(bitmap.getAllocationByteCount(), IMAGE_CACHE_BUDGET);
+        }
+    };
     private final Matrix transform = new Matrix();
     private final float[] transformValues = new float[9];
-    private final float density;
+    private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
     private final Runnable frameCallback = new Runnable() {
         @Override
@@ -144,6 +158,7 @@ public final class HuxerUIView extends View {
         }
         pathCache.evictAll();
         paragraphCache.evictAll();
+        imageCache.evictAll();
         frameScheduled = false;
         frameTime = 0L;
         if (inputConnection != null) {
@@ -161,6 +176,23 @@ public final class HuxerUIView extends View {
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         resizeNativeState(width, height);
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfiguration) {
+        super.onConfigurationChanged(newConfiguration);
+        if (nativeHandle != 0L) {
+            float displayScale = resourceScale();
+            if (density != displayScale) {
+                density = displayScale;
+                if (shadowRenderer != null) {
+                    shadowRenderer.clear();
+                    shadowRenderer = null;
+                }
+                resizeNativeState(getWidth(), getHeight());
+            }
+            nativeUpdateResourceContext(nativeHandle, resourceLocale(), displayScale);
+        }
     }
 
     @Override
@@ -387,6 +419,42 @@ public final class HuxerUIView extends View {
         }
         clipboard.setPrimaryClip(ClipData.newPlainText("HuxerUI", new String(utf8, StandardCharsets.UTF_8)));
         return true;
+    }
+
+    private byte[] resourceLocale() {
+        Configuration configuration = getResources().getConfiguration();
+        Locale locale = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !configuration.getLocales().isEmpty()
+                ? configuration.getLocales().get(0)
+                : configuration.locale;
+        if (locale == null) {
+            locale = Locale.getDefault();
+        }
+        return locale.toLanguageTag().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private float resourceScale() {
+        return getResources().getDisplayMetrics().density;
+    }
+
+    private byte[] readResource(byte[] encodedPath) {
+        String path = new String(encodedPath, StandardCharsets.UTF_8);
+        try (InputStream stream = getContext().getAssets().open(path)) {
+            return readAllBytes(stream);
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream stream) throws IOException {
+        ByteArrayOutputStream result = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int length;
+        while ((length = stream.read(buffer)) != -1) {
+            if (length > 0) {
+                result.write(buffer, 0, length);
+            }
+        }
+        return result.toByteArray();
     }
 
     private void resizeNativeState(int width, int height) {
@@ -948,6 +1016,29 @@ public final class HuxerUIView extends View {
         return Layout.Alignment.ALIGN_NORMAL;
     }
 
+    private boolean drawImage(Canvas canvas, long identity, byte[] encoded, float sourceX, float sourceY,
+            float sourceWidth, float sourceHeight, float destinationX, float destinationY, float destinationWidth,
+            float destinationHeight, float opacity, int sampling) {
+        Bitmap bitmap = imageCache.get(identity);
+        if (bitmap == null && encoded != null) {
+            bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.length);
+            if (bitmap != null) {
+                imageCache.put(identity, bitmap);
+            }
+        }
+        if (bitmap == null) {
+            return false;
+        }
+        Rect source = new Rect(Math.round(sourceX), Math.round(sourceY), Math.round(sourceX + sourceWidth),
+                Math.round(sourceY + sourceHeight));
+        rect.set(destinationX, destinationY, destinationX + destinationWidth, destinationY + destinationHeight);
+        paint.reset();
+        paint.setAlpha(Math.round(Math.max(0.0F, Math.min(1.0F, opacity)) * 255.0F));
+        paint.setFilterBitmap(sampling != 0);
+        canvas.drawBitmap(bitmap, source, rect, paint);
+        return true;
+    }
+
     private static boolean isTextRightToLeft(String text, int direction) {
         return direction == TEXT_DIRECTION_RIGHT_TO_LEFT
                 || (direction != TEXT_DIRECTION_LEFT_TO_RIGHT
@@ -978,6 +1069,8 @@ public final class HuxerUIView extends View {
     private static native void nativeDestroy(long handle);
 
     private static native void nativeResize(long handle, float width, float height);
+
+    private static native void nativeUpdateResourceContext(long handle, byte[] languageTag, float displayScale);
 
     private static native void nativeCommitFrame(long handle);
 

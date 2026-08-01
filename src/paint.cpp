@@ -142,6 +142,43 @@ void PaintContext::DrawTextRuns(std::vector<TextRun> runs) {
   sequence_.commands_.emplace_back(DrawTextRunsCommand{std::move(runs)});
 }
 
+void PaintContext::DrawImage(ImageAsset image, Rect destination, ImageSampling sampling, float opacity) {
+  const Size intrinsic = image.IntrinsicSize();
+  DrawImageRect(std::move(image), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, sampling, opacity);
+}
+
+void PaintContext::DrawImageRect(
+    ImageAsset image, Rect source, Rect destination, ImageSampling sampling, float opacity
+) {
+  RequireOpen();
+  if (!image.HasValue()) {
+    throw std::invalid_argument("HuxerUI paint image must not be empty");
+  }
+  RequireRect(source);
+  RequireRect(destination);
+  const Size intrinsic = image.IntrinsicSize();
+  if (source.x < 0.0F || source.y < 0.0F || source.x + source.width > intrinsic.width ||
+      source.y + source.height > intrinsic.height) {
+    throw std::invalid_argument("HuxerUI image source rectangle must be inside the intrinsic image bounds");
+  }
+  if (!std::isfinite(opacity) || opacity < 0.0F || opacity > 1.0F) {
+    throw std::invalid_argument("HuxerUI image opacity must be finite and between zero and one");
+  }
+  if (source.IsEmpty() || destination.IsEmpty() || opacity <= 0.0F) {
+    return;
+  }
+  sequence_.commands_.emplace_back(
+      DrawImageCommand{
+          std::move(image),
+          source,
+          destination,
+          sampling,
+          opacity,
+      }
+  );
+  Include(destination);
+}
+
 void PaintContext::DrawCircle(Point center, float radius, Color color) {
   RequireOpen();
   if (!IsFinite(center)) {

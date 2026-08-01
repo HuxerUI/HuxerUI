@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -19,6 +20,7 @@
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "host_frame_internal.h"
+#include "resource_internal.h"
 #include "text_layout_internal.h"
 
 namespace huxerui::detail {
@@ -34,6 +36,7 @@ class MacPlatformHost;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
+- (void)resourceContextDidChange:(NSNotification*)notification;
 - (void)cancelPointer;
 - (void)commitHuxerUIFrame;
 @end
@@ -133,7 +136,7 @@ class MacPlatformHost;
 
 namespace huxerui::detail {
 
-class MacPlatformHost final : public PlatformHost, public PlatformClipboard {
+class MacPlatformHost final : public PlatformHost, public PlatformClipboard, public PlatformResources {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     @autoreleasepool {
@@ -156,12 +159,17 @@ public:
       view_ = [[HuxerUIHostView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
       view_->huxeruiHost = this;
+      [NSNotificationCenter.defaultCenter addObserver:view_
+                                             selector:@selector(resourceContextDidChange:)
+                                                 name:NSCurrentLocaleDidChangeNotification
+                                               object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
       [window_ makeKeyAndOrderFront:nil];
       [window_ makeFirstResponder:view_];
+      runtime_->UpdateResourceContext(Context());
 
       [application finishLaunching];
       [application activateIgnoringOtherApps:YES];
@@ -171,6 +179,7 @@ public:
       });
       RequestFrameAt(Now());
       [application run];
+      [NSNotificationCenter.defaultCenter removeObserver:view_ name:NSCurrentLocaleDidChangeNotification object:nil];
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiHost = nullptr;
       delegate_->huxeruiHost = nullptr;
@@ -232,6 +241,12 @@ public:
     }
   }
 
+  void UpdateResourceContext() {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateResourceContext(Context());
+    }
+  }
+
   FontMetrics Metrics(const Font& font) override {
     return renderer_.Metrics(font);
   }
@@ -279,6 +294,45 @@ public:
 
   PlatformClipboard* Clipboard() noexcept override {
     return this;
+  }
+
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  ResourceContext Context() const override {
+    @autoreleasepool {
+      NSString* language = NSLocale.preferredLanguages.firstObject;
+      const char* language_tag = language == nil ? nullptr : language.UTF8String;
+      Locale locale = language_tag == nullptr ? Locale::Default() : Locale::FromLanguageTag(language_tag);
+      NSScreen* screen = window_ != nil ? window_.screen : NSScreen.mainScreen;
+      const float scale = screen == nil ? 1.0F : static_cast<float>(screen.backingScaleFactor);
+      return {std::move(locale), scale};
+    }
+  }
+
+  RawAsset Read(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI macOS resource path is invalid");
+    }
+    @autoreleasepool {
+      NSString* relative = [[NSString alloc] initWithBytes:package_path.data()
+                                                    length:package_path.size()
+                                                  encoding:NSUTF8StringEncoding];
+      if (relative == nil) {
+        throw std::logic_error("HuxerUI macOS resource path is not valid UTF-8");
+      }
+      NSURL* root = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"HuxerUI" isDirectory:YES];
+      NSData* data = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:relative]];
+      if (data == nil) {
+        return {};
+      }
+      std::vector<std::byte> bytes(data.length);
+      if (!bytes.empty()) {
+        std::memcpy(bytes.data(), data.bytes, bytes.size());
+      }
+      return RawAsset::FromBytes(std::move(bytes));
+    }
   }
 
   std::optional<std::string> ReadText() override {
@@ -433,8 +487,16 @@ int RunPlatformApp(AppDefinition definition) {
 - (void)viewDidChangeBackingProperties {
   [super viewDidChangeBackingProperties];
   if (huxeruiHost != nullptr) {
+    huxeruiHost->UpdateResourceContext();
     huxeruiHost->InvalidateNativeSurface();
     huxeruiHost->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)resourceContextDidChange:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiHost != nullptr) {
+    huxeruiHost->UpdateResourceContext();
   }
 }
 

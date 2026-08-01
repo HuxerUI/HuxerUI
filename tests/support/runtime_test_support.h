@@ -224,6 +224,10 @@ public:
     runtime_.SetViewport(viewport);
   }
 
+  void UpdateResourceContext(huxerui::ResourceContext context) {
+    runtime_.UpdateResourceContext(std::move(context));
+  }
+
   const FlattenedScene& BuildFrame() {
     flattened_scene_.Update(BuildCommit().render_frame);
     return flattened_scene_;
@@ -554,11 +558,16 @@ public:
     return platform_clipboard;
   }
 
+  huxerui::PlatformResources* Resources() noexcept override {
+    return platform_resources;
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
+  huxerui::PlatformResources* platform_resources = nullptr;
 };
 
 inline std::string FirstText(const FlattenedScene& scene) {
