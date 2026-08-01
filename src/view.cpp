@@ -33,6 +33,16 @@ void ApplyBackground(detail::ViewSpec& spec, const Background& modifier) {
   spec.style.background = modifier.color;
 }
 
+void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
+  const bool color_finite = std::isfinite(modifier.color.red) && std::isfinite(modifier.color.green) &&
+                            std::isfinite(modifier.color.blue) && std::isfinite(modifier.color.alpha);
+  if (!color_finite || !std::isfinite(modifier.offset.x) || !std::isfinite(modifier.offset.y) ||
+      !std::isfinite(modifier.blur_radius) || modifier.blur_radius < 0.0F || !std::isfinite(modifier.spread)) {
+    throw std::invalid_argument("HuxerUI shadow values must be finite with non-negative blur");
+  }
+  spec.style.shadow = modifier;
+}
+
 void ApplyForeground(detail::ViewSpec& spec, const Foreground& modifier) {
   spec.style.foreground = modifier.color;
 }
@@ -510,6 +520,10 @@ const detail::ModifierDescriptor& Focusable::Descriptor() {
 
 const detail::ModifierDescriptor& Background::Descriptor() {
   return ApplyOnlyModifierDescriptor<Background, ApplyBackground>();
+}
+
+const detail::ModifierDescriptor& Shadow::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Shadow, ApplyShadow>();
 }
 
 const detail::ModifierDescriptor& Foreground::Descriptor() {

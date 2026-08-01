@@ -1,5 +1,7 @@
 #include "runtime_test_support.h"
 
+#include <limits>
+
 namespace huxerui::test {
 
 View RenderSceneApp() {
@@ -17,6 +19,7 @@ State<bool> clip_damage_expanded;
 State<bool> retained_opacity_faded;
 State<bool> child_order_reversed;
 State<bool> overflowing_paint_changed;
+State<bool> shadow_changed;
 
 struct OverflowPaint;
 struct FramePaintInvalidation;
@@ -98,6 +101,24 @@ View PaintReuseApp() {
 
 View FramePaintInvalidationApp() {
   return Spacer().With(Frame{40.0F, 20.0F}, FramePaintInvalidation{});
+}
+
+View ShadowApp() {
+  auto changed = UseState(false);
+  shadow_changed = changed;
+  return Row {
+    Spacer().With(
+        Frame{40.0F, 20.0F},
+        Background{Color::White()},
+        CornerRadius{6.0F},
+        Shadow{
+            .color = Color::Rgb(0, 0, 0, changed.Get() ? 0.4F : 0.2F),
+            .offset = {4.0F, 5.0F},
+            .blur_radius = 6.0F,
+            .spread = 2.0F,
+        }
+    ),
+  }.With(CrossAlign{CrossAxisAlignment::Start});
 }
 
 View PresentationReuseApp() {
@@ -583,6 +604,36 @@ TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheV
   REQUIRE(DamageContains(changed.damage, {0.0F, 0.0F, 80.0F, 20.0F}));
 }
 
+TEST_CASE("ShadowsPaintBehindContentAndInvalidateTheirOverflow") {
+  TestPlatform platform;
+  Runtime runtime{ShadowApp, platform};
+  runtime.SetViewport({160.0F, 100.0F});
+
+  const RenderFrame& first = runtime.BuildRenderFrame();
+  const auto* mounted_root = runtime.RootNode();
+  REQUIRE(mounted_root != nullptr);
+  REQUIRE(mounted_root->children.size() == 1);
+  const auto* mounted = mounted_root->children.front().get();
+  const RenderNode* render_node = FindRenderNode(*first.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->content.Commands().size() == 2);
+  const auto* shadow = std::get_if<DrawShadowCommand>(&render_node->content.Commands()[0]);
+  REQUIRE(shadow != nullptr);
+  REQUIRE(shadow->corner_radius == 6.0F);
+  REQUIRE(std::holds_alternative<DrawRectCommand>(render_node->content.Commands()[1]));
+  REQUIRE(render_node->content.Bounds() == Rect{-4.0F, -3.0F, 176.0F, 36.0F});
+
+  shadow_changed = true;
+  const RenderFrame& changed = runtime.BuildRenderFrame();
+  render_node = FindRenderNode(*changed.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  shadow = std::get_if<DrawShadowCommand>(&render_node->content.Commands()[0]);
+  REQUIRE(shadow != nullptr);
+  REQUIRE(shadow->color.alpha == 0.4F);
+  REQUIRE_FALSE(changed.damage.full);
+  REQUIRE(DamageContains(changed.damage, Rect{0.0F, 0.0F, 160.0F, 33.0F}));
+}
+
 TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {
   TestPlatform platform;
   Runtime runtime{ClippedOverflowingPaintApp, platform};
@@ -596,6 +647,23 @@ TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {
   REQUIRE(child != nullptr);
   REQUIRE_FALSE(child->visible);
   REQUIRE_FALSE(scroll_view->render_node.visible);
+}
+
+TEST_CASE("ShadowModifierRejectsInvalidValues") {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+
+  REQUIRE_THROWS_AS(
+      Spacer().With(Shadow{.color = Color::Black(), .blur_radius = -1.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Spacer().With(Shadow{.color = Color::Black(), .blur_radius = nan}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Spacer().With(Shadow{.color = Color::Black(), .spread = nan}),
+      std::invalid_argument
+  );
 }
 
 } // namespace huxerui::test

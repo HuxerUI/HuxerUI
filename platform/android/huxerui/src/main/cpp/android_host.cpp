@@ -16,14 +16,16 @@
 #include <string_view>
 #include <utility>
 
-#include "internal.h"
+#include "android_renderer.h"
+#include "android_text_layout.h"
+#include "android_text_input_internal.h"
+#include "host_frame_internal.h"
 #include "text_input_internal.h"
+#include "text_layout_internal.h"
 
 namespace huxerui::detail {
 
 namespace {
-
-constexpr float kRadiansToDegrees = 57.2957795130823208768F;
 
 enum class AndroidEditorAction : jint {
   Unspecified,
@@ -67,16 +69,6 @@ enum class AndroidTextInputOperation : jint {
   DeleteSurroundingCodePoints,
   SetComposingRegion,
 };
-
-jint PackColor(Color color) {
-  const auto channel = [](float value) {
-    return static_cast<std::uint32_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
-  };
-  return static_cast<jint>(
-      channel(color.alpha) << 24U | channel(color.red) << 16U | channel(color.green) << 8U | channel(color.blue)
-  );
-}
-
 jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
   auto* bytes = environment->NewByteArray(static_cast<jsize>(text.size()));
   if (bytes == nullptr || text.empty()) {
@@ -157,128 +149,6 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
     environment->DeleteLocalRef(exception_class);
   }
 }
-
-class AndroidTextLayout final : public TextLayout {
-public:
-  AndroidTextLayout(JavaVM* virtual_machine, JNIEnv* environment, jobject layout)
-      : virtual_machine_(virtual_machine), layout_(environment->NewGlobalRef(layout)) {
-    if (layout_ == nullptr) {
-      throw std::runtime_error("HuxerUI could not retain its Android text layout");
-    }
-    jclass layout_class = environment->GetObjectClass(layout);
-    measure_ = environment->GetMethodID(layout_class, "measure", "()[F");
-    hit_test_ = environment->GetMethodID(layout_class, "hitTest", "(FF)J");
-    caret_ = environment->GetMethodID(layout_class, "caret", "(JZ)[F");
-    range_ = environment->GetMethodID(layout_class, "range", "(JJ)[F");
-    previous_ = environment->GetMethodID(layout_class, "previous", "(J)J");
-    next_ = environment->GetMethodID(layout_class, "next", "(J)J");
-    environment->DeleteLocalRef(layout_class);
-    if (measure_ == nullptr || hit_test_ == nullptr || caret_ == nullptr || range_ == nullptr || previous_ == nullptr ||
-        next_ == nullptr) {
-      environment->DeleteGlobalRef(layout_);
-      layout_ = nullptr;
-      throw std::runtime_error("HuxerUI Android text layout methods do not match the native backend");
-    }
-  }
-
-  ~AndroidTextLayout() override {
-    if (JNIEnv* environment = Environment(); environment != nullptr && layout_ != nullptr) {
-      environment->DeleteGlobalRef(layout_);
-    }
-  }
-
-  Size Measure() const override {
-    const std::vector<float> values = FloatArray(measure_);
-    return values.size() >= 2 ? Size{values[0], values[1]} : Size{};
-  }
-
-  TextPosition HitTest(Point point) const override {
-    JNIEnv* environment = Environment();
-    if (environment == nullptr) {
-      return {};
-    }
-    const jlong encoded = environment->CallLongMethod(layout_, hit_test_, point.x, point.y);
-    const bool upstream = encoded < 0;
-    return {
-        static_cast<TextOffset>(upstream ? -encoded - 1 : encoded),
-        upstream ? TextAffinity::Upstream : TextAffinity::Downstream,
-    };
-  }
-
-  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
-    const std::vector<float> values =
-        FloatArray(caret_, static_cast<jlong>(offset), affinity == TextAffinity::Upstream ? JNI_TRUE : JNI_FALSE);
-    return values.size() >= 4 ? Rect{values[0], values[1], values[2], values[3]} : Rect{};
-  }
-
-  std::vector<Rect> RangeRects(TextRange range) const override {
-    const std::vector<float> values =
-        FloatArray(range_, static_cast<jlong>(range.start), static_cast<jlong>(range.end));
-    std::vector<Rect> rects;
-    rects.reserve(values.size() / 4);
-    for (std::size_t index = 0; index + 3 < values.size(); index += 4) {
-      rects.push_back({
-          values[index],
-          values[index + 1],
-          values[index + 2],
-          values[index + 3],
-      });
-    }
-    return rects;
-  }
-
-  TextOffset PreviousCaretOffset(TextOffset offset) const override {
-    JNIEnv* environment = Environment();
-    return environment == nullptr
-               ? offset
-               : static_cast<TextOffset>(environment->CallLongMethod(layout_, previous_, static_cast<jlong>(offset)));
-  }
-
-  TextOffset NextCaretOffset(TextOffset offset) const override {
-    JNIEnv* environment = Environment();
-    return environment == nullptr
-               ? offset
-               : static_cast<TextOffset>(environment->CallLongMethod(layout_, next_, static_cast<jlong>(offset)));
-  }
-
-private:
-  JNIEnv* Environment() const noexcept {
-    if (virtual_machine_ == nullptr) {
-      return nullptr;
-    }
-    JNIEnv* environment = nullptr;
-    return virtual_machine_->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6) == JNI_OK ? environment
-                                                                                                       : nullptr;
-  }
-
-  template <class... Arguments> std::vector<float> FloatArray(jmethodID method, Arguments... arguments) const {
-    JNIEnv* environment = Environment();
-    if (environment == nullptr) {
-      return {};
-    }
-    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(layout_, method, arguments...));
-    if (result == nullptr) {
-      return {};
-    }
-    const jsize size = environment->GetArrayLength(result);
-    std::vector<float> values(static_cast<std::size_t>(size));
-    if (size > 0) {
-      environment->GetFloatArrayRegion(result, 0, size, values.data());
-    }
-    environment->DeleteLocalRef(result);
-    return values;
-  }
-
-  JavaVM* virtual_machine_ = nullptr;
-  jobject layout_ = nullptr;
-  jmethodID measure_ = nullptr;
-  jmethodID hit_test_ = nullptr;
-  jmethodID caret_ = nullptr;
-  jmethodID range_ = nullptr;
-  jmethodID previous_ = nullptr;
-  jmethodID next_ = nullptr;
-};
-
 class AndroidViewPlatformHost final : public PlatformHost, public PlatformTextInput, public PlatformClipboard {
 public:
   AndroidViewPlatformHost(JNIEnv* environment, jobject view) {
@@ -296,6 +166,7 @@ public:
       view_ = nullptr;
       throw std::runtime_error("HuxerUI could not inspect its Android view");
     }
+
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
     invalidate_full_frame_ = environment->GetMethodID(view_class, "invalidateFullFrame", "()V");
     measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFF)[F");
@@ -307,30 +178,26 @@ public:
     request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
     read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
     write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
-    draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
-    draw_text_ = environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFIFI)V");
-    draw_circle_ = environment->GetMethodID(view_class, "drawCircle", "(Landroid/graphics/Canvas;FFFI)V");
-    draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFI)V");
-    draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
-    push_clip_ = environment->GetMethodID(view_class, "pushClip", "(Landroid/graphics/Canvas;FFFFF)V");
-    pop_clip_ = environment->GetMethodID(view_class, "popClip", "(Landroid/graphics/Canvas;)V");
-    push_opacity_ = environment->GetMethodID(view_class, "pushOpacity", "(Landroid/graphics/Canvas;F)V");
-    pop_opacity_ = environment->GetMethodID(view_class, "popOpacity", "(Landroid/graphics/Canvas;)V");
-    push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
-    pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
-    environment->DeleteLocalRef(view_class);
 
     if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || measure_text_ == nullptr ||
         create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
         restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
-        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || draw_rect_ == nullptr ||
-        draw_text_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr ||
-        push_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr ||
-        push_transform_ == nullptr || pop_transform_ == nullptr) {
+        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr) {
+      environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
       throw std::runtime_error("HuxerUI Android view methods do not match the native backend");
     }
+
+    try {
+      renderer_.Initialize(environment, view_class);
+    } catch (...) {
+      environment->DeleteLocalRef(view_class);
+      environment->DeleteGlobalRef(view_);
+      view_ = nullptr;
+      throw;
+    }
+    environment->DeleteLocalRef(view_class);
   }
 
   ~AndroidViewPlatformHost() override {
@@ -341,29 +208,13 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    frame_build_pending_ = true;
-    const double now = Now();
-    if (std::isnan(deadline) || deadline <= now) {
-      deadline = now;
-    } else if (!std::isfinite(deadline)) {
-      deadline = std::numeric_limits<double>::max();
+    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), view_ != nullptr)) {
+      ScheduleFrame(*scheduled);
     }
-    if (paint_pending_ || paint_in_progress_) {
-      if (!deferred_frame_deadline_.has_value() || deadline < *deferred_frame_deadline_) {
-        deferred_frame_deadline_ = deadline;
-      }
-      return;
-    }
-    ScheduleFrame(deadline);
   }
 
   bool BeginFrameCommit() {
-    if (!frame_build_pending_) {
-      return false;
-    }
-    frame_build_pending_ = false;
-    deferred_frame_deadline_.reset();
-    return true;
+    return frame_state_.BeginCommit();
   }
 
   void CommitFrame(const FrameCommit& commit) {
@@ -376,13 +227,13 @@ public:
   }
 
   void Draw(JNIEnv* environment, jobject canvas) {
-    paint_in_progress_ = true;
+    frame_state_.BeginPaint();
     if (committed_frame_ != nullptr) {
       Render(environment, canvas, *committed_frame_);
     }
-    paint_in_progress_ = false;
-    paint_pending_ = false;
-    FlushDeferredFrame();
+    if (const std::optional<double> deadline = frame_state_.EndPaint(view_ != nullptr)) {
+      ScheduleFrame(*deadline);
+    }
   }
 
   double Now() const noexcept override {
@@ -406,12 +257,9 @@ private:
   }
 
   void FlushDeferredFrame() {
-    if (paint_pending_ || paint_in_progress_ || !frame_build_pending_ || !deferred_frame_deadline_.has_value()) {
-      return;
+    if (const std::optional<double> deadline = frame_state_.TakeDeferred(view_ != nullptr)) {
+      ScheduleFrame(*deadline);
     }
-    const double deadline = *deferred_frame_deadline_;
-    deferred_frame_deadline_.reset();
-    ScheduleFrame(deadline);
   }
 
   bool InvalidateDamage(const DamageRegion& damage) {
@@ -420,8 +268,11 @@ private:
       return false;
     }
     environment->CallVoidMethod(view_, invalidate_full_frame_);
-    paint_pending_ = !environment->ExceptionCheck();
-    return paint_pending_;
+    const bool invalidated = !environment->ExceptionCheck();
+    if (invalidated) {
+      frame_state_.MarkPaintPending();
+    }
+    return invalidated;
   }
 
 public:
@@ -463,7 +314,7 @@ public:
     if (layout == nullptr) {
       return {};
     }
-    auto result = std::make_unique<AndroidTextLayout>(virtual_machine_, environment, layout);
+    std::unique_ptr<TextLayout> result = CreateAndroidTextLayout(virtual_machine_, environment, layout);
     environment->DeleteLocalRef(layout);
     return result;
   }
@@ -561,105 +412,7 @@ public:
   }
 
   void Render(JNIEnv* environment, jobject canvas, const RenderFrame& frame) {
-    if (frame.scene.root != nullptr) {
-      RenderSceneNode(environment, canvas, *frame.scene.root);
-    }
-  }
-
-  bool RenderSequence(JNIEnv* environment, jobject canvas, const PaintSequence& sequence) {
-    for (const PaintCommand& command : sequence.Commands()) {
-      std::visit(
-          [this, environment, canvas](const auto& value) { RenderCommand(environment, canvas, value); },
-          command
-      );
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  bool RenderSceneNode(JNIEnv* environment, jobject canvas, const RenderNode& node) {
-    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
-    if (!node.visible || opacity <= 0.0F || environment->ExceptionCheck()) {
-      return !environment->ExceptionCheck();
-    }
-
-    Transform2D transform = node.transform;
-    transform.translate_x += node.offset.x;
-    transform.translate_y += node.offset.y;
-    const bool transformed = !transform.IsIdentity();
-    if (transformed) {
-      RenderCommand(environment, canvas, PushTransformCommand{transform});
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-
-    const bool translucent = opacity < 1.0F;
-    if (translucent) {
-      environment->CallVoidMethod(view_, push_opacity_, canvas, opacity);
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-
-    if (!RenderSequence(environment, canvas, node.content)) {
-      return false;
-    }
-    if (node.child_clip.has_value()) {
-      RenderCommand(
-          environment,
-          canvas,
-          PushClipCommand{
-              node.child_clip->rect,
-              node.child_clip->corner_radius,
-          }
-      );
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    const bool children_transformed = !node.children_transform.IsIdentity();
-    if (children_transformed) {
-      RenderCommand(environment, canvas, PushTransformCommand{node.children_transform});
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    for (const RenderNode* child : node.children) {
-      if (child != nullptr && !RenderSceneNode(environment, canvas, *child)) {
-        return false;
-      }
-    }
-    if (children_transformed) {
-      RenderCommand(environment, canvas, PopTransformCommand{});
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    if (node.child_clip.has_value()) {
-      RenderCommand(environment, canvas, PopClipCommand{});
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    if (!RenderSequence(environment, canvas, node.foreground)) {
-      return false;
-    }
-    if (translucent) {
-      environment->CallVoidMethod(view_, pop_opacity_, canvas);
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    if (transformed) {
-      RenderCommand(environment, canvas, PopTransformCommand{});
-      if (environment->ExceptionCheck()) {
-        return false;
-      }
-    }
-    return true;
+    renderer_.Render(environment, view_, canvas, frame);
   }
 
 private:
@@ -710,119 +463,7 @@ private:
     return environment;
   }
 
-  void RenderCommand(JNIEnv* environment, jobject canvas, const DrawRectCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        draw_rect_,
-        canvas,
-        command.rect.x,
-        command.rect.y,
-        command.rect.width,
-        command.rect.height,
-        PackColor(command.color),
-        command.corner_radius
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const DrawTextCommand& command) {
-    jbyteArray bytes = ToByteArray(environment, command.text);
-    if (bytes == nullptr) {
-      return;
-    }
-    environment->CallVoidMethod(
-        view_,
-        draw_text_,
-        canvas,
-        bytes,
-        command.rect.x,
-        command.rect.y,
-        command.rect.width,
-        command.rect.height,
-        PackColor(command.color),
-        command.font_size,
-        static_cast<jint>(command.align)
-    );
-    environment->DeleteLocalRef(bytes);
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const DrawCircleCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        draw_circle_,
-        canvas,
-        command.center.x,
-        command.center.y,
-        command.radius,
-        PackColor(command.color)
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const DrawArcCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        draw_arc_,
-        canvas,
-        command.center.x,
-        command.center.y,
-        command.radius,
-        command.start_angle * kRadiansToDegrees,
-        command.sweep_angle * kRadiansToDegrees,
-        PackColor(command.color),
-        command.width,
-        static_cast<jint>(command.cap)
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const DrawBorderCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        draw_border_,
-        canvas,
-        command.rect.x,
-        command.rect.y,
-        command.rect.width,
-        command.rect.height,
-        PackColor(command.color),
-        command.width,
-        command.corner_radius
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const PushClipCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        push_clip_,
-        canvas,
-        command.rect.x,
-        command.rect.y,
-        command.rect.width,
-        command.rect.height,
-        command.corner_radius
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const PopClipCommand&) {
-    environment->CallVoidMethod(view_, pop_clip_, canvas);
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const PushTransformCommand& command) {
-    environment->CallVoidMethod(
-        view_,
-        push_transform_,
-        canvas,
-        command.transform.m11,
-        command.transform.m12,
-        command.transform.m21,
-        command.transform.m22,
-        command.transform.translate_x,
-        command.transform.translate_y
-    );
-  }
-
-  void RenderCommand(JNIEnv* environment, jobject canvas, const PopTransformCommand&) {
-    environment->CallVoidMethod(view_, pop_transform_, canvas);
-  }
-
+  AndroidRenderer renderer_;
   JavaVM* virtual_machine_ = nullptr;
   jobject view_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
@@ -836,49 +477,9 @@ private:
   jmethodID request_show_text_input_ = nullptr;
   jmethodID read_clipboard_text_ = nullptr;
   jmethodID write_clipboard_text_ = nullptr;
-  jmethodID draw_rect_ = nullptr;
-  jmethodID draw_text_ = nullptr;
-  jmethodID draw_circle_ = nullptr;
-  jmethodID draw_arc_ = nullptr;
-  jmethodID draw_border_ = nullptr;
-  jmethodID push_clip_ = nullptr;
-  jmethodID pop_clip_ = nullptr;
-  jmethodID push_opacity_ = nullptr;
-  jmethodID pop_opacity_ = nullptr;
-  jmethodID push_transform_ = nullptr;
-  jmethodID pop_transform_ = nullptr;
-  bool frame_build_pending_ = false;
-  bool paint_pending_ = false;
-  bool paint_in_progress_ = false;
-  std::optional<double> deferred_frame_deadline_;
+  HostFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
 };
-
-std::optional<TextSelection> AndroidCursorSelection(
-    const TextInputContext& context, TextRange target, TextOffset inserted_length, TextOffset new_cursor_position
-) {
-  if (target.end > context.total_length || inserted_length < 0) {
-    return std::nullopt;
-  }
-  const TextOffset retained_length = context.total_length - target.Length();
-  if (inserted_length > std::numeric_limits<TextOffset>::max() - retained_length) {
-    return std::nullopt;
-  }
-  const TextOffset result_length = retained_length + inserted_length;
-
-  TextOffset cursor = target.start;
-  if (new_cursor_position > 0) {
-    const TextOffset insertion_end = target.start + inserted_length;
-    const TextOffset delta = new_cursor_position - 1;
-    cursor = delta > result_length - insertion_end ? result_length : insertion_end + delta;
-  } else if (new_cursor_position < 0) {
-    const TextOffset magnitude = new_cursor_position == std::numeric_limits<TextOffset>::min()
-                                     ? std::numeric_limits<TextOffset>::max()
-                                     : -new_cursor_position;
-    cursor = magnitude > target.start ? 0 : target.start - magnitude;
-  }
-  return TextSelection{cursor, cursor};
-}
 
 class AndroidSession final {
 public:

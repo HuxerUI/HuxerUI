@@ -70,6 +70,17 @@ struct DrawBorderCommand {
   bool operator==(const DrawBorderCommand&) const = default;
 };
 
+struct DrawShadowCommand {
+  Rect rect;
+  Color color;
+  Point offset;
+  float blur_radius = 0.0F;
+  float spread = 0.0F;
+  float corner_radius = 0.0F;
+
+  bool operator==(const DrawShadowCommand&) const = default;
+};
+
 struct PushClipCommand {
   Rect rect;
   float corner_radius = 0.0F;
@@ -97,6 +108,7 @@ using PaintCommand = std::variant<
     DrawCircleCommand,
     DrawArcCommand,
     DrawBorderCommand,
+    DrawShadowCommand,
     PushClipCommand,
     PopClipCommand,
     PushTransformCommand,
@@ -153,6 +165,15 @@ public:
       StrokeCap cap = StrokeCap::Butt
   );
   void DrawBorder(Rect rect, Color color, float width, float corner_radius = 0.0F);
+  // blur_radius is the outer falloff extent around the spread shadow shape; spread may contract the caster.
+  void DrawShadow(
+      Rect rect,
+      Color color,
+      Point offset,
+      float blur_radius,
+      float spread = 0.0F,
+      float corner_radius = 0.0F
+  );
   void PushClip(Rect rect, float corner_radius = 0.0F);
   void PopClip();
   void PushTransform(Transform2D transform);

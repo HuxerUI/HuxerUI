@@ -82,18 +82,6 @@ struct VirtualGridItemSpans {
   using Value = std::vector<std::size_t>;
 };
 
-class TextLayout {
-public:
-  virtual ~TextLayout() = default;
-
-  [[nodiscard]] virtual Size Measure() const = 0;
-  [[nodiscard]] virtual TextPosition HitTest(Point point) const = 0;
-  [[nodiscard]] virtual Rect CaretRect(TextOffset offset, TextAffinity affinity) const = 0;
-  [[nodiscard]] virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
-  [[nodiscard]] virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
-  [[nodiscard]] virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
-};
-
 struct EnvironmentFrame {
   std::shared_ptr<const EnvironmentFrame> parent;
   EnvironmentValues overrides;
@@ -247,6 +235,7 @@ struct ViewStyle {
   EdgeInsets padding;
   Frame frame;
   std::optional<Color> background;
+  std::optional<Shadow> shadow;
   std::optional<Color> foreground;
   std::optional<float> font_size;
   float corner_radius = 0.0F;
@@ -270,8 +259,8 @@ struct ViewStyle {
   }
 
   [[nodiscard]] bool ContentPaintEquals(const ViewStyle& other) const {
-    return padding == other.padding && background == other.background && foreground == other.foreground &&
-           font_size == other.font_size && corner_radius == other.corner_radius;
+    return padding == other.padding && background == other.background && shadow == other.shadow &&
+           foreground == other.foreground && font_size == other.font_size && corner_radius == other.corner_radius;
   }
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewStyle& other) const {
@@ -885,9 +874,5 @@ ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event);
 bool AdvanceMountedNodeFrame(MountedNode& node, const FrameInfo& frame);
 
 bool IsVirtualLayoutNode(const MountedNode& node) noexcept;
-
-#if !defined(__ANDROID__)
-int RunPlatformApp(AppDefinition definition);
-#endif
 
 } // namespace huxerui::detail

@@ -4,11 +4,44 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <huxerui/render_scene.h>
 
 namespace huxerui::detail {
+
+inline std::wstring Utf8ToWide(std::string_view text) {
+  if (text.empty()) {
+    return {};
+  }
+  const int input_size =
+      static_cast<int>(std::min<std::size_t>(text.size(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
+  const int output_size = MultiByteToWideChar(CP_UTF8, 0, text.data(), input_size, nullptr, 0);
+  if (output_size <= 0) {
+    return {};
+  }
+  std::wstring result(static_cast<std::size_t>(output_size), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, text.data(), input_size, result.data(), output_size);
+  return result;
+}
+
+inline std::string WideToUtf8(std::wstring_view text) {
+  if (text.empty()) {
+    return {};
+  }
+  const int input_size =
+      static_cast<int>(std::min<std::size_t>(text.size(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
+  const int output_size = WideCharToMultiByte(CP_UTF8, 0, text.data(), input_size, nullptr, 0, nullptr, nullptr);
+  if (output_size <= 0) {
+    return {};
+  }
+  std::string result(static_cast<std::size_t>(output_size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, text.data(), input_size, result.data(), output_size, nullptr, nullptr);
+  return result;
+}
 
 struct Win32DamageRegion {
   bool full = false;
@@ -23,8 +56,7 @@ inline Win32DamageRegion ResolveWin32Damage(const DamageRegion& damage, float sc
   }
 
   for (const Rect& rect : damage.rects) {
-    if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) ||
-        !std::isfinite(rect.height)) {
+    if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) || !std::isfinite(rect.height)) {
       result.full = true;
       result.rects.clear();
       return result;

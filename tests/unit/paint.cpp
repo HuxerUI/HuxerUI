@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <variant>
 
+#include "shadow_internal.h"
+
 namespace huxerui::test {
 
 static_assert(std::equality_comparable<Color>);
@@ -96,6 +98,54 @@ TEST_CASE("PaintContextIncludesSquareArcCapsInBounds") {
   REQUIRE(sequence.Bounds().y + sequence.Bounds().height > 52.0F);
 }
 
+TEST_CASE("PaintContextRecordsShadowOverflowBounds") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawShadow({10.0F, 20.0F, 30.0F, 15.0F}, Color::Rgb(0, 0, 0, 0.25F), {4.0F, 6.0F}, 8.0F, 2.0F, 5.0F);
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto* shadow = std::get_if<DrawShadowCommand>(&sequence.Commands().front());
+  REQUIRE(shadow != nullptr);
+  REQUIRE(shadow->offset == Point{4.0F, 6.0F});
+  REQUIRE(sequence.Bounds() == Rect{4.0F, 16.0F, 50.0F, 35.0F});
+}
+
+TEST_CASE("PaintContextAllowsNegativeShadowSpread") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawShadow({10.0F, 20.0F, 30.0F, 15.0F}, Color::Black(), {4.0F, 6.0F}, 8.0F, -2.0F, 5.0F);
+  context.Finish();
+
+  REQUIRE(sequence.Bounds() == Rect{8.0F, 20.0F, 42.0F, 27.0F});
+}
+
+TEST_CASE("ShadowResolutionClampsCornerRadiusAndRejectsCollapsedCasters") {
+  const detail::ResolvedShadow expanded = detail::ResolveShadow(
+      DrawShadowCommand{
+          .rect = {10.0F, 20.0F, 20.0F, 10.0F},
+          .color = Color::Black(),
+          .blur_radius = 6.0F,
+          .spread = 3.0F,
+          .corner_radius = 4.0F,
+      }
+  );
+  REQUIRE(expanded.caster == Rect{7.0F, 17.0F, 26.0F, 16.0F});
+  REQUIRE(expanded.corner_radius == 7.0F);
+  REQUIRE(expanded.standard_deviation == 2.0F);
+
+  const detail::ResolvedShadow collapsed = detail::ResolveShadow(
+      DrawShadowCommand{
+          .rect = {0.0F, 0.0F, 10.0F, 10.0F},
+          .color = Color::Black(),
+          .spread = -5.0F,
+          .corner_radius = 8.0F,
+      }
+  );
+  REQUIRE(collapsed.IsEmpty());
+  REQUIRE(collapsed.bounds.IsEmpty());
+}
+
 TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
   const float nan = std::numeric_limits<float>::quiet_NaN();
 
@@ -108,6 +158,10 @@ TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
   REQUIRE_THROWS_AS(context.DrawCircle({}, -1.0F, Color::White()), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawArc({}, 10.0F, 0.0F, nan, Color::White(), 1.0F), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawBorder({}, Color::White(), -1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {}, -1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {}, nan), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {nan, 0.0F}, 1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {}, 1.0F, nan), std::invalid_argument);
   REQUIRE_THROWS_AS(context.PushClip({}, -1.0F), std::invalid_argument);
   REQUIRE_THROWS_AS(context.PushTransform(Transform2D{1.0F, 0.0F, 0.0F, 1.0F, nan, 0.0F}), std::invalid_argument);
   context.Finish();

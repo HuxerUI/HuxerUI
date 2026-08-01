@@ -8,9 +8,11 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
 add_executable(huxerui_tests
         tests_main.cpp
+        unit/host_frame.cpp
         unit/paint.cpp
         unit/text_input.cpp
         unit/validation.cpp
+        platform/android_text_input.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
         runtime/layout.cpp
@@ -41,6 +43,7 @@ endif ()
 
 target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
+        "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp"
         "${HUXERUI_PROJECT_DIR}/platform/macos"
         "${HUXERUI_PROJECT_DIR}/platform/windows"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"

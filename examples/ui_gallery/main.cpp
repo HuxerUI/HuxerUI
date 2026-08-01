@@ -22,6 +22,12 @@ View Panel(View content) {
       Frame{.width = gallery_width},
       Padding(theme.spacing.medium),
       Background(theme.colors.surface),
+      Shadow{
+          .color = Color::Rgb(20, 28, 40, 0.14F),
+          .offset = {0.0F, 6.0F},
+          .blur_radius = 18.0F,
+          .spread = -2.0F,
+      },
       CornerRadius(theme.shapes.large)
   );
 }
@@ -130,25 +136,25 @@ View MotionDemo() {
 }
 
 View GalleryContent() {
-  const ThemeSpec& theme = UseTheme();
-  return Column {
-    Text("UI Gallery").With(FontSize(28.0F)),
-    Text("Controls, layout, and motion in one compact overview", TextRole::Label),
-    ControlsDemo(),
-    LayoutDemo(),
-    MotionDemo(),
-  }.With(
+  auto& theme = UseTheme();
+  return ScrollView {
+    Column {
+      Text("UI Gallery").With(FontSize(28.0F)),
+      Text("Controls, layout, and motion in one compact overview", TextRole::Label),
+      ControlsDemo(),
+      LayoutDemo(),
+      MotionDemo(),
+    }.With(
       Padding(theme.spacing.large),
       Spacing(theme.spacing.medium),
       Background(theme.colors.background),
       CrossAlign(CrossAxisAlignment::Center)
-  );
+    )
+  }.With(ScrollBar());
 }
 
 View App() {
-  return ScrollView {
-    GalleryContent(),
-  }.With(ScrollBar());
+  return MaterialTheme(GalleryContent);
 }
 
 HUXERUI_APP(

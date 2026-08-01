@@ -278,7 +278,7 @@ It remains true when local paint or an unclipped descendant contributes visible 
 An effective child clip can still make that descendant and therefore the clipped subtree invisible.
 
 `PaintSequence` contains immutable platform-neutral `PaintCommand` values in node-local coordinates.
-`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, borders, clips, transforms, shadows, paths, and future primitives.
+`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, borders, clips, transforms, shadows, and future primitives.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
 Platform renderers traverse `RenderScene`, maintain the native transform and clip stacks, and replay only the records referenced by the scene.
@@ -305,7 +305,7 @@ It rejects non-finite geometry, colors, transforms, and negative dimensions, rad
 Arc start and sweep angles are expressed in radians.
 Its transform and clip stacks are reflected in those bounds, so the recorded rectangle conservatively contains the pixels produced by replay.
 `PaintContext::Bounds()` supplies the owning node's local layout bounds as a geometry reference; it does not clip drawing to that rectangle.
-Dirty sequences are recorded before visibility is resolved, allowing extensions and future Canvas or shadow primitives to paint beyond layout bounds correctly.
+Dirty sequences are recorded before visibility is resolved, allowing extensions, shadows, and future Canvas primitives to paint beyond layout bounds correctly.
 Built-in nodes, `NodeExtension::Paint`, and the future `Canvas` component use this same API.
 
 Paint callbacks are pure:
@@ -461,7 +461,8 @@ Damage is derived from retained scene changes:
 - Clip changes damage the conservative union of the affected old and new clipped subtree bounds.
 
 Each PaintCommand contributes conservative visual bounds, including its stroke width where applicable.
-Future overflow primitives such as shadows must include their complete visual extent; unknown or renderer-dependent overflow falls back to the host viewport.
+Shadow commands include their resolved caster and complete blur overflow.
+Unknown or renderer-dependent overflow falls back to the host viewport.
 
 The Android View backend currently ignores regional damage at the native invalidation boundary and redraws the full surface.
 Other future platform implementations may initially do the same.
@@ -517,10 +518,11 @@ Implemented stages:
 - Add equality-aware retained modifier and layout-value diffs.
 - Retain clean virtual policy, realization, and placement state, and reuse stable item measurements while scrolling.
 - Consume DamageRegion as native update bounds on macOS and Windows, while Android uses the same committed scene with full View invalidation.
+- Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its native blur resources.
 
 The migration stages defined in this document are implemented.
 
-Canvas, box shadows, page transitions, and embedded native views should build on this foundation rather than introduce competing rendering or invalidation paths.
+Canvas, page transitions, and embedded native views should build on this foundation rather than introduce competing rendering or invalidation paths.
 
 ## Validation
 

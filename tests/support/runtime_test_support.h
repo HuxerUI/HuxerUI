@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "internal.h"
+#include "text_layout_internal.h"
 
 namespace huxerui::test {
 

@@ -266,6 +266,17 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   if (node.content_paint_dirty) {
     PaintContext content{render_node.content, node.bounds};
     const Rect bounds = node.bounds;
+    if (node.style.shadow.has_value() && node.style.shadow->color.alpha > 0.0F) {
+      const Shadow& shadow = *node.style.shadow;
+      content.DrawShadow(
+          bounds,
+          shadow.color,
+          shadow.offset,
+          shadow.blur_radius,
+          shadow.spread,
+          node.style.corner_radius
+      );
+    }
     if (node.style.background.has_value() && node.style.background->alpha > 0.0F) {
       content.DrawRect(bounds, *node.style.background, node.style.corner_radius);
     }

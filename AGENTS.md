@@ -219,7 +219,7 @@ Keep AppKit work and `NSTextInputClient` interaction on the main thread. Preserv
 
 ### Windows
 
-Windows platform configuration lives in `cmake/platform/Windows.cmake`. The backend targets Windows 10 and later.
+Windows platform configuration lives in `cmake/platform/Windows.cmake`. The backend targets Windows 10 and later by default. `HUXERUI_WINDOWS_7_COMPAT=ON` may target Windows 7 SP1 with Platform Update by dynamically resolving newer Win32 APIs and retaining capability-based rendering fallbacks. Windows 7 without Platform Update is unsupported.
 
 Keep shared layout in DIPs and convert pixels, screen coordinates, DPI, UTF-16, and IME geometry at the boundary. Check HRESULTs, handles, COM lifetime, clipboard ownership, and resource recreation; prefer RAII and `ComPtr`.
 

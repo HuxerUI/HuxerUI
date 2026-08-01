@@ -65,9 +65,21 @@ Button("Save").With(
     Enabled(can_save),
     Padding(12.0F),
     Background{Color::Rgb(40, 100, 220)},
+    Shadow{
+        .color = Color::Rgb(0, 0, 0, 0.2F),
+        .offset = {0.0F, 4.0F},
+        .blur_radius = 10.0F,
+        .spread = -1.0F,
+    },
     CornerRadius(8.0F)
 );
 ```
+
+`Shadow` paints a Gaussian-blurred copy of the node's rectangular or rounded-rectangular shape behind its background.
+The shadow includes the caster interior; a node background is painted afterward and normally covers that portion.
+It follows presentation transforms and group opacity without changing measurement, layout, clipping, or hit testing.
+The blur radius is the outer falloff extent in logical units, while positive and negative spread expand and contract the shadow caster.
+The complete shadow overflow participates in visibility and damage calculation.
 
 Component-specific configuration remains on the component:
 

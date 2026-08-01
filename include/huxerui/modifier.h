@@ -296,6 +296,18 @@ struct Background {
   bool operator==(const Background&) const = default;
 };
 
+struct Shadow {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  Color color;
+  Point offset;
+  // blur_radius is the conservative outer falloff; signed spread adjusts the caster before blurring.
+  float blur_radius = 0.0F;
+  float spread = 0.0F;
+
+  bool operator==(const Shadow&) const = default;
+};
+
 struct Foreground {
   static const detail::ModifierDescriptor& Descriptor();
 

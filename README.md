@@ -16,7 +16,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and 
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
 
-HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, Toast, Dialog, custom layouts, and typed extension points.
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Toast, Dialog, custom layouts, and typed extension points.
 
 ## Quick Start
 
@@ -78,7 +78,7 @@ See [Getting Started](docs/getting-started.md) for application setup, Windows an
 |---|---|---|
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
 | macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
-| Windows | Supported | Win32, Direct2D, DirectWrite |
+| Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
 | iOS, OHOS, Linux, Web | Planned | Shared Runtime with platform-specific hosts |
 
 See [Platform Support](docs/platform-support.md) for backend responsibilities and integration details.

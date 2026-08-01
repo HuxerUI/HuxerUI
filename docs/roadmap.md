@@ -1,6 +1,6 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, layers, controlled text editing, and Android, macOS, and Windows backends.
+The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, shadows, layers, controlled text editing, and Android, macOS, and Windows backends.
 
 Runtime foundation work:
 
@@ -10,7 +10,7 @@ Runtime foundation work:
 Framework capability work:
 
 - Composition-scoped effects with post-commit setup and cleanup semantics
-- Canvas, box shadows, and demand-driven PaintCommand expansion
+- Canvas and demand-driven PaintCommand expansion
 - Navigation stacks, scoped navigation controllers, platform back handling, and page transitions
 - General-purpose clipping modifiers
 - Event capture, bubbling, and explicit pointer capture

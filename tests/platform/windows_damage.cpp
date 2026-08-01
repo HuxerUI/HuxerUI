@@ -2,7 +2,7 @@
 
 #include <limits>
 
-#include "win32_damage_internal.h"
+#include "win32_internal.h"
 
 namespace huxerui::test {
 

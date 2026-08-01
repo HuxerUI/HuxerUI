@@ -1,6 +1,21 @@
 function(huxerui_platform_configure)
+    if (HUXERUI_WINDOWS_7_COMPAT)
+        set(HUXERUI_WINDOWS_VERSION_DEFINITIONS
+                HUXERUI_WINDOWS_7_COMPAT=1
+                WINVER=0x0601
+                _WIN32_WINNT=0x0601
+        )
+    else ()
+        set(HUXERUI_WINDOWS_VERSION_DEFINITIONS
+                WINVER=0x0A00
+                _WIN32_WINNT=0x0A00
+        )
+    endif ()
+
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_host.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS
@@ -8,13 +23,15 @@ function(huxerui_platform_configure)
             _UNICODE
             NOMINMAX
             WIN32_LEAN_AND_MEAN
-            WINVER=0x0A00
-            _WIN32_WINNT=0x0A00
+            ${HUXERUI_WINDOWS_VERSION_DEFINITIONS}
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_LINK_LIBRARIES
             d2d1
+            d3d11
             dwrite
+            dxguid
+            dxgi
             imm32
             user32
             PARENT_SCOPE

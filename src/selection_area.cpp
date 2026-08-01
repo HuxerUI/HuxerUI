@@ -2,6 +2,7 @@
 
 #include "geometry_internal.h"
 #include "text_input_internal.h"
+#include "text_layout_internal.h"
 
 #include <algorithm>
 #include <cmath>

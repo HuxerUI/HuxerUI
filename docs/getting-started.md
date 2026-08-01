@@ -113,4 +113,5 @@ See the [README](../README.md#examples) for the complete example index.
 | `HUXERUI_BUILD_STATIC` | `ON` | Build the static library |
 | `HUXERUI_BUILD_TESTS` | `ON` for the top-level project | Build tests |
 | `HUXERUI_BUILD_EXAMPLES` | `ON` for the top-level project | Build examples |
+| `HUXERUI_WINDOWS_7_COMPAT` | `OFF` | Build the Windows backend for Windows 7 SP1 with Platform Update |
 

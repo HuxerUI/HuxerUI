@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "geometry_internal.h"
+#include "shadow_internal.h"
 
 namespace huxerui {
 namespace {
@@ -140,6 +141,28 @@ void PaintContext::DrawBorder(Rect rect, Color color, float width, float corner_
       rect.width + outset * 2.0F,
       rect.height + outset * 2.0F,
   });
+}
+
+void PaintContext::DrawShadow(
+    Rect rect, Color color, Point offset, float blur_radius, float spread, float corner_radius
+) {
+  RequireOpen();
+  RequireRect(rect);
+  RequireColor(color);
+  if (!IsFinite(offset)) {
+    throw std::invalid_argument("HuxerUI paint shadow offset must be finite");
+  }
+  RequireNonNegative(blur_radius, "HuxerUI paint shadow blur radius must be finite and non-negative");
+  if (!std::isfinite(spread)) {
+    throw std::invalid_argument("HuxerUI paint shadow spread must be finite");
+  }
+  RequireNonNegative(corner_radius, "HuxerUI paint corner radius must be finite and non-negative");
+  const DrawShadowCommand command{rect, color, offset, blur_radius, spread, corner_radius};
+  sequence_.commands_.emplace_back(command);
+  const detail::ResolvedShadow resolved = detail::ResolveShadow(command);
+  if (!resolved.IsEmpty()) {
+    Include(resolved.bounds);
+  }
 }
 
 void PaintContext::PushClip(Rect rect, float corner_radius) {

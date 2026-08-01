@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "internal.h"
+#include "text_layout_internal.h"
 
 namespace huxerui {
 
@@ -27,6 +27,8 @@ PlatformHost::CreateTextLayout(std::string_view text, float font_size, float max
 }
 
 namespace detail {
+
+int RunPlatformApp(AppDefinition definition);
 
 void RegisterAppDefinition(AppDefinition definition) {
   if (definition.root_factory == nullptr) {
