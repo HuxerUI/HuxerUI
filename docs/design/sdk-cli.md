@@ -419,7 +419,7 @@ A cross-platform source project does not imply that every package can be produce
 | --- | --- |
 | macOS | macOS and Android |
 | Windows | Windows and Android |
-| Linux | Android when Linux host tools are distributed |
+| Linux | Linux and Android |
 
 Formal macOS packaging requires Apple tools. Formal Windows packaging requires a supported Windows toolchain. The CLI must not silently skip an explicitly requested target and must not claim that an unsupported local cross-build succeeded.
 

@@ -9,6 +9,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES)
 
     if (ANDROID)
         set(HUXERUI_PLATFORM_ID "android")
@@ -19,8 +20,11 @@ function(huxerui_configure_platform)
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
+    elseif (UNIX)
+        set(HUXERUI_PLATFORM_ID "linux")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Linux.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports Android, macOS, and Windows only")
+        message(FATAL_ERROR "HuxerUI currently supports Android, macOS, Windows, and Linux only")
     endif ()
 
     huxerui_platform_configure()
@@ -30,6 +34,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS ${HUXERUI_PLATFORM_COMPILE_OPTIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES} PARENT_SCOPE)
 endfunction()
 
 function(huxerui_configure_compile_target target_name)
@@ -37,6 +42,7 @@ function(huxerui_configure_compile_target target_name)
     target_include_directories(${target_name} PRIVATE
             "${HUXERUI_PUBLIC_INCLUDE_DIR}"
             "${HUXERUI_PROJECT_DIR}/src"
+            ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES}
     )
     target_compile_options(${target_name} PRIVATE
             "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
@@ -138,8 +144,52 @@ function(huxerui_resolve_host_tool tool_name output_variable)
             "${HUXERUI_PROJECT_DIR}/tools/prebuilt/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}/huxerui-${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
     )
     if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
-        message(FATAL_ERROR
-                "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
+        if (HUXERUI_HOST_SYSTEM STREQUAL "linux")
+            huxerui_build_host_tool("${tool_name}" HUXERUI_HOST_TOOL)
+        else ()
+            message(FATAL_ERROR
+                    "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
+            )
+        endif ()
+    endif ()
+    set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)
+endfunction()
+
+# Builds a host tool from tools/<tool_name> source into the build tree when the
+# matching prebuilt executable is unavailable (Linux hosts commonly lack one).
+# The returned path is a custom-command output, so DEPENDS on it orders the build.
+function(huxerui_build_host_tool tool_name output_variable)
+    set(HUXERUI_HOST_TOOL_SOURCE_DIR
+            "${HUXERUI_PROJECT_DIR}/tools/${tool_name}"
+    )
+    set(HUXERUI_HOST_TOOL_BUILD_DIR
+            "${CMAKE_BINARY_DIR}/huxerui-host-tools/${tool_name}"
+    )
+    set(HUXERUI_HOST_TOOL
+            "${HUXERUI_HOST_TOOL_BUILD_DIR}/huxerui-${tool_name}"
+    )
+    if (WIN32)
+        set(HUXERUI_HOST_TOOL
+                "${HUXERUI_HOST_TOOL}.exe"
+        )
+    endif ()
+
+    if (NOT TARGET huxerui_host_${tool_name})
+        add_custom_command(
+                OUTPUT "${HUXERUI_HOST_TOOL}"
+                COMMAND ${CMAKE_COMMAND} -E rm -rf
+                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                COMMAND ${CMAKE_COMMAND}
+                        -S "${HUXERUI_HOST_TOOL_SOURCE_DIR}"
+                        -B "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                        -DCMAKE_BUILD_TYPE=Release
+                COMMAND ${CMAKE_COMMAND} --build
+                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                        --config Release
+                VERBATIM
+        )
+        add_custom_target(huxerui_host_${tool_name}
+                DEPENDS "${HUXERUI_HOST_TOOL}"
         )
     endif ()
     set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)
@@ -422,7 +472,7 @@ function(huxerui_add_resources target_name)
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
         )
-    elseif (WIN32)
+    elseif (WIN32 OR (UNIX AND NOT APPLE))
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
         )

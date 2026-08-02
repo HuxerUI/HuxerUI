@@ -532,7 +532,7 @@ The OHOS renderer owns decoded platform image values and native cache release.
 Linux resolves an installed application-specific resource root instead of relying on the current working directory.
 A conventional layout places the executable under `bin` and HuxerUI resources under an application-specific directory in `share`.
 AppImage, Flatpak, Snap, or another distribution changes only that root resolution.
-The eventual Linux renderer chooses its own decoder and native cache without changing ImageAsset.
+The Linux renderer decodes PNG and JPEG through libpng and libjpeg into a bounded Cairo bitmap cache without changing ImageAsset.
 
 ### Web
 

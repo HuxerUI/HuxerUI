@@ -8,6 +8,8 @@ prebuilt/<windows|macos|linux>/<x86_64|arm64>/huxerui-<tool>[.exe]
 
 These executables run on the build host. Their platform and architecture are independent of the application target and Android ABI. CMake selects the matching executable automatically and stops configuration when that host package is unavailable.
 
+When a Linux host package is absent, CMake builds the matching tool from its `tools/<tool>` sources into the build tree instead of stopping configuration. Prebuilt packages for other hosts remain required.
+
 Current host tools are:
 
 - `huxerui-codegen` for `[[huxerui::scope]]` transformation

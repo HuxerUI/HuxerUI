@@ -8,13 +8,13 @@
 
 <p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
 
-HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining native platform hosts, text systems, and renderers.
+HuxerUI brings a functional, declarative UI model to C++20. Android, Linux, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining native platform hosts, text systems, and renderers.
 
 ## Why HuxerUI
 
 | Declarative C++ | Shared Runtime | Native Integration |
 |---|---|---|
-| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
+| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, Win32, and X11 while using each platform's native text and rendering stack. |
 
 HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, custom layouts, and typed extension points.
 
@@ -62,7 +62,7 @@ target_link_libraries(my_app PRIVATE HuxerUI::huxerui)
 huxerui_enable_codegen(my_app)
 ```
 
-Build the repository on macOS:
+Build the repository on macOS or Linux:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -77,9 +77,10 @@ See [Getting Started](docs/getting-started.md) for application setup, Windows an
 | Platform | Status | Native integration |
 |---|---|---|
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
+| Linux | Supported | X11, Cairo, Vulkan, FreeType, HarfBuzz, XIM |
 | macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
 | Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
-| iOS, OHOS, Linux, Web | Planned | Shared Runtime with platform-specific hosts |
+| iOS, OHOS, Web | Planned | Shared Runtime with platform-specific hosts |
 
 See [Platform Support](docs/platform-support.md) for backend responsibilities and integration details.
 
