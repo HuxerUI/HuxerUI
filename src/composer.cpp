@@ -164,7 +164,7 @@ std::shared_ptr<StateCellBase> RecomposeScope::UseState(
 
 thread_local Composer* Composer::current_ = nullptr;
 
-Composer::Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const EnvironmentFrame> environment)
+Composer::Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const Environment> environment)
     : scope_(std::move(scope)), environment_(std::move(environment)) {}
 
 Composer* Composer::Current() noexcept {
@@ -191,7 +191,7 @@ std::shared_ptr<EventHub> Composer::Events() const noexcept {
   return scope_->Events();
 }
 
-Composer::EnvironmentGuard::EnvironmentGuard(std::shared_ptr<const EnvironmentFrame> environment)
+Composer::EnvironmentGuard::EnvironmentGuard(std::shared_ptr<const Environment> environment)
     : composer_(&Composer::RequireCurrent()), previous_(composer_->environment_) {
   composer_->environment_ = std::move(environment);
 }

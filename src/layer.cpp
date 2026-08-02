@@ -14,11 +14,11 @@ void LayerController::Disconnect() noexcept {
 }
 
 LayerId LayerController::Attach(LayerOptions options, ViewFactory content) const {
-  return AttachCaptured(options, std::move(content), detail::CurrentEnvironmentFrame());
+  return AttachCaptured(options, std::move(content), detail::CurrentEnvironment());
 }
 
 LayerId LayerController::AttachCaptured(
-    LayerOptions options, ViewFactory content, std::shared_ptr<const detail::EnvironmentFrame> environment
+    LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment
 ) const {
   if (state_->runtime == nullptr) {
     throw std::logic_error("HuxerUI layer controller is disconnected");

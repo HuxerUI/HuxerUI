@@ -34,7 +34,7 @@ namespace huxerui::detail {
 struct MountedNode;
 class ScrollConnection;
 class IndicationState;
-class AppResourcesService;
+class AppResources;
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -82,11 +82,6 @@ struct VirtualGridCacheExtent {
 
 struct VirtualGridItemSpans {
   using Value = std::vector<std::size_t>;
-};
-
-struct EnvironmentFrame {
-  std::shared_ptr<const EnvironmentFrame> parent;
-  EnvironmentValues overrides;
 };
 
 struct TextMeasurerService {
@@ -209,9 +204,9 @@ struct ScrollItemRequest {
   ScrollAlignment alignment;
 };
 
-class ScrollControllerData {
+class ScrollControllerState {
 public:
-  explicit ScrollControllerData(float initial_offset);
+  explicit ScrollControllerState(float initial_offset);
 
   std::shared_ptr<StateCell<ScrollMetrics>> metrics;
   std::weak_ptr<ScrollConnection> connection;
@@ -239,7 +234,7 @@ enum class NodeKind {
 
 using ViewKey = std::variant<std::int64_t, std::uint64_t, std::string>;
 
-struct ViewStyle {
+struct ViewProperties {
   EdgeInsets padding;
   Frame frame;
   std::optional<Color> background;
@@ -256,29 +251,29 @@ struct ViewStyle {
   float focus_ring_width = 2.0F;
   float disabled_opacity = 0.42F;
 
-  bool operator==(const ViewStyle&) const = default;
+  bool operator==(const ViewProperties&) const = default;
 
   // Reconciliation compares the inputs consumed by layout, content paint, and foreground paint independently.
-  // New style fields must participate in every projection whose stage reads them.
-  [[nodiscard]] bool LayoutEquals(const ViewStyle& other) const {
+  // New property fields must participate in every projection whose stage reads them.
+  [[nodiscard]] bool LayoutEquals(const ViewProperties& other) const {
     return padding == other.padding && frame == other.frame && text_style.font == other.text_style.font &&
            spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
            cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
            vertical_alignment == other.vertical_alignment;
   }
 
-  [[nodiscard]] bool ContentPaintEquals(const ViewStyle& other) const {
+  [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
     return padding == other.padding && background == other.background && shadow == other.shadow &&
            text_style == other.text_style && corner_radius == other.corner_radius;
   }
 
-  [[nodiscard]] bool ForegroundPaintEquals(const ViewStyle& other) const {
+  [[nodiscard]] bool ForegroundPaintEquals(const ViewProperties& other) const {
     return corner_radius == other.corner_radius && focus_ring == other.focus_ring &&
            focus_ring_width == other.focus_ring_width;
   }
 };
 
-struct ImageViewData {
+struct ImageProperties {
   ImageAsset asset;
   ImageFit fit = ImageFit::Contain;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
@@ -286,11 +281,11 @@ struct ImageViewData {
   ImageSampling sampling = ImageSampling::Linear;
 
   // Only intrinsic logical size affects measurement; image contents, fit, alignment, and sampling are paint inputs.
-  [[nodiscard]] bool LayoutEquals(const ImageViewData& other) const noexcept {
+  [[nodiscard]] bool LayoutEquals(const ImageProperties& other) const noexcept {
     return asset.IntrinsicSize() == other.asset.IntrinsicSize();
   }
 
-  bool operator==(const ImageViewData&) const = default;
+  bool operator==(const ImageProperties&) const = default;
 };
 
 // ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
@@ -302,19 +297,19 @@ struct ViewSpec {
   TextRole text_role = TextRole::Body;
   std::optional<ViewKey> key;
   std::string text;
-  ViewStyle style;
+  ViewProperties properties;
   std::vector<View> children;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
-  ImageViewData image;
-  const LayoutDescriptor* layout = nullptr;
-  const VirtualLayoutDescriptor* virtual_layout = nullptr;
+  ImageProperties image_properties;
+  const LayoutDescriptor* layout_descriptor = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   VirtualItemSource virtual_items;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
-  std::vector<ModifierSpec> modifiers;
-  std::shared_ptr<const EnvironmentFrame> environment;
+  std::vector<ModifierSpec> retained_modifiers;
+  std::shared_ptr<const Environment> environment;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool focusable = false;
@@ -338,26 +333,26 @@ struct StateSlotStorage {
   std::unordered_map<StateSlotKey, std::shared_ptr<StateCellBase>, StateSlotKeyHash> slots;
 };
 
-struct SavedNodeState {
+struct VirtualItemState {
   NodeKind kind = NodeKind::Layout;
   std::optional<ViewKey> key;
-  const LayoutDescriptor* layout = nullptr;
-  const VirtualLayoutDescriptor* virtual_layout = nullptr;
+  const LayoutDescriptor* layout_descriptor = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   std::optional<StateSlotStorage> state_slots;
-  std::vector<SavedNodeState> children;
+  std::vector<VirtualItemState> children;
 };
 
-struct VirtualStateCache {
-  std::unordered_map<ViewKey, SavedNodeState> keyed;
-  std::unordered_map<std::size_t, SavedNodeState> indexed;
+struct VirtualItemStateCache {
+  std::unordered_map<ViewKey, VirtualItemState> keyed;
+  std::unordered_map<std::size_t, VirtualItemState> indexed;
 };
 
 struct VirtualNodeState {
   VirtualItemSource source;
-  std::unordered_map<std::size_t, View> item_views;
-  std::vector<std::size_t> child_indices;
-  std::vector<VirtualLayoutResult::Placement> placements;
-  std::unique_ptr<VirtualStateCache> saved_state;
+  std::unordered_map<std::size_t, View> item_declarations;
+  std::vector<std::size_t> realized_indices;
+  std::vector<VirtualLayoutResult::Placement> realized_placements;
+  std::unique_ptr<VirtualItemStateCache> item_state_cache;
   bool source_dirty = true;
   bool viewport_dirty = true;
 };
@@ -412,12 +407,12 @@ struct MountedNode final : public huxerui::MountedNode {
   std::uint64_t identity = 0;
   std::optional<ViewKey> key;
   std::string text;
-  ViewStyle style;
+  ViewProperties properties;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
-  ImageViewData image;
-  const LayoutDescriptor* layout = nullptr;
-  const VirtualLayoutDescriptor* virtual_layout = nullptr;
+  ImageProperties image_properties;
+  const LayoutDescriptor* layout_descriptor = nullptr;
+  const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   std::unordered_map<std::type_index, std::any> layout_cache;
   std::vector<LayoutResult::Placement> layout_placements;
@@ -438,10 +433,10 @@ struct MountedNode final : public huxerui::MountedNode {
   bool layout_dirty = true;
   bool content_paint_dirty = true;
   bool foreground_paint_dirty = true;
-  std::unique_ptr<ScrollNodeState> scroll;
+  std::unique_ptr<ScrollNodeState> scroll_state;
   std::unique_ptr<VirtualNodeState> virtual_state;
   std::vector<NodeExtensionEntry> extensions;
-  std::shared_ptr<const EnvironmentFrame> environment;
+  std::shared_ptr<const Environment> environment;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool enabled = true;
@@ -450,6 +445,15 @@ struct MountedNode final : public huxerui::MountedNode {
   bool focus_visible = false;
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
+
+  [[nodiscard]] Rect ContentBounds() const noexcept {
+    return {
+        bounds.x + properties.padding.left,
+        bounds.y + properties.padding.top,
+        std::max(0.0F, bounds.width - properties.padding.Horizontal()),
+        std::max(0.0F, bounds.height - properties.padding.Vertical()),
+    };
+  }
 
 protected:
   [[nodiscard]] std::size_t ChildCountImpl() const noexcept override {
@@ -493,27 +497,27 @@ protected:
   }
 
   [[nodiscard]] float SpacingImpl() const noexcept override {
-    return style.spacing;
+    return properties.spacing;
   }
 
   [[nodiscard]] float GrowFactorImpl() const noexcept override {
-    return style.grow;
+    return properties.grow;
   }
 
   [[nodiscard]] MainAxisAlignment MainAlignmentImpl() const noexcept override {
-    return style.main_axis_alignment;
+    return properties.main_axis_alignment;
   }
 
   [[nodiscard]] CrossAxisAlignment CrossAlignmentImpl() const noexcept override {
-    return style.cross_axis_alignment;
+    return properties.cross_axis_alignment;
   }
 
   [[nodiscard]] HorizontalAlignment HorizontalAlignmentImpl() const noexcept override {
-    return style.horizontal_alignment;
+    return properties.horizontal_alignment;
   }
 
   [[nodiscard]] VerticalAlignment VerticalAlignmentImpl() const noexcept override {
-    return style.vertical_alignment;
+    return properties.vertical_alignment;
   }
 
   [[nodiscard]] const std::any* FindLayoutValue(std::type_index key_value) const noexcept override {
@@ -547,10 +551,10 @@ using RenderSceneSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapshot
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
-  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerData> data);
+  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerState> state);
 
-  [[nodiscard]] const std::shared_ptr<ScrollControllerData>& Data() const noexcept {
-    return data_;
+  [[nodiscard]] const std::shared_ptr<ScrollControllerState>& State() const noexcept {
+    return state_;
   }
 
   [[nodiscard]] bool IsCurrent() const noexcept;
@@ -569,7 +573,7 @@ private:
 
   Runtime* runtime_;
   MountedNode* node_;
-  std::shared_ptr<ScrollControllerData> data_;
+  std::shared_ptr<ScrollControllerState> state_;
 };
 
 void PrepareScrollController(MountedNode& node, Runtime& runtime);
@@ -588,18 +592,20 @@ public:
   void CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
+  VirtualItemState CaptureItemState(MountedNode& mounted);
+  void RestoreItemState(MountedNode& mounted, VirtualItemState& state);
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
   void RestoreOwner() noexcept;
 
   Runtime* runtime_;
   MountedNode* owner_;
-  std::vector<std::unique_ptr<MountedNode>> previous_;
-  std::vector<std::size_t> previous_indices_;
-  std::vector<std::uint64_t> previous_identities_;
-  std::vector<std::unique_ptr<MountedNode>> requested_;
-  std::vector<std::size_t> requested_indices_;
-  std::unordered_map<std::size_t, std::size_t> requested_positions_;
-  std::unordered_set<ViewKey> requested_keys_;
+  std::vector<std::unique_ptr<MountedNode>> previous_nodes_;
+  std::vector<std::size_t> previous_realized_indices_;
+  std::vector<std::uint64_t> previous_node_identities_;
+  std::vector<std::unique_ptr<MountedNode>> requested_nodes_;
+  std::vector<std::size_t> requested_item_indices_;
+  std::unordered_map<std::size_t, std::size_t> requested_positions_by_index_;
+  std::unordered_set<ViewKey> requested_item_keys_;
   bool committed_ = false;
 };
 
@@ -652,7 +658,7 @@ private:
 
 class Composer {
 public:
-  explicit Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const EnvironmentFrame> environment = {});
+  explicit Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const Environment> environment = {});
 
   static Composer* Current() noexcept;
   static Composer& RequireCurrent();
@@ -661,13 +667,13 @@ public:
   std::shared_ptr<StateCellBase>
   UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
   [[nodiscard]] std::shared_ptr<EventHub> Events() const noexcept;
-  [[nodiscard]] const std::shared_ptr<const EnvironmentFrame>& Environment() const noexcept {
+  [[nodiscard]] const std::shared_ptr<const Environment>& CurrentEnvironment() const noexcept {
     return environment_;
   }
 
   class EnvironmentGuard {
   public:
-    explicit EnvironmentGuard(std::shared_ptr<const EnvironmentFrame> environment);
+    explicit EnvironmentGuard(std::shared_ptr<const Environment> environment);
     ~EnvironmentGuard();
 
     EnvironmentGuard(const EnvironmentGuard&) = delete;
@@ -675,7 +681,7 @@ public:
 
   private:
     Composer* composer_;
-    std::shared_ptr<const EnvironmentFrame> previous_;
+    std::shared_ptr<const Environment> previous_;
   };
 
   class Guard {
@@ -693,7 +699,7 @@ public:
 private:
   static thread_local Composer* current_;
   std::shared_ptr<RecomposeScope> scope_;
-  std::shared_ptr<const EnvironmentFrame> environment_;
+  std::shared_ptr<const Environment> environment_;
 };
 
 struct ScrollBarGeometry {
@@ -804,7 +810,7 @@ struct LayerEntry {
   LayerId id = 0;
   LayerOptions options;
   ViewFactory content;
-  std::shared_ptr<const EnvironmentFrame> environment;
+  std::shared_ptr<const Environment> environment;
 };
 
 } // namespace huxerui::detail
@@ -814,7 +820,7 @@ namespace huxerui {
 struct Runtime::State {
   State(
       RootFactory root_factory,
-      PlatformHost* platform,
+      PlatformAdapter* platform,
       std::shared_ptr<detail::RecomposeScope> root_scope,
       LayerController layer_controller
   )
@@ -822,21 +828,20 @@ struct Runtime::State {
         layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
-  PlatformHost* platform_;
+  PlatformAdapter* platform_;
   Size viewport_;
   std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
   std::vector<std::shared_ptr<void>> root_services_;
-  EnvironmentValues root_environment_values_;
   std::unordered_set<std::type_index> root_service_types_;
-  std::shared_ptr<detail::EnvironmentFrame> root_environment_;
-  std::shared_ptr<detail::AppResourcesService> app_resources_;
+  std::shared_ptr<Environment> root_environment_;
+  std::shared_ptr<detail::AppResources> app_resources_;
   std::vector<detail::LayerEntry> layers_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;
-  detail::RenderSceneSnapshot committed_render_scene_;
+  detail::RenderSceneSnapshot committed_scene_snapshot_;
   Size committed_viewport_;
-  bool has_committed_render_scene_ = false;
+  bool has_committed_scene_snapshot_ = false;
   bool composition_dirty_ = true;
   bool composing_root_ = false;
   bool layer_snapshot_taken_ = false;
@@ -877,7 +882,7 @@ struct RuntimeAccess {
   }
 };
 
-Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformHost& platform, Runtime& runtime);
+Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime);
 void LayoutNode(MountedNode& node, Point offset);
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 void ResolvePresentationTree(MountedNode& node);

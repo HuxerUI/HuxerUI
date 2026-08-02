@@ -19,36 +19,36 @@
 
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
-#include "host_frame_internal.h"
+#include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
 
 namespace huxerui::detail {
-class MacPlatformHost;
+class MacPlatformAdapter;
 }
 
-@interface HuxerUIHostView : NSView {
+@interface HuxerUIView : NSView {
 @public
   huxerui::Runtime* huxeruiRuntime;
-  huxerui::detail::MacPlatformHost* huxeruiHost;
+  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
   NSPoint huxeruiPointerPosition;
   NSTrackingArea* huxeruiTrackingArea;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
-- (void)resourceContextDidChange:(NSNotification*)notification;
+- (void)resourceConfigurationDidChange:(NSNotification*)notification;
 - (void)cancelPointer;
 - (void)commitHuxerUIFrame;
 @end
 
 @interface HuxerUIApplicationDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate> {
 @public
-  huxerui::detail::MacPlatformHost* huxeruiHost;
+  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
 }
 @end
 
 @interface HuxerUIFrameScheduler : NSObject
-- (instancetype)initWithView:(HuxerUIHostView*)view;
+- (instancetype)initWithView:(HuxerUIView*)view;
 - (void)requestFrameAfter:(double)delaySeconds;
 - (void)shutdown;
 @end
@@ -59,12 +59,12 @@ class MacPlatformHost;
 @end
 
 @implementation HuxerUIFrameScheduler {
-  __weak HuxerUIHostView* _view;
+  __weak HuxerUIView* _view;
   __strong CADisplayLink* _displayLink;
   NSUInteger _generation;
 }
 
-- (instancetype)initWithView:(HuxerUIHostView*)view {
+- (instancetype)initWithView:(HuxerUIView*)view {
   self = [super init];
   if (self == nil) {
     return nil;
@@ -119,7 +119,7 @@ class MacPlatformHost;
 }
 
 - (void)display {
-  HuxerUIHostView* view = _view;
+  HuxerUIView* view = _view;
   if (view != nil && view.window != nil) {
     [view commitHuxerUIFrame];
   }
@@ -136,7 +136,7 @@ class MacPlatformHost;
 
 namespace huxerui::detail {
 
-class MacPlatformHost final : public PlatformHost, public PlatformClipboard, public PlatformResources {
+class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     @autoreleasepool {
@@ -145,7 +145,7 @@ public:
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
 
       delegate_ = [[HuxerUIApplicationDelegate alloc] init];
-      delegate_->huxeruiHost = this;
+      delegate_->huxeruiAdapter = this;
       application.delegate = delegate_;
 
       const NSRect frame = NSMakeRect(0.0, 0.0, options.width, options.height);
@@ -156,11 +156,11 @@ public:
       window_.acceptsMouseMovedEvents = YES;
       window_.delegate = delegate_;
 
-      view_ = [[HuxerUIHostView alloc] initWithFrame:frame];
+      view_ = [[HuxerUIView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
-      view_->huxeruiHost = this;
+      view_->huxeruiAdapter = this;
       [NSNotificationCenter.defaultCenter addObserver:view_
-                                             selector:@selector(resourceContextDidChange:)
+                                             selector:@selector(resourceConfigurationDidChange:)
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
@@ -169,7 +169,7 @@ public:
       [window_ center];
       [window_ makeKeyAndOrderFront:nil];
       [window_ makeFirstResponder:view_];
-      runtime_->UpdateResourceContext(Context());
+      runtime_->UpdateResourceConfiguration(Configuration());
 
       [application finishLaunching];
       [application activateIgnoringOtherApps:YES];
@@ -181,8 +181,8 @@ public:
       [application run];
       [NSNotificationCenter.defaultCenter removeObserver:view_ name:NSCurrentLocaleDidChangeNotification object:nil];
       view_->huxeruiRuntime = nullptr;
-      view_->huxeruiHost = nullptr;
-      delegate_->huxeruiHost = nullptr;
+      view_->huxeruiAdapter = nullptr;
+      delegate_->huxeruiAdapter = nullptr;
       [frame_scheduler_ shutdown];
       frame_scheduler_ = nil;
       scheduled_frame_deadline_.reset();
@@ -241,9 +241,9 @@ public:
     }
   }
 
-  void UpdateResourceContext() {
+  void UpdateResourceConfiguration() {
     if (runtime_ != nullptr) {
-      runtime_->UpdateResourceContext(Context());
+      runtime_->UpdateResourceConfiguration(Configuration());
     }
   }
 
@@ -300,7 +300,7 @@ public:
     return this;
   }
 
-  ResourceContext Context() const override {
+  ResourceConfiguration Configuration() const override {
     @autoreleasepool {
       NSString* language = NSLocale.preferredLanguages.firstObject;
       const char* language_tag = language == nil ? nullptr : language.UTF8String;
@@ -417,25 +417,25 @@ private:
   AppKitRenderer renderer_;
   Runtime* runtime_ = nullptr;
   __strong NSWindow* window_ = nil;
-  __strong HuxerUIHostView* view_ = nil;
+  __strong HuxerUIView* view_ = nil;
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
-  HostFrameState frame_state_;
+  PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
 };
 
 int RunPlatformApp(AppDefinition definition) {
   AppOptions options = definition.options;
-  MacPlatformHost platform;
+  MacPlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
   return platform.Run(runtime, options);
 }
 
 } // namespace huxerui::detail
 
-@implementation HuxerUIHostView
+@implementation HuxerUIView
 
 - (BOOL)isFlipped {
   return YES;
@@ -447,62 +447,62 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (void)setFrameSize:(NSSize)newSize {
   [super setFrameSize:newSize];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->Resize({
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->Resize({
         static_cast<float>(newSize.width),
         static_cast<float>(newSize.height),
     });
-    huxeruiHost->InvalidateTextInputGeometry();
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
 - (void)setFrameOrigin:(NSPoint)newOrigin {
   [super setFrameOrigin:newOrigin];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
 - (void)setBoundsOrigin:(NSPoint)newOrigin {
   [super setBoundsOrigin:newOrigin];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
 - (void)viewDidMoveToWindow {
   [super viewDidMoveToWindow];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
 - (void)viewDidMoveToSuperview {
   [super viewDidMoveToSuperview];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
 - (void)viewDidChangeBackingProperties {
   [super viewDidChangeBackingProperties];
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->UpdateResourceContext();
-    huxeruiHost->InvalidateNativeSurface();
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateResourceConfiguration();
+    huxeruiAdapter->InvalidateNativeSurface();
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 
-- (void)resourceContextDidChange:(NSNotification*)notification {
+- (void)resourceConfigurationDidChange:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->UpdateResourceContext();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateResourceConfiguration();
   }
 }
 
 - (NSTextInputContext*)inputContext {
-  if (huxeruiHost != nullptr) {
-    NSTextInputContext* context = huxeruiHost->InputContext();
+  if (huxeruiAdapter != nullptr) {
+    NSTextInputContext* context = huxeruiAdapter->InputContext();
     if (context != nil) {
       return context;
     }
@@ -524,19 +524,19 @@ int RunPlatformApp(AppDefinition definition) {
 }
 
 - (void)commitHuxerUIFrame {
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->CommitFrameAndInvalidate();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->CommitFrameAndInvalidate();
   }
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
   [super drawRect:dirtyRect];
-  if (huxeruiHost == nullptr) {
+  if (huxeruiAdapter == nullptr) {
     return;
   }
 
   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
-  huxeruiHost->DrawCommittedFrame(context, dirtyRect);
+  huxeruiAdapter->DrawCommittedFrame(context, dirtyRect);
 }
 
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type {
@@ -602,7 +602,7 @@ int RunPlatformApp(AppDefinition definition) {
 }
 
 - (void)keyDown:(NSEvent*)event {
-  if (huxeruiHost != nullptr && huxeruiHost->HandleTextInputEvent(event)) {
+  if (huxeruiAdapter != nullptr && huxeruiAdapter->HandleTextInputEvent(event)) {
     return;
   }
   [self sendKeyEvent:event type:huxerui::KeyEventType::Down];
@@ -647,22 +647,22 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->ApplicationActiveChanged(true);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->ApplicationActiveChanged(true);
   }
 }
 
 - (void)applicationDidResignActive:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->ApplicationActiveChanged(false);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->ApplicationActiveChanged(false);
   }
 }
 
 - (void)windowDidMove:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiHost != nullptr) {
-    huxeruiHost->InvalidateTextInputGeometry();
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->InvalidateTextInputGeometry();
   }
 }
 

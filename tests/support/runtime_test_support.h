@@ -37,7 +37,7 @@ using huxerui::DrawRectCommand;
 using huxerui::DrawTextCommand;
 using huxerui::Easing;
 using huxerui::Enabled;
-using huxerui::EnvironmentValues;
+using huxerui::Environment;
 using huxerui::Event;
 using huxerui::EventEmitter;
 using huxerui::Focusable;
@@ -135,9 +135,9 @@ using huxerui::VirtualLayoutResult;
 using huxerui::VirtualList;
 
 template <huxerui::EnvironmentValue Value> Value ThemeDefinitionValue(const ThemeDefinition& definition) {
-  EnvironmentValues values;
-  huxerui::detail::ApplyThemeDefinition(values, definition);
-  const std::any* stored = huxerui::detail::FindLocalEnvironmentValue(values, typeid(Value));
+  Environment environment;
+  huxerui::detail::ApplyThemeDefinition(environment, definition);
+  const std::any* stored = huxerui::detail::FindLocalEnvironmentValue(environment, typeid(Value));
   const auto* typed = stored ? std::any_cast<Value>(stored) : nullptr;
   if (!typed) {
     throw std::logic_error("HuxerUI test theme definition does not contain the requested value");
@@ -211,7 +211,7 @@ private:
 
 class Runtime final {
 public:
-  Runtime(huxerui::RootFactory root_factory, huxerui::PlatformHost& platform, huxerui::AppOptions options = {})
+  Runtime(huxerui::RootFactory root_factory, huxerui::PlatformAdapter& platform, huxerui::AppOptions options = {})
       : runtime_(
             {
                 .root_factory = root_factory,
@@ -224,8 +224,8 @@ public:
     runtime_.SetViewport(viewport);
   }
 
-  void UpdateResourceContext(huxerui::ResourceContext context) {
-    runtime_.UpdateResourceContext(std::move(context));
+  void UpdateResourceConfiguration(huxerui::ResourceConfiguration configuration) {
+    runtime_.UpdateResourceConfiguration(std::move(configuration));
   }
 
   const FlattenedScene& BuildFrame() {
@@ -307,7 +307,7 @@ private:
   const FrameCommit* last_commit_ = nullptr;
 };
 
-class TestPlatform final : public huxerui::PlatformHost {
+class TestPlatform final : public huxerui::PlatformAdapter {
 public:
   class TextLayout final : public huxerui::detail::TextLayout {
   public:

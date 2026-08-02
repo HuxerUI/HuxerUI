@@ -22,7 +22,7 @@
 
 #include <huxerui/app.h>
 
-#include "host_frame_internal.h"
+#include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
 #include "win32_internal.h"
@@ -204,9 +204,9 @@ std::string TranslateKeyText(WPARAM virtual_key, LPARAM key_data) {
   return WideToUtf8(std::wstring_view(characters, static_cast<std::size_t>(length)));
 }
 } // namespace
-class Win32PlatformHost final : public huxerui::PlatformHost,
-                                public huxerui::PlatformClipboard,
-                                public huxerui::PlatformResources {
+class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
+                                   public huxerui::PlatformClipboard,
+                                   public huxerui::PlatformResources {
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     runtime_ = &runtime;
@@ -222,7 +222,7 @@ public:
       renderer_.Initialize();
       RegisterWindowClass();
       CreateApplicationWindow(options);
-      runtime_->UpdateResourceContext(Context());
+      runtime_->UpdateResourceConfiguration(Configuration());
 
       ShowWindow(window_, SW_SHOW);
       UpdateWindow(window_);
@@ -329,7 +329,7 @@ public:
     return this;
   }
 
-  ResourceContext Context() const override {
+  ResourceConfiguration Configuration() const override {
     wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
     Locale locale = Locale::Default();
     if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) > 0) {
@@ -433,7 +433,7 @@ private:
     WNDCLASSEXW window_class{
         sizeof(WNDCLASSEXW),
         CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-        &Win32PlatformHost::WindowProcedure,
+        &Win32PlatformAdapter::WindowProcedure,
         0,
         0,
         instance_,
@@ -667,12 +667,12 @@ private:
           SWP_NOACTIVATE | SWP_NOZORDER
       );
       UpdateRuntimeViewport();
-      runtime_->UpdateResourceContext(Context());
+      runtime_->UpdateResourceConfiguration(Configuration());
       RequestFrameAt(Now());
       return 0;
     }
     case WM_SETTINGCHANGE:
-      runtime_->UpdateResourceContext(Context());
+      runtime_->UpdateResourceConfiguration(Configuration());
       return 0;
     case WM_DISPLAYCHANGE:
       renderer_.ResetDeviceResources();
@@ -807,23 +807,23 @@ private:
   }
 
   static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    Win32PlatformHost* host = reinterpret_cast<Win32PlatformHost*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    Win32PlatformAdapter* adapter = reinterpret_cast<Win32PlatformAdapter*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-      host = static_cast<Win32PlatformHost*>(create->lpCreateParams);
-      host->window_ = window;
-      host->text_input_.SetWindow(window);
-      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(host));
+      adapter = static_cast<Win32PlatformAdapter*>(create->lpCreateParams);
+      adapter->window_ = window;
+      adapter->text_input_.SetWindow(window);
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(adapter));
     }
-    if (host == nullptr) {
+    if (adapter == nullptr) {
       return DefWindowProcW(window, message, w_param, l_param);
     }
 
     try {
-      return host->HandleMessage(window, message, w_param, l_param);
+      return adapter->HandleMessage(window, message, w_param, l_param);
     } catch (...) {
-      if (!host->failure_) {
-        host->failure_ = std::current_exception();
+      if (!adapter->failure_) {
+        adapter->failure_ = std::current_exception();
       }
       PostQuitMessage(1);
       return 0;
@@ -837,7 +837,7 @@ private:
   float dpi_ = kDipsPerInch;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
-  HostFrameState frame_state_;
+  PlatformFrameState frame_state_;
   bool mouse_tracking_ = false;
   bool pointer_down_ = false;
   bool com_initialized_ = false;
@@ -852,7 +852,7 @@ private:
 
 int RunPlatformApp(AppDefinition definition) {
   AppOptions options = definition.options;
-  Win32PlatformHost platform;
+  Win32PlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
   return platform.Run(runtime, options);
 }

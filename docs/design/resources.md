@@ -27,14 +27,14 @@ Android `content://` values, Apple security-scoped URLs, and other native handle
 
 ## Ownership
 
-Resource ownership follows the existing Runtime, Environment, PlatformHost, and PaintCommand boundaries:
+Resource ownership follows the existing Runtime, Environment, PlatformAdapter, and PaintCommand boundaries:
 
 | Layer | Responsibility |
 |---|---|
 | Resource tool and CMake | Validate source resources, generate typed keys and a versioned index, and stage target resources |
-| PlatformResources | Read immutable bytes from the installed platform package and report the current resource context |
+| PlatformResources | Read immutable bytes from the installed platform package and report the current resource configuration |
 | AppResources | Resolve typed keys, locale fallback, density variants, and shared immutable assets |
-| Runtime | Own AppResources for one root, seed the resource Environment, and coordinate resource-context invalidation |
+| Runtime | Own AppResources for one root, seed the resource Environment, and coordinate resource-configuration invalidation |
 | Image | Measure from intrinsic logical size and translate fit and alignment into image paint commands |
 | PaintContext | Record immutable image assets, source geometry, destination geometry, sampling, and opacity |
 | Platform renderer | Decode encoded image bytes, cache native images, and replay DrawImageCommand |
@@ -186,14 +186,14 @@ Future backends likewise keep native bundle handles, rawfile handles, installati
 
 ## Platform resource boundary
 
-PlatformHost exposes one optional native resource capability:
+PlatformAdapter exposes one optional native resource capability:
 
 ```cpp
-struct ResourceContext {
+struct ResourceConfiguration {
   Locale locale;
   float display_scale = 1.0F;
 
-  bool operator==(const ResourceContext&) const = default;
+  bool operator==(const ResourceConfiguration&) const = default;
 };
 
 class RawAsset;
@@ -202,25 +202,25 @@ class PlatformResources {
 public:
   virtual ~PlatformResources() = default;
 
-  [[nodiscard]] virtual ResourceContext Context() const = 0;
+  [[nodiscard]] virtual ResourceConfiguration Configuration() const = 0;
   [[nodiscard]] virtual RawAsset Read(std::string_view package_path) = 0;
 };
 ```
 
-PlatformHost returns the capability when packaged resources are available.
+PlatformAdapter returns the capability when packaged resources are available.
 Using a packaged resource without an installed capability is a framework configuration error.
 
 Returning RawAsset lets a backend retain owned memory, a mapped file, a package buffer, or a WASM memory range without forcing an intermediate vector copy.
 
 The resource index is already filtered for the build target, so shared Runtime code does not branch on a platform identifier.
-ResourceContext supplies only values that vary at runtime and affect resolution.
+ResourceConfiguration supplies only values that vary at runtime and affect resolution.
 
 Packaged resources must be synchronously readable before Runtime is created.
 A platform whose package transport is asynchronous completes that transport during host startup and exposes the resulting immutable payload through PlatformResources.
 In particular, a Web host loads the resource index and payload before invoking the registered HUXERUI_APP definition.
 Remote URLs remain application or module inputs and do not become package paths.
 
-When system locale or display scale changes, the native host calls `Runtime::UpdateResourceContext()` with the new value.
+When system locale or display scale changes, the native host calls `Runtime::UpdateResourceConfiguration()` with the new value.
 Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, invalidates root composition, and requests a frame.
 `BuildFrame()` does not poll native state.
 The initial implementation invalidates root composition, then normal reconciliation limits changed ImageAsset geometry and paint work to the affected nodes.
@@ -401,7 +401,7 @@ public:
 };
 ```
 
-The ImageResource constructor lets Runtime resolve locale and scale variants from the node's Environment and PlatformResources context.
+The ImageResource constructor lets Runtime resolve locale and scale variants from the node's Environment and PlatformResources configuration.
 The ImageAsset constructor supports files, network results, native picker modules, generated images, and explicitly shared application data.
 
 Image does not add component-specific opacity.
@@ -518,7 +518,7 @@ New backends implement PlatformResources and native image replay without adding 
 ### iOS
 
 iOS reads the reserved resource directory from the application bundle and uses the same versioned index as macOS.
-ImageIO produces renderer-owned CGImage values, while the host reports system Locale and display scale through ResourceContext.
+ImageIO produces renderer-owned CGImage values, while the host reports system Locale and display scale through ResourceConfiguration.
 Security-scoped URLs are native service inputs whose bytes may be converted to ImageAsset with FromEncoded; they are not package ResourceIds.
 
 ### OHOS
@@ -562,7 +562,7 @@ public:
 };
 ```
 
-Runtime seeds the root Locale from ResourceContext.
+Runtime seeds the root Locale from ResourceConfiguration.
 Applications may override it for any subtree with ProvideEnvironment.
 
 ```cpp
@@ -692,7 +692,7 @@ Resource reads participate in the existing dependency and invalidation model:
 
 - UseString, Text resource construction, Text resource formatting, and UseImage resolve from the Runtime-owned service during composition without allocating state slots.
 - An Image constructed from ImageResource resolves that key during composition and retains the resulting immutable ImageAsset.
-- ResourceContext changes currently invalidate the root composition so locale and density variants are selected consistently.
+- ResourceConfiguration changes currently invalidate the root composition so locale and density variants are selected consistently.
 - Reconciliation limits a changed image asset or intrinsic size to the affected node's measure, layout, and paint paths.
 - An unchanged ImageAsset compares equal and preserves its recorded PaintSequence.
 - Presentation-only changes continue to reuse the image command and native decoded bitmap.

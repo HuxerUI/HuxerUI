@@ -4,6 +4,7 @@
 #include <optional>
 #include <stdexcept>
 
+#include <huxerui/root.h>
 #include <huxerui/theme.h>
 
 #include "internal.h"
@@ -85,7 +86,7 @@ DialogStyle DefaultDialogStyle(const ThemeSpec& theme) {
 }
 
 template <class Style>
-Style ResolvePresentationStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment, Style fallback) {
+Style ResolvePresentationStyle(const std::shared_ptr<const Environment>& environment, Style fallback) {
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
     if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
@@ -95,15 +96,12 @@ Style ResolvePresentationStyle(const std::shared_ptr<const detail::EnvironmentFr
   return fallback;
 }
 
-ToastStyle ResolveToastStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
+ToastStyle ResolveToastStyle(const std::shared_ptr<const Environment>& environment) {
   return ResolvePresentationStyle<ToastStyle>(environment, DefaultToastStyle(detail::ResolveThemeSpec(environment)));
 }
 
-DialogStyle ResolveDialogStyle(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
-  return ResolvePresentationStyle<DialogStyle>(
-      environment,
-      DefaultDialogStyle(detail::ResolveThemeSpec(environment))
-  );
+DialogStyle ResolveDialogStyle(const std::shared_ptr<const Environment>& environment) {
+  return ResolvePresentationStyle<DialogStyle>(environment, DefaultDialogStyle(detail::ResolveThemeSpec(environment)));
 }
 
 std::shared_ptr<DialogService> DialogServiceFor(const detail::MountedNode& node) {
@@ -118,8 +116,7 @@ std::shared_ptr<DialogService> DialogServiceFor(const detail::MountedNode& node)
   return *service;
 }
 
-LayerOptions
-DialogLayerOptions(DialogOptions options, const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
+LayerOptions DialogLayerOptions(DialogOptions options, const std::shared_ptr<const Environment>& environment) {
   return {
       .kind = LayerKind::Modal,
       .input_policy = LayerInputPolicy::Modal,
@@ -129,9 +126,13 @@ DialogLayerOptions(DialogOptions options, const std::shared_ptr<const detail::En
   };
 }
 
+} // namespace
+
+namespace detail {
+
 class DialogExtension final : public NodeExtension {
 public:
-  DialogExtension(MountedNode& node, const Dialog& modifier) {
+  DialogExtension(huxerui::MountedNode& node, const Dialog& modifier) {
     Update(node, modifier);
   }
 
@@ -141,75 +142,50 @@ public:
     }
   }
 
-  void Update(MountedNode& node, const Dialog& modifier);
+  void Update(huxerui::MountedNode& node, const Dialog& modifier) {
+    auto& mounted = static_cast<detail::MountedNode&>(node);
+    if (!service_) {
+      service_ = DialogServiceFor(mounted);
+    }
+
+    if (!modifier.visible) {
+      if (layer_.has_value()) {
+        service_->Dismiss(*layer_);
+        layer_.reset();
+      }
+      return;
+    }
+    if (!modifier.content) {
+      throw std::invalid_argument("HuxerUI visible Dialog modifier content must not be empty");
+    }
+    if (modifier.dismiss_on_outside_press && !modifier.on_dismiss_request) {
+      throw std::invalid_argument(
+          "HuxerUI dismissible Dialog modifier requires "
+          "on_dismiss_request"
+      );
+    }
+    DialogOptions options{
+        .dismiss_on_outside_press = modifier.dismiss_on_outside_press,
+        .on_dismiss_request = modifier.on_dismiss_request,
+    };
+    if (layer_.has_value()) {
+      service_->Update(*layer_, modifier.content, std::move(options), mounted.environment);
+      return;
+    }
+    layer_ = service_->Show(modifier.content, std::move(options), mounted.environment);
+  }
 
 private:
   std::shared_ptr<DialogService> service_;
   std::optional<LayerId> layer_;
 };
 
-} // namespace
-
-namespace detail {
-
 void InstallBuiltinPresentation(RootContext& root) {
   root.Provide(std::make_shared<ToastService>(root.Layers()));
   root.Provide(std::make_shared<DialogService>(root.Layers()));
 }
 
-struct DialogModifierAccess {
-  static LayerId Show(
-      DialogService& service,
-      ViewFactory content,
-      DialogOptions options,
-      std::shared_ptr<const EnvironmentFrame> environment
-  ) {
-    return service.Show(std::move(content), options, std::move(environment));
-  }
-
-  static bool Update(
-      DialogService& service,
-      LayerId id,
-      ViewFactory content,
-      DialogOptions options,
-      std::shared_ptr<const EnvironmentFrame> environment
-  ) {
-    return service.Update(id, std::move(content), std::move(options), std::move(environment));
-  }
-};
-
 } // namespace detail
-
-void DialogExtension::Update(MountedNode& node, const Dialog& modifier) {
-  auto& mounted = static_cast<detail::MountedNode&>(node);
-  if (!service_) {
-    service_ = DialogServiceFor(mounted);
-  }
-
-  if (!modifier.visible) {
-    if (layer_.has_value()) {
-      service_->Dismiss(*layer_);
-      layer_.reset();
-    }
-    return;
-  }
-  if (!modifier.content) {
-    throw std::invalid_argument("HuxerUI visible Dialog modifier content must not be empty");
-  }
-  if (modifier.dismiss_on_outside_press && !modifier.on_dismiss_request) {
-    throw std::invalid_argument("HuxerUI dismissible Dialog modifier requires "
-                                "on_dismiss_request");
-  }
-  DialogOptions options{
-      .dismiss_on_outside_press = modifier.dismiss_on_outside_press,
-      .on_dismiss_request = modifier.on_dismiss_request,
-  };
-  if (layer_.has_value()) {
-    detail::DialogModifierAccess::Update(*service_, *layer_, modifier.content, std::move(options), mounted.environment);
-    return;
-  }
-  layer_ = detail::DialogModifierAccess::Show(*service_, modifier.content, std::move(options), mounted.environment);
-}
 
 LayerId ToastHandle::Show(std::string message, ToastOptions options) const {
   return service_->Show(std::move(message), options, environment_);
@@ -219,9 +195,7 @@ bool ToastHandle::Dismiss(LayerId id) const {
   return service_->Dismiss(id);
 }
 
-LayerId ToastService::Show(
-    std::string message, ToastOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment
-) {
+LayerId ToastService::Show(std::string message, ToastOptions options, std::shared_ptr<const Environment> environment) {
   if (!std::isfinite(options.duration) || options.duration < 0.0) {
     throw std::invalid_argument("HuxerUI toast duration must be finite and non-negative");
   }
@@ -262,7 +236,7 @@ bool ToastService::Dismiss(LayerId id) {
 ToastHandle UseToast() {
   return ToastHandle{
       UseService<ToastService>(),
-      detail::CurrentEnvironmentFrame(),
+      detail::CurrentEnvironment(),
   };
 }
 
@@ -286,16 +260,14 @@ bool DialogHandle::Dismiss(LayerId id) const {
   return service_->Dismiss(id);
 }
 
-LayerId DialogService::Show(
-    ViewFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment
-) {
+LayerId
+DialogService::Show(ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment) {
   const LayerOptions layer_options = DialogLayerOptions(options, environment);
   return layers_.AttachCaptured(layer_options, std::move(content), std::move(environment));
 }
 
-LayerId DialogService::Show(
-    DialogFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment
-) {
+LayerId
+DialogService::Show(DialogFactory content, DialogOptions options, std::shared_ptr<const Environment> environment) {
   if (!content) {
     throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
   }
@@ -317,7 +289,7 @@ bool DialogService::Update(LayerId id, ViewFactory content) {
 }
 
 bool DialogService::Update(
-    LayerId id, ViewFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment
+    LayerId id, ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment
 ) {
   return layers_.Update(id, DialogLayerOptions(std::move(options), environment), std::move(content));
 }
@@ -338,7 +310,7 @@ bool DialogService::Dismiss(LayerId id) {
 DialogHandle UseDialog() {
   return DialogHandle{
       UseService<DialogService>(),
-      detail::CurrentEnvironmentFrame(),
+      detail::CurrentEnvironment(),
   };
 }
 
@@ -351,7 +323,7 @@ DialogStyle DialogStyle::Default() {
 }
 
 const detail::ModifierDescriptor& Dialog::Descriptor() {
-  return detail::ModifierDescriptorFor<Dialog, DialogExtension>();
+  return detail::ModifierDescriptorFor<Dialog, detail::DialogExtension>();
 }
 
 } // namespace huxerui

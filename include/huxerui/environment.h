@@ -13,44 +13,43 @@
 
 namespace huxerui {
 
-class EnvironmentValues;
+class Environment;
 
 namespace detail {
-struct EnvironmentFrame;
-
-void SetEnvironmentValue(EnvironmentValues& values, std::type_index key, std::any value);
-void MergeEnvironmentValues(EnvironmentValues& target, const EnvironmentValues& source);
-const std::any* FindLocalEnvironmentValue(const EnvironmentValues& values, std::type_index key) noexcept;
-}
+void SetEnvironmentValue(Environment& environment, std::type_index key, std::any value);
+void MergeEnvironment(Environment& target, const Environment& source);
+const std::any* FindLocalEnvironmentValue(const Environment& environment, std::type_index key) noexcept;
+const std::shared_ptr<const Environment>& EnvironmentParent(const Environment& environment) noexcept;
+} // namespace detail
 
 template <class Value>
 concept EnvironmentValue = std::copy_constructible<Value> && requires {
   { Value::Default() } -> std::convertible_to<Value>;
 };
 
-class EnvironmentValues {
+class Environment {
 public:
-  template <EnvironmentValue Value> EnvironmentValues& Set(Value value) {
-    values_.insert_or_assign(typeid(Value), std::move(value));
+  template <EnvironmentValue Value> Environment& Set(Value value) {
+    local_values_.insert_or_assign(typeid(Value), std::move(value));
     return *this;
   }
 
 private:
-  std::unordered_map<std::type_index, std::any> values_;
+  std::shared_ptr<const Environment> parent_;
+  std::unordered_map<std::type_index, std::any> local_values_;
 
-  friend struct detail::EnvironmentFrame;
-  friend void detail::SetEnvironmentValue(EnvironmentValues& values, std::type_index key, std::any value);
-  friend void detail::MergeEnvironmentValues(EnvironmentValues& target, const EnvironmentValues& source);
-  friend const std::any* detail::FindLocalEnvironmentValue(
-      const EnvironmentValues& values,
-      std::type_index key
-  ) noexcept;
+  friend void detail::SetEnvironmentValue(Environment& environment, std::type_index key, std::any value);
+  friend void detail::MergeEnvironment(Environment& target, const Environment& source);
+  friend const std::any*
+  detail::FindLocalEnvironmentValue(const Environment& environment, std::type_index key) noexcept;
+  friend const std::shared_ptr<const Environment>& detail::EnvironmentParent(const Environment& environment) noexcept;
+  friend View ProvideEnvironment(Environment environment, std::function<View()> content);
 };
 
 namespace detail {
 
-std::shared_ptr<const EnvironmentFrame> CurrentEnvironmentFrame();
-const std::any* FindEnvironmentValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key);
+std::shared_ptr<const Environment> CurrentEnvironment();
+const std::any* FindEnvironmentValue(std::shared_ptr<const Environment> environment, std::type_index key);
 const std::any* FindEnvironmentValue(std::type_index key);
 
 } // namespace detail
@@ -66,14 +65,14 @@ template <EnvironmentValue Value> const Value& UseEnvironment() {
   return fallback;
 }
 
-View ProvideEnvironment(EnvironmentValues values, std::function<View()> content);
+View ProvideEnvironment(Environment environment, std::function<View()> content);
 
 template <EnvironmentValue Value, class Factory>
   requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
 View ProvideEnvironment(Value value, Factory&& content) {
-  EnvironmentValues values;
-  values.Set(std::move(value));
-  return ProvideEnvironment(std::move(values), std::forward<Factory>(content));
+  Environment environment;
+  environment.Set(std::move(value));
+  return ProvideEnvironment(std::move(environment), std::forward<Factory>(content));
 }
 
 } // namespace huxerui

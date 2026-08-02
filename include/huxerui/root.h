@@ -35,14 +35,14 @@ public:
 private:
   RootContext(
       LayerController& layers,
-      EnvironmentValues& environment,
+      Environment& environment,
       std::unordered_set<std::type_index>& service_types,
       std::vector<std::shared_ptr<void>>& services
   )
       : layers_(&layers), environment_(&environment), service_types_(&service_types), services_(&services) {}
 
   LayerController* layers_;
-  EnvironmentValues* environment_;
+  Environment* environment_;
   std::unordered_set<std::type_index>* service_types_;
   std::vector<std::shared_ptr<void>>* services_;
 

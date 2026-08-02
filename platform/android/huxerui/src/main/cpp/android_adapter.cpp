@@ -19,7 +19,7 @@
 #include "android_renderer.h"
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
-#include "host_frame_internal.h"
+#include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_input_internal.h"
 #include "text_layout_internal.h"
@@ -150,12 +150,12 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
     environment->DeleteLocalRef(exception_class);
   }
 }
-class AndroidViewPlatformHost final : public PlatformHost,
-                                      public PlatformTextInput,
-                                      public PlatformClipboard,
-                                      public PlatformResources {
+class AndroidViewPlatformAdapter final : public PlatformAdapter,
+                                         public PlatformTextInput,
+                                         public PlatformClipboard,
+                                         public PlatformResources {
 public:
-  AndroidViewPlatformHost(JNIEnv* environment, jobject view) {
+  AndroidViewPlatformAdapter(JNIEnv* environment, jobject view) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM");
     }
@@ -212,7 +212,7 @@ public:
     environment->DeleteLocalRef(view_class);
   }
 
-  ~AndroidViewPlatformHost() override {
+  ~AndroidViewPlatformAdapter() override {
     JNIEnv* environment = Environment();
     if (environment != nullptr && view_ != nullptr) {
       environment->DeleteGlobalRef(view_);
@@ -530,7 +530,7 @@ public:
     return this;
   }
 
-  ResourceContext Context() const override {
+  ResourceConfiguration Configuration() const override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
@@ -738,7 +738,7 @@ private:
   jmethodID resource_locale_ = nullptr;
   jmethodID resource_scale_ = nullptr;
   jmethodID read_resource_ = nullptr;
-  HostFrameState frame_state_;
+  PlatformFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
 };
 
@@ -754,8 +754,8 @@ public:
     });
   }
 
-  void UpdateResourceContext(std::string language_tag, float display_scale) {
-    runtime_.UpdateResourceContext({Locale::FromLanguageTag(language_tag), display_scale});
+  void UpdateResourceConfiguration(std::string language_tag, float display_scale) {
+    runtime_.UpdateResourceConfiguration({Locale::FromLanguageTag(language_tag), display_scale});
   }
 
   void Draw(JNIEnv* environment, jobject canvas) {
@@ -898,7 +898,7 @@ public:
   }
 
 private:
-  AndroidViewPlatformHost platform_;
+  AndroidViewPlatformAdapter platform_;
   Runtime runtime_;
 };
 
@@ -940,12 +940,12 @@ Java_org_huxerui_HuxerUIView_nativeResize(JNIEnv* environment, jclass, jlong han
   }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateResourceContext(
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateResourceConfiguration(
     JNIEnv* environment, jclass, jlong handle, jbyteArray language_tag, jfloat display_scale
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->UpdateResourceContext(huxerui::detail::FromByteArray(environment, language_tag), display_scale);
+      session->UpdateResourceConfiguration(huxerui::detail::FromByteArray(environment, language_tag), display_scale);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

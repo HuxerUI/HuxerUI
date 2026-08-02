@@ -8,7 +8,7 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
 add_executable(huxerui_tests
         tests_main.cpp
-        unit/host_frame.cpp
+        unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
         unit/resource.cpp

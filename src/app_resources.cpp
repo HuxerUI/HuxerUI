@@ -41,29 +41,29 @@ std::uint64_t ContentHash(std::span<const std::byte> bytes) noexcept {
 
 } // namespace
 
-AppResourcesService::AppResourcesService(PlatformResources* platform) : platform_(platform) {
-  if (platform_ == nullptr) {
+AppResources::AppResources(PlatformResources* platform_resources) : platform_resources_(platform_resources) {
+  if (platform_resources_ == nullptr) {
     return;
   }
-  context_ = platform_->Context();
-  if (!std::isfinite(context_.display_scale) || context_.display_scale <= 0.0F) {
+  configuration_ = platform_resources_->Configuration();
+  if (!std::isfinite(configuration_.display_scale) || configuration_.display_scale <= 0.0F) {
     throw std::logic_error("HuxerUI platform resource display scale must be finite and positive");
   }
-  entries_ = ParseResourceIndex(platform_->Read(resource_index_path));
+  entries_ = ParseResourceIndex(platform_resources_->Read(resource_index_path));
 }
 
-void AppResourcesService::UpdateContext(ResourceContext context) {
-  if (!std::isfinite(context.display_scale) || context.display_scale <= 0.0F) {
+void AppResources::UpdateConfiguration(ResourceConfiguration configuration) {
+  if (!std::isfinite(configuration.display_scale) || configuration.display_scale <= 0.0F) {
     throw std::logic_error("HuxerUI platform resource display scale must be finite and positive");
   }
-  context_ = std::move(context);
+  configuration_ = std::move(configuration);
 }
 
-ResourceContext AppResourcesService::Context() const noexcept {
-  return context_;
+ResourceConfiguration AppResources::Configuration() const noexcept {
+  return configuration_;
 }
 
-RawAsset AppResourcesService::Resolve(RawResource resource) {
+RawAsset AppResources::Resolve(RawResource resource) {
   const auto found = std::ranges::find_if(entries_, [&resource](const ResourceIndexEntry& entry) {
     return entry.kind == ResourceEntryKind::Raw && entry.id == resource;
   });
@@ -74,7 +74,7 @@ RawAsset AppResourcesService::Resolve(RawResource resource) {
 }
 
 const ResourceIndexEntry&
-AppResourcesService::ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const {
+AppResources::ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const {
   const std::vector<std::string> fallbacks = LocaleFallbacks(locale);
   for (const std::string& fallback : fallbacks) {
     const auto found = std::ranges::find_if(entries_, [&id, kind, &fallback](const ResourceIndexEntry& entry) {
@@ -87,15 +87,15 @@ AppResourcesService::ResolveLocalized(const ResourceId& id, ResourceEntryKind ki
   throw std::logic_error(MissingResourceMessage(id));
 }
 
-RawAsset AppResourcesService::ReadEntry(const ResourceIndexEntry& entry) {
-  if (platform_ == nullptr) {
+RawAsset AppResources::ReadEntry(const ResourceIndexEntry& entry) {
+  if (platform_resources_ == nullptr) {
     throw std::logic_error("HuxerUI packaged resources require PlatformResources");
   }
   const auto cached = raw_cache_.find(entry.package_path);
   if (cached != raw_cache_.end()) {
     return cached->second;
   }
-  RawAsset asset = platform_->Read(entry.package_path);
+  RawAsset asset = platform_resources_->Read(entry.package_path);
   if (!asset.HasValue()) {
     throw std::logic_error("HuxerUI packaged resource payload is missing: " + entry.package_path);
   }
@@ -107,7 +107,7 @@ RawAsset AppResourcesService::ReadEntry(const ResourceIndexEntry& entry) {
   return asset;
 }
 
-ImageAsset AppResourcesService::Resolve(ImageResource resource, const Locale& locale) {
+ImageAsset AppResources::Resolve(ImageResource resource, const Locale& locale) {
   const std::vector<std::string> fallbacks = LocaleFallbacks(locale);
   std::vector<const ResourceIndexEntry*> candidates;
   for (const std::string& fallback : fallbacks) {
@@ -125,7 +125,7 @@ ImageAsset AppResourcesService::Resolve(ImageResource resource, const Locale& lo
   }
   std::ranges::sort(candidates, {}, [](const ResourceIndexEntry* entry) { return entry->scale; });
   const auto selected = std::ranges::find_if(candidates, [this](const ResourceIndexEntry* entry) {
-    return entry->scale >= context_.display_scale;
+    return entry->scale >= configuration_.display_scale;
   });
   const ResourceIndexEntry& entry = **(selected == candidates.end() ? std::prev(candidates.end()) : selected);
   const std::string cache_key = entry.package_path + '@' + std::to_string(entry.content_hash);
@@ -141,7 +141,7 @@ ImageAsset AppResourcesService::Resolve(ImageResource resource, const Locale& lo
   return asset;
 }
 
-ResolvedStringResource AppResourcesService::Resolve(StringResource resource, const Locale& locale) const {
+ResolvedStringResource AppResources::Resolve(StringResource resource, const Locale& locale) const {
   const ResourceIndexEntry& entry = ResolveLocalized(resource, ResourceEntryKind::String, locale);
   return {entry.value, entry.argument_count};
 }
@@ -152,9 +152,9 @@ namespace huxerui {
 
 namespace {
 
-std::shared_ptr<detail::AppResourcesService> CurrentResources() {
+std::shared_ptr<detail::AppResources> CurrentResources() {
   try {
-    return UseService<detail::AppResourcesService>();
+    return UseService<detail::AppResources>();
   } catch (const std::logic_error&) {
     throw std::logic_error("HuxerUI resource lookup requires an active Runtime resource service");
   }

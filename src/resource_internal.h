@@ -48,12 +48,12 @@ public:
   static std::uint64_t ImageIdentity(const ImageAsset& image) noexcept;
 };
 
-class AppResourcesService {
+class AppResources {
 public:
-  explicit AppResourcesService(PlatformResources* platform);
+  explicit AppResources(PlatformResources* platform_resources);
 
-  void UpdateContext(ResourceContext context);
-  [[nodiscard]] ResourceContext Context() const noexcept;
+  void UpdateConfiguration(ResourceConfiguration configuration);
+  [[nodiscard]] ResourceConfiguration Configuration() const noexcept;
   [[nodiscard]] RawAsset Resolve(RawResource resource);
   [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale);
   [[nodiscard]] ResolvedStringResource Resolve(StringResource resource, const Locale& locale) const;
@@ -63,8 +63,8 @@ private:
   ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const;
   [[nodiscard]] RawAsset ReadEntry(const ResourceIndexEntry& entry);
 
-  PlatformResources* platform_ = nullptr;
-  ResourceContext context_;
+  PlatformResources* platform_resources_ = nullptr;
+  ResourceConfiguration configuration_;
   std::vector<ResourceIndexEntry> entries_;
   std::unordered_map<std::string, RawAsset> raw_cache_;
   std::unordered_map<std::string, ImageAsset> image_cache_;

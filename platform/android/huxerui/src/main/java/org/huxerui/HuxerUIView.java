@@ -191,7 +191,7 @@ public final class HuxerUIView extends View {
                 }
                 resizeNativeState(getWidth(), getHeight());
             }
-            nativeUpdateResourceContext(nativeHandle, resourceLocale(), displayScale);
+            nativeUpdateResourceConfiguration(nativeHandle, resourceLocale(), displayScale);
         }
     }
 
@@ -1070,7 +1070,7 @@ public final class HuxerUIView extends View {
 
     private static native void nativeResize(long handle, float width, float height);
 
-    private static native void nativeUpdateResourceContext(long handle, byte[] languageTag, float displayScale);
+    private static native void nativeUpdateResourceConfiguration(long handle, byte[] languageTag, float displayScale);
 
     private static native void nativeCommitFrame(long handle);
 

@@ -1440,8 +1440,8 @@ TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
   maximum.BuildFrame();
   const auto* field = maximum.RootNode()->children.front().get();
   REQUIRE(field->bounds.height == 76.0F);
-  REQUIRE(field->scroll != nullptr);
-  REQUIRE(field->scroll->content_height == 100.0F);
+  REQUIRE(field->scroll_state != nullptr);
+  REQUIRE(field->scroll_state->content_height == 100.0F);
 }
 
 TEST_CASE("TestTextFieldParentHeightOverridesIntrinsicLineLimits") {
@@ -1538,8 +1538,8 @@ TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
   });
 
   const auto& text_field = *runtime.RootNode()->children.front();
-  REQUIRE(text_field.scroll);
-  REQUIRE(text_field.scroll->offset_y == 0.0F);
+  REQUIRE(text_field.scroll_state);
+  REQUIRE(text_field.scroll_state->offset_y == 0.0F);
 
   PaintSequence sequence;
   PaintContext context{sequence, text_field.bounds};
@@ -1550,7 +1550,7 @@ TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
   }
   context.Finish();
 
-  REQUIRE(text_field.scroll->offset_y == 0.0F);
+  REQUIRE(text_field.scroll_state->offset_y == 0.0F);
 }
 
 TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
@@ -1666,8 +1666,8 @@ TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResume
   runtime.BuildFrame();
 
   const auto* field = runtime.RootNode()->children.front().get();
-  REQUIRE(field->scroll != nullptr);
-  REQUIRE(field->scroll->offset_y == 20.0F);
+  REQUIRE(field->scroll_state != nullptr);
+  REQUIRE(field->scroll_state->offset_y == 20.0F);
   REQUIRE(runtime.QueryTextInputGeometry(1, {1, 1}).caret.y < 8.0F);
 
   runtime.HandleKeyEvent({
@@ -1675,7 +1675,7 @@ TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResume
       Key::Home,
   });
   runtime.BuildFrame();
-  REQUIRE(field->scroll->offset_y == 0.0F);
+  REQUIRE(field->scroll_state->offset_y == 0.0F);
 }
 
 TEST_CASE("TestMultilineTextFieldScrollUpdatesImeGeometry") {
@@ -1753,13 +1753,13 @@ TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
 
   const auto* root = runtime.RootNode();
   const auto* field = root->children.front()->children.front().get();
-  REQUIRE(field->scroll != nullptr);
-  REQUIRE(field->scroll->offset_y == 80.0F);
-  REQUIRE(root->scroll->offset_y == 20.0F);
+  REQUIRE(field->scroll_state != nullptr);
+  REQUIRE(field->scroll_state->offset_y == 80.0F);
+  REQUIRE(root->scroll_state->offset_y == 20.0F);
 
   runtime.BuildFrame();
-  REQUIRE(field->scroll->offset_y == 80.0F);
-  REQUIRE(root->scroll->offset_y == 20.0F);
+  REQUIRE(field->scroll_state->offset_y == 80.0F);
+  REQUIRE(root->scroll_state->offset_y == 20.0F);
 }
 
 TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection") {
@@ -1780,7 +1780,7 @@ TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection"
       {20.0F, 8.0F},
       PointerDeviceKind::Touch,
   });
-  REQUIRE(touch.RootNode()->children.front()->scroll->offset_y == 20.0F);
+  REQUIRE(touch.RootNode()->children.front()->scroll_state->offset_y == 20.0F);
 
   ResetTextFieldState();
   TestPlatform mouse_platform;
@@ -1799,7 +1799,7 @@ TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection"
       {20.0F, 38.0F},
       PointerDeviceKind::Mouse,
   });
-  REQUIRE(mouse.RootNode()->children.front()->scroll->offset_y == 0.0F);
+  REQUIRE(mouse.RootNode()->children.front()->scroll_state->offset_y == 0.0F);
   REQUIRE(multiline_text_field_value.Get().selection == TextSelection{1, 4});
 }
 
@@ -1822,7 +1822,7 @@ TEST_CASE("TestMultilineTextFieldSelectionDragScrollsAtViewportEdge") {
       PointerDeviceKind::Mouse,
   });
 
-  REQUIRE(runtime.RootNode()->children.front()->scroll->offset_y == 20.0F);
+  REQUIRE(runtime.RootNode()->children.front()->scroll_state->offset_y == 20.0F);
   REQUIRE(multiline_text_field_value.Get().selection.active > 1);
 }
 

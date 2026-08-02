@@ -92,8 +92,8 @@ std::uint64_t Hash(std::span<const std::byte> bytes) {
 
 class TestResources final : public PlatformResources {
 public:
-  ResourceContext Context() const override {
-    return context;
+  ResourceConfiguration Configuration() const override {
+    return configuration;
   }
 
   RawAsset Read(std::string_view package_path) override {
@@ -101,7 +101,7 @@ public:
     return found == assets.end() ? RawAsset{} : found->second;
   }
 
-  ResourceContext context{Locale::FromLanguageTag("zh-Hans-CN"), 1.5F};
+  ResourceConfiguration configuration{Locale::FromLanguageTag("zh-Hans-CN"), 1.5F};
   std::unordered_map<std::string, RawAsset> assets;
 };
 
@@ -167,7 +167,7 @@ TEST_CASE("AppResourcesResolveLocaleScaleAndRawPayloads") {
   resources.assets.emplace("huxerui/test/images/logo.png", logo);
   resources.assets.emplace("huxerui/test/images/logo@2x.png", logo_2x);
 
-  detail::AppResourcesService service(&resources);
+  detail::AppResources service(&resources);
   const RawAsset resolved_config = service.Resolve(RawResource("test", "raw/config.txt"));
   REQUIRE(resolved_config.Bytes().size() == 7);
   REQUIRE(resolved_config.MimeType() == "text/plain");
@@ -204,11 +204,11 @@ TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   runtime.SetViewport({200.0F, 60.0F});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "你好，Ada");
-  resources.context.locale = Locale::FromLanguageTag("en-US");
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
   const int requests_before_update = platform.requested_frames;
-  runtime.UpdateResourceContext(resources.context);
+  runtime.UpdateResourceConfiguration(resources.configuration);
   REQUIRE(platform.requested_frames == requests_before_update + 1);
-  runtime.UpdateResourceContext(resources.context);
+  runtime.UpdateResourceConfiguration(resources.configuration);
   REQUIRE(platform.requested_frames == requests_before_update + 1);
   REQUIRE(FirstText(runtime.BuildFrame()) == "Hello Ada");
 }
@@ -289,7 +289,7 @@ TEST_CASE("AppResourcesRejectPayloadsThatDoNotMatchTheIndex") {
       RawAsset::CopyBytes(std::as_bytes(std::span("enabled", std::size("enabled") - 1)), "text/plain")
   );
 
-  detail::AppResourcesService service(&resources);
+  detail::AppResources service(&resources);
   REQUIRE_THROWS_AS(service.Resolve(RawResource("test", "raw/config.txt")), std::logic_error);
 }
 

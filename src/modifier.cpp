@@ -12,8 +12,7 @@ namespace huxerui {
 namespace {
 
 ScrollBarStyle ResolveScrollBarStyle(
-    const std::shared_ptr<const detail::EnvironmentFrame>& environment,
-    const std::optional<ScrollBarStyle>& explicit_style
+    const std::shared_ptr<const Environment>& environment, const std::optional<ScrollBarStyle>& explicit_style
 ) {
   if (explicit_style.has_value()) {
     return *explicit_style;
@@ -181,7 +180,7 @@ public:
           0.0F,
           maximum_offset_
       );
-      const float current = pointer_axis_ == Axis::Vertical ? mounted.scroll->offset_y : mounted.scroll->offset_x;
+      const float current = pointer_axis_ == Axis::Vertical ? mounted.scroll_state->offset_y : mounted.scroll_state->offset_x;
       if (detail::ScrollNodeBy(mounted, desired - current) != 0.0F) {
         activity_pending_ = true;
         InvalidatePaint();

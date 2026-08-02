@@ -74,7 +74,7 @@ class DirectoryResources final : public huxerui::PlatformResources {
 public:
   explicit DirectoryResources(std::filesystem::path root) : root_(std::move(root)) {}
 
-  huxerui::ResourceContext Context() const override {
+  huxerui::ResourceConfiguration Configuration() const override {
     return {};
   }
 
@@ -254,7 +254,7 @@ TEST_CASE("GeneratedPackagesRoundTripThroughRuntimeResolution") {
   huxerui::resource_codegen::Generate({root, output, "test_app"});
 
   DirectoryResources platform(output / "package");
-  huxerui::detail::AppResourcesService resources(&platform);
+  huxerui::detail::AppResources resources(&platform);
   REQUIRE(resources.Resolve(huxerui::RawResource("test_app", "raw/config.txt")).AsStringView() == "enabled");
   REQUIRE(resources.Resolve(huxerui::RawResource("test_app", "raw/" + unicode_name)).AsStringView() == "unicode");
   const huxerui::detail::ResolvedStringResource title =

@@ -557,7 +557,7 @@ TEST_CASE("TestFlowWrapsAndAlignsChildrenWithinLines") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const auto& flow = *root->children[0];
-  REQUIRE(flow.layout->type == std::type_index(typeid(Flow)));
+  REQUIRE(flow.layout_descriptor->type == std::type_index(typeid(Flow)));
   REQUIRE(flow.measured_size.width == 90.0F);
   REQUIRE(flow.measured_size.height == 40.0F);
   REQUIRE(flow.children[0]->layout_offset.x == 0.0F);
@@ -785,7 +785,7 @@ TEST_CASE("TestCustomLayoutProtocol") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::Layout);
-  REQUIRE(root->layout->type == std::type_index(typeid(TestFlow)));
+  REQUIRE(root->layout_descriptor->type == std::type_index(typeid(TestFlow)));
   REQUIRE(root->children.size() == 3);
   REQUIRE(root->children[0]->bounds.x == 0.0F);
   REQUIRE(root->children[0]->bounds.y == 0.0F);
@@ -808,13 +808,13 @@ TEST_CASE("TestLayoutTypeParticipatesInIdentity") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const std::uint64_t row_identity = root->identity;
-  REQUIRE(root->layout->type == std::type_index(typeid(Row)));
+  REQUIRE(root->layout_descriptor->type == std::type_index(typeid(Row)));
 
   use_column_layout = true;
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->identity != row_identity);
-  REQUIRE(root->layout->type == std::type_index(typeid(Column)));
+  REQUIRE(root->layout_descriptor->type == std::type_index(typeid(Column)));
 }
 
 } // namespace huxerui::test

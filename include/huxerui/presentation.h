@@ -5,13 +5,16 @@
 #include <string>
 #include <utility>
 
+#include <huxerui/color.h>
+#include <huxerui/layer.h>
 #include <huxerui/modifier.h>
-#include <huxerui/root.h>
 
 namespace huxerui {
 
+class Environment;
+
 namespace detail {
-struct DialogModifierAccess;
+class DialogExtension;
 }
 
 struct ToastStyle {
@@ -47,11 +50,11 @@ public:
   bool Dismiss(LayerId id) const;
 
 private:
-  ToastHandle(std::shared_ptr<ToastService> service, std::shared_ptr<const detail::EnvironmentFrame> environment)
+  ToastHandle(std::shared_ptr<ToastService> service, std::shared_ptr<const Environment> environment)
       : service_(std::move(service)), environment_(std::move(environment)) {}
 
   std::shared_ptr<ToastService> service_;
-  std::shared_ptr<const detail::EnvironmentFrame> environment_;
+  std::shared_ptr<const Environment> environment_;
 
   friend ToastHandle UseToast();
 };
@@ -63,7 +66,7 @@ public:
   bool Dismiss(LayerId id);
 
 private:
-  LayerId Show(std::string message, ToastOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId Show(std::string message, ToastOptions options, std::shared_ptr<const Environment> environment);
 
   LayerController layers_;
 
@@ -109,11 +112,11 @@ public:
   bool Dismiss(LayerId id) const;
 
 private:
-  DialogHandle(std::shared_ptr<DialogService> service, std::shared_ptr<const detail::EnvironmentFrame> environment)
+  DialogHandle(std::shared_ptr<DialogService> service, std::shared_ptr<const Environment> environment)
       : service_(std::move(service)), environment_(std::move(environment)) {}
 
   std::shared_ptr<DialogService> service_;
-  std::shared_ptr<const detail::EnvironmentFrame> environment_;
+  std::shared_ptr<const Environment> environment_;
 
   friend DialogHandle UseDialog();
 };
@@ -127,20 +130,14 @@ public:
   bool Dismiss(LayerId id);
 
 private:
-  LayerId Show(ViewFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
-  LayerId
-  Show(DialogFactory content, DialogOptions options, std::shared_ptr<const detail::EnvironmentFrame> environment);
-  bool Update(
-      LayerId id,
-      ViewFactory content,
-      DialogOptions options,
-      std::shared_ptr<const detail::EnvironmentFrame> environment
-  );
+  LayerId Show(ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
+  LayerId Show(DialogFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
+  bool Update(LayerId id, ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
 
   LayerController layers_;
 
   friend class DialogHandle;
-  friend struct detail::DialogModifierAccess;
+  friend class detail::DialogExtension;
 };
 
 DialogHandle UseDialog();

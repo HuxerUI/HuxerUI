@@ -18,7 +18,7 @@ std::optional<AppDefinition>& AppRegistration() {
 
 } // namespace
 
-std::unique_ptr<detail::TextLayout> PlatformHost::CreateTextLayout(
+std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
   static_cast<void>(text);

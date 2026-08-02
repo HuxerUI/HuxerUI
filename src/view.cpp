@@ -26,11 +26,11 @@ const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
 }
 
 void ApplyPadding(detail::ViewSpec& spec, const Padding& modifier) {
-  spec.style.padding = modifier.insets;
+  spec.properties.padding = modifier.insets;
 }
 
 void ApplyBackground(detail::ViewSpec& spec, const Background& modifier) {
-  spec.style.background = modifier.color;
+  spec.properties.background = modifier.color;
 }
 
 void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
@@ -40,18 +40,18 @@ void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
       !std::isfinite(modifier.blur_radius) || modifier.blur_radius < 0.0F || !std::isfinite(modifier.spread)) {
     throw std::invalid_argument("HuxerUI shadow values must be finite with non-negative blur");
   }
-  spec.style.shadow = modifier;
+  spec.properties.shadow = modifier;
 }
 
 void ApplyForeground(detail::ViewSpec& spec, const Foreground& modifier) {
-  spec.style.text_style.foreground = modifier.color;
+  spec.properties.text_style.foreground = modifier.color;
 }
 
 void ApplyFontSize(detail::ViewSpec& spec, const FontSize& modifier) {
   if (!std::isfinite(modifier.value) || modifier.value <= 0.0F) {
     throw std::invalid_argument("HuxerUI font size must be finite and greater than zero");
   }
-  spec.style.text_style.font = spec.style.text_style.font.WithSize(modifier.value);
+  spec.properties.text_style.font = spec.properties.text_style.font.WithSize(modifier.value);
 }
 
 void ValidateFrameValue(const std::optional<float>& value, const char* name) {
@@ -76,7 +76,7 @@ void ValidateFrameConstraints(const Frame& frame) {
 }
 
 void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
-  Frame frame = spec.style.frame;
+  Frame frame = spec.properties.frame;
   if (modifier.width.has_value()) {
     frame.width = modifier.width;
   }
@@ -96,35 +96,35 @@ void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
     frame.max_height = modifier.max_height;
   }
   ValidateFrameConstraints(frame);
-  spec.style.frame = std::move(frame);
+  spec.properties.frame = std::move(frame);
 }
 
 void ApplyCornerRadius(detail::ViewSpec& spec, const CornerRadius& modifier) {
-  spec.style.corner_radius = modifier.value;
+  spec.properties.corner_radius = modifier.value;
 }
 
 void ApplySpacing(detail::ViewSpec& spec, const Spacing& modifier) {
-  spec.style.spacing = modifier.value;
+  spec.properties.spacing = modifier.value;
 }
 
 void ApplyMainAlign(detail::ViewSpec& spec, const MainAlign& modifier) {
-  spec.style.main_axis_alignment = modifier.alignment;
+  spec.properties.main_axis_alignment = modifier.alignment;
 }
 
 void ApplyCrossAlign(detail::ViewSpec& spec, const CrossAlign& modifier) {
-  spec.style.cross_axis_alignment = modifier.alignment;
+  spec.properties.cross_axis_alignment = modifier.alignment;
 }
 
 void ApplyAlign(detail::ViewSpec& spec, const Align& modifier) {
-  spec.style.horizontal_alignment = modifier.horizontal;
-  spec.style.vertical_alignment = modifier.vertical;
+  spec.properties.horizontal_alignment = modifier.horizontal;
+  spec.properties.vertical_alignment = modifier.vertical;
 }
 
 void ApplyGrow(detail::ViewSpec& spec, const Grow& modifier) {
   if (!std::isfinite(modifier.factor) || modifier.factor < 0.0F) {
     throw std::invalid_argument("HuxerUI grow factor must be finite and non-negative");
   }
-  spec.style.grow = modifier.factor;
+  spec.properties.grow = modifier.factor;
 }
 
 void ApplyEnabled(detail::ViewSpec& spec, const Enabled& modifier) {
@@ -369,7 +369,7 @@ const detail::ModifierDescriptor& ProgressCircleVisual::Descriptor() {
 }
 
 template <class Style>
-std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const detail::EnvironmentFrame>& environment) {
+std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const Environment>& environment) {
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
     if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
@@ -381,59 +381,59 @@ std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const detail::En
 
 void ApplyThemeDefaults(detail::ViewSpec& spec) {
   const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
-  spec.style.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
-  spec.style.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
-  spec.style.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
+  spec.properties.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
+  spec.properties.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
+  spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
-    spec.style.text_style =
+    spec.properties.text_style =
         ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
     return;
   }
   if (spec.kind == detail::NodeKind::Button) {
     const ButtonStyle style =
         ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
-    spec.style.padding = style.padding;
-    spec.style.background = style.background;
-    spec.style.text_style = style.label_style;
-    spec.style.corner_radius = style.corner_radius;
+    spec.properties.padding = style.padding;
+    spec.properties.background = style.background;
+    spec.properties.text_style = style.label_style;
+    spec.properties.corner_radius = style.corner_radius;
     return;
   }
   if (spec.kind == detail::NodeKind::TextField) {
     const TextFieldStyle style =
         ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
     spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), detail::MakeErasedLayoutValue(style));
-    spec.style.focus_ring_width = 0.0F;
-    spec.style.padding = style.padding;
-    spec.style.background = style.background;
-    spec.style.text_style = style.text_style;
-    spec.style.corner_radius = style.corner_radius;
-    spec.style.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec.properties.focus_ring_width = 0.0F;
+    spec.properties.padding = style.padding;
+    spec.properties.background = style.background;
+    spec.properties.text_style = style.text_style;
+    spec.properties.corner_radius = style.corner_radius;
+    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
     return;
   }
   if (spec.kind == detail::NodeKind::Checkbox) {
     const CheckboxStyle style =
         ResolveStyleOverride<CheckboxStyle>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), detail::MakeErasedLayoutValue(style));
-    spec.style.frame.width = std::max(0.0F, style.size);
-    spec.style.frame.height = std::max(0.0F, style.size);
-    spec.style.corner_radius = std::max(0.0F, style.corner_radius);
+    spec.properties.frame.width = std::max(0.0F, style.size);
+    spec.properties.frame.height = std::max(0.0F, style.size);
+    spec.properties.corner_radius = std::max(0.0F, style.corner_radius);
     return;
   }
   if (spec.kind == detail::NodeKind::Switch) {
     const SwitchStyle style =
         ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), detail::MakeErasedLayoutValue(style));
-    spec.style.frame.width = std::max(0.0F, style.width);
-    spec.style.frame.height = std::max(0.0F, style.height);
-    spec.style.corner_radius = std::max(0.0F, style.corner_radius);
+    spec.properties.frame.width = std::max(0.0F, style.width);
+    spec.properties.frame.height = std::max(0.0F, style.height);
+    spec.properties.corner_radius = std::max(0.0F, style.corner_radius);
     return;
   }
   if (spec.kind == detail::NodeKind::ProgressCircle) {
     const ProgressCircleStyle style =
         ResolveStyleOverride<ProgressCircleStyle>(spec.environment).value_or(detail::DefaultProgressCircleStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), detail::MakeErasedLayoutValue(style));
-    spec.style.frame.width = std::max(0.0F, style.size);
-    spec.style.frame.height = std::max(0.0F, style.size);
+    spec.properties.frame.width = std::max(0.0F, style.size);
+    spec.properties.frame.height = std::max(0.0F, style.size);
   }
 }
 
@@ -457,8 +457,8 @@ std::shared_ptr<detail::ViewSpec> MakeToggleSpec(detail::NodeKind kind, ToggleVi
   spec->activation = [checked](const detail::EventBindings& bindings) {
     detail::EmitEvent<ToggleEvents::Changed>(bindings, !checked);
   };
-  spec->modifiers.push_back(detail::MakeModifierSpec(ToggleVisual{visual_kind, checked}));
-  spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ToggleVisual{visual_kind, checked}));
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
@@ -477,7 +477,7 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
     progress = NormalizeProgress(*progress);
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressCircle);
-  spec->modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
   return spec;
 }
 
@@ -492,7 +492,7 @@ std::shared_ptr<detail::ViewSpec> MakeCanvasSpec(CanvasPainter painter) {
 
 std::shared_ptr<detail::ViewSpec> MakeSpacerSpec() {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Spacer);
-  spec->style.grow = 1.0F;
+  spec->properties.grow = 1.0F;
   return spec;
 }
 
@@ -573,7 +573,7 @@ namespace detail {
 
 std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor& layout, std::vector<View> children) {
   auto spec = std::make_shared<ViewSpec>(NodeKind::Layout);
-  spec->layout = &layout;
+  spec->layout_descriptor = &layout;
   spec->children = std::move(children);
   return spec;
 }
@@ -583,7 +583,7 @@ std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& l
     throw std::invalid_argument("HuxerUI virtual item factory must not be empty");
   }
   auto spec = std::make_shared<ViewSpec>(NodeKind::VirtualLayout);
-  spec->virtual_layout = &layout;
+  spec->virtual_layout_descriptor = &layout;
   spec->virtual_items = std::move(source);
   return spec;
 }
@@ -592,7 +592,7 @@ std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& l
 
 View::View(std::shared_ptr<detail::ViewSpec> spec) : spec_(std::move(spec)) {
   if (spec_) {
-    spec_->environment = detail::CurrentEnvironmentFrame();
+    spec_->environment = detail::CurrentEnvironment();
     ApplyThemeDefaults(*spec_);
   }
 }
@@ -623,11 +623,11 @@ void View::AddModifier(detail::ModifierSpec modifier) {
   }
   EnsureUniqueSpec();
   if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {
-    std::erase_if(spec_->modifiers, [](const detail::ModifierSpec& existing) {
+    std::erase_if(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
       return detail::IsDefaultIndicationDescriptor(existing.descriptor);
     });
   } else if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
-    const bool already_has_indication = std::ranges::any_of(spec_->modifiers, [](const detail::ModifierSpec& existing) {
+    const bool already_has_indication = std::ranges::any_of(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
       return detail::IsDefaultIndicationDescriptor(existing.descriptor) ||
              detail::IsExplicitIndicationDescriptor(existing.descriptor);
     });
@@ -641,7 +641,7 @@ void View::AddModifier(detail::ModifierSpec modifier) {
   if (modifier.descriptor->create_extension == nullptr) {
     return;
   }
-  spec_->modifiers.push_back(std::move(modifier));
+  spec_->retained_modifiers.push_back(std::move(modifier));
 }
 
 void View::SetModifier(detail::ModifierSpec modifier) {
@@ -649,11 +649,11 @@ void View::SetModifier(detail::ModifierSpec modifier) {
     throw std::invalid_argument("HuxerUI retained modifier descriptor and value must not be empty");
   }
   EnsureUniqueSpec();
-  const auto found = std::ranges::find_if(spec_->modifiers, [&modifier](const detail::ModifierSpec& existing) {
+  const auto found = std::ranges::find_if(spec_->retained_modifiers, [&modifier](const detail::ModifierSpec& existing) {
     return existing.descriptor == modifier.descriptor;
   });
-  if (found == spec_->modifiers.end()) {
-    spec_->modifiers.push_back(std::move(modifier));
+  if (found == spec_->retained_modifiers.end()) {
+    spec_->retained_modifiers.push_back(std::move(modifier));
   } else {
     *found = std::move(modifier);
   }
@@ -664,18 +664,18 @@ std::shared_ptr<detail::ViewSpec> MakeImageSpec(ImageAsset image) {
     throw std::invalid_argument("HuxerUI image view asset must not be empty");
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
-  spec->image.asset = std::move(image);
+  spec->image_properties.asset = std::move(image);
   return spec;
 }
 
 void View::SetTextStyle(TextStyle style) {
   EnsureUniqueSpec();
-  spec_->style.text_style = std::move(style);
+  spec_->properties.text_style = std::move(style);
 }
 
 void View::SetImageFit(ImageFit fit) {
   EnsureUniqueSpec();
-  spec_->image.fit = fit;
+  spec_->image_properties.fit = fit;
 }
 
 void View::SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment vertical) {
@@ -683,13 +683,13 @@ void View::SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment v
     throw std::invalid_argument("HuxerUI image content alignment must not use Stretch");
   }
   EnsureUniqueSpec();
-  spec_->image.horizontal_alignment = horizontal;
-  spec_->image.vertical_alignment = vertical;
+  spec_->image_properties.horizontal_alignment = horizontal;
+  spec_->image_properties.vertical_alignment = vertical;
 }
 
 void View::SetImageSampling(ImageSampling sampling) {
   EnsureUniqueSpec();
-  spec_->image.sampling = sampling;
+  spec_->image_properties.sampling = sampling;
 }
 
 void View::SetKey(std::int64_t value) {

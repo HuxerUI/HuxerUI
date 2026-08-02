@@ -79,11 +79,11 @@ private:
   std::string language_tag_;
 };
 
-struct ResourceContext {
+struct ResourceConfiguration {
   Locale locale = Locale::Default();
   float display_scale = 1.0F;
 
-  bool operator==(const ResourceContext&) const = default;
+  bool operator==(const ResourceConfiguration&) const = default;
 };
 
 class RawAsset {
@@ -158,7 +158,7 @@ class PlatformResources {
 public:
   virtual ~PlatformResources() = default;
 
-  [[nodiscard]] virtual ResourceContext Context() const = 0;
+  [[nodiscard]] virtual ResourceConfiguration Configuration() const = 0;
   // Reads an immutable package-relative payload synchronously. A default RawAsset reports a missing payload.
   [[nodiscard]] virtual RawAsset Read(std::string_view package_path) = 0;
 };

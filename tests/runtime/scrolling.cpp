@@ -133,10 +133,10 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   REQUIRE(root != nullptr);
   REQUIRE(root->measured_size.width == 100.0F);
   REQUIRE(root->measured_size.height == 60.0F);
-  REQUIRE(root->scroll != nullptr);
-  REQUIRE(root->scroll->content_height == 120.0F);
-  REQUIRE(root->scroll->offset_y == 0.0F);
-  REQUIRE(root->children[0]->scroll == nullptr);
+  REQUIRE(root->scroll_state != nullptr);
+  REQUIRE(root->scroll_state->content_height == 120.0F);
+  REQUIRE(root->scroll_state->offset_y == 0.0F);
+  REQUIRE(root->children[0]->scroll_state == nullptr);
   REQUIRE(root->children[0]->layout_offset.y == 0.0F);
 
   int push_clips = 0;
@@ -167,7 +167,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 45.0F);
+  REQUIRE(root->scroll_state->offset_y == 45.0F);
   REQUIRE(root->children[0]->layout_offset.y == 0.0F);
   REQUIRE(root->render_node.children_transform.translate_y == -45.0F);
   REQUIRE(root->measure_revision == scroll_measure_revision);
@@ -181,7 +181,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   runtime.InvalidateRoot();
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 45.0F);
+  REQUIRE(root->scroll_state->offset_y == 45.0F);
 
   runtime.HandleScrollEvent(
       ScrollEvent{
@@ -192,12 +192,12 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   );
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 60.0F);
+  REQUIRE(root->scroll_state->offset_y == 60.0F);
 
   runtime.SetViewport({100.0F, 100.0F});
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 20.0F);
+  REQUIRE(root->scroll_state->offset_y == 20.0F);
 }
 
 TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
@@ -208,9 +208,9 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->scroll->axis == Axis::Horizontal);
-  REQUIRE(root->scroll->content_width == 180.0F);
-  REQUIRE(root->scroll->content_height == 40.0F);
+  REQUIRE(root->scroll_state->axis == Axis::Horizontal);
+  REQUIRE(root->scroll_state->content_width == 180.0F);
+  REQUIRE(root->scroll_state->content_height == 40.0F);
   REQUIRE(horizontal_view_scroll.ViewportExtent() == 100.0F);
   REQUIRE(horizontal_view_scroll.ContentExtent() == 180.0F);
   REQUIRE(horizontal_view_scroll.MaxOffset() == 80.0F);
@@ -228,8 +228,8 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_x == 45.0F);
-  REQUIRE(root->scroll->offset_y == 0.0F);
+  REQUIRE(root->scroll_state->offset_x == 45.0F);
+  REQUIRE(root->scroll_state->offset_y == 0.0F);
   REQUIRE(root->children[0]->layout_offset.x == 0.0F);
   REQUIRE(root->render_node.children_transform.translate_x == -45.0F);
   REQUIRE(horizontal_view_scroll.Offset() == 45.0F);
@@ -247,7 +247,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(controlled_list_scroll.IsConnected());
-  REQUIRE(root->scroll->offset_y == 40.0F);
+  REQUIRE(root->scroll_state->offset_y == 40.0F);
   REQUIRE(controlled_list_scroll.Offset() == 40.0F);
   REQUIRE(controlled_list_scroll.MaxOffset() == 19900.0F);
   REQUIRE(controlled_list_scroll.ViewportExtent() == 100.0F);
@@ -257,23 +257,23 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
   REQUIRE(controlled_list_scroll.ScrollBy(20.0F));
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 60.0F);
+  REQUIRE(root->scroll_state->offset_y == 60.0F);
   REQUIRE(controlled_list_scroll.Offset() == 60.0F);
   REQUIRE(scroll_observer_compositions > compositions_before_scroll);
 
   REQUIRE(controlled_list_scroll.ScrollToItem(std::size_t{50}, ScrollAlignment::Center));
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 960.0F);
+  REQUIRE(root->scroll_state->offset_y == 960.0F);
   const auto centered =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
-  REQUIRE(centered != root->virtual_state->child_indices.end());
-  const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{50});
+  REQUIRE(centered != root->virtual_state->realized_indices.end());
+  const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[centered_position]->layout_offset.y == 40.0F);
 
   REQUIRE(controlled_list_scroll.ScrollTo(0.0F));
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll->offset_y == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->offset_y == 0.0F);
 
   show_controlled_scroll = false;
   runtime.BuildFrame();
@@ -308,7 +308,7 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   );
   REQUIRE(example_scroll.Offset() > 0.0F);
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->children[1]->scroll->offset_y > 0.0F);
+  REQUIRE(runtime.RootNode()->children[1]->scroll_state->offset_y > 0.0F);
 
   root = runtime.RootNode();
   toolbar = root->children[0]->children[0].get();
@@ -322,7 +322,7 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
       }
   );
   REQUIRE(example_scroll.Offset() == 0.0F);
-  REQUIRE(runtime.RootNode()->children[1]->scroll->offset_y == 0.0F);
+  REQUIRE(runtime.RootNode()->children[1]->scroll_state->offset_y == 0.0F);
 }
 
 TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
@@ -336,22 +336,22 @@ TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 384.0F);
+  REQUIRE(root->scroll_state->offset_y == 384.0F);
   const auto item =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
-  REQUIRE(item != root->virtual_state->child_indices.end());
-  std::size_t item_position = static_cast<std::size_t>(item - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{50});
+  REQUIRE(item != root->virtual_state->realized_indices.end());
+  std::size_t item_position = static_cast<std::size_t>(item - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_position]->layout_offset.y == 0.0F);
 
   REQUIRE(controlled_grid_scroll.ScrollToItem(std::size_t{50}, ScrollAlignment::Center));
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 370.0F);
+  REQUIRE(root->scroll_state->offset_y == 370.0F);
   const auto centered =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{50});
-  REQUIRE(centered != root->virtual_state->child_indices.end());
-  item_position = static_cast<std::size_t>(centered - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{50});
+  REQUIRE(centered != root->virtual_state->realized_indices.end());
+  item_position = static_cast<std::size_t>(centered - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_position]->layout_offset.y == 14.0F);
 }
 
@@ -364,7 +364,7 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(controlled_view_scroll.IsConnected());
-  REQUIRE(root->scroll->offset_y == 20.0F);
+  REQUIRE(root->scroll_state->offset_y == 20.0F);
   REQUIRE(controlled_view_scroll.Offset() == 20.0F);
   REQUIRE(controlled_view_scroll.MaxOffset() == 300.0F);
   REQUIRE(controlled_view_scroll.ViewportExtent() == 100.0F);
@@ -372,7 +372,7 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
 
   REQUIRE(controlled_view_scroll.ScrollBy(30.0F));
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll->offset_y == 50.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->offset_y == 50.0F);
   REQUIRE(controlled_view_scroll.Offset() == 50.0F);
   REQUIRE(!controlled_view_scroll.ScrollToItem(std::size_t{3}));
 }

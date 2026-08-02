@@ -445,7 +445,7 @@ TEST_CASE("TestForEachStateSurvivesScrolling") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 0.0F);
+  REQUIRE(root->scroll_state->offset_y == 0.0F);
   REQUIRE(root->children[0]->children[0]->children[0]->text == "0:4");
 }
 
@@ -461,12 +461,12 @@ TEST_CASE("TestVirtualListVirtualization") {
   REQUIRE(root != nullptr);
   REQUIRE(root->virtual_state->source.size == 1000);
   REQUIRE(root->children.size() < root->virtual_state->source.size);
-  const auto materialized_items = root->virtual_state->item_views.size();
+  const auto materialized_items = root->virtual_state->item_declarations.size();
   REQUIRE(materialized_items == root->children.size());
   REQUIRE(virtual_item_factory_calls == static_cast<int>(materialized_items));
-  REQUIRE(!root->virtual_state->child_indices.empty());
-  REQUIRE(root->virtual_state->child_indices.front() == 0);
-  REQUIRE(root->scroll->content_height == 20000.0F);
+  REQUIRE(!root->virtual_state->realized_indices.empty());
+  REQUIRE(root->virtual_state->realized_indices.front() == 0);
+  REQUIRE(root->scroll_state->content_height == 20000.0F);
   REQUIRE(FirstText(initial) == "0");
   REQUIRE(ContainsText(initial, "4"));
   REQUIRE(!ContainsText(initial, "5"));
@@ -481,16 +481,16 @@ TEST_CASE("TestVirtualListVirtualization") {
   const FlattenedScene& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 1000.0F);
-  REQUIRE(root->virtual_state->child_indices.front() == 40);
-  REQUIRE(root->virtual_state->child_indices.back() == 65);
-  REQUIRE(!root->virtual_state->saved_state);
+  REQUIRE(root->scroll_state->offset_y == 1000.0F);
+  REQUIRE(root->virtual_state->realized_indices.front() == 40);
+  REQUIRE(root->virtual_state->realized_indices.back() == 65);
+  REQUIRE(!root->virtual_state->item_state_cache);
   REQUIRE(virtual_item_factory_calls < 1000);
   REQUIRE(FirstText(scrolled) == "50");
   REQUIRE(ContainsText(scrolled, "54"));
   REQUIRE(!ContainsText(scrolled, "55"));
 
-  const std::size_t visible_position = 50 - root->virtual_state->child_indices.front();
+  const std::size_t visible_position = 50 - root->virtual_state->realized_indices.front();
   REQUIRE(root->children[visible_position]->layout_offset.y == 0.0F);
 
   runtime.HandleScrollEvent(
@@ -503,8 +503,8 @@ TEST_CASE("TestVirtualListVirtualization") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 19900.0F);
-  REQUIRE(root->virtual_state->child_indices.back() == 999);
+  REQUIRE(root->scroll_state->offset_y == 19900.0F);
+  REQUIRE(root->virtual_state->realized_indices.back() == 999);
 
   Runtime state_runtime{VirtualStateListApp, platform};
   state_runtime.SetViewport({100.0F, 40.0F});
@@ -538,10 +538,10 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   );
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->virtual_state->child_indices.front() > 0);
+  REQUIRE(root->virtual_state->realized_indices.front() > 0);
   REQUIRE(root->children.size() < root->virtual_state->source.size);
-  REQUIRE(root->virtual_state->saved_state != nullptr);
-  REQUIRE(root->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
+  REQUIRE(root->virtual_state->item_state_cache != nullptr);
+  REQUIRE(root->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}));
 
   runtime.HandleScrollEvent(
       ScrollEvent{
@@ -553,9 +553,12 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 0.0F);
-  REQUIRE(root->virtual_state->child_indices.front() == 0);
-  REQUIRE((!root->virtual_state->saved_state || !root->virtual_state->saved_state->keyed.contains(std::int64_t{0})));
+  REQUIRE(root->scroll_state->offset_y == 0.0F);
+  REQUIRE(root->virtual_state->realized_indices.front() == 0);
+  REQUIRE(
+      (!root->virtual_state->item_state_cache ||
+       !root->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}))
+  );
   REQUIRE(root->children[0]->children[0]->text == "0:4");
 }
 
@@ -580,11 +583,11 @@ TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
       }
   );
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
+  REQUIRE(runtime.RootNode()->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}));
 
   virtual_reorder_items.Update([](auto& items) { items.erase(items.begin()); });
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
+  REQUIRE(runtime.RootNode()->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}));
 
   virtual_reorder_items.Update([](auto& items) { items.push_back(0); });
   runtime.BuildFrame();
@@ -623,9 +626,9 @@ TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
 
   const auto* root = runtime.RootNode();
   const auto position =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{99});
-  REQUIRE(position != root->virtual_state->child_indices.end());
-  const std::size_t child_index = static_cast<std::size_t>(position - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{99});
+  REQUIRE(position != root->virtual_state->realized_indices.end());
+  const std::size_t child_index = static_cast<std::size_t>(position - root->virtual_state->realized_indices.begin());
   InvokeClick(*root->children[child_index]->children[0]);
   runtime.BuildFrame();
 
@@ -639,14 +642,17 @@ TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->virtual_state->saved_state != nullptr);
-  REQUIRE(root->virtual_state->saved_state->indexed.contains(std::size_t{99}));
+  REQUIRE(root->virtual_state->item_state_cache != nullptr);
+  REQUIRE(root->virtual_state->item_state_cache->indexed.contains(std::size_t{99}));
 
   virtual_unkeyed_items.Update([](auto& items) { items.resize(10); });
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE((!root->virtual_state->saved_state || !root->virtual_state->saved_state->indexed.contains(std::size_t{99})));
+  REQUIRE(
+      (!root->virtual_state->item_state_cache ||
+       !root->virtual_state->item_state_cache->indexed.contains(std::size_t{99}))
+  );
 }
 
 TEST_CASE("TestVariableVirtualListMeasurementAndAnchor") {
@@ -671,22 +677,22 @@ TEST_CASE("TestVariableVirtualListMeasurementAndAnchor") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 70.0F);
+  REQUIRE(root->scroll_state->offset_y == 70.0F);
   const auto item_two =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{2});
-  REQUIRE(item_two != root->virtual_state->child_indices.end());
-  std::size_t child_index = static_cast<std::size_t>(item_two - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{2});
+  REQUIRE(item_two != root->virtual_state->realized_indices.end());
+  std::size_t child_index = static_cast<std::size_t>(item_two - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[child_index]->layout_offset.y == -10.0F);
 
   variable_height_expanded = true;
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 90.0F);
+  REQUIRE(root->scroll_state->offset_y == 90.0F);
   const auto anchored_item =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{2});
-  REQUIRE(anchored_item != root->virtual_state->child_indices.end());
-  child_index = static_cast<std::size_t>(anchored_item - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{2});
+  REQUIRE(anchored_item != root->virtual_state->realized_indices.end());
+  child_index = static_cast<std::size_t>(anchored_item - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[child_index]->layout_offset.y == -10.0F);
 }
 
@@ -698,8 +704,8 @@ TEST_CASE("TestVariableVirtualListRefinesEstimatedExtent") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->scroll->content_height == 1000.0F);
-  REQUIRE(root->virtual_state->child_indices.back() >= 99);
+  REQUIRE(root->scroll_state->content_height == 1000.0F);
+  REQUIRE(root->virtual_state->realized_indices.back() >= 99);
 }
 
 TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
@@ -711,8 +717,8 @@ TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::VirtualLayout);
-  REQUIRE(root->scroll->axis == Axis::Horizontal);
-  REQUIRE(root->scroll->content_width == 20000.0F);
+  REQUIRE(root->scroll_state->axis == Axis::Horizontal);
+  REQUIRE(root->scroll_state->content_width == 20000.0F);
 
   runtime.HandleScrollEvent(
       ScrollEvent{
@@ -724,11 +730,11 @@ TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
   const FlattenedScene& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_x == 1000.0F);
-  REQUIRE(root->virtual_state->child_indices.front() == 40);
-  REQUIRE(root->virtual_state->child_indices.back() == 65);
+  REQUIRE(root->scroll_state->offset_x == 1000.0F);
+  REQUIRE(root->virtual_state->realized_indices.front() == 40);
+  REQUIRE(root->virtual_state->realized_indices.back() == 65);
   REQUIRE(FirstText(scrolled) == "50");
-  const std::size_t visible_position = 50 - root->virtual_state->child_indices.front();
+  const std::size_t visible_position = 50 - root->virtual_state->realized_indices.front();
   REQUIRE(root->children[visible_position]->layout_offset.x == 0.0F);
 }
 
@@ -754,11 +760,11 @@ TEST_CASE("TestVariableHorizontalVirtualListMeasurementAndScrolling") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_x == 70.0F);
+  REQUIRE(root->scroll_state->offset_x == 70.0F);
   const auto item_two =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{2});
-  REQUIRE(item_two != root->virtual_state->child_indices.end());
-  const std::size_t child_index = static_cast<std::size_t>(item_two - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{2});
+  REQUIRE(item_two != root->virtual_state->realized_indices.end());
+  const std::size_t child_index = static_cast<std::size_t>(item_two - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[child_index]->layout_offset.x == -10.0F);
 }
 
@@ -784,9 +790,9 @@ TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
   );
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->virtual_state->child_indices.front() > 0);
-  REQUIRE(root->virtual_state->saved_state != nullptr);
-  REQUIRE(root->virtual_state->saved_state->keyed.contains(std::int64_t{0}));
+  REQUIRE(root->virtual_state->realized_indices.front() > 0);
+  REQUIRE(root->virtual_state->item_state_cache != nullptr);
+  REQUIRE(root->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}));
 
   runtime.HandleScrollEvent(
       ScrollEvent{
@@ -798,7 +804,7 @@ TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_x == 0.0F);
+  REQUIRE(root->scroll_state->offset_x == 0.0F);
   REQUIRE(root->children[0]->children[0]->text == "0:4");
 }
 
@@ -811,9 +817,9 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::VirtualLayout);
-  REQUIRE(root->virtual_layout->type == typeid(TestVirtualStrip));
+  REQUIRE(root->virtual_layout_descriptor->type == typeid(TestVirtualStrip));
   REQUIRE(root->children.size() == 5);
-  REQUIRE(root->virtual_state->child_indices.front() == 0);
+  REQUIRE(root->virtual_state->realized_indices.front() == 0);
   REQUIRE(FirstText(initial) == "0");
   REQUIRE(huxerui::detail::ResolveScrollBarGeometry(*root).has_value());
 
@@ -827,19 +833,19 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   const FlattenedScene& scrolled = runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 250.0F);
-  REQUIRE(root->virtual_state->child_indices.front() == 10);
+  REQUIRE(root->scroll_state->offset_y == 250.0F);
+  REQUIRE(root->virtual_state->realized_indices.front() == 10);
   REQUIRE(root->children.size() == 5);
   REQUIRE(FirstText(scrolled) == "10");
 
   REQUIRE(custom_virtual_scroll.ScrollToItem(std::size_t{20}, ScrollAlignment::Center));
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 462.5F);
+  REQUIRE(root->scroll_state->offset_y == 462.5F);
   const auto centered =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{20});
-  REQUIRE(centered != root->virtual_state->child_indices.end());
-  const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{20});
+  REQUIRE(centered != root->virtual_state->realized_indices.end());
+  const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[centered_position]->layout_offset.y == 37.5F);
 }
 
@@ -861,7 +867,7 @@ TEST_CASE("TestVirtualLayoutSkipsCleanPolicyAndStableItemMeasurement") {
   std::unordered_map<std::size_t, std::pair<std::uint64_t, std::uint64_t>> initial_items;
   for (std::size_t position = 0; position < virtual_layout->children.size(); ++position) {
     initial_items.emplace(
-        virtual_layout->virtual_state->child_indices[position],
+        virtual_layout->virtual_state->realized_indices[position],
         std::pair{
             virtual_layout->children[position]->identity,
             virtual_layout->children[position]->measure_revision,
@@ -889,7 +895,7 @@ TEST_CASE("TestVirtualLayoutSkipsCleanPolicyAndStableItemMeasurement") {
   REQUIRE(virtual_strip_measure_calls == 2);
   REQUIRE(root->measure_revision > initial_measure_revision);
   for (std::size_t position = 0; position < virtual_layout->children.size(); ++position) {
-    const auto previous = initial_items.find(virtual_layout->virtual_state->child_indices[position]);
+    const auto previous = initial_items.find(virtual_layout->virtual_state->realized_indices[position]);
     if (previous == initial_items.end()) {
       continue;
     }
@@ -922,17 +928,17 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::VirtualLayout);
-  REQUIRE(root->virtual_layout->type == typeid(TestVirtualGrid));
+  REQUIRE(root->virtual_layout_descriptor->type == typeid(TestVirtualGrid));
   REQUIRE(root->children.size() < root->virtual_state->source.size);
 
   const auto first =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{0});
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{0});
   const auto second =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{1});
-  REQUIRE(first != root->virtual_state->child_indices.end());
-  REQUIRE(second != root->virtual_state->child_indices.end());
-  const std::size_t first_position = static_cast<std::size_t>(first - root->virtual_state->child_indices.begin());
-  const std::size_t second_position = static_cast<std::size_t>(second - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{1});
+  REQUIRE(first != root->virtual_state->realized_indices.end());
+  REQUIRE(second != root->virtual_state->realized_indices.end());
+  const std::size_t first_position = static_cast<std::size_t>(first - root->virtual_state->realized_indices.begin());
+  const std::size_t second_position = static_cast<std::size_t>(second - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[first_position]->bounds.width == 60.0F);
   REQUIRE(root->children[second_position]->layout_offset.x == 60.0F);
   REQUIRE(root->children[second_position]->bounds.width == 30.0F);
@@ -953,13 +959,13 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->virtual_state->saved_state != nullptr);
-  REQUIRE(root->virtual_state->saved_state->keyed.contains(std::uint64_t{0}));
+  REQUIRE(root->virtual_state->item_state_cache != nullptr);
+  REQUIRE(root->virtual_state->item_state_cache->keyed.contains(std::uint64_t{0}));
 
   std::size_t anchor_index = root->virtual_state->source.size;
   for (std::size_t position = 0; position < root->children.size(); ++position) {
     if (root->children[position]->layout_offset.y == 0.0F) {
-      anchor_index = root->virtual_state->child_indices[position];
+      anchor_index = root->virtual_state->realized_indices[position];
       break;
     }
   }
@@ -972,10 +978,10 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   root = runtime.RootNode();
   REQUIRE(root->identity == identity);
   const auto resized_anchor =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), anchor_index);
-  REQUIRE(resized_anchor != root->virtual_state->child_indices.end());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), anchor_index);
+  REQUIRE(resized_anchor != root->virtual_state->realized_indices.end());
   const std::size_t resized_position =
-      static_cast<std::size_t>(resized_anchor - root->virtual_state->child_indices.begin());
+      static_cast<std::size_t>(resized_anchor - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[resized_position]->layout_offset.y == 0.0F);
 
   runtime.HandleScrollEvent(
@@ -989,9 +995,9 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
 
   root = runtime.RootNode();
   const auto restored =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{0});
-  REQUIRE(restored != root->virtual_state->child_indices.end());
-  const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{0});
+  REQUIRE(restored != root->virtual_state->realized_indices.end());
+  const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[restored_position]->bounds.width == 60.0F);
   REQUIRE(root->children[restored_position]->children[0]->text == "0:4");
   REQUIRE(virtual_grid_factory_calls < 200);
@@ -1008,17 +1014,17 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->kind == huxerui::detail::NodeKind::VirtualLayout);
-  REQUIRE(root->virtual_layout->type == typeid(VirtualGrid));
+  REQUIRE(root->virtual_layout_descriptor->type == typeid(VirtualGrid));
   REQUIRE(root->children.size() < root->virtual_state->source.size);
 
   const auto first =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{0});
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{0});
   const auto second =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{1});
-  REQUIRE(first != root->virtual_state->child_indices.end());
-  REQUIRE(second != root->virtual_state->child_indices.end());
-  const std::size_t first_position = static_cast<std::size_t>(first - root->virtual_state->child_indices.begin());
-  const std::size_t second_position = static_cast<std::size_t>(second - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{1});
+  REQUIRE(first != root->virtual_state->realized_indices.end());
+  REQUIRE(second != root->virtual_state->realized_indices.end());
+  const std::size_t first_position = static_cast<std::size_t>(first - root->virtual_state->realized_indices.begin());
+  const std::size_t second_position = static_cast<std::size_t>(second - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[first_position]->bounds.width == 65.0F);
   REQUIRE(root->children[second_position]->layout_offset.x == 70.0F);
   REQUIRE(root->children[second_position]->bounds.width == 30.0F);
@@ -1039,14 +1045,14 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 240.0F);
-  REQUIRE(root->virtual_state->saved_state != nullptr);
-  REQUIRE(root->virtual_state->saved_state->keyed.contains(std::uint64_t{0}));
+  REQUIRE(root->scroll_state->offset_y == 240.0F);
+  REQUIRE(root->virtual_state->item_state_cache != nullptr);
+  REQUIRE(root->virtual_state->item_state_cache->keyed.contains(std::uint64_t{0}));
 
   std::size_t anchor_index = root->virtual_state->source.size;
   for (std::size_t position = 0; position < root->children.size(); ++position) {
     if (root->children[position]->layout_offset.y == 0.0F) {
-      anchor_index = root->virtual_state->child_indices[position];
+      anchor_index = root->virtual_state->realized_indices[position];
       break;
     }
   }
@@ -1059,10 +1065,10 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   root = runtime.RootNode();
   REQUIRE(root->identity == identity);
   const auto resized_anchor =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), anchor_index);
-  REQUIRE(resized_anchor != root->virtual_state->child_indices.end());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), anchor_index);
+  REQUIRE(resized_anchor != root->virtual_state->realized_indices.end());
   const std::size_t resized_position =
-      static_cast<std::size_t>(resized_anchor - root->virtual_state->child_indices.begin());
+      static_cast<std::size_t>(resized_anchor - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[resized_position]->layout_offset.y == 0.0F);
 
   runtime.HandleScrollEvent(
@@ -1076,9 +1082,9 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
 
   root = runtime.RootNode();
   const auto restored =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{0});
-  REQUIRE(restored != root->virtual_state->child_indices.end());
-  const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{0});
+  REQUIRE(restored != root->virtual_state->realized_indices.end());
+  const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[restored_position]->bounds.width == 65.0F);
   REQUIRE(root->children[restored_position]->children[0]->text == "0:4");
   REQUIRE(built_in_grid_factory_calls < 200);
@@ -1101,9 +1107,9 @@ TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   const auto item_two =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{2});
-  REQUIRE(item_two != root->virtual_state->child_indices.end());
-  std::size_t item_two_position = static_cast<std::size_t>(item_two - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{2});
+  REQUIRE(item_two != root->virtual_state->realized_indices.end());
+  std::size_t item_two_position = static_cast<std::size_t>(item_two - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_two_position]->layout_offset.y == 45.0F);
 
   runtime.HandleScrollEvent(
@@ -1116,22 +1122,22 @@ TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 80.0F);
+  REQUIRE(root->scroll_state->offset_y == 80.0F);
   const auto item_four =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{4});
-  REQUIRE(item_four != root->virtual_state->child_indices.end());
-  std::size_t item_four_position = static_cast<std::size_t>(item_four - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{4});
+  REQUIRE(item_four != root->virtual_state->realized_indices.end());
+  std::size_t item_four_position = static_cast<std::size_t>(item_four - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_four_position]->layout_offset.y == 0.0F);
 
   variable_grid_height_expanded = true;
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->scroll->offset_y == 100.0F);
+  REQUIRE(root->scroll_state->offset_y == 100.0F);
   const auto anchored_item =
-      std::find(root->virtual_state->child_indices.begin(), root->virtual_state->child_indices.end(), std::size_t{4});
-  REQUIRE(anchored_item != root->virtual_state->child_indices.end());
-  item_four_position = static_cast<std::size_t>(anchored_item - root->virtual_state->child_indices.begin());
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), std::size_t{4});
+  REQUIRE(anchored_item != root->virtual_state->realized_indices.end());
+  item_four_position = static_cast<std::size_t>(anchored_item - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_four_position]->layout_offset.y == 0.0F);
 }
 
@@ -1158,11 +1164,11 @@ TEST_CASE("TestVirtualListAxisChangePreservesAnchorAndIdentity") {
 
   root = runtime.RootNode();
   REQUIRE(root->identity == identity);
-  REQUIRE(root->scroll->axis == Axis::Horizontal);
-  REQUIRE(root->scroll->offset_x == 1000.0F);
-  REQUIRE(root->virtual_state->child_indices.front() == 40);
+  REQUIRE(root->scroll_state->axis == Axis::Horizontal);
+  REQUIRE(root->scroll_state->offset_x == 1000.0F);
+  REQUIRE(root->virtual_state->realized_indices.front() == 40);
   REQUIRE(FirstText(horizontal) == "50");
-  const std::size_t visible_position = 50 - root->virtual_state->child_indices.front();
+  const std::size_t visible_position = 50 - root->virtual_state->realized_indices.front();
   REQUIRE(root->children[visible_position]->layout_offset.x == 0.0F);
 }
 

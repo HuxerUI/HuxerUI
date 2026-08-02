@@ -50,7 +50,7 @@ When asked for a commit message, use English Conventional Commits with a concise
 feat(text-field): add line and length limits
 fix(android): release pressed state after pointer up
 docs(architecture): define node extension lifecycle
-refactor(runtime): consolidate platform host ownership
+refactor(runtime): consolidate platform adapter ownership
 ```
 
 Describe the outcome, not the editing process.
@@ -115,7 +115,7 @@ Example targets use the `example_` prefix and a semantic snake-case name. A new 
 
 The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and RenderScene generation. Platform adapters own native lifecycle, frame scheduling, event conversion, text services, clipboard integration, and RenderScene rendering.
 
-Use one shared `Runtime` implementation and one `PlatformHost` boundary per native host view. Do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
+Use one shared `Runtime` implementation and one `PlatformAdapter` boundary per native host view. Do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
 
 The shared runtime does not depend on native platform types. Add a native capability only for a genuine native service; fix behavior at the narrowest layer that owns it.
 

@@ -137,14 +137,11 @@ ThemeSpec ThemeSpec::Default() {
 
 namespace detail {
 
-void ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition) {
-  if (definition.theme_.has_value()) {
-    values.Set(*definition.theme_);
-  }
-  MergeEnvironmentValues(values, definition.values_);
+void ApplyThemeDefinition(Environment& environment, const ThemeDefinition& definition) {
+  MergeEnvironment(environment, definition.overrides_);
 }
 
-ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment) {
+ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment) {
   if (const std::any* value = FindEnvironmentValue(std::move(environment), typeid(ThemeSpec))) {
     if (const auto* theme = std::any_cast<ThemeSpec>(value)) {
       return *theme;
@@ -154,12 +151,12 @@ ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment) 
   return ThemeSpec::Default();
 }
 
-const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key) {
-  for (auto frame = std::move(environment); frame != nullptr; frame = frame->parent) {
-    if (const std::any* value = FindLocalEnvironmentValue(frame->overrides, key)) {
+const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key) {
+  for (auto current = std::move(environment); current != nullptr; current = EnvironmentParent(*current)) {
+    if (const std::any* value = FindLocalEnvironmentValue(*current, key)) {
       return value;
     }
-    if (FindLocalEnvironmentValue(frame->overrides, typeid(ThemeSpec))) {
+    if (FindLocalEnvironmentValue(*current, typeid(ThemeSpec))) {
       return nullptr;
     }
   }

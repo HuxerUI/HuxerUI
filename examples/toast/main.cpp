@@ -10,7 +10,7 @@ View App() {
   return Column {
     Text("Toast").With(FontSize(28.0F), Foreground(primary_text_color)),
     Text(
-        "Toast is presented by the window LayerHost and "
+        "Toast is presented by the window layer stack and "
         "dismisses itself after the configured duration."
     ),
     Button("Show toast").OnClick([toast] {

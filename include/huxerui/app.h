@@ -17,7 +17,8 @@
 namespace huxerui {
 
 class PlatformResources;
-struct ResourceContext;
+class Environment;
+struct ResourceConfiguration;
 
 namespace detail {
 class TextLayout;
@@ -37,9 +38,9 @@ struct AppDefinition {
   AppOptions options;
 };
 
-class PlatformHost : public TextMeasurer {
+class PlatformAdapter : public TextMeasurer {
 public:
-  virtual ~PlatformHost() = default;
+  virtual ~PlatformAdapter() = default;
 
   virtual void RequestFrameAt(double deadline) = 0;
   virtual double Now() const noexcept = 0;
@@ -59,12 +60,10 @@ public:
 
 namespace detail {
 
-struct EnvironmentFrame;
 struct NodeExtensionHandle;
 struct MountedNode;
 struct PointerSession;
 struct RuntimeAccess;
-struct SavedNodeState;
 struct ViewSpec;
 class RecomposeScope;
 class ScrollConnection;
@@ -74,7 +73,7 @@ class VirtualMeasureSession;
 
 class Runtime final {
 public:
-  Runtime(AppDefinition definition, PlatformHost& host);
+  Runtime(AppDefinition definition, PlatformAdapter& platform);
   ~Runtime();
 
   Runtime(const Runtime&) = delete;
@@ -83,7 +82,7 @@ public:
   Runtime& operator=(Runtime&&) = delete;
 
   void SetViewport(Size viewport);
-  void UpdateResourceContext(ResourceContext context);
+  void UpdateResourceConfiguration(ResourceConfiguration configuration);
   const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
@@ -102,8 +101,7 @@ public:
 private:
   struct State;
 
-  LayerId
-  AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const detail::EnvironmentFrame> environment);
+  LayerId AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment);
   bool UpdateLayer(LayerId id, ViewFactory content);
   bool UpdateLayer(LayerId id, LayerOptions options, ViewFactory content);
   bool DismissLayer(LayerId id);
@@ -154,7 +152,7 @@ private:
       std::optional<double>& next_wakeup,
       bool rebuild_cache
   );
-  void BindNodeExtensions(detail::MountedNode& node);
+  void BindExtensionPaintInvalidation(detail::MountedNode& node);
   const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
   void InvalidateScope(std::uint64_t scope_id);
@@ -167,8 +165,6 @@ private:
   bool ReconcileChildren(
       std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
   );
-  detail::SavedNodeState SaveNodeState(detail::MountedNode& mounted);
-  void RestoreNodeState(detail::MountedNode& mounted, detail::SavedNodeState& saved);
   [[nodiscard]] const detail::MountedNode* RootNode() const noexcept;
 
   std::unique_ptr<State> state_;

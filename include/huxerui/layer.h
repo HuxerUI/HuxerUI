@@ -14,9 +14,9 @@ namespace huxerui {
 
 class Runtime;
 class View;
+class Environment;
 
 namespace detail {
-struct EnvironmentFrame;
 struct LayerControllerState;
 } // namespace detail
 
@@ -80,9 +80,8 @@ public:
   bool Dismiss(LayerId id) const;
 
 private:
-  LayerId AttachCaptured(
-      LayerOptions options, ViewFactory content, std::shared_ptr<const detail::EnvironmentFrame> environment
-  ) const;
+  LayerId
+  AttachCaptured(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment) const;
 
   explicit LayerController(Runtime& runtime);
   void Disconnect() noexcept;

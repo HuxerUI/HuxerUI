@@ -10,6 +10,8 @@ struct SelectionAreaModifier {
   bool operator==(const SelectionAreaModifier&) const = default;
 };
 
-Size MeasureSelectionArea(MountedNode& node, PlatformHost& platform, Runtime& runtime, const Constraints& constraints);
+Size MeasureSelectionArea(
+    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints
+);
 
 } // namespace huxerui::detail

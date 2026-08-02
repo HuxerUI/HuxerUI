@@ -12,15 +12,6 @@ namespace huxerui::detail {
 
 namespace {
 
-Rect ContentRect(const MountedNode& node) {
-  return {
-      node.bounds.x + node.style.padding.left,
-      node.bounds.y + node.style.padding.top,
-      std::max(0.0F, node.bounds.width - node.style.padding.Horizontal()),
-      std::max(0.0F, node.bounds.height - node.style.padding.Vertical()),
-  };
-}
-
 float AlignOffset(float available, float extent, HorizontalAlignment alignment) noexcept {
   if (alignment == HorizontalAlignment::End) {
     return available - extent;
@@ -36,43 +27,43 @@ float AlignOffset(float available, float extent, VerticalAlignment alignment) no
 }
 
 void PaintImage(const MountedNode& node, PaintContext& context) {
-  const Size intrinsic = node.image.asset.IntrinsicSize();
-  const Rect content = ContentRect(node);
+  const Size intrinsic = node.image_properties.asset.IntrinsicSize();
+  const Rect content = node.ContentBounds();
   if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
     return;
   }
   const Rect full_source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
-  if (node.image.fit == ImageFit::Fill) {
-    context.DrawImageRect(node.image.asset, full_source, content, node.image.sampling);
+  if (node.image_properties.fit == ImageFit::Fill) {
+    context.DrawImageRect(node.image_properties.asset, full_source, content, node.image_properties.sampling);
     return;
   }
-  if (node.image.fit == ImageFit::Cover) {
+  if (node.image_properties.fit == ImageFit::Cover) {
     const float scale = std::max(content.width / intrinsic.width, content.height / intrinsic.height);
     const Size source_size{content.width / scale, content.height / scale};
     const Rect source{
-        AlignOffset(intrinsic.width, source_size.width, node.image.horizontal_alignment),
-        AlignOffset(intrinsic.height, source_size.height, node.image.vertical_alignment),
+        AlignOffset(intrinsic.width, source_size.width, node.image_properties.horizontal_alignment),
+        AlignOffset(intrinsic.height, source_size.height, node.image_properties.vertical_alignment),
         source_size.width,
         source_size.height,
     };
-    context.DrawImageRect(node.image.asset, source, content, node.image.sampling);
+    context.DrawImageRect(node.image_properties.asset, source, content, node.image_properties.sampling);
     return;
   }
   float scale = 1.0F;
-  if (node.image.fit == ImageFit::Contain || node.image.fit == ImageFit::ScaleDown) {
+  if (node.image_properties.fit == ImageFit::Contain || node.image_properties.fit == ImageFit::ScaleDown) {
     scale = std::min(content.width / intrinsic.width, content.height / intrinsic.height);
-    if (node.image.fit == ImageFit::ScaleDown) {
+    if (node.image_properties.fit == ImageFit::ScaleDown) {
       scale = std::min(1.0F, scale);
     }
   }
   const Size destination_size{intrinsic.width * scale, intrinsic.height * scale};
   const Rect destination{
-      content.x + AlignOffset(content.width, destination_size.width, node.image.horizontal_alignment),
-      content.y + AlignOffset(content.height, destination_size.height, node.image.vertical_alignment),
+      content.x + AlignOffset(content.width, destination_size.width, node.image_properties.horizontal_alignment),
+      content.y + AlignOffset(content.height, destination_size.height, node.image_properties.vertical_alignment),
       destination_size.width,
       destination_size.height,
   };
-  context.DrawImageRect(node.image.asset, full_source, destination, node.image.sampling);
+  context.DrawImageRect(node.image_properties.asset, full_source, destination, node.image_properties.sampling);
 }
 
 bool ClipsChildren(const MountedNode& node) {
@@ -80,11 +71,11 @@ bool ClipsChildren(const MountedNode& node) {
 }
 
 Transform2D ResolveChildrenTransform(const MountedNode& node) {
-  if (node.kind != NodeKind::ScrollView || node.scroll == nullptr) {
+  if (node.kind != NodeKind::ScrollView || node.scroll_state == nullptr) {
     return {};
   }
-  return ScrollAxis(node) == Axis::Vertical ? TranslationTransform({0.0F, -node.scroll->offset_y})
-                                            : TranslationTransform({-node.scroll->offset_x, 0.0F});
+  return ScrollAxis(node) == Axis::Vertical ? TranslationTransform({0.0F, -node.scroll_state->offset_y})
+                                            : TranslationTransform({-node.scroll_state->offset_x, 0.0F});
 }
 
 std::optional<Rect> UnionBounds(std::optional<Rect> left, Rect right) {
@@ -260,7 +251,7 @@ void ResolvePresentationTreeImpl(
   // Apply disabled opacity only when entering a disabled subtree; descendants inherit the result without multiplying
   // the same disabled state again.
   if (inherited_enabled && !node.enabled) {
-    render_opacity *= node.style.disabled_opacity;
+    render_opacity *= node.properties.disabled_opacity;
   }
   node.presentation.render_opacity = render_opacity;
   node.presentation.resolved_opacity = inherited_opacity * render_opacity;
@@ -280,10 +271,10 @@ void PaintNodeExtensions(MountedNode& node, PaintContext& context) {
 }
 
 void PaintFocusRing(const MountedNode& node, const Rect& bounds, PaintContext& context) {
-  if (!node.focus_visible || !node.enabled || node.style.focus_ring_width <= 0.0F) {
+  if (!node.focus_visible || !node.enabled || node.properties.focus_ring_width <= 0.0F) {
     return;
   }
-  context.DrawBorder(bounds, node.style.focus_ring, node.style.focus_ring_width, node.style.corner_radius);
+  context.DrawBorder(bounds, node.properties.focus_ring, node.properties.focus_ring_width, node.properties.corner_radius);
 }
 
 void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
@@ -296,7 +287,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   Rect child_clip = clip;
   std::optional<RenderClip> render_clip;
   if (ClipsChildren(node)) {
-    const Rect viewport = ContentRect(node);
+    const Rect viewport = node.ContentBounds();
     render_clip = RenderClip{
         viewport,
         0.0F,
@@ -311,32 +302,32 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                    ? Rect{
                                          0.0F,
                                          0.0F,
-                                         std::max(0.0F, bounds.width - node.style.padding.Horizontal()),
-                                         std::max(0.0F, bounds.height - node.style.padding.Vertical()),
+                                         std::max(0.0F, bounds.width - node.properties.padding.Horizontal()),
+                                         std::max(0.0F, bounds.height - node.properties.padding.Vertical()),
                                      }
                                    : bounds;
     PaintContext content{render_node.content, canvas_bounds};
-    if (node.style.shadow.has_value() && node.style.shadow->color.alpha > 0.0F) {
-      const Shadow& shadow = *node.style.shadow;
+    if (node.properties.shadow.has_value() && node.properties.shadow->color.alpha > 0.0F) {
+      const Shadow& shadow = *node.properties.shadow;
       content
-          .DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread, node.style.corner_radius);
+          .DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread, node.properties.corner_radius);
     }
-    if (node.style.background.has_value() && node.style.background->alpha > 0.0F) {
-      content.DrawRect(bounds, *node.style.background, node.style.corner_radius);
+    if (node.properties.background.has_value() && node.properties.background->alpha > 0.0F) {
+      content.DrawRect(bounds, *node.properties.background, node.properties.corner_radius);
     }
     if (node.kind == NodeKind::Text) {
-      content.DrawText(ContentRect(node), node.text, node.style.text_style);
+      content.DrawText(node.ContentBounds(), node.text, node.properties.text_style);
     } else if (node.kind == NodeKind::Button) {
       content.DrawText(
           bounds,
           node.text,
-          node.style.text_style,
+          node.properties.text_style,
           TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
       );
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);
     } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
-      const Point content_origin{node.style.padding.left, node.style.padding.top};
+      const Point content_origin{node.properties.padding.left, node.properties.padding.top};
       if (content_origin != Point{}) {
         content.PushTransform(TranslationTransform(content_origin));
       }

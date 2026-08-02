@@ -2,13 +2,13 @@
 
 #include <limits>
 
-#include "host_frame_internal.h"
+#include "platform_frame_internal.h"
 
 namespace huxerui::detail {
 namespace {
 
-TEST_CASE("HostFrameStateNormalizesAndBeginsPendingCommits") {
-  HostFrameState state;
+TEST_CASE("PlatformFrameStateNormalizesAndBeginsPendingCommits") {
+  PlatformFrameState state;
 
   REQUIRE(state.Request(std::numeric_limits<double>::quiet_NaN(), 4.0, true) == 4.0);
   REQUIRE(state.FrameBuildPending());
@@ -19,8 +19,8 @@ TEST_CASE("HostFrameStateNormalizesAndBeginsPendingCommits") {
   REQUIRE(state.Request(std::numeric_limits<double>::infinity(), 5.0, true) == std::numeric_limits<double>::max());
 }
 
-TEST_CASE("HostFrameStateDefersTheEarliestRequestUntilPaintingCompletes") {
-  HostFrameState state;
+TEST_CASE("PlatformFrameStateDefersTheEarliestRequestUntilPaintingCompletes") {
+  PlatformFrameState state;
   state.MarkPaintPending();
 
   REQUIRE_FALSE(state.Request(8.0, 2.0, true).has_value());
@@ -30,8 +30,8 @@ TEST_CASE("HostFrameStateDefersTheEarliestRequestUntilPaintingCompletes") {
   REQUIRE_FALSE(state.TakeDeferred(true).has_value());
 }
 
-TEST_CASE("HostFrameStateDefersRequestsMadeDuringNativePainting") {
-  HostFrameState state;
+TEST_CASE("PlatformFrameStateDefersRequestsMadeDuringNativePainting") {
+  PlatformFrameState state;
 
   REQUIRE(state.Request(1.0, 0.0, true) == 1.0);
   REQUIRE(state.BeginCommit());
@@ -43,8 +43,8 @@ TEST_CASE("HostFrameStateDefersRequestsMadeDuringNativePainting") {
   REQUIRE(state.FrameBuildPending());
 }
 
-TEST_CASE("HostFrameStateWaitsForTheNativeHostBeforeScheduling") {
-  HostFrameState state;
+TEST_CASE("PlatformFrameStateWaitsForPlatformReadinessBeforeScheduling") {
+  PlatformFrameState state;
 
   REQUIRE_FALSE(state.Request(3.0, 1.0, false).has_value());
   REQUIRE_FALSE(state.TakeDeferred(false).has_value());

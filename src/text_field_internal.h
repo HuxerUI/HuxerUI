@@ -10,7 +10,7 @@
 #include <huxerui/validation.h>
 
 namespace huxerui {
-class PlatformHost;
+class PlatformAdapter;
 }
 
 namespace huxerui::detail {
@@ -34,6 +34,6 @@ struct TextFieldModifier {
   static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);
 };
 
-[[nodiscard]] Size MeasureTextField(MountedNode& node, PlatformHost& platform, Constraints constraints);
+[[nodiscard]] Size MeasureTextField(MountedNode& node, PlatformAdapter& platform, Constraints constraints);
 
 } // namespace huxerui::detail

@@ -410,7 +410,7 @@ Focus and IME sessions are not paint state.
 After the final layout and presentation commit, Runtime refreshes focused text-input geometry only when the client synchronization revision, focused-node layout revision, or node-to-host transform changed.
 Text clients report geometry in node-local logical coordinates; Runtime converts it to host-view coordinates before crossing the platform boundary.
 
-LayerHost entries participate in the same layout and render scene as application content.
+Runtime layer entries participate in the same layout and render scene as application content.
 Independent layer scopes can recompose and invalidate without repainting the application subtree.
 Modal hit testing, focus restoration, and captured Environment behavior remain Runtime responsibilities.
 

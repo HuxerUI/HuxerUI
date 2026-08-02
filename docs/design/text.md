@@ -8,7 +8,7 @@ Localized string resolution and the root Locale Environment are defined in [App 
 ## Ownership
 
 The shared C++ layer owns platform-neutral font identity, text style, shaping intent, layout options, measured geometry, and retained paint commands.
-Platform hosts own native font resolution, shaping, paragraph layout, glyph drawing, and bounded native caches.
+Platform adapters own native font resolution, shaping, paragraph layout, glyph drawing, and bounded native caches.
 Native font, glyph, layout, and brush objects never enter a View, PaintCommand, RenderScene, or application state value.
 
 `Font`, `TextStyle`, `TextShapingOptions`, and `TextLayoutOptions` compare by value.
@@ -77,8 +77,8 @@ A finite `max_width` still constrains the reported paragraph width; it does not 
 `TextWrap::Word` additionally introduces automatic line breaks to satisfy a finite `max_width`.
 Both modes report all resulting hard and automatic lines through `line_count`, `first_baseline`, and `last_baseline`.
 
-The active `PlatformHost` is exposed through a private root text-measurer service whose lifetime is owned by Runtime.
-Components can obtain it with `UseTextMeasurer()` without depending on PlatformHost or native types.
+The active `PlatformAdapter` is exposed through a private root text-measurer service whose lifetime is owned by Runtime.
+Components can obtain it with `UseTextMeasurer()` without depending on PlatformAdapter or native types.
 Built-in layout and editing code use the same service contract directly through the host boundary.
 `TextMeasurer` calls occur synchronously on the Runtime and native host thread.
 Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition or layout operation.

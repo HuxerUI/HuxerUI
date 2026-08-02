@@ -493,8 +493,8 @@ TEST_CASE("TestViewCopyOnWrite") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
-  REQUIRE(root->children[0]->style.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
-  REQUIRE(root->children[1]->style.text_style.foreground.red == 1.0F);
+  REQUIRE(root->children[0]->properties.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
+  REQUIRE(root->children[1]->properties.text_style.foreground.red == 1.0F);
 }
 
 TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
@@ -505,11 +505,11 @@ TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->style.text_style.font.FamilyKind() == FontFamilyKind::Monospace);
-  REQUIRE(root->style.text_style.font.Weight() == FontWeight::Bold);
-  REQUIRE(root->style.text_style.font.Size() == 22.0F);
-  REQUIRE(root->style.text_style.foreground == Color::Rgb(40, 50, 60));
-  REQUIRE(root->style.text_style.decoration == TextDecoration::Underline);
+  REQUIRE(root->properties.text_style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(root->properties.text_style.font.Weight() == FontWeight::Bold);
+  REQUIRE(root->properties.text_style.font.Size() == 22.0F);
+  REQUIRE(root->properties.text_style.foreground == Color::Rgb(40, 50, 60));
+  REQUIRE(root->properties.text_style.decoration == TextDecoration::Underline);
 }
 
 TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
@@ -525,8 +525,8 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
 
     const auto* root = runtime.RootNode();
     REQUIRE(root != nullptr);
-    REQUIRE(root->style.padding.left == 5.0F);
-    REQUIRE(root->style.background.has_value());
+    REQUIRE(root->properties.padding.left == 5.0F);
+    REQUIRE(root->properties.background.has_value());
     REQUIRE(root->extensions.size() == 1);
     REQUIRE(root->extensions[0].extension != nullptr);
     REQUIRE(extension_creations == 1);
@@ -565,8 +565,8 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   copy_runtime.BuildFrame();
   const auto* copy_root = copy_runtime.RootNode();
   REQUIRE(copy_root != nullptr);
-  REQUIRE(copy_root->children[0]->style.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
-  REQUIRE(copy_root->children[1]->style.text_style.foreground.red == 1.0F);
+  REQUIRE(copy_root->children[0]->properties.text_style.foreground.red == huxerui::TextStyle::Default().foreground.red);
+  REQUIRE(copy_root->children[1]->properties.text_style.foreground.red == 1.0F);
 }
 
 TEST_CASE("TestNonComparableModifierUpdatesConservatively") {

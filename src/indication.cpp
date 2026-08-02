@@ -317,7 +317,7 @@ public:
 
   void Paint(const MountedNode& node, PaintContext& context) const override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    indication_.Paint(context, node.Bounds(), mounted.style.corner_radius);
+    indication_.Paint(context, node.Bounds(), mounted.properties.corner_radius);
   }
 
 private:

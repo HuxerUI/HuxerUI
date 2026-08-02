@@ -32,15 +32,6 @@ struct TextEntry {
   TextEntryGeometry geometry;
 };
 
-Rect ContentRect(const detail::MountedNode& node) {
-  return {
-      node.bounds.x + node.style.padding.left,
-      node.bounds.y + node.style.padding.top,
-      std::max(0.0F, node.bounds.width - node.style.padding.Horizontal()),
-      std::max(0.0F, node.bounds.height - node.style.padding.Vertical()),
-  };
-}
-
 class SelectionAreaExtension final : public NodeExtension, public TextSelectionClient {
 public:
   SelectionAreaExtension(MountedNode&, const detail::SelectionAreaModifier&) {}
@@ -115,7 +106,7 @@ public:
     }
   }
 
-  Size Measure(detail::MountedNode& node, PlatformHost& platform, Runtime& runtime, const Constraints& constraints) {
+  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints) {
     Size size;
     if (!node.children.empty()) {
       size = detail::MeasureNode(*node.children.front(), constraints, platform, runtime);
@@ -224,7 +215,7 @@ private:
     }
   }
 
-  void Rebuild(detail::MountedNode& node, PlatformHost& platform) {
+  void Rebuild(detail::MountedNode& node, PlatformAdapter& platform) {
     std::vector<detail::MountedNode*> nodes;
     CollectTextNodes(node, node, nodes);
     entries_.clear();
@@ -236,12 +227,12 @@ private:
         ++total_length_;
       }
       const TextOffset length = detail::Utf16Length(text->text).value_or(0);
-      const float width = std::max(0.0F, text->measured_size.width - text->style.padding.Horizontal());
+      const float width = std::max(0.0F, text->measured_size.width - text->properties.padding.Horizontal());
       entries_.push_back({
           text->identity,
           total_length_,
           length,
-          platform.CreateTextLayout(text->text, text->style.text_style, width),
+          platform.CreateTextLayout(text->text, text->properties.text_style, width),
           {},
       });
       document_ += text->text;
@@ -263,7 +254,7 @@ private:
       const auto found = nodes.find(entry.node_identity);
       if (host_to_owner.has_value() && found != nodes.end()) {
         const detail::MountedNode& text = *found->second;
-        geometry.content = ContentRect(text);
+        geometry.content = text.ContentBounds();
         geometry.to_owner = detail::ComposeTransform(*host_to_owner, text.presentation.resolved_transform);
         geometry.relative_opacity =
             owner_opacity > 0.0F ? std::clamp(text.PresentationOpacity() / owner_opacity, 0.0F, 1.0F) : 0.0F;
@@ -367,8 +358,8 @@ std::shared_ptr<detail::ViewSpec> MakeSelectionAreaSpec(View content) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::SelectionArea);
   spec->children.push_back(std::move(content));
   spec->focusable = true;
-  spec->style.focus_ring_width = 0.0F;
-  spec->modifiers.push_back(detail::MakeModifierSpec(detail::SelectionAreaModifier{}));
+  spec->properties.focus_ring_width = 0.0F;
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::SelectionAreaModifier{}));
   return spec;
 }
 
@@ -380,7 +371,9 @@ const ModifierDescriptor& SelectionAreaModifier::Descriptor() {
   return ModifierDescriptorFor<SelectionAreaModifier, SelectionAreaExtension>();
 }
 
-Size MeasureSelectionArea(MountedNode& node, PlatformHost& platform, Runtime& runtime, const Constraints& constraints) {
+Size MeasureSelectionArea(
+    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints
+) {
   return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints);
 }
 

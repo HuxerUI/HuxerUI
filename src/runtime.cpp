@@ -36,11 +36,11 @@ public:
   }
 };
 
-bool ContainsStateSlots(const SavedNodeState& saved) {
-  if (saved.state_slots.has_value() && !saved.state_slots->slots.empty()) {
+bool ContainsStateSlots(const VirtualItemState& state) {
+  if (state.state_slots.has_value() && !state.state_slots->slots.empty()) {
     return true;
   }
-  return std::ranges::any_of(saved.children, ContainsStateSlots);
+  return std::ranges::any_of(state.children, ContainsStateSlots);
 }
 
 bool IsCompatibleLayout(const LayoutDescriptor* left, const LayoutDescriptor* right) {
@@ -58,25 +58,25 @@ bool IsCompatibleVirtualLayout(const VirtualLayoutDescriptor* left, const Virtua
 }
 
 bool IsCompatibleNode(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.kind == incoming.kind && IsCompatibleLayout(mounted.layout, incoming.layout) &&
-         IsCompatibleVirtualLayout(mounted.virtual_layout, incoming.virtual_layout);
+  return mounted.kind == incoming.kind && IsCompatibleLayout(mounted.layout_descriptor, incoming.layout_descriptor) &&
+         IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, incoming.virtual_layout_descriptor);
 }
 
-bool IsCompatibleSavedNode(const MountedNode& mounted, const SavedNodeState& saved) {
-  return mounted.kind == saved.kind && IsCompatibleLayout(mounted.layout, saved.layout) &&
-         IsCompatibleVirtualLayout(mounted.virtual_layout, saved.virtual_layout);
+bool IsCompatibleVirtualItemState(const MountedNode& mounted, const VirtualItemState& state) {
+  return mounted.kind == state.kind && IsCompatibleLayout(mounted.layout_descriptor, state.layout_descriptor) &&
+         IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, state.virtual_layout_descriptor);
 }
 
 bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
   if (incoming.kind == NodeKind::Canvas) {
     return false;
   }
-  return mounted.text == incoming.text && mounted.image == incoming.image &&
-         mounted.style.ContentPaintEquals(incoming.style);
+  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+         mounted.properties.ContentPaintEquals(incoming.properties);
 }
 
 bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.style.ForegroundPaintEquals(incoming.style);
+  return mounted.properties.ForegroundPaintEquals(incoming.properties);
 }
 
 bool LayoutValuesEquivalent(
@@ -93,18 +93,39 @@ bool LayoutValuesEquivalent(
 }
 
 bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.image.LayoutEquals(incoming.image) &&
-         mounted.style.LayoutEquals(incoming.style) &&
+  return mounted.text == incoming.text && mounted.image_properties.LayoutEquals(incoming.image_properties) &&
+         mounted.properties.LayoutEquals(incoming.properties) &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
 }
 
 bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.image == incoming.image && mounted.style == incoming.style &&
+  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+         mounted.properties == incoming.properties &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
          mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
          mounted.environment == incoming.environment &&
          mounted.pointer_events_enabled == incoming.pointer_events_enabled &&
          mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable;
+}
+
+// Child structure, virtual sources, and retained modifiers reconcile separately because they carry mounted state.
+void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
+  mounted.kind = incoming.kind;
+  mounted.key = incoming.key;
+  mounted.text = incoming.text;
+  mounted.properties = incoming.properties;
+  mounted.scope_factory = incoming.scope_factory;
+  mounted.canvas_painter = incoming.canvas_painter;
+  mounted.image_properties = incoming.image_properties;
+  mounted.layout_descriptor = incoming.layout_descriptor;
+  mounted.virtual_layout_descriptor = incoming.virtual_layout_descriptor;
+  mounted.layout_values = incoming.layout_values;
+  mounted.event_bindings = incoming.event_bindings;
+  mounted.activation = incoming.activation;
+  mounted.environment = incoming.environment;
+  mounted.pointer_events_enabled = incoming.pointer_events_enabled;
+  mounted.local_enabled = incoming.local_enabled;
+  mounted.focusable = incoming.focusable;
 }
 
 bool MarkLayoutDirtyPath(MountedNode& node, std::uint64_t identity) {
@@ -342,7 +363,7 @@ namespace huxerui {
 
 using namespace detail;
 
-Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
+Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   if (definition.root_factory == nullptr) {
     throw std::invalid_argument("HuxerUI root factory must not be null");
   }
@@ -352,15 +373,12 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
       std::make_shared<RecomposeScope>(*this, 1),
       LayerController(*this)
   );
-  RootContext root{
-      state_->layer_controller_,
-      state_->root_environment_values_,
-      state_->root_service_types_,
-      state_->root_services_
-  };
-  state_->app_resources_ = std::make_shared<AppResourcesService>(platform.Resources());
-  const ResourceContext resource_context = state_->app_resources_->Context();
-  state_->root_environment_values_.Set(resource_context.locale);
+  state_->root_environment_ = std::make_shared<Environment>();
+  RootContext
+      root{state_->layer_controller_, *state_->root_environment_, state_->root_service_types_, state_->root_services_};
+  state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
+  const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
+  state_->root_environment_->Set(resource_configuration.locale);
   root.Provide(state_->app_resources_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   InstallBuiltinPresentation(root);
@@ -370,10 +388,6 @@ Runtime::Runtime(AppDefinition definition, PlatformHost& platform) {
     }
     hook(root);
   }
-  state_->root_environment_ = std::make_shared<EnvironmentFrame>(EnvironmentFrame{
-      nullptr,
-      state_->root_environment_values_,
-  });
 }
 
 Runtime::~Runtime() {
@@ -386,7 +400,6 @@ Runtime::~Runtime() {
   state_->mounted_root_.reset();
   state_->layers_.clear();
   state_->root_environment_.reset();
-  state_->root_environment_values_ = {};
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
@@ -395,7 +408,7 @@ Runtime::~Runtime() {
 }
 
 LayerId
-Runtime::AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const EnvironmentFrame> environment) {
+Runtime::AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment) {
   if (!content) {
     throw std::invalid_argument("HuxerUI layer content factory must not be empty");
   }
@@ -525,13 +538,13 @@ const FrameCommit& Runtime::BuildFrame() {
   }
 }
 
-void Runtime::UpdateResourceContext(ResourceContext context) {
-  if (state_->app_resources_->Context() == context) {
+void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
+  if (state_->app_resources_->Configuration() == configuration) {
     return;
   }
-  state_->app_resources_->UpdateContext(context);
-  // Mutate the shared root frame so environments already captured by layers observe the new system locale.
-  detail::SetEnvironmentValue(state_->root_environment_->overrides, typeid(Locale), context.locale);
+  state_->app_resources_->UpdateConfiguration(configuration);
+  // Mutate the shared root so environments already captured by layers observe the new system locale.
+  state_->root_environment_->Set(configuration.locale);
   InvalidateRoot();
 }
 
@@ -556,8 +569,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     RefreshTextInputSession();
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
-    state_->committed_render_scene_.clear();
-    state_->has_committed_render_scene_ = false;
+    state_->committed_scene_snapshot_.clear();
+    state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
     state_->frame_commit_.next_frame_deadline =
         state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
@@ -614,9 +627,9 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
       state_->frame_commit_.render_frame.scene.root,
       state_->viewport_,
-      state_->committed_render_scene_,
+      state_->committed_scene_snapshot_,
       state_->committed_viewport_,
-      state_->has_committed_render_scene_
+      state_->has_committed_scene_snapshot_
   );
   ++state_->frame_commit_.render_frame.revision;
   if (needs_frame) {
@@ -883,7 +896,7 @@ bool Runtime::UpdateNodeExtensions(
   return subtree_has_extensions;
 }
 
-void Runtime::BindNodeExtensions(detail::MountedNode& node) {
+void Runtime::BindExtensionPaintInvalidation(detail::MountedNode& node) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
@@ -903,7 +916,7 @@ void Runtime::HandleScrollEvent(const ScrollEvent& event) {
   }
   ScrollEventResult result = ApplyScrollEvent(*state_->mounted_root_, event);
   for (detail::MountedNode* node : result.scroll_chain) {
-    node->scroll->motion.Stop();
+    node->scroll_state->motion.Stop();
   }
   for (detail::MountedNode* node : result.scroll_chain) {
     NotifyScrollActivity(*node);
@@ -1274,43 +1287,31 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     mounted->foreground_paint_dirty = true;
   }
   const bool extension_node_inputs_equal = ExtensionNodeInputsEqual(*mounted, *incoming);
-  mounted->text = incoming->text;
-  mounted->style = incoming->style;
-  mounted->scope_factory = incoming->scope_factory;
-  mounted->canvas_painter = incoming->canvas_painter;
-  mounted->image = incoming->image;
-  mounted->layout = incoming->layout;
-  mounted->virtual_layout = incoming->virtual_layout;
-  mounted->layout_values = incoming->layout_values;
-  mounted->event_bindings = incoming->event_bindings;
-  mounted->activation = incoming->activation;
-  mounted->environment = incoming->environment;
-  mounted->pointer_events_enabled = incoming->pointer_events_enabled;
-  mounted->local_enabled = incoming->local_enabled;
-  mounted->focusable = incoming->focusable;
+  ApplyViewDeclaration(*mounted, *incoming);
   const ModifierChanges modifier_changes =
-      ReconcileNodeExtensions(*mounted, incoming->modifiers, extension_node_inputs_equal);
+      ReconcileNodeExtensions(*mounted, incoming->retained_modifiers, extension_node_inputs_equal);
   layout_changed = layout_changed || modifier_changes.layout_changed;
   if (modifier_changes.changed) {
     mounted->foreground_paint_dirty = true;
   }
   if (modifier_changes.structure_changed) {
     state_->extension_tree_dirty_ = true;
-    BindNodeExtensions(*mounted);
+    BindExtensionPaintInvalidation(*mounted);
   }
   if (mounted->kind == NodeKind::Scope) {
     layout_changed = ComposeScope(*mounted) || layout_changed;
   } else if (IsVirtualLayoutNode(*mounted)) {
     mounted->virtual_state->source = incoming->virtual_items;
-    mounted->virtual_state->item_views.clear();
+    mounted->virtual_state->item_declarations.clear();
     mounted->virtual_state->source_dirty = true;
-    if (mounted->virtual_state->saved_state) {
+    if (mounted->virtual_state->item_state_cache) {
       std::erase_if(
-          mounted->virtual_state->saved_state->indexed,
+          mounted->virtual_state->item_state_cache->indexed,
           [item_count = incoming->virtual_items.size](const auto& entry) { return entry.first >= item_count; }
       );
-      if (mounted->virtual_state->saved_state->keyed.empty() && mounted->virtual_state->saved_state->indexed.empty()) {
-        mounted->virtual_state->saved_state.reset();
+      if (mounted->virtual_state->item_state_cache->keyed.empty() &&
+          mounted->virtual_state->item_state_cache->indexed.empty()) {
+        mounted->virtual_state->item_state_cache.reset();
       }
     }
     layout_changed = true;
@@ -1323,28 +1324,13 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
 
 std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming) {
   auto mounted = std::make_unique<detail::MountedNode>();
-  mounted->kind = incoming->kind;
   mounted->identity = state_->next_node_identity_++;
-  if (incoming->kind == NodeKind::ScrollView || incoming->kind == NodeKind::VirtualLayout) {
-    mounted->scroll = std::make_unique<ScrollNodeState>();
+  ApplyViewDeclaration(*mounted, *incoming);
+  if (mounted->kind == NodeKind::ScrollView || mounted->kind == NodeKind::VirtualLayout) {
+    mounted->scroll_state = std::make_unique<ScrollNodeState>();
   }
-  mounted->key = incoming->key;
-  mounted->text = incoming->text;
-  mounted->style = incoming->style;
-  mounted->scope_factory = incoming->scope_factory;
-  mounted->canvas_painter = incoming->canvas_painter;
-  mounted->image = incoming->image;
-  mounted->layout = incoming->layout;
-  mounted->virtual_layout = incoming->virtual_layout;
-  mounted->layout_values = incoming->layout_values;
-  mounted->event_bindings = incoming->event_bindings;
-  mounted->activation = incoming->activation;
-  mounted->environment = incoming->environment;
-  mounted->pointer_events_enabled = incoming->pointer_events_enabled;
-  mounted->local_enabled = incoming->local_enabled;
-  mounted->focusable = incoming->focusable;
-  static_cast<void>(ReconcileNodeExtensions(*mounted, incoming->modifiers, false));
-  BindNodeExtensions(*mounted);
+  static_cast<void>(ReconcileNodeExtensions(*mounted, incoming->retained_modifiers, false));
+  BindExtensionPaintInvalidation(*mounted);
   if (mounted->kind == NodeKind::Scope) {
     static_cast<void>(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {
@@ -1431,79 +1417,82 @@ bool Runtime::ReconcileChildren(
   return layout_changed;
 }
 
-SavedNodeState Runtime::SaveNodeState(detail::MountedNode& mounted) {
-  SavedNodeState saved{
-      mounted.kind,
-      mounted.key,
-      mounted.layout,
-      mounted.virtual_layout,
-      mounted.recompose_scope ? std::optional<StateSlotStorage>{mounted.recompose_scope->TakeStateSlots()}
-                              : std::nullopt,
-      {},
-  };
-  saved.children.reserve(mounted.children.size());
-  for (auto& child : mounted.children) {
-    saved.children.push_back(SaveNodeState(*child));
-  }
-  return saved;
-}
-
-void Runtime::RestoreNodeState(detail::MountedNode& mounted, SavedNodeState& saved) {
-  if (!IsCompatibleSavedNode(mounted, saved) || mounted.key != saved.key) {
-    return;
-  }
-
-  if (mounted.kind == NodeKind::Scope && saved.state_slots) {
-    mounted.recompose_scope =
-        std::make_shared<RecomposeScope>(*this, state_->next_scope_identity_++, std::move(*saved.state_slots));
-    ComposeScope(mounted);
-  }
-
-  std::vector<bool> restored(saved.children.size(), false);
-  for (std::size_t index = 0; index < mounted.children.size(); ++index) {
-    detail::MountedNode& child = *mounted.children[index];
-    SavedNodeState* saved_child = nullptr;
-    std::size_t saved_index = 0;
-
-    if (child.key.has_value()) {
-      for (; saved_index < saved.children.size(); ++saved_index) {
-        if (!restored[saved_index] && IsCompatibleSavedNode(child, saved.children[saved_index]) &&
-            saved.children[saved_index].key == child.key) {
-          saved_child = &saved.children[saved_index];
-          break;
-        }
-      }
-    } else if (
-        index < saved.children.size() && !restored[index] && !saved.children[index].key.has_value() &&
-        IsCompatibleSavedNode(child, saved.children[index])
-    ) {
-      saved_index = index;
-      saved_child = &saved.children[index];
-    }
-
-    if (saved_child) {
-      restored[saved_index] = true;
-      RestoreNodeState(child, *saved_child);
-    }
-  }
-}
-
 } // namespace huxerui
 
 namespace huxerui::detail {
 
 VirtualMeasureSession::VirtualMeasureSession(Runtime& runtime, MountedNode& owner)
-    : runtime_(&runtime), owner_(&owner), previous_(std::move(owner.children)),
-      previous_indices_(std::move(owner.virtual_state->child_indices)) {
-  previous_identities_.reserve(previous_.size());
-  for (const auto& node : previous_) {
-    previous_identities_.push_back(node ? node->identity : 0);
+    : runtime_(&runtime), owner_(&owner), previous_nodes_(std::move(owner.children)),
+      previous_realized_indices_(std::move(owner.virtual_state->realized_indices)) {
+  previous_node_identities_.reserve(previous_nodes_.size());
+  for (const auto& node : previous_nodes_) {
+    previous_node_identities_.push_back(node ? node->identity : 0);
   }
 }
 
 VirtualMeasureSession::~VirtualMeasureSession() {
   if (!committed_) {
     RestoreOwner();
+  }
+}
+
+VirtualItemState VirtualMeasureSession::CaptureItemState(MountedNode& mounted) {
+  VirtualItemState state{
+      mounted.kind,
+      mounted.key,
+      mounted.layout_descriptor,
+      mounted.virtual_layout_descriptor,
+      mounted.recompose_scope ? std::optional<StateSlotStorage>{mounted.recompose_scope->TakeStateSlots()}
+                              : std::nullopt,
+      {},
+  };
+  state.children.reserve(mounted.children.size());
+  for (auto& child : mounted.children) {
+    state.children.push_back(CaptureItemState(*child));
+  }
+  return state;
+}
+
+void VirtualMeasureSession::RestoreItemState(MountedNode& mounted, VirtualItemState& state) {
+  if (!IsCompatibleVirtualItemState(mounted, state) || mounted.key != state.key) {
+    return;
+  }
+
+  if (mounted.kind == NodeKind::Scope && state.state_slots) {
+    mounted.recompose_scope = std::make_shared<RecomposeScope>(
+        *runtime_,
+        runtime_->state_->next_scope_identity_++,
+        std::move(*state.state_slots)
+    );
+    runtime_->ComposeScope(mounted);
+  }
+
+  std::vector<bool> restored(state.children.size(), false);
+  for (std::size_t index = 0; index < mounted.children.size(); ++index) {
+    MountedNode& child = *mounted.children[index];
+    VirtualItemState* child_state = nullptr;
+    std::size_t state_index = 0;
+
+    if (child.key.has_value()) {
+      for (; state_index < state.children.size(); ++state_index) {
+        if (!restored[state_index] && IsCompatibleVirtualItemState(child, state.children[state_index]) &&
+            state.children[state_index].key == child.key) {
+          child_state = &state.children[state_index];
+          break;
+        }
+      }
+    } else if (
+        index < state.children.size() && !restored[index] && !state.children[index].key.has_value() &&
+        IsCompatibleVirtualItemState(child, state.children[index])
+    ) {
+      state_index = index;
+      child_state = &state.children[index];
+    }
+
+    if (child_state) {
+      restored[state_index] = true;
+      RestoreItemState(child, *child_state);
+    }
   }
 }
 
@@ -1515,95 +1504,95 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
   if (index >= ItemCount()) {
     throw std::out_of_range("HuxerUI virtual item index is out of range");
   }
-  if (const auto found = requested_positions_.find(index); found != requested_positions_.end()) {
-    return *requested_[found->second];
+  if (const auto found = requested_positions_by_index_.find(index); found != requested_positions_by_index_.end()) {
+    return *requested_nodes_[found->second];
   }
 
   auto& state = *owner_->virtual_state;
-  auto item_view = state.item_views.find(index);
-  if (item_view == state.item_views.end()) {
+  auto item_declaration = state.item_declarations.find(index);
+  if (item_declaration == state.item_declarations.end()) {
     if (!state.source.factory) {
       throw std::logic_error("HuxerUI virtual item factory must not be empty");
     }
-    item_view = state.item_views.emplace(index, state.source.factory(index)).first;
+    item_declaration = state.item_declarations.emplace(index, state.source.factory(index)).first;
   }
-  const View& item = item_view->second;
+  const View& item = item_declaration->second;
   if (!item.spec_) {
     throw std::logic_error("HuxerUI virtual item factory must return a non-empty view");
   }
-  if (item.spec_->key.has_value() && !requested_keys_.insert(*item.spec_->key).second) {
+  if (item.spec_->key.has_value() && !requested_item_keys_.insert(*item.spec_->key).second) {
     throw std::logic_error("HuxerUI mounted virtual items must not use duplicate keys");
   }
 
   std::unique_ptr<MountedNode> candidate;
   if (item.spec_->key.has_value()) {
-    for (auto& previous : previous_) {
+    for (auto& previous : previous_nodes_) {
       if (previous && IsCompatibleNode(*previous, *item.spec_) && previous->key == item.spec_->key) {
         candidate = std::move(previous);
         break;
       }
     }
   } else {
-    for (std::size_t position = 0; position < previous_.size(); ++position) {
-      if (previous_[position] && !previous_[position]->key.has_value() && position < previous_indices_.size() &&
-          previous_indices_[position] == index) {
-        candidate = std::move(previous_[position]);
+    for (std::size_t position = 0; position < previous_nodes_.size(); ++position) {
+      if (previous_nodes_[position] && !previous_nodes_[position]->key.has_value() &&
+          position < previous_realized_indices_.size() && previous_realized_indices_[position] == index) {
+        candidate = std::move(previous_nodes_[position]);
         break;
       }
     }
   }
 
-  std::optional<SavedNodeState> saved;
-  if (!candidate && state.saved_state) {
+  std::optional<VirtualItemState> retained_state;
+  if (!candidate && state.item_state_cache) {
     if (item.spec_->key.has_value()) {
-      const auto found = state.saved_state->keyed.find(*item.spec_->key);
-      if (found != state.saved_state->keyed.end()) {
-        saved.emplace(std::move(found->second));
-        state.saved_state->keyed.erase(found);
+      const auto found = state.item_state_cache->keyed.find(*item.spec_->key);
+      if (found != state.item_state_cache->keyed.end()) {
+        retained_state.emplace(std::move(found->second));
+        state.item_state_cache->keyed.erase(found);
       }
     } else {
-      const auto found = state.saved_state->indexed.find(index);
-      if (found != state.saved_state->indexed.end()) {
-        saved.emplace(std::move(found->second));
-        state.saved_state->indexed.erase(found);
+      const auto found = state.item_state_cache->indexed.find(index);
+      if (found != state.item_state_cache->indexed.end()) {
+        retained_state.emplace(std::move(found->second));
+        state.item_state_cache->indexed.erase(found);
       }
     }
-    if (state.saved_state->keyed.empty() && state.saved_state->indexed.empty()) {
-      state.saved_state.reset();
+    if (state.item_state_cache->keyed.empty() && state.item_state_cache->indexed.empty()) {
+      state.item_state_cache.reset();
     }
   }
 
   if (!candidate || state.source_dirty) {
     runtime_->Reconcile(candidate, item.spec_);
   }
-  if (saved.has_value()) {
-    runtime_->RestoreNodeState(*candidate, *saved);
+  if (retained_state.has_value()) {
+    RestoreItemState(*candidate, *retained_state);
   }
 
-  const std::size_t position = requested_.size();
-  requested_positions_.emplace(index, position);
-  requested_.push_back(std::move(candidate));
-  requested_indices_.push_back(index);
-  return *requested_.back();
+  const std::size_t position = requested_nodes_.size();
+  requested_positions_by_index_.emplace(index, position);
+  requested_nodes_.push_back(std::move(candidate));
+  requested_item_indices_.push_back(index);
+  return *requested_nodes_.back();
 }
 
 void VirtualMeasureSession::SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index) {
   if (!node) {
     return;
   }
-  SavedNodeState saved = runtime_->SaveNodeState(*node);
-  if (!ContainsStateSlots(saved)) {
+  VirtualItemState retained_state = CaptureItemState(*node);
+  if (!ContainsStateSlots(retained_state)) {
     return;
   }
 
   auto& state = *owner_->virtual_state;
-  if (!state.saved_state) {
-    state.saved_state = std::make_unique<VirtualStateCache>();
+  if (!state.item_state_cache) {
+    state.item_state_cache = std::make_unique<VirtualItemStateCache>();
   }
   if (node->key.has_value()) {
-    state.saved_state->keyed.insert_or_assign(*node->key, std::move(saved));
+    state.item_state_cache->keyed.insert_or_assign(*node->key, std::move(retained_state));
   } else if (index < state.source.size) {
-    state.saved_state->indexed.insert_or_assign(index, std::move(saved));
+    state.item_state_cache->indexed.insert_or_assign(index, std::move(retained_state));
   }
 }
 
@@ -1618,38 +1607,39 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
     if (placement.item == nullptr || !placed.insert(placement.item).second) {
       throw std::logic_error("HuxerUI virtual layout must place each requested item at most once");
     }
-    const auto found = std::find_if(requested_.begin(), requested_.end(), [&placement](const auto& item) {
+    const auto found = std::find_if(requested_nodes_.begin(), requested_nodes_.end(), [&placement](const auto& item) {
       return item.get() == placement.item;
     });
-    if (found == requested_.end()) {
+    if (found == requested_nodes_.end()) {
       throw std::logic_error(
           "HuxerUI virtual layout can only place items "
           "requested from its context"
       );
     }
-    const std::size_t position = static_cast<std::size_t>(found - requested_.begin());
+    const std::size_t position = static_cast<std::size_t>(found - requested_nodes_.begin());
     next.push_back(std::move(*found));
-    next_indices.push_back(requested_indices_[position]);
+    next_indices.push_back(requested_item_indices_[position]);
   }
 
-  for (std::size_t position = 0; position < requested_.size(); ++position) {
-    if (requested_[position]) {
-      owner_->virtual_state->item_views.erase(requested_indices_[position]);
-      SaveUnmounted(std::move(requested_[position]), requested_indices_[position]);
+  for (std::size_t position = 0; position < requested_nodes_.size(); ++position) {
+    if (requested_nodes_[position]) {
+      owner_->virtual_state->item_declarations.erase(requested_item_indices_[position]);
+      SaveUnmounted(std::move(requested_nodes_[position]), requested_item_indices_[position]);
     }
   }
-  for (std::size_t position = 0; position < previous_.size(); ++position) {
-    if (previous_[position]) {
-      const std::size_t index = position < previous_indices_.size() ? previous_indices_[position] : 0;
-      owner_->virtual_state->item_views.erase(index);
-      SaveUnmounted(std::move(previous_[position]), index);
+  for (std::size_t position = 0; position < previous_nodes_.size(); ++position) {
+    if (previous_nodes_[position]) {
+      const std::size_t index = position < previous_realized_indices_.size() ? previous_realized_indices_[position] : 0;
+      owner_->virtual_state->item_declarations.erase(index);
+      SaveUnmounted(std::move(previous_nodes_[position]), index);
     }
   }
 
-  bool structure_changed = next_indices != previous_indices_ || next.size() != previous_identities_.size();
+  bool structure_changed =
+      next_indices != previous_realized_indices_ || next.size() != previous_node_identities_.size();
   if (!structure_changed) {
     for (std::size_t index = 0; index < next.size(); ++index) {
-      if (!next[index] || next[index]->identity != previous_identities_[index]) {
+      if (!next[index] || next[index]->identity != previous_node_identities_[index]) {
         structure_changed = true;
         break;
       }
@@ -1657,7 +1647,7 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
   }
 
   owner_->children = std::move(next);
-  owner_->virtual_state->child_indices = std::move(next_indices);
+  owner_->virtual_state->realized_indices = std::move(next_indices);
   owner_->virtual_state->source_dirty = false;
   runtime_->state_->extension_tree_dirty_ = runtime_->state_->extension_tree_dirty_ || structure_changed;
   committed_ = true;
@@ -1665,18 +1655,18 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
 
 void VirtualMeasureSession::RestoreOwner() noexcept {
   owner_->children.clear();
-  owner_->virtual_state->child_indices.clear();
-  for (std::size_t position = 0; position < requested_.size(); ++position) {
-    if (requested_[position]) {
-      owner_->children.push_back(std::move(requested_[position]));
-      owner_->virtual_state->child_indices.push_back(requested_indices_[position]);
+  owner_->virtual_state->realized_indices.clear();
+  for (std::size_t position = 0; position < requested_nodes_.size(); ++position) {
+    if (requested_nodes_[position]) {
+      owner_->children.push_back(std::move(requested_nodes_[position]));
+      owner_->virtual_state->realized_indices.push_back(requested_item_indices_[position]);
     }
   }
-  for (std::size_t position = 0; position < previous_.size(); ++position) {
-    if (previous_[position]) {
-      owner_->children.push_back(std::move(previous_[position]));
-      owner_->virtual_state->child_indices.push_back(
-          position < previous_indices_.size() ? previous_indices_[position] : 0
+  for (std::size_t position = 0; position < previous_nodes_.size(); ++position) {
+    if (previous_nodes_[position]) {
+      owner_->children.push_back(std::move(previous_nodes_[position]));
+      owner_->virtual_state->realized_indices.push_back(
+          position < previous_realized_indices_.size() ? previous_realized_indices_[position] : 0
       );
     }
   }

@@ -65,7 +65,7 @@ struct FrameCommit {
   // Couples the frame to present with the earliest follow-up build requested while producing it. The platform commits
   // the render frame before scheduling this absolute deadline, avoiding frame construction re-entry during a build.
   RenderFrame render_frame;
-  // Absolute deadline in the platform host's monotonic clock.
+  // Absolute deadline in the platform adapter's monotonic clock.
   std::optional<double> next_frame_deadline;
 };
 

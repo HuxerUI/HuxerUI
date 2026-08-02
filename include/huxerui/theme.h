@@ -186,25 +186,26 @@ class ThemeDefinition;
 
 namespace detail {
 
-void ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition);
+void ApplyThemeDefinition(Environment& environment, const ThemeDefinition& definition);
 
 } // namespace detail
 
 class ThemeDefinition {
 public:
   ThemeDefinition() = default;
-  explicit ThemeDefinition(ThemeSpec theme) : theme_(std::move(theme)) {}
+  explicit ThemeDefinition(ThemeSpec theme) {
+    overrides_.Set(std::move(theme));
+  }
 
   template <EnvironmentValue Value> ThemeDefinition& Set(Value value) {
-    values_.Set(std::move(value));
+    overrides_.Set(std::move(value));
     return *this;
   }
 
 private:
-  std::optional<ThemeSpec> theme_;
-  EnvironmentValues values_;
+  Environment overrides_;
 
-  friend void detail::ApplyThemeDefinition(EnvironmentValues& values, const ThemeDefinition& definition);
+  friend void detail::ApplyThemeDefinition(Environment& environment, const ThemeDefinition& definition);
 };
 
 inline const ThemeSpec& UseTheme() {
@@ -214,9 +215,9 @@ inline const ThemeSpec& UseTheme() {
 template <class Factory>
   requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
 View Theme(ThemeDefinition definition, Factory&& content) {
-  EnvironmentValues values;
-  detail::ApplyThemeDefinition(values, definition);
-  return ProvideEnvironment(std::move(values), std::forward<Factory>(content));
+  Environment environment;
+  detail::ApplyThemeDefinition(environment, definition);
+  return ProvideEnvironment(std::move(environment), std::forward<Factory>(content));
 }
 
 ThemeSpec FlatLightThemeSpec();
@@ -261,8 +262,8 @@ View MaterialDarkTheme(Factory&& content) {
 
 namespace detail {
 
-ThemeSpec ResolveThemeSpec(std::shared_ptr<const EnvironmentFrame> environment);
-const std::any* FindThemeStyleValue(std::shared_ptr<const EnvironmentFrame> environment, std::type_index key);
+ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment);
+const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key);
 TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);

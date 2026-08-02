@@ -407,7 +407,7 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
   REQUIRE(drag_item_clicks == 2);
 
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll->offset_y == 20.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->offset_y == 20.0F);
 }
 
 TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
@@ -681,7 +681,7 @@ TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
   );
 
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll->offset_x == 30.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->offset_x == 30.0F);
 }
 
 TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
@@ -720,7 +720,7 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   REQUIRE(nested_inner_scroll.Offset() == 140.0F);
   REQUIRE(nested_outer_scroll.Offset() == 20.0F);
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll->offset_y == 20.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->offset_y == 20.0F);
 }
 
 TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
@@ -822,7 +822,7 @@ TEST_CASE("TestApplyOnlyModifiersDoNotReplaceNodeExtensions") {
 
   root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->style.padding.top == 4.0F);
+  REQUIRE(root->properties.padding.top == 4.0F);
   REQUIRE(root->layout_values.contains(typeid(ScrollPhysics)));
   REQUIRE(root->extensions.size() == 1);
   REQUIRE(root->extensions.front().extension.get() == extension);

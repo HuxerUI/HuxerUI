@@ -281,7 +281,7 @@ bool Runtime::BringTextInputIntoView() {
   };
   bool changed = false;
   for (auto ancestor = path.rbegin(); ancestor != path.rend(); ++ancestor) {
-    if ((*ancestor)->scroll && !(*ancestor)->scroll->allows_automatic_reveal) {
+    if ((*ancestor)->scroll_state && !(*ancestor)->scroll_state->allows_automatic_reveal) {
       break;
     }
     if (!detail::ScrollNodeRectIntoView(**ancestor, target)) {
@@ -308,9 +308,9 @@ void Runtime::StopTextInputSession(TextInputEndReason reason) {
     failure = std::current_exception();
   }
 
-  if (PlatformTextInput* platform = state_->platform_->TextInput()) {
+  if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
     try {
-      platform->Stop(session.session_id);
+      text_input->Stop(session.session_id);
     } catch (...) {
       if (!failure) {
         failure = std::current_exception();
@@ -366,11 +366,11 @@ void Runtime::RefreshTextInputSession() {
           !active.published_geometry.has_value() || resolved.snapshot->geometry != active.published_geometry->geometry;
       active.configuration = configuration;
       active.state = current;
-      if (PlatformTextInput* platform = state_->platform_->TextInput()) {
+      if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
         if (restart) {
-          platform->Restart(active.session_id, active.configuration, active.state, resolved.snapshot->geometry);
+          text_input->Restart(active.session_id, active.configuration, active.state, resolved.snapshot->geometry);
         } else if (state_changed || geometry_changed) {
-          platform->Update(active.session_id, active.state, resolved.snapshot->geometry);
+          text_input->Update(active.session_id, active.state, resolved.snapshot->geometry);
         }
       }
       PublishGeometrySnapshot(active, resolved);
@@ -422,8 +422,8 @@ void Runtime::RefreshTextInputSession() {
   };
   try {
     TextInputGeometry geometry = QueryTextInputGeometry(session_id, initial.selection.Range());
-    if (PlatformTextInput* platform = state_->platform_->TextInput()) {
-      platform->Start(session_id, configuration, initial, geometry);
+    if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+      text_input->Start(session_id, configuration, initial, geometry);
     }
     state_->text_input_session_->published_geometry = MakeGeometrySnapshot(initial, *focused, std::move(geometry));
   } catch (...) {
@@ -483,11 +483,11 @@ TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatc
   active.configuration = configuration;
   active.state = current;
 
-  if (PlatformTextInput* platform = state_->platform_->TextInput()) {
+  if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
     if (restart) {
-      platform->Restart(active.session_id, active.configuration, active.state, geometry);
+      text_input->Restart(active.session_id, active.configuration, active.state, geometry);
     } else if (update || geometry_changed) {
-      platform->Update(active.session_id, active.state, geometry);
+      text_input->Update(active.session_id, active.state, geometry);
     }
   }
   if (resolved.has_value()) {

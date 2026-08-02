@@ -222,8 +222,8 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, b
     }
   }
   if (session_to_show.has_value()) {
-    if (PlatformTextInput* platform = state_->platform_->TextInput()) {
-      platform->RequestShow(*session_to_show);
+    if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+      text_input->RequestShow(*session_to_show);
     }
   }
   return true;
@@ -259,7 +259,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   }
   for (detail::MountedNode* node : route) {
     if (IsScrollContainer(*node)) {
-      node->scroll->motion.Stop();
+      node->scroll_state->motion.Stop();
     }
   }
 
@@ -280,7 +280,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       session.target_identity = (*node)->identity;
     }
     if ((*node)->enabled && IsScrollContainer(**node) &&
-        (!(*node)->scroll->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
+        (!(*node)->scroll_state->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
       session.scroll_chain.push_back((*node)->identity);
     }
   }
@@ -541,7 +541,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   state_->pointer_sessions_.erase(captured);
   if (should_start_momentum && momentum_identity.has_value()) {
     if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *momentum_identity);
-        node && node->scroll->motion.StartMomentum(*node, scroll_velocity)) {
+        node && node->scroll_state->motion.StartMomentum(*node, scroll_velocity)) {
       state_->scroll_motion_active_ = true;
       RequestFrame();
     }

@@ -9,7 +9,7 @@ Current implementation status:
 - Generic View modifiers, node extension reconciliation, frame callbacks, pointer observation, foreground painting, and third-party descriptors are implemented.
 - ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
-- The synthetic RuntimeRoot, fixed LayerHost ordering, RootHook services, Toast, command and declarative Dialog presentation are implemented.
+- The synthetic RuntimeRoot, fixed layer ordering, RootHook services, Toast, command and declarative Dialog presentation are implemented.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Retained exit transitions, keyframes, decay animation, platform Back handling, and advanced Toast queue policy remain follow-up work.
@@ -30,7 +30,7 @@ RuntimeRoot
 ├── Root Environment
 ├── ContentHost
 │   └── application MountedNode tree
-└── LayerHost
+└── Layer stack
     ├── popup entries
     ├── modal entries
     ├── toast entries
@@ -582,16 +582,16 @@ return ProvideEnvironment(GreetingLocale{"fr"}, Content);
 
 Use a semantic wrapper when two ambient values share the same underlying representation. Primitive or third-party representation types are not separate Environment keys by themselves.
 
-Each Environment frame stores only local overrides and points to its parent:
+Each Environment stores only local values and points to its parent:
 
 ```cpp
-struct EnvironmentFrame {
-  std::shared_ptr<const EnvironmentFrame> parent;
-  EnvironmentValues overrides;
+class Environment {
+  std::shared_ptr<const Environment> parent_;
+  std::unordered_map<std::type_index, std::any> local_values_;
 };
 ```
 
-Each composed subtree captures its current Environment frame. A nested provider shadows only the value type it supplies and inherits every other value from its parent frame.
+Each composed subtree captures its current Environment. A nested provider shadows only the value type it supplies and inherits every other value through the shared parent chain.
 
 Environment carries:
 
@@ -613,7 +613,7 @@ View Theme(
     Factory&& content);
 ```
 
-The content factory is stored and invoked only after the Theme Environment frame is active. This allows `UseTheme()` inside child component composition.
+The content factory is stored and invoked only after the Theme Environment is active. This allows `UseTheme()` inside child component composition.
 
 ### Theme systems
 
@@ -748,9 +748,9 @@ Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select t
 
 Theme switching initially updates values directly. Per-frame animated Theme interpolation is intentionally deferred.
 
-## RuntimeRoot and LayerHost
+## RuntimeRoot and the layer stack
 
-`RuntimeRoot` owns the application content and one shared LayerHost. LayerHost is the only global presentation container:
+`RuntimeRoot` owns the application content and one shared layer stack. This stack is the only global presentation container:
 
 ```cpp
 enum class LayerKind {
@@ -768,7 +768,7 @@ struct LayerEntry {
   LayerId id;
   LayerOptions options;
   ViewFactory content;
-  std::shared_ptr<const EnvironmentFrame> environment;
+  std::shared_ptr<const Environment> environment;
 };
 ```
 
@@ -830,7 +830,7 @@ RootHook InstallXxxToast(XxxToastOptions options = {})
 }
 ```
 
-A persistent global component can attach to LayerHost:
+A persistent global component can attach through `LayerController`:
 
 ```cpp
 RootHook InstallDebugPanel()
@@ -876,9 +876,9 @@ return Button("Save")
     });
 ```
 
-`UseToast()` returns a lightweight handle bound to the current window and captures the current Environment frame. A Toast shown from a nested Theme uses that Theme by default.
+`UseToast()` returns a lightweight handle bound to the current window and captures the current Environment. A Toast shown from a nested Theme uses that Theme by default.
 
-The Toast service creates one LayerEntry per call and manages its duration. The LayerHost owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
+The Toast service creates one LayerEntry per call and manages its duration. The Runtime layer stack owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
 
 There is no process-global `Toast::Show()` because it would be ambiguous in multi-window and multi-Runtime applications.
 
@@ -902,7 +902,7 @@ return Content().With(
 
 `DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry. Destroying the source modifier dismisses the entry immediately.
 
-An outside press requests dismissal instead of directly removing a declarative Dialog layer. The callback updates the source State, preserving one source of truth for both the component and LayerHost. A dismissible declarative Dialog must provide `on_dismiss_request`.
+An outside press requests dismissal instead of directly removing a declarative Dialog layer. The callback updates the source State, preserving one source of truth for both the component and layer stack. A dismissible declarative Dialog must provide `on_dismiss_request`.
 
 Command-oriented presentation uses a per-window service:
 
@@ -935,7 +935,7 @@ Dialog does not own a separate Runtime or presentation host.
 
 ## Theme and global presentation
 
-Root services are installed before application composition and inherited through nested Environment frames.
+Root services are installed before application composition and inherited through nested Environments.
 
 A global presentation handle obtained inside themed content captures the caller Environment:
 
@@ -957,7 +957,7 @@ View App()
 }
 ```
 
-The resulting Toast entry receives the Material Theme frame even though it is mounted in the window LayerHost outside the normal content layout hierarchy.
+The resulting Toast entry receives the Material Theme frame even though it is mounted in the window layer stack outside the normal content layout hierarchy.
 
 A presentation API may explicitly request the root Theme for application-wide alerts, but caller Theme is the default.
 
@@ -976,8 +976,8 @@ The current extension points are:
 | Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
 | Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
 | Per-window service | RootHook and `RootContext::Provide()` |
-| Global component | RootHook and LayerHost |
-| Toast or Dialog library | A service backed by LayerHost |
+| Global component | RootHook and `LayerController` |
+| Toast or Dialog library | A service backed by the Runtime layer stack |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
 
@@ -1025,9 +1025,9 @@ The foundation was introduced through the following sequence:
 - Add the generic modifier descriptor and node extension reconciliation.
 - Move ScrollBar frame, pointer, and paint state into a node extension.
 - Add generic invalidation flags and prune inactive frame subtrees.
-- Add typed Environment frames and direct Theme providers.
-- Add the synthetic RuntimeRoot and shared LayerHost.
+- Add typed hierarchical Environment values and direct Theme providers.
+- Add the synthetic RuntimeRoot and shared layer stack.
 - Add RootHook service installation.
-- Build Dialog and Toast on LayerHost.
+- Build Dialog and Toast on the layer stack.
 - Add interaction indications and public animation values.
 - Migrate common View styling to `With()` modifier values.

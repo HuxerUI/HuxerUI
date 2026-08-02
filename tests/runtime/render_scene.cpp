@@ -462,7 +462,7 @@ TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
   runtime.HandleScrollEvent(ScrollEvent{{50.0F, 30.0F}, 0.0F, 20.0F});
   const RenderFrame& scrolled = runtime.BuildRenderFrame();
 
-  REQUIRE(scroll_view->scroll->offset_y == 20.0F);
+  REQUIRE(scroll_view->scroll_state->offset_y == 20.0F);
   REQUIRE(content->layout_offset.x == content_offset.x);
   REQUIRE(content->layout_offset.y == content_offset.y);
   REQUIRE(scroll_view->render_node.children_transform.translate_x == 0.0F);

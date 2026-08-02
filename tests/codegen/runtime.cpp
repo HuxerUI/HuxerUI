@@ -14,7 +14,7 @@ namespace {
 
 using huxerui::DrawTextCommand;
 using huxerui::FrameCommit;
-using huxerui::PlatformHost;
+using huxerui::PlatformAdapter;
 using huxerui::RenderFrame;
 using huxerui::RenderNode;
 using huxerui::Runtime;
@@ -23,7 +23,7 @@ using huxerui::State;
 using huxerui::Text;
 using huxerui::UseState;
 using huxerui::View;
-class TestPlatform final : public PlatformHost {
+class TestPlatform final : public PlatformAdapter {
 public:
   void RequestFrameAt(double deadline) override {
     static_cast<void>(deadline);

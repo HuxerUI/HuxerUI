@@ -1,6 +1,6 @@
 # Extending HuxerUI
 
-HuxerUI exposes typed extension points for component events, layout, virtualization, retained modifiers, root services, and platform hosts. Prefer the narrowest extension point that owns the behavior.
+HuxerUI exposes typed extension points for component events, layout, virtualization, retained modifiers, root services, and platform adapters. Prefer the narrowest extension point that owns the behavior.
 
 ## Custom components and events
 
@@ -100,9 +100,9 @@ A root hook installs per-window services without replacing application content. 
 
 Built-in Toast and Dialog services install automatically. Third-party services should preserve per-window ownership and capture the Environment needed by deferred content.
 
-## Platform hosts
+## Platform adapters
 
-`PlatformHost` is the native boundary for a HuxerUI host view. It provides frame scheduling, time, text measurement, text input, clipboard behavior, and native rendering integration while sharing the same `Runtime`.
+`PlatformAdapter` is the native boundary for a HuxerUI host view. It provides frame scheduling, time, text measurement, text input, clipboard behavior, and native rendering integration while sharing the same `Runtime`.
 
 Native feature modules should expose typed services and controllers rather than adding feature-specific branches to Runtime. Embedded native UI is designed as a real leaf View, not a Modifier or NodeExtension.
 

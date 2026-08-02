@@ -30,7 +30,7 @@ struct ScrollMetrics {
 
 namespace detail {
 struct ScrollControllerAccess;
-class ScrollControllerData;
+class ScrollControllerState;
 } // namespace detail
 
 class ScrollController {
@@ -51,7 +51,7 @@ public:
   bool operator==(const ScrollController&) const = default;
 
 private:
-  std::shared_ptr<detail::ScrollControllerData> data_;
+  std::shared_ptr<detail::ScrollControllerState> state_;
 
   friend struct detail::ScrollControllerAccess;
 };

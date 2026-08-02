@@ -2,7 +2,7 @@
 
 Status: proposed design
 
-This document defines the target project model, SDK distribution, command-line workflow, native module system, and platform UI interoperability model for HuxerUI. The design builds on the existing `HUXERUI_APP` entry point, `Runtime`, `PlatformHost`, CMake integration, Android host view, and scope code generator. It does not describe currently implemented CLI behavior unless stated explicitly.
+This document defines the target project model, SDK distribution, command-line workflow, native module system, and platform UI interoperability model for HuxerUI. The design builds on the existing `HUXERUI_APP` entry point, `Runtime`, `PlatformAdapter`, CMake integration, Android host view, and scope code generator. It does not describe currently implemented CLI behavior unless stated explicitly.
 
 The design has the following goals:
 
@@ -46,7 +46,7 @@ HuxerUI SDK
 ├── public headers and libraries
 ├── CMake package and application helpers
 ├── Android AAR and Prefab package
-├── platform host integrations
+├── platform adapter integrations
 ├── host code generation tools
 ├── native project templates
 └── SDK and template metadata
@@ -60,14 +60,14 @@ Native toolchains
 
 The CLI is an orchestrator. CMake remains the C++ build system, Gradle remains the Android application build system, and native signing and packaging tools remain authoritative for their platforms.
 
-`Runtime` and `PlatformHost` remain the only runtime and platform ownership boundary:
+`Runtime` and `PlatformAdapter` remain the only runtime and platform ownership boundary:
 
 ```text
 Application View tree
         ↓
 Runtime
         ↓
-PlatformHost
+PlatformAdapter
         ↓
 native window, rendering, input, and embedded native views
 ```
@@ -565,7 +565,7 @@ The interoperability model has four directions:
 | UI drawn by HuxerUI | `View`, `Layout`, and `Modifier` |
 | Native UI embedded in HuxerUI | `NativeView` |
 | Platform capability without an inline view | typed service or controller |
-| HuxerUI embedded in a native application | `HuxerUIHostView` |
+| HuxerUI embedded in a native application | platform-native `HuxerUIView` |
 
 Together these mechanisms make the framework extensible across platform UI boundaries without turning every platform API into a Runtime feature.
 
@@ -615,7 +615,7 @@ HuxerUI owns layout. A native view must not independently change the frame assig
 
 The MountedNode stores a stable opaque native handle. It does not store Java, Objective-C, Swift, AppKit, UIKit, WinUI, or Win32 types in common public headers.
 
-`Runtime` decides when an operation is required. `PlatformHost` performs the operation against the real native object. No additional native host abstraction is required.
+`Runtime` decides when an operation is required. `PlatformAdapter` performs the operation against the real native object. No additional native host abstraction is required.
 
 ### Measurement
 
@@ -667,7 +667,7 @@ The host container coordinates native and HuxerUI input:
 - IME ownership follows the focused control.
 - Native accessibility nodes remain reachable in the composed hierarchy.
 
-The Runtime remains the source of HuxerUI hit-test ordering. The PlatformHost remains the source of native event dispatch.
+The Runtime remains the source of HuxerUI hit-test ordering. The PlatformAdapter remains the source of native event dispatch.
 
 ### Events and commands
 
@@ -705,21 +705,21 @@ return Button("Choose image").OnClick([picker] {
 });
 ```
 
-The service presents from the current native Activity, view controller, window, or equivalent platform owner supplied by `PlatformHost`.
+The service presents from the current native Activity, view controller, window, or equivalent platform owner supplied by `PlatformAdapter`.
 
 A full native picker, payment sheet, or system camera is not represented as a fake HuxerUI Dialog or an inline NativeView. Its lifecycle is owned by the native presentation system, while its result is delivered back through a typed asynchronous API.
 
 Services must define cancellation, owner destruction, repeated presentation, and background behavior. A callback arriving after the requesting runtime or scope has been destroyed must not access invalid state.
 
-## HuxerUIHostView
+## HuxerUIView
 
 Native interoperability must work in both directions. Every supported platform should expose a native host view that embeds one HuxerUI Runtime:
 
 ```text
-Android     HuxerUIView
-macOS       HuxerUIHostView backed by NSView
-Windows     HuxerUIHostView backed by the selected native window system
-iOS         HuxerUIHostView backed by UIView
+Android     HuxerUIView backed by View
+macOS       HuxerUIView backed by NSView
+Windows     HuxerUIView backed by the selected native window system
+iOS         HuxerUIView backed by UIView
 ```
 
 This supports:
@@ -859,7 +859,7 @@ The implementation should preserve these constraints:
 
 - One common `HUXERUI_APP` definition.
 - One Runtime implementation.
-- One PlatformHost boundary per native host view.
+- One PlatformAdapter boundary per native host view.
 - CMake and native toolchains remain authoritative.
 - Managed generated projects are reproducible and do not overwrite user-owned platform files.
 - Modules are build-time units, not dynamically loaded plugins.

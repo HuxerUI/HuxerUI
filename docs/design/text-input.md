@@ -2,7 +2,7 @@
 
 Status: implemented foundation with Android, macOS, and Windows platform adapters
 
-This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformHost`, retained `NodeExtension` state, typed events, and retained-scene rendering.
+This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformAdapter`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
 The design also defines the extension boundary required by complex editable components. SweetEditor is the reference integration: it should reuse the HuxerUI focus and platform input path without replacing its document model with the built-in TextField state.
 
@@ -13,7 +13,7 @@ This document records the implemented architecture and the remaining extension d
 - Provide a controlled built-in TextField with selection and composition state.
 - Support native IME composition without inferring edits from full text snapshots.
 - Keep focus and input session ownership in `Runtime`.
-- Keep native input connection behavior in `PlatformHost`.
+- Keep native input connection behavior in `PlatformAdapter`.
 - Let editable components own their text, selection, composition, and editing semantics.
 - Isolate delayed callbacks from old native input sessions.
 - Use one platform input path for TextField, SweetEditor, and future custom editable components.
@@ -23,7 +23,7 @@ This document records the implemented architecture and the remaining extension d
 The initial design deliberately does not include:
 
 - A second application runtime for text input.
-- A full-document mirror owned by `Runtime` or `PlatformHost`.
+- A full-document mirror owned by `Runtime` or `PlatformAdapter`.
 - Mutation inference by comparing two complete text snapshots.
 - A Flutter-style delta buffer and revision protocol.
 - Editor history, transactions, or linked-editing behavior in the common input protocol.
@@ -72,7 +72,7 @@ The ownership boundaries are:
 | TextField | Controlled value, simple editing reducer, selection, caret, and painting |
 | SweetEditor | Document state, transactions, history, and editor-specific behavior |
 
-`Runtime` does not own text content. `PlatformHost` does not decide how an edit changes a value. An editable component does not call native IME APIs directly.
+`Runtime` does not own text content. `PlatformAdapter` does not decide how an edit changes a value. An editable component does not call native IME APIs directly.
 
 ## Text model
 
@@ -415,7 +415,7 @@ Modal focus capture and restoration use the same lifecycle. Restoring focus to a
 
 ## Platform input capability
 
-Text input is a cohesive optional capability of `PlatformHost`. It should not expand `PlatformHost` into a collection of unrelated per-command methods:
+Text input is a cohesive optional capability of `PlatformAdapter`. It should not expand `PlatformAdapter` into a collection of unrelated per-command methods:
 
 ```cpp
 class PlatformTextInput {
@@ -450,7 +450,7 @@ public:
 };
 ```
 
-`PlatformHost` provides a nullable capability:
+`PlatformAdapter` provides a nullable capability:
 
 ```cpp
 virtual PlatformTextInput* TextInput() noexcept {
@@ -726,7 +726,7 @@ The TextField caches layout by text, font, available width, multiline configurat
 
 Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
 
-Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform host converts those coordinates to the native coordinate space required by its input API.
+Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform adapter converts those coordinates to the native coordinate space required by its input API.
 
 `TextInputClient::QueryTextInputPosition` receives a point in the owning node's local logical coordinates.
 `Runtime::QueryTextInputPosition` accepts host-view logical coordinates and applies the inverse node transform before calling the client.
@@ -921,12 +921,12 @@ An embedded native control and a HuxerUI TextInputClient cannot own the same hos
 When input enters a native view:
 
 - Runtime ends the active HuxerUI client session.
-- PlatformHost stops the HuxerUI input connection.
+- PlatformAdapter stops the HuxerUI input connection.
 - The native control receives native focus and owns its IME directly.
 
 When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
-The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformHost remains authoritative for native focus transfer and event dispatch. This follows the NativeView ownership model in [`sdk-cli.md`](sdk-cli.md).
+The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformAdapter remains authoritative for native focus transfer and event dispatch. This follows the NativeView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
 
@@ -1108,9 +1108,9 @@ The implementation should preserve these constraints:
 - Native text mutation uses typed ordered command batches.
 - One native callback produces one atomic client mutation.
 - Runtime owns focus and logical input session identity.
-- PlatformHost owns native input connections and coordinate conversion.
+- PlatformAdapter owns native input connections and coordinate conversion.
 - Editable clients own text, selection, composition, and editing semantics.
-- Runtime and PlatformHost do not mirror complete editor documents.
+- Runtime and PlatformAdapter do not mirror complete editor documents.
 - Session IDs isolate delayed callbacks from previous clients.
 - UTF-8 text and UTF-16 offsets use one validated conversion policy.
 - TextField retains transient editing and animation state in a mounted extension.

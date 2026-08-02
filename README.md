@@ -94,7 +94,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Layout and Scrolling](docs/layout-and-scrolling.md) | Constraints, ScrollView, controllers, virtualization, and custom layout |
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
 | [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, indications, animation, Toast, and Dialog |
-| [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform hosts |
+| [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform adapters |
 | [Platform Support](docs/platform-support.md) | Native backends and Runtime boundaries |
 | [Roadmap](docs/roadmap.md) | Framework, platform, SDK, and distribution work |
 

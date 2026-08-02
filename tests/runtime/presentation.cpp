@@ -72,7 +72,7 @@ View EnvironmentReader() {
 }
 
 View EnvironmentApp() {
-  EnvironmentValues outer;
+  Environment outer;
   outer.Set(TestEnvironmentValue{"outer"});
   return Column {
     EnvironmentReader(),
@@ -394,7 +394,7 @@ View NodeExtensionPruningApp() {
   };
 }
 
-TEST_CASE("TestNestedEnvironmentValues") {
+TEST_CASE("TestNestedEnvironment") {
   observed_environment_values.clear();
 
   TestPlatform platform;
