@@ -44,6 +44,16 @@ struct AppDefinition {
   AppOptions options;
 };
 
+struct ProcessMetrics {
+  // CPU time is cumulative; consumers derive utilization from two samples and the logical processor count.
+  double cpu_time_seconds = 0.0;
+  // Memory usage is the platform's preferred current process-footprint estimate, expressed in bytes.
+  std::uint64_t memory_usage_bytes = 0;
+  std::uint32_t processor_count = 1;
+
+  bool operator==(const ProcessMetrics&) const = default;
+};
+
 class PlatformAdapter : public TextMeasurer {
 public:
   virtual ~PlatformAdapter() = default;
@@ -61,6 +71,9 @@ public:
   }
   virtual PlatformResources* Resources() noexcept {
     return nullptr;
+  }
+  virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
+    return std::nullopt;
   }
 };
 

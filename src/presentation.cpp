@@ -1,8 +1,11 @@
 #include <huxerui/presentation.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <huxerui/animation.h>
@@ -47,6 +50,82 @@ private:
   friend class huxerui::DialogHandle;
   friend class DialogExtension;
 };
+
+void DebugMetricsState::RecordCommit(
+    double commit_time_seconds, const DamageRegion& damage, Size viewport
+) noexcept {
+  viewport_ = viewport;
+  const bool damaged = damage.full || !damage.rects.empty();
+  if (!damaged) {
+    return;
+  }
+  ++painted_frame_count_;
+  if (std::isfinite(commit_time_seconds)) {
+    const double non_negative_commit_time = std::max(0.0, commit_time_seconds);
+    total_commit_time_seconds_ += non_negative_commit_time;
+    maximum_commit_time_seconds_ = std::max(maximum_commit_time_seconds_, non_negative_commit_time);
+  }
+
+  const double viewport_area = static_cast<double>(viewport.width) * static_cast<double>(viewport.height);
+  if (damage.full) {
+    total_damage_ratio_ += 1.0;
+  } else if (viewport_area > 0.0) {
+    double damaged_area = 0.0;
+    for (const Rect& rect : damage.rects) {
+      damaged_area +=
+          static_cast<double>(std::max(0.0F, rect.width)) * static_cast<double>(std::max(0.0F, rect.height));
+    }
+    total_damage_ratio_ += std::clamp(damaged_area / viewport_area, 0.0, 1.0);
+  }
+}
+
+DebugMetricsSnapshot DebugMetricsState::Sample(double timestamp) noexcept {
+  DebugMetricsSnapshot snapshot;
+  snapshot.viewport = viewport_;
+
+  if (!window_initialized_) {
+    window_initialized_ = true;
+    window_started_at_ = timestamp;
+  } else {
+    snapshot.painted_frame_count = painted_frame_count_;
+    const double elapsed = std::max(0.0, timestamp - window_started_at_);
+    if (elapsed > 0.0) {
+      snapshot.fps = static_cast<float>(static_cast<double>(painted_frame_count_) / elapsed);
+    }
+    if (painted_frame_count_ > 0) {
+      snapshot.average_commit_time_ms =
+          static_cast<float>(total_commit_time_seconds_ * 1000.0 / static_cast<double>(painted_frame_count_));
+      snapshot.maximum_commit_time_ms = static_cast<float>(maximum_commit_time_seconds_ * 1000.0);
+      snapshot.average_damage_ratio =
+          static_cast<float>(total_damage_ratio_ / static_cast<double>(painted_frame_count_));
+    }
+  }
+
+  if (platform_ != nullptr) {
+    const std::optional<ProcessMetrics> process = platform_->QueryProcessMetrics();
+    if (process.has_value()) {
+      snapshot.memory_usage_bytes = process->memory_usage_bytes;
+      if (previous_process_metrics_.has_value()) {
+        const double elapsed = timestamp - previous_process_timestamp_;
+        const double cpu_delta = process->cpu_time_seconds - previous_process_metrics_->cpu_time_seconds;
+        if (elapsed > 0.0 && std::isfinite(cpu_delta) && cpu_delta >= 0.0) {
+          const double processor_count = static_cast<double>(std::max<std::uint32_t>(1, process->processor_count));
+          snapshot.cpu_percent =
+              static_cast<float>(std::clamp(cpu_delta / elapsed / processor_count * 100.0, 0.0, 100.0));
+        }
+      }
+      previous_process_metrics_ = process;
+      previous_process_timestamp_ = timestamp;
+    }
+  }
+
+  window_started_at_ = timestamp;
+  painted_frame_count_ = 0;
+  total_commit_time_seconds_ = 0.0;
+  maximum_commit_time_seconds_ = 0.0;
+  total_damage_ratio_ = 0.0;
+  return snapshot;
+}
 
 } // namespace detail
 
@@ -257,18 +336,23 @@ public:
 
     LayoutResult result;
     if (node.ChildCount() > 0) {
-      result.Place(node.ChildAt(0), {12.0F, 40.0F});
+      MountedNode& panel = node.ChildAt(0);
+      result.Place(
+          panel,
+          {
+              std::min(16.0F, std::max(0.0F, constraints.max_width - panel.LayoutSize().width)),
+              std::min(16.0F, std::max(0.0F, constraints.max_height - panel.LayoutSize().height)),
+          }
+      );
     }
     if (node.ChildCount() > 1) {
-      MountedNode& banner = node.ChildAt(1);
+      constexpr float corner_inset = 28.0F;
+      MountedNode& ribbon = node.ChildAt(1);
       result.Place(
-          banner,
+          ribbon,
           {
-              std::max(
-                  -banner.LayoutSize().width * 0.5F,
-                  constraints.max_width - banner.LayoutSize().width * 0.5F - 26.0F
-              ),
-              26.0F - banner.LayoutSize().height * 0.5F,
+              constraints.max_width - corner_inset - ribbon.LayoutSize().width * 0.5F,
+              corner_inset - ribbon.LayoutSize().height * 0.5F,
           }
       );
     }
@@ -277,15 +361,19 @@ public:
   }
 };
 
-constexpr Color debug_banner_background = Color::Rgb(198, 40, 40);
-constexpr Color debug_banner_foreground = Color::Rgb(255, 245, 157);
-constexpr Color debug_banner_shadow = Color::Rgb(0, 0, 0, 0.28F);
-constexpr Color debug_panel_background = Color::Rgb(24, 28, 35, 0.96F);
+constexpr Color debug_ribbon_background = Color::Rgb(183, 28, 28);
+constexpr Color debug_ribbon_foreground = Color::White();
+constexpr Color debug_ribbon_shadow = Color::Rgb(0, 0, 0, 0.32F);
+constexpr Color debug_panel_background = Color::Rgb(17, 22, 31, 0.97F);
 constexpr Color debug_panel_foreground = Color::White();
-constexpr Color debug_shadow_color = Color::Rgb(0, 0, 0, 0.35F);
+constexpr Color debug_panel_secondary = Color::Rgb(164, 174, 190);
+constexpr Color debug_metric_background = Color::Rgb(255, 255, 255, 0.065F);
+constexpr Color debug_shadow_color = Color::Rgb(0, 0, 0, 0.42F);
+constexpr Color debug_live_color = Color::Rgb(67, 209, 125);
 
 struct DebugSampler {
-  State<float> fps;
+  std::shared_ptr<detail::DebugMetricsState> metrics;
+  State<detail::DebugMetricsSnapshot> snapshot;
 
   static const detail::ModifierDescriptor& Descriptor();
 };
@@ -298,35 +386,163 @@ public:
 
   void Update(MountedNode& node, const DebugSampler& modifier) {
     static_cast<void>(node);
-    fps_ = modifier.fps;
+    metrics_ = modifier.metrics;
+    snapshot_ = modifier.snapshot;
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
-    if (!window_started_at_.has_value()) {
-      window_started_at_ = frame.timestamp;
+    constexpr double sample_interval = 1.0;
+    if (!next_sample_at_.has_value()) {
+      if (metrics_) {
+        const detail::DebugMetricsSnapshot sampled = metrics_->Sample(frame.timestamp);
+        const bool changed = snapshot_.Get() != sampled;
+        if (changed) {
+          snapshot_ = sampled;
+        }
+      }
+      next_sample_at_ = frame.timestamp + sample_interval;
+      return {
+          .needs_frame = false,
+          .wake_after = sample_interval,
+      };
     }
-    ++frames_;
-    const double elapsed = frame.timestamp - *window_started_at_;
-    if (elapsed >= 0.5) {
-      fps_ = static_cast<float>(static_cast<double>(frames_) / elapsed);
-      window_started_at_ = frame.timestamp;
-      frames_ = 0;
+    const double remaining = *next_sample_at_ - frame.timestamp;
+    if (remaining > 0.0) {
+      return {
+          .needs_frame = false,
+          .wake_after = remaining,
+      };
     }
+    if (metrics_) {
+      const detail::DebugMetricsSnapshot sampled = metrics_->Sample(frame.timestamp);
+      if (snapshot_.Get() != sampled) {
+        snapshot_ = sampled;
+      }
+    }
+    next_sample_at_ = frame.timestamp + sample_interval;
     return {
-        .needs_frame = true,
-        .wake_after = std::nullopt,
+        .needs_frame = false,
+        .wake_after = sample_interval,
     };
   }
 
 private:
-  State<float> fps_;
-  std::optional<double> window_started_at_;
-  std::size_t frames_ = 0;
+  std::shared_ptr<detail::DebugMetricsState> metrics_;
+  State<detail::DebugMetricsSnapshot> snapshot_;
+  std::optional<double> next_sample_at_;
 };
 
 const detail::ModifierDescriptor& DebugSampler::Descriptor() {
   return detail::ModifierDescriptorFor<DebugSampler, DebugSamplerExtension>();
+}
+
+std::string FormatOneDecimal(float value) {
+  const int tenths = std::max(0, static_cast<int>(std::lround(value * 10.0F)));
+  return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10);
+}
+
+std::string FormatMemory(std::uint64_t bytes) {
+  constexpr double bytes_per_megabyte = 1024.0 * 1024.0;
+  return FormatOneDecimal(static_cast<float>(static_cast<double>(bytes) / bytes_per_megabyte)) + " MiB";
+}
+
+View DebugMetricCard(std::string label, std::string value, std::string detail, Color accent) {
+  Frame frame;
+  frame.height = 64.0F;
+  return Column {
+    Text(std::move(label)).Style(TextStyle{Font::System(10.0F).WithWeight(FontWeight::SemiBold), accent}),
+    Text(std::move(value)).Style(
+        TextStyle{Font::System(18.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}
+    ),
+    Text(std::move(detail)).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+  }.With(
+      frame,
+      Grow{},
+      Spacing{1.0F},
+      Padding{8.0F},
+      Background{debug_metric_background},
+      CornerRadius{8.0F}
+  );
+}
+
+View DebugPanel(
+    const detail::DebugMetricsSnapshot& snapshot,
+    const std::shared_ptr<detail::DebugMetricsState>& metrics,
+    State<detail::DebugMetricsSnapshot> snapshot_state
+) {
+  const std::string fps =
+      snapshot.painted_frame_count == 0 ? "Idle" : std::to_string(static_cast<int>(std::lround(snapshot.fps)));
+  const std::string commit_time = snapshot.painted_frame_count == 0
+                                      ? "--"
+                                      : FormatOneDecimal(snapshot.average_commit_time_ms) + " ms";
+  const std::string maximum_commit_time = snapshot.painted_frame_count == 0
+                                              ? "No painted frames"
+                                              : "Max " + FormatOneDecimal(snapshot.maximum_commit_time_ms) + " ms";
+  const std::string cpu = snapshot.cpu_percent.has_value() ? FormatOneDecimal(*snapshot.cpu_percent) + "%" : "--";
+  const std::string memory =
+      snapshot.memory_usage_bytes.has_value() ? FormatMemory(*snapshot.memory_usage_bytes) : "--";
+  const std::string footer = "Damage " + FormatOneDecimal(snapshot.average_damage_ratio * 100.0F) + "%  /  " +
+                             std::to_string(static_cast<int>(std::lround(snapshot.viewport.width))) + " x " +
+                             std::to_string(static_cast<int>(std::lround(snapshot.viewport.height)));
+
+  Frame panel_frame;
+  panel_frame.width = 288.0F;
+  Frame live_indicator_frame;
+  live_indicator_frame.width = 8.0F;
+  live_indicator_frame.height = 8.0F;
+  return Column {
+    Row {
+      Column {}.With(live_indicator_frame, Background{debug_live_color}, CornerRadius{4.0F}),
+      Text("HuxerUI Performance").Style(
+          TextStyle{Font::System(14.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}
+      ),
+      Spacer().With(Grow{}),
+      Text("LIVE").Style(TextStyle{Font::System(9.0F).WithWeight(FontWeight::SemiBold), debug_live_color}),
+    }.With(Spacing{7.0F}, CrossAlign{CrossAxisAlignment::Center}),
+    Row {
+      DebugMetricCard("FPS", fps, "Painted frames/s", debug_live_color),
+      DebugMetricCard("COMMIT", commit_time, maximum_commit_time, Color::Rgb(92, 158, 255)),
+    }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+    Row {
+      DebugMetricCard("CPU", cpu, "Process / all cores", Color::Rgb(255, 183, 77)),
+      DebugMetricCard("MEMORY", memory, "Process footprint", Color::Rgb(186, 132, 255)),
+    }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+    Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+  }.With(
+      panel_frame,
+      Spacing{8.0F},
+      Padding{12.0F},
+      Background{debug_panel_background},
+      Shadow{
+          .color = debug_shadow_color,
+          .offset = {},
+          .blur_radius = 20.0F,
+          .spread = -2.0F,
+      },
+      CornerRadius{12.0F},
+      DebugSampler{metrics, snapshot_state}
+  );
+}
+
+View DebugRibbon(State<bool> expanded) {
+  Frame ribbon_frame;
+  ribbon_frame.width = 96.0F;
+  ribbon_frame.height = 18.0F;
+  return Row {
+    Text("DEBUG").Style(TextStyle{Font::System(12.0F).WithWeight(FontWeight::Bold), debug_ribbon_foreground}),
+  }.With(
+      ribbon_frame,
+      MainAlign{MainAxisAlignment::Center},
+      CrossAlign{CrossAxisAlignment::Center},
+      Background{debug_ribbon_background},
+      Shadow{
+          .color = debug_ribbon_shadow,
+          .offset = {},
+          .blur_radius = 8.0F,
+      },
+      Rotation{45.0F}
+  ).OnClick([expanded] { expanded = !expanded.Get(); });
 }
 
 } // namespace
@@ -529,7 +745,7 @@ private:
 
 class DebugOverlayInstaller {
 public:
-  static void Install(RootContext& root) {
+  static void Install(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {
     LayerPlacement placement;
     placement.kind = LayerPlacementKind::Fill;
     root.Layers().AttachCaptured(
@@ -542,61 +758,16 @@ public:
             .on_dismiss_request = {},
             .barrier_color = std::nullopt,
         },
-        [] {
+        [metrics = std::move(metrics)] {
           auto expanded = UseState(false);
-          auto fps = UseState(0.0F);
+          auto snapshot = UseState(DebugMetricsSnapshot{});
           std::vector<View> children;
           if (expanded.Get()) {
-            Frame panel_frame;
-            panel_frame.width = 216.0F;
-            children.push_back(
-                Column {
-                  Text("HuxerUI Debug").Style(
-                      TextStyle{Font::System(16.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}
-                  ),
-                  Text::Format("UI FPS: {}", static_cast<int>(std::lround(fps.Get())))
-                      .Style(TextStyle{Font::System(13.0F), debug_panel_foreground}),
-                }.With(
-                    panel_frame,
-                    Spacing{6.0F},
-                    Padding{12.0F},
-                    Background{debug_panel_background},
-                    Shadow{
-                        .color = debug_shadow_color,
-                        .offset = {0.0F, 4.0F},
-                        .blur_radius = 12.0F,
-                        .spread = -1.0F,
-                    },
-                    CornerRadius{8.0F},
-                    DebugSampler{fps}
-                )
-            );
+            children.push_back(DebugPanel(snapshot.Get(), metrics, snapshot));
           } else {
             children.push_back(Spacer());
           }
-          Frame banner_frame;
-          banner_frame.width = 136.0F;
-          banner_frame.height = 28.0F;
-          children.push_back(
-              Row {
-                Text("Debug").Style(
-                    TextStyle{Font::System(11.0F).WithWeight(FontWeight::SemiBold), debug_banner_foreground}
-                ),
-              }
-                  .With(
-                      banner_frame,
-                      MainAlign{MainAxisAlignment::Center},
-                      CrossAlign{CrossAxisAlignment::Center},
-                      Background{debug_banner_background},
-                      Shadow{
-                          .color = debug_banner_shadow,
-                          .offset = {},
-                          .blur_radius = 8.0F,
-                      },
-                      Rotation{45.0F}
-                  )
-                  .OnClick([expanded] { expanded = !expanded.Get(); })
-          );
+          children.push_back(DebugRibbon(expanded));
           return DebugOverlayLayout{std::move(children)};
         },
         {},
@@ -664,8 +835,8 @@ void InstallBuiltinPresentation(RootContext& root) {
   root.Provide(std::make_shared<MenuService>(root.Layers()));
 }
 
-void InstallDebugOverlay(RootContext& root) {
-  DebugOverlayInstaller::Install(root);
+void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {
+  DebugOverlayInstaller::Install(root, std::move(metrics));
 }
 
 } // namespace detail

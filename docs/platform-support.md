@@ -47,6 +47,7 @@ Android receives the same committed damage but invalidates the complete native V
 All three backends replay only the committed scene during native paint callbacks.
 Exact `DrawTextRunsCommand` geometry is supplied by TextMeasurer and is not replaced by renderer-side layout decisions.
 Native font, layout, and decoded-image caches are host-owned and bounded; see [Text and Font Design](design/text.md) and [App Resources, Images, and Localization Design](design/resources.md).
+When the debug performance panel is open, `PlatformAdapter::QueryProcessMetrics()` optionally reports cumulative process CPU time, a current process-memory footprint, and logical processor count. Android reports proportional set size (PSS); Windows and macOS report their current working-set or resident-set values. Runtime derives interval CPU utilization and keeps the sampling lifecycle out of native hosts.
 
 ## Android
 
@@ -72,6 +73,7 @@ Rounded-rectangle shadows use hardware shadow layers on API 28 and later, with d
 Arbitrary Paths use the same native Canvas, and Path shadows use hardware layers on API 28 and later with a bounded software mask fallback on older supported versions.
 Neither path disables hardware acceleration for the complete host View.
 Packaged resources are read from Android assets, system changes proactively update the Runtime resource configuration, and encoded images are transferred to Java only on a Bitmap cache miss.
+Debug process metrics use `getrusage`, `Debug.getPss()`, and the online processor count.
 
 ## macOS
 
@@ -79,6 +81,7 @@ The macOS backend creates an AppKit host, renders through CoreGraphics, measures
 Core Graphics resolves retained shadow commands with native blurred path shadows.
 Canvas Paths map directly to Core Graphics fill, stroke, clip, and shadow operations.
 Packaged resources are read from the application bundle, locale and backing-scale changes proactively update the Runtime resource configuration, and ImageIO-backed decoded images remain renderer-owned.
+Debug process metrics use `getrusage`, Mach task information, and `NSProcessInfo`.
 
 Example targets build as application bundles and can be launched from `build/bin`.
 
@@ -90,6 +93,7 @@ Partial Runtime damage updates a retained scene bitmap before the affected pixel
 Direct2D Shadow effects consume cached rounded-rectangle masks while color, opacity, and offset remain draw-time properties.
 Canvas Paths map to Direct2D path geometry for fill, stroke, geometric clipping, and blurred shadow masks.
 Packaged resources are read from the executable-specific `<name>.resources` directory, locale and DPI changes proactively update the Runtime resource configuration, and WIC decoding produces device-dependent Direct2D bitmap cache entries.
+Debug process metrics use process times, working-set counters, and the native logical processor count.
 
 `HUXERUI_WINDOWS_7_COMPAT=ON` builds an opt-in binary for Windows 7 SP1 with Platform Update or later.
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.

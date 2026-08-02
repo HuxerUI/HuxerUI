@@ -558,48 +558,108 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   options.show_debug_overlay = true;
 
   TestPlatform platform;
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 1.0,
+      .memory_usage_bytes = 64ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
   Runtime runtime{DebugOverlayApp, platform, std::move(options)};
-  runtime.SetViewport({240.0F, 120.0F});
+  runtime.SetViewport({360.0F, 260.0F});
   const FlattenedScene& initial = runtime.BuildFrame();
-  REQUIRE(ContainsText(initial, "Debug"));
-  REQUIRE(!ContainsText(initial, "HuxerUI Debug"));
-  const std::optional<Rect> banner_text = FindPresentedTextRect(initial, "Debug");
+  REQUIRE(ContainsText(initial, "DEBUG"));
+  REQUIRE(!ContainsText(initial, "HuxerUI Performance"));
+  const std::optional<Rect> banner_text = FindPresentedTextRect(initial, "DEBUG");
   REQUIRE(banner_text.has_value());
-  REQUIRE(banner_text->x > 170.0F);
-  REQUIRE(banner_text->y < 70.0F);
-  REQUIRE(FindRectWithColor(initial, Color::Rgb(198, 40, 40)) != nullptr);
+  REQUIRE(banner_text->x > 300.0F);
+  REQUIRE(banner_text->x + banner_text->width <= 360.0F);
+  REQUIRE(banner_text->y < 56.0F);
+  REQUIRE(FindRectWithColor(initial, Color::Rgb(183, 28, 28)) != nullptr);
   REQUIRE(std::ranges::any_of(initial.Commands(), [](const PaintCommand& command) {
-    const auto* shadow = std::get_if<huxerui::DrawShadowCommand>(&command);
-    return shadow != nullptr && shadow->color == Color::Rgb(0, 0, 0, 0.28F) && shadow->offset == Point{} &&
+    const auto* shadow = std::get_if<DrawShadowCommand>(&command);
+    return shadow != nullptr && shadow->color == Color::Rgb(0, 0, 0, 0.32F) && shadow->offset == Point{} &&
            shadow->blur_radius == 8.0F;
   }));
   REQUIRE(layer_app_compositions == 1);
 
-  ClickAt(runtime, {20.0F, 100.0F}, 123);
+  ClickAt(runtime, {20.0F, 220.0F}, 123);
   REQUIRE(layer_background_clicks == 1);
 
-  ClickAt(runtime, {220.0F, 20.0F}, 124);
+  ClickAt(runtime, {332.0F, 28.0F}, 124);
   const FlattenedScene& expanded = runtime.BuildFrame();
-  REQUIRE(ContainsText(expanded, "Debug"));
-  REQUIRE(ContainsText(expanded, "HuxerUI Debug"));
-  REQUIRE(ContainsText(expanded, "UI FPS: 0"));
-  const std::optional<Rect> panel_title = FindPresentedTextRect(expanded, "HuxerUI Debug");
+  REQUIRE(ContainsText(expanded, "DEBUG"));
+  REQUIRE(ContainsText(expanded, "HuxerUI Performance"));
+  REQUIRE(ContainsText(expanded, "FPS"));
+  REQUIRE(ContainsText(expanded, "COMMIT"));
+  REQUIRE(ContainsText(expanded, "CPU"));
+  REQUIRE(ContainsText(expanded, "MEMORY"));
+  const std::optional<Rect> panel_title = FindPresentedTextRect(expanded, "HuxerUI Performance");
   REQUIRE(panel_title.has_value());
-  REQUIRE(panel_title->x >= 12.0F);
-  REQUIRE(panel_title->y >= 40.0F);
-  REQUIRE(FindRectWithColor(expanded, Color::Rgb(24, 28, 35, 0.96F)) != nullptr);
+  REQUIRE(panel_title->x >= 16.0F);
+  REQUIRE(panel_title->y >= 16.0F);
+  REQUIRE(FindRectWithColor(expanded, Color::Rgb(17, 22, 31, 0.97F)) != nullptr);
   REQUIRE(layer_app_compositions == 1);
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
 
-  ClickAt(runtime, {220.0F, 20.0F}, 125);
+  const FlattenedScene& initialized = runtime.BuildFrame();
+  REQUIRE(ContainsText(initialized, "64.0 MiB"));
+  REQUIRE(ContainsText(initialized, "Damage 0.0%  /  360 x 260"));
+
+  platform.AdvanceTime(1.0);
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 1.2,
+      .memory_usage_bytes = 72ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
+  runtime.BuildFrame();
+  const FlattenedScene& sampled = runtime.BuildFrame();
+  REQUIRE(ContainsText(sampled, "2"));
+  REQUIRE(ContainsText(sampled, "5.0%"));
+  REQUIRE(ContainsText(sampled, "72.0 MiB"));
+  REQUIRE(layer_app_compositions == 1);
+
+  ClickAt(runtime, {332.0F, 28.0F}, 125);
   const FlattenedScene& collapsed = runtime.BuildFrame();
-  REQUIRE(ContainsText(collapsed, "Debug"));
-  REQUIRE(!ContainsText(collapsed, "HuxerUI Debug"));
+  REQUIRE(ContainsText(collapsed, "DEBUG"));
+  REQUIRE(!ContainsText(collapsed, "HuxerUI Performance"));
   REQUIRE(layer_app_compositions == 1);
   REQUIRE(layer_background_clicks == 1);
-  platform.AdvanceTime(0.5);
+  platform.AdvanceTime(1.0);
   runtime.BuildFrame();
   REQUIRE(!runtime.LastCommit().next_frame_deadline.has_value());
+}
+
+TEST_CASE("TestDebugMetricsSamplesPaintedFramesAndProcessUsage") {
+  TestPlatform platform;
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 2.0,
+      .memory_usage_bytes = 48ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
+  detail::DebugMetricsState metrics{platform};
+  static_cast<void>(metrics.Sample(0.0));
+
+  metrics.RecordCommit(0.004, DamageRegion{.full = true}, {200.0F, 100.0F});
+  metrics.RecordCommit(0.001, {}, {200.0F, 100.0F});
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 2.2,
+      .memory_usage_bytes = 56ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
+  const detail::DebugMetricsSnapshot sampled = metrics.Sample(1.0);
+  REQUIRE(sampled.painted_frame_count == 1);
+  REQUIRE(sampled.fps == 1.0F);
+  REQUIRE(sampled.average_commit_time_ms == 4.0F);
+  REQUIRE(sampled.maximum_commit_time_ms == 4.0F);
+  REQUIRE(sampled.cpu_percent == 5.0F);
+  REQUIRE(sampled.memory_usage_bytes == 56ULL * 1024ULL * 1024ULL);
+  REQUIRE(sampled.average_damage_ratio == 1.0F);
+  REQUIRE(sampled.viewport == Size{200.0F, 100.0F});
+
+  metrics.RecordCommit(0.003, DamageRegion{.full = true}, {200.0F, 100.0F});
+  const detail::DebugMetricsSnapshot next_sample = metrics.Sample(2.0);
+  REQUIRE(next_sample.painted_frame_count == 1);
+  REQUIRE(next_sample.fps == 1.0F);
+  REQUIRE(next_sample.average_commit_time_ms == 3.0F);
 }
 
 TEST_CASE("TestDebugOverlayDefaultMatchesBuildConfiguration") {

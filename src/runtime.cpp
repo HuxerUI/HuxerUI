@@ -544,7 +544,8 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
     hook(root);
   }
   if (definition.options.show_debug_overlay) {
-    InstallDebugOverlay(root);
+    state_->debug_metrics_ = std::make_shared<DebugMetricsState>(platform);
+    InstallDebugOverlay(root, state_->debug_metrics_);
   }
 }
 
@@ -641,6 +642,18 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
+  detail::DebugMetricsState* const debug_metrics = state_->debug_metrics_.get();
+  const double build_started_at = debug_metrics != nullptr ? state_->platform_->Now() : 0.0;
+  const auto record_debug_commit = [&] {
+    if (debug_metrics == nullptr) {
+      return;
+    }
+    debug_metrics->RecordCommit(
+        std::max(0.0, state_->platform_->Now() - build_started_at),
+        state_->frame_commit_.render_frame.damage,
+        state_->viewport_
+    );
+  };
   if (!std::isfinite(frame.timestamp)) {
     frame.timestamp = state_->platform_->Now();
   }
@@ -671,6 +684,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     ++state_->frame_commit_.render_frame.revision;
     state_->frame_commit_.next_frame_deadline =
         state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
+    record_debug_commit();
     state_->building_frame_ = false;
     return state_->frame_commit_;
   }
@@ -751,6 +765,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   }
   state_->frame_commit_.next_frame_deadline =
       state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
+  record_debug_commit();
   state_->building_frame_ = false;
   return state_->frame_commit_;
 }

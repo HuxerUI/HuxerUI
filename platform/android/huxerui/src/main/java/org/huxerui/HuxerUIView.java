@@ -13,6 +13,7 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Debug;
 import android.os.SystemClock;
 import android.os.Build;
 import android.text.Layout;
@@ -444,6 +445,10 @@ public final class HuxerUIView extends View {
 
     private float resourceScale() {
         return getResources().getDisplayMetrics().density;
+    }
+
+    private long processPssBytes() {
+        return Debug.getPss() * 1024L;
     }
 
     private byte[] readResource(byte[] encodedPath) {

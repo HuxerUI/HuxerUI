@@ -2,6 +2,8 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <dispatch/dispatch.h>
+#import <mach/mach.h>
+#import <sys/resource.h>
 
 #include <algorithm>
 #include <chrono>
@@ -26,6 +28,14 @@
 namespace huxerui::detail {
 class MacPlatformAdapter;
 }
+
+namespace {
+
+double TimevalSeconds(const timeval& value) noexcept {
+  return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1'000'000.0;
+}
+
+} // namespace
 
 @interface HuxerUIView : NSView {
 @public
@@ -298,6 +308,30 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+      return std::nullopt;
+    }
+    mach_task_basic_info_data_t task_metrics{};
+    mach_msg_type_number_t task_metrics_count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            reinterpret_cast<task_info_t>(&task_metrics),
+            &task_metrics_count
+        ) != KERN_SUCCESS) {
+      return std::nullopt;
+    }
+    return ProcessMetrics{
+        .cpu_time_seconds = TimevalSeconds(usage.ru_utime) + TimevalSeconds(usage.ru_stime),
+        .memory_usage_bytes = static_cast<std::uint64_t>(task_metrics.resident_size),
+        .processor_count = static_cast<std::uint32_t>(
+            std::max<NSInteger>(1, [[NSProcessInfo processInfo] processorCount])
+        ),
+    };
   }
 
   ResourceConfiguration Configuration() const override {

@@ -12,7 +12,7 @@ Current implementation status:
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Retained exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and richer debug metrics remain follow-up work.
+- Retained exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and profiler timelines remain follow-up work.
 
 The design has four goals:
 
@@ -786,7 +786,7 @@ enum class LayerCancelPolicy {
 };
 ```
 
-`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient messages such as Toast. `System` contains ordinary HuxerUI diagnostic UI such as the debug banner and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
+`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient messages such as Toast. `System` contains ordinary HuxerUI diagnostic UI such as the debug ribbon and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
 
 Layer options separate stacking, pointer behavior, focus containment, and dismissal:
 
@@ -856,7 +856,9 @@ The anchor modifier records final PresentationBounds without creating a layer. `
 
 Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, and Environment machinery, while their layout, surface, motion, and options remain component-specific. The existing command-oriented `UseDialog()` path is the primary ergonomic model for the revised design.
 
-The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its rotated top-right banner toggles a shadowed upper-left metrics panel within the entry's own state. The panel remains below the top system-bar region on edge-to-edge hosts. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime frame statistics and optional platform process metrics belong to a separate debug metrics service, not LayerController.
+The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its top-right corner ribbon toggles an upper-left metrics panel within the entry's own state. Both are composed from ordinary Views; the ribbon is one rotated component clipped by the viewport rather than separately positioned background and label geometry. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime records painted-frame count, frame-commit time, and damage ratio in a dedicated debug metrics state. PlatformAdapter optionally supplies cumulative process CPU time, a platform-preferred process-memory footprint, and logical processor count so interval utilization can be derived without platform state leaking into LayerController.
+
+The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling Runtime accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
 Dismissed entries are removed immediately. Retained exit presentation belongs to the deferred transition model.
 

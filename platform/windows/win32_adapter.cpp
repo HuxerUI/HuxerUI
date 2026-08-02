@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <objbase.h>
+#include <psapi.h>
 
 #include <algorithm>
 #include <chrono>
@@ -37,6 +38,13 @@ constexpr wchar_t kWindowClassName[] = L"HuxerUI.Win32.Window";
 constexpr UINT kRenderMessage = WM_APP + 1;
 constexpr UINT_PTR kFrameTimer = 1;
 constexpr float kDipsPerInch = 96.0F;
+
+double FileTimeSeconds(const FILETIME& time) noexcept {
+  ULARGE_INTEGER value{};
+  value.LowPart = time.dwLowDateTime;
+  value.HighPart = time.dwHighDateTime;
+  return static_cast<double>(value.QuadPart) / 10'000'000.0;
+}
 
 class Win32Api {
 public:
@@ -327,6 +335,29 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    FILETIME created{};
+    FILETIME exited{};
+    FILETIME kernel{};
+    FILETIME user{};
+    if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) == FALSE) {
+      return std::nullopt;
+    }
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)) == FALSE) {
+      return std::nullopt;
+    }
+    SYSTEM_INFO system_info{};
+    GetSystemInfo(&system_info);
+    return ProcessMetrics{
+        .cpu_time_seconds = FileTimeSeconds(kernel) + FileTimeSeconds(user),
+        .memory_usage_bytes = static_cast<std::uint64_t>(counters.WorkingSetSize),
+        .processor_count =
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
+    };
   }
 
   ResourceConfiguration Configuration() const override {

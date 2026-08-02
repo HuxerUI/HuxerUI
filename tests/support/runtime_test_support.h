@@ -582,9 +582,14 @@ public:
     return platform_resources;
   }
 
+  std::optional<huxerui::ProcessMetrics> QueryProcessMetrics() noexcept override {
+    return process_metrics;
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
+  std::optional<huxerui::ProcessMetrics> process_metrics;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;

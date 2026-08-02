@@ -88,8 +88,41 @@ struct TextMeasurerService {
   TextMeasurer* measurer = nullptr;
 };
 
+struct DebugMetricsSnapshot {
+  float fps = 0.0F;
+  float average_commit_time_ms = 0.0F;
+  float maximum_commit_time_ms = 0.0F;
+  std::optional<float> cpu_percent;
+  std::optional<std::uint64_t> memory_usage_bytes;
+  float average_damage_ratio = 0.0F;
+  Size viewport;
+  std::size_t painted_frame_count = 0;
+
+  bool operator==(const DebugMetricsSnapshot&) const = default;
+};
+
+class DebugMetricsState {
+public:
+  explicit DebugMetricsState(PlatformAdapter& platform) : platform_(&platform) {}
+
+  void RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept;
+  DebugMetricsSnapshot Sample(double timestamp) noexcept;
+
+private:
+  PlatformAdapter* platform_;
+  bool window_initialized_ = false;
+  double window_started_at_ = 0.0;
+  std::size_t painted_frame_count_ = 0;
+  double total_commit_time_seconds_ = 0.0;
+  double maximum_commit_time_seconds_ = 0.0;
+  double total_damage_ratio_ = 0.0;
+  Size viewport_;
+  std::optional<ProcessMetrics> previous_process_metrics_;
+  double previous_process_timestamp_ = 0.0;
+};
+
 void InstallBuiltinPresentation(RootContext& root);
-void InstallDebugOverlay(RootContext& root);
+void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> metrics);
 
 enum class LayerPlacementKind : std::uint8_t {
   Natural,
@@ -888,6 +921,7 @@ struct Runtime::State {
   std::unordered_set<std::type_index> root_service_types_;
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
+  std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
