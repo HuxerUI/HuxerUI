@@ -11,9 +11,31 @@ namespace huxerui::detail {
 
 namespace {
 
-struct RuntimeFillsViewport {
-  using Value = bool;
-};
+int LayerLevelRank(LayerLevel level) noexcept {
+  switch (level) {
+  case LayerLevel::Presentation:
+    return 0;
+  case LayerLevel::Notification:
+    return 1;
+  case LayerLevel::System:
+    return 2;
+  }
+  return 0;
+}
+
+bool LayerPaintsAbove(const LayerEntry& candidate, const LayerEntry& current) noexcept {
+  const int candidate_level = LayerLevelRank(candidate.options.level);
+  const int current_level = LayerLevelRank(current.options.level);
+  return candidate_level != current_level ? candidate_level > current_level : candidate.sequence > current.sequence;
+}
+
+std::vector<LayerEntry> OrderedLayerEntries(const std::vector<LayerEntry>& entries) {
+  std::vector<LayerEntry> ordered = entries;
+  std::stable_sort(ordered.begin(), ordered.end(), [](const LayerEntry& left, const LayerEntry& right) {
+    return LayerPaintsAbove(right, left);
+  });
+  return ordered;
+}
 
 class RuntimeRootLayout final : public huxerui::Layout<RuntimeRootLayout> {
 public:
@@ -21,17 +43,150 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
     LayoutResult result;
-    std::size_t index = 0;
     for (huxerui::MountedNode& child : node.Children()) {
-      const bool tight = index == 0 || child.LayoutValueOr<RuntimeFillsViewport>(false);
-      static_cast<void>(context.Measure(child, tight ? constraints : constraints.Loose()));
+      static_cast<void>(context.Measure(child, constraints));
       result.Place(child, {});
-      ++index;
     }
     result.SetSize(constraints.Constrain({
         constraints.max_width,
         constraints.max_height,
     }));
+    return result;
+  }
+};
+
+class LayerStackLayout final : public huxerui::Layout<LayerStackLayout> {
+public:
+  using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+    LayoutResult result;
+    for (huxerui::MountedNode& child : node.Children()) {
+      static_cast<void>(context.Measure(child, constraints));
+      result.Place(child, {});
+    }
+    result.SetSize(constraints.Constrain({
+        constraints.max_width,
+        constraints.max_height,
+    }));
+    return result;
+  }
+};
+
+bool IsLayerStack(const MountedNode& node) {
+  return node.layout_descriptor != nullptr && node.layout_descriptor->type == typeid(LayerStackLayout);
+}
+
+MountedNode* FindLayerStack(MountedNode& root) {
+  const auto found =
+      std::ranges::find_if(root.children, [](const auto& child) { return child && IsLayerStack(*child); });
+  return found == root.children.end() ? nullptr : found->get();
+}
+
+class LayerEntryLayout final : public huxerui::Layout<LayerEntryLayout> {
+public:
+  using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+    LayoutResult result;
+    if (node.ChildCount() == 0) {
+      result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
+      return result;
+    }
+
+    huxerui::MountedNode& child = node.ChildAt(0);
+    const auto* placement_value = node.LayoutValue<LayerPlacementValue>();
+    const LayerPlacement fallback;
+    const LayerPlacement& placement = placement_value && *placement_value ? **placement_value : fallback;
+    const float viewport_width = constraints.max_width;
+    const float viewport_height = constraints.max_height;
+    const Constraints loose = constraints.Loose();
+
+    Size child_size;
+    Point child_offset;
+    switch (placement.kind) {
+    case LayerPlacementKind::Natural:
+      child_size = context.Measure(child, loose);
+      break;
+    case LayerPlacementKind::Fill:
+      child_size = context.Measure(child, constraints);
+      break;
+    case LayerPlacementKind::Center:
+      child_size = context.Measure(child, loose);
+      child_offset = {
+          (viewport_width - child_size.width) * 0.5F,
+          (viewport_height - child_size.height) * 0.5F,
+      };
+      break;
+    case LayerPlacementKind::BottomCenter:
+      child_size = context.Measure(child, loose);
+      child_offset = {
+          (viewport_width - child_size.width) * 0.5F,
+          viewport_height - child_size.height,
+      };
+      break;
+    case LayerPlacementKind::Anchored: {
+      // Anchors use final presentation coordinates; LayerEntryLayout itself shares the host-view coordinate space.
+      const float horizontal_margin =
+          std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_width * 0.5F));
+      const float vertical_margin =
+          std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_height * 0.5F));
+      child_size = context.Measure(
+          child,
+          Constraints{
+              0.0F,
+              std::max(0.0F, viewport_width - horizontal_margin * 2.0F),
+              0.0F,
+              std::max(0.0F, viewport_height - vertical_margin * 2.0F),
+          }
+      );
+      LayerAnchorSide side = placement.preferred_side;
+      const float anchor_right = placement.anchor.x + placement.anchor.width;
+      const float anchor_bottom = placement.anchor.y + placement.anchor.height;
+      const float gap = std::max(0.0F, placement.gap);
+      const float below = viewport_height - vertical_margin - anchor_bottom - gap;
+      const float above = placement.anchor.y - vertical_margin - gap;
+      const float right = viewport_width - horizontal_margin - anchor_right - gap;
+      const float left = placement.anchor.x - horizontal_margin - gap;
+      if (side == LayerAnchorSide::Below && child_size.height > below && above > below) {
+        side = LayerAnchorSide::Above;
+      } else if (side == LayerAnchorSide::Above && child_size.height > above && below > above) {
+        side = LayerAnchorSide::Below;
+      } else if (side == LayerAnchorSide::Right && child_size.width > right && left > right) {
+        side = LayerAnchorSide::Left;
+      } else if (side == LayerAnchorSide::Left && child_size.width > left && right > left) {
+        side = LayerAnchorSide::Right;
+      }
+
+      switch (side) {
+      case LayerAnchorSide::Below:
+        child_offset = {placement.anchor.x, anchor_bottom + gap};
+        break;
+      case LayerAnchorSide::Above:
+        child_offset = {placement.anchor.x, placement.anchor.y - child_size.height - gap};
+        break;
+      case LayerAnchorSide::Right:
+        child_offset = {anchor_right + gap, placement.anchor.y};
+        break;
+      case LayerAnchorSide::Left:
+        child_offset = {placement.anchor.x - child_size.width - gap, placement.anchor.y};
+        break;
+      }
+      child_offset.x = std::clamp(
+          child_offset.x,
+          horizontal_margin,
+          std::max(horizontal_margin, viewport_width - horizontal_margin - child_size.width)
+      );
+      child_offset.y = std::clamp(
+          child_offset.y,
+          vertical_margin,
+          std::max(vertical_margin, viewport_height - vertical_margin - child_size.height)
+      );
+      break;
+    }
+    }
+    result.Place(child, child_offset);
+    result.SetSize(constraints.Constrain({viewport_width, viewport_height}));
     return result;
   }
 };
@@ -388,6 +543,9 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
     }
     hook(root);
   }
+  if (definition.options.show_debug_overlay) {
+    InstallDebugOverlay(root);
+  }
 }
 
 Runtime::~Runtime() {
@@ -397,83 +555,13 @@ Runtime::~Runtime() {
   }
   state_->pointer_sessions_.clear();
   state_->hovered_extension_.reset();
+  state_->layer_controller_.Disconnect();
   state_->mounted_root_.reset();
-  state_->layers_.clear();
   state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
   state_->root_services_.clear();
-  state_->layer_controller_.Disconnect();
-}
-
-LayerId
-Runtime::AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment) {
-  if (!content) {
-    throw std::invalid_argument("HuxerUI layer content factory must not be empty");
-  }
-  const LayerId id = state_->next_layer_id_++;
-  state_->layers_.push_back(
-      LayerEntry{
-          id,
-          options,
-          std::move(content),
-          environment ? std::move(environment) : state_->root_environment_,
-      }
-  );
-  if (!state_->composing_root_ || state_->layer_snapshot_taken_) {
-    InvalidateRoot();
-  }
-  return id;
-}
-
-bool Runtime::UpdateLayer(LayerId id, ViewFactory content) {
-  if (!content) {
-    throw std::invalid_argument("HuxerUI layer content factory must not be empty");
-  }
-  const auto found = std::find_if(state_->layers_.begin(), state_->layers_.end(), [id](const LayerEntry& entry) {
-    return entry.id == id;
-  });
-  if (found == state_->layers_.end()) {
-    return false;
-  }
-  found->content = std::move(content);
-  if (!state_->composing_root_ || state_->layer_snapshot_taken_) {
-    InvalidateRoot();
-  }
-  return true;
-}
-
-bool Runtime::UpdateLayer(LayerId id, LayerOptions options, ViewFactory content) {
-  if (!content) {
-    throw std::invalid_argument("HuxerUI layer content factory must not be empty");
-  }
-  const auto found = std::find_if(state_->layers_.begin(), state_->layers_.end(), [id](const LayerEntry& entry) {
-    return entry.id == id;
-  });
-  if (found == state_->layers_.end()) {
-    return false;
-  }
-  found->options = std::move(options);
-  found->content = std::move(content);
-  if (!state_->composing_root_ || state_->layer_snapshot_taken_) {
-    InvalidateRoot();
-  }
-  return true;
-}
-
-bool Runtime::DismissLayer(LayerId id) {
-  const auto found = std::find_if(state_->layers_.begin(), state_->layers_.end(), [id](const LayerEntry& entry) {
-    return entry.id == id;
-  });
-  if (found == state_->layers_.end()) {
-    return false;
-  }
-  state_->layers_.erase(found);
-  if (!state_->composing_root_ || state_->layer_snapshot_taken_) {
-    InvalidateRoot();
-  }
-  return true;
 }
 
 void Runtime::SetViewport(Size viewport) {
@@ -545,7 +633,11 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   state_->app_resources_->UpdateConfiguration(configuration);
   // Mutate the shared root so environments already captured by layers observe the new system locale.
   state_->root_environment_->Set(configuration.locale);
+  for (LayerEntry& entry : state_->layer_controller_.state_->entries) {
+    ++entry.revision;
+  }
   InvalidateRoot();
+  InvalidateLayers();
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
@@ -558,9 +650,14 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   frame.delta_time = std::clamp(frame.delta_time, 0.0, 0.25);
   state_->previous_frame_timestamp_ = frame.timestamp;
   state_->frame_requested_ = false;
-  if (state_->composition_dirty_) {
-    ComposeRoot();
-  } else if (state_->mounted_root_) {
+  // Application and LayerStack composition are independent so transient presentation never executes the root factory.
+  if (state_->application_dirty_) {
+    ComposeApplication();
+  }
+  if (state_->layers_dirty_) {
+    ComposeLayers();
+  }
+  if (state_->mounted_root_) {
     RecomposeDirtyScopes(*state_->mounted_root_);
   }
 
@@ -611,6 +708,21 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   // Text input clients prepare node-local geometry after the final layout, then the runtime converts it to host-view
   // coordinates while synchronizing the platform IME session.
   PrepareExtensionGeometry(*state_->mounted_root_);
+  // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
+  // presentation does not retain geometry from its parent's previous placement.
+  const std::size_t maximum_geometry_layout_passes = state_->layer_controller_.state_->entries.size() + 1;
+  std::size_t geometry_layout_passes = 0;
+  while (state_->mounted_root_->measure_dirty && geometry_layout_passes < maximum_geometry_layout_passes) {
+    ++geometry_layout_passes;
+    PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
+    MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+    LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+    ResolvePresentationTree(*state_->mounted_root_);
+    PrepareExtensionGeometry(*state_->mounted_root_);
+  }
+  if (state_->mounted_root_->measure_dirty) {
+    RequestFrame();
+  }
   RefreshTextInputSession();
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
@@ -644,9 +756,16 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 }
 
 const detail::MountedNode* Runtime::RootNode() const noexcept {
-  return state_->has_application_root_ && state_->mounted_root_ && !state_->mounted_root_->children.empty()
-             ? state_->mounted_root_->children.front().get()
-             : nullptr;
+  if (!state_->mounted_root_) {
+    return nullptr;
+  }
+  const detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
+  for (const auto& child : state_->mounted_root_->children) {
+    if (child.get() != layer_stack) {
+      return child.get();
+    }
+  }
+  return nullptr;
 }
 
 void Runtime::UpdateHoveredExtension(Point position) {
@@ -687,38 +806,39 @@ void Runtime::RefreshInteractionTree() {
   }
 
   ResolveEnabledTree(*state_->mounted_root_, true);
-  const std::optional<LayerId> modal_layer = ActiveModalLayerId();
-  if (state_->active_modal_focus_layer_ != modal_layer) {
-    if (state_->active_modal_focus_layer_.has_value()) {
-      const bool previous_still_present = std::ranges::any_of(state_->layers_, [this](const LayerEntry& entry) {
-        return entry.id == *state_->active_modal_focus_layer_;
-      });
-      if (!previous_still_present) {
-        const auto restore = state_->modal_focus_restore_.find(*state_->active_modal_focus_layer_);
-        if (restore != state_->modal_focus_restore_.end()) {
-          SetFocusedNode(restore->second);
-          state_->modal_focus_restore_.erase(restore);
-        }
+  const std::optional<LayerId> focus_layer = ActiveFocusLayerId();
+  const std::optional<LayerId> previous_focus_layer =
+      state_->layer_focus_stack_.empty() ? std::nullopt : std::optional{state_->layer_focus_stack_.back().id};
+  if (previous_focus_layer != focus_layer) {
+    // Keep nested restoration frames until every higher focus layer leaves, even if a lower layer was removed first.
+    const auto existing = focus_layer.has_value()
+                              ? std::ranges::find(state_->layer_focus_stack_, *focus_layer, &LayerFocusFrame::id)
+                              : state_->layer_focus_stack_.end();
+    if (existing == state_->layer_focus_stack_.end() && focus_layer.has_value()) {
+      state_->layer_focus_stack_.push_back({*focus_layer, state_->focused_node_identity_});
+    } else {
+      std::optional<std::uint64_t> restore_identity;
+      while (!state_->layer_focus_stack_.empty() &&
+             (!focus_layer.has_value() || state_->layer_focus_stack_.back().id != *focus_layer)) {
+        restore_identity = state_->layer_focus_stack_.back().restore_identity;
+        state_->layer_focus_stack_.pop_back();
       }
+      SetFocusedNode(restore_identity);
     }
-    if (modal_layer.has_value() && !state_->modal_focus_restore_.contains(*modal_layer)) {
-      state_->modal_focus_restore_.insert_or_assign(*modal_layer, state_->focused_node_identity_);
-    }
-    state_->active_modal_focus_layer_ = modal_layer;
   }
-  detail::MountedNode* modal_focus_root = ActiveModalFocusRoot();
+  detail::MountedNode* focus_root = ActiveFocusLayerRoot();
   if (state_->focused_node_identity_.has_value()) {
     detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
     if (!focused || !focused->enabled || !focused->focusable ||
-        (modal_focus_root && !ContainsNodeIdentity(*modal_focus_root, focused->identity))) {
+        (focus_root && !ContainsNodeIdentity(*focus_root, focused->identity))) {
       SetFocusedNode(std::nullopt);
     }
   }
-  if (modal_focus_root && !state_->focused_node_identity_.has_value()) {
-    std::vector<detail::MountedNode*> modal_focusable;
-    CollectFocusableNodes(*modal_focus_root, modal_focusable);
-    if (!modal_focusable.empty()) {
-      SetFocusedNode(modal_focusable.front()->identity);
+  if (focus_root && !state_->focused_node_identity_.has_value()) {
+    std::vector<detail::MountedNode*> layer_focusable;
+    CollectFocusableNodes(*focus_root, layer_focusable);
+    if (!layer_focusable.empty()) {
+      SetFocusedNode(layer_focusable.front()->identity);
     }
   }
 
@@ -737,36 +857,88 @@ void Runtime::RefreshInteractionTree() {
   ResolveFocusedFlags(*state_->mounted_root_, state_->focused_node_identity_, state_->focus_visible_);
 }
 
-detail::MountedNode* Runtime::ActiveModalFocusRoot() {
-  if (!state_->mounted_root_) {
+detail::MountedNode* Runtime::ActiveFocusLayerRoot() {
+  if (!state_->mounted_root_ || state_->layer_focus_stack_.empty()) {
     return nullptr;
   }
-  const std::optional<LayerId> modal_id = ActiveModalLayerId();
-  if (!modal_id.has_value()) {
-    return nullptr;
-  }
+  const LayerId focus_id = state_->layer_focus_stack_.back().id;
 
-  const std::string key = "__huxerui_layer_" + std::to_string(*modal_id);
-  for (auto& child : state_->mounted_root_->children) {
-    if (!child->key.has_value()) {
-      continue;
-    }
-    const auto* value = std::get_if<std::string>(&*child->key);
-    if (value && *value == key) {
+  detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
+  if (!layer_stack) {
+    return nullptr;
+  }
+  for (auto& child : layer_stack->children) {
+    if (child->LayoutValueOr<LayerEntryIdValue>(0) == focus_id) {
       return child.get();
     }
   }
   return nullptr;
 }
 
-std::optional<LayerId> Runtime::ActiveModalLayerId() const {
-  std::optional<LayerId> modal_id;
-  for (const LayerEntry& entry : state_->layers_) {
-    if (entry.options.input_policy == LayerInputPolicy::Modal) {
-      modal_id = entry.id;
+std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route) {
+  std::optional<std::uint64_t> candidate;
+  for (auto node = route.rbegin(); node != route.rend(); ++node) {
+    if ((*node)->enabled && (*node)->focusable) {
+      candidate = (*node)->identity;
+      break;
     }
   }
-  return modal_id;
+
+  detail::MountedNode* focus_root = ActiveFocusLayerRoot();
+  if (!focus_root || (candidate.has_value() && ContainsNodeIdentity(*focus_root, *candidate))) {
+    return candidate;
+  }
+  if (state_->focused_node_identity_.has_value() &&
+      ContainsNodeIdentity(*focus_root, *state_->focused_node_identity_)) {
+    return state_->focused_node_identity_;
+  }
+
+  std::vector<detail::MountedNode*> focusable;
+  CollectFocusableNodes(*focus_root, focusable);
+  return focusable.empty() ? std::nullopt : std::optional{focusable.front()->identity};
+}
+
+std::optional<LayerId> Runtime::ActiveFocusLayerId() const {
+  const LayerEntry* active = nullptr;
+  for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
+    if (entry.options.trap_focus && (active == nullptr || LayerPaintsAbove(entry, *active))) {
+      active = &entry;
+    }
+  }
+  return active == nullptr ? std::nullopt : std::optional{active->id};
+}
+
+bool Runtime::HandleTopLayerBack() {
+  const LayerEntry* topmost = nullptr;
+  for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
+    if (entry.options.cancel_policy != LayerCancelPolicy::PassThrough &&
+        (topmost == nullptr || LayerPaintsAbove(entry, *topmost))) {
+      topmost = &entry;
+    }
+  }
+  if (topmost == nullptr) {
+    return false;
+  }
+  if (topmost->options.cancel_policy == LayerCancelPolicy::Consume) {
+    return true;
+  }
+  const LayerId id = topmost->id;
+  const std::function<void()> dismiss = topmost->options.on_dismiss_request;
+  if (dismiss) {
+    dismiss();
+  } else {
+    state_->layer_controller_.Dismiss(id);
+  }
+  return true;
+}
+
+bool Runtime::HandleBack() {
+  if (state_->text_selection_overlay_.state.visible) {
+    HideTextSelectionOverlay();
+    RequestFrame();
+    return true;
+  }
+  return HandleTopLayerBack();
 }
 
 void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible) {
@@ -824,7 +996,7 @@ void Runtime::MoveFocus(bool reverse, bool wrap) {
     return;
   }
   std::vector<detail::MountedNode*> focusable;
-  detail::MountedNode* root = ActiveModalFocusRoot();
+  detail::MountedNode* root = ActiveFocusLayerRoot();
   CollectFocusableNodes(root ? *root : *state_->mounted_root_, focusable);
   if (focusable.empty()) {
     SetFocusedNode(std::nullopt, true);
@@ -963,6 +1135,9 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   if (!state_->mounted_root_) {
     return;
   }
+  if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
+    return;
+  }
   if (event.type == KeyEventType::Down && event.key == Key::Tab && !event.repeat) {
     MoveFocus(event.modifiers.shift);
     RefreshTextInputSession();
@@ -1031,13 +1206,36 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
 }
 
 void Runtime::InvalidateRoot() {
-  state_->composition_dirty_ = true;
+  state_->application_dirty_ = true;
+  RequestFrame();
+}
+
+void Runtime::InvalidateLayers() {
+  state_->layers_dirty_ = true;
+  RequestFrame();
+}
+
+void Runtime::InvalidateLayerPlacement(LayerId id) {
+  if (state_->mounted_root_) {
+    if (detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_)) {
+      const auto found = std::ranges::find_if(layer_stack->children, [id](const auto& child) {
+        return child->template LayoutValueOr<LayerEntryIdValue>(0) == id;
+      });
+      if (found != layer_stack->children.end()) {
+        MarkLayoutDirtyPath(*state_->mounted_root_, (*found)->identity);
+        if (!state_->building_frame_) {
+          RequestFrame();
+        }
+        return;
+      }
+    }
+  }
   RequestFrame();
 }
 
 void Runtime::InvalidateScope(std::uint64_t scope_id) {
   if (scope_id == state_->root_scope_->Id()) {
-    state_->composition_dirty_ = true;
+    state_->application_dirty_ = true;
   }
   RequestFrame();
 }
@@ -1064,35 +1262,11 @@ bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   return layout_changed;
 }
 
-void Runtime::ComposeRoot() {
-  state_->composing_root_ = true;
-  state_->layer_snapshot_taken_ = false;
-  state_->composition_dirty_ = false;
+void Runtime::ComposeApplication() {
+  state_->application_dirty_ = false;
   bool scope_composing = false;
-  bool children_split = false;
-  bool application_reconciled = false;
-  bool application_layout_changed = false;
-  bool layer_layout_changed = false;
-  const bool previous_has_application = state_->has_application_root_;
-  bool next_has_application = previous_has_application;
+  std::unique_ptr<detail::MountedNode> layer_stack;
   std::vector<std::unique_ptr<detail::MountedNode>> application_nodes;
-  std::vector<std::unique_ptr<detail::MountedNode>> layer_nodes;
-
-  const auto restore_root_children = [&] {
-    if (!children_split || !state_->mounted_root_) {
-      return;
-    }
-    auto& children = state_->mounted_root_->children;
-    children.clear();
-    children.reserve(application_nodes.size() + layer_nodes.size());
-    for (auto& node : application_nodes) {
-      children.push_back(std::move(node));
-    }
-    for (auto& node : layer_nodes) {
-      children.push_back(std::move(node));
-    }
-    children_split = false;
-  };
 
   try {
     state_->root_scope_->BeginComposition();
@@ -1107,118 +1281,124 @@ void Runtime::ComposeRoot() {
 
     state_->root_scope_->EndComposition();
     scope_composing = false;
-    next_has_application = static_cast<bool>(application);
-
     if (!state_->mounted_root_) {
       View root = RuntimeRootLayout{};
       state_->mounted_root_ = Mount(root.spec_);
+      View stack = LayerStackLayout{};
+      state_->mounted_root_->children.push_back(Mount(stack.spec_));
     }
 
     auto previous = std::move(state_->mounted_root_->children);
-    if (previous_has_application && !previous.empty()) {
-      application_nodes.push_back(std::move(previous.front()));
+    for (auto& child : previous) {
+      if (child && IsLayerStack(*child)) {
+        layer_stack = std::move(child);
+      } else if (child) {
+        application_nodes.push_back(std::move(child));
+      }
     }
-    const std::size_t layer_start = previous_has_application && !previous.empty() ? 1 : 0;
-    layer_nodes.reserve(previous.size() - layer_start);
-    for (std::size_t index = layer_start; index < previous.size(); ++index) {
-      layer_nodes.push_back(std::move(previous[index]));
+    if (!layer_stack) {
+      View stack = LayerStackLayout{};
+      layer_stack = Mount(stack.spec_);
     }
-    children_split = true;
 
     std::vector<View> application_children;
     if (application) {
       application_children.push_back(std::move(application));
     }
-    application_layout_changed = ReconcileChildren(application_nodes, application_children);
-    application_reconciled = true;
-
-    state_->layer_snapshot_taken_ = true;
-    std::vector<const LayerEntry*> ordered_layers;
-    ordered_layers.reserve(state_->layers_.size());
-    for (const LayerEntry& entry : state_->layers_) {
-      ordered_layers.push_back(&entry);
+    const bool application_layout_changed = ReconcileChildren(application_nodes, application_children);
+    auto& children = state_->mounted_root_->children;
+    children.clear();
+    children.reserve(application_nodes.size() + 1);
+    for (auto& node : application_nodes) {
+      children.push_back(std::move(node));
     }
-    std::stable_sort(ordered_layers.begin(), ordered_layers.end(), [](const LayerEntry* left, const LayerEntry* right) {
-      return left->options.kind < right->options.kind;
-    });
-
-    std::vector<View> layer_children;
-    layer_children.reserve(ordered_layers.size());
-    for (const LayerEntry* entry : ordered_layers) {
-      auto environment = entry->environment ? entry->environment : state_->root_environment_;
-      View layer = Scope([factory = entry->content, environment = std::move(environment)]() mutable {
-        Composer::EnvironmentGuard guard{environment};
-        return factory();
-      });
-      if (entry->options.input_policy == LayerInputPolicy::PassThrough) {
-        layer.spec_->pointer_events_enabled = false;
-      }
-      if (entry->options.kind == LayerKind::Toast) {
-        layer = Stack{std::move(layer)}
-                    .With(
-                        Padding{EdgeInsets{
-                            0.0F,
-                            16.0F,
-                            24.0F,
-                            16.0F,
-                        }},
-                        Align{
-                            HorizontalAlignment::Center,
-                            VerticalAlignment::End,
-                        }
-                    )
-                    .LayoutValue<RuntimeFillsViewport>(true);
-      }
-      if (entry->options.input_policy == LayerInputPolicy::Modal) {
-        layer = std::move(layer).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
-        View modal = Stack{std::move(layer)}
-                         .With(
-                             Align{
-                                 HorizontalAlignment::Center,
-                                 VerticalAlignment::Center,
-                             }
-                         )
-                         .LayoutValue<RuntimeFillsViewport>(true)
-                         .On<ViewEvents::PointerDown>([this,
-                                                       id = entry->id,
-                                                       dismiss = entry->options.dismiss_on_outside_press,
-                                                       on_dismiss_request =
-                                                           entry->options.on_dismiss_request](const PointerEvent&) {
-                           if (dismiss) {
-                             if (on_dismiss_request) {
-                               on_dismiss_request();
-                             } else {
-                               DismissLayer(id);
-                             }
-                           }
-                         });
-        if (entry->options.modal_scrim.has_value()) {
-          modal = std::move(modal).With(Background{*entry->options.modal_scrim});
-        }
-        layer = std::move(modal);
-      }
-      layer_children.push_back(std::move(layer).Key("__huxerui_layer_" + std::to_string(entry->id)));
-    }
-
-    layer_layout_changed = ReconcileChildren(layer_nodes, layer_children);
-    restore_root_children();
-    if (application_layout_changed || layer_layout_changed) {
+    children.push_back(std::move(layer_stack));
+    if (application_layout_changed) {
       state_->mounted_root_->measure_dirty = true;
     }
-    state_->has_application_root_ = next_has_application;
-    state_->composing_root_ = false;
-    state_->layer_snapshot_taken_ = false;
   } catch (...) {
     if (scope_composing) {
       state_->root_scope_->AbortComposition();
     } else {
       state_->root_scope_->Invalidate();
     }
-    restore_root_children();
-    state_->has_application_root_ = application_reconciled ? next_has_application : previous_has_application;
-    state_->composing_root_ = false;
-    state_->layer_snapshot_taken_ = false;
+    if (state_->mounted_root_ && layer_stack) {
+      auto& children = state_->mounted_root_->children;
+      children.clear();
+      for (auto& node : application_nodes) {
+        children.push_back(std::move(node));
+      }
+      children.push_back(std::move(layer_stack));
+    }
     InvalidateRoot();
+    throw;
+  }
+}
+
+void Runtime::ComposeLayers() {
+  state_->layers_dirty_ = false;
+  if (!state_->mounted_root_) {
+    View root = RuntimeRootLayout{};
+    state_->mounted_root_ = Mount(root.spec_);
+    View stack = LayerStackLayout{};
+    state_->mounted_root_->children.push_back(Mount(stack.spec_));
+  }
+  detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
+  if (!layer_stack) {
+    throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
+  }
+
+  try {
+    // Factories may mutate the controller while composing; those mutations mark layers dirty for the next frame.
+    const std::vector<LayerEntry> ordered = OrderedLayerEntries(state_->layer_controller_.state_->entries);
+    std::vector<View> layer_children;
+    layer_children.reserve(ordered.size());
+    for (const LayerEntry& entry : ordered) {
+      auto environment = entry.environment ? entry.environment : state_->root_environment_;
+      View content = Scope([factory = entry.content, environment = std::move(environment)]() mutable {
+        Composer::EnvironmentGuard guard{environment};
+        return factory();
+      });
+      const bool barrier = entry.options.pointer_policy == LayerPointerPolicy::Barrier;
+      if (barrier) {
+        content = std::move(content).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
+      }
+
+      View layer = LayerEntryLayout{std::move(content)}
+                       .LayoutValue<LayerPlacementValue>(entry.placement)
+                       .LayoutValue<LayerEntryIdValue>(entry.id)
+                       .LayoutValue<LayerEntryRevisionValue>(entry.revision);
+      if (barrier) {
+        layer =
+            std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,
+                                                          id = entry.id,
+                                                          dismiss = entry.options.dismiss_on_outside_press,
+                                                          on_dismiss_request =
+                                                              entry.options.on_dismiss_request](const PointerEvent&) {
+              if (!dismiss) {
+                return;
+              }
+              if (on_dismiss_request) {
+                on_dismiss_request();
+              } else {
+                controller.Dismiss(id);
+              }
+            });
+        if (entry.options.barrier_color.has_value()) {
+          layer = std::move(layer).With(Background{*entry.options.barrier_color});
+        }
+      } else if (entry.options.pointer_policy == LayerPointerPolicy::PassThrough) {
+        layer.spec_->pointer_events_enabled = false;
+      }
+      layer_children.push_back(std::move(layer));
+    }
+
+    if (ReconcileLayerChildren(layer_stack->children, layer_children)) {
+      layer_stack->measure_dirty = true;
+      state_->mounted_root_->measure_dirty = true;
+    }
+  } catch (...) {
+    InvalidateLayers();
     throw;
   }
 }
@@ -1412,6 +1592,88 @@ bool Runtime::ReconcileChildren(
   const bool removed = std::ranges::any_of(previous, [](const auto& child) { return child != nullptr; });
   layout_changed = previous.size() != next.size() || removed || layout_changed;
   structure_changed = previous.size() != next.size() || removed || structure_changed;
+  mounted_children = std::move(next);
+  state_->extension_tree_dirty_ = state_->extension_tree_dirty_ || structure_changed;
+  return layout_changed;
+}
+
+bool Runtime::ReconcileLayerChildren(
+    std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+) {
+  const auto declaration_value = [](const View& view, std::type_index key) -> const std::any* {
+    if (!view.spec_) {
+      return nullptr;
+    }
+    const auto found = view.spec_->layout_values.find(key);
+    return found == view.spec_->layout_values.end() ? nullptr : &found->second.value;
+  };
+  const auto declaration_id = [&declaration_value](const View& view) {
+    const std::any* value = declaration_value(view, typeid(LayerEntryIdValue));
+    const auto* id = value ? std::any_cast<LayerId>(value) : nullptr;
+    if (!id) {
+      throw std::logic_error("HuxerUI LayerStack child is missing its entry identity");
+    }
+    return *id;
+  };
+  const auto declaration_revision = [&declaration_value](const View& view) {
+    const std::any* value = declaration_value(view, typeid(LayerEntryRevisionValue));
+    const auto* revision = value ? std::any_cast<std::uint64_t>(value) : nullptr;
+    if (!revision) {
+      throw std::logic_error("HuxerUI LayerStack child is missing its declaration revision");
+    }
+    return *revision;
+  };
+
+  std::vector<std::unique_ptr<detail::MountedNode>> next;
+  std::vector<std::optional<std::size_t>> origins;
+  next.reserve(incoming_children.size());
+  origins.reserve(incoming_children.size());
+  auto previous = std::move(mounted_children);
+  bool layout_changed = previous.size() != incoming_children.size();
+  bool structure_changed = layout_changed;
+
+  try {
+    for (const View& incoming : incoming_children) {
+      const LayerId id = declaration_id(incoming);
+      const std::uint64_t revision = declaration_revision(incoming);
+      std::optional<std::size_t> origin;
+      for (std::size_t index = 0; index < previous.size(); ++index) {
+        if (previous[index] && previous[index]->LayoutValueOr<LayerEntryIdValue>(0) == id) {
+          origin = index;
+          break;
+        }
+      }
+
+      if (!origin.has_value()) {
+        std::unique_ptr<detail::MountedNode> candidate;
+        layout_changed = Reconcile(candidate, incoming.spec_) || layout_changed;
+        next.push_back(std::move(candidate));
+        structure_changed = true;
+      } else if (previous[*origin]->LayoutValueOr<LayerEntryRevisionValue>(0) == revision) {
+        layout_changed = *origin != next.size() || layout_changed;
+        structure_changed = *origin != next.size() || structure_changed;
+        next.push_back(std::move(previous[*origin]));
+      } else {
+        layout_changed = Reconcile(previous[*origin], incoming.spec_) || layout_changed;
+        layout_changed = *origin != next.size() || layout_changed;
+        structure_changed = *origin != next.size() || structure_changed;
+        next.push_back(std::move(previous[*origin]));
+      }
+      origins.push_back(origin);
+    }
+  } catch (...) {
+    for (std::size_t index = 0; index < next.size(); ++index) {
+      if (origins[index].has_value()) {
+        previous[*origins[index]] = std::move(next[index]);
+      }
+    }
+    mounted_children = std::move(previous);
+    throw;
+  }
+
+  const bool removed = std::ranges::any_of(previous, [](const auto& child) { return child != nullptr; });
+  layout_changed = removed || layout_changed;
+  structure_changed = removed || structure_changed;
   mounted_children = std::move(next);
   state_->extension_tree_dirty_ = state_->extension_tree_dirty_ || structure_changed;
   return layout_changed;

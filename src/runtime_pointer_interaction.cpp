@@ -24,15 +24,6 @@ bool SupportsHover(PointerDeviceKind device_kind) {
   return device_kind == PointerDeviceKind::Mouse || device_kind == PointerDeviceKind::Pen;
 }
 
-std::optional<std::uint64_t> FocusTarget(const std::vector<MountedNode*>& route) {
-  for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    if ((*node)->enabled && (*node)->focusable) {
-      return (*node)->identity;
-    }
-  }
-  return std::nullopt;
-}
-
 void RecordScrollVelocity(PointerSession& session, float delta, double timestamp) {
   const double elapsed = timestamp - session.velocity_sample_timestamp;
   session.velocity_sample_timestamp = timestamp;
@@ -201,8 +192,9 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, b
 
   std::vector<detail::MountedNode*> route;
   const std::optional<std::uint64_t> released =
-      state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, position, route) ? FocusTarget(route)
-                                                                                          : std::nullopt;
+      state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, position, route)
+          ? ResolvePointerFocusTarget(route)
+          : std::nullopt;
   if (released != pending) {
     return false;
   }
@@ -268,7 +260,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   session.last_position = event.position;
   session.device_kind = event.device_kind;
   session.velocity_sample_timestamp = state_->platform_->Now();
-  const std::optional<std::uint64_t> focus_target = FocusTarget(route);
+  const std::optional<std::uint64_t> focus_target = ResolvePointerFocusTarget(route);
   if (event.device_kind == PointerDeviceKind::Touch) {
     session.focus_pending = true;
     session.pending_focus_identity = focus_target;

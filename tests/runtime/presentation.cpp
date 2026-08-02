@@ -91,13 +91,13 @@ View TestButtonTheme(std::function<View()> content);
 View ThemedReader() {
   HUXERUI_SCOPE({
     observed_theme_color = UseTheme().colors.primary;
-    return Column{
-        Text("theme text"),
-        Text("theme title", TextRole::Title),
-        Text("theme label", TextRole::Label),
-        Button("theme button"),
-        Text("explicit text").With(huxerui::Foreground{Color::Rgb(255, 140, 0)}, huxerui::FontSize{29.0F}),
-        TestButtonTheme(NestedThemeReader),
+    return Column {
+      Text("theme text"),
+      Text("theme title", TextRole::Title),
+      Text("theme label", TextRole::Label),
+      Button("theme button"),
+      Text("explicit text").With(huxerui::Foreground{Color::Rgb(255, 140, 0)}, huxerui::FontSize{29.0F}),
+      TestButtonTheme(NestedThemeReader),
     };
   });
 }
@@ -149,10 +149,10 @@ View FlatDarkThemeApp() {
       TestButtonTheme,
       HUXERUI_THEME(
           huxerui::FlatDarkTheme,
-          Column{
-              Text("dark body"),
-              Text("dark title", TextRole::Title),
-              Button("dark button"),
+          Column {
+            Text("dark body"),
+            Text("dark title", TextRole::Title),
+            Button("dark button"),
           }
       )
   );
@@ -175,15 +175,15 @@ View ToggleApp() {
   auto switch_value = UseState(false);
   checkbox_checked = checkbox;
   switch_checked = switch_value;
-  return Row{
-      Checkbox(checkbox).OnChanged([checkbox](bool checked) {
-        ++checkbox_changes;
-        checkbox = checked;
-      }),
-      Switch(switch_value).On<ToggleEvents::Changed>([switch_value](bool checked) {
-        ++switch_changes;
-        switch_value = checked;
-      }),
+  return Row {
+    Checkbox(checkbox).OnChanged([checkbox](bool checked) {
+      ++checkbox_changes;
+      checkbox = checked;
+    }),
+    Switch(switch_value).On<ToggleEvents::Changed>([switch_value](bool checked) {
+      ++switch_changes;
+      switch_value = checked;
+    }),
   }
       .With(huxerui::Spacing{8.0F});
 }
@@ -191,8 +191,8 @@ View ToggleApp() {
 View DeterminateProgressCircleApp() {
   auto progress = UseState(0.25F);
   progress_circle_value = progress;
-  return Row{
-      ProgressCircle(progress),
+  return Row {
+    ProgressCircle(progress),
   };
 }
 
@@ -242,21 +242,21 @@ template <class Factory> View FocusTestTheme(Factory&& content) {
 View FocusContent() {
   HUXERUI_SCOPE({
     first_focus_enabled = UseState(true);
-    return Column{
-        Button("first")
-            .With(Enabled{first_focus_enabled})
-            .OnClick([] { ++first_keyboard_clicks; })
-            .On<ViewEvents::FocusChanged>([](bool focused) {
-              focus_changes.push_back(focused ? "first:on" : "first:off");
-            }),
-        Button("disabled").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
-        Button("third").OnClick([] { ++third_keyboard_clicks; }).On<ViewEvents::FocusChanged>([](bool focused) {
-          focus_changes.push_back(focused ? "third:on" : "third:off");
-        }),
-        Text("custom focus")
-            .With(Focusable{})
-            .OnClick([] { ++custom_keyboard_clicks; })
-            .On<ViewEvents::KeyDown>([](const KeyEvent& event) { received_keys.push_back(event.key); }),
+    return Column {
+      Button("first")
+          .With(Enabled{first_focus_enabled})
+          .OnClick([] { ++first_keyboard_clicks; })
+          .On<ViewEvents::FocusChanged>([](bool focused) {
+            focus_changes.push_back(focused ? "first:on" : "first:off");
+          }),
+      Button("disabled").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
+      Button("third").OnClick([] { ++third_keyboard_clicks; }).On<ViewEvents::FocusChanged>([](bool focused) {
+        focus_changes.push_back(focused ? "third:on" : "third:off");
+      }),
+      Text("custom focus")
+          .With(Focusable{})
+          .OnClick([] { ++custom_keyboard_clicks; })
+          .On<ViewEvents::KeyDown>([](const KeyEvent& event) { received_keys.push_back(event.key); }),
     };
   });
 }
@@ -266,15 +266,15 @@ View FocusApp() {
 }
 
 View DisabledHitTestApp() {
-  return Stack{
-      Button("underlying").OnClick([] { ++underlying_clicks; }),
-      Button("disabled overlay").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
+  return Stack {
+    Button("underlying").OnClick([] { ++underlying_clicks; }),
+    Button("disabled overlay").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
   };
 }
 
 View DisabledSubtreeApp() {
-  return Column{
-      Button("disabled child").With(Enabled{true}).OnClick([] { ++disabled_clicks; }),
+  return Column {
+    Button("disabled child").With(Enabled{true}).OnClick([] { ++disabled_clicks; }),
   }
       .With(Enabled{false});
 }
@@ -344,21 +344,21 @@ View AnimationApp() {
 View TransformAnimationApp() {
   transform_animation_target = UseState(false);
   const bool transformed = transform_animation_target.Get();
-  return Stack{
-      Text("transform")
-          .With(
-              huxerui::Frame{80.0F, 40.0F},
-              Scale{AnimateTo(transformed ? 2.0F : 1.0F, TweenSpec{1.0, Easing::Linear})},
-              Rotation{AnimateTo(transformed ? 90.0F : 0.0F, TweenSpec{1.0, Easing::Linear})}
-          ),
+  return Stack {
+    Text("transform")
+        .With(
+            huxerui::Frame{80.0F, 40.0F},
+            Scale{AnimateTo(transformed ? 2.0F : 1.0F, TweenSpec{1.0, Easing::Linear})},
+            Rotation{AnimateTo(transformed ? 90.0F : 0.0F, TweenSpec{1.0, Easing::Linear})}
+        ),
   };
 }
 
 View TransformedHitTestApp() {
-  return Stack{
-      Button("transformed").With(huxerui::Frame{80.0F, 40.0F}, Scale{1.5F}, Rotation{45.0F}).OnClick([] {
-        ++transformed_clicks;
-      }),
+  return Stack {
+    Button("transformed").With(huxerui::Frame{80.0F, 40.0F}, Scale{1.5F}, Rotation{45.0F}).OnClick([] {
+      ++transformed_clicks;
+    }),
   };
 }
 
@@ -367,8 +367,8 @@ View IndicationApp() {
 }
 
 View PresentedIndicationApp() {
-  return Stack{
-      Button("presented").With(huxerui::Frame{80.0F, 40.0F}, Offset{Point{50.0F, 0.0F}}, Opacity{0.5F}).OnClick([] {}),
+  return Stack {
+    Button("presented").With(huxerui::Frame{80.0F, 40.0F}, Offset{Point{50.0F, 0.0F}}, Opacity{0.5F}).OnClick([] {}),
   };
 }
 
@@ -384,13 +384,13 @@ View NodeExtensionPruningApp() {
   auto visible = UseState(true);
   show_modifier_branch = visible;
   if (visible.Get()) {
-    return Column{
-        Text("plain"),
-        Button("interactive").OnClick([] {}),
+    return Column {
+      Text("plain"),
+      Button("interactive").OnClick([] {}),
     };
   }
-  return Column{
-      Text("plain"),
+  return Column {
+    Text("plain"),
   };
 }
 
@@ -1124,12 +1124,12 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
 
   const LayerId dialog = saved_dialogs->Show(
       [] {
-        return Column{
-            Button("first dialog focus").OnClick([] { ++first_dialog_clicks; }),
-            Button("second dialog focus").OnClick([] { ++second_dialog_clicks; }),
+        return Column {
+          Button("first dialog focus").OnClick([] { ++first_dialog_clicks; }),
+          Button("second dialog focus").OnClick([] { ++second_dialog_clicks; }),
         };
       },
-      huxerui::DialogOptions{false}
+      huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
   runtime.BuildFrame();
 
@@ -1174,8 +1174,11 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   installed_root_service.reset();
   observed_root_service_value = 0;
   root_app_clicks = 0;
+  int toast_compositions = 0;
+  int modal_compositions = 0;
 
   huxerui::AppOptions options;
+  options.show_debug_overlay = false;
   options.root_hooks.push_back([](huxerui::RootContext& root) {
     installed_root_service = std::make_shared<TestRootService>(TestRootService{
         &root.Layers(),
@@ -1191,18 +1194,61 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   REQUIRE(observed_root_service_value == 42);
   REQUIRE(ContainsText(initial, "application"));
 
-  const LayerId toast = installed_root_service->layers->Attach(LayerKind::Toast, [] { return Text("toast"); });
+  const LayerId toast = installed_root_service->layers->Attach(
+      LayerOptions{
+          .level = LayerLevel::Notification,
+          .pointer_policy = LayerPointerPolicy::PassThrough,
+      },
+      [&toast_compositions] {
+        ++toast_compositions;
+        return Text("toast");
+      }
+  );
   const FlattenedScene& with_toast = runtime.BuildFrame();
+  REQUIRE(toast_compositions == 1);
   REQUIRE(ContainsText(with_toast, "application"));
   REQUIRE(ContainsText(with_toast, "toast"));
 
-  const LayerId modal = installed_root_service->layers->Attach(LayerKind::Modal, [] { return Text("modal"); });
-  runtime.BuildFrame();
+  const LayerId modal = installed_root_service->layers->Attach(
+      LayerOptions{
+          .level = LayerLevel::Presentation,
+          .pointer_policy = LayerPointerPolicy::Barrier,
+          .trap_focus = true,
+      },
+      [&modal_compositions] {
+        ++modal_compositions;
+        return Text("modal");
+      }
+  );
+  const FlattenedScene& with_modal = runtime.BuildFrame();
+  REQUIRE(toast_compositions == 1);
+  REQUIRE(modal_compositions == 1);
+  std::vector<std::string> painted_text;
+  for (const PaintCommand& command : with_modal.Commands()) {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
+      painted_text.push_back(text->text);
+    }
+  }
+  const auto modal_position = std::ranges::find(painted_text, "modal");
+  const auto toast_position = std::ranges::find(painted_text, "toast");
+  REQUIRE(modal_position != painted_text.end());
+  REQUIRE(toast_position != painted_text.end());
+  REQUIRE(modal_position < toast_position);
   ClickAt(runtime, {20.0F, 20.0F}, 82);
   REQUIRE(root_app_clicks == 0);
 
+  REQUIRE(installed_root_service->layers->Update(modal, [&modal_compositions] {
+    ++modal_compositions;
+    return Text("updated modal");
+  }));
+  const FlattenedScene& updated_modal = runtime.BuildFrame();
+  REQUIRE(ContainsText(updated_modal, "updated modal"));
+  REQUIRE(toast_compositions == 1);
+  REQUIRE(modal_compositions == 2);
+
   REQUIRE(installed_root_service->layers->Dismiss(modal));
   runtime.BuildFrame();
+  REQUIRE(toast_compositions == 1);
   ClickAt(runtime, {20.0F, 20.0F}, 83);
   REQUIRE(root_app_clicks == 1);
 
@@ -1243,7 +1289,10 @@ TEST_CASE("TestToastAndDialogPresentation") {
   const FlattenedScene& expired = runtime.BuildFrame();
   REQUIRE(!ContainsText(expired, "saved"));
 
-  const LayerId dialog = saved_dialogs->Show([] { return Text("command dialog"); }, huxerui::DialogOptions{false});
+  const LayerId dialog = saved_dialogs->Show(
+      [] { return Text("command dialog"); },
+      huxerui::DialogOptions{.dismiss_on_outside_press = false}
+  );
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "command dialog"));
   const DrawRectCommand* scrim = FindRect(shown, Rect{0.0F, 0.0F, 200.0F, 100.0F});
@@ -1259,7 +1308,7 @@ TEST_CASE("TestToastAndDialogPresentation") {
         saved_dialog_context = dialog_context;
         return Text("context dialog");
       },
-      huxerui::DialogOptions{false}
+      huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
   const FlattenedScene& contextual = runtime.BuildFrame();
   REQUIRE(ContainsText(contextual, "context dialog"));
@@ -1307,7 +1356,10 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   REQUIRE(toast_text != nullptr);
   REQUIRE(toast_text->style.foreground.red == dark.colors.surface.red);
 
-  saved_dialogs->Show([] { return Text("dark dialog"); }, huxerui::DialogOptions{false});
+  saved_dialogs->Show(
+      [] { return Text("dark dialog"); },
+      huxerui::DialogOptions{.dismiss_on_outside_press = false}
+  );
   const FlattenedScene& dialog = runtime.BuildFrame();
   const DrawRectCommand* scrim = FindRect(dialog, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);

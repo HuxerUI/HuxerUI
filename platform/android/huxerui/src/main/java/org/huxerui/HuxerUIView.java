@@ -280,6 +280,9 @@ public final class HuxerUIView extends View {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return super.onKeyDown(keyCode, event);
+        }
         if (nativeHandle == 0L) {
             return super.onKeyDown(keyCode, event);
         }
@@ -289,11 +292,18 @@ public final class HuxerUIView extends View {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return super.onKeyUp(keyCode, event);
+        }
         if (nativeHandle == 0L) {
             return super.onKeyUp(keyCode, event);
         }
         sendKey(event, false);
         return true;
+    }
+
+    public boolean handleBack() {
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle);
     }
 
     @Override
@@ -1082,4 +1092,6 @@ public final class HuxerUIView extends View {
 
     private static native void nativeKey(long handle, boolean down, int keyCode, byte[] text, boolean shift,
             boolean control, boolean alt, boolean meta, boolean repeat);
+
+    private static native boolean nativeHandleBack(long handle);
 }

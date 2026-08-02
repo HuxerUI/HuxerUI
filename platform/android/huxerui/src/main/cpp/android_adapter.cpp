@@ -795,6 +795,10 @@ public:
     });
   }
 
+  bool HandleBack() {
+    return runtime_.HandleBack();
+  }
+
   bool ApplyTextInputCommand(
       TextInputSessionId session_id,
       AndroidTextInputOperation operation,
@@ -1034,6 +1038,19 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_huxerui_HuxerUIView_nativeHandleBack(JNIEnv* environment, jclass, jlong handle) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      return session->HandleBack() ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
   }
 }
 

@@ -89,9 +89,56 @@ struct TextMeasurerService {
 };
 
 void InstallBuiltinPresentation(RootContext& root);
+void InstallDebugOverlay(RootContext& root);
 
-struct LayerControllerState {
-  Runtime* runtime = nullptr;
+enum class LayerPlacementKind : std::uint8_t {
+  Natural,
+  Center,
+  BottomCenter,
+  Fill,
+  Anchored,
+};
+
+enum class LayerAnchorSide : std::uint8_t {
+  Below,
+  Above,
+  Right,
+  Left,
+};
+
+struct LayerPlacement {
+  LayerPlacementKind kind = LayerPlacementKind::Natural;
+  Rect anchor;
+  LayerAnchorSide preferred_side = LayerAnchorSide::Below;
+  float gap = 0.0F;
+  float viewport_margin = 0.0F;
+
+  bool operator==(const LayerPlacement&) const = default;
+};
+
+struct LayerPlacementValue {
+  // Anchor geometry mutates this shared value so only the retained layer entry needs layout invalidation.
+  using Value = std::shared_ptr<LayerPlacement>;
+};
+
+struct LayerEntryIdValue {
+  // LayerStack retains entries by id and skips unchanged content factories by revision.
+  using Value = LayerId;
+};
+
+struct LayerEntryRevisionValue {
+  using Value = std::uint64_t;
+};
+
+struct LayerEntry {
+  LayerId id = 0;
+  std::uint64_t sequence = 0;
+  std::uint64_t revision = 1;
+  LayerOptions options;
+  ViewFactory content;
+  std::shared_ptr<const Environment> environment;
+  // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
+  std::shared_ptr<LayerPlacement> placement;
 };
 
 template <std::floating_point T> class AnimatedValue {
@@ -806,16 +853,21 @@ struct TextSelectionOverlay {
   TextSelectionOverlayState state;
 };
 
-struct LayerEntry {
+struct LayerFocusFrame {
   LayerId id = 0;
-  LayerOptions options;
-  ViewFactory content;
-  std::shared_ptr<const Environment> environment;
+  std::optional<std::uint64_t> restore_identity;
 };
 
 } // namespace huxerui::detail
 
 namespace huxerui {
+
+struct LayerController::State {
+  Runtime* runtime = nullptr;
+  std::vector<detail::LayerEntry> entries;
+  LayerId next_id = 1;
+  std::uint64_t next_sequence = 1;
+};
 
 struct Runtime::State {
   State(
@@ -836,15 +888,13 @@ struct Runtime::State {
   std::unordered_set<std::type_index> root_service_types_;
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
-  std::vector<detail::LayerEntry> layers_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
   Size committed_viewport_;
   bool has_committed_scene_snapshot_ = false;
-  bool composition_dirty_ = true;
-  bool composing_root_ = false;
-  bool layer_snapshot_taken_ = false;
+  bool application_dirty_ = true;
+  bool layers_dirty_ = true;
   bool extension_tree_dirty_ = true;
   bool scroll_motion_active_ = false;
   bool building_frame_ = false;
@@ -853,8 +903,6 @@ struct Runtime::State {
   std::optional<double> previous_frame_timestamp_;
   std::uint64_t next_node_identity_ = 1;
   std::uint64_t next_scope_identity_ = 2;
-  LayerId next_layer_id_ = 1;
-  bool has_application_root_ = false;
   std::optional<detail::NodeExtensionHandle> hovered_extension_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
@@ -864,8 +912,7 @@ struct Runtime::State {
   detail::TextSelectionGestureState text_selection_gesture_;
   detail::TextSelectionOverlay text_selection_overlay_;
   TextInputSessionId next_text_input_session_id_ = 1;
-  std::optional<LayerId> active_modal_focus_layer_;
-  std::unordered_map<LayerId, std::optional<std::uint64_t>> modal_focus_restore_;
+  std::vector<detail::LayerFocusFrame> layer_focus_stack_;
 };
 
 } // namespace huxerui

@@ -9,10 +9,10 @@ Current implementation status:
 - Generic View modifiers, node extension reconciliation, frame callbacks, pointer observation, foreground painting, and third-party descriptors are implemented.
 - ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
-- The synthetic RuntimeRoot, fixed layer ordering, RootHook services, Toast, command and declarative Dialog presentation are implemented.
+- RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Retained exit transitions, keyframes, decay animation, platform Back handling, and advanced Toast queue policy remain follow-up work.
+- Retained exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and richer debug metrics remain follow-up work.
 
 The design has four goals:
 
@@ -28,8 +28,7 @@ Each window owns one internal runtime root:
 ```text
 RuntimeRoot
 ├── Root Environment
-├── ContentHost
-│   └── application MountedNode tree
+├── application MountedNode tree
 └── Layer stack
     ├── popup entries
     ├── modal entries
@@ -750,38 +749,116 @@ Theme switching initially updates values directly. Per-frame animated Theme inte
 
 ## RuntimeRoot and the layer stack
 
-`RuntimeRoot` owns the application content and one shared layer stack. This stack is the only global presentation container:
+`RuntimeRoot` owns the application content and one shared layer stack. This stack is the only global presentation container.
+
+### LayerStack ownership and ordering
+
+`RuntimeRoot` keeps the application root view directly and one internal `LayerStack`; it does not introduce an application host, slot, scope wrapper, or portal abstraction:
+
+```text
+RuntimeRoot
+|-- application root view
+`-- LayerStack
+    |-- Presentation entries
+    |-- Notification entries
+    `-- System entries
+```
+
+Layer ordering describes broad drawing levels rather than concrete presentation components:
 
 ```cpp
-enum class LayerKind {
-  Popup,
-  Modal,
-  Toast,
+enum class LayerLevel {
+  Presentation,
+  Notification,
   System,
 };
-```
 
-Each entry owns independent identity and composition:
+enum class LayerPointerPolicy {
+  PassThrough,
+  Content,
+  Barrier,
+};
 
-```cpp
-struct LayerEntry {
-  LayerId id;
-  LayerOptions options;
-  ViewFactory content;
-  std::shared_ptr<const Environment> environment;
+enum class LayerCancelPolicy {
+  PassThrough,
+  Consume,
+  Dismiss,
 };
 ```
 
-Layer entries have their own `RecomposeScope`. Showing a Toast or Dialog does not invalidate the application root scope.
+`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient messages such as Toast. `System` contains ordinary HuxerUI diagnostic UI such as the debug banner and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
 
-Paint follows layer order. Hit testing walks layers in reverse paint order:
+Layer options separate stacking, pointer behavior, focus containment, and dismissal:
 
-- A Toast passes input through by default.
-- A Popup only intercepts input inside its bounds.
-- A modal barrier prevents input from reaching lower layers.
-- The System layer is reserved for framework and diagnostic UI.
+```cpp
+struct LayerOptions {
+  LayerLevel level = LayerLevel::Presentation;
+  LayerPointerPolicy pointer_policy = LayerPointerPolicy::Content;
+  bool trap_focus = false;
+  bool dismiss_on_outside_press = false;
+  LayerCancelPolicy cancel_policy = LayerCancelPolicy::PassThrough;
+  std::function<void()> on_dismiss_request;
+  std::optional<Color> barrier_color;
+};
+```
 
-Dismissed entries are currently removed immediately. Retained exit presentation belongs to the deferred transition model.
+Pointer `PassThrough` never participates in hit testing. `Content` allows uncovered areas to reach lower layers. `Barrier` consumes input outside the presented content and optionally requests dismissal. A dismissible or colored barrier requires `Barrier`.
+
+Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the native window. Toast and passive diagnostic content pass through. Future page navigation extends this same Runtime-owned chain after layers. Only a completely unhandled request reaches the platform fallback.
+
+Desktop adapters map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback and asks `Runtime::HandleBack()` before invoking its native fallback. `HuxerUIView` only exposes `handleBack()`; an embedded host decides when to call it and owns any unhandled behavior. Runtime never pushes Back-handler state into a platform adapter.
+
+Focus follows actual paint order rather than raw insertion order. The topmost `trap_focus` entry excludes lower entries and application content from focus traversal while still allowing higher System content to interact. Dismissing Menu over Dialog restores Dialog focus; dismissing Dialog then restores the previous application focus when that node is still valid.
+
+`LayerController::State` owns layer entries, identifiers, and attachment sequence. `LayerController` mutates that shared state directly and asks Runtime to invalidate the layer stack. Runtime owns the corresponding mounted nodes, layout, interaction tree, and RenderScene state. Disconnecting the controller clears retained factories and makes copies that outlive Runtime fail safely.
+
+Application and layer invalidation remain separate:
+
+```text
+application_dirty -> compose the application root factory
+layers_dirty      -> reconcile ordered LayerStack entries
+dirty scope       -> recompose only that mounted scope
+```
+
+Attaching, updating, or dismissing a LayerEntry must not execute the application root factory. Each entry owns an independent `RecomposeScope`. Application composition may attach an entry that is included later in the same frame. Mutations after the layer snapshot schedule another frame instead of recursively composing layers.
+
+Concrete presentation policy remains outside Runtime. Typed per-window services build entries on the common controller:
+
+```text
+UseToast()       -> Notification, pass-through, timed bottom placement
+UseDialog()      -> Presentation, modal barrier, centered content
+UseBottomSheet() -> Presentation, modal barrier, bottom content
+UsePopup()       -> Presentation, anchored arbitrary content
+UseMenu()        -> Presentation, anchored menu semantics and focus
+```
+
+These typed handles are the primary public interaction model. Having several discoverable `UseXxx()` functions does not create several layer systems; each service shares LayerController, ordering, Environment capture, focus, input, and invalidation. The design does not add a generic `UsePresentation()`, public `UseModal()`, `UseLayers()`, or declarative portal solely to reduce the number of typed entry points.
+
+`UseXxx()` captures the current Environment while composing and returns a lightweight handle that can be retained by an event callback. Showing content later uses that captured Theme, Locale, resources, and third-party values. Services installed through RootHook use the root Environment unless their typed handle captures a narrower one.
+
+Popup and Menu handles expose a retained anchor modifier and point-based presentation:
+
+```cpp
+auto menu = UseMenu();
+
+return Button("More")
+    .With(menu.Anchor())
+    .OnClick([menu] {
+      menu.Show([](MenuContext context) {
+        return Button("Rename").OnClick([context] {
+          context.Dismiss();
+        });
+      });
+    });
+```
+
+The anchor modifier records final PresentationBounds without creating a layer. `Show()` attaches the entry and follows those bounds. `ShowAt()` supports context menus and pointer-position popups. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` and `MenuContext` dismiss their own entry without retaining a `LayerId` or recomposing application state. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses the entry. Placement uses the measured popup size, preferred side, viewport margin, and edge flipping without introducing a general cross-tree layout dependency.
+
+Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, and Environment machinery, while their layout, surface, motion, and options remain component-specific. The existing command-oriented `UseDialog()` path is the primary ergonomic model for the revised design.
+
+The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its rotated top-right banner toggles a shadowed upper-left metrics panel within the entry's own state. The panel remains below the top system-bar region on edge-to-edge hosts. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime frame statistics and optional platform process metrics belong to a separate debug metrics service, not LayerController.
+
+Dismissed entries are removed immediately. Retained exit presentation belongs to the deferred transition model.
 
 ## RootHook
 
@@ -811,7 +888,6 @@ HUXERUI_APP(
     {
         .root_hooks = {
             InstallXxxToast(),
-            InstallDebugPanel(),
         },
     })
 ```
@@ -833,12 +909,15 @@ RootHook InstallXxxToast(XxxToastOptions options = {})
 A persistent global component can attach through `LayerController`:
 
 ```cpp
-RootHook InstallDebugPanel()
+RootHook InstallGlobalBanner()
 {
   return [](RootContext& root) {
     root.Layers().Attach(
-        LayerKind::System,
-        DebugPanel);
+        LayerOptions{
+            .level = LayerLevel::System,
+            .pointer_policy = LayerPointerPolicy::PassThrough,
+        },
+        GlobalBanner);
   };
 }
 ```
@@ -853,7 +932,7 @@ Duplicate service types are rejected rather than silently replaced.
 
 Root hooks run once in declaration order. Runtime owns the provided services and attached entries. On window destruction, Runtime removes content and layers before destroying services in reverse registration order. A service uses its destructor to release external subscriptions.
 
-HuxerUI installs its built-in Toast and Dialog services for every Runtime before application root hooks run. Applications use `UseToast()` and `UseDialog()` directly; root hooks remain the extension mechanism for third-party services and global components.
+HuxerUI installs its built-in Toast, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use their typed `UseXxx()` handles directly; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
 RootHook does not provide:
 
@@ -977,7 +1056,7 @@ The current extension points are:
 | Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and `LayerController` |
-| Toast or Dialog library | A service backed by the Runtime layer stack |
+| Typed presentation library | A service backed by the Runtime LayerStack |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
 
@@ -1029,5 +1108,6 @@ The foundation was introduced through the following sequence:
 - Add the synthetic RuntimeRoot and shared layer stack.
 - Add RootHook service installation.
 - Build Dialog and Toast on the layer stack.
+- Separate application and LayerStack composition, add level ordering, and build BottomSheet, Popup, Menu, and DebugOverlay on the shared controller.
 - Add interaction indications and public animation values.
 - Migrate common View styling to `With()` modifier values.

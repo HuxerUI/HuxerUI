@@ -18,6 +18,7 @@ add_executable(huxerui_tests
         platform/android_text_input.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
+        runtime/layers.cpp
         runtime/layout.cpp
         runtime/presentation.cpp
         runtime/render_scene.cpp

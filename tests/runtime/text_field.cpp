@@ -1964,6 +1964,30 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
   }));
 }
 
+TEST_CASE("TestTextSelectionOverlayHandlesBackBeforePlatformFallback") {
+  ResetTextFieldState();
+  TextFieldClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  Runtime runtime{TextSelectionOverlayApp, platform};
+  runtime.SetViewport({240.0F, 120.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      709,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.5);
+  const FlattenedScene& shown = runtime.BuildFrame();
+  REQUIRE(FindText(shown, "复制") != nullptr);
+
+  REQUIRE(runtime.HandleBack());
+  const FlattenedScene& dismissed = runtime.BuildFrame();
+  REQUIRE(FindText(dismissed, "复制") == nullptr);
+}
+
 TEST_CASE("TestTextFieldSelectionHandleDragExtendsSelection") {
   ResetTextFieldState();
   TextFieldClipboard clipboard;

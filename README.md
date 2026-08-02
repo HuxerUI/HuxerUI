@@ -16,7 +16,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and 
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
 
-HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, custom layouts, and typed extension points.
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
 ## Quick Start
 
@@ -93,7 +93,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Core Concepts](docs/core-concepts.md) | Views, scopes, state, keys, events, modifiers, and Environment |
 | [Layout and Scrolling](docs/layout-and-scrolling.md) | Constraints, ScrollView, controllers, virtualization, and custom layout |
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
-| [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, indications, animation, Toast, and Dialog |
+| [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, animation, layers, and typed presentation services |
 | [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform adapters |
 | [Platform Support](docs/platform-support.md) | Native backends and Runtime boundaries |
 | [Roadmap](docs/roadmap.md) | Framework, platform, SDK, and distribution work |
@@ -123,8 +123,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_horizontal_virtual_list` | Horizontal fixed-extent virtualization |
 | `example_virtual_grid` | Adaptive columns, spans, and large data sets |
 | `example_custom_event` | Typed custom component events |
-| `example_toast` | Per-window Toast presentation |
-| `example_dialog` | Declarative modal presentation |
+| `example_presentation` | Toast, Dialog, BottomSheet, Popup, and Menu presentation |
 | `example_theme` | Material, Flat, nested themes, and style precedence |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Path fill, stroke, clipping, shadows, and Canvas-local drawing |

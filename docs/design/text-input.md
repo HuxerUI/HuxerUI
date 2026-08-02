@@ -778,7 +778,7 @@ The first pointer behavior includes:
 - Drag to extend selection.
 - Preserve pointer cancellation behavior when a parent scroll gesture wins.
 
-Mouse or pen double-click selects a word immediately. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned system overlay above application layers. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application node. It is not a public Layer entry and does not participate in application layer focus or dismissal policy. Magnifiers and more advanced gesture behavior remain incremental.
+Mouse or pen double-click selects a word immediately. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned `FrameworkOverlay` above the shared LayerStack. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application or LayerStack node. It is not a public Layer entry and does not participate in application-layer ordering or focus containment, but Runtime Back routing hides it before consulting public layers. Magnifiers and more advanced gesture behavior remain incremental.
 
 ## Theme
 
@@ -815,7 +815,7 @@ Flat and Material Theme definitions provide their own TextField styles. TextFiel
 
 Text input configuration, selection behavior, and placeholder content are not Theme values.
 
-The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Menu surfaces, typography, shapes, and pressed states use the current Theme. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Material menu items use the shared ripple indication, while Flat menu items use the shared hover and pressed state overlay. Editing actions execute on release; the menu becomes non-interactive until the indication exit animation finishes.
+The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Menu surfaces, typography, shapes, and pressed states use the current Theme. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Material menu items use the shared ripple indication, while Flat menu items use the shared hover and pressed state overlay. Editing actions execute on release; the menu becomes non-interactive until the indication exit animation finishes. The public Menu service has separate LayerStack lifecycle, anchoring, focus, and dismissal; sharing a future menu-item visual component does not move text selection into the public LayerStack.
 
 A collapsed TextField selection uses a caret-anchored menu without selection handles. This allows an empty field to expose Paste when the clipboard contains text. A range selection uses the same menu together with themed start and end handles.
 

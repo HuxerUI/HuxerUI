@@ -129,7 +129,87 @@ return Button("Open").OnClick([dialog] {
 });
 ```
 
-Modal layers trap focus and restore the previously focused node when dismissed. The topmost modal layer controls outside-press dismissal and its scrim.
+Modal layers trap focus and restore the previously focused node when dismissed. The topmost modal layer controls outside-press dismissal and its scrim. Setting `dismiss_on_cancel` to `false` consumes Cancel without dismissing the presentation, so Back or Escape cannot close content behind it or leave the native window. BottomSheet resolves its scrim from the captured `ThemeSpec`; `DialogStyle` affects Dialog only.
 
 For lifecycle and rendering details, see the [architecture design](design/architecture.md).
+
+## Typed presentation services
+
+Command-oriented, per-window services are the primary API for temporary presentation.
+
+Dialog remains explicit and ergonomic rather than being replaced by a generic presentation mode:
+
+```cpp
+auto dialog = UseDialog();
+
+return Button("Delete").OnClick([dialog] {
+  dialog.Show([](DialogContext context) {
+    return Column {
+      Text("Delete this item?"),
+      Button("Cancel").OnClick([context] {
+        context.Dismiss();
+      }),
+    };
+  });
+});
+```
+
+BottomSheet is a separate typed service because bottom placement, sizing, motion, and future drag behavior differ from Dialog:
+
+```cpp
+auto bottom_sheet = UseBottomSheet();
+
+return Button("Actions").OnClick([bottom_sheet] {
+  bottom_sheet.Show([](BottomSheetContext context) {
+    return Column {
+      Text("Actions"),
+      Button("Close").OnClick([context] {
+        context.Dismiss();
+      }),
+    };
+  });
+});
+```
+
+Popup and Menu bind an anchor through a retained modifier and show content from the event that opens it:
+
+```cpp
+auto popup = UsePopup();
+
+return Button("Account")
+    .With(popup.Anchor())
+    .OnClick([popup] {
+      popup.Show([](PopupContext context) {
+        return Button("Close account popup").OnClick([context] {
+          context.Dismiss();
+        });
+      });
+    });
+```
+
+```cpp
+auto menu = UseMenu();
+
+return Button("More")
+    .With(menu.Anchor())
+    .OnClick([menu] {
+      menu.Show([](MenuContext context) {
+        return Button("Rename").OnClick([context] {
+          context.Dismiss();
+        });
+      });
+    });
+```
+
+Popup exposes arbitrary anchored content and configurable outside-press and focus behavior. Menu reuses its positioning foundation while adding a transparent barrier, focus containment, focus restoration, and menu-oriented dismissal policy. Each Popup or Menu handle owns at most one active entry, so calling `Show()` or `ShowAt()` again replaces its previous entry. Their typed contexts dismiss the current entry directly, so application state does not need to retain a `LayerId` or recompose solely to close transient content. The supplied content owns its surface and item styling. Point-based `ShowAt()` supports context menus without a View anchor.
+
+All typed handles capture the current Environment when obtained and can be retained by event callbacks. Dialog, BottomSheet, Popup, and Menu share one internal LayerController and LayerStack; their separate `UseXxx()` names express user-facing semantics rather than separate runtimes or rendering paths.
+
+The API does not add `UsePresentation()`, expose a public generic Modal mode, or require temporary presentation to be declared as ordinary application content. Toast, Dialog, BottomSheet, Popup, and Menu are window-level entries mounted outside the application root while retaining caller Environment values.
+
+## Debug overlay
+
+`AppOptions::show_debug_overlay` controls a persistent built-in System layer. It defaults to enabled in Debug builds and disabled in Release builds, and Runtime installs it after application RootHooks. A rotated, shadowed `Debug` banner at the top right toggles a shadowed upper-left panel that currently shows UI FPS. The panel keeps a top inset so it remains visible on edge-to-edge hosts. Frame-build time, damage ratio, mounted-node count, and optional platform CPU or memory information can be added through a separate metrics service without expanding LayerController.
+
+The badge and panel are ordinary HuxerUI Views in their own layer scope. Opening the panel does not recompose the application root, transparent System-layer regions do not block application input, and closing the panel stops metric sampling while leaving the badge mounted.
 

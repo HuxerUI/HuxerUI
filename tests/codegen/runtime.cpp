@@ -139,7 +139,10 @@ View GeneratedApp() {
 TEST_CASE("Generated scopes run in Runtime") {
   TestPlatform platform;
   Runtime runtime{
-      {.root_factory = GeneratedApp},
+      {
+          .root_factory = GeneratedApp,
+          .options = {.show_debug_overlay = false},
+      },
       platform,
   };
   runtime.SetViewport({320.0F, 240.0F});

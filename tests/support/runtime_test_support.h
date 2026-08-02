@@ -21,6 +21,8 @@ class Runtime;
 
 using huxerui::AnimateTo;
 using huxerui::Axis;
+using huxerui::BottomSheetContext;
+using huxerui::BottomSheetHandle;
 using huxerui::Button;
 using huxerui::ButtonStyle;
 using huxerui::Checkbox;
@@ -51,12 +53,17 @@ using huxerui::Key;
 using huxerui::KeyEvent;
 using huxerui::KeyEventType;
 using huxerui::LayerController;
+using huxerui::LayerCancelPolicy;
 using huxerui::LayerId;
-using huxerui::LayerKind;
+using huxerui::LayerLevel;
+using huxerui::LayerOptions;
+using huxerui::LayerPointerPolicy;
 using huxerui::Layout;
 using huxerui::LayoutContext;
 using huxerui::LayoutResult;
 using huxerui::MainAxisAlignment;
+using huxerui::MenuContext;
+using huxerui::MenuHandle;
 using huxerui::MountedNode;
 using huxerui::NodeExtension;
 using huxerui::Offset;
@@ -69,6 +76,8 @@ using huxerui::PointerEvent;
 using huxerui::PointerEventType;
 using huxerui::PopClipCommand;
 using huxerui::PopTransformCommand;
+using huxerui::PopupContext;
+using huxerui::PopupHandle;
 using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
 using huxerui::PushClipCommand;
@@ -117,9 +126,12 @@ using huxerui::ToastHandle;
 using huxerui::ToggleEvents;
 using huxerui::Transform2D;
 using huxerui::TweenSpec;
+using huxerui::UseBottomSheet;
 using huxerui::UseDialog;
 using huxerui::UseEnvironment;
 using huxerui::UseEvents;
+using huxerui::UseMenu;
+using huxerui::UsePopup;
 using huxerui::UseScrollController;
 using huxerui::UseService;
 using huxerui::UseState;
@@ -211,7 +223,11 @@ private:
 
 class Runtime final {
 public:
-  Runtime(huxerui::RootFactory root_factory, huxerui::PlatformAdapter& platform, huxerui::AppOptions options = {})
+  Runtime(
+      huxerui::RootFactory root_factory,
+      huxerui::PlatformAdapter& platform,
+      huxerui::AppOptions options = {.show_debug_overlay = false}
+  )
       : runtime_(
             {
                 .root_factory = root_factory,
@@ -259,6 +275,10 @@ public:
 
   void HandleKeyEvent(const KeyEvent& event) {
     runtime_.HandleKeyEvent(event);
+  }
+
+  bool HandleBack() {
+    return runtime_.HandleBack();
   }
 
   bool PerformTextInputAction(TextInputSessionId session_id, huxerui::TextInputAction action) {

@@ -1,12 +1,9 @@
 #pragma once
 
-#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <type_traits>
-#include <utility>
 
 #include <huxerui/color.h>
 
@@ -17,34 +14,45 @@ class View;
 class Environment;
 
 namespace detail {
-struct LayerControllerState;
-} // namespace detail
-
+struct LayerAnchorState;
+class BottomSheetService;
+class DebugOverlayInstaller;
 class DialogService;
+class MenuService;
+class PopupService;
 class ToastService;
+struct LayerPlacement;
+} // namespace detail
 
 using LayerId = std::uint64_t;
 using ViewFactory = std::function<View()>;
 
-enum class LayerKind {
-  Popup,
-  Modal,
-  Toast,
+enum class LayerLevel {
+  Presentation,
+  Notification,
   System,
 };
 
-enum class LayerInputPolicy {
+enum class LayerPointerPolicy {
   PassThrough,
   Content,
-  Modal,
+  Barrier,
+};
+
+enum class LayerCancelPolicy {
+  PassThrough,
+  Consume,
+  Dismiss,
 };
 
 struct LayerOptions {
-  LayerKind kind = LayerKind::Popup;
-  LayerInputPolicy input_policy = LayerInputPolicy::Content;
+  LayerLevel level = LayerLevel::Presentation;
+  LayerPointerPolicy pointer_policy = LayerPointerPolicy::Content;
+  bool trap_focus = false;
   bool dismiss_on_outside_press = false;
+  LayerCancelPolicy cancel_policy = LayerCancelPolicy::PassThrough;
   std::function<void()> on_dismiss_request;
-  std::optional<Color> modal_scrim;
+  std::optional<Color> barrier_color;
 };
 
 class LayerController {
@@ -54,43 +62,43 @@ public:
 
   LayerId Attach(LayerOptions options, ViewFactory content) const;
 
-  template <class Factory>
-    requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-  LayerId Attach(LayerKind kind, Factory&& content) const {
-    LayerInputPolicy input_policy = LayerInputPolicy::Content;
-    if (kind == LayerKind::Toast) {
-      input_policy = LayerInputPolicy::PassThrough;
-    } else if (kind == LayerKind::Modal) {
-      input_policy = LayerInputPolicy::Modal;
-    }
-    return Attach(
-        LayerOptions{
-            .kind = kind,
-            .input_policy = input_policy,
-            .dismiss_on_outside_press = false,
-            .on_dismiss_request = {},
-            .modal_scrim = std::nullopt,
-        },
-        ViewFactory(std::forward<Factory>(content))
-    );
-  }
-
   bool Update(LayerId id, ViewFactory content) const;
   bool Update(LayerId id, LayerOptions options, ViewFactory content) const;
   bool Dismiss(LayerId id) const;
 
 private:
-  LayerId
-  AttachCaptured(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment) const;
+  struct State;
+
+  LayerId AttachCaptured(
+      LayerOptions options,
+      ViewFactory content,
+      std::shared_ptr<const Environment> environment,
+      detail::LayerPlacement placement
+  ) const;
+  bool UpdateCaptured(
+      LayerId id, LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment
+  ) const;
+  bool UpdateEntry(
+      LayerId id,
+      std::optional<LayerOptions> options,
+      ViewFactory content,
+      std::optional<std::shared_ptr<const Environment>> environment
+  ) const;
+  bool UpdatePlacement(LayerId id, detail::LayerPlacement placement) const;
 
   explicit LayerController(Runtime& runtime);
   void Disconnect() noexcept;
 
-  std::shared_ptr<detail::LayerControllerState> state_;
+  std::shared_ptr<State> state_;
 
   friend class Runtime;
-  friend class DialogService;
-  friend class ToastService;
+  friend class detail::BottomSheetService;
+  friend class detail::DebugOverlayInstaller;
+  friend class detail::DialogService;
+  friend class detail::MenuService;
+  friend class detail::PopupService;
+  friend class detail::ToastService;
+  friend struct detail::LayerAnchorState;
 };
 
 } // namespace huxerui

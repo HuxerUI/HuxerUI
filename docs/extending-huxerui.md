@@ -98,7 +98,7 @@ Custom editable or selectable components expose `TextInputClient`, `TextSelectio
 
 A root hook installs per-window services without replacing application content. Services can use `LayerController` for presentation above the application tree and are consumed through typed `UseService<Service>()`.
 
-Built-in Toast and Dialog services install automatically. Third-party services should preserve per-window ownership and capture the Environment needed by deferred content.
+Built-in Toast, Dialog, BottomSheet, Popup, and Menu services install automatically and their typed handles capture the current Environment. A third-party service using `LayerController` directly receives the root Environment unless its own typed handle explicitly captures and provides narrower values needed by deferred content.
 
 ## Platform adapters
 

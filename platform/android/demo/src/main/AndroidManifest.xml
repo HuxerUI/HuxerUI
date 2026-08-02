@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:label="HuxerUI"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

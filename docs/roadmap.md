@@ -12,7 +12,7 @@ Framework capability work:
 - Composition-scoped effects with post-commit setup and cleanup semantics
 - Framework string migration, plural messages, and inherited Locale text shaping
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
-- Navigation stacks, scoped navigation controllers, platform back handling, and page transitions
+- Navigation stacks, scoped navigation controllers, navigation-aware predictive Back, and page transitions
 - General-purpose clipping modifiers
 - Event capture, bubbling, and explicit pointer capture
 - Saveable state, keyframe and decay animation, and overscroll effects

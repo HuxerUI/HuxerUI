@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -8,6 +9,7 @@
 
 #include <huxerui/clipboard.h>
 #include <huxerui/event.h>
+#include <huxerui/layer.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/text.h>
@@ -17,17 +19,21 @@
 namespace huxerui {
 
 class PlatformResources;
-class Environment;
 struct ResourceConfiguration;
 
 namespace detail {
 class TextLayout;
-}
+} // namespace detail
 
 struct AppOptions {
   std::string title = "HuxerUI";
   float width = 520.0F;
   float height = 360.0F;
+#if defined(NDEBUG)
+  bool show_debug_overlay = false;
+#else
+  bool show_debug_overlay = true;
+#endif
   std::vector<RootHook> root_hooks;
 };
 
@@ -87,6 +93,7 @@ public:
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
+  bool HandleBack();
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
   [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
   bool PerformTextEditingAction(TextEditingAction action);
@@ -101,10 +108,6 @@ public:
 private:
   struct State;
 
-  LayerId AttachLayer(LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment);
-  bool UpdateLayer(LayerId id, ViewFactory content);
-  bool UpdateLayer(LayerId id, LayerOptions options, ViewFactory content);
-  bool DismissLayer(LayerId id);
   void RequestFrame();
   void RequestFrameAfter(double delay_seconds);
   void NotifyScrollActivity(detail::MountedNode& node);
@@ -121,11 +124,13 @@ private:
   void HandlePointerCancel(const PointerEvent& event);
   void HandlePointerUp(const PointerEvent& event);
   bool CommitPendingTouchFocus(detail::PointerSession& session, Point position, bool record_tap = false);
+  [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void UpdateHoveredExtension(Point position);
   void RefreshInteractionTree();
   bool HandleFocusedTextInputKey(const KeyEvent& event);
-  [[nodiscard]] std::optional<LayerId> ActiveModalLayerId() const;
-  detail::MountedNode* ActiveModalFocusRoot();
+  [[nodiscard]] std::optional<LayerId> ActiveFocusLayerId() const;
+  detail::MountedNode* ActiveFocusLayerRoot();
+  bool HandleTopLayerBack();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
   void MoveFocus(bool reverse, bool wrap = true);
   bool BringTextInputIntoView();
@@ -155,14 +160,20 @@ private:
   void BindExtensionPaintInvalidation(detail::MountedNode& node);
   const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
+  void InvalidateLayers();
+  void InvalidateLayerPlacement(LayerId id);
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
-  void ComposeRoot();
+  void ComposeApplication();
+  void ComposeLayers();
   bool ComposeScope(detail::MountedNode& mounted);
   bool RecomposeDirtyScopes(detail::MountedNode& mounted);
   bool Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<detail::ViewSpec>& incoming);
   std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec>& incoming);
   bool ReconcileChildren(
+      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+  );
+  bool ReconcileLayerChildren(
       std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
   );
   [[nodiscard]] const detail::MountedNode* RootNode() const noexcept;

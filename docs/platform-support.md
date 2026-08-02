@@ -65,6 +65,8 @@ public final class MainActivity extends HuxerUIActivity {}
 
 The application native library is named `huxerui_app`. Loading it registers the immutable `HUXERUI_APP` definition before the activity creates its `HuxerUIView`.
 
+`HuxerUIActivity` owns a lifecycle-bound Android 13 Back callback and forwards Back to the shared Runtime. Applications using this full-screen Activity set `android:enableOnBackInvokedCallback="true"` on their manifest `application` element, as the demo module does. When Runtime returns `false`, the Activity calls its overridable `onUnhandledBack()` fallback, which finishes the Activity with transition by default. On older Android versions, `onBackPressed()` forwards to the same Runtime path before calling the native Activity fallback. An embedded host owns registration itself, may call `HuxerUIView.handleBack()`, and continues its native fallback only when that method returns `false`.
+
 Coordinates remain density independent. The host maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
 Rounded-rectangle shadows use hardware shadow layers on API 28 and later, with density-aware cached alpha masks on older supported versions.
 Arbitrary Paths use the same native Canvas, and Path shadows use hardware layers on API 28 and later with a bounded software mask fallback on older supported versions.
