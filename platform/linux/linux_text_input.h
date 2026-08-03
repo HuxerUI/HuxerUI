@@ -12,8 +12,6 @@ class Runtime;
 
 namespace huxerui::detail {
 
-// Full XIM (X Input Method) client: preedit and commit composition through an
-// input context bound to the host window. Mirrors the Win32 IMM32 adapter.
 class LinuxTextInput final : public PlatformTextInput {
 public:
   LinuxTextInput();
@@ -30,12 +28,8 @@ public:
   [[nodiscard]] bool Active() const noexcept;
   [[nodiscard]] bool Composing() const noexcept;
   void SetFocus(bool focused);
-  // Returns the input context for direct key-to-text translation; the adapter
-  // uses it when no input session is active so the host owns one XIM only.
-  [[nodiscard]] XIC InputContext() const noexcept;
-  // Returns true when the IME consumed the key event; false when the adapter
-  // should dispatch it to the Runtime as a normal key event.
-  [[nodiscard]] bool HandleXKeyEvent(const XKeyEvent& event);
+      [[nodiscard]] XIC InputContext() const noexcept;
+      [[nodiscard]] bool HandleXKeyEvent(const XKeyEvent& event);
 
   void Start(
       TextInputSessionId session_id,

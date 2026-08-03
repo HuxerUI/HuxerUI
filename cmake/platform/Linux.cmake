@@ -11,6 +11,7 @@ function(huxerui_platform_configure)
     pkg_check_modules(HUXERUI_FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
     pkg_check_modules(HUXERUI_PNG REQUIRED IMPORTED_TARGET libpng)
     pkg_check_modules(HUXERUI_JPEG REQUIRED IMPORTED_TARGET libjpeg)
+    pkg_check_modules(HUXERUI_XRANDR REQUIRED IMPORTED_TARGET xrandr)
 
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
@@ -28,6 +29,7 @@ function(huxerui_platform_configure)
             ${HUXERUI_FONTCONFIG_INCLUDE_DIRS}
             ${HUXERUI_PNG_INCLUDE_DIRS}
             ${HUXERUI_JPEG_INCLUDE_DIRS}
+            ${HUXERUI_XRANDR_INCLUDE_DIRS}
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_LINK_LIBRARIES
@@ -41,6 +43,7 @@ function(huxerui_platform_configure)
             PkgConfig::HUXERUI_FONTCONFIG
             PkgConfig::HUXERUI_PNG
             PkgConfig::HUXERUI_JPEG
+            PkgConfig::HUXERUI_XRANDR
             PARENT_SCOPE
     )
 endfunction()

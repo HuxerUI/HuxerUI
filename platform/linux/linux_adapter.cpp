@@ -1,8 +1,7 @@
-// X11 headers must precede linux_internal.h: its undef of the Xlib Bool/True
-// macros would otherwise break the declarations in Xutil.h and XKBlib.h.
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
 #include <X11/Xutil.h>
+#include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
 
 #include <poll.h>
@@ -111,26 +110,21 @@ KeyModifiers CurrentKeyModifiers(unsigned int state) noexcept {
   };
 }
 
-// Xlib's default error handler terminates the process on any protocol error.
-// Replace it so benign races (for example the window manager destroying the
-// window between two of our requests) are survivable.
 int XErrorHandler(Display* display, XErrorEvent* error) {
   static_cast<void>(display);
   static_cast<void>(error);
   return 0;
 }
 
-// X11 sends a KeyRelease between repeated keys unless XKB detectable
-// autorepeat is enabled, in which case repeats arrive as a KeyPress stream and
-// carry no repeat bit (unlike Win32). The adapter therefore never reports
-// repeat and relies on the repeated KeyPress events instead.
 void ConfigureDetectableAutoRepeat(Display* display) noexcept {
-  static_cast<void>(XkbSetDetectableAutoRepeat(display, 1, nullptr));
+  static_cast<void>(XkbSetDetectableAutoRepeat(display, 0, nullptr));
 }
 
-// Keeps printable characters and multi-byte UTF-8 sequences, dropping the
-// single-byte control characters that modifier chords (for example Ctrl+C)
-// produce through the input context translation.
+bool FilterInputEvent(const XEvent& event, Window window) noexcept {
+  XEvent filtered = event;
+  return XFilterEvent(&filtered, window) != 0;
+}
+
 std::string StripControlCharacters(std::string_view text) {
   std::string result;
   result.reserve(text.size());
@@ -160,6 +154,13 @@ public:
     }
     XSetErrorHandler(XErrorHandler);
     dpi_ = ReadDpi();
+            int randr_error_base_ = 0;
+    XRRQueryExtension(display_, &randr_event_base_, &randr_error_base_);
+    XRRSelectInput(
+        display_,
+        DefaultRootWindow(display_),
+        RRScreenChangeNotifyMask | RRCrtcChangeNotifyMask | RROutputChangeNotifyMask | RROutputPropertyNotifyMask
+    );
 
     try {
       CreateApplicationWindow(options);
@@ -270,9 +271,7 @@ public:
     XConvertSelection(display_, clipboard_atom_, utf8_string_atom_, clipboard_property_, window_, CurrentTime);
     XFlush(display_);
 
-    // The X11 selection protocol is asynchronous: service events until the
-    // matching SelectionNotify arrives so a paste can complete synchronously.
-    const double deadline = Now() + kClipboardTimeoutSeconds;
+            const double deadline = Now() + kClipboardTimeoutSeconds;
     const int connection = ConnectionNumber(display_);
     while (clipboard_read_pending_ && running_ && Now() < deadline) {
       const double remaining_seconds = std::min(kClipboardTimeoutSeconds, deadline - Now());
@@ -369,15 +368,55 @@ private:
 
   float ReadDpi() const noexcept {
     const char* value = XGetDefault(display_, "Xft", "dpi");
-    if (value == nullptr) {
+    if (value != nullptr) {
+      char* end = nullptr;
+      const double parsed = std::strtod(value, &end);
+      if (end != value && std::isfinite(parsed) && parsed > 0.0) {
+        return static_cast<float>(parsed);
+      }
+    }
+    return RandrPhysicalDpi();
+  }
+
+        float RandrPhysicalDpi() const noexcept {
+    int event_base = 0;
+    int error_base = 0;
+    if (XRRQueryExtension(display_, &event_base, &error_base) == 0) {
       return kDipsPerInch;
     }
-    char* end = nullptr;
-    const double parsed = std::strtod(value, &end);
-    if (end == value || !std::isfinite(parsed) || parsed <= 0.0) {
+    XRRScreenResources* resources = XRRGetScreenResourcesCurrent(display_, DefaultRootWindow(display_));
+    if (resources == nullptr) {
       return kDipsPerInch;
     }
-    return static_cast<float>(parsed);
+    XRROutputInfo* primary = nullptr;
+    const RROutput primary_output = XRRGetOutputPrimary(display_, DefaultRootWindow(display_));
+    for (int index = 0; index < resources->noutput; ++index) {
+      if (resources->outputs[index] == primary_output) {
+        primary = XRRGetOutputInfo(display_, resources, resources->outputs[index]);
+        break;
+      }
+    }
+    if (primary == nullptr && resources->noutput > 0) {
+      primary = XRRGetOutputInfo(display_, resources, resources->outputs[0]);
+    }
+    float dpi = kDipsPerInch;
+    if (primary != nullptr && primary->mm_width > 0 && primary->mm_height > 0 && primary->crtc != 0) {
+      XRRCrtcInfo* crtc = XRRGetCrtcInfo(display_, resources, primary->crtc);
+      if (crtc != nullptr) {
+        const bool rotated = (crtc->rotation & (RR_Rotate_90 | RR_Rotate_270)) != 0;
+        const int pixels_x = crtc->width;
+        const int pixels_y = crtc->height;
+        if (pixels_x > 0 && pixels_y > 0) {
+          const float dpi_x = 25.4F * static_cast<float>(pixels_x) / static_cast<float>(primary->mm_width);
+          const float dpi_y = 25.4F * static_cast<float>(pixels_y) / static_cast<float>(primary->mm_height);
+          dpi = rotated ? std::min(dpi_x, dpi_y) : std::max(dpi_x, dpi_y);
+        }
+        XRRFreeCrtcInfo(crtc);
+      }
+      XRRFreeOutputInfo(primary);
+    }
+    XRRFreeScreenResources(resources);
+    return dpi > 0.0F ? dpi : kDipsPerInch;
   }
 
   Locale SystemLocale() const {
@@ -426,9 +465,7 @@ private:
     while (running_) {
       int timeout_ms = -1;
       if (scheduled_frame_deadline_.has_value()) {
-        // Wake exactly when the earliest scheduled frame becomes due so
-        // animations run without burning CPU while idle events still wake us.
-        const double remaining_seconds = std::max(0.0, *scheduled_frame_deadline_ - Now());
+                        const double remaining_seconds = std::max(0.0, *scheduled_frame_deadline_ - Now());
         timeout_ms = static_cast<int>(
             std::min(remaining_seconds * 1000.0, static_cast<double>(std::numeric_limits<int>::max()))
         );
@@ -465,9 +502,7 @@ private:
         break;
       }
 
-      // X11 has no paint-message round trip; present the committed frame
-      // directly once its deadline is reached.
-      if (scheduled_frame_deadline_.has_value() && *scheduled_frame_deadline_ <= Now()) {
+                  if (scheduled_frame_deadline_.has_value() && *scheduled_frame_deadline_ <= Now()) {
         CommitFrameAndInvalidate();
         RenderCommittedFrame();
       }
@@ -488,22 +523,32 @@ private:
       break;
     case DestroyNotify:
       if (event.xdestroywindow.window == window_) {
-        // The window vanished under us (window manager or another client);
-        // null it so cleanup does not destroy a stale resource id.
-        window_ = 0;
+                        window_ = 0;
         running_ = false;
       }
       break;
     case ButtonPress:
+      if (FilterInputEvent(event, window_)) {
+        return;
+      }
       HandleButtonPress(event.xbutton);
       break;
     case ButtonRelease:
+      if (FilterInputEvent(event, window_)) {
+        return;
+      }
       HandleButtonRelease(event.xbutton);
       break;
     case MotionNotify:
+      if (FilterInputEvent(event, window_)) {
+        return;
+      }
       HandleMotionNotify(event.xmotion);
       break;
     case LeaveNotify:
+      if (FilterInputEvent(event, window_)) {
+        return;
+      }
       HandleLeaveNotify(event.xcrossing);
       break;
     case KeyPress:
@@ -533,6 +578,13 @@ private:
       clipboard_text_.clear();
       break;
     default:
+                        if (randr_event_base_ != 0 && event.type - randr_event_base_ == RRScreenChangeNotify) {
+        XRRUpdateConfiguration(&event);
+        HandleDisplayChange();
+      } else if (randr_event_base_ != 0 && event.type - randr_event_base_ == RRNotify) {
+        XRRUpdateConfiguration(&event);
+        HandleDisplayChange();
+      }
       break;
     }
   }
@@ -556,9 +608,7 @@ private:
   }
 
   void HandleExpose(const XExposeEvent& event) {
-    // The server can lose window content (uncover, first map); repaint once the
-    // expose burst for the region completes.
-    if (event.count == 0) {
+            if (event.count == 0) {
       RequestFrameAt(Now());
     }
   }
@@ -620,9 +670,7 @@ private:
 
   void HandleLeaveNotify(const XCrossingEvent& event) {
     static_cast<void>(event);
-    // The X11 pointer grab during a button press keeps sending motion events,
-    // so only cancel when the pointer is genuinely no longer tracking.
-    if (!pointer_down_) {
+            if (!pointer_down_) {
       SendPointer(PointerEventType::Cancel, last_pointer_position_);
     }
   }
@@ -646,36 +694,41 @@ private:
       return;
     }
     const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
-    // Translate the key to text unconditionally: a focused editor consumes
-    // characters through the key event, and the input method reports commits
-    // through HandleXKeyEvent. Composition keys already returned above.
-    SendKey(KeyEventType::Down, keysym, event.state, TranslateKeyText(event));
+            const bool repeat = key_pressed_[event.keycode] != 0;
+    key_pressed_[event.keycode] = 1;
+                SendKey(KeyEventType::Down, keysym, event.state, TranslateKeyText(event), repeat);
   }
 
   void HandleKeyRelease(const XKeyEvent& event) {
     if (text_input_.HandleXKeyEvent(event)) {
       return;
     }
+    key_pressed_[event.keycode] = 0;
     const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
-    SendKey(KeyEventType::Up, keysym, event.state, {});
+    SendKey(KeyEventType::Up, keysym, event.state, {}, false);
   }
 
   std::string TranslateKeyText(const XKeyEvent& event) const {
-    // The text input owns the host's single XIM input context; reuse it for
-    // direct key-to-text translation so the IME server sees one client only.
-    if (const XIC xic = text_input_.InputContext(); xic != nullptr) {
-      char buffer[64];
+            if (const XIC xic = text_input_.InputContext(); xic != nullptr) {
+      std::vector<char> buffer(64);
       KeySym keysym = NoSymbol;
       int status = 0;
-      const int length =
-          Xutf8LookupString(xic, const_cast<XKeyEvent*>(&event), buffer, sizeof(buffer), &keysym, &status);
+      int length =
+          Xutf8LookupString(xic, const_cast<XKeyEvent*>(&event), buffer.data(), buffer.size(), &keysym, &status);
+      if (status == XBufferOverflow) {
+        const std::size_t needed = static_cast<std::size_t>(std::abs(length)) + 1;
+        if (needed > buffer.size()) {
+          buffer.resize(needed);
+          length =
+              Xutf8LookupString(xic, const_cast<XKeyEvent*>(&event), buffer.data(), buffer.size(), &keysym, &status);
+        }
+      }
       if (length > 0) {
-        return StripControlCharacters(std::string_view(buffer, static_cast<std::size_t>(length)));
+        return StripControlCharacters(std::string_view(buffer.data(), static_cast<std::size_t>(length)));
       }
       return {};
     }
-    // No input method is available; fall back to the Latin-1 core translation.
-    char buffer[64];
+        char buffer[64];
     KeySym keysym = NoSymbol;
     const int length = XLookupString(const_cast<XKeyEvent*>(&event), buffer, sizeof(buffer), &keysym, nullptr);
     if (length <= 0) {
@@ -694,7 +747,7 @@ private:
     return result;
   }
 
-  void SendKey(KeyEventType type, KeySym keysym, unsigned int state, std::string text) {
+  void SendKey(KeyEventType type, KeySym keysym, unsigned int state, std::string text, bool repeat) {
     if (runtime_ == nullptr) {
       return;
     }
@@ -703,7 +756,7 @@ private:
         TranslateKey(keysym),
         std::move(text),
         CurrentKeyModifiers(state),
-        false,
+        repeat,
     });
   }
 
@@ -742,6 +795,19 @@ private:
         static_cast<float>(width_) / scale,
         static_cast<float>(height_) / scale,
     });
+  }
+
+  void HandleDisplayChange() {
+    const float new_dpi = ReadDpi();
+    if (std::abs(new_dpi - dpi_) < 0.5F) {
+      return;
+    }
+    dpi_ = new_dpi;
+    renderer_.DpiChanged(display_, window_, dpi_);
+    text_input_.SetDpiScale(DpiScale());
+    runtime_->UpdateResourceConfiguration(Configuration());
+    UpdateRuntimeViewport();
+    RequestFrameAt(Now());
   }
 
   void CommitFrameAndInvalidate() {
@@ -827,8 +893,7 @@ private:
           static_cast<int>(clipboard_text_.size())
       );
     } else {
-      // Unsupported target: leave the property unset and announce the refusal.
-      reply.property = 0;
+            reply.property = 0;
     }
     XSendEvent(display_, request.requestor, 0, 0, reinterpret_cast<XEvent*>(&reply));
   }
@@ -892,6 +957,8 @@ private:
   int width_ = 0;
   int height_ = 0;
   float dpi_ = kDipsPerInch;
+  int randr_event_base_ = 0;
+  bool key_pressed_[256] = {};
   Atom wm_protocols_ = 0;
   Atom wm_delete_window_ = 0;
   Atom clipboard_atom_ = 0;

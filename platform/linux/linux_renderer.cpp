@@ -79,9 +79,7 @@ struct ShapedGlyph {
   float x_offset = 0.0F;
   float y_offset = 0.0F;
   std::uint32_t cluster = 0;
-  // Set when the glyph came from a fontconfig fallback face; the index belongs
-  // to that face, so drawing must switch Cairo to the matching fallback font.
-  bool fallback = false;
+      bool fallback = false;
 };
 
 struct ShapedRun {
@@ -89,7 +87,6 @@ struct ShapedRun {
   float advance = 0.0F;
 };
 
-// One shaped visual line. Offsets into text are UTF-8 byte offsets.
 struct LayoutLine {
   std::string text;
   std::vector<ShapedGlyph> glyphs;
@@ -142,8 +139,6 @@ struct LayoutLine {
   return DecodeCodePoint(text, offset, width);
 }
 
-// Converts a UTF-16 code unit offset into a UTF-8 byte offset. Surrogate pairs
-// count as two units; an offset inside a pair resolves to the pair's start.
 [[nodiscard]] std::size_t Utf16ToUtf8(std::string_view text, std::size_t utf16_offset) {
   std::size_t utf16 = 0;
   std::size_t offset = 0;
@@ -163,7 +158,6 @@ struct LayoutLine {
   return text.size();
 }
 
-// Converts a UTF-8 byte offset into a UTF-16 code unit offset.
 [[nodiscard]] std::size_t Utf8ToUtf16(std::string_view text, std::size_t byte_offset) {
   std::size_t utf16 = 0;
   std::size_t offset = 0;
@@ -203,8 +197,6 @@ struct LayoutLine {
   return TextDirection::LeftToRight;
 }
 
-// FontWeight uses OpenType semantics (100-900) while fontconfig weights run
-// from 0 to 210; convert so pattern matching asks for the intended weight.
 [[nodiscard]] int FcWeightFor(FontWeight weight) noexcept {
   return FcWeightFromOpenType(static_cast<int>(weight));
 }
@@ -221,8 +213,6 @@ struct LayoutLine {
   }
 }
 
-// Shaped paragraph for editing: caret, hit test, and range geometry resolve
-// against the shaped lines without re-shaping. Mirrors Win32TextLayout.
 class LinuxTextLayout final : public TextLayout {
 public:
   LinuxTextLayout(std::string text, std::vector<LayoutLine> lines) : text_(std::move(text)), lines_(std::move(lines)) {
@@ -254,9 +244,7 @@ public:
         const std::size_t glyph_utf16 = Utf8ToUtf16(text_, line.byte_start + glyph.cluster);
         if (distance < best_distance || (distance == best_distance && glyph_utf16 > 0)) {
           const bool trailing = point.x > (x + glyph_end) * 0.5F;
-          // A trailing hit resolves past the glyph's whole code point so the
-          // caret lands on a code point boundary, never inside one.
-          const std::size_t resolved_utf16 =
+                              const std::size_t resolved_utf16 =
               trailing ? Utf8ToUtf16(
                              text_,
                              line.byte_start + glyph.cluster +
@@ -417,9 +405,6 @@ struct DecodedImage {
   return result;
 }
 
-// libjpeg's default error handler terminates the process on corrupt input;
-// route every decode error through longjmp so a bad file fails the decode
-// instead of killing the host application.
 struct JpegErrorState {
   jpeg_error_mgr manager;
   jmp_buf jump;
@@ -441,9 +426,7 @@ void JpegErrorExit(j_common_ptr cinfo) {
     return result;
   }
   jpeg_create_decompress(&cinfo);
-  // jpeg_mem_src only reads the input bytes; the const_cast drops the const the
-  // legacy C API cannot express.
-  jpeg_mem_src(
+      jpeg_mem_src(
       &cinfo,
       reinterpret_cast<unsigned char*>(const_cast<std::byte*>(bytes.data())),
       static_cast<unsigned long>(bytes.size())
@@ -627,9 +610,6 @@ struct LinuxRenderer::State {
     if (FT_New_Face(ft_library, path.c_str(), face_index, &face) != 0) {
       throw std::runtime_error("HuxerUI could not open the resolved font file");
     }
-    // Measure in a 96-dpi reference space so advances and metrics are DIPs.
-    // The Cairo surface applies the display scale separately, so glyph
-    // measurement and rendering stay consistent at any Xft.dpi.
     if (FT_Set_Char_Size(face, 0, static_cast<FT_F26Dot6>(font.Size() * 64.0F), 96, 96) != 0) {
       FT_Done_Face(face);
       throw std::runtime_error("HuxerUI could not set the font size");
@@ -645,9 +625,7 @@ struct LinuxRenderer::State {
       return existing->second;
     }
     FT_Face face = FaceFor(font);
-    // Cairo renders glyph indices against the face's active charmap; select
-    // the Unicode charmap so glyph indices agree with HarfBuzz shaping.
-    static_cast<void>(FT_Select_Charmap(face, FT_ENCODING_UNICODE));
+            static_cast<void>(FT_Select_Charmap(face, FT_ENCODING_UNICODE));
     cairo_font_face_t* cairo_face = cairo_ft_font_face_create_for_ft_face(face, 0);
     cairo_font_cache.emplace(key, cairo_face);
     return cairo_face;
@@ -678,17 +656,12 @@ struct LinuxRenderer::State {
     metrics.leading = static_cast<float>(std::max(0.0, (face->height - face->ascender + face->descender) * scale));
     metrics.underline_position = static_cast<float>(-face->underline_position * scale);
     metrics.underline_thickness = static_cast<float>(face->underline_thickness * scale);
-    // FreeType exposes no x-height metric; approximate with half the ascent.
-    metrics.strike_through_position = static_cast<float>(face->ascender * 0.5 * scale);
+        metrics.strike_through_position = static_cast<float>(face->ascender * 0.5 * scale);
     metrics.strike_through_thickness = metrics.underline_thickness;
     return metrics;
   }
 
-  // Resolves a fallback FreeType face that contains the given Unicode code
-  // point, caching by code point and pixel size. Returns nullptr when
-  // fontconfig cannot find one. Used when the primary font lacks a glyph
-  // (shaped codepoint == 0).
-  [[nodiscard]] FT_Face FallbackFaceFor(std::uint32_t code_point, float size) {
+          [[nodiscard]] FT_Face FallbackFaceFor(std::uint32_t code_point, float size) {
     EnsureFreeType();
     EnsureFontconfig();
     const std::pair<std::uint32_t, float> key{code_point, size};
@@ -733,6 +706,9 @@ struct LinuxRenderer::State {
 
   [[nodiscard]] ShapedRun ShapeRun(std::string_view text, const TextStyle& style) {
     FT_Face face = FaceFor(style.font);
+    // Cairo's FT load face rewrites the shared face's character size while
+    // rendering; reset it to the 96-dpi reference so shaping stays in DIPs.
+    FT_Set_Char_Size(face, 0, static_cast<FT_F26Dot6>(style.font.Size() * 64.0F), 96, 96);
     hb_face_t* hb_face = hb_ft_face_create(face, nullptr);
     hb_font_t* hb_font = hb_ft_font_create_referenced(face);
     hb_buffer_t* buffer = hb_buffer_create();
@@ -765,18 +741,13 @@ struct LinuxRenderer::State {
     hb_font_destroy(hb_font);
     hb_face_destroy(hb_face);
 
-    // Reshape missing glyphs (codepoint 0) through fontconfig fallback fonts.
-    // Runs through the buffer again so a fallback font contributes its own
-    // glyph index, advance, and offsets for the cluster that lacked a glyph.
-    if (std::any_of(run.glyphs.begin(), run.glyphs.end(), [](const ShapedGlyph& glyph) { return glyph.index == 0; })) {
+                if (std::any_of(run.glyphs.begin(), run.glyphs.end(), [](const ShapedGlyph& glyph) { return glyph.index == 0; })) {
       run = ApplyFallbackShaping(text, style, std::move(run));
     }
     return run;
   }
 
-  // Re-shapes clusters whose primary-font glyph index is zero (missing glyph)
-  // with a fontconfig fallback face for the cluster's code point.
-  [[nodiscard]] ShapedRun ApplyFallbackShaping(std::string_view text, const TextStyle& style, ShapedRun run) {
+      [[nodiscard]] ShapedRun ApplyFallbackShaping(std::string_view text, const TextStyle& style, ShapedRun run) {
     std::size_t offset = 0;
     while (offset < run.glyphs.size()) {
       ShapedGlyph& glyph = run.glyphs[offset];
@@ -796,6 +767,7 @@ struct LinuxRenderer::State {
         ++offset;
         continue;
       }
+      FT_Set_Char_Size(fallback, 0, static_cast<FT_F26Dot6>(style.font.Size() * 64.0F), 96, 96);
       hb_face_t* fallback_hb_face = hb_ft_face_create(fallback, nullptr);
       hb_font_t* fallback_hb_font = hb_ft_font_create_referenced(fallback);
       hb_buffer_t* fallback_buffer = hb_buffer_create();
@@ -933,8 +905,7 @@ struct LinuxRenderer::State {
         const unsigned char green = src[x * 4 + 1];
         const unsigned char blue = src[x * 4 + 2];
         const unsigned char alpha = src[x * 4 + 3];
-        // Cairo ARGB32 stores premultiplied BGRA byte order.
-        const float a = alpha / 255.0F;
+                const float a = alpha / 255.0F;
         dst[x * 4] = static_cast<unsigned char>(blue * a);
         dst[x * 4 + 1] = static_cast<unsigned char>(green * a);
         dst[x * 4 + 2] = static_cast<unsigned char>(red * a);
@@ -1462,12 +1433,6 @@ struct LinuxRenderer::State {
   }
 };
 
-// Breaks `text` into visual lines at whitespace word boundaries, mirroring
-// DirectWrite's DWRITE_WRAP_WORD: a line breaks at the last space that fits;
-// a single word longer than wrap_width breaks at character boundaries. Explicit
-// newlines are preserved. Returns the line text spans with their UTF-8 byte
-// starts. wrap_width is the measurement width; the returned lines are used for
-// measurement, editing, and drawing so all three agree.
 [[nodiscard]] std::vector<LayoutLine>
 WrapLines(std::string_view text, const TextStyle& style, float wrap_width, TextWrap wrap, LinuxRenderer::State& state) {
   std::vector<LayoutLine> lines;
@@ -1671,9 +1636,7 @@ std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
   std::vector<LayoutLine> lines = WrapLines(text, style, wrap_width, options.wrap, *state_);
 
   if (lines.empty()) {
-    // An empty layout still exposes one line's height so the caret and
-    // vertical centering agree with non-empty editors (mirrors CoreText).
-    const FontMetrics metrics = state_->MetricsFor(style.font);
+            const FontMetrics metrics = state_->MetricsFor(style.font);
     LayoutLine empty_line;
     empty_line.ascent = metrics.ascent;
     empty_line.descent = metrics.descent;
@@ -1867,9 +1830,6 @@ void AppendPath(cairo_t* cr, const Path& path) {
     }
   }
 }
-// Scene traversal owns the clip and transform stacks; RenderSceneNode mirrors
-// the retained RenderNode semantics (content, child clip, children transform,
-// children, foreground).
 class ScenePainter {
 public:
   ScenePainter(LinuxRenderer::State& state, cairo_t* context) : state_(state), cr_(context) {}
@@ -1936,10 +1896,7 @@ private:
   }
 
   void ApplyTransform(const Transform2D& transform) {
-    // Match Direct2D PushTransform semantics: the new transform is applied
-    // first, then the previous one (transform * previous). Cairo's
-    // cairo_transform() post-multiplies, so compose explicitly instead.
-    cairo_matrix_t previous{};
+                cairo_matrix_t previous{};
     cairo_get_matrix(cr_, &previous);
     cairo_matrix_t current{};
     cairo_matrix_init(
@@ -1970,7 +1927,7 @@ private:
     for (const TextRun& run : command.runs) {
       ShapedRun shaped = state_.ShapeRun(run.text, run.style);
       cairo_set_font_face(cr_, state_.CairoFontFor(run.style.font));
-      cairo_set_font_size(cr_, run.style.font.Size() / state_.Scale());
+      cairo_set_font_size(cr_, run.style.font.Size());
       SetSourceColor(cr_, run.style.foreground);
       double x = run.baseline_origin.x;
       for (const ShapedGlyph& glyph : shaped.glyphs) {
@@ -2092,6 +2049,18 @@ private:
     if (bounds.width <= 0.0F || bounds.height <= 0.0F) {
       return;
     }
+    if (command.blur_radius <= 0.0F) {
+      SetSourceColor(cr_, command.color);
+      const Rect hard_caster{
+          caster.x + command.offset.x,
+          caster.y + command.offset.y,
+          caster.width,
+          caster.height,
+      };
+      AddRoundedRect(cr_, hard_caster, command.corner_radius);
+      cairo_fill(cr_);
+      return;
+    }
     const int mask_width = std::max(1, static_cast<int>(std::ceil(bounds.width * scale)));
     const int mask_height = std::max(1, static_cast<int>(std::ceil(bounds.height * scale)));
     cairo_surface_t* mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mask_width, mask_height);
@@ -2103,9 +2072,7 @@ private:
     cairo_fill(mask_cr);
     cairo_destroy(mask_cr);
 
-    // Separable box blur approximation: two horizontal + two vertical passes
-    // on the alpha mask, computed in place into a scratch surface.
-    const int radius = std::max(1, static_cast<int>(std::ceil(blur_pixels)));
+                        const int radius = std::max(1, static_cast<int>(std::ceil(blur_pixels * 0.57735)));
     cairo_surface_t* blurred = BoxBlurMask(mask, radius);
     cairo_surface_destroy(mask);
 
@@ -2113,9 +2080,10 @@ private:
     cairo_save(cr_);
     cairo_translate(cr_, bounds.x, bounds.y);
     cairo_scale(cr_, 1.0 / scale, 1.0 / scale);
-    cairo_set_source_surface(cr_, blurred, 0, 0);
-    cairo_pattern_set_extend(cairo_get_source(cr_), CAIRO_EXTEND_NONE);
-    cairo_paint_with_alpha(cr_, command.color.alpha);
+    cairo_pattern_t* blur_pattern = cairo_pattern_create_for_surface(blurred);
+    cairo_pattern_set_extend(blur_pattern, CAIRO_EXTEND_NONE);
+    cairo_mask(cr_, blur_pattern);
+    cairo_pattern_destroy(blur_pattern);
     cairo_restore(cr_);
     cairo_surface_destroy(blurred);
   }
@@ -2192,6 +2160,19 @@ private:
     if (shadow_bounds.width <= 0.0F || shadow_bounds.height <= 0.0F) {
       return;
     }
+    if (command.blur_radius <= 0.0F) {
+      SetSourceColor(cr_, command.color);
+      cairo_save(cr_);
+      cairo_translate(cr_, command.offset.x, command.offset.y);
+      AppendPath(cr_, command.path);
+      cairo_set_fill_rule(
+          cr_,
+          command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
+      );
+      cairo_fill(cr_);
+      cairo_restore(cr_);
+      return;
+    }
     const int mask_width = std::max(1, static_cast<int>(std::ceil(shadow_bounds.width * scale)));
     const int mask_height = std::max(1, static_cast<int>(std::ceil(shadow_bounds.height * scale)));
     cairo_surface_t* mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mask_width, mask_height);
@@ -2206,14 +2187,16 @@ private:
     );
     cairo_fill(mask_cr);
     cairo_destroy(mask_cr);
-    cairo_surface_t* blurred = BoxBlurMask(mask, std::max(1, static_cast<int>(std::ceil(blur_pixels))));
+    cairo_surface_t* blurred = BoxBlurMask(mask, std::max(1, static_cast<int>(std::ceil(blur_pixels * 0.57735))));
     cairo_surface_destroy(mask);
     SetSourceColor(cr_, command.color);
     cairo_save(cr_);
     cairo_translate(cr_, shadow_bounds.x, shadow_bounds.y);
     cairo_scale(cr_, 1.0 / scale, 1.0 / scale);
-    cairo_set_source_surface(cr_, blurred, 0, 0);
-    cairo_paint_with_alpha(cr_, command.color.alpha);
+    cairo_pattern_t* blur_pattern = cairo_pattern_create_for_surface(blurred);
+    cairo_pattern_set_extend(blur_pattern, CAIRO_EXTEND_NONE);
+    cairo_mask(cr_, blur_pattern);
+    cairo_pattern_destroy(blur_pattern);
     cairo_restore(cr_);
     cairo_surface_destroy(blurred);
   }
@@ -2268,7 +2251,7 @@ private:
       y += (rect.height - total_height) * 0.5F;
     }
     cairo_set_font_face(cr_, state_.CairoFontFor(style.font));
-    cairo_set_font_size(cr_, style.font.Size() / state_.Scale());
+    cairo_set_font_size(cr_, style.font.Size());
     SetSourceColor(cr_, style.foreground);
     for (const LayoutLine& line : lines) {
       float x = rect.x;

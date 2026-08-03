@@ -2,10 +2,6 @@
 
 #include <X11/Xlib.h>
 
-// Xlib defines C macros that collide with huxerui scoped enumerators and
-// standard library identifiers. Undefine them immediately after including X
-// headers so shared headers below are unaffected; platform sources include
-// this header first.
 #undef None
 #undef Bool
 #undef True
@@ -28,9 +24,6 @@ struct LinuxDamageRegion {
   std::vector<XRectangle> rects;
 };
 
-// Damage rectangles arrive in logical coordinates relative to the host view.
-// Resolve them into pixel-aligned X rectangles clamped to the client area,
-// mirroring the Win32 damage resolution. A full region supersedes any rects.
 inline LinuxDamageRegion ResolveLinuxDamage(const DamageRegion& damage, float scale, int width, int height) noexcept {
   LinuxDamageRegion result;
   if (damage.full || !std::isfinite(scale) || scale <= 0.0F || width <= 0 || height <= 0) {
@@ -67,17 +60,6 @@ inline LinuxDamageRegion ResolveLinuxDamage(const DamageRegion& damage, float sc
     }
   }
   return result;
-}
-
-// Converts a DIP position into device pixels, mirroring Win32PixelRectToDips.
-inline Point LinuxPixelsToDips(const Point& pixel, float scale) noexcept {
-  if (!std::isfinite(scale) || scale <= 0.0F) {
-    return pixel;
-  }
-  return {
-      static_cast<float>(pixel.x) / scale,
-      static_cast<float>(pixel.y) / scale,
-  };
 }
 
 } // namespace huxerui::detail

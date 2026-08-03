@@ -19,8 +19,6 @@ enum class LinuxRenderResult {
   Recreate,
 };
 
-// Rasterizes the committed RenderScene with Cairo into a retained device-pixel
-// bitmap, then presents it through a Vulkan swap chain backed by an X11 window.
 class LinuxRenderer final {
 public:
   LinuxRenderer();
@@ -43,8 +41,7 @@ public:
   [[nodiscard]] std::unique_ptr<TextLayout>
   CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
 
-  // Damage rectangles are pixel-aligned and clamped to the client area.
-  [[nodiscard]] LinuxRenderResult Render(
+    [[nodiscard]] LinuxRenderResult Render(
       Display* display,
       Window window,
       float dpi,
