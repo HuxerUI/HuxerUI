@@ -73,6 +73,69 @@ public:
   }
 };
 
+struct LayerTransition {
+  std::shared_ptr<LayerTransitionState> state;
+
+  static const ModifierDescriptor& Descriptor();
+};
+
+class LayerTransitionExtension final : public NodeExtension {
+public:
+  LayerTransitionExtension(huxerui::MountedNode& node, const LayerTransition& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(huxerui::MountedNode& node, const LayerTransition& modifier) {
+    static_cast<void>(node);
+    if (state_ == modifier.state) {
+      return;
+    }
+    state_ = modifier.state;
+    initialized_ = false;
+    completion_sent_ = false;
+  }
+
+  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+    if (!state_) {
+      return {};
+    }
+    if (!initialized_) {
+      opacity_.Set(state_->target_visible ? 0.0F : 1.0F);
+      target_visible_ = !state_->target_visible;
+      initialized_ = true;
+    }
+    if (target_visible_ != state_->target_visible) {
+      target_visible_ = state_->target_visible;
+      opacity_.Update(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
+      if (target_visible_) {
+        completion_sent_ = false;
+      }
+    }
+
+    auto& mounted = static_cast<MountedNode&>(node);
+    const bool running = opacity_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
+    mounted.presentation.local_opacity *= opacity_.Value();
+    if (!running && !target_visible_ && !completion_sent_) {
+      completion_sent_ = true;
+      if (state_->on_exit_complete) {
+        state_->on_exit_complete();
+      }
+    }
+    return {running, std::nullopt};
+  }
+
+private:
+  std::shared_ptr<LayerTransitionState> state_;
+  AnimatedValue<float> opacity_;
+  bool initialized_ = false;
+  bool target_visible_ = false;
+  bool completion_sent_ = false;
+};
+
+const ModifierDescriptor& LayerTransition::Descriptor() {
+  return ModifierDescriptorFor<LayerTransition, LayerTransitionExtension>();
+}
+
 bool IsLayerStack(const MountedNode& node) {
   return node.layout_descriptor != nullptr && node.layout_descriptor->type == typeid(LayerStackLayout);
 }
@@ -119,7 +182,14 @@ public:
       };
       break;
     case LayerPlacementKind::BottomCenter:
-      child_size = context.Measure(child, loose);
+      if (placement.fill_cross_axis) {
+        const float margin = std::clamp(placement.viewport_margin, 0.0F, viewport_width * 0.5F);
+        const float available = std::max(0.0F, viewport_width - margin * 2.0F);
+        const float width = std::min(available, std::max(0.0F, placement.maximum_cross_axis_extent));
+        child_size = context.Measure(child, Constraints{width, width, 0.0F, viewport_height});
+      } else {
+        child_size = context.Measure(child, loose);
+      }
       child_offset = {
           (viewport_width - child_size.width) * 0.5F,
           viewport_height - child_size.height,
@@ -160,18 +230,45 @@ public:
 
       switch (side) {
       case LayerAnchorSide::Below:
-        child_offset = {placement.anchor.x, anchor_bottom + gap};
+        child_offset.y = anchor_bottom + gap;
         break;
       case LayerAnchorSide::Above:
-        child_offset = {placement.anchor.x, placement.anchor.y - child_size.height - gap};
+        child_offset.y = placement.anchor.y - child_size.height - gap;
         break;
       case LayerAnchorSide::Right:
-        child_offset = {anchor_right + gap, placement.anchor.y};
+        child_offset.x = anchor_right + gap;
         break;
       case LayerAnchorSide::Left:
-        child_offset = {placement.anchor.x - child_size.width - gap, placement.anchor.y};
+        child_offset.x = placement.anchor.x - child_size.width - gap;
         break;
       }
+      if (side == LayerAnchorSide::Below || side == LayerAnchorSide::Above) {
+        switch (placement.alignment) {
+        case LayerAnchorAlignment::Start:
+          child_offset.x = placement.anchor.x;
+          break;
+        case LayerAnchorAlignment::Center:
+          child_offset.x = placement.anchor.x + (placement.anchor.width - child_size.width) * 0.5F;
+          break;
+        case LayerAnchorAlignment::End:
+          child_offset.x = anchor_right - child_size.width;
+          break;
+        }
+      } else {
+        switch (placement.alignment) {
+        case LayerAnchorAlignment::Start:
+          child_offset.y = placement.anchor.y;
+          break;
+        case LayerAnchorAlignment::Center:
+          child_offset.y = placement.anchor.y + (placement.anchor.height - child_size.height) * 0.5F;
+          break;
+        case LayerAnchorAlignment::End:
+          child_offset.y = anchor_bottom - child_size.height;
+          break;
+        }
+      }
+      child_offset.x += placement.offset.x;
+      child_offset.y += placement.offset.y;
       child_offset.x = std::clamp(
           child_offset.x,
           horizontal_margin,
@@ -1375,6 +1472,10 @@ void Runtime::ComposeLayers() {
         return factory();
       });
       const bool barrier = entry.options.pointer_policy == LayerPointerPolicy::Barrier;
+      const bool exiting = entry.transition && !entry.transition->target_visible;
+      if (exiting) {
+        content.spec_->pointer_events_enabled = false;
+      }
       if (barrier) {
         content = std::move(content).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
       }
@@ -1387,7 +1488,7 @@ void Runtime::ComposeLayers() {
         layer =
             std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,
                                                           id = entry.id,
-                                                          dismiss = entry.options.dismiss_on_outside_press,
+                                                          dismiss = entry.options.dismiss_on_outside_press && !exiting,
                                                           on_dismiss_request =
                                                               entry.options.on_dismiss_request](const PointerEvent&) {
               if (!dismiss) {
@@ -1404,6 +1505,9 @@ void Runtime::ComposeLayers() {
         }
       } else if (entry.options.pointer_policy == LayerPointerPolicy::PassThrough) {
         layer.spec_->pointer_events_enabled = false;
+      }
+      if (entry.transition) {
+        layer = std::move(layer).With(LayerTransition{entry.transition});
       }
       layer_children.push_back(std::move(layer));
     }

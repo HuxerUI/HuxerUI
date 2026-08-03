@@ -88,6 +88,8 @@ Presentation transforms do not change measured size or parent layout. They trans
 
 Animation state is retained by the mounted node extension. Compatible recomposition retargets from the current presentation value rather than restarting from the previous declaration. Reduced-motion themes resolve animations immediately where appropriate.
 
+Dialog and BottomSheet use the same animation values for their retained layer transitions. Dialog fades and scales its content, while BottomSheet fades the modal barrier and translates its sheet from the bottom edge. Dismissal disables content input immediately and removes the retained layer only after its exit animation completes.
+
 ## Toast
 
 Toast is a per-window root service:
@@ -129,7 +131,7 @@ return Button("Open").OnClick([dialog] {
 });
 ```
 
-Modal layers trap focus and restore the previously focused node when dismissed. The topmost modal layer controls outside-press dismissal and its scrim. Setting `dismiss_on_cancel` to `false` consumes Cancel without dismissing the presentation, so Back or Escape cannot close content behind it or leave the native window. BottomSheet resolves its scrim from the captured `ThemeSpec`; `DialogStyle` affects Dialog only.
+Modal layers trap focus and restore the previously focused node after its exit transition completes. The topmost modal layer controls outside-press dismissal and its scrim. Setting `dismiss_on_cancel` to `false` consumes Cancel without dismissing the presentation, so Back or Escape cannot close content behind it or leave the native window. `DialogStyle` and `BottomSheetStyle` independently define their scrim and motion, while BottomSheet also owns its surface, maximum width, corner radius, and shadow.
 
 For lifecycle and rendering details, see the [architecture design](design/architecture.md).
 
@@ -154,7 +156,7 @@ return Button("Delete").OnClick([dialog] {
 });
 ```
 
-BottomSheet is a separate typed service because bottom placement, sizing, motion, and future drag behavior differ from Dialog:
+BottomSheet is a separate typed service because its bottom placement, adaptive width, surface, slide motion, and future drag behavior differ from Dialog:
 
 ```cpp
 auto bottom_sheet = UseBottomSheet();
@@ -193,15 +195,30 @@ auto menu = UseMenu();
 return Button("More")
     .With(menu.Anchor())
     .OnClick([menu] {
-      menu.Show([](MenuContext context) {
-        return Button("Rename").OnClick([context] {
-          context.Dismiss();
-        });
+      menu.Show({
+          MenuItem("Rename", [] {}),
+          MenuItem(
+              app_resources::images::move,
+              app_resources::strings::move_to,
+              {
+                MenuItem("Archive", [] {}),
+                MenuSection{},
+                MenuItem("Trash", [] {}),
+              }
+          ),
       });
     });
 ```
 
-Popup exposes arbitrary anchored content and configurable outside-press and focus behavior. Menu reuses its positioning foundation while adding a transparent barrier, focus containment, focus restoration, and menu-oriented dismissal policy. Each Popup or Menu handle owns at most one active entry, so calling `Show()` or `ShowAt()` again replaces its previous entry. Their typed contexts dismiss the current entry directly, so application state does not need to retain a `LayerId` or recompose solely to close transient content. The supplied content owns its surface and item styling. Point-based `ShowAt()` supports context menus without a View anchor.
+Popup exposes arbitrary anchored content and configurable outside-press and focus behavior. `AnchorPlacement` separates the preferred side from cross-axis alignment; `gap`, `offset`, viewport clamping, and automatic opposite-side fallback complete the platform-neutral positioning contract without Android-specific Gravity terminology. Point-based `ShowAt()` supports context menus without a View anchor.
+
+Menu accepts a recursive sequence of semantic `MenuItem` values rather than an arbitrary View factory. An action item ends in a callback, while a submenu item ends in another entry sequence using the same syntax. Optional leading images accept either `ImageResource` or `ImageAsset`, and labels accept either ordinary text or `StringResource`; resource values resolve while the captured layer Environment is composed. `MenuSection{}` marks a logical boundary between items without wrapping them in another container. `MenuStyle::separator_mode` lets a theme omit separators or place them at section boundaries or between all items, while the separator color, thickness, and padding remain ordinary typed style values. The built-in Material theme omits separators while Flat themes place them between items. Leaf actions automatically dismiss the complete open menu chain, and submenu items can be opened repeatedly from the same declaration.
+
+Only the root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, which keeps every visible ancestor interactive and lets sibling submenus replace one another without blocking their parent. Back closes the deepest open level, the default outside-press behavior or a leaf action closes the complete chain, and focus is restored when the root closes. A custom `on_dismiss_request` remains a request callback and decides whether to close the menu. Disabled and checked items, Material ripple, and Flat state-overlay feedback are provided consistently by the framework. Arbitrary custom anchored content belongs in Popup.
+
+Menu surfaces use the widest item's natural width plus themed content padding, subject to `MenuStyle::minimum_width` and viewport constraints. Set `MenuOptions::width` only when one menu needs an explicit surface width. Items without an image or checked marker do not reserve a hidden leading slot, and section separators stretch only after the surface width has been resolved.
+
+Each Popup or Menu handle owns at most one active entry, so calling `Show()` or `ShowAt()` again replaces its previous entry. `PopupContext` can dismiss arbitrary popup content directly; Menu actions dismiss automatically and do not expose layer identity to the item model.
 
 All typed handles capture the current Environment when obtained and can be retained by event callbacks. Dialog, BottomSheet, Popup, and Menu share one internal LayerController and LayerStack; their separate `UseXxx()` names express user-facing semantics rather than separate runtimes or rendering paths.
 

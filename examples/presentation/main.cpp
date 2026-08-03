@@ -47,16 +47,6 @@ View PopupCard(PopupContext popup) {
   }.With(Padding(16.0F), Spacing(8.0F), Background(surface_color), CornerRadius(10.0F));
 }
 
-View MenuCard(MenuContext menu) {
-  auto dismiss = [menu] { menu.Dismiss(); };
-
-  return Column {
-    Button("Rename").OnClick(dismiss),
-    Button("Duplicate").OnClick(dismiss),
-    Button("Delete").OnClick(dismiss),
-  }.With(Padding(8.0F), Spacing(4.0F), Background(surface_color), CornerRadius(10.0F));
-}
-
 View App() {
   auto declarative_dialog_visible = UseState(false);
   auto toast = UseToast();
@@ -98,7 +88,19 @@ View App() {
           Button("Show menu")
               .With(menu.Anchor())
               .OnClick([menu] {
-                menu.Show(MenuCard);
+                menu.Show({
+                  MenuItem("Rename", [] {}),
+                  MenuItem("Duplicate", [] {}),
+                  MenuItem(
+                      "Move to",
+                      {
+                        MenuItem("Archive", [] {}),
+                        MenuItem("Trash", [] {}),
+                      }
+                  ),
+                  MenuSection{},
+                  MenuItem("Delete", [] {}),
+                });
               }),
         }.With(Spacing(12.0F)),
       }.With(Spacing(16.0F), CrossAlign(CrossAxisAlignment::Start)),

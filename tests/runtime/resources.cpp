@@ -1,5 +1,6 @@
 #include "runtime_test_support.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -104,6 +105,14 @@ public:
   ResourceConfiguration configuration{Locale::FromLanguageTag("zh-Hans-CN"), 1.5F};
   std::unordered_map<std::string, RawAsset> assets;
 };
+
+std::optional<MenuHandle> resource_menu;
+
+View ResourceMenuApp() {
+  auto menu = UseMenu();
+  resource_menu = menu;
+  return Button("resource menu").With(huxerui::Frame{120.0F, 36.0F}, menu.Anchor());
+}
 
 View LocalizedResourceApp() {
   return Text::Format(StringResource("test", "strings/greeting"), "Ada");
@@ -239,6 +248,53 @@ TEST_CASE("TextResolvesStringResourcesDirectly") {
   runtime.SetViewport({200.0F, 60.0F});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "标题");
+}
+
+TEST_CASE("MenuItemsResolveStringAndImageResources") {
+  resource_menu.reset();
+  TestResources resources;
+  const RawAsset icon = TestPng(16, 16);
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/menu_item",
+              .mime_type = "text/plain",
+              .value = "Resource item",
+          },
+          {
+              .kind = detail::ResourceEntryKind::Image,
+              .key = "images/menu_icon",
+              .path = "huxerui/test/images/menu_icon.png",
+              .mime_type = "image/png",
+              .width = 16,
+              .height = 16,
+              .content_hash = Hash(icon.Bytes()),
+          },
+      })
+  );
+  resources.assets.emplace("huxerui/test/images/menu_icon.png", icon);
+
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{ResourceMenuApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+  REQUIRE(resource_menu.has_value());
+
+  resource_menu->Show({
+      MenuItem(
+          ImageResource("test", "images/menu_icon"),
+          StringResource("test", "strings/menu_item"),
+          [] {}
+      ),
+  });
+  const FlattenedScene& shown = runtime.BuildFrame();
+  REQUIRE(ContainsText(shown, "Resource item"));
+  REQUIRE(std::ranges::any_of(shown.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<huxerui::DrawImageCommand>(command);
+  }));
 }
 
 TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {

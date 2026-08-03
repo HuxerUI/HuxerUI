@@ -43,7 +43,12 @@ public:
 private:
   LayerId Show(ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
   LayerId Show(DialogFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
-  bool Update(LayerId id, ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment);
+  bool Update(
+      LayerId id,
+      ViewFactory content,
+      const DialogOptions& options,
+      std::shared_ptr<const Environment> environment
+  );
 
   LayerController layers_;
 
@@ -51,9 +56,7 @@ private:
   friend class DialogExtension;
 };
 
-void DebugMetricsState::RecordCommit(
-    double commit_time_seconds, const DamageRegion& damage, Size viewport
-) noexcept {
+void DebugMetricsState::RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept {
   viewport_ = viewport;
   const bool damaged = damage.full || !damage.rects.empty();
   if (!damaged) {
@@ -199,7 +202,42 @@ ToastStyle DefaultToastStyle(const ThemeSpec& theme) {
 
 DialogStyle DefaultDialogStyle(const ThemeSpec& theme) {
   return {
-      theme.colors.scrim,
+      .scrim = theme.colors.scrim,
+      .enter = TweenSpec{.duration = theme.motion.normal},
+      .exit = TweenSpec{.duration = theme.motion.fast},
+  };
+}
+
+BottomSheetStyle DefaultBottomSheetStyle(const ThemeSpec& theme) {
+  return {
+      .scrim = theme.colors.scrim,
+      .background = theme.colors.surface,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.22F), {0.0F, -2.0F}, theme.elevation.high, 0.0F},
+      .corner_radius = theme.shapes.large,
+      .maximum_width = 640.0F,
+      .enter = TweenSpec{.duration = theme.motion.slow},
+      .exit = TweenSpec{.duration = theme.motion.normal},
+  };
+}
+
+MenuStyle DefaultMenuStyle(const ThemeSpec& theme) {
+  Color separator = theme.colors.on_surface;
+  separator.alpha = 0.12F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .separator_color = separator,
+      .separator_mode = MenuSeparatorMode::BetweenItems,
+      .separator_thickness = 1.0F,
+      .separator_padding = {},
+      .content_padding = EdgeInsets::All(theme.spacing.extra_small),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
+      .item_content_spacing = theme.spacing.small,
+      .icon_size = 18.0F,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {0.0F, 4.0F}, theme.elevation.medium, 0.0F},
+      .corner_radius = theme.shapes.medium,
+      .minimum_width = 180.0F,
+      .minimum_item_height = 36.0F,
   };
 }
 
@@ -218,8 +256,166 @@ ToastStyle ResolveToastStyle(const std::shared_ptr<const Environment>& environme
   return ResolvePresentationStyle<ToastStyle>(environment, DefaultToastStyle(detail::ResolveThemeSpec(environment)));
 }
 
-DialogStyle ResolveDialogStyle(const std::shared_ptr<const Environment>& environment) {
-  return ResolvePresentationStyle<DialogStyle>(environment, DefaultDialogStyle(detail::ResolveThemeSpec(environment)));
+DialogStyle ResolveDialogStyle(const std::shared_ptr<const Environment>& environment, const ThemeSpec& theme) {
+  return ResolvePresentationStyle<DialogStyle>(environment, DefaultDialogStyle(theme));
+}
+
+BottomSheetStyle ResolveBottomSheetStyle(
+    const std::shared_ptr<const Environment>& environment, const ThemeSpec& theme
+) {
+  return ResolvePresentationStyle<BottomSheetStyle>(environment, DefaultBottomSheetStyle(theme));
+}
+
+MenuStyle ResolveMenuStyle(const std::shared_ptr<const Environment>& environment) {
+  return ResolvePresentationStyle<MenuStyle>(environment, DefaultMenuStyle(detail::ResolveThemeSpec(environment)));
+}
+
+enum class PresentationMotionKind {
+  Dialog,
+  BottomSheet,
+};
+
+struct PresentationContentMotion {
+  std::shared_ptr<detail::LayerTransitionState> state;
+  PresentationMotionKind kind = PresentationMotionKind::Dialog;
+
+  static const detail::ModifierDescriptor& Descriptor();
+};
+
+class PresentationContentMotionExtension final : public NodeExtension {
+public:
+  PresentationContentMotionExtension(MountedNode& node, const PresentationContentMotion& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const PresentationContentMotion& modifier) {
+    static_cast<void>(node);
+    if (state_ == modifier.state && kind_ == modifier.kind) {
+      return;
+    }
+    state_ = modifier.state;
+    kind_ = modifier.kind;
+    initialized_ = false;
+  }
+
+  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+    if (!state_) {
+      return {};
+    }
+    if (!initialized_) {
+      progress_.Set(state_->target_visible ? 0.0F : 1.0F);
+      target_visible_ = !state_->target_visible;
+      initialized_ = true;
+    }
+    if (target_visible_ != state_->target_visible) {
+      target_visible_ = state_->target_visible;
+      progress_.Update(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
+    }
+
+    auto& mounted = static_cast<detail::MountedNode&>(node);
+    const bool running = progress_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
+    const float progress = progress_.Value();
+    if (kind_ == PresentationMotionKind::Dialog) {
+      constexpr float initial_scale = 0.96F;
+      const float scale_value = initial_scale + (1.0F - initial_scale) * progress;
+      const Rect bounds = node.Bounds();
+      const Point origin{bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F};
+      const Transform2D scale{scale_value, 0.0F, 0.0F, scale_value};
+      mounted.presentation.local_transform =
+          detail::ComposeTransform(detail::AroundOriginTransform(scale, origin), mounted.presentation.local_transform);
+    } else {
+      mounted.presentation.local_transform = detail::ComposeTransform(
+          detail::TranslationTransform({0.0F, node.Bounds().height * (1.0F - progress)}),
+          mounted.presentation.local_transform
+      );
+    }
+    return {running, std::nullopt};
+  }
+
+private:
+  std::shared_ptr<detail::LayerTransitionState> state_;
+  PresentationMotionKind kind_ = PresentationMotionKind::Dialog;
+  detail::AnimatedValue<float> progress_;
+  bool initialized_ = false;
+  bool target_visible_ = false;
+};
+
+const detail::ModifierDescriptor& PresentationContentMotion::Descriptor() {
+  return detail::ModifierDescriptorFor<PresentationContentMotion, PresentationContentMotionExtension>();
+}
+
+std::shared_ptr<detail::LayerTransitionState> DialogTransition(const DialogStyle& style, bool reduced_motion) {
+  return std::make_shared<detail::LayerTransitionState>(detail::LayerTransitionState{
+      .target_visible = true,
+      .reduced_motion = reduced_motion,
+      .enter = style.enter,
+      .exit = style.exit,
+      .on_exit_complete = {},
+  });
+}
+
+void UpdateDialogTransition(
+    const std::shared_ptr<detail::LayerTransitionState>& transition, const DialogStyle& style, bool reduced_motion
+) {
+  if (!transition) {
+    throw std::logic_error("HuxerUI dialog transition must not be empty");
+  }
+  transition->enter = style.enter;
+  transition->exit = style.exit;
+  transition->reduced_motion = reduced_motion;
+}
+
+bool ValidShadow(const Shadow& shadow) {
+  return std::isfinite(shadow.offset.x) && std::isfinite(shadow.offset.y) && std::isfinite(shadow.blur_radius) &&
+         shadow.blur_radius >= 0.0F && std::isfinite(shadow.spread);
+}
+
+std::shared_ptr<detail::LayerTransitionState> BottomSheetTransition(
+    const BottomSheetStyle& style, bool reduced_motion
+) {
+  return std::make_shared<detail::LayerTransitionState>(detail::LayerTransitionState{
+      .target_visible = true,
+      .reduced_motion = reduced_motion,
+      .enter = style.enter,
+      .exit = style.exit,
+      .on_exit_complete = {},
+  });
+}
+
+void ValidateBottomSheetStyle(const BottomSheetStyle& style) {
+  if (!std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.maximum_width) ||
+      style.maximum_width <= 0.0F || !ValidShadow(style.shadow)) {
+    throw std::invalid_argument(
+        "HuxerUI bottom sheet geometry and shadow must be finite with positive maximum width and non-negative extents"
+    );
+  }
+}
+
+ViewFactory AnimatedDialogContent(ViewFactory content, std::shared_ptr<detail::LayerTransitionState> transition) {
+  return [content = std::move(content), transition = std::move(transition)] {
+    return Stack {content()}.With(
+        PresentationContentMotion{
+            .state = transition,
+            .kind = PresentationMotionKind::Dialog,
+        }
+    );
+  };
+}
+
+ViewFactory BottomSheetContent(
+    ViewFactory content, const BottomSheetStyle& style, std::shared_ptr<detail::LayerTransitionState> transition
+) {
+  return [content = std::move(content), style, transition = std::move(transition)] {
+    return Stack {content()}.With(
+        Background{style.background},
+        CornerRadius{style.corner_radius},
+        style.shadow,
+        PresentationContentMotion{
+            .state = transition,
+            .kind = PresentationMotionKind::BottomSheet,
+        }
+    );
+  };
 }
 
 std::shared_ptr<detail::DialogService> DialogServiceFor(const detail::MountedNode& node) {
@@ -234,67 +430,81 @@ std::shared_ptr<detail::DialogService> DialogServiceFor(const detail::MountedNod
   return *service;
 }
 
-LayerOptions DialogLayerOptions(DialogOptions options, const std::shared_ptr<const Environment>& environment) {
+LayerOptions DialogLayerOptions(DialogOptions options, Color scrim) {
   return {
       .level = LayerLevel::Presentation,
       .pointer_policy = LayerPointerPolicy::Barrier,
       .trap_focus = true,
       .dismiss_on_outside_press = options.dismiss_on_outside_press,
-      .cancel_policy =
-          options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
+      .cancel_policy = options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
       .on_dismiss_request = std::move(options.on_dismiss_request),
-      .barrier_color = ResolveDialogStyle(environment).scrim,
+      .barrier_color = scrim,
   };
 }
 
-void ValidateAnchoredOptions(float gap, float viewport_margin, const std::optional<Point>& point) {
+void ValidateAnchoredOptions(float gap, float viewport_margin, Point offset, const std::optional<Point>& point) {
   if (!std::isfinite(gap) || gap < 0.0F) {
     throw std::invalid_argument("HuxerUI anchored presentation gap must be finite and non-negative");
   }
   if (!std::isfinite(viewport_margin) || viewport_margin < 0.0F) {
     throw std::invalid_argument("HuxerUI anchored presentation viewport margin must be finite and non-negative");
   }
+  if (!std::isfinite(offset.x) || !std::isfinite(offset.y)) {
+    throw std::invalid_argument("HuxerUI anchored presentation offset must be finite");
+  }
   if (point.has_value() && (!std::isfinite(point->x) || !std::isfinite(point->y))) {
     throw std::invalid_argument("HuxerUI anchored presentation point must be finite");
   }
 }
 
-detail::LayerAnchorSide ResolveAnchorSide(AnchorPlacement placement) noexcept {
-  switch (placement) {
-  case AnchorPlacement::Below:
+detail::LayerAnchorSide ResolveAnchorSide(AnchorSide side) noexcept {
+  switch (side) {
+  case AnchorSide::Below:
     return detail::LayerAnchorSide::Below;
-  case AnchorPlacement::Above:
+  case AnchorSide::Above:
     return detail::LayerAnchorSide::Above;
-  case AnchorPlacement::Right:
+  case AnchorSide::Right:
     return detail::LayerAnchorSide::Right;
-  case AnchorPlacement::Left:
+  case AnchorSide::Left:
     return detail::LayerAnchorSide::Left;
   }
   return detail::LayerAnchorSide::Below;
 }
 
-detail::LayerPlacement AnchoredPlacement(Rect anchor, AnchorPlacement placement, float gap, float viewport_margin) {
+detail::LayerAnchorAlignment ResolveAnchorAlignment(AnchorAlignment alignment) noexcept {
+  switch (alignment) {
+  case AnchorAlignment::Start:
+    return detail::LayerAnchorAlignment::Start;
+  case AnchorAlignment::Center:
+    return detail::LayerAnchorAlignment::Center;
+  case AnchorAlignment::End:
+    return detail::LayerAnchorAlignment::End;
+  }
+  return detail::LayerAnchorAlignment::Start;
+}
+
+detail::LayerPlacement
+AnchoredPlacement(Rect anchor, AnchorPlacement placement, float gap, float viewport_margin, Point offset) {
   return detail::LayerPlacement{
       .kind = detail::LayerPlacementKind::Anchored,
       .anchor = anchor,
-      .preferred_side = ResolveAnchorSide(placement),
+      .preferred_side = ResolveAnchorSide(placement.side),
+      .alignment = ResolveAnchorAlignment(placement.alignment),
       .gap = gap,
       .viewport_margin = viewport_margin,
+      .offset = offset,
   };
 }
 
-LayerOptions BottomSheetLayerOptions(
-    BottomSheetOptions options, const std::shared_ptr<const Environment>& environment
-) {
+LayerOptions BottomSheetLayerOptions(BottomSheetOptions options, Color scrim) {
   return {
       .level = LayerLevel::Presentation,
       .pointer_policy = LayerPointerPolicy::Barrier,
       .trap_focus = true,
       .dismiss_on_outside_press = options.dismiss_on_outside_press,
-      .cancel_policy =
-          options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
+      .cancel_policy = options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
       .on_dismiss_request = std::move(options.on_dismiss_request),
-      .barrier_color = detail::ResolveThemeSpec(environment).colors.scrim,
+      .barrier_color = scrim,
   };
 }
 
@@ -304,24 +514,39 @@ LayerOptions PopupLayerOptions(PopupOptions options) {
       .pointer_policy = options.dismiss_on_outside_press ? LayerPointerPolicy::Barrier : LayerPointerPolicy::Content,
       .trap_focus = options.trap_focus,
       .dismiss_on_outside_press = options.dismiss_on_outside_press,
-      .cancel_policy =
-          options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
+      .cancel_policy = options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
       .on_dismiss_request = std::move(options.on_dismiss_request),
       .barrier_color = std::nullopt,
   };
 }
 
-LayerOptions MenuLayerOptions(MenuOptions options) {
+LayerOptions MenuLayerOptions(MenuOptions options, bool submenu) {
+  // The root barrier owns outside dismissal; content-only descendants leave their visible ancestors interactive.
   return {
       .level = LayerLevel::Presentation,
-      .pointer_policy = LayerPointerPolicy::Barrier,
+      .pointer_policy = submenu ? LayerPointerPolicy::Content : LayerPointerPolicy::Barrier,
       .trap_focus = true,
-      .dismiss_on_outside_press = options.dismiss_on_outside_press,
-      .cancel_policy =
-          options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
+      .dismiss_on_outside_press = !submenu && options.dismiss_on_outside_press,
+      .cancel_policy = options.dismiss_on_cancel ? LayerCancelPolicy::Dismiss : LayerCancelPolicy::Consume,
       .on_dismiss_request = std::move(options.on_dismiss_request),
       .barrier_color = std::nullopt,
   };
+}
+
+void ValidateMenuStyle(const MenuStyle& style) {
+  const auto valid_insets = [](const EdgeInsets& insets) {
+    return std::isfinite(insets.top) && insets.top >= 0.0F && std::isfinite(insets.right) && insets.right >= 0.0F &&
+           std::isfinite(insets.bottom) && insets.bottom >= 0.0F && std::isfinite(insets.left) && insets.left >= 0.0F;
+  };
+  if (!std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.minimum_width) ||
+      style.minimum_width < 0.0F || !std::isfinite(style.minimum_item_height) || style.minimum_item_height < 0.0F ||
+      !std::isfinite(style.separator_thickness) || style.separator_thickness < 0.0F ||
+      !std::isfinite(style.item_content_spacing) || style.item_content_spacing < 0.0F ||
+      !std::isfinite(style.icon_size) ||
+      style.icon_size < 0.0F || !valid_insets(style.separator_padding) || !valid_insets(style.content_padding) ||
+      !valid_insets(style.item_padding) || !ValidShadow(style.shadow)) {
+    throw std::invalid_argument("HuxerUI menu geometry and shadow must be finite and non-negative");
+  }
 }
 
 class DebugOverlayLayout final : public Layout<DebugOverlayLayout> {
@@ -451,19 +676,12 @@ View DebugMetricCard(std::string label, std::string value, std::string detail, C
   Frame frame;
   frame.height = 64.0F;
   return Column {
-    Text(std::move(label)).Style(TextStyle{Font::System(10.0F).WithWeight(FontWeight::SemiBold), accent}),
-    Text(std::move(value)).Style(
-        TextStyle{Font::System(18.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}
-    ),
-    Text(std::move(detail)).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
-  }.With(
-      frame,
-      Grow{},
-      Spacing{1.0F},
-      Padding{8.0F},
-      Background{debug_metric_background},
-      CornerRadius{8.0F}
-  );
+      Text(std::move(label)).Style(TextStyle{Font::System(10.0F).WithWeight(FontWeight::SemiBold), accent}),
+      Text(std::move(value))
+          .Style(TextStyle{Font::System(18.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}),
+      Text(std::move(detail)).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+  }
+      .With(frame, Grow{}, Spacing{1.0F}, Padding{8.0F}, Background{debug_metric_background}, CornerRadius{8.0F});
 }
 
 View DebugPanel(
@@ -473,9 +691,8 @@ View DebugPanel(
 ) {
   const std::string fps =
       snapshot.painted_frame_count == 0 ? "Idle" : std::to_string(static_cast<int>(std::lround(snapshot.fps)));
-  const std::string commit_time = snapshot.painted_frame_count == 0
-                                      ? "--"
-                                      : FormatOneDecimal(snapshot.average_commit_time_ms) + " ms";
+  const std::string commit_time =
+      snapshot.painted_frame_count == 0 ? "--" : FormatOneDecimal(snapshot.average_commit_time_ms) + " ms";
   const std::string maximum_commit_time = snapshot.painted_frame_count == 0
                                               ? "No painted frames"
                                               : "Max " + FormatOneDecimal(snapshot.maximum_commit_time_ms) + " ms";
@@ -492,37 +709,40 @@ View DebugPanel(
   live_indicator_frame.width = 8.0F;
   live_indicator_frame.height = 8.0F;
   return Column {
-    Row {
-      Column {}.With(live_indicator_frame, Background{debug_live_color}, CornerRadius{4.0F}),
-      Text("HuxerUI Performance").Style(
-          TextStyle{Font::System(14.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}
-      ),
-      Spacer().With(Grow{}),
-      Text("LIVE").Style(TextStyle{Font::System(9.0F).WithWeight(FontWeight::SemiBold), debug_live_color}),
-    }.With(Spacing{7.0F}, CrossAlign{CrossAxisAlignment::Center}),
-    Row {
-      DebugMetricCard("FPS", fps, "Painted frames/s", debug_live_color),
-      DebugMetricCard("COMMIT", commit_time, maximum_commit_time, Color::Rgb(92, 158, 255)),
-    }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
-    Row {
-      DebugMetricCard("CPU", cpu, "Process / all cores", Color::Rgb(255, 183, 77)),
-      DebugMetricCard("MEMORY", memory, "Process footprint", Color::Rgb(186, 132, 255)),
-    }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
-    Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
-  }.With(
-      panel_frame,
-      Spacing{8.0F},
-      Padding{12.0F},
-      Background{debug_panel_background},
-      Shadow{
-          .color = debug_shadow_color,
-          .offset = {},
-          .blur_radius = 20.0F,
-          .spread = -2.0F,
-      },
-      CornerRadius{12.0F},
-      DebugSampler{metrics, snapshot_state}
-  );
+      Row {
+          Column {}.With(live_indicator_frame, Background{debug_live_color}, CornerRadius{4.0F}),
+          Text("HuxerUI Performance")
+              .Style(TextStyle{Font::System(14.0F).WithWeight(FontWeight::SemiBold), debug_panel_foreground}),
+          Spacer().With(Grow{}),
+          Text("LIVE").Style(TextStyle{Font::System(9.0F).WithWeight(FontWeight::SemiBold), debug_live_color}),
+      }
+          .With(Spacing{7.0F}, CrossAlign{CrossAxisAlignment::Center}),
+      Row {
+          DebugMetricCard("FPS", fps, "Painted frames/s", debug_live_color),
+          DebugMetricCard("COMMIT", commit_time, maximum_commit_time, Color::Rgb(92, 158, 255)),
+      }
+          .With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+      Row {
+          DebugMetricCard("CPU", cpu, "Process / all cores", Color::Rgb(255, 183, 77)),
+          DebugMetricCard("MEMORY", memory, "Process footprint", Color::Rgb(186, 132, 255)),
+      }
+          .With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+      Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+  }
+      .With(
+          panel_frame,
+          Spacing{8.0F},
+          Padding{12.0F},
+          Background{debug_panel_background},
+          Shadow{
+              .color = debug_shadow_color,
+              .offset = {},
+              .blur_radius = 20.0F,
+              .spread = -2.0F,
+          },
+          CornerRadius{12.0F},
+          DebugSampler{metrics, snapshot_state}
+      );
 }
 
 View DebugRibbon(State<bool> expanded) {
@@ -530,19 +750,21 @@ View DebugRibbon(State<bool> expanded) {
   ribbon_frame.width = 96.0F;
   ribbon_frame.height = 18.0F;
   return Row {
-    Text("DEBUG").Style(TextStyle{Font::System(12.0F).WithWeight(FontWeight::Bold), debug_ribbon_foreground}),
-  }.With(
-      ribbon_frame,
-      MainAlign{MainAxisAlignment::Center},
-      CrossAlign{CrossAxisAlignment::Center},
-      Background{debug_ribbon_background},
-      Shadow{
-          .color = debug_ribbon_shadow,
-          .offset = {},
-          .blur_radius = 8.0F,
-      },
-      Rotation{45.0F}
-  ).OnClick([expanded] { expanded = !expanded.Get(); });
+      Text("DEBUG").Style(TextStyle{Font::System(12.0F).WithWeight(FontWeight::Bold), debug_ribbon_foreground}),
+  }
+      .With(
+          ribbon_frame,
+          MainAlign{MainAxisAlignment::Center},
+          CrossAlign{CrossAxisAlignment::Center},
+          Background{debug_ribbon_background},
+          Shadow{
+              .color = debug_ribbon_shadow,
+              .offset = {},
+              .blur_radius = 8.0F,
+          },
+          Rotation{45.0F}
+      )
+      .OnClick([expanded] { expanded = !expanded.Get(); });
 }
 
 } // namespace
@@ -563,8 +785,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
     mounted = false;
     bounds.reset();
     if (active_layer.has_value() && follows_anchor) {
-      layers.Dismiss(*active_layer);
-      active_layer.reset();
+      Dismiss(*active_layer);
     }
     follows_anchor = false;
   }
@@ -589,7 +810,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
 
   void Bind(LayerId id, LayerPlacement placement, bool should_follow_anchor) {
     if (active_layer.has_value() && *active_layer != id) {
-      layers.Dismiss(*active_layer);
+      Dismiss(*active_layer);
     }
     active_layer = id;
     active_placement = std::move(placement);
@@ -597,12 +818,28 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   }
 
   bool Dismiss(LayerId id) {
+    if (active_layer == id && dismiss_handler) {
+      auto handler = std::move(dismiss_handler);
+      return handler(id);
+    }
+    return DismissDirect(id);
+  }
+
+  bool DismissDirect(LayerId id) {
     const bool dismissed = layers.Dismiss(id);
     if (active_layer == id) {
       active_layer.reset();
       follows_anchor = false;
+      dismiss_handler = {};
     }
     return dismissed;
+  }
+
+  void SetDismissHandler(LayerId id, std::function<bool(LayerId)> handler) {
+    if (active_layer != id) {
+      throw std::logic_error("HuxerUI presentation dismissal handler requires the active layer");
+    }
+    dismiss_handler = std::move(handler);
   }
 
   LayerId AttachLayer(
@@ -611,20 +848,19 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
       AnchorPlacement preferred_placement,
       float gap,
       float viewport_margin,
+      Point offset,
       LayerOptions options,
       std::shared_ptr<const Environment> environment
   ) {
-    ValidateAnchoredOptions(gap, viewport_margin, point);
+    ValidateAnchoredOptions(gap, viewport_margin, offset, point);
     const Rect anchor_bounds = point.has_value() ? Rect{point->x, point->y, 0.0F, 0.0F} : RequireBounds();
-    LayerPlacement placement =
-        AnchoredPlacement(anchor_bounds, preferred_placement, gap, viewport_margin);
+    LayerPlacement placement = AnchoredPlacement(anchor_bounds, preferred_placement, gap, viewport_margin, offset);
     auto id = std::make_shared<LayerId>(0);
     if (!options.on_dismiss_request) {
       options.on_dismiss_request = [anchor = shared_from_this(), id] { anchor->Dismiss(*id); };
     }
-    const LayerId attached = layers.AttachCaptured(
-        std::move(options), std::move(content), std::move(environment), placement
-    );
+    const LayerId attached =
+        layers.AttachCaptured(std::move(options), std::move(content), std::move(environment), placement);
     *id = attached;
     Bind(attached, std::move(placement), !point.has_value());
     return attached;
@@ -634,8 +870,42 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   std::optional<Rect> bounds;
   std::optional<LayerId> active_layer;
   LayerPlacement active_placement;
+  std::function<bool(LayerId)> dismiss_handler;
   bool mounted = false;
   bool follows_anchor = false;
+};
+
+struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
+  struct Level {
+    std::weak_ptr<LayerAnchorState> anchor;
+    LayerId id = 0;
+  };
+
+  bool DismissFrom(std::size_t depth) noexcept {
+    // Remove descendants first so focus and anchor ownership unwind in visual stacking order.
+    bool dismissed = false;
+    while (levels.size() > depth) {
+      Level level = std::move(levels.back());
+      levels.pop_back();
+      if (const auto anchor = level.anchor.lock()) {
+        dismissed = anchor->DismissDirect(level.id) || dismissed;
+      }
+    }
+    return dismissed;
+  }
+
+  void Register(std::size_t depth, const std::shared_ptr<LayerAnchorState>& anchor, LayerId id) {
+    if (depth != levels.size()) {
+      throw std::logic_error("HuxerUI menu chain levels must be registered in order");
+    }
+    levels.push_back(Level{anchor, id});
+    anchor->SetDismissHandler(id, [chain = weak_from_this(), depth](LayerId) {
+      const auto locked = chain.lock();
+      return locked && locked->DismissFrom(depth);
+    });
+  }
+
+  std::vector<Level> levels;
 };
 
 class BottomSheetService {
@@ -672,7 +942,6 @@ public:
       PopupOptions options,
       std::shared_ptr<const Environment> environment
   );
-  bool Dismiss(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id);
 
 private:
   LayerController layers_;
@@ -689,22 +958,202 @@ public:
   LayerId Show(
       const std::shared_ptr<LayerAnchorState>& anchor,
       std::optional<Point> point,
-      ViewFactory content,
+      std::vector<MenuEntry> entries,
       MenuOptions options,
       std::shared_ptr<const Environment> environment
   );
-  LayerId Show(
-      const std::shared_ptr<LayerAnchorState>& anchor,
-      std::optional<Point> point,
-      MenuFactory content,
-      MenuOptions options,
-      std::shared_ptr<const Environment> environment
-  );
-  bool Dismiss(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id);
 
 private:
+  LayerId ShowLevel(
+      const std::shared_ptr<LayerAnchorState>& anchor,
+      std::optional<Point> point,
+      std::vector<MenuEntry> entries,
+      MenuOptions options,
+      std::shared_ptr<const Environment> environment,
+      const std::shared_ptr<MenuChainState>& chain,
+      std::size_t depth,
+      bool submenu
+  );
+  static void ValidateEntries(const std::vector<MenuEntry>& entries);
+  static View ItemView(
+      MenuItem item, const MenuStyle& style, const std::shared_ptr<MenuChainState>& chain, std::size_t depth
+  );
+  static View SeparatorView(const MenuStyle& style);
+  static View Surface(
+      std::vector<MenuEntry> entries,
+      MenuStyle style,
+      std::optional<float> width,
+      const std::shared_ptr<MenuChainState>& chain,
+      std::size_t depth
+  );
+
   LayerController layers_;
 };
+
+void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
+  if (entries.empty()) {
+    throw std::invalid_argument("HuxerUI menu must contain at least one item");
+  }
+
+  bool previous_was_section = true;
+  for (const MenuEntry& entry : entries) {
+    if (std::holds_alternative<MenuSection>(entry.value_)) {
+      if (previous_was_section) {
+        throw std::invalid_argument("HuxerUI menu section must separate two items");
+      }
+      previous_was_section = true;
+      continue;
+    }
+
+    const MenuItem& item = std::get<MenuItem>(entry.value_);
+    if (const auto* label = std::get_if<std::string>(&item.label_); label && label->empty()) {
+      throw std::invalid_argument("HuxerUI menu item label must not be empty");
+    }
+    if (const auto* icon = std::get_if<ImageAsset>(&item.icon_); icon && !icon->HasValue()) {
+      throw std::invalid_argument("HuxerUI menu item image asset must not be empty");
+    }
+    if (const auto* action = std::get_if<std::function<void()>>(&item.destination_)) {
+      if (!*action) {
+        throw std::invalid_argument("HuxerUI menu action item must provide an action");
+      }
+    } else {
+      ValidateEntries(std::get<std::vector<MenuEntry>>(item.destination_));
+    }
+    previous_was_section = false;
+  }
+
+  if (previous_was_section) {
+    throw std::invalid_argument("HuxerUI menu section must separate two items");
+  }
+}
+
+View MenuService::ItemView(
+    MenuItem item, const MenuStyle& style, const std::shared_ptr<MenuChainState>& chain, std::size_t depth
+) {
+  Frame item_frame;
+  item_frame.min_height = style.minimum_item_height;
+  Frame icon_frame;
+  icon_frame.width = style.icon_size;
+  icon_frame.height = style.icon_size;
+
+  std::vector<View> content;
+  if (item.checked_) {
+    content.push_back(Text("\xE2\x9C\x93").With(icon_frame, Foreground{style.foreground}));
+  }
+  if (const auto* resource = std::get_if<ImageResource>(&item.icon_)) {
+    content.push_back(Image(*resource).Fit(ImageFit::Contain).With(icon_frame));
+  } else if (const auto* asset = std::get_if<ImageAsset>(&item.icon_)) {
+    content.push_back(Image(*asset).Fit(ImageFit::Contain).With(icon_frame));
+  }
+
+  std::string label;
+  if (const auto* value = std::get_if<std::string>(&item.label_)) {
+    label = *value;
+  } else {
+    label = UseString(std::get<StringResource>(item.label_));
+  }
+  content.push_back(Text(std::move(label)).With(Foreground{style.foreground}));
+
+  if (std::holds_alternative<std::vector<MenuEntry>>(item.destination_)) {
+    auto submenu = UseMenu();
+    std::vector<MenuEntry> entries = std::get<std::vector<MenuEntry>>(std::move(item.destination_));
+    content.push_back(Text("\xE2\x80\xBA").With(Foreground{style.foreground}));
+    return Row {std::move(content)}
+        .With(
+            submenu.Anchor(),
+            item_frame,
+            Padding{style.item_padding},
+            Spacing{style.item_content_spacing},
+            CrossAlign{CrossAxisAlignment::Center},
+            Enabled{item.enabled_},
+            Focusable{}
+        )
+        .OnClick([submenu, entries = std::move(entries), chain, depth] {
+          MenuOptions options;
+          options.placement = {
+              .side = AnchorSide::Right,
+              .alignment = AnchorAlignment::Start,
+          };
+          options.gap = 2.0F;
+          submenu.service_->ShowLevel(
+              submenu.anchor_,
+              std::nullopt,
+              entries,
+              std::move(options),
+              submenu.environment_,
+              chain,
+              depth + 1,
+              true
+          );
+        });
+  }
+
+  std::function<void()> action = std::get<std::function<void()>>(std::move(item.destination_));
+  return Row {std::move(content)}
+      .With(
+          item_frame,
+          Padding{style.item_padding},
+          Spacing{style.item_content_spacing},
+          CrossAlign{CrossAxisAlignment::Center},
+          Enabled{item.enabled_},
+          Focusable{}
+      )
+      .OnClick([chain, action = std::move(action)] {
+        chain->DismissFrom(0);
+        action();
+      });
+}
+
+View MenuService::SeparatorView(const MenuStyle& style) {
+  Frame line_frame;
+  line_frame.height = style.separator_thickness;
+  return Column {
+    Row {}.With(line_frame, Background{style.separator_color}),
+  }.With(
+      Padding{style.separator_padding},
+      CrossAlign{CrossAxisAlignment::Stretch}
+  );
+}
+
+View MenuService::Surface(
+    std::vector<MenuEntry> entries,
+    MenuStyle style,
+    std::optional<float> width,
+    const std::shared_ptr<MenuChainState>& chain,
+    std::size_t depth
+) {
+  std::vector<View> children;
+  bool has_item = false;
+  bool pending_section = false;
+  for (MenuEntry& entry : entries) {
+    if (std::holds_alternative<MenuSection>(entry.value_)) {
+      pending_section = true;
+      continue;
+    }
+    if (has_item && (style.separator_mode == MenuSeparatorMode::BetweenItems ||
+                     (style.separator_mode == MenuSeparatorMode::BetweenSections && pending_section))) {
+      children.push_back(SeparatorView(style));
+    }
+    has_item = true;
+    pending_section = false;
+    children.push_back(ItemView(std::get<MenuItem>(std::move(entry.value_)), style, chain, depth));
+  }
+
+  Frame surface_frame;
+  if (width.has_value()) {
+    surface_frame.width = *width;
+  } else {
+    surface_frame.min_width = style.minimum_width;
+  }
+  return Column {std::move(children)}.With(
+      surface_frame,
+      Padding{style.content_padding},
+      CrossAlign{CrossAxisAlignment::Stretch},
+      Background{style.background},
+      CornerRadius{style.corner_radius},
+      style.shadow
+  );
+}
 
 class LayerAnchorExtension final : public NodeExtension {
 public:
@@ -768,7 +1217,7 @@ public:
             children.push_back(Spacer());
           }
           children.push_back(DebugRibbon(expanded));
-          return DebugOverlayLayout{std::move(children)};
+          return DebugOverlayLayout {std::move(children)};
         },
         {},
         std::move(placement)
@@ -797,7 +1246,6 @@ public:
     if (!modifier.visible) {
       if (layer_.has_value()) {
         service_->Dismiss(*layer_);
-        layer_.reset();
       }
       return;
     }
@@ -816,8 +1264,10 @@ public:
         .on_dismiss_request = modifier.on_dismiss_request,
     };
     if (layer_.has_value()) {
-      service_->Update(*layer_, modifier.content, std::move(options), mounted.environment);
-      return;
+      if (service_->Update(*layer_, modifier.content, options, mounted.environment)) {
+        return;
+      }
+      layer_.reset();
     }
     layer_ = service_->Show(modifier.content, std::move(options), mounted.environment);
   }
@@ -841,6 +1291,68 @@ void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> m
 
 } // namespace detail
 
+MenuItem::MenuItem(std::string_view label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::string(label)}, Icon{std::monostate{}}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(StringResource label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::move(label)}, Icon{std::monostate{}}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(ImageResource icon, std::string_view label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::string(label)}, Icon{std::move(icon)}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(ImageResource icon, StringResource label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::move(label)}, Icon{std::move(icon)}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(ImageAsset icon, std::string_view label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::string(label)}, Icon{std::move(icon)}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(ImageAsset icon, StringResource label, std::function<void()> on_item_click)
+    : MenuItem(Label{std::move(label)}, Icon{std::move(icon)}, std::move(on_item_click)) {}
+
+MenuItem::MenuItem(std::string_view label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::string(label)}, Icon{std::monostate{}}, std::move(children)) {}
+
+MenuItem::MenuItem(StringResource label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::move(label)}, Icon{std::monostate{}}, std::move(children)) {}
+
+MenuItem::MenuItem(ImageResource icon, std::string_view label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::string(label)}, Icon{std::move(icon)}, std::move(children)) {}
+
+MenuItem::MenuItem(ImageResource icon, StringResource label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::move(label)}, Icon{std::move(icon)}, std::move(children)) {}
+
+MenuItem::MenuItem(ImageAsset icon, std::string_view label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::string(label)}, Icon{std::move(icon)}, std::move(children)) {}
+
+MenuItem::MenuItem(ImageAsset icon, StringResource label, std::vector<MenuEntry> children)
+    : MenuItem(Label{std::move(label)}, Icon{std::move(icon)}, std::move(children)) {}
+
+MenuItem::MenuItem(Label label, Icon icon, std::function<void()> on_item_click)
+    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(on_item_click)) {}
+
+MenuItem::MenuItem(Label label, Icon icon, std::vector<MenuEntry> children)
+    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(children)) {}
+
+MenuItem::MenuItem(const MenuItem& other) = default;
+
+MenuItem::MenuItem(MenuItem&& other) noexcept = default;
+
+MenuItem& MenuItem::operator=(const MenuItem& other) = default;
+
+MenuItem& MenuItem::operator=(MenuItem&& other) noexcept = default;
+
+MenuItem::~MenuItem() = default;
+
+MenuItem MenuItem::Enabled(bool enabled) && {
+  enabled_ = enabled;
+  return std::move(*this);
+}
+
+MenuItem MenuItem::Checked(bool checked) && {
+  checked_ = checked;
+  return std::move(*this);
+}
+
 LayerId ToastHandle::Show(std::string message, ToastOptions options) const {
   return service_->Show(std::move(message), options, environment_);
 }
@@ -849,9 +1361,8 @@ bool ToastHandle::Dismiss(LayerId id) const {
   return service_->Dismiss(id);
 }
 
-LayerId detail::ToastService::Show(
-    std::string message, ToastOptions options, std::shared_ptr<const Environment> environment
-) {
+LayerId
+detail::ToastService::Show(std::string message, ToastOptions options, std::shared_ptr<const Environment> environment) {
   if (!std::isfinite(options.duration) || options.duration < 0.0) {
     throw std::invalid_argument("HuxerUI toast duration must be finite and non-negative");
   }
@@ -872,25 +1383,26 @@ LayerId detail::ToastService::Show(
       },
       [service, id, message = std::move(message), options, style] {
         return Stack {
-          Text(message).With(
-              Padding{style.padding},
-              Background{style.background},
-              Foreground{style.foreground},
-              CornerRadius{style.corner_radius},
-              ToastLifetime{
-                  service,
-                  *id,
-                  options.duration,
-              }
-          ),
-        }.With(
-            Padding{EdgeInsets{
-                0.0F,
-                16.0F,
-                24.0F,
-                16.0F,
-            }}
-        );
+            Text(message).With(
+                Padding{style.padding},
+                Background{style.background},
+                Foreground{style.foreground},
+                CornerRadius{style.corner_radius},
+                ToastLifetime{
+                    service,
+                    *id,
+                    options.duration,
+                }
+            ),
+        }
+            .With(
+                Padding{EdgeInsets{
+                    0.0F,
+                    16.0F,
+                    24.0F,
+                    16.0F,
+                }}
+            );
       },
       std::move(environment),
       std::move(placement)
@@ -933,11 +1445,22 @@ bool DialogHandle::Dismiss(LayerId id) const {
 LayerId detail::DialogService::Show(
     ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment
 ) {
-  LayerOptions layer_options = DialogLayerOptions(std::move(options), environment);
+  if (!content) {
+    throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
+  }
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const DialogStyle style = ResolveDialogStyle(environment, theme);
+  const std::shared_ptr<detail::LayerTransitionState> transition = DialogTransition(style, theme.motion.reduced_motion);
+  LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::Center;
-  return layers_
-      .AttachCaptured(std::move(layer_options), std::move(content), std::move(environment), std::move(placement));
+  return layers_.AttachCaptured(
+      std::move(layer_options),
+      AnimatedDialogContent(std::move(content), transition),
+      std::move(environment),
+      std::move(placement),
+      transition
+  );
 }
 
 LayerId detail::DialogService::Show(
@@ -947,29 +1470,50 @@ LayerId detail::DialogService::Show(
     throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
   }
   auto id = std::make_shared<LayerId>(0);
-  LayerOptions layer_options = DialogLayerOptions(std::move(options), environment);
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const DialogStyle style = ResolveDialogStyle(environment, theme);
+  const std::shared_ptr<detail::LayerTransitionState> transition = DialogTransition(style, theme.motion.reduced_motion);
+  LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::Center;
   const LayerId attached = layers_.AttachCaptured(
       std::move(layer_options),
-      [layers = layers_, id, content = std::move(content)] { return content(DialogContext{layers, *id}); },
+      AnimatedDialogContent(
+          [layers = layers_, id, content = std::move(content)] { return content(DialogContext{layers, *id}); },
+          transition
+      ),
       std::move(environment),
-      std::move(placement)
+      std::move(placement),
+      transition
   );
   *id = attached;
   return attached;
 }
 
 bool detail::DialogService::Update(LayerId id, ViewFactory content) {
-  return layers_.Update(id, std::move(content));
+  if (!content) {
+    throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
+  }
+  const std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
+  return transition && layers_.Update(id, AnimatedDialogContent(std::move(content), transition));
 }
 
 bool detail::DialogService::Update(
-    LayerId id, ViewFactory content, DialogOptions options, std::shared_ptr<const Environment> environment
+    LayerId id, ViewFactory content, const DialogOptions& options, std::shared_ptr<const Environment> environment
 ) {
-  LayerOptions layer_options = DialogLayerOptions(std::move(options), environment);
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const DialogStyle style = ResolveDialogStyle(environment, theme);
+  LayerOptions layer_options = DialogLayerOptions(options, style.scrim);
+  const std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
+  if (!transition) {
+    return false;
+  }
+  UpdateDialogTransition(transition, style, theme.motion.reduced_motion);
   return layers_.UpdateCaptured(
-      id, std::move(layer_options), std::move(content), std::move(environment)
+      id,
+      std::move(layer_options),
+      AnimatedDialogContent(std::move(content), transition),
+      std::move(environment)
   );
 }
 
@@ -977,9 +1521,15 @@ bool detail::DialogService::Update(LayerId id, DialogFactory content) {
   if (!content) {
     throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
   }
-  return layers_.Update(id, [layers = layers_, id, content = std::move(content)] {
-    return content(DialogContext{layers, id});
-  });
+  const std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
+  return transition &&
+         layers_.Update(
+             id,
+             AnimatedDialogContent(
+                 [layers = layers_, id, content = std::move(content)] { return content(DialogContext{layers, id}); },
+                 transition
+             )
+         );
 }
 
 bool detail::DialogService::Dismiss(LayerId id) {
@@ -1008,11 +1558,26 @@ bool BottomSheetHandle::Dismiss(LayerId id) const {
 LayerId detail::BottomSheetService::Show(
     ViewFactory content, BottomSheetOptions options, std::shared_ptr<const Environment> environment
 ) {
-  LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), environment);
+  if (!content) {
+    throw std::invalid_argument("HuxerUI bottom sheet content factory must not be empty");
+  }
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const BottomSheetStyle style = ResolveBottomSheetStyle(environment, theme);
+  ValidateBottomSheetStyle(style);
+  const std::shared_ptr<detail::LayerTransitionState> transition =
+      BottomSheetTransition(style, theme.motion.reduced_motion);
+  LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::BottomCenter;
-  return layers_
-      .AttachCaptured(std::move(layer_options), std::move(content), std::move(environment), std::move(placement));
+  placement.fill_cross_axis = true;
+  placement.maximum_cross_axis_extent = style.maximum_width;
+  return layers_.AttachCaptured(
+      std::move(layer_options),
+      BottomSheetContent(std::move(content), style, transition),
+      std::move(environment),
+      std::move(placement),
+      transition
+  );
 }
 
 LayerId detail::BottomSheetService::Show(
@@ -1022,14 +1587,26 @@ LayerId detail::BottomSheetService::Show(
     throw std::invalid_argument("HuxerUI bottom sheet content factory must not be empty");
   }
   auto id = std::make_shared<LayerId>(0);
-  LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), environment);
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const BottomSheetStyle style = ResolveBottomSheetStyle(environment, theme);
+  ValidateBottomSheetStyle(style);
+  const std::shared_ptr<detail::LayerTransitionState> transition =
+      BottomSheetTransition(style, theme.motion.reduced_motion);
+  LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::BottomCenter;
+  placement.fill_cross_axis = true;
+  placement.maximum_cross_axis_extent = style.maximum_width;
   const LayerId attached = layers_.AttachCaptured(
       std::move(layer_options),
-      [layers = layers_, id, content = std::move(content)] { return content(BottomSheetContext{layers, *id}); },
+      BottomSheetContent(
+          [layers = layers_, id, content = std::move(content)] { return content(BottomSheetContext{layers, *id}); },
+          style,
+          transition
+      ),
       std::move(environment),
-      std::move(placement)
+      std::move(placement),
+      transition
   );
   *id = attached;
   return attached;
@@ -1067,7 +1644,7 @@ LayerId PopupHandle::ShowAt(Point point, PopupFactory content, PopupOptions opti
 }
 
 bool PopupHandle::Dismiss(LayerId id) const {
-  return service_->Dismiss(anchor_, id);
+  return anchor_ && anchor_->Dismiss(id);
 }
 
 LayerId detail::PopupService::Show(
@@ -1083,12 +1660,14 @@ LayerId detail::PopupService::Show(
   const AnchorPlacement preferred_placement = options.placement;
   const float gap = options.gap;
   const float viewport_margin = options.viewport_margin;
+  const Point offset = options.offset;
   return anchor->AttachLayer(
       point,
       std::move(content),
       preferred_placement,
       gap,
       viewport_margin,
+      offset,
       PopupLayerOptions(std::move(options)),
       std::move(environment)
   );
@@ -1116,10 +1695,6 @@ LayerId detail::PopupService::Show(
   return attached;
 }
 
-bool detail::PopupService::Dismiss(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id) {
-  return anchor->Dismiss(id);
-}
-
 PopupHandle UsePopup() {
   const std::shared_ptr<detail::PopupService> service = UseService<detail::PopupService>();
   auto anchor = UseState(service->CreateAnchor());
@@ -1138,74 +1713,75 @@ LayerAnchor MenuHandle::Anchor() const {
   return LayerAnchor{anchor_};
 }
 
-LayerId MenuHandle::Show(ViewFactory content, MenuOptions options) const {
-  return service_->Show(anchor_, std::nullopt, std::move(content), std::move(options), environment_);
+LayerId MenuHandle::Show(std::vector<MenuEntry> entries, MenuOptions options) const {
+  return service_->Show(anchor_, std::nullopt, std::move(entries), std::move(options), environment_);
 }
 
-LayerId MenuHandle::Show(MenuFactory content, MenuOptions options) const {
-  return service_->Show(anchor_, std::nullopt, std::move(content), std::move(options), environment_);
-}
-
-LayerId MenuHandle::ShowAt(Point point, ViewFactory content, MenuOptions options) const {
-  return service_->Show(anchor_, point, std::move(content), std::move(options), environment_);
-}
-
-LayerId MenuHandle::ShowAt(Point point, MenuFactory content, MenuOptions options) const {
-  return service_->Show(anchor_, point, std::move(content), std::move(options), environment_);
+LayerId MenuHandle::ShowAt(Point point, std::vector<MenuEntry> entries, MenuOptions options) const {
+  return service_->Show(anchor_, point, std::move(entries), std::move(options), environment_);
 }
 
 bool MenuHandle::Dismiss(LayerId id) const {
-  return service_->Dismiss(anchor_, id);
+  return anchor_ && anchor_->Dismiss(id);
 }
 
 LayerId detail::MenuService::Show(
     const std::shared_ptr<detail::LayerAnchorState>& anchor,
     std::optional<Point> point,
-    ViewFactory content,
+    std::vector<MenuEntry> entries,
     MenuOptions options,
     std::shared_ptr<const Environment> environment
 ) {
-  if (!content) {
-    throw std::invalid_argument("HuxerUI menu content factory must not be empty");
+  return ShowLevel(
+      anchor,
+      point,
+      std::move(entries),
+      std::move(options),
+      std::move(environment),
+      std::make_shared<MenuChainState>(),
+      0,
+      false
+  );
+}
+
+LayerId detail::MenuService::ShowLevel(
+    const std::shared_ptr<detail::LayerAnchorState>& anchor,
+    std::optional<Point> point,
+    std::vector<MenuEntry> entries,
+    MenuOptions options,
+    std::shared_ptr<const Environment> environment,
+    const std::shared_ptr<MenuChainState>& chain,
+    std::size_t depth,
+    bool submenu
+) {
+  ValidateEntries(entries);
+  const MenuStyle style = ResolveMenuStyle(environment);
+  ValidateMenuStyle(style);
+  if (options.width.has_value() && (!std::isfinite(*options.width) || *options.width <= 0.0F)) {
+    throw std::invalid_argument("HuxerUI menu width must be finite and positive");
   }
   const AnchorPlacement preferred_placement = options.placement;
   const float gap = options.gap;
   const float viewport_margin = options.viewport_margin;
-  return anchor->AttachLayer(
+  const Point offset = options.offset;
+  const std::optional<float> width = options.width;
+  if (submenu) {
+    chain->DismissFrom(depth);
+  }
+  const LayerId attached = anchor->AttachLayer(
       point,
-      std::move(content),
+      [entries = std::move(entries), style, width, chain, depth] {
+        return Surface(entries, style, width, chain, depth);
+      },
       preferred_placement,
       gap,
       viewport_margin,
-      MenuLayerOptions(std::move(options)),
+      offset,
+      MenuLayerOptions(std::move(options), submenu),
       std::move(environment)
   );
-}
-
-LayerId detail::MenuService::Show(
-    const std::shared_ptr<detail::LayerAnchorState>& anchor,
-    std::optional<Point> point,
-    MenuFactory content,
-    MenuOptions options,
-    std::shared_ptr<const Environment> environment
-) {
-  if (!content) {
-    throw std::invalid_argument("HuxerUI menu content factory must not be empty");
-  }
-  auto id = std::make_shared<LayerId>(0);
-  const LayerId attached = Show(
-      anchor,
-      point,
-      [anchor, id, content = std::move(content)] { return content(MenuContext{anchor, *id}); },
-      std::move(options),
-      std::move(environment)
-  );
-  *id = attached;
+  chain->Register(depth, anchor, attached);
   return attached;
-}
-
-bool detail::MenuService::Dismiss(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id) {
-  return anchor->Dismiss(id);
 }
 
 MenuHandle UseMenu() {
@@ -1218,16 +1794,20 @@ MenuHandle UseMenu() {
   };
 }
 
-bool MenuContext::Dismiss() const {
-  return anchor_ && anchor_->Dismiss(id_);
-}
-
 ToastStyle ToastStyle::Default() {
   return DefaultToastStyle(ThemeSpec::Default());
 }
 
 DialogStyle DialogStyle::Default() {
   return DefaultDialogStyle(ThemeSpec::Default());
+}
+
+BottomSheetStyle BottomSheetStyle::Default() {
+  return DefaultBottomSheetStyle(ThemeSpec::Default());
+}
+
+MenuStyle MenuStyle::Default() {
+  return DefaultMenuStyle(ThemeSpec::Default());
 }
 
 const detail::ModifierDescriptor& Dialog::Descriptor() {

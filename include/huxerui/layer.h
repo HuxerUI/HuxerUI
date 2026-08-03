@@ -15,6 +15,7 @@ class Environment;
 
 namespace detail {
 struct LayerAnchorState;
+struct LayerTransitionState;
 class BottomSheetService;
 class DebugOverlayInstaller;
 class DialogService;
@@ -73,7 +74,8 @@ private:
       LayerOptions options,
       ViewFactory content,
       std::shared_ptr<const Environment> environment,
-      detail::LayerPlacement placement
+      detail::LayerPlacement placement,
+      std::shared_ptr<detail::LayerTransitionState> transition = {}
   ) const;
   bool UpdateCaptured(
       LayerId id, LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment
@@ -85,6 +87,7 @@ private:
       std::optional<std::shared_ptr<const Environment>> environment
   ) const;
   bool UpdatePlacement(LayerId id, detail::LayerPlacement placement) const;
+  std::shared_ptr<detail::LayerTransitionState> Transition(LayerId id) const;
 
   explicit LayerController(Runtime& runtime);
   void Disconnect() noexcept;

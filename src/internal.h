@@ -139,12 +139,34 @@ enum class LayerAnchorSide : std::uint8_t {
   Left,
 };
 
+enum class LayerAnchorAlignment : std::uint8_t {
+  Start,
+  Center,
+  End,
+};
+
+struct LayerTransitionState {
+  // LayerEntry owns this while retained modifiers observe it. The completion callback holds the controller weakly and
+  // removes the entry only after the exit value settles.
+  bool target_visible = true;
+  bool reduced_motion = false;
+  AnimationSpec enter = TweenSpec{.duration = 0.2};
+  AnimationSpec exit = TweenSpec{.duration = 0.14};
+  std::function<void()> on_exit_complete;
+};
+
 struct LayerPlacement {
   LayerPlacementKind kind = LayerPlacementKind::Natural;
   Rect anchor;
   LayerAnchorSide preferred_side = LayerAnchorSide::Below;
+  LayerAnchorAlignment alignment = LayerAnchorAlignment::Start;
   float gap = 0.0F;
   float viewport_margin = 0.0F;
+  Point offset;
+
+  // BottomCenter uses these fields for surfaces that fill compact viewports but retain a desktop width limit.
+  bool fill_cross_axis = false;
+  float maximum_cross_axis_extent = std::numeric_limits<float>::infinity();
 
   bool operator==(const LayerPlacement&) const = default;
 };
@@ -172,6 +194,7 @@ struct LayerEntry {
   std::shared_ptr<const Environment> environment;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
+  std::shared_ptr<LayerTransitionState> transition;
 };
 
 template <std::floating_point T> class AnimatedValue {

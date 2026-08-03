@@ -12,7 +12,7 @@ Current implementation status:
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Retained exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and profiler timelines remain follow-up work.
+- General View exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and profiler timelines remain follow-up work. Dialog and BottomSheet already retain their Layer entries through component-specific exit motion.
 
 The design has four goals:
 
@@ -458,7 +458,7 @@ run the exit transition
 unmount after completion
 ```
 
-A future Layer transition contract should reuse the same model instead of adding a second animation system.
+Dialog and BottomSheet already apply this lifecycle to Layer entries through a shared internal transition state. They reuse `AnimationSpec`, `AnimatedValue`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
 
 ### Reduced motion
 
@@ -635,7 +635,12 @@ Component styles are typed Environment values:
 ```text
 TextStyle
 ButtonStyle
+CheckboxStyle
+SwitchStyle
+ProgressCircleStyle
 DialogStyle
+BottomSheetStyle
+MenuStyle
 ToastStyle
 ScrollBarStyle
 ```
@@ -844,23 +849,25 @@ auto menu = UseMenu();
 return Button("More")
     .With(menu.Anchor())
     .OnClick([menu] {
-      menu.Show([](MenuContext context) {
-        return Button("Rename").OnClick([context] {
-          context.Dismiss();
-        });
+      menu.Show({
+          MenuItem("Rename", [] {}),
+          MenuSection{},
+          MenuItem("Delete", [] {}),
       });
     });
 ```
 
-The anchor modifier records final PresentationBounds without creating a layer. `Show()` attaches the entry and follows those bounds. `ShowAt()` supports context menus and pointer-position popups. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` and `MenuContext` dismiss their own entry without retaining a `LayerId` or recomposing application state. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses the entry. Placement uses the measured popup size, preferred side, viewport margin, and edge flipping without introducing a general cross-tree layout dependency.
+The anchor modifier records final PresentationBounds without creating a layer. `Show()` attaches the entry and follows those bounds. `ShowAt()` supports context menus and pointer-position popups. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` dismisses arbitrary popup content directly, while Menu leaf actions dismiss the complete open menu chain automatically. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses the entry. Placement combines a preferred side, cross-axis alignment, gap, offset, viewport margin, opposite-side fallback, and final clamping without introducing a general cross-tree layout dependency.
 
-Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, and Environment machinery, while their layout, surface, motion, and options remain component-specific. The existing command-oriented `UseDialog()` path is the primary ergonomic model for the revised design.
+Menu is structurally distinct from Popup. Its public input is a recursive sequence of `MenuEntry` values created implicitly from `MenuItem` and `MenuSection`. Menu items directly contain either an action or another entry sequence, while `MenuSection{}` is a non-interactive logical boundary whose visual treatment belongs to the theme. Items retain resource identifiers and image assets as semantic values; the presentation service resolves resources from the captured Environment and composes themed surfaces and interaction. The root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, so their parent menu remains interactive; Back closes the deepest open level, the default outside-press behavior closes the complete chain, and opening another submenu replaces only that level and its descendants. Arbitrary custom anchored content remains a Popup responsibility.
+
+Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, Environment, and retained Layer transition machinery, while their layout, surface, motion, and options remain component-specific. Dialog fades and scales centered content. BottomSheet owns an adaptive-width bottom surface and translates it from the window edge. The existing command-oriented `UseDialog()` path remains the primary ergonomic model.
 
 The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its top-right corner ribbon toggles an upper-left metrics panel within the entry's own state. Both are composed from ordinary Views; the ribbon is one rotated component clipped by the viewport rather than separately positioned background and label geometry. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime records painted-frame count, frame-commit time, and damage ratio in a dedicated debug metrics state. PlatformAdapter optionally supplies cumulative process CPU time, a platform-preferred process-memory footprint, and logical processor count so interval utilization can be derived without platform state leaking into LayerController.
 
 The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling Runtime accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
-Dismissed entries are removed immediately. Retained exit presentation belongs to the deferred transition model.
+Ordinary LayerController entries are removed immediately. Dialog and BottomSheet entries first become non-interactive, retain their modal barrier and presentation state through the configured exit animation, and are removed after completion. Focus restoration occurs with actual removal, so content behind a visually exiting modal cannot be activated early.
 
 ## RootHook
 
@@ -981,7 +988,7 @@ return Content().With(
     });
 ```
 
-`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry. Destroying the source modifier dismisses the entry immediately.
+`DialogExtension` owns a LayerEntry handle. Updating the modifier updates the entry and can reverse an in-progress exit from its current presentation value. Destroying the source modifier requests the same retained dismissal used by command-created dialogs.
 
 An outside press requests dismissal instead of directly removing a declarative Dialog layer. The callback updates the source State, preserving one source of truth for both the component and layer stack. A dismissible declarative Dialog must provide `on_dismiss_request`.
 

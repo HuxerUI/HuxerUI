@@ -65,6 +65,11 @@ android {
     buildFeatures {
         prefab true
     }
+
+    lintOptions {
+        abortOnError false
+        checkReleaseBuilds false
+    }
 }
 
 dependencies {

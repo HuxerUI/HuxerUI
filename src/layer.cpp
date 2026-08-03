@@ -43,7 +43,8 @@ LayerId LayerController::AttachCaptured(
     LayerOptions options,
     ViewFactory content,
     std::shared_ptr<const Environment> environment,
-    detail::LayerPlacement placement
+    detail::LayerPlacement placement,
+    std::shared_ptr<detail::LayerTransitionState> transition
 ) const {
   if (state_->runtime == nullptr) {
     throw std::logic_error("HuxerUI layer controller is disconnected");
@@ -62,8 +63,23 @@ LayerId LayerController::AttachCaptured(
           .content = std::move(content),
           .environment = std::move(environment),
           .placement = std::make_shared<detail::LayerPlacement>(std::move(placement)),
+          .transition = std::move(transition),
       }
   );
+  if (state_->entries.back().transition) {
+    state_->entries.back().transition->on_exit_complete = [state = std::weak_ptr<State>(state_), id] {
+      const std::shared_ptr<State> locked = state.lock();
+      if (!locked || locked->runtime == nullptr) {
+        return;
+      }
+      const auto found = std::ranges::find(locked->entries, id, &detail::LayerEntry::id);
+      if (found == locked->entries.end()) {
+        return;
+      }
+      locked->entries.erase(found);
+      locked->runtime->InvalidateLayers();
+    };
+  }
   state_->runtime->InvalidateLayers();
   return id;
 }
@@ -82,6 +98,14 @@ bool LayerController::UpdatePlacement(LayerId id, detail::LayerPlacement placeme
   *found->placement = std::move(placement);
   state_->runtime->InvalidateLayerPlacement(id);
   return true;
+}
+
+std::shared_ptr<detail::LayerTransitionState> LayerController::Transition(LayerId id) const {
+  if (state_->runtime == nullptr) {
+    return {};
+  }
+  const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
+  return found == state_->entries.end() ? nullptr : found->transition;
 }
 
 bool LayerController::Update(LayerId id, ViewFactory content) const {
@@ -124,6 +148,9 @@ bool LayerController::UpdateEntry(
   if (environment.has_value()) {
     found->environment = std::move(*environment);
   }
+  if (found->transition && !found->transition->target_visible) {
+    found->transition->target_visible = true;
+  }
   ++found->revision;
   state_->runtime->InvalidateLayers();
   return true;
@@ -136,6 +163,15 @@ bool LayerController::Dismiss(LayerId id) const {
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
   if (found == state_->entries.end()) {
     return false;
+  }
+  if (found->transition) {
+    if (!found->transition->target_visible) {
+      return false;
+    }
+    found->transition->target_visible = false;
+    ++found->revision;
+    state_->runtime->InvalidateLayers();
+    return true;
   }
   state_->entries.erase(found);
   state_->runtime->InvalidateLayers();

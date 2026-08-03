@@ -2,13 +2,19 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
+#include <huxerui/animation.h>
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layer.h>
 #include <huxerui/modifier.h>
+#include <huxerui/resource.h>
 
 namespace huxerui {
 
@@ -38,10 +44,53 @@ struct ToastStyle {
 
 struct DialogStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
+  AnimationSpec enter = TweenSpec{.duration = 0.2};
+  AnimationSpec exit = TweenSpec{.duration = 0.14};
 
   static DialogStyle Default();
 
   bool operator==(const DialogStyle&) const = default;
+};
+
+struct BottomSheetStyle {
+  Color scrim = Color::Rgb(0, 0, 0, 0.42F);
+  Color background = Color::White();
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.22F), {0.0F, -2.0F}, 18.0F, 0.0F};
+  float corner_radius = 14.0F;
+  float maximum_width = 640.0F;
+  AnimationSpec enter = TweenSpec{.duration = 0.24};
+  AnimationSpec exit = TweenSpec{.duration = 0.18};
+
+  static BottomSheetStyle Default();
+
+  bool operator==(const BottomSheetStyle&) const = default;
+};
+
+enum class MenuSeparatorMode {
+  None,
+  BetweenSections,
+  BetweenItems,
+};
+
+struct MenuStyle {
+  Color background = Color::White();
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color separator_color = Color::Rgb(31, 35, 40, 0.12F);
+  MenuSeparatorMode separator_mode = MenuSeparatorMode::BetweenItems;
+  float separator_thickness = 1.0F;
+  EdgeInsets separator_padding;
+  EdgeInsets content_padding = EdgeInsets::All(4.0F);
+  EdgeInsets item_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
+  float item_content_spacing = 8.0F;
+  float icon_size = 18.0F;
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.2F), {0.0F, 4.0F}, 16.0F, 0.0F};
+  float corner_radius = 8.0F;
+  float minimum_width = 180.0F;
+  float minimum_item_height = 36.0F;
+
+  static MenuStyle Default();
+
+  bool operator==(const MenuStyle&) const = default;
 };
 
 struct ToastOptions {
@@ -159,17 +208,31 @@ private:
 
 BottomSheetHandle UseBottomSheet();
 
-enum class AnchorPlacement {
+enum class AnchorSide {
   Below,
   Above,
   Right,
   Left,
 };
 
+enum class AnchorAlignment {
+  Start,
+  Center,
+  End,
+};
+
+struct AnchorPlacement {
+  AnchorSide side = AnchorSide::Below;
+  AnchorAlignment alignment = AnchorAlignment::Start;
+
+  bool operator==(const AnchorPlacement&) const = default;
+};
+
 struct PopupOptions {
-  AnchorPlacement placement = AnchorPlacement::Below;
+  AnchorPlacement placement;
   float gap = 4.0F;
   float viewport_margin = 8.0F;
+  Point offset;
   bool dismiss_on_outside_press = true;
   bool dismiss_on_cancel = true;
   bool trap_focus = false;
@@ -177,9 +240,12 @@ struct PopupOptions {
 };
 
 struct MenuOptions {
-  AnchorPlacement placement = AnchorPlacement::Below;
+  AnchorPlacement placement;
   float gap = 4.0F;
   float viewport_margin = 8.0F;
+  Point offset;
+  // When omitted, the surface uses its widest item's natural width subject to the theme minimum and viewport limits.
+  std::optional<float> width;
   bool dismiss_on_outside_press = true;
   bool dismiss_on_cancel = true;
   std::function<void()> on_dismiss_request;
@@ -244,32 +310,70 @@ private:
 
 PopupHandle UsePopup();
 
-class MenuContext {
-public:
-  [[nodiscard]] LayerId Id() const noexcept {
-    return id_;
-  }
+class MenuEntry;
 
-  bool Dismiss() const;
+// Marks a logical boundary between adjacent items; the active MenuStyle decides whether it paints a separator.
+struct MenuSection {};
+
+class MenuItem {
+public:
+  MenuItem(std::string_view label, std::function<void()> on_item_click);
+  MenuItem(StringResource label, std::function<void()> on_item_click);
+  MenuItem(ImageResource icon, std::string_view label, std::function<void()> on_item_click);
+  MenuItem(ImageResource icon, StringResource label, std::function<void()> on_item_click);
+  MenuItem(ImageAsset icon, std::string_view label, std::function<void()> on_item_click);
+  MenuItem(ImageAsset icon, StringResource label, std::function<void()> on_item_click);
+
+  MenuItem(std::string_view label, std::vector<MenuEntry> children);
+  MenuItem(StringResource label, std::vector<MenuEntry> children);
+  MenuItem(ImageResource icon, std::string_view label, std::vector<MenuEntry> children);
+  MenuItem(ImageResource icon, StringResource label, std::vector<MenuEntry> children);
+  MenuItem(ImageAsset icon, std::string_view label, std::vector<MenuEntry> children);
+  MenuItem(ImageAsset icon, StringResource label, std::vector<MenuEntry> children);
+
+  MenuItem(const MenuItem& other);
+  MenuItem(MenuItem&& other) noexcept;
+  MenuItem& operator=(const MenuItem& other);
+  MenuItem& operator=(MenuItem&& other) noexcept;
+  ~MenuItem();
+
+  MenuItem Enabled(bool enabled) &&;
+  MenuItem Checked(bool checked) &&;
 
 private:
-  MenuContext(std::shared_ptr<detail::LayerAnchorState> anchor, LayerId id) : anchor_(std::move(anchor)), id_(id) {}
+  using Label = std::variant<std::string, StringResource>;
+  using Icon = std::variant<std::monostate, ImageResource, ImageAsset>;
+  using Destination = std::variant<std::function<void()>, std::vector<MenuEntry>>;
 
-  std::shared_ptr<detail::LayerAnchorState> anchor_;
-  LayerId id_;
+  MenuItem(Label label, Icon icon, std::function<void()> on_item_click);
+  MenuItem(Label label, Icon icon, std::vector<MenuEntry> children);
+
+  Label label_;
+  Icon icon_;
+  Destination destination_;
+  bool enabled_ = true;
+  bool checked_ = false;
+
+  friend class MenuEntry;
+  friend class detail::MenuService;
+};
+
+class MenuEntry {
+public:
+  MenuEntry(MenuItem item) : value_(std::move(item)) {}
+  MenuEntry(MenuSection section) : value_(section) {}
+
+private:
+  std::variant<MenuItem, MenuSection> value_;
 
   friend class detail::MenuService;
 };
 
-using MenuFactory = std::function<View(MenuContext)>;
-
 class MenuHandle {
 public:
   [[nodiscard]] LayerAnchor Anchor() const;
-  LayerId Show(ViewFactory content, MenuOptions options = {}) const;
-  LayerId Show(MenuFactory content, MenuOptions options = {}) const;
-  LayerId ShowAt(Point point, ViewFactory content, MenuOptions options = {}) const;
-  LayerId ShowAt(Point point, MenuFactory content, MenuOptions options = {}) const;
+  LayerId Show(std::vector<MenuEntry> entries, MenuOptions options = {}) const;
+  LayerId ShowAt(Point point, std::vector<MenuEntry> entries, MenuOptions options = {}) const;
   bool Dismiss(LayerId id) const;
 
 private:
@@ -285,6 +389,7 @@ private:
   std::shared_ptr<detail::LayerAnchorState> anchor_;
 
   friend MenuHandle UseMenu();
+  friend class detail::MenuService;
 };
 
 MenuHandle UseMenu();

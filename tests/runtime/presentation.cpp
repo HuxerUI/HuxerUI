@@ -323,7 +323,7 @@ View DeclarativeDialogApp() {
   declarative_dialog_visible = UseState(false);
   declarative_dialog_value = UseState(1);
   const std::string label = "declarative dialog " + std::to_string(declarative_dialog_value.Get());
-  return Text("content").With(Dialog{
+  return Text("content").With(Dialog {
       .visible = declarative_dialog_visible,
       .content = [label] { return Text(label); },
       .dismiss_on_outside_press = true,
@@ -561,6 +561,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   const huxerui::DialogStyle dialog_style = ThemeDefinitionValue<huxerui::DialogStyle>(definition);
   REQUIRE(dialog_style.scrim.alpha == light.colors.scrim.alpha);
+  REQUIRE(std::get<TweenSpec>(dialog_style.enter).duration == light.motion.normal);
+  REQUIRE(std::get<TweenSpec>(dialog_style.exit).duration == light.motion.fast);
 
   const huxerui::ScrollBarStyle scroll_bar_style = ThemeDefinitionValue<huxerui::ScrollBarStyle>(definition);
   REQUIRE(scroll_bar_style.thickness == 4.0F);
@@ -1132,6 +1134,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
       huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
   runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
@@ -1163,6 +1166,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
 
   REQUIRE(saved_dialogs->Dismiss(dialog));
   runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
       .key = Key::Enter,
@@ -1293,6 +1297,8 @@ TEST_CASE("TestToastAndDialogPresentation") {
       [] { return Text("command dialog"); },
       huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "command dialog"));
   const DrawRectCommand* scrim = FindRect(shown, Rect{0.0F, 0.0F, 200.0F, 100.0F});
@@ -1300,6 +1306,8 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(scrim->color.red == Color::Rgb(180, 20, 20, 0.3F).red);
   REQUIRE(scrim->color.alpha == 0.3F);
   REQUIRE(saved_dialogs->Dismiss(dialog));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(dismissed, "command dialog"));
 
@@ -1310,6 +1318,8 @@ TEST_CASE("TestToastAndDialogPresentation") {
       },
       huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& contextual = runtime.BuildFrame();
   REQUIRE(ContainsText(contextual, "context dialog"));
   REQUIRE(saved_dialog_context.has_value());
@@ -1325,16 +1335,56 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(saved_dialog_context.has_value());
   REQUIRE(saved_dialog_context->Id() == contextual_dialog);
   REQUIRE(saved_dialog_context->Dismiss());
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& context_dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(context_dismissed, "updated context dialog"));
 
   const LayerId outside_dialog = saved_dialogs->Show([] { return Text("outside dismiss dialog"); });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& outside_shown = runtime.BuildFrame();
   REQUIRE(ContainsText(outside_shown, "outside dismiss dialog"));
   ClickAt(runtime, {1.0F, 1.0F}, 85);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& outside_dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(outside_dismissed, "outside dismiss dialog"));
   REQUIRE(!saved_dialogs->Dismiss(outside_dialog));
+}
+
+TEST_CASE("TestDialogRetainsExitPresentationWithoutRetainingInput") {
+  saved_dialogs.reset();
+  first_dialog_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{PresentationThemeApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const LayerId dialog =
+      saved_dialogs->Show([] { return Button("animated dialog").OnClick([] { ++first_dialog_clicks; }); });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const FlattenedScene& shown = runtime.BuildFrame();
+  REQUIRE(ContainsText(shown, "animated dialog"));
+
+  REQUIRE(saved_dialogs->Dismiss(dialog));
+  const FlattenedScene& exiting = runtime.BuildFrame();
+  REQUIRE(ContainsText(exiting, "animated dialog"));
+  ClickAt(runtime, {100.0F, 50.0F}, 133);
+  REQUIRE(first_dialog_clicks == 0);
+
+  REQUIRE(saved_dialogs->Update(dialog, [] { return Text("revived dialog"); }));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "revived dialog"));
+
+  REQUIRE(saved_dialogs->Dismiss(dialog));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "animated dialog"));
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "revived dialog"));
 }
 
 TEST_CASE("TestFlatDarkPresentationStyles") {
@@ -1360,6 +1410,8 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
       [] { return Text("dark dialog"); },
       huxerui::DialogOptions{.dismiss_on_outside_press = false}
   );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& dialog = runtime.BuildFrame();
   const DrawRectCommand* scrim = FindRect(dialog, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);
@@ -1373,6 +1425,8 @@ TEST_CASE("TestDeclarativeDialogModifier") {
   runtime.BuildFrame();
 
   declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "declarative dialog 1"));
 
@@ -1382,8 +1436,26 @@ TEST_CASE("TestDeclarativeDialogModifier") {
 
   ClickAt(runtime, {1.0F, 1.0F}, 84);
   REQUIRE(!declarative_dialog_visible);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& hidden = runtime.BuildFrame();
   REQUIRE(!ContainsText(hidden, "declarative dialog 2"));
+
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "declarative dialog 2"));
+
+  ClickAt(runtime, {1.0F, 1.0F}, 85);
+  REQUIRE(!declarative_dialog_visible);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "declarative dialog 2"));
+
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "declarative dialog 2"));
 }
 
 TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {

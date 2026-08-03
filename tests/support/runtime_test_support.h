@@ -52,8 +52,8 @@ using huxerui::HorizontalAlignment;
 using huxerui::Key;
 using huxerui::KeyEvent;
 using huxerui::KeyEventType;
-using huxerui::LayerController;
 using huxerui::LayerCancelPolicy;
+using huxerui::LayerController;
 using huxerui::LayerId;
 using huxerui::LayerLevel;
 using huxerui::LayerOptions;
@@ -62,8 +62,10 @@ using huxerui::Layout;
 using huxerui::LayoutContext;
 using huxerui::LayoutResult;
 using huxerui::MainAxisAlignment;
-using huxerui::MenuContext;
+using huxerui::MenuEntry;
 using huxerui::MenuHandle;
+using huxerui::MenuItem;
+using huxerui::MenuSection;
 using huxerui::MountedNode;
 using huxerui::NodeExtension;
 using huxerui::Offset;
@@ -595,6 +597,13 @@ public:
   huxerui::PlatformResources* platform_resources = nullptr;
 };
 
+inline void SettlePresentation(TestPlatform& platform, Runtime& runtime, double duration = 0.5) {
+  platform.AdvanceTime(duration);
+  runtime.BuildFrame();
+  // Exit completion invalidates the layer stack; the following commit removes the retained entry.
+  runtime.BuildFrame();
+}
+
 inline std::string FirstText(const FlattenedScene& scene) {
   for (const auto& command : scene.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
@@ -692,6 +701,7 @@ inline std::optional<float> RectAlpha(const FlattenedScene& scene, Rect expected
   }
   return std::nullopt;
 }
+
 inline void InvokeClick(const huxerui::detail::MountedNode& node) {
   REQUIRE(huxerui::detail::EmitEvent<ViewEvents::Click>(node.event_bindings));
 }

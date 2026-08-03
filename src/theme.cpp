@@ -109,6 +109,27 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   };
 }
 
+MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
+  Color separator = theme.colors.on_surface;
+  separator.alpha = 0.12F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .separator_color = separator,
+      .separator_mode = MenuSeparatorMode::None,
+      .separator_thickness = 1.0F,
+      .separator_padding = {},
+      .content_padding = EdgeInsets::All(theme.spacing.extra_small),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
+      .item_content_spacing = theme.spacing.small,
+      .icon_size = 18.0F,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {0.0F, 4.0F}, theme.elevation.medium, 0.0F},
+      .corner_radius = theme.shapes.medium,
+      .minimum_width = 180.0F,
+      .minimum_item_height = 36.0F,
+  };
+}
+
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
@@ -124,7 +145,10 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   });
   definition.Set(DialogStyle{
       .scrim = theme.colors.scrim,
+      .enter = TweenSpec{.duration = theme.motion.normal},
+      .exit = TweenSpec{.duration = theme.motion.fast},
   });
+  definition.Set(MaterialMenuStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
   return definition;
 }
