@@ -216,18 +216,18 @@ The resource index is already filtered for the build target, so shared Runtime c
 ResourceConfiguration supplies only values that vary at runtime and affect resolution.
 
 Packaged resources must be synchronously readable before Runtime is created.
-A platform whose package transport is asynchronous completes that transport during host startup and exposes the resulting immutable payload through PlatformResources.
-In particular, a Web host loads the resource index and payload before invoking the registered HUXERUI_APP definition.
+A platform whose package transport is asynchronous completes that transport during platform startup and exposes the resulting immutable payload through PlatformResources.
+In particular, the Web entry integration loads the resource index and payload before invoking the registered HUXERUI_APP definition.
 Remote URLs remain application or module inputs and do not become package paths.
 
-When system locale or display scale changes, the native host calls `Runtime::UpdateResourceConfiguration()` with the new value.
+When system locale or display scale changes, the platform integration calls `Runtime::UpdateResourceConfiguration()` with the new value.
 Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, invalidates root composition, and requests a frame.
 `BuildFrame()` does not poll native state.
 The initial implementation invalidates root composition, then normal reconciliation limits changed ImageAsset geometry and paint work to the affected nodes.
 Dependency-recorded resource reads and inherited Locale text shaping may later narrow the initial root invalidation without changing the public API.
 
 An explicit Locale Environment value overrides the system locale for its subtree.
-Display scale remains a host property.
+Display scale remains a platform property.
 
 ## Resource variants
 
@@ -255,7 +255,7 @@ logo@2x.png    836 x 836
 logo@3x.png   1254 x 1254
 ```
 
-It displays the selected ImageAsset scale and encoded pixel dimensions so density selection is observable on each host.
+It displays the selected ImageAsset scale and encoded pixel dimensions so density selection is observable on each platform.
 
 Scale variants for one ImageResource must have the same intrinsic logical size:
 
@@ -502,11 +502,11 @@ Native image caches use a 64 MiB decoded-byte LRU budget and remain renderer-own
 An individual decoded image larger than the budget is retained as the cache's sole entry so repeated frames do not
 decode it again; the next distinct image evicts it normally.
 Device loss clears Windows device-dependent bitmaps but does not invalidate ImageAsset, layout, or PaintSequence data.
-Destroying an Android host view releases its Bitmap cache, and macOS cache entries use balanced Core Foundation ownership.
+Destroying an Android View releases its Bitmap cache, and macOS cache entries use balanced Core Foundation ownership.
 macOS maps source and destination rectangles while drawing the retained full CGImage, avoiding a cropped CGImage allocation per command.
 
 The current Android, macOS, and Windows backends decode synchronously on the first cache miss.
-A future asynchronous backend keeps loading and failure state inside the renderer, draws no image while loading, and asks its host to schedule a frame when decoding completes.
+The Web backend keeps asynchronous loading and failure state inside its renderer, draws no image while loading, and asks its PlatformAdapter to schedule a frame when decoding completes.
 
 A later preload service may warm native caches without changing ImageAsset, Image, or DrawImageCommand.
 
@@ -518,7 +518,7 @@ New backends implement PlatformResources and native image replay without adding 
 ### iOS
 
 iOS reads the reserved resource directory from the application bundle and uses the same versioned index as macOS.
-ImageIO produces renderer-owned CGImage values, while the host reports system Locale and display scale through ResourceConfiguration.
+ImageIO produces renderer-owned CGImage values, while the platform adapter reports system Locale and display scale through ResourceConfiguration.
 Security-scoped URLs are native service inputs whose bytes may be converted to ImageAsset with FromEncoded; they are not package ResourceIds.
 
 ### OHOS
@@ -536,11 +536,12 @@ The eventual Linux renderer chooses its own decoder and native cache without cha
 
 ### Web
 
-The Web host loads the generated resource index and payload before creating Runtime, then exposes them through WASM memory or a virtual filesystem.
+The Web entry integration loads the generated resource index and payload before creating Runtime, then exposes them through WASM memory or a virtual filesystem.
 Resource lookup and localized string formatting therefore remain synchronous after application startup.
 
 Browser-native image decoding may complete asynchronously.
-The Web renderer keeps its loading entry, creates an ImageBitmap, CanvasImageSource, or graphics texture, and requests another frame through its host when the image becomes ready.
+The Web renderer keeps its loading entry, creates an ImageBitmap, and requests another frame through WebPlatformAdapter when the image becomes ready.
+Decoded browser images follow the same 64 MiB renderer-owned LRU budget as native decoded-image caches.
 The current PaintSequence remains valid because DrawImageCommand already retains immutable encoded bytes and complete geometry.
 
 Network fetches are not ResourceIds.
@@ -740,7 +741,7 @@ The initial implementation has focused shared coverage for:
 Every renderer implements image decode, cropping, destination scaling, sampling, and bounded native caches.
 Windows common builds and tests plus Android compilation are required for this implementation; macOS must be built on macOS before release.
 
-Future platform and SDK work adds installed-package, module-merge, iOS, OHOS, Linux, and Web packaging validation as those backends become available.
+Future platform and SDK work adds installed-package, module-merge, iOS, OHOS, Linux, and Web release-packaging validation as those capabilities become available.
 
 ## Delivery sequence
 
@@ -763,7 +764,7 @@ Each slice updates public headers, standalone-header checks, common tests, platf
 - ImageAsset exposes encoded bytes but never native image objects or ambiguous decoded pixel data.
 - RawResource is the explicit arbitrary-byte resource kind.
 - PlatformResources returns shared RawAsset storage and does not require an intermediate byte-vector copy.
-- Packaged resources are synchronously readable before Runtime starts; a Web host performs asynchronous transport during startup.
+- Packaged resources are synchronously readable before Runtime starts; the Web entry integration performs asynchronous transport during startup.
 - Filesystem construction is synchronous and distinct from native URI services.
 - Localized formatting uses indexed positional arguments and permits translation reordering.
 - StringResource values resolve during composition and never enter PaintCommand as resources.

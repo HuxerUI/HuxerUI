@@ -211,7 +211,7 @@ int RunApp(AppDefinition definition);
 
 } // namespace huxerui
 
-#if defined(__ANDROID__) || defined(HUXERUI_EXTERNAL_APP_HOST)
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 #define HUXERUI_APP(app_root, ...) \
   namespace { \
   [[maybe_unused]] const bool huxerui_app_registration = [] { \

@@ -16,6 +16,7 @@ add_executable(huxerui_tests
         unit/text_input.cpp
         unit/validation.cpp
         platform/android_text_input.cpp
+        platform/web_text.cpp
         runtime/composition.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
@@ -52,6 +53,7 @@ target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp"
         "${HUXERUI_PROJECT_DIR}/platform/macos"
         "${HUXERUI_PROJECT_DIR}/platform/windows"
+        "${HUXERUI_PROJECT_DIR}/platform/web"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
 

@@ -4,17 +4,17 @@
 
 <p align="center"><strong>Declarative, native, cross-platform UI in modern C++.</strong></p>
 
-<p align="center">One runtime. Native hosts. Shared application code.</p>
+<p align="center">One runtime. Native integration. Shared application code.</p>
 
 <p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
 
-HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, and Windows share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining native platform hosts, text systems, and renderers.
+HuxerUI brings a functional, declarative UI model to C++20. Android, macOS, Windows, and the Web technical preview share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining platform-specific integration, text systems, and renderers.
 
 ## Why HuxerUI
 
 | Declarative C++ | Shared Runtime | Native Integration |
 |---|---|---|
-| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, and Win32 while using each platform's native text and rendering stack. |
+| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, AppKit, Win32, or an Emscripten Canvas while preserving platform services. |
 
 HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
@@ -79,7 +79,8 @@ See [Getting Started](docs/getting-started.md) for application setup, Windows an
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
 | macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
 | Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
-| iOS, OHOS, Linux, Web | Planned | Shared Runtime with platform-specific hosts |
+| Web | Technical preview | Emscripten, WebAssembly, Canvas 2D, browser text input |
+| iOS, OHOS, Linux | Planned | Shared Runtime with platform-specific adapters |
 
 See [Platform Support](docs/platform-support.md) for backend responsibilities and integration details.
 
@@ -110,6 +111,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and native adapter contracts |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and NativeView |
+| [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |
 
 ## Examples
 
@@ -128,7 +130,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Path fill, stroke, clipping, shadows, and Canvas-local drawing |
 | `example_image` | Generated resource keys, localized strings, density variants, packaged bytes, and Image fitting |
-| `platform/android/demo` | Android native host and application packaging |
+| `platform/android/demo` | Android platform integration and application packaging |
 
 ## Architecture
 
@@ -142,7 +144,7 @@ declarative components and State
   -> native renderer
 ```
 
-The native layer owns the window or host view, frame scheduling, platform input, text services, and drawing surface. Shared application code does not depend on native UI objects.
+The platform layer owns the native window or View, frame scheduling, input services, text services, and drawing surface. Shared application code does not depend on native UI objects.
 
 Explore the complete runtime and extension model in [Architecture Design](docs/design/architecture.md).
 

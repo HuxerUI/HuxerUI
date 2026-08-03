@@ -31,8 +31,14 @@ std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
 namespace detail {
 
 int RunPlatformApp(AppDefinition definition);
+#if defined(__EMSCRIPTEN__)
+void EnsureWebPlatformLinked();
+#endif
 
 void RegisterAppDefinition(AppDefinition definition) {
+#if defined(__EMSCRIPTEN__)
+  EnsureWebPlatformLinked();
+#endif
   if (definition.root_factory == nullptr) {
     throw std::invalid_argument("HuxerUI application registration requires a root factory");
   }
@@ -55,9 +61,9 @@ const AppDefinition& RegisteredAppDefinition() {
 } // namespace detail
 
 int RunApp(AppDefinition definition) {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
   static_cast<void>(definition);
-  throw std::runtime_error("RunApp() is not available on Android; use Runtime with HuxerUIView");
+  throw std::runtime_error("RunApp() is not available on Android or Web");
 #else
   return detail::RunPlatformApp(std::move(definition));
 #endif
