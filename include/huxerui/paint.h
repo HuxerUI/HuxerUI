@@ -12,60 +12,9 @@
 #include <huxerui/geometry.h>
 #include <huxerui/resource.h>
 #include <huxerui/text.h>
+#include <huxerui/vector.h>
 
 namespace huxerui {
-
-namespace detail {
-class PathAccess;
-}
-
-class Path {
-public:
-  Path();
-  Path(const Path&) = default;
-  Path(Path&&) noexcept = default;
-  Path& operator=(const Path&) = default;
-  Path& operator=(Path&&) noexcept = default;
-  ~Path() = default;
-
-  Path& MoveTo(Point point);
-  Path& LineTo(Point point);
-  Path& QuadraticTo(Point control, Point end);
-  Path& CubicTo(Point first_control, Point second_control, Point end);
-  Path& Close();
-  void Reset();
-
-  [[nodiscard]] bool IsEmpty() const noexcept;
-  [[nodiscard]] Rect Bounds() const noexcept;
-
-  bool operator==(const Path& other) const noexcept;
-
-private:
-  struct Data;
-
-  void EnsureUnique();
-
-  std::shared_ptr<Data> data_;
-
-  friend class detail::PathAccess;
-};
-
-enum class PathFillRule {
-  NonZero,
-  EvenOdd,
-};
-
-enum class StrokeCap {
-  Butt,
-  Round,
-  Square,
-};
-
-enum class StrokeJoin {
-  Miter,
-  Round,
-  Bevel,
-};
 
 struct DrawRectCommand {
   Rect rect;
@@ -278,6 +227,9 @@ public:
       ImageSampling sampling = ImageSampling::Linear,
       float opacity = 1.0F
   );
+  void DrawImage(VectorAsset image, Rect destination, std::optional<Color> tint = {}, float opacity = 1.0F);
+  void
+  DrawImageRect(VectorAsset image, Rect source, Rect destination, std::optional<Color> tint = {}, float opacity = 1.0F);
   void DrawCircle(Point center, float radius, Color color);
   // Arc angles are expressed in radians.
   void DrawArc(

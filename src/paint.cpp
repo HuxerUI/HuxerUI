@@ -6,8 +6,11 @@
 #include <stdexcept>
 #include <utility>
 
+#include <huxerui/vector.h>
+
 #include "geometry_internal.h"
 #include "shadow_internal.h"
+#include "vector_internal.h"
 
 namespace huxerui {
 namespace {
@@ -176,6 +179,87 @@ void PaintContext::DrawImageRect(
           opacity,
       }
   );
+  Include(destination);
+}
+
+void PaintContext::DrawImage(VectorAsset image, Rect destination, std::optional<Color> tint, float opacity) {
+  const Size intrinsic = image.IntrinsicSize();
+  DrawImageRect(std::move(image), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, tint, opacity);
+}
+
+void PaintContext::DrawImageRect(
+    VectorAsset image, Rect source, Rect destination, std::optional<Color> tint, float opacity
+) {
+  RequireOpen();
+  if (!image.HasValue()) {
+    throw std::invalid_argument("HuxerUI paint vector image must not be empty");
+  }
+  RequireRect(source);
+  RequireRect(destination);
+  if (tint.has_value()) {
+    RequireColor(*tint);
+  }
+  const Size intrinsic = image.IntrinsicSize();
+  if (source.x < 0.0F || source.y < 0.0F || source.x + source.width > intrinsic.width ||
+      source.y + source.height > intrinsic.height) {
+    throw std::invalid_argument("HuxerUI vector image source rectangle must be inside the intrinsic image bounds");
+  }
+  if (!std::isfinite(opacity) || opacity < 0.0F || opacity > 1.0F) {
+    throw std::invalid_argument("HuxerUI vector image opacity must be finite and between zero and one");
+  }
+  if (source.IsEmpty() || destination.IsEmpty() || opacity <= 0.0F) {
+    return;
+  }
+
+  const Rect view_box = image.ViewBox();
+  const float scale_x = intrinsic.width / view_box.width * destination.width / source.width;
+  const float scale_y = intrinsic.height / view_box.height * destination.height / source.height;
+  const Transform2D placement{
+      scale_x,
+      0.0F,
+      0.0F,
+      scale_y,
+      destination.x - source.x * destination.width / source.width - view_box.x * scale_x,
+      destination.y - source.y * destination.height / source.height - view_box.y * scale_y,
+  };
+  const auto resolve_color = [tint, opacity](Color color) {
+    if (tint.has_value()) {
+      color.red = tint->red;
+      color.green = tint->green;
+      color.blue = tint->blue;
+      color.alpha *= tint->alpha;
+    }
+    color.alpha *= opacity;
+    return color;
+  };
+
+  PushClip(destination);
+  PushTransform(placement);
+  for (const PaintCommand& command : detail::VectorAccess::Sequence(image).Commands()) {
+    std::visit(
+        [this, &resolve_color](const auto& value) {
+          using Command = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Command, FillPathCommand>) {
+            FillPath(value.path, resolve_color(value.color), value.fill_rule);
+          } else if constexpr (std::same_as<Command, StrokePathCommand>) {
+            StrokePath(value.path, resolve_color(value.color), value.width, value.cap, value.join, value.miter_limit);
+          } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
+            PushPathClip(value.path, value.fill_rule);
+          } else if constexpr (std::same_as<Command, PopClipCommand>) {
+            PopClip();
+          } else if constexpr (std::same_as<Command, PushTransformCommand>) {
+            PushTransform(value.transform);
+          } else if constexpr (std::same_as<Command, PopTransformCommand>) {
+            PopTransform();
+          } else {
+            throw std::logic_error("HuxerUI vector image contains an unsupported paint command");
+          }
+        },
+        command
+    );
+  }
+  PopTransform();
+  PopClip();
   Include(destination);
 }
 

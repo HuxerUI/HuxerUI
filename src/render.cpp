@@ -27,14 +27,27 @@ float AlignOffset(float available, float extent, VerticalAlignment alignment) no
 }
 
 void PaintImage(const MountedNode& node, PaintContext& context) {
-  const Size intrinsic = node.image_properties.asset.IntrinsicSize();
+  const Size intrinsic = node.image_properties.IntrinsicSize();
   const Rect content = node.ContentBounds();
   if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
     return;
   }
+  const auto draw = [&](Rect source, Rect destination) {
+    std::visit(
+        [&](const auto& asset) {
+          using Asset = std::decay_t<decltype(asset)>;
+          if constexpr (std::same_as<Asset, ImageAsset>) {
+            context.DrawImageRect(asset, source, destination, node.image_properties.sampling);
+          } else {
+            context.DrawImageRect(asset, source, destination, node.image_properties.tint);
+          }
+        },
+        node.image_properties.asset
+    );
+  };
   const Rect full_source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
   if (node.image_properties.fit == ImageFit::Fill) {
-    context.DrawImageRect(node.image_properties.asset, full_source, content, node.image_properties.sampling);
+    draw(full_source, content);
     return;
   }
   if (node.image_properties.fit == ImageFit::Cover) {
@@ -46,7 +59,7 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
         source_size.width,
         source_size.height,
     };
-    context.DrawImageRect(node.image_properties.asset, source, content, node.image_properties.sampling);
+    draw(source, content);
     return;
   }
   float scale = 1.0F;
@@ -63,7 +76,7 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
       destination_size.width,
       destination_size.height,
   };
-  context.DrawImageRect(node.image_properties.asset, full_source, destination, node.image_properties.sampling);
+  draw(full_source, destination);
 }
 
 bool ClipsChildren(const MountedNode& node) {

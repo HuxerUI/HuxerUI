@@ -1,5 +1,6 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -9,11 +10,14 @@
 #include <string>
 #include <vector>
 
+#include <huxerui/paint.h>
 #include <huxerui/resource.h>
 
 #include "generator.h"
 #include "image_test_support.h"
+#include "path_internal.h"
 #include "resource_internal.h"
+#include "runtime_test_support.h"
 
 namespace {
 
@@ -91,6 +95,10 @@ public:
 private:
   std::filesystem::path root_;
 };
+
+huxerui::View VectorResourceApp() {
+  return huxerui::Image(huxerui::ImageResource("test_app", "images/mark"));
+}
 
 TEST_CASE("ResourceCodegenGeneratesTypedKeysIndexAndPayloads") {
   TemporaryDirectory temporary;
@@ -265,6 +273,151 @@ TEST_CASE("GeneratedPackagesRoundTripThroughRuntimeResolution") {
       resources.Resolve(huxerui::ImageResource("test_app", "images/logo"), huxerui::Locale::Default());
   REQUIRE(logo.PixelWidth() == 8);
   REQUIRE(logo.PixelHeight() == 4);
+  REQUIRE_THROWS_AS(
+      resources.ResolveVector(huxerui::ImageResource("test_app", "images/logo"), huxerui::Locale::Default()),
+      std::invalid_argument
+  );
+}
+
+TEST_CASE("SvgResourcesCompileToTypedVectorPayloads") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(
+      root / "images" / "mark.svg",
+      R"(<svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 2 2 L 22 2 L 12 14 Z" fill="#336699"/>
+</svg>)"
+  );
+
+  huxerui::resource_codegen::Generate({root, output, "test_app"});
+
+  const std::string header = Read(output / "include" / "test_app_resources.h");
+  REQUIRE(header.find("huxerui::ImageResource mark") != std::string::npos);
+  const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "mark.huxv");
+  REQUIRE(payload.starts_with("HUXVEC"));
+
+  DirectoryResources platform_resources(output / "package");
+  huxerui::detail::AppResources resources(&platform_resources);
+  const huxerui::ImageResource resource("test_app", "images/mark");
+  const huxerui::VectorAsset vector = resources.ResolveVector(resource, huxerui::Locale::Default());
+  REQUIRE(vector.IntrinsicSize() == huxerui::Size{24.0F, 16.0F});
+  REQUIRE_THROWS_AS(resources.Resolve(resource, huxerui::Locale::Default()), std::invalid_argument);
+
+  huxerui::test::TestPlatform platform;
+  platform.platform_resources = &platform_resources;
+  huxerui::test::Runtime runtime{VectorResourceApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  const huxerui::test::FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(std::ranges::any_of(scene.Commands(), [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::FillPathCommand>(command);
+  }));
+  REQUIRE(std::ranges::none_of(scene.Commands(), [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::DrawImageCommand>(command);
+  }));
+}
+
+TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndUnsupportedPresentationSemantics") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path source = root / "images" / "mark.svg";
+
+  Write(source, R"(<path d="M0 0L1 1"/><svg viewBox="0 0 10 10"/>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "outside", "test_app"}),
+      Catch::Matchers::ContainsSubstring("inside the root svg element")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10" preserveAspectRatio="none"/>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "aspect", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported attribute: preserveAspectRatio")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><g visibility="hidden"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "visibility", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported attribute: visibility")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><g style="display: none"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "display", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported style property: display")
+  );
+}
+
+TEST_CASE("SvgStylesAllowTrailingWhitespaceAndSmoothCurvesDoNotReflectArcControls") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(
+      root / "images" / "mark.svg",
+      R"(<svg width="40" height="20" viewBox="0 0 40 20"><path style="fill: #fff; " d="M0 10A10 10 0 0 1 20 10S30 20 40 10"/></svg>)"
+  );
+
+  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  DirectoryResources platform(output / "package");
+  huxerui::detail::AppResources resources(&platform);
+  const huxerui::VectorAsset vector =
+      resources.ResolveVector(huxerui::ImageResource("test_app", "images/mark"), huxerui::Locale::Default());
+  huxerui::PaintSequence sequence;
+  huxerui::PaintContext context(sequence, {0.0F, 0.0F, 40.0F, 20.0F});
+  context.DrawImage(vector, {0.0F, 0.0F, 40.0F, 20.0F});
+  context.Finish();
+
+  const auto fill = std::ranges::find_if(sequence.Commands(), [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::FillPathCommand>(command);
+  });
+  REQUIRE(fill != sequence.Commands().end());
+  const std::span<const huxerui::detail::PathElement> elements =
+      huxerui::detail::PathAccess::Elements(std::get<huxerui::FillPathCommand>(*fill).path);
+  REQUIRE_FALSE(elements.empty());
+  REQUIRE(elements.back().verb == huxerui::detail::PathVerb::CubicTo);
+  REQUIRE(elements.back().points[0] == huxerui::Point{20.0F, 10.0F});
+}
+
+TEST_CASE("ResourceCodegenRejectsUnsupportedSvgFeaturesAndDensityVariants") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  Write(
+      root / "images" / "filtered.svg",
+      R"svg(<svg viewBox="0 0 10 10"><path filter="url(#x)" d="M0 0L1 1"/></svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "filtered", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported attribute: filter")
+  );
+
+  REQUIRE(std::filesystem::remove(root / "images" / "filtered.svg"));
+  Write(root / "images" / "mark@2x.svg", R"(<svg viewBox="0 0 10 10"><path d="M0 0L1 1"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "scaled", "test_app"}),
+      Catch::Matchers::ContainsSubstring("do not support density suffixes")
+  );
+}
+
+TEST_CASE("ResourceCodegenRejectsMixedRasterAndVectorVariants") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  Write(root / "images" / "mark.svg", R"(<svg viewBox="0 0 8 4"><path d="M0 0L8 4"/></svg>)");
+  Write(root / "images" / "mark@2x.png", huxerui::test::MakeTestPng(16, 8));
+
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      Catch::Matchers::ContainsSubstring("raster and vector variants must not share")
+  );
+}
+
+TEST_CASE("ResourceCodegenRejectsMalformedPathDataAfterClose") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  Write(root / "images" / "mark.svg", R"(<svg viewBox="0 0 8 4"><path d="M0 0Z 1"/></svg>)");
+
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      Catch::Matchers::ContainsSubstring("path data is malformed")
+  );
 }
 
 } // namespace

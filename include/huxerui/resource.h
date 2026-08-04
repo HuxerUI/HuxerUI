@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <huxerui/geometry.h>
+#include <huxerui/vector.h>
 
 namespace huxerui {
 
@@ -195,6 +196,7 @@ public:
 
 RawAsset UseRawResource(RawResource resource);
 ImageAsset UseImage(ImageResource resource);
+VectorAsset UseVectorImage(ImageResource resource);
 
 namespace detail {
 

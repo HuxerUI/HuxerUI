@@ -65,13 +65,15 @@ assets/
   images/logo.png
   images/logo@2x.png
   images/logo@3x.png
+  images/mark.svg
   raw/config.json
   strings/default.properties
   strings/zh.properties
 ```
 
 String catalogs are UTF-8 `.properties` files with `key = value` entries and indexed placeholders such as `{0}`.
-Image scale suffixes must preserve the same intrinsic logical size; for example, 418-pixel, 836-pixel, and 1254-pixel square images form matching 1x, 2x, and 3x variants.
+Raster image scale suffixes must preserve the same intrinsic logical size; for example, 418-pixel, 836-pixel, and 1254-pixel square images form matching 1x, 2x, and 3x variants.
+SVG files are compiled into platform-neutral vector payloads and do not use density suffixes.
 
 Register the root after creating the target:
 
@@ -92,10 +94,12 @@ source so concurrent ABI builds never mutate the same directory.
 #include <app_resources.h>
 
 const ImageAsset logo = UseImage(app_resources::images::logo);
+const VectorAsset mark = UseVectorImage(app_resources::images::mark);
 
 return Column {
   Text::Format(app_resources::strings::welcome, "Ada"),
   Image(logo).Fit(ImageFit::Contain),
+  Image(mark).Tint(Color::Rgb(132, 78, 255)),
 };
 ```
 
@@ -163,4 +167,3 @@ See the [README](../README.md#examples) for the complete example index.
 | `HUXERUI_BUILD_TESTS` | `ON` for the top-level project | Build tests |
 | `HUXERUI_BUILD_EXAMPLES` | `ON` for the top-level project | Build examples |
 | `HUXERUI_WINDOWS_7_COMPAT` | `OFF` | Build the Windows backend for Windows 7 SP1 with Platform Update |
-

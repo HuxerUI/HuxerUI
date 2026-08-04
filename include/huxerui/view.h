@@ -29,6 +29,7 @@
 #include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/validation.h>
+#include <huxerui/vector.h>
 #include <huxerui/virtual_layout.h>
 
 namespace huxerui {
@@ -149,6 +150,7 @@ protected:
   void SetImageFit(ImageFit fit);
   void SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment vertical);
   void SetImageSampling(ImageSampling sampling);
+  void SetImageTint(std::optional<Color> tint);
   void SetKey(std::int64_t value);
   void SetKey(std::uint64_t value);
   void SetKey(std::string value);
@@ -532,10 +534,12 @@ class Image final : public View {
 public:
   explicit Image(ImageResource resource);
   explicit Image(ImageAsset asset);
+  explicit Image(VectorAsset asset);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;
   Image Sampling(ImageSampling sampling) &&;
+  Image Tint(Color tint) &&;
 };
 
 using CanvasPainter = std::function<void(PaintContext&, Size)>;

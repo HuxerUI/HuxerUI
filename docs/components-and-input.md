@@ -60,6 +60,20 @@ ProgressCircle(progress);
 
 Indeterminate progress advances through retained animation state. Reduced motion themes keep it static.
 
+## Image
+
+Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:
+
+```cpp
+Image(app_resources::images::logo)
+    .Fit(ImageFit::Contain)
+    .With(Frame{.width = 160.0F, .height = 120.0F});
+```
+
+UseImage returns a raster asset and UseVectorImage returns a vector asset when application code needs the concrete value.
+Vector assets can also be constructed with VectorAsset::Create and painted by Canvas.
+Sampling applies only to raster images; Tint applies only to vector images.
+
 ## Controlled TextField
 
 `TextField` is controlled by a complete `TextEditingValue`. The owner should store the entire emitted value so selection and IME composition remain authoritative:
@@ -128,4 +142,3 @@ Rules return valid, invalid, or pending results. Applications decide whether to 
 Android, macOS, and Windows use the same text-input session and command protocol. Platform adapters handle native IME lifecycle and coordinate conversion while the C++ runtime owns controlled value synchronization, selection, composition, undo, redo, and submission.
 
 For protocol and platform details, see the [text input design](design/text-input.md).
-

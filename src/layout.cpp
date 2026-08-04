@@ -236,7 +236,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
   case NodeKind::ProgressCircle:
     break;
   case NodeKind::Image: {
-    content_size = node.image_properties.asset.IntrinsicSize();
+    content_size = node.image_properties.IntrinsicSize();
     float scale = 1.0F;
     if (content_size.width > 0.0F && content_constraints.HasBoundedWidth()) {
       scale = std::min(scale, content_constraints.max_width / content_size.width);

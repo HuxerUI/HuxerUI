@@ -87,7 +87,7 @@ std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
 
   Reader reader(bytes.subspan(std::size(magic)));
   const std::uint32_t version = reader.U32();
-  if (version != 1) {
+  if (version != 1 && version != 2) {
     throw std::logic_error("HuxerUI resource index version is unsupported: " + std::to_string(version));
   }
   const std::uint32_t count = reader.U32();
@@ -113,7 +113,16 @@ std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
         reader.U32(),
         reader.U64(),
         reader.U32(),
+        {},
     };
+    if (version >= 2) {
+      entry.intrinsic_size = {reader.F32(), reader.F32()};
+    } else if (entry.kind == ResourceEntryKind::Image) {
+      entry.intrinsic_size = {
+          static_cast<float>(entry.pixel_width) / entry.scale,
+          static_cast<float>(entry.pixel_height) / entry.scale,
+      };
+    }
     if (!std::isfinite(entry.scale) || entry.scale <= 0.0F) {
       throw std::logic_error("HuxerUI resource index contains an invalid image scale");
     }
@@ -125,9 +134,8 @@ std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
       throw std::logic_error("HuxerUI resource index contains an invalid package path");
     }
     if (entry.kind == ResourceEntryKind::Image &&
-        (entry.pixel_width == 0 || entry.pixel_height == 0 ||
-         !std::isfinite(static_cast<float>(entry.pixel_width) / entry.scale) ||
-         !std::isfinite(static_cast<float>(entry.pixel_height) / entry.scale))) {
+        (!std::isfinite(entry.intrinsic_size.width) || !std::isfinite(entry.intrinsic_size.height) ||
+         entry.intrinsic_size.width <= 0.0F || entry.intrinsic_size.height <= 0.0F)) {
       throw std::logic_error("HuxerUI resource index contains invalid image dimensions");
     }
     entries.push_back(std::move(entry));

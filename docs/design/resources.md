@@ -2,9 +2,9 @@
 
 Status: initial implementation
 
-This document defines application resource identity, packaging, resolution, immutable image and raw assets, the Image component, image paint commands, locale propagation, and formatted localized strings.
+This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, macOS, and Windows, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, Image, image PaintCommands, native image caches, and generated-assets wiring for the repository Android demo.
+The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android demo.
 SDK manifest integration, reusable consumer Gradle integration, module bundle merging, built-in framework string bundles, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
@@ -20,7 +20,7 @@ SDK manifest integration, reusable consumer Gradle integration, module bundle me
 
 ## Non-goals
 
-The initial implementation does not provide network loading, URI loading, animated images, SVG decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime module registry.
+The initial implementation does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime module registry.
 
 Network and native picker modules may produce encoded bytes and construct an ImageAsset.
 Android `content://` values, Apple security-scoped URLs, and other native handles remain platform-service concerns rather than cross-platform file paths.
@@ -35,9 +35,9 @@ Resource ownership follows the existing Runtime, Environment, PlatformAdapter, a
 | PlatformResources | Read immutable bytes from the installed platform package and report the current resource configuration |
 | AppResources | Resolve typed keys, locale fallback, density variants, and shared immutable assets |
 | Runtime | Own AppResources for one root, seed the resource Environment, and coordinate resource-configuration invalidation |
-| Image | Measure from intrinsic logical size and translate fit and alignment into image paint commands |
-| PaintContext | Record immutable image assets, source geometry, destination geometry, sampling, and opacity |
-| Platform renderer | Decode encoded image bytes, cache native images, and replay DrawImageCommand |
+| Image | Measure from intrinsic logical size and translate fit and alignment into raster or vector painting |
+| PaintContext | Record raster image commands or expand immutable vector paths with source geometry, tint, and opacity |
+| Platform renderer | Decode and cache raster images, then replay the common platform-neutral path and image commands |
 
 Runtime and application state never retain `Bitmap`, `CGImage`, `ID2D1Bitmap`, platform paths, or platform resource identifiers.
 Platform renderers never resolve localized strings or decide ImageFit behavior.
@@ -104,6 +104,7 @@ The public composition operations remain narrow:
 
 ```cpp
 ImageAsset UseImage(ImageResource resource);
+VectorAsset UseVectorImage(ImageResource resource);
 RawAsset UseRawResource(RawResource resource);
 
 template <class... Arguments>
@@ -327,6 +328,34 @@ The encoded bytes are therefore already present when a renderer first decodes th
 The initial guaranteed formats are PNG and JPEG.
 Additional formats extend ImageFormat and every renderer together.
 
+## VectorAsset and SVG resources
+
+VectorAsset is an immutable platform-neutral vector image value.
+It retains a view box, intrinsic logical size, and a restricted sequence of filled paths, stroked paths, clips, and transforms.
+It does not retain native paths, callbacks, Environment values, Theme values, or mutable component state.
+
+Applications may construct vector images directly:
+
+```cpp
+const VectorAsset mark = VectorAsset::Create({24.0F, 24.0F}, [](VectorBuilder& vector) {
+  Path path;
+  path.MoveTo({2.0F, 12.0F}).LineTo({10.0F, 20.0F}).LineTo({22.0F, 4.0F});
+  vector.StrokePath(std::move(path), Color::Black(), 2.0F, StrokeCap::Round, StrokeJoin::Round);
+});
+```
+
+Packaged SVG files remain ImageResource values and live under `assets/images` with raster images.
+The resource generator validates them and compiles supported geometry into the versioned `HUXV` payload.
+Runtime detects that payload signature when it first resolves the ImageResource; ResourceId does not encode the storage format and there is no public ImageKind.
+
+The initial SVG compiler supports `svg`, `g`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`; view boxes and intrinsic sizes; solid fill and stroke colors; fill rules; stroke widths, caps, joins, and miter limits; element transforms; and path arcs converted to cubic curves.
+It rejects scripts, external entities, text rendering, embedded bitmaps, CSS stylesheets, gradients, filters, masks, clip paths, animation, and unsupported units with a source-file diagnostic.
+Unimplemented presentation semantics such as `preserveAspectRatio`, `display`, `visibility`, and group `opacity` are rejected rather than approximated.
+
+`Image(ImageResource)` automatically accepts either a raster or vector payload.
+`UseImage()` and `UseVectorImage()` are explicit type-checked resolvers for code that needs the concrete asset value.
+Calling the wrong resolver throws `std::invalid_argument`.
+
 ## RawResource and RawAsset
 
 Arbitrary bytes use a distinct key and value rather than abusing ImageAsset:
@@ -395,15 +424,22 @@ class Image final : public View {
 public:
   explicit Image(ImageResource resource);
   explicit Image(ImageAsset asset);
+  explicit Image(VectorAsset asset);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;
   Image Sampling(ImageSampling sampling) &&;
+  Image Tint(Color tint) &&;
 };
 ```
 
-The ImageResource constructor lets Runtime resolve locale and scale variants from the node's Environment and PlatformResources configuration.
+The ImageResource constructor lets Runtime resolve raster scale variants or a compiled vector payload from the node's Environment and PlatformResources configuration.
 The ImageAsset constructor supports files, network results, native picker modules, generated images, and explicitly shared application data.
+Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
+
+Sampling configures raster filtering and is invalid for a VectorAsset.
+Tint replaces the RGB channels of vector fills and strokes while preserving their per-layer alpha, then multiplies the supplied tint alpha.
+Tint is invalid for an ImageAsset; a future raster color-filter API remains a distinct operation.
 
 Image does not add component-specific opacity.
 The existing Opacity presentation modifier applies to the node as a whole.
@@ -415,7 +451,7 @@ Image validates them when configured.
 
 ImageFit does not determine the node's measured size.
 
-- Without tight dimensions, Image uses ImageAsset::IntrinsicSize() as its desired size.
+- Without tight dimensions, Image uses the resolved asset's IntrinsicSize() as its desired size.
 - If the intrinsic size exceeds finite maximum constraints, Image scales the desired size down uniformly to fit.
 - Minimum constraints may enlarge the Image layout box without changing the image's intrinsic aspect ratio.
 - Frame, Grow, and parent layout policy may provide a larger or tighter final box.
@@ -434,7 +470,7 @@ This keeps layout deterministic while letting the paint policy decide how an ima
 Alignment positions unused destination space or chooses the cropped source region.
 Image computes source and destination geometry before recording a command, so native renderers do not implement ImageFit independently.
 
-## Image paint commands
+## Image painting
 
 PaintCommand adds one immutable image command:
 
@@ -470,6 +506,21 @@ void DrawImageRect(
     ImageSampling sampling = ImageSampling::Linear,
     float opacity = 1.0F
 );
+
+void DrawImage(
+    VectorAsset image,
+    Rect destination,
+    std::optional<Color> tint = {},
+    float opacity = 1.0F
+);
+
+void DrawImageRect(
+    VectorAsset image,
+    Rect source,
+    Rect destination,
+    std::optional<Color> tint = {},
+    float opacity = 1.0F
+);
 ```
 
 The explicit method names avoid a single overload whose optional source geometry is difficult to read at call sites.
@@ -477,6 +528,10 @@ The explicit method names avoid a single overload whose optional source geometry
 DrawImageCommand destination geometry supplies culling, damage, and conservative paint bounds.
 The renderer does not measure the image or recalculate fit.
 Existing transforms, clips, retained opacity, and PaintSequence reuse apply without image-specific traversal.
+
+Vector drawing is expanded while PaintContext records the sequence.
+The expansion adds a destination clip and a view-box transform, then reuses the existing immutable FillPathCommand, StrokePathCommand, clip, and transform commands.
+Every renderer therefore uses its established path implementation instead of maintaining a second vector interpreter.
 
 Canvas resolves an application resource during composition and captures the cheap ImageAsset value:
 
@@ -693,12 +748,12 @@ Once framework localization is implemented, current internal fallback labels mov
 
 Resource reads participate in the existing dependency and invalidation model:
 
-- UseString, Text resource construction, Text resource formatting, and UseImage resolve from the Runtime-owned service during composition without allocating state slots.
-- An Image constructed from ImageResource resolves that key during composition and retains the resulting immutable ImageAsset.
+- UseString, Text resource construction, Text resource formatting, UseImage, and UseVectorImage resolve from the Runtime-owned service during composition without allocating state slots.
+- An Image constructed from ImageResource resolves that key during composition and retains the resulting immutable raster or vector asset.
 - ResourceConfiguration changes currently invalidate the root composition so locale and density variants are selected consistently.
 - Reconciliation limits a changed image asset or intrinsic size to the affected node's measure, layout, and paint paths.
-- An unchanged ImageAsset compares equal and preserves its recorded PaintSequence.
-- Presentation-only changes continue to reuse the image command and native decoded bitmap.
+- An unchanged image asset compares equal and preserves its recorded PaintSequence.
+- Presentation-only changes continue to reuse raster image commands, decoded bitmaps, and expanded vector paths.
 
 Release resource bundles are immutable.
 A future development hot-reload implementation may publish content revisions through the same dependency records without introducing a second invalidation path.
@@ -711,6 +766,7 @@ The current resource tool rejects:
 - Invalid resource namespaces, paths, locale tags, and image scales.
 - Image files whose metadata cannot be read.
 - Scale variants with inconsistent intrinsic logical dimensions.
+- SVG density suffixes, mixed raster/vector variants, and unsupported SVG elements, attributes, styles, or units.
 - Malformed format templates.
 - Non-contiguous default argument indices.
 - Translations that reference undeclared indices.
@@ -733,6 +789,8 @@ The initial implementation has focused shared coverage for:
 - Locale normalization and fallback.
 - Scale-variant selection.
 - ImageAsset moved-byte and copied-byte metadata, scale, equality, and byte-lifetime behavior.
+- VectorAsset construction, immutable geometry, painting, tint, and validation.
+- SVG compilation, payload signatures, runtime resolution, unsupported features, and density-suffix rejection.
 - RawAsset byte, MIME, string-view lifetime, embedded-null, and owned-string behavior.
 - Indexed string lookup, default argument-count enforcement, and invalid template generation.
 - Direct Text resource construction and Text resource formatting.
@@ -753,6 +811,7 @@ The delivery sequence is:
 - Add ResourceId, typed keys, resource index generation, PlatformResources, AppResources, Locale, and package staging.
 - Add RawResource and RawAsset as the smallest byte-loading path and use it to validate the package boundary.
 - Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Android, macOS, and Windows native decoders.
+- Add VectorAsset construction, compiled SVG resources, automatic ImageResource format detection, vector tint, and shared path replay.
 - Add StringResource formatting and locale fallback.
 - Add inherited Locale text shaping and migrate framework strings. This remains planned.
 - Integrate generated resource keys and module bundle merging into the SDK and CLI delivery sequence. This remains planned.
@@ -764,6 +823,7 @@ Each slice updates public headers, standalone-header checks, common tests, platf
 - Resource keys are typed; a generic public Resource template is not introduced.
 - Resource payload values are immutable and cheap to copy.
 - ImageAsset exposes encoded bytes but never native image objects or ambiguous decoded pixel data.
+- VectorAsset exposes immutable platform-neutral geometry without a public ImageKind or native path objects.
 - RawResource is the explicit arbitrary-byte resource kind.
 - PlatformResources returns shared RawAsset storage and does not require an intermediate byte-vector copy.
 - Packaged resources are synchronously readable before Runtime starts; the Web entry integration performs asynchronous transport during startup.

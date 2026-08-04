@@ -15,6 +15,7 @@ add_executable(huxerui_tests
         unit/text.cpp
         unit/text_input.cpp
         unit/validation.cpp
+        unit/vector.cpp
         platform/android_text_input.cpp
         platform/web_text.cpp
         runtime/composition.cpp
@@ -91,6 +92,7 @@ set(HUXERUI_PUBLIC_HEADERS
         text_input.h
         theme.h
         validation.h
+        vector.h
         view.h
         virtual_layout.h
 )
@@ -148,6 +150,7 @@ add_executable(huxerui_resource_codegen_tests
         tests_main.cpp
         resource_codegen/generator.cpp
         "${HUXERUI_PROJECT_DIR}/tools/resource_codegen/generator.cpp"
+        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen/svg_compiler.cpp"
 )
 
 target_compile_features(huxerui_resource_codegen_tests PRIVATE cxx_std_20)

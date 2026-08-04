@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <huxerui/resource.h>
+#include <huxerui/vector.h>
 
 namespace huxerui::detail {
 
@@ -31,6 +32,7 @@ struct ResourceIndexEntry {
   std::uint32_t pixel_height = 0;
   std::uint64_t content_hash = 0;
   std::uint32_t argument_count = 0;
+  Size intrinsic_size;
 };
 
 struct ResolvedStringResource {
@@ -45,8 +47,12 @@ class ResourceAccess {
 public:
   static RawAsset WithMimeType(RawAsset asset, std::string mime_type);
   static ImageAsset ImageFromRaw(RawAsset asset, float scale);
+  static VectorAsset VectorFromRaw(RawAsset asset);
+  static bool IsVectorPayload(const RawAsset& asset) noexcept;
   static std::uint64_t ImageIdentity(const ImageAsset& image) noexcept;
 };
+
+using ResolvedImageAsset = std::variant<ImageAsset, VectorAsset>;
 
 class AppResources {
 public:
@@ -55,7 +61,9 @@ public:
   void UpdateConfiguration(ResourceConfiguration configuration);
   [[nodiscard]] ResourceConfiguration Configuration() const noexcept;
   [[nodiscard]] RawAsset Resolve(RawResource resource);
+  [[nodiscard]] ResolvedImageAsset ResolveImage(ImageResource resource, const Locale& locale);
   [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale);
+  [[nodiscard]] VectorAsset ResolveVector(ImageResource resource, const Locale& locale);
   [[nodiscard]] ResolvedStringResource Resolve(const StringResource& resource, const Locale& locale) const;
 
 private:
@@ -67,7 +75,9 @@ private:
   ResourceConfiguration configuration_;
   std::vector<ResourceIndexEntry> entries_;
   std::unordered_map<std::string, RawAsset> raw_cache_;
-  std::unordered_map<std::string, ImageAsset> image_cache_;
+  std::unordered_map<std::string, ResolvedImageAsset> image_cache_;
 };
+
+ResolvedImageAsset UseImageResource(ImageResource resource);
 
 } // namespace huxerui::detail

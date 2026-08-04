@@ -3,7 +3,7 @@
 #include <array>
 #include <span>
 
-#include <huxerui/paint.h>
+#include <huxerui/vector.h>
 
 namespace huxerui::detail {
 

@@ -129,7 +129,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_theme` | Material, Flat, nested themes, and style precedence |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Path fill, stroke, clipping, shadows, and Canvas-local drawing |
-| `example_image` | Generated resource keys, localized strings, density variants, packaged bytes, and Image fitting |
+| `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `platform/android/demo` | Android platform integration and application packaging |
 
 ## Architecture

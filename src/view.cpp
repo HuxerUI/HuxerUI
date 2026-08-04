@@ -8,6 +8,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "resource_internal.h"
 #include "indication_internal.h"
 #include "text_field_internal.h"
 
@@ -660,8 +661,9 @@ void View::SetModifier(detail::ModifierSpec modifier) {
   }
 }
 
-std::shared_ptr<detail::ViewSpec> MakeImageSpec(ImageAsset image) {
-  if (!image.HasValue()) {
+std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ResolvedImageAsset image) {
+  const bool has_value = std::visit([](const auto& asset) { return asset.HasValue(); }, image);
+  if (!has_value) {
     throw std::invalid_argument("HuxerUI image view asset must not be empty");
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
@@ -690,7 +692,18 @@ void View::SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment v
 
 void View::SetImageSampling(ImageSampling sampling) {
   EnsureUniqueSpec();
+  if (spec_->image_properties.IsVector()) {
+    throw std::invalid_argument("HuxerUI vector images do not support raster sampling configuration");
+  }
   spec_->image_properties.sampling = sampling;
+}
+
+void View::SetImageTint(std::optional<Color> tint) {
+  EnsureUniqueSpec();
+  if (!spec_->image_properties.IsVector()) {
+    throw std::invalid_argument("HuxerUI raster images do not support Tint");
+  }
+  spec_->image_properties.tint = tint;
 }
 
 void View::SetKey(std::int64_t value) {
@@ -764,9 +777,11 @@ Button::Button(std::string_view label) : Button(std::string(label)) {}
 
 Button::Button(const char* label) : Button(label == nullptr ? std::string{} : std::string(label)) {}
 
-Image::Image(ImageResource resource) : Image(UseImage(std::move(resource))) {}
+Image::Image(ImageResource resource) : View(MakeImageSpec(detail::UseImageResource(std::move(resource)))) {}
 
 Image::Image(ImageAsset asset) : View(MakeImageSpec(std::move(asset))) {}
+
+Image::Image(VectorAsset asset) : View(MakeImageSpec(std::move(asset))) {}
 
 Image Image::Fit(ImageFit fit) && {
   SetImageFit(fit);
@@ -780,6 +795,11 @@ Image Image::Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &
 
 Image Image::Sampling(ImageSampling sampling) && {
   SetImageSampling(sampling);
+  return std::move(*this);
+}
+
+Image Image::Tint(Color tint) && {
+  SetImageTint(tint);
   return std::move(*this);
 }
 

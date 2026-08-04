@@ -159,10 +159,10 @@ TEST_CASE("ImageAssetRejectsTruncatedEncodedImages") {
 
 TEST_CASE("ResourceIndexRejectsUnsupportedVersions") {
   std::vector<std::byte> bytes = MakeIndex();
-  bytes[8] = std::byte{2};
+  bytes[8] = std::byte{3};
   REQUIRE_THROWS_WITH(
       huxerui::detail::ParseResourceIndex(RawAsset::FromBytes(std::move(bytes))),
-      "HuxerUI resource index version is unsupported: 2"
+      "HuxerUI resource index version is unsupported: 3"
   );
 }
 

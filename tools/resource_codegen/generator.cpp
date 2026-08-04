@@ -1,4 +1,5 @@
 #include "generator.h"
+#include "svg_compiler.h"
 
 #include <algorithm>
 #include <bit>
@@ -43,6 +44,9 @@ struct Entry {
   std::uint64_t content_hash = 0;
   std::uint32_t argument_count = 0;
   std::filesystem::path source_path;
+  float intrinsic_width = 0.0F;
+  float intrinsic_height = 0.0F;
+  std::vector<std::byte> generated_payload;
 };
 
 std::string Trim(std::string_view value) {
@@ -540,6 +544,10 @@ void AppendString(std::vector<std::byte>& bytes, std::string_view value) {
 
 void CopyPayload(const Entry& entry, const std::filesystem::path& output) {
   const std::filesystem::path destination = output / "package" / PathFromUtf8(entry.package_path);
+  if (!entry.generated_payload.empty()) {
+    WriteBytesIfChanged(destination, entry.generated_payload);
+    return;
+  }
   std::filesystem::create_directories(destination.parent_path());
   std::filesystem::copy_file(entry.source_path, destination, std::filesystem::copy_options::overwrite_existing);
 }
@@ -556,11 +564,41 @@ std::vector<Entry> Discover(const Options& options) {
       std::ranges::transform(extension, extension.begin(), [](char value) {
         return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
       });
-      if (extension != ".png" && extension != ".jpg" && extension != ".jpeg") {
+      if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".svg") {
         continue;
       }
       std::filesystem::path relative = std::filesystem::relative(file.path(), images);
       std::string stem = Utf8PathString(relative.stem());
+      if (extension == ".svg") {
+        const std::string unscaled_stem = stem;
+        static_cast<void>(ImageScale(stem));
+        if (stem != unscaled_stem) {
+          throw std::runtime_error("SVG image resources do not support density suffixes: " + file.path().string());
+        }
+        const CompiledSvg compiled = CompileSvg(file.path());
+        std::filesystem::path logical = relative.parent_path() / PathFromUtf8(stem);
+        std::filesystem::path packaged = relative;
+        packaged.replace_extension(".huxv");
+        const std::string package_path = "huxerui/" + options.resource_namespace + "/images/" + GenericPath(packaged);
+        entries.push_back({
+            EntryKind::Image,
+            "images/" + GenericPath(logical),
+            package_path,
+            "application/x-huxerui-vector",
+            {},
+            {},
+            1.0F,
+            0,
+            0,
+            Hash(compiled.payload),
+            0,
+            file.path(),
+            compiled.intrinsic_width,
+            compiled.intrinsic_height,
+            compiled.payload,
+        });
+        continue;
+      }
       const float scale = ImageScale(stem);
       std::filesystem::path logical = relative.parent_path() / PathFromUtf8(stem);
       const std::string package_path = "huxerui/" + options.resource_namespace + "/images/" + GenericPath(relative);
@@ -579,6 +617,9 @@ std::vector<Entry> Discover(const Options& options) {
           Hash(bytes),
           0,
           file.path(),
+          static_cast<float>(width) / scale,
+          static_cast<float>(height) / scale,
+          {},
       });
     }
   }
@@ -605,6 +646,9 @@ std::vector<Entry> Discover(const Options& options) {
           Hash(bytes),
           0,
           file.path(),
+          0.0F,
+          0.0F,
+          {},
       });
     }
   }
@@ -646,7 +690,13 @@ std::vector<Entry> Discover(const Options& options) {
           throw std::runtime_error("localized string key must be a normalized resource path: " + key);
         }
         static_cast<void>(PlaceholderIndices(value));
-        entries.push_back({EntryKind::String, "strings/" + key, {}, "text/plain", locale, value});
+        entries.push_back({
+            .kind = EntryKind::String,
+            .key = "strings/" + key,
+            .mime_type = "text/plain",
+            .locale = locale,
+            .value = value,
+        });
       }
     }
   }
@@ -663,12 +713,18 @@ std::vector<Entry> Discover(const Options& options) {
     }
   }
   std::map<std::string, std::pair<float, float>> image_sizes;
+  std::map<std::string, bool> vector_images;
   std::map<std::string, std::vector<std::size_t>> default_string_schemas;
   for (const Entry& entry : entries) {
     if (entry.kind == EntryKind::Image) {
+      const bool is_vector = !entry.generated_payload.empty();
+      const auto [format, inserted_format] = vector_images.try_emplace(entry.key, is_vector);
+      if (!inserted_format && format->second != is_vector) {
+        throw std::runtime_error("raster and vector variants must not share an image resource key: " + entry.key);
+      }
       const std::pair logical_size{
-          static_cast<float>(entry.pixel_width) / entry.scale,
-          static_cast<float>(entry.pixel_height) / entry.scale,
+          entry.intrinsic_width,
+          entry.intrinsic_height,
       };
       const auto [found, inserted] = image_sizes.try_emplace(entry.key, logical_size);
       if (!inserted && found->second != logical_size) {
@@ -723,7 +779,7 @@ std::vector<std::byte> EncodeIndex(const Options& options, const std::vector<Ent
       std::byte{0},
       std::byte{0},
   };
-  AppendU32(bytes, 1);
+  AppendU32(bytes, 2);
   AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
   for (const Entry& entry : entries) {
     bytes.push_back(static_cast<std::byte>(entry.kind));
@@ -738,6 +794,8 @@ std::vector<std::byte> EncodeIndex(const Options& options, const std::vector<Ent
     AppendU32(bytes, entry.pixel_height);
     AppendU64(bytes, entry.content_hash);
     AppendU32(bytes, entry.argument_count);
+    AppendU32(bytes, std::bit_cast<std::uint32_t>(entry.intrinsic_width));
+    AppendU32(bytes, std::bit_cast<std::uint32_t>(entry.intrinsic_height));
   }
   return bytes;
 }

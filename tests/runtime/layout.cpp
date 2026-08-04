@@ -17,6 +17,7 @@ HorizontalAlignment layout_test_image_horizontal_alignment = HorizontalAlignment
 VerticalAlignment layout_test_image_vertical_alignment = VerticalAlignment::Center;
 ImageSampling layout_test_image_sampling = ImageSampling::Linear;
 Size layout_test_image_frame{100.0F, 100.0F};
+VectorAsset layout_test_vector;
 
 View ImageLayoutApp() {
   return Column {
@@ -26,6 +27,12 @@ View ImageLayoutApp() {
         .Sampling(layout_test_image_sampling)
         .With(Frame{.width = layout_test_image_frame.width, .height = layout_test_image_frame.height}),
   };
+}
+
+View VectorImageLayoutApp() {
+  return Image(layout_test_vector)
+      .Tint(Color::Rgb(90, 120, 180))
+      .With(Frame{.width = 100.0F, .height = 100.0F});
 }
 
 struct FlowBreakBefore {
@@ -365,6 +372,38 @@ TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {
   const auto& command = std::get<DrawImageCommand>(*image);
   REQUIRE(command.source == Rect{0.0F, 0.0F, 20.0F, 10.0F});
   REQUIRE(command.destination == Rect{0.0F, 25.0F, 100.0F, 50.0F});
+}
+
+TEST_CASE("TestVectorImageUsesImageLayoutAndSharedPathPainting") {
+  layout_test_vector = VectorAsset::Create({20.0F, 10.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(
+        Path{}.MoveTo({0.0F, 0.0F}).LineTo({20.0F, 0.0F}).LineTo({20.0F, 10.0F}).Close(),
+        Color::Black()
+    );
+  });
+  TestPlatform platform;
+  Runtime runtime{VectorImageLayoutApp, platform};
+  runtime.SetViewport({200.0F, 200.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto fill = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<FillPathCommand>(command);
+  });
+  REQUIRE(fill != scene.Commands().end());
+  REQUIRE(std::get<FillPathCommand>(*fill).color == Color::Rgb(90, 120, 180));
+  REQUIRE(std::ranges::none_of(scene.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<DrawImageCommand>(command);
+  }));
+}
+
+TEST_CASE("TestImageRejectsConfigurationForTheWrongAssetFormat") {
+  const ImageAsset raster = ImageAsset::FromEncoded(MakeTestPng(20, 10));
+  const VectorAsset vector = VectorAsset::Create({20.0F, 10.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(Path{}.MoveTo({0.0F, 0.0F}).LineTo({20.0F, 10.0F}), Color::Black());
+  });
+
+  REQUIRE_THROWS_AS(Image(raster).Tint(Color::Black()), std::invalid_argument);
+  REQUIRE_THROWS_AS(Image(vector).Sampling(ImageSampling::Linear), std::invalid_argument);
 }
 
 TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {

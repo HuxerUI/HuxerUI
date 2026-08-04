@@ -382,15 +382,24 @@ struct ViewProperties {
 };
 
 struct ImageProperties {
-  ImageAsset asset;
+  std::variant<ImageAsset, VectorAsset> asset;
   ImageFit fit = ImageFit::Contain;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;
   ImageSampling sampling = ImageSampling::Linear;
+  std::optional<Color> tint;
+
+  [[nodiscard]] Size IntrinsicSize() const noexcept {
+    return std::visit([](const auto& value) { return value.IntrinsicSize(); }, asset);
+  }
+
+  [[nodiscard]] bool IsVector() const noexcept {
+    return std::holds_alternative<VectorAsset>(asset);
+  }
 
   // Only intrinsic logical size affects measurement; image contents, fit, alignment, and sampling are paint inputs.
   [[nodiscard]] bool LayoutEquals(const ImageProperties& other) const noexcept {
-    return asset.IntrinsicSize() == other.asset.IntrinsicSize();
+    return IntrinsicSize() == other.IntrinsicSize();
   }
 
   bool operator==(const ImageProperties&) const = default;

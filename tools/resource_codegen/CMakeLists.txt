@@ -4,6 +4,7 @@ project(huxerui_resource_codegen LANGUAGES CXX)
 add_executable(huxerui_resource_codegen
         main.cpp
         generator.cpp
+        svg_compiler.cpp
 )
 
 target_compile_features(huxerui_resource_codegen PRIVATE cxx_std_20)
