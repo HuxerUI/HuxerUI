@@ -98,6 +98,8 @@ using huxerui::ScrollEvent;
 using huxerui::ScrollView;
 using huxerui::SelectionArea;
 using huxerui::Size;
+using huxerui::Slider;
+using huxerui::SliderStyle;
 using huxerui::Spacer;
 using huxerui::Stack;
 using huxerui::State;

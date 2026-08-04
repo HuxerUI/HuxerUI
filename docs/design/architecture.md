@@ -640,6 +640,7 @@ CheckboxStyle
 SwitchStyle
 ProgressCircleStyle
 ProgressBarStyle
+SliderStyle
 DialogStyle
 BottomSheetStyle
 MenuStyle

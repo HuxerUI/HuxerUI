@@ -74,6 +74,23 @@ ProgressBar is a controlled display component and does not emit events. Its defa
 
 `ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps the indicator static.
 
+## Slider
+
+Slider is a controlled single-value input. It uses a `0` to `1` range by default; `Range` and `Step` configure component-specific behavior:
+
+```cpp
+Slider(volume)
+    .Range(0.0F, 100.0F)
+    .Step(1.0F)
+    .OnChanged([volume](float value) { volume = value; });
+```
+
+Pointer and touch input update the value while dragging. Arrow keys adjust by `Step`, or by one percent of the range when no step is set; Home and End select the range endpoints. The owner must apply `OnChanged` values to the next composition.
+
+`OnChanged` is the convenience wrapper for `On<SliderEvents::Changed>`.
+
+`SliderStyle` controls the split track, thumb dimensions, track gap, discrete tick and stop indicators, and interaction animation. Layout modifiers can override the component dimensions.
+
 ## Image
 
 Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:

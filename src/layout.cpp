@@ -235,6 +235,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
   case NodeKind::ProgressBar:
+  case NodeKind::Slider:
     break;
   case NodeKind::Image: {
     content_size = node.image_properties.IntrinsicSize();
@@ -418,6 +419,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
   case NodeKind::ProgressBar:
+  case NodeKind::Slider:
   case NodeKind::Image:
   case NodeKind::Canvas:
   case NodeKind::Spacer:

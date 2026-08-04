@@ -117,6 +117,10 @@ struct ToggleEvents {
   struct Changed : Event<bool> {};
 };
 
+struct SliderEvents {
+  struct Changed : Event<float> {};
+};
+
 struct TextFieldEvents {
   struct Changed : Event<const TextEditingValue&> {};
   struct Submitted : Event<> {};

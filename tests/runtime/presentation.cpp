@@ -1,5 +1,7 @@
 #include "runtime_test_support.h"
 
+#include <limits>
+
 #include "indication_internal.h"
 
 namespace huxerui::test {
@@ -56,6 +58,8 @@ int switch_changes = 0;
 State<float> progress_circle_value;
 State<float> progress_bar_value;
 State<double> progress_bar_animation_duration;
+State<float> slider_value;
+int slider_changes = 0;
 constexpr Color policy_dialog_background = Color::Rgb(32, 84, 132);
 constexpr Color policy_dialog_separator = Color::Rgb(220, 120, 30);
 constexpr Color policy_toast_background = Color::Rgb(42, 52, 62);
@@ -310,6 +314,30 @@ View AdjustableProgressBarApp() {
       ProgressBar(),
     };
   });
+}
+
+View SliderApp() {
+  auto value = UseState(4.0F);
+  slider_value = value;
+  return Row {
+    Slider(value).Range(0.0F, 10.0F).Step(2.0F).OnChanged([value](float changed) {
+      ++slider_changes;
+      value = changed;
+    }),
+  };
+}
+
+View MaterialSliderApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        Slider(4.0F).Range(0.0F, 10.0F).Step(2.0F),
+      }
+  );
+}
+
+View DisabledSliderApp() {
+  return Slider(0.5F).OnChanged([](float) { ++slider_changes; }).With(Enabled{false});
 }
 
 template <class Factory> View InteractionTestTheme(Factory&& content) {
@@ -751,6 +779,19 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(progress_bar_style.width == 160.0F);
   REQUIRE(progress_bar_style.height == 4.0F);
   REQUIRE(progress_bar_style.indicator_color.red == light.colors.primary.red);
+
+  const SliderStyle slider_style = ThemeDefinitionValue<SliderStyle>(definition);
+  REQUIRE(slider_style.width == 160.0F);
+  REQUIRE(slider_style.height == 48.0F);
+  REQUIRE(slider_style.track_height == 16.0F);
+  REQUIRE(slider_style.thumb_width == 4.0F);
+  REQUIRE(slider_style.thumb_height == 44.0F);
+  REQUIRE(slider_style.pressed_thumb_width == 2.0F);
+  REQUIRE(slider_style.thumb_track_gap == 6.0F);
+  REQUIRE(slider_style.stop_indicator_size == 4.0F);
+  REQUIRE(slider_style.tick_size == 4.0F);
+  REQUIRE(slider_style.active_track.red == light.colors.primary.red);
+  REQUIRE(slider_style.inactive_track == light.colors.secondary_container);
 
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
@@ -1195,6 +1236,193 @@ TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
   const auto faster = DrawRectangles(runtime.BuildFrame());
   REQUIRE(faster.size() == 2);
   REQUIRE(std::abs(faster[1].rect.x - style.width * 0.35F) < 0.001F);
+}
+
+TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
+  slider_changes = 0;
+  const SliderStyle style = SliderStyle::Default();
+
+  TestPlatform platform;
+  Runtime runtime{SliderApp, platform};
+  runtime.SetViewport({200.0F, 64.0F});
+  const FlattenedScene& initial = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* slider = root->children[0].get();
+  REQUIRE(slider->kind == huxerui::detail::NodeKind::Slider);
+  REQUIRE(slider->focusable);
+  REQUIRE(slider->measured_size.width == style.width);
+  REQUIRE(slider->measured_size.height == style.height);
+
+  const huxerui::DrawRectCommand* initial_thumb = nullptr;
+  for (const PaintCommand& command : initial.Commands()) {
+    if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
+      if (rectangle->color == style.thumb && rectangle->rect.width == style.thumb_width &&
+          rectangle->rect.height == style.thumb_height) {
+        initial_thumb = rectangle;
+        break;
+      }
+    }
+  }
+  REQUIRE(initial_thumb != nullptr);
+  const float initial_thumb_width = initial_thumb->rect.width;
+  const float maximum_thumb_width = std::max({style.thumb_width, style.hovered_thumb_width, style.pressed_thumb_width});
+  const float inset = maximum_thumb_width * 0.5F;
+  const Rect bounds = slider->PresentationBounds();
+  const float travel = bounds.width - inset * 2.0F;
+  REQUIRE(
+      std::abs(initial_thumb->rect.x + initial_thumb->rect.width * 0.5F - (bounds.x + inset + travel * 0.4F)) < 0.001F
+  );
+
+  const Point pointer{
+      bounds.x + inset + travel * 0.74F,
+      bounds.y + bounds.height * 0.5F,
+  };
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Down,
+      .pointer_id = 42,
+      .position = pointer,
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(slider_changes == 1);
+  REQUIRE(slider_value.Get() == 8.0F);
+  runtime.BuildFrame();
+  platform.AdvanceTime(style.animation_duration);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+  const huxerui::DrawRectCommand* pressed_thumb = nullptr;
+  for (const PaintCommand& command : pressed.Commands()) {
+    if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
+      if (rectangle->color == style.thumb && rectangle->rect.height == style.pressed_thumb_height &&
+          rectangle->rect.width > style.track_height) {
+        pressed_thumb = rectangle;
+        break;
+      }
+    }
+  }
+  REQUIRE(pressed_thumb != nullptr);
+  REQUIRE(pressed_thumb->rect.width > initial_thumb_width);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Move,
+      .pointer_id = 42,
+      .position = {bounds.x + bounds.width + 20.0F, pointer.y},
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(slider_changes == 2);
+  REQUIRE(slider_value.Get() == 10.0F);
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Up,
+      .pointer_id = 42,
+      .position = {bounds.x + bounds.width - inset, pointer.y},
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(slider_changes == 2);
+
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowLeft});
+  REQUIRE(slider_changes == 3);
+  REQUIRE(slider_value.Get() == 8.0F);
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowLeft, .repeat = true});
+  REQUIRE(slider_changes == 4);
+  REQUIRE(slider_value.Get() == 6.0F);
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Home});
+  REQUIRE(slider_changes == 5);
+  REQUIRE(slider_value.Get() == 0.0F);
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::End});
+  REQUIRE(slider_changes == 6);
+  REQUIRE(slider_value.Get() == 10.0F);
+
+  const Point cancelled_pointer{
+      bounds.x + inset + travel * 0.25F,
+      pointer.y,
+  };
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Down,
+      .pointer_id = 84,
+      .position = cancelled_pointer,
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(slider_changes == 7);
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Cancel,
+      .pointer_id = 84,
+      .position = cancelled_pointer,
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Move,
+      .pointer_id = 84,
+      .position = {bounds.x + bounds.width, pointer.y},
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(slider_changes == 7);
+}
+
+TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
+  const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
+  const SliderStyle style = ThemeDefinitionValue<SliderStyle>(definition);
+  TestPlatform platform;
+  Runtime runtime{MaterialSliderApp, platform};
+  runtime.SetViewport({200.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const huxerui::DrawRectCommand* thumb = nullptr;
+  bool drew_inactive_track = false;
+  int indicators = 0;
+  for (const PaintCommand& command : scene.Commands()) {
+    if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
+      if (rectangle->color == style.thumb && rectangle->rect.width == style.thumb_width &&
+          rectangle->rect.height == style.thumb_height) {
+        thumb = rectangle;
+      }
+    }
+    if (const auto* fill = std::get_if<huxerui::FillPathCommand>(&command)) {
+      if (fill->color == style.inactive_track && fill->path.Bounds().height == style.track_height) {
+        drew_inactive_track = true;
+      }
+    }
+    if (const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command)) {
+      if (circle->radius == style.tick_size * 0.5F || circle->radius == style.stop_indicator_size * 0.5F) {
+        ++indicators;
+      }
+    }
+  }
+  REQUIRE(thumb != nullptr);
+  REQUIRE(thumb->corner_radius == style.thumb_width * 0.5F);
+  REQUIRE(drew_inactive_track);
+  REQUIRE(indicators >= 3);
+}
+
+TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
+  slider_changes = 0;
+  TestPlatform platform;
+  Runtime runtime{DisabledSliderApp, platform};
+  runtime.SetViewport({200.0F, 64.0F});
+  runtime.BuildFrame();
+
+  const auto* slider = runtime.RootNode();
+  REQUIRE(slider != nullptr);
+  REQUIRE(slider->kind == huxerui::detail::NodeKind::Slider);
+  REQUIRE_FALSE(slider->enabled);
+  const Rect bounds = slider->PresentationBounds();
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Down,
+      .pointer_id = 85,
+      .position = {bounds.x + bounds.width * 0.75F, bounds.y + bounds.height * 0.5F},
+      .device_kind = PointerDeviceKind::Mouse,
+  });
+  REQUIRE(slider_changes == 0);
+}
+
+TEST_CASE("TestSliderRejectsInvalidConfiguration") {
+  REQUIRE_THROWS_AS(Slider(std::numeric_limits<float>::quiet_NaN()), std::invalid_argument);
+  REQUIRE_THROWS_AS(Slider(0.5F).Range(1.0F, 1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(Slider(0.5F).Range(2.0F, 1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(Slider(0.5F).Step(0.0F), std::invalid_argument);
 }
 
 TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {

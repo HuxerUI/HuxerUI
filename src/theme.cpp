@@ -239,6 +239,31 @@ ProgressBarStyle MaterialProgressBarStyle(const ThemeSpec& theme) {
   };
 }
 
+SliderStyle MaterialSliderStyle(const ThemeSpec& theme) {
+  return {
+      .width = 160.0F,
+      .height = 48.0F,
+      .track_height = 16.0F,
+      .inactive_track = theme.colors.secondary_container,
+      .active_track = theme.colors.primary,
+      .thumb = theme.colors.primary,
+      .stop_indicator = theme.colors.primary,
+      .active_tick = theme.colors.secondary_container,
+      .inactive_tick = theme.colors.primary,
+      .thumb_width = 4.0F,
+      .thumb_height = 44.0F,
+      .hovered_thumb_width = 4.0F,
+      .hovered_thumb_height = 44.0F,
+      .pressed_thumb_width = 2.0F,
+      .pressed_thumb_height = 44.0F,
+      .thumb_track_gap = 6.0F,
+      .track_inside_corner_radius = 2.0F,
+      .stop_indicator_size = 4.0F,
+      .tick_size = 4.0F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+  };
+}
+
 ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   Color thumb = theme.colors.on_surface;
   thumb.alpha *= 0.38F;
@@ -356,6 +381,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialSwitchStyle(theme));
   definition.Set(MaterialProgressCircleStyle(theme));
   definition.Set(MaterialProgressBarStyle(theme));
+  definition.Set(MaterialSliderStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
   definition.Set(MaterialToastStyle(theme));
   definition.Set(MaterialDialogStyle(theme));
@@ -509,6 +535,33 @@ ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme) {
   };
 }
 
+SliderStyle DefaultSliderStyle(const ThemeSpec& theme) {
+  Color inactive_track = theme.colors.on_surface;
+  inactive_track.alpha *= 0.2F;
+  return {
+      .width = 160.0F,
+      .height = 32.0F,
+      .track_height = 4.0F,
+      .inactive_track = inactive_track,
+      .active_track = theme.colors.primary,
+      .thumb = theme.colors.primary,
+      .stop_indicator = theme.colors.primary,
+      .active_tick = theme.colors.surface,
+      .inactive_tick = theme.colors.primary,
+      .thumb_width = 16.0F,
+      .thumb_height = 16.0F,
+      .hovered_thumb_width = 17.0F,
+      .hovered_thumb_height = 17.0F,
+      .pressed_thumb_width = 18.0F,
+      .pressed_thumb_height = 18.0F,
+      .thumb_track_gap = 0.0F,
+      .track_inside_corner_radius = 2.0F,
+      .stop_indicator_size = 0.0F,
+      .tick_size = 0.0F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+  };
+}
+
 } // namespace detail
 
 TextStyle TextStyle::Default() {
@@ -537,6 +590,10 @@ ProgressCircleStyle ProgressCircleStyle::Default() {
 
 ProgressBarStyle ProgressBarStyle::Default() {
   return detail::DefaultProgressBarStyle(ThemeSpec::Default());
+}
+
+SliderStyle SliderStyle::Default() {
+  return detail::DefaultSliderStyle(ThemeSpec::Default());
 }
 
 ToastStyle ToastStyle::Default() {
@@ -574,6 +631,10 @@ ThemeSpec FlatDarkThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(88, 166, 255),
       .on_primary = Color::Rgb(13, 17, 23),
+      .secondary = Color::Rgb(139, 148, 158),
+      .on_secondary = Color::Rgb(13, 17, 23),
+      .secondary_container = Color::Rgb(48, 54, 61),
+      .on_secondary_container = Color::Rgb(230, 237, 243),
       .background = Color::Rgb(13, 17, 23),
       .surface = Color::Rgb(22, 27, 34),
       .on_surface = Color::Rgb(230, 237, 243),
@@ -611,6 +672,10 @@ ThemeSpec MaterialLightThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(103, 80, 164),
       .on_primary = Color::White(),
+      .secondary = Color::Rgb(98, 91, 113),
+      .on_secondary = Color::White(),
+      .secondary_container = Color::Rgb(232, 222, 248),
+      .on_secondary_container = Color::Rgb(29, 25, 43),
       .background = Color::Rgb(255, 251, 254),
       .surface = Color::Rgb(255, 251, 254),
       .on_surface = Color::Rgb(28, 27, 31),
@@ -656,6 +721,10 @@ ThemeSpec MaterialDarkThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(208, 188, 255),
       .on_primary = Color::Rgb(56, 30, 114),
+      .secondary = Color::Rgb(204, 194, 220),
+      .on_secondary = Color::Rgb(51, 45, 65),
+      .secondary_container = Color::Rgb(74, 68, 88),
+      .on_secondary_container = Color::Rgb(232, 222, 248),
       .background = Color::Rgb(28, 27, 31),
       .surface = Color::Rgb(28, 27, 31),
       .on_surface = Color::Rgb(230, 225, 229),

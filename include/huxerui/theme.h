@@ -19,6 +19,10 @@ namespace huxerui {
 struct ColorScheme {
   Color primary = Color::Rgb(31, 111, 235);
   Color on_primary = Color::White();
+  Color secondary = Color::Rgb(87, 96, 106);
+  Color on_secondary = Color::White();
+  Color secondary_container = Color::Rgb(218, 225, 232);
+  Color on_secondary_container = Color::Rgb(31, 35, 40);
   Color background = Color::Rgb(246, 248, 250);
   Color surface = Color::White();
   Color on_surface = Color::Rgb(31, 35, 40);
@@ -196,6 +200,33 @@ struct ProgressBarStyle {
   bool operator==(const ProgressBarStyle&) const = default;
 };
 
+struct SliderStyle {
+  float width = 160.0F;
+  float height = 32.0F;
+  float track_height = 4.0F;
+  Color inactive_track = Color::Rgb(87, 96, 106, 0.2F);
+  Color active_track = Color::Rgb(31, 111, 235);
+  Color thumb = Color::Rgb(31, 111, 235);
+  Color stop_indicator = Color::Rgb(31, 111, 235);
+  Color active_tick = Color::Rgb(218, 225, 232);
+  Color inactive_tick = Color::Rgb(31, 111, 235);
+  float thumb_width = 16.0F;
+  float thumb_height = 16.0F;
+  float hovered_thumb_width = 17.0F;
+  float hovered_thumb_height = 17.0F;
+  float pressed_thumb_width = 18.0F;
+  float pressed_thumb_height = 18.0F;
+  float thumb_track_gap = 0.0F;
+  float track_inside_corner_radius = 2.0F;
+  float stop_indicator_size = 0.0F;
+  float tick_size = 0.0F;
+  double animation_duration = 0.12;
+
+  static SliderStyle Default();
+
+  bool operator==(const SliderStyle&) const = default;
+};
+
 class ThemeDefinition;
 
 namespace detail {
@@ -292,6 +323,7 @@ CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
 ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);
 ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme);
+SliderStyle DefaultSliderStyle(const ThemeSpec& theme);
 
 } // namespace detail
 

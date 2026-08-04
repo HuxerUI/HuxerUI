@@ -75,6 +75,10 @@ View ControlsDemo() {
           ProgressBar(progress),
           Text::Format("{}%", static_cast<int>(progress * 100.0F)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          Slider(progress).Step(0.05F).OnChanged([progress](float value) { progress = value; }),
+          Text::Format("{}%", static_cast<int>(progress * 100.0F)),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         TextField(password)
             .Secure()
             .MaxLength(64)

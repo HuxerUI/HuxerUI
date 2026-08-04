@@ -646,6 +646,27 @@ public:
   explicit ProgressBar(const State<float>& progress) : ProgressBar(progress.Get()) {}
 };
 
+class Slider final : public detail::TypedView<Slider> {
+public:
+  explicit Slider(float value);
+  explicit Slider(const State<float>& value) : Slider(value.Get()) {}
+
+  Slider Range(float minimum, float maximum) &&;
+  Slider Step(float step) &&;
+
+  template <class Function> Slider OnChanged(Function&& function) && {
+    return std::move(*this).On<SliderEvents::Changed>(std::forward<Function>(function));
+  }
+
+private:
+  void UpdateModifier();
+
+  float value_ = 0.0F;
+  float minimum_ = 0.0F;
+  float maximum_ = 1.0F;
+  std::optional<float> step_;
+};
+
 class Scope final : public View {
 public:
   explicit Scope(std::function<View()> factory);
