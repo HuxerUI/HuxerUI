@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <variant>
 #include <vector>
 
 #include <huxerui/geometry.h>
@@ -9,13 +10,9 @@
 
 namespace huxerui {
 
-struct RenderClip {
-  // The clip is expressed in the owning render node's local logical coordinates.
-  Rect rect;
-  float corner_radius = 0.0F;
-
-  bool operator==(const RenderClip&) const = default;
-};
+// The clip is expressed in the owning render node's local logical coordinates. Uniform corners retain the compact
+// rectangle command, while asymmetric corners reuse the platform-neutral Path clip command.
+using RenderClip = std::variant<PushClipCommand, PushPathClipCommand>;
 
 struct RenderNode {
   // Identity remains stable while the corresponding mounted node reconciles compatibly.
@@ -26,9 +23,9 @@ struct RenderNode {
   Transform2D transform;
   // Group opacity applied to content, descendants, and foreground.
   float opacity = 1.0F;
-  // Clips descendants only; content and foreground remain outside this clip.
-  std::optional<RenderClip> child_clip;
-  // Applied after child_clip to child render nodes without affecting this node's content or foreground.
+  // Clips descendants only; multiple clips preserve independent container and scroll viewport constraints.
+  std::vector<RenderClip> child_clips;
+  // Applied after child_clips to child render nodes without affecting this node's content or foreground.
   Transform2D children_transform;
   // Content and foreground commands use this node's local logical coordinates.
   PaintSequence content;

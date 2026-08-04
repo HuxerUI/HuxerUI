@@ -11,6 +11,7 @@
 
 #include <huxerui/color.h>
 #include <huxerui/environment.h>
+#include <huxerui/indication.h>
 #include <huxerui/text.h>
 #include <huxerui/view.h>
 
@@ -25,7 +26,13 @@ struct ColorScheme {
   Color on_secondary_container = Color::Rgb(31, 35, 40);
   Color background = Color::Rgb(246, 248, 250);
   Color surface = Color::White();
+  Color surface_container_low = Color::White();
+  Color surface_container = Color::White();
+  Color surface_container_high = Color::White();
+  Color surface_container_highest = Color::Rgb(239, 241, 243);
   Color on_surface = Color::Rgb(31, 35, 40);
+  Color on_surface_variant = Color::Rgb(87, 96, 106);
+  Color outline = Color::Rgb(87, 96, 106);
   Color inverse_surface = Color::Rgb(31, 35, 40);
   Color inverse_on_surface = Color::White();
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
@@ -35,17 +42,23 @@ struct ColorScheme {
 };
 
 struct TypographyScheme {
-  float body = 14.0F;
-  float label = 14.0F;
-  float title = 20.0F;
+  float body_large = 16.0F;
+  float body_medium = 14.0F;
+  float body_small = 12.0F;
+  float label_large = 14.0F;
+  float title_large = 20.0F;
+  float headline_small = 24.0F;
 
   bool operator==(const TypographyScheme&) const = default;
 };
 
 struct ShapeScheme {
-  float small = 4.0F;
-  float medium = 8.0F;
-  float large = 14.0F;
+  float extra_small = 4.0F;
+  float small = 8.0F;
+  float medium = 12.0F;
+  float large = 16.0F;
+  float extra_large = 28.0F;
+  float full = 10000.0F;
 
   bool operator==(const ShapeScheme&) const = default;
 };
@@ -111,8 +124,13 @@ struct ThemeSpec {
 struct ButtonStyle {
   Color background = Color::Rgb(31, 111, 235);
   TextStyle label_style{Font::System(14.0F), Color::White()};
+  Color disabled_background = Color::Rgb(31, 35, 40, 0.1F);
+  Color disabled_label = Color::Rgb(31, 35, 40, 0.38F);
   EdgeInsets padding = EdgeInsets::Symmetric(14.0F, 8.0F);
+  float minimum_width = 0.0F;
+  float minimum_height = 0.0F;
   float corner_radius = 8.0F;
+  std::optional<IndicationSpec> indication;
 
   static ButtonStyle Default();
 
@@ -123,11 +141,17 @@ struct TextFieldStyle {
   Color background = Color::White();
   TextStyle text_style;
   TextStyle placeholder_style{Font::System(14.0F), Color::Rgb(87, 96, 106)};
+  Color disabled_text = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_placeholder = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_supporting_text = Color::Rgb(31, 35, 40, 0.38F);
   Color selection = Color::Rgb(31, 111, 235, 0.24F);
   Color caret = Color::Rgb(31, 111, 235);
+  Color error_caret = Color::Rgb(207, 34, 46);
   Color composition = Color::Rgb(31, 111, 235);
   Color border = Color::Rgb(87, 96, 106, 0.55F);
+  Color hovered_border = Color::Rgb(31, 35, 40);
   Color focused_border = Color::Rgb(31, 111, 235);
+  Color disabled_border = Color::Rgb(31, 35, 40, 0.12F);
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 6.0F;
@@ -135,7 +159,8 @@ struct TextFieldStyle {
   float minimum_height = 36.0F;
   double caret_blink_interval = 0.5;
   Color validation_error = Color::Rgb(207, 34, 46);
-  float validation_border_width = 2.0F;
+  float validation_border_width = 1.0F;
+  float focused_validation_border_width = 2.0F;
   TextStyle validation_text_style{Font::System(12.0F), Color::Rgb(207, 34, 46)};
   float validation_spacing = 4.0F;
 
@@ -146,9 +171,14 @@ struct TextFieldStyle {
 
 struct CheckboxStyle {
   float size = 20.0F;
+  float minimum_interactive_size = 20.0F;
+  float state_layer_size = 20.0F;
   Color checked_background = Color::Rgb(31, 111, 235);
   Color checkmark = Color::White();
   Color unchecked_border = Color::Rgb(87, 96, 106);
+  Color disabled_checked_background = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_checkmark = Color::White();
+  Color disabled_unchecked_border = Color::Rgb(31, 35, 40, 0.38F);
   float border_width = 2.0F;
   float corner_radius = 4.0F;
 
@@ -160,11 +190,23 @@ struct CheckboxStyle {
 struct SwitchStyle {
   float width = 40.0F;
   float height = 24.0F;
+  float minimum_interactive_height = 24.0F;
+  float state_layer_size = 24.0F;
   Color unchecked_track = Color::Rgb(87, 96, 106, 0.38F);
   Color checked_track = Color::Rgb(31, 111, 235);
-  Color thumb = Color::White();
-  float thumb_radius = 8.0F;
-  float track_padding = 4.0F;
+  Color unchecked_track_border = Color::Transparent();
+  Color checked_track_border = Color::Transparent();
+  Color unchecked_thumb = Color::White();
+  Color checked_thumb = Color::White();
+  Color disabled_unchecked_track = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_checked_track = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_unchecked_track_border = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_checked_track_border = Color::Transparent();
+  Color disabled_unchecked_thumb = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_checked_thumb = Color::Rgb(31, 35, 40, 0.38F);
+  float unchecked_thumb_radius = 8.0F;
+  float checked_thumb_radius = 8.0F;
+  float track_border_width = 0.0F;
   float corner_radius = 12.0F;
   double animation_duration = 0.2;
 
@@ -173,17 +215,31 @@ struct SwitchStyle {
   bool operator==(const SwitchStyle&) const = default;
 };
 
+enum class ProgressCircleIndeterminateMotion {
+  Sweep,
+  PulsingArc,
+};
+
 struct ProgressCircleStyle {
   float size = 24.0F;
   float stroke_width = 3.0F;
   Color track_color = Color::Rgb(87, 96, 106, 0.16F);
+  Color indeterminate_track_color = Color::Rgb(87, 96, 106, 0.16F);
   Color indicator_color = Color::Rgb(31, 111, 235);
-  float indeterminate_arc_fraction = 0.28F;
+  float track_gap = 0.0F;
+  ProgressCircleIndeterminateMotion indeterminate_motion = ProgressCircleIndeterminateMotion::Sweep;
+  float minimum_indeterminate_arc_fraction = 0.28F;
+  float maximum_indeterminate_arc_fraction = 0.28F;
   double animation_duration = 0.9;
 
   static ProgressCircleStyle Default();
 
   bool operator==(const ProgressCircleStyle&) const = default;
+};
+
+enum class ProgressBarIndeterminateMotion {
+  Sweep,
+  Segmented,
 };
 
 struct ProgressBarStyle {
@@ -192,6 +248,10 @@ struct ProgressBarStyle {
   Color track_color = Color::Rgb(87, 96, 106, 0.16F);
   Color indicator_color = Color::Rgb(31, 111, 235);
   float corner_radius = 2.0F;
+  float track_gap = 0.0F;
+  float stop_indicator_size = 0.0F;
+  ProgressBarIndeterminateMotion indeterminate_motion = ProgressBarIndeterminateMotion::Sweep;
+  // Sweep motion uses this fraction as its moving segment width; segmented motion owns its keyframed extents.
   float indeterminate_fraction = 0.35F;
   double animation_duration = 1.2;
 
@@ -210,6 +270,12 @@ struct SliderStyle {
   Color stop_indicator = Color::Rgb(31, 111, 235);
   Color active_tick = Color::Rgb(218, 225, 232);
   Color inactive_tick = Color::Rgb(31, 111, 235);
+  Color disabled_inactive_track = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_active_track = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_thumb = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_stop_indicator = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_active_tick = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_inactive_tick = Color::Rgb(31, 35, 40, 0.38F);
   float thumb_width = 16.0F;
   float thumb_height = 16.0F;
   float hovered_thumb_width = 17.0F;
@@ -220,6 +286,8 @@ struct SliderStyle {
   float track_inside_corner_radius = 2.0F;
   float stop_indicator_size = 0.0F;
   float tick_size = 0.0F;
+  // An empty override inherits InteractionScheme; zero suppresses the node-level ring for handle-focused styles.
+  std::optional<float> focus_ring_width;
   double animation_duration = 0.12;
 
   static SliderStyle Default();

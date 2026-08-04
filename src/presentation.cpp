@@ -404,7 +404,8 @@ bool ValidMotion(const PresentationMotion& motion) noexcept {
 
 void ValidateToastStyle(const ToastStyle& style) {
   if (!ValidInsets(style.padding) || !ValidInsets(style.viewport_padding) || !ValidShadow(style.shadow) ||
-      !std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.maximum_width) ||
+      !std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.minimum_height) ||
+      style.minimum_height < 0.0F || !std::isfinite(style.maximum_width) ||
       style.maximum_width <= 0.0F || (style.motion.has_value() && !ValidMotion(*style.motion))) {
     throw std::invalid_argument(
         "HuxerUI toast geometry, shadow, and motion must be finite with positive maximum width and non-negative extents"
@@ -419,8 +420,10 @@ void ValidateDialogStyle(const DialogStyle& style) {
       style.action_separator_thickness < 0.0F || !std::isfinite(style.action_corner_radius) ||
       style.action_corner_radius < 0.0F || !std::isfinite(style.minimum_action_height) ||
       style.minimum_action_height < 0.0F || !std::isfinite(style.corner_radius) || style.corner_radius < 0.0F ||
-      !std::isfinite(style.maximum_width) || style.maximum_width <= 0.0F || !std::isfinite(style.viewport_margin) ||
-      style.viewport_margin < 0.0F || (style.motion.has_value() && !ValidMotion(*style.motion))) {
+      !std::isfinite(style.minimum_width) || style.minimum_width < 0.0F || !std::isfinite(style.maximum_width) ||
+      style.maximum_width <= 0.0F || style.minimum_width > style.maximum_width ||
+      !std::isfinite(style.viewport_margin) || style.viewport_margin < 0.0F ||
+      (style.motion.has_value() && !ValidMotion(*style.motion))) {
     throw std::invalid_argument(
         "HuxerUI dialog geometry, shadow, and motion must be finite with positive maximum width and non-negative "
         "extents"
@@ -440,8 +443,13 @@ BottomSheetTransition(const BottomSheetStyle& style, bool reduced_motion) {
 }
 
 void ValidateBottomSheetStyle(const BottomSheetStyle& style) {
-  if (!std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.maximum_width) ||
-      style.maximum_width <= 0.0F || !ValidShadow(style.shadow)) {
+  const CornerRadii& radii = style.corner_radii;
+  if (!std::isfinite(radii.top_left) || radii.top_left < 0.0F || !std::isfinite(radii.top_right) ||
+      radii.top_right < 0.0F || !std::isfinite(radii.bottom_right) || radii.bottom_right < 0.0F ||
+      !std::isfinite(radii.bottom_left) || radii.bottom_left < 0.0F || !std::isfinite(style.maximum_width) ||
+      style.maximum_width <= 0.0F || !std::isfinite(style.drag_handle_size.width) ||
+      style.drag_handle_size.width < 0.0F || !std::isfinite(style.drag_handle_size.height) ||
+      style.drag_handle_size.height < 0.0F || !ValidInsets(style.drag_handle_padding) || !ValidShadow(style.shadow)) {
     throw std::invalid_argument(
         "HuxerUI bottom sheet geometry and shadow must be finite with positive maximum width and non-negative extents"
     );
@@ -514,9 +522,32 @@ ViewFactory BottomSheetContent(
     ViewFactory content, const BottomSheetStyle& style, std::shared_ptr<detail::LayerTransitionState> transition
 ) {
   return [content = std::move(content), style, transition = std::move(transition)] {
-    return Stack {content()}.With(
+    std::vector<View> children;
+    if (style.drag_handle_size.width > 0.0F && style.drag_handle_size.height > 0.0F && style.drag_handle.alpha > 0.0F) {
+      Frame handle_frame;
+      handle_frame.width = style.drag_handle_size.width;
+      handle_frame.height = style.drag_handle_size.height;
+      children.push_back(
+          Row {
+            Spacer().With(
+                handle_frame,
+                Grow{0.0F},
+                Background{style.drag_handle},
+                CornerRadius{style.drag_handle_size.height * 0.5F}
+            ),
+          }.With(
+              Padding{style.drag_handle_padding},
+              MainAlign{MainAxisAlignment::Center},
+              CrossAlign{CrossAxisAlignment::Center}
+          )
+      );
+    }
+    children.push_back(content());
+    return Column {std::move(children)}.With(
+        CrossAlign{CrossAxisAlignment::Stretch},
         Background{style.background},
-        CornerRadius{style.corner_radius},
+        CornerRadius{style.corner_radii},
+        ClipChildren{},
         style.shadow,
         PresentationContentMotion{
             .state = transition,
@@ -1342,6 +1373,7 @@ View MenuService::Surface(
       CrossAlign{CrossAxisAlignment::Stretch},
       Background{style.background},
       CornerRadius{style.corner_radius},
+      ClipChildren{},
       style.shadow
   );
 }
@@ -1425,10 +1457,10 @@ View DialogService::StandardContent(
 
   View actions;
   if (style.action_layout == Axis::Horizontal) {
-    View action_row =
-        Row {std::move(action_views)}.With(Spacing{style.action_spacing}, CrossAlign{CrossAxisAlignment::Center});
+    View action_flow =
+        Flow {std::move(action_views)}.With(Spacing{style.action_spacing}, CrossAlign{CrossAxisAlignment::Center});
     actions = Stack {
-      std::move(action_row),
+      std::move(action_flow),
     }.With(Align{style.action_alignment, VerticalAlignment::Center});
   } else {
     actions = Column {std::move(action_views)}.With(
@@ -1443,6 +1475,7 @@ View DialogService::StandardContent(
   }.With(Spacing{style.content_spacing}, CrossAlign{ResolveCrossAlignment(style.content_alignment)});
 
   Frame surface_frame;
+  surface_frame.min_width = style.minimum_width;
   surface_frame.max_width = style.maximum_width;
   return Column {
     std::move(body),
@@ -1686,6 +1719,7 @@ LayerId detail::ToastService::Show(
           throw std::invalid_argument("HuxerUI toast message must not be empty");
         }
         Frame surface_frame;
+        surface_frame.min_height = style.minimum_height;
         surface_frame.max_width = style.maximum_width;
         View result = Stack {
           Text(std::move(resolved_message))

@@ -53,6 +53,7 @@ struct ToastStyle {
   EdgeInsets padding = EdgeInsets::Symmetric(16.0F, 12.0F);
   Shadow shadow{Color::Rgb(0, 0, 0, 0.24F), {}, 10.0F, 0.0F};
   float corner_radius = 8.0F;
+  float minimum_height = 0.0F;
   float maximum_width = 480.0F;
   EdgeInsets viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F};
   VerticalPlacement placement = VerticalPlacement::Bottom;
@@ -87,6 +88,7 @@ struct DialogStyle {
   float action_corner_radius = 6.0F;
   float minimum_action_height = 36.0F;
   float corner_radius = 12.0F;
+  float minimum_width = 0.0F;
   float maximum_width = 480.0F;
   float viewport_margin = 24.0F;
   VerticalPlacement placement = VerticalPlacement::Center;
@@ -104,7 +106,10 @@ struct BottomSheetStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
   Color background = Color::White();
   Shadow shadow{Color::Rgb(0, 0, 0, 0.22F), {}, 18.0F, 0.0F};
-  float corner_radius = 14.0F;
+  CornerRadii corner_radii = CornerRadii::Top(14.0F);
+  Color drag_handle = Color::Transparent();
+  Size drag_handle_size;
+  EdgeInsets drag_handle_padding;
   float maximum_width = 640.0F;
   AnimationSpec enter = TweenSpec{.duration = 0.24};
   AnimationSpec exit = TweenSpec{.duration = 0.18};

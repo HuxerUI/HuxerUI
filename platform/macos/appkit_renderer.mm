@@ -1032,14 +1032,8 @@ void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef contex
   }
 
   RenderSequence(node.content, context);
-  if (node.child_clip.has_value()) {
-    RenderCommand(
-        context,
-        PushClipCommand{
-            node.child_clip->rect,
-            node.child_clip->corner_radius,
-        }
-    );
+  for (const RenderClip& clip : node.child_clips) {
+    std::visit([&](const auto& command) { RenderCommand(context, command); }, clip);
   }
   const bool children_transformed = !node.children_transform.IsIdentity();
   if (children_transformed) {
@@ -1053,7 +1047,7 @@ void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef contex
   if (children_transformed) {
     RenderCommand(context, PopTransformCommand{});
   }
-  if (node.child_clip.has_value()) {
+  for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
     RenderCommand(context, PopClipCommand{});
   }
   RenderSequence(node.foreground, context);

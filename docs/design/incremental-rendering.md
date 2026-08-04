@@ -244,7 +244,7 @@ struct RenderNode {
   Point offset;
   Transform2D transform;
   float opacity;
-  std::optional<RenderClip> child_clip;
+  std::vector<RenderClip> child_clips;
   Transform2D children_transform;
   PaintSequence content;
   std::vector<const RenderNode*> children;
@@ -256,6 +256,7 @@ struct RenderNode {
 
 This is an implementation model, not a required public layout.
 Storage may be embedded in `MountedNode` or owned by `RenderScene` as long as identity is stable and platform adapters never observe dangling nodes.
+Child clips form a retained stack because a rounded container boundary and a ScrollView content viewport can both constrain the same descendants.
 
 Traversal order is:
 
@@ -292,7 +293,7 @@ All drawing is recorded through `PaintContext`:
 class PaintContext {
 public:
   Rect Bounds() const;
-  void DrawRect(Rect rect, Color color, float corner_radius = 0.0F);
+  void DrawRect(Rect rect, Color color, CornerRadii corner_radii = {});
   void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
   void DrawTextRun(
       Rect bounds,
@@ -300,7 +301,7 @@ public:
       std::string text,
       TextStyle style,
       TextShapingOptions shaping = {});
-  void PushClip(Rect rect, float corner_radius = 0.0F);
+  void PushClip(Rect rect, CornerRadii corner_radii = {});
   void PopClip();
 };
 ```

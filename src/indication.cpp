@@ -144,12 +144,12 @@ bool IndicationState::Advance(const FrameInfo& frame) {
   return needs_frame;
 }
 
-void IndicationState::Paint(PaintContext& context, Rect frame, float corner_radius, float opacity) const {
+void IndicationState::Paint(PaintContext& context, Rect frame, CornerRadii corner_radii, float opacity) const {
   if (const auto* overlay = std::get_if<StateOverlayIndication>(&spec_); overlay && opacity_.Value() > 0.0F) {
     const bool pressed = !pressed_pointers_.empty() || (released_visual_ && !hovered_);
     Color color = pressed ? overlay->color : overlay->hover_color;
     color.alpha *= opacity_.Value() * opacity;
-    context.DrawRect(frame, color, corner_radius);
+    context.DrawRect(frame, color, corner_radii);
     return;
   }
   const auto* ripple_spec = std::get_if<RippleIndication>(&spec_);
@@ -160,10 +160,13 @@ void IndicationState::Paint(PaintContext& context, Rect frame, float corner_radi
   if (hover_opacity_.Value() > 0.0F && ripple_spec->hover_color.alpha > 0.0F) {
     Color hover_color = ripple_spec->hover_color;
     hover_color.alpha *= hover_opacity_.Value() * opacity;
-    context.DrawRect(frame, hover_color, corner_radius);
+    context.DrawRect(frame, hover_color, corner_radii);
   }
 
-  context.PushClip(frame, corner_radius);
+  if (ripples_.empty()) {
+    return;
+  }
+  context.PushClip(frame, corner_radii);
   for (const IndicationRippleState& ripple : ripples_) {
     if (!ripple.started_at.has_value()) {
       continue;
@@ -206,6 +209,24 @@ bool IndicationState::HasVisuals() const noexcept {
 
 namespace {
 
+Rect ResolveIndicationFrame(const MountedNode& node) {
+  const auto& mounted = static_cast<const detail::MountedNode&>(node);
+  if (mounted.indication_frame.has_value()) {
+    return *mounted.indication_frame;
+  }
+  Rect frame = node.Bounds();
+  if (!mounted.properties.indication_size.has_value()) {
+    return frame;
+  }
+  const Size size = *mounted.properties.indication_size;
+  return {
+      frame.x + (frame.width - size.width) * 0.5F,
+      frame.y + (frame.height - size.height) * 0.5F,
+      size.width,
+      size.height,
+  };
+}
+
 class IndicationExtension final : public NodeExtension {
 public:
   IndicationExtension(MountedNode& node, const Indication& modifier) {
@@ -227,7 +248,12 @@ public:
 
   void Update(MountedNode& node, const detail::DefaultIndication& modifier) {
     static_cast<void>(modifier);
-    Update(node, Indication{});
+    const auto& mounted = static_cast<const detail::MountedNode&>(node);
+    if (mounted.properties.indication_override.has_value()) {
+      Update(node, Indication{*mounted.properties.indication_override});
+    } else {
+      Update(node, Indication{});
+    }
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
@@ -267,7 +293,7 @@ public:
     }
     keyboard_pressed_ = pressed;
     if (pressed) {
-      const Rect frame = node.Bounds();
+      const Rect frame = ResolveIndicationFrame(node);
       indication_.Press(
           keyboard_pointer_id_,
           {
@@ -286,7 +312,8 @@ public:
       return NodeExtension::PointerResult::Ignored;
     }
     if (event.type == PointerEventType::Down) {
-      indication_.Press(event.pointer_id, event.position);
+      const Rect frame = ResolveIndicationFrame(node);
+      indication_.Press(event.pointer_id, {event.position.x - frame.x, event.position.y - frame.y});
       InvalidatePaint();
       return NodeExtension::PointerResult::Observe;
     }
@@ -317,7 +344,11 @@ public:
 
   void Paint(const MountedNode& node, PaintContext& context) const override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    indication_.Paint(context, node.Bounds(), mounted.properties.corner_radius);
+    const Rect frame = ResolveIndicationFrame(node);
+    const CornerRadii corner_radii = mounted.properties.indication_size.has_value()
+                                         ? CornerRadii{mounted.properties.indication_corner_radius}
+                                         : mounted.properties.corner_radii;
+    indication_.Paint(context, frame, corner_radii);
   }
 
 private:

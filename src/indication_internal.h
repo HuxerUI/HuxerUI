@@ -36,7 +36,7 @@ public:
   void Press(std::int64_t pointer_id, Point local_origin);
   void Release(std::int64_t pointer_id);
   [[nodiscard]] bool Advance(const FrameInfo& frame);
-  void Paint(PaintContext& context, Rect frame, float corner_radius, float opacity = 1.0F) const;
+  void Paint(PaintContext& context, Rect frame, CornerRadii corner_radii, float opacity = 1.0F) const;
   [[nodiscard]] bool HasVisuals() const noexcept;
 
 private:

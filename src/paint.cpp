@@ -65,6 +65,12 @@ void RequireNonNegative(float value, const char* message) {
   }
 }
 
+void RequireCornerRadii(CornerRadii corner_radii) {
+  RequireNonNegative(corner_radii.top_left, "HuxerUI paint corner radii must be finite and non-negative");
+  RequireNonNegative(corner_radii.top_right, "HuxerUI paint corner radii must be finite and non-negative");
+  RequireNonNegative(corner_radii.bottom_right, "HuxerUI paint corner radii must be finite and non-negative");
+  RequireNonNegative(corner_radii.bottom_left, "HuxerUI paint corner radii must be finite and non-negative");
+}
 } // namespace
 
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(sequence), bounds_(bounds) {
@@ -73,13 +79,17 @@ PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(seq
   sequence_.bounds_ = {};
 }
 
-void PaintContext::DrawRect(Rect rect, Color color, float corner_radius) {
+void PaintContext::DrawRect(Rect rect, Color color, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
   RequireColor(color);
-  RequireNonNegative(corner_radius, "HuxerUI paint corner radius must be finite and non-negative");
-  sequence_.commands_.emplace_back(DrawRectCommand{rect, color, corner_radius});
-  Include(rect);
+  RequireCornerRadii(corner_radii);
+  if (corner_radii.IsUniform()) {
+    sequence_.commands_.emplace_back(DrawRectCommand{rect, color, corner_radii.top_left});
+    Include(rect);
+    return;
+  }
+  FillPath(Path::RoundedRect(rect, corner_radii), color);
 }
 
 void PaintContext::DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options) {
@@ -314,13 +324,30 @@ void PaintContext::DrawArc(
   });
 }
 
-void PaintContext::DrawBorder(Rect rect, Color color, float width, float corner_radius) {
+void PaintContext::DrawBorder(Rect rect, Color color, float width, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
   RequireColor(color);
   RequireNonNegative(width, "HuxerUI paint border width must be finite and non-negative");
-  RequireNonNegative(corner_radius, "HuxerUI paint corner radius must be finite and non-negative");
-  sequence_.commands_.emplace_back(DrawBorderCommand{rect, color, width, corner_radius});
+  RequireCornerRadii(corner_radii);
+  if (!corner_radii.IsUniform()) {
+    const float inset = width * 0.5F;
+    const Rect centerline{
+        rect.x + inset,
+        rect.y + inset,
+        std::max(0.0F, rect.width - width),
+        std::max(0.0F, rect.height - width),
+    };
+    const CornerRadii centerline_radii{
+        std::max(0.0F, corner_radii.top_left - inset),
+        std::max(0.0F, corner_radii.top_right - inset),
+        std::max(0.0F, corner_radii.bottom_right - inset),
+        std::max(0.0F, corner_radii.bottom_left - inset),
+    };
+    StrokePath(Path::RoundedRect(centerline, centerline_radii), color, width);
+    return;
+  }
+  sequence_.commands_.emplace_back(DrawBorderCommand{rect, color, width, corner_radii.top_left});
   const float outset = std::max(0.0F, width) * 0.5F;
   Include({
       rect.x - outset,
@@ -331,7 +358,7 @@ void PaintContext::DrawBorder(Rect rect, Color color, float width, float corner_
 }
 
 void PaintContext::DrawShadow(
-    Rect rect, Color color, Point offset, float blur_radius, float spread, float corner_radius
+    Rect rect, Color color, Point offset, float blur_radius, float spread, CornerRadii corner_radii
 ) {
   RequireOpen();
   RequireRect(rect);
@@ -343,8 +370,22 @@ void PaintContext::DrawShadow(
   if (!std::isfinite(spread)) {
     throw std::invalid_argument("HuxerUI paint shadow spread must be finite");
   }
-  RequireNonNegative(corner_radius, "HuxerUI paint corner radius must be finite and non-negative");
-  const DrawShadowCommand command{rect, color, offset, blur_radius, spread, corner_radius};
+  RequireCornerRadii(corner_radii);
+  if (!corner_radii.IsUniform()) {
+    const Rect shadow_rect{
+        rect.x - spread,
+        rect.y - spread,
+        std::max(0.0F, rect.width + spread * 2.0F),
+        std::max(0.0F, rect.height + spread * 2.0F),
+    };
+    corner_radii.top_left = std::max(0.0F, corner_radii.top_left + spread);
+    corner_radii.top_right = std::max(0.0F, corner_radii.top_right + spread);
+    corner_radii.bottom_right = std::max(0.0F, corner_radii.bottom_right + spread);
+    corner_radii.bottom_left = std::max(0.0F, corner_radii.bottom_left + spread);
+    DrawPathShadow(Path::RoundedRect(shadow_rect, corner_radii), color, offset, blur_radius);
+    return;
+  }
+  const DrawShadowCommand command{rect, color, offset, blur_radius, spread, corner_radii.top_left};
   sequence_.commands_.emplace_back(command);
   const detail::ResolvedShadow resolved = detail::ResolveShadow(command);
   if (!resolved.IsEmpty()) {
@@ -429,11 +470,15 @@ void PaintContext::DrawPathShadow(Path path, Color color, Point offset, float bl
   });
 }
 
-void PaintContext::PushClip(Rect rect, float corner_radius) {
+void PaintContext::PushClip(Rect rect, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
-  RequireNonNegative(corner_radius, "HuxerUI paint clip corner radius must be finite and non-negative");
-  sequence_.commands_.emplace_back(PushClipCommand{rect, corner_radius});
+  RequireCornerRadii(corner_radii);
+  if (!corner_radii.IsUniform()) {
+    PushPathClip(Path::RoundedRect(rect, corner_radii));
+    return;
+  }
+  sequence_.commands_.emplace_back(PushClipCommand{rect, corner_radii.top_left});
   clip_stack_.push_back(clip_);
   command_stack_.push_back(StackEntry::Clip);
   const Rect transformed = detail::TransformBounds(transform_, rect);

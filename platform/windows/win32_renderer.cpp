@@ -1120,13 +1120,8 @@ struct Win32Renderer::State {
     }
 
     RenderSequence(node.content);
-    if (node.child_clip.has_value()) {
-      RenderCommand(
-          PushClipCommand{
-              node.child_clip->rect,
-              node.child_clip->corner_radius,
-          }
-      );
+    for (const RenderClip& clip : node.child_clips) {
+      std::visit([this](const auto& command) { RenderCommand(command); }, clip);
     }
     const bool children_transformed = !node.children_transform.IsIdentity();
     if (children_transformed) {
@@ -1140,7 +1135,7 @@ struct Win32Renderer::State {
     if (children_transformed) {
       RenderCommand(PopTransformCommand{});
     }
-    if (node.child_clip.has_value()) {
+    for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
       RenderCommand(PopClipCommand{});
     }
     RenderSequence(node.foreground);

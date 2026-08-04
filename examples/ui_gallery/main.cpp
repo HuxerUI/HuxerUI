@@ -28,7 +28,7 @@ View Panel(View content) {
           .blur_radius = 18.0F,
           .spread = -2.0F,
       },
-      CornerRadius(theme.shapes.large)
+      CornerRadius(theme.shapes.extra_large)
   );
 }
 

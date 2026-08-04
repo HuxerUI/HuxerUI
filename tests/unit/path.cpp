@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "path_internal.h"
+
 namespace huxerui::test {
 
 static_assert(std::equality_comparable<Path>);
@@ -62,6 +64,18 @@ TEST_CASE("PathRejectsInvalidGeometryAndContourOperations") {
   REQUIRE_THROWS_AS(path.MoveTo({nan, 0.0F}), std::invalid_argument);
   path.MoveTo({0.0F, 0.0F});
   REQUIRE_THROWS_AS(path.CubicTo({}, {nan, 0.0F}, {}), std::invalid_argument);
+}
+
+TEST_CASE("RoundedRectUsesCubicCircularCorners") {
+  const Path path = Path::RoundedRect({10.0F, 20.0F, 80.0F, 60.0F}, CornerRadii::Top(16.0F));
+  const auto elements = detail::PathAccess::Elements(path);
+
+  REQUIRE(elements.size() == 10);
+  REQUIRE(elements[2].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[4].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[6].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[8].verb == detail::PathVerb::CubicTo);
+  REQUIRE(path.Bounds() == Rect{10.0F, 20.0F, 80.0F, 60.0F});
 }
 
 TEST_CASE("MovedFromPathRemainsAnEmptyReusableValue") {

@@ -101,7 +101,11 @@ void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
 }
 
 void ApplyCornerRadius(detail::ViewSpec& spec, const CornerRadius& modifier) {
-  spec.properties.corner_radius = modifier.value;
+  spec.properties.corner_radii = modifier.value;
+}
+
+void ApplyClipChildren(detail::ViewSpec& spec, const ClipChildren&) {
+  spec.properties.clip_children = true;
 }
 
 void ApplySpacing(detail::ViewSpec& spec, const Spacing& modifier) {
@@ -144,6 +148,21 @@ Color InterpolateColor(Color from, Color to, float progress) {
       from.blue + (to.blue - from.blue) * value,
       from.alpha + (to.alpha - from.alpha) * value,
   };
+}
+
+Rect CenteredRect(Rect outer, Size size) {
+  const float width = std::clamp(size.width, 0.0F, outer.width);
+  const float height = std::clamp(size.height, 0.0F, outer.height);
+  return {
+      outer.x + (outer.width - width) * 0.5F,
+      outer.y + (outer.height - height) * 0.5F,
+      width,
+      height,
+  };
+}
+
+bool UsesDisabledVisualState(const MountedNode& node) {
+  return static_cast<const detail::MountedNode&>(node).disabled_visual_state;
 }
 
 enum class ToggleVisualKind {
@@ -205,6 +224,63 @@ private:
   float value_ = 0.0F;
 };
 
+float CubicBezierCoordinate(float time, float first_control, float second_control) {
+  const float inverse = 1.0F - time;
+  return 3.0F * inverse * inverse * time * first_control + 3.0F * inverse * time * time * second_control +
+         time * time * time;
+}
+
+float CubicBezierProgress(float progress, float x1, float y1, float x2, float y2) {
+  const float target = std::clamp(progress, 0.0F, 1.0F);
+  if (target <= 0.0F || target >= 1.0F) {
+    return target;
+  }
+  float lower = 0.0F;
+  float upper = 1.0F;
+  for (int iteration = 0; iteration < 16; ++iteration) {
+    const float parameter = (lower + upper) * 0.5F;
+    if (CubicBezierCoordinate(parameter, x1, x2) < target) {
+      lower = parameter;
+    } else {
+      upper = parameter;
+    }
+  }
+  return CubicBezierCoordinate((lower + upper) * 0.5F, y1, y2);
+}
+
+float SegmentedProgressPosition(float phase, float delay, float duration) {
+  if (phase <= delay) {
+    return 0.0F;
+  }
+  if (phase >= delay + duration) {
+    return 1.0F;
+  }
+  return CubicBezierProgress((phase - delay) / duration, 0.3F, 0.0F, 0.8F, 0.15F);
+}
+
+constexpr float segmented_progress_cycle = 1750.0F;
+
+float PulsingArcProgress(float phase, float minimum, float maximum) {
+  if (phase < 0.5F) {
+    return minimum + (maximum - minimum) * phase * 2.0F;
+  }
+  const float eased = CubicBezierProgress((phase - 0.5F) * 2.0F, 0.2F, 0.0F, 0.0F, 1.0F);
+  return maximum + (minimum - maximum) * eased;
+}
+
+float PulsingArcRotation(float phase) {
+  constexpr float pi = 3.14159265358979323846F;
+  constexpr float stage_duration = 0.25F;
+  constexpr float rotation_duration = 0.05F;
+  const float stage = std::floor(phase / stage_duration);
+  const float stage_progress = phase - stage * stage_duration;
+  const float eased_rotation =
+      CubicBezierProgress(std::min(stage_progress / rotation_duration, 1.0F), 0.05F, 0.7F, 0.1F, 1.0F);
+  const float global_rotation = phase * pi * 6.0F;
+  const float additional_rotation = (stage + eased_rotation) * pi * 0.5F;
+  return global_rotation + additional_rotation;
+}
+
 struct ToggleVisual {
   static const detail::ModifierDescriptor& Descriptor();
 
@@ -261,6 +337,29 @@ public:
     };
   }
 
+  [[nodiscard]] bool PrepareGeometry(MountedNode& node) override {
+    auto& mounted = static_cast<detail::MountedNode&>(node);
+    std::optional<Rect> indication_frame;
+    if (kind_ == ToggleVisualKind::Switch) {
+      const Rect track = CenteredRect(node.Bounds(), {switch_style_.width, switch_style_.height});
+      const float state_layer_size =
+          std::min(std::max(0.0F, switch_style_.state_layer_size), std::min(node.Bounds().width, node.Bounds().height));
+      const float thumb_center_x =
+          track.x + track.height * 0.5F + std::max(0.0F, track.width - track.height) * progress_.Value();
+      indication_frame = Rect{
+          thumb_center_x - state_layer_size * 0.5F,
+          track.y + (track.height - state_layer_size) * 0.5F,
+          state_layer_size,
+          state_layer_size,
+      };
+    }
+    if (mounted.indication_frame == indication_frame) {
+      return false;
+    }
+    mounted.indication_frame = indication_frame;
+    return true;
+  }
+
   void Paint(const MountedNode& node, PaintContext& context) const override {
     if (kind_ == ToggleVisualKind::Checkbox) {
       PaintCheckbox(node, context);
@@ -271,43 +370,70 @@ public:
 
 private:
   void PaintCheckbox(const MountedNode& node, PaintContext& context) const {
-    const Rect frame = node.Bounds();
+    const Rect frame = CenteredRect(node.Bounds(), {checkbox_style_.size, checkbox_style_.size});
+    const bool disabled = UsesDisabledVisualState(node);
     if (checked_) {
-      context.DrawRect(frame, checkbox_style_.checked_background, std::max(0.0F, checkbox_style_.corner_radius));
+      const Color background =
+          disabled ? checkbox_style_.disabled_checked_background : checkbox_style_.checked_background;
+      const Color checkmark = disabled ? checkbox_style_.disabled_checkmark : checkbox_style_.checkmark;
+      context.DrawRect(frame, background, std::max(0.0F, checkbox_style_.corner_radius));
       context.DrawText(
           frame,
           "✓",
-          TextStyle{Font::System(std::max(0.1F, checkbox_style_.size * 0.72F)), checkbox_style_.checkmark},
+          TextStyle{Font::System(std::max(0.1F, checkbox_style_.size * 0.72F)), checkmark},
           TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
       );
       return;
     }
     context.DrawBorder(
         frame,
-        checkbox_style_.unchecked_border,
+        disabled ? checkbox_style_.disabled_unchecked_border : checkbox_style_.unchecked_border,
         std::max(0.0F, checkbox_style_.border_width),
         std::max(0.0F, checkbox_style_.corner_radius)
     );
   }
 
   void PaintSwitch(const MountedNode& node, PaintContext& context) const {
-    const Rect frame = node.Bounds();
+    const Rect frame = CenteredRect(node.Bounds(), {switch_style_.width, switch_style_.height});
     const float progress = progress_.Value();
-    const Color track = InterpolateColor(switch_style_.unchecked_track, switch_style_.checked_track, progress);
+    const bool disabled = UsesDisabledVisualState(node);
+    const Color track =
+        disabled
+            ? InterpolateColor(switch_style_.disabled_unchecked_track, switch_style_.disabled_checked_track, progress)
+            : InterpolateColor(switch_style_.unchecked_track, switch_style_.checked_track, progress);
+    const Color border =
+        disabled ? InterpolateColor(
+                       switch_style_.disabled_unchecked_track_border,
+                       switch_style_.disabled_checked_track_border,
+                       progress
+                   )
+                 : InterpolateColor(switch_style_.unchecked_track_border, switch_style_.checked_track_border, progress);
     context.DrawRect(frame, track, std::max(0.0F, switch_style_.corner_radius));
 
-    const float padding = std::max(0.0F, switch_style_.track_padding);
-    const float maximum_radius = std::max(0.0F, std::min(frame.height * 0.5F - padding, frame.width * 0.5F - padding));
-    const float radius = std::clamp(switch_style_.thumb_radius, 0.0F, maximum_radius);
-    const float start_x = frame.x + padding + radius;
-    const float travel = std::max(0.0F, frame.width - 2.0F * (padding + radius));
+    if (switch_style_.track_border_width > 0.0F && border.alpha > 0.0F) {
+      context.DrawBorder(frame, border, switch_style_.track_border_width, std::max(0.0F, switch_style_.corner_radius));
+    }
+
+    const float maximum_radius = std::max(0.0F, std::min(frame.width, frame.height) * 0.5F);
+    const float radius = std::clamp(
+        switch_style_.unchecked_thumb_radius +
+            (switch_style_.checked_thumb_radius - switch_style_.unchecked_thumb_radius) * progress,
+        0.0F,
+        maximum_radius
+    );
+    const float start_x = frame.x + frame.height * 0.5F;
+    const float travel = std::max(0.0F, frame.width - frame.height);
+    const Color thumb =
+        disabled
+            ? InterpolateColor(switch_style_.disabled_unchecked_thumb, switch_style_.disabled_checked_thumb, progress)
+            : InterpolateColor(switch_style_.unchecked_thumb, switch_style_.checked_thumb, progress);
     context.DrawCircle(
         {
             start_x + travel * progress,
             frame.y + frame.height * 0.5F,
         },
         radius,
-        switch_style_.thumb
+        thumb
     );
   }
 
@@ -378,17 +504,39 @@ public:
         frame.x + frame.width * 0.5F,
         frame.y + frame.height * 0.5F,
     };
-    if (style_.track_color.alpha > 0.0F) {
-      context.DrawArc(center, radius, -pi * 0.5F, full_circle, style_.track_color, stroke_width);
+    const float minimum_arc = std::clamp(style_.minimum_indeterminate_arc_fraction, 0.0F, 1.0F);
+    const float maximum_arc = std::clamp(style_.maximum_indeterminate_arc_fraction, minimum_arc, 1.0F);
+    const bool pulsing_arc = style_.indeterminate_motion == ProgressCircleIndeterminateMotion::PulsingArc;
+    const float indeterminate_progress =
+        pulsing_arc
+            ? PulsingArcProgress(phase_.Value(), minimum_arc, maximum_arc)
+            : minimum_arc + (maximum_arc - minimum_arc) * (1.0F - std::cos(phase_.Value() * full_circle)) * 0.5F;
+    const float progress = progress_.value_or(indeterminate_progress);
+    const Color track_color = progress_.has_value() ? style_.track_color : style_.indeterminate_track_color;
+    const bool separated_track = style_.track_gap > 0.0F;
+    if (!separated_track && track_color.alpha > 0.0F) {
+      context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color, stroke_width);
     }
 
-    const float progress = progress_.value_or(std::clamp(style_.indeterminate_arc_fraction, 0.0F, 1.0F));
     if (progress <= 0.0F) {
+      if (separated_track && track_color.alpha > 0.0F) {
+        context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color, stroke_width, StrokeCap::Round);
+      }
       return;
     }
-    const float start = -pi * 0.5F + (progress_.has_value() ? 0.0F : phase_.Value() * full_circle);
-    context
-        .DrawArc(center, radius, start, progress * full_circle, style_.indicator_color, stroke_width, StrokeCap::Round);
+    float start = -pi * 0.5F;
+    if (!progress_.has_value()) {
+      start = pulsing_arc ? PulsingArcRotation(phase_.Value()) : start + phase_.Value() * full_circle * 2.0F;
+    }
+    const float sweep = std::clamp(progress, 0.0F, 1.0F) * full_circle;
+    const float adjusted_gap = std::max(0.0F, style_.track_gap) + stroke_width;
+    const float gap_angle = std::min(sweep, adjusted_gap / radius);
+    const float track_sweep = std::max(0.0F, full_circle - sweep - gap_angle * 2.0F);
+    if (separated_track && track_color.alpha > 0.0F && track_sweep > 0.0F) {
+      context
+          .DrawArc(center, radius, start + sweep + gap_angle, track_sweep, track_color, stroke_width, StrokeCap::Round);
+    }
+    context.DrawArc(center, radius, start, sweep, style_.indicator_color, stroke_width, StrokeCap::Round);
   }
 
 private:
@@ -447,17 +595,14 @@ public:
     }
 
     const float track_radius = std::clamp(style_.corner_radius, 0.0F, frame.height * 0.5F);
-    if (style_.track_color.alpha > 0.0F) {
-      context.DrawRect(frame, style_.track_color, track_radius);
-    }
-
-    if (style_.indicator_color.alpha <= 0.0F) {
-      return;
-    }
-    const auto draw_indicator = [&](float x, float width) {
-      if (width <= 0.0F) {
+    const auto draw_segment = [&](float start, float end, Color color) {
+      start = std::clamp(start, 0.0F, 1.0F);
+      end = std::clamp(end, 0.0F, 1.0F);
+      if (end <= start || color.alpha <= 0.0F) {
         return;
       }
+      const float x = frame.x + frame.width * start;
+      const float width = frame.width * (end - start);
       context.DrawRect(
           {
               x,
@@ -465,25 +610,70 @@ public:
               width,
               frame.height,
           },
-          style_.indicator_color,
+          color,
           std::min(track_radius, width * 0.5F)
       );
     };
 
     if (progress_.has_value()) {
-      draw_indicator(frame.x, frame.width * *progress_);
+      const float progress = std::clamp(*progress_, 0.0F, 1.0F);
+      const bool separated_track = style_.track_gap > 0.0F || style_.stop_indicator_size > 0.0F;
+      if (separated_track) {
+        const float gap = std::max(0.0F, style_.track_gap) / frame.width;
+        draw_segment(progress + std::min(progress, gap), 1.0F, style_.track_color);
+      } else {
+        draw_segment(0.0F, 1.0F, style_.track_color);
+      }
+      draw_segment(0.0F, progress, style_.indicator_color);
+      const float stop_size = std::clamp(style_.stop_indicator_size, 0.0F, std::min(frame.width, frame.height));
+      if (stop_size > 0.0F && style_.indicator_color.alpha > 0.0F) {
+        context.DrawCircle(
+            {frame.x + frame.width - stop_size * 0.5F, frame.y + frame.height * 0.5F},
+            stop_size * 0.5F,
+            style_.indicator_color
+        );
+      }
       return;
     }
 
+    if (style_.indeterminate_motion == ProgressBarIndeterminateMotion::Segmented) {
+      const float phase = style_.animation_duration > 0.0 ? phase_.Value() : 0.5F;
+      // One normalized cycle keeps the four coupled timelines intact when a style changes the loop duration.
+      const float first_head = SegmentedProgressPosition(phase, 0.0F, 1000.0F / segmented_progress_cycle);
+      const float first_tail =
+          SegmentedProgressPosition(phase, 250.0F / segmented_progress_cycle, 1000.0F / segmented_progress_cycle);
+      const float second_head =
+          SegmentedProgressPosition(phase, 650.0F / segmented_progress_cycle, 850.0F / segmented_progress_cycle);
+      const float second_tail =
+          SegmentedProgressPosition(phase, 900.0F / segmented_progress_cycle, 850.0F / segmented_progress_cycle);
+      const float gap = std::max(0.0F, style_.track_gap) / frame.width;
+
+      draw_segment(first_head > 0.0F ? first_head + gap : 0.0F, 1.0F, style_.track_color);
+      draw_segment(second_head > 0.0F ? second_head + gap : 0.0F, first_tail - gap, style_.track_color);
+      draw_segment(0.0F, second_tail - gap, style_.track_color);
+      draw_segment(first_tail, first_head, style_.indicator_color);
+      draw_segment(second_tail, second_head, style_.indicator_color);
+      return;
+    }
+
+    draw_segment(0.0F, 1.0F, style_.track_color);
     const float indicator_width = frame.width * std::clamp(style_.indeterminate_fraction, 0.0F, 1.0F);
-    if (indicator_width <= 0.0F) {
+    if (indicator_width <= 0.0F || style_.indicator_color.alpha <= 0.0F) {
       return;
     }
     const float indicator_x = frame.x + frame.width * phase_.Value();
     context.PushClip(frame, track_radius);
-    draw_indicator(indicator_x, indicator_width);
+    context.DrawRect(
+        {indicator_x, frame.y, indicator_width, frame.height},
+        style_.indicator_color,
+        std::min(track_radius, indicator_width * 0.5F)
+    );
     if (indicator_x + indicator_width > frame.x + frame.width) {
-      draw_indicator(indicator_x - frame.width, indicator_width);
+      context.DrawRect(
+          {indicator_x - frame.width, frame.y, indicator_width, frame.height},
+          style_.indicator_color,
+          std::min(track_radius, indicator_width * 0.5F)
+      );
     }
     context.PopClip();
   }
@@ -517,12 +707,17 @@ public:
 
   void Update(MountedNode& node, const SliderVisual& modifier) {
     style_ = node.LayoutValueOr<ResolvedSliderStyle>(SliderStyle::Default());
+    if (!node.IsEnabled()) {
+      pointer_id_.reset();
+      hovered_ = false;
+      pressed_ = false;
+    }
     value_ = std::clamp(modifier.value, modifier.minimum, modifier.maximum);
     minimum_ = modifier.minimum;
     maximum_ = modifier.maximum;
     step_ = modifier.step;
     last_emitted_value_ = value_;
-    UpdateThumbSize();
+    UpdateThumbSize(node.IsEnabled());
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
@@ -554,7 +749,7 @@ public:
       return;
     }
     hovered_ = hovered;
-    UpdateThumbSize();
+    UpdateThumbSize(node.IsEnabled());
   }
 
   void OnFocusChanged(MountedNode& node, bool focused) override {
@@ -563,7 +758,7 @@ public:
       return;
     }
     focused_ = focused;
-    UpdateThumbSize();
+    UpdateThumbSize(node.IsEnabled());
   }
 
   void OnKey(MountedNode& node, const KeyEvent& event) override {
@@ -595,13 +790,13 @@ public:
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       pressed_ = false;
-      UpdateThumbSize();
+      UpdateThumbSize(false);
       return PointerResult::Ignored;
     }
     if (event.type == PointerEventType::Down) {
       pointer_id_ = event.pointer_id;
       pressed_ = true;
-      UpdateThumbSize();
+      UpdateThumbSize(true);
       EmitPointerValue(node, event.position.x);
       return PointerResult::Capture;
     }
@@ -618,7 +813,7 @@ public:
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
       pointer_id_.reset();
       pressed_ = false;
-      UpdateThumbSize();
+      UpdateThumbSize(true);
       return PointerResult::Handled;
     }
     return PointerResult::Ignored;
@@ -638,19 +833,26 @@ public:
     const float gap = style_.thumb_track_gap > 0.0F ? thumb_half_width + style_.thumb_track_gap : 0.0F;
     const float active_end = std::clamp(thumb_x - gap, track.x, track.x + track.width);
     const float inactive_start = std::clamp(thumb_x + gap, track.x, track.x + track.width);
+    const bool disabled = UsesDisabledVisualState(node);
+    const Color active_track = disabled ? style_.disabled_active_track : style_.active_track;
+    const Color inactive_track = disabled ? style_.disabled_inactive_track : style_.inactive_track;
+    const Color active_tick = disabled ? style_.disabled_active_tick : style_.active_tick;
+    const Color inactive_tick = disabled ? style_.disabled_inactive_tick : style_.inactive_tick;
+    const Color stop_indicator = disabled ? style_.disabled_stop_indicator : style_.stop_indicator;
+    const Color thumb = disabled ? style_.disabled_thumb : style_.thumb;
 
-    DrawTrackSegment(context, {track.x, track.y, active_end - track.x, track.height}, style_.active_track, true, false);
+    DrawTrackSegment(context, {track.x, track.y, active_end - track.x, track.height}, active_track, true, false);
     DrawTrackSegment(
         context,
         {inactive_start, track.y, track.x + track.width - inactive_start, track.height},
-        style_.inactive_track,
+        inactive_track,
         false,
         true
     );
-    DrawTicks(context, track, thumb_x, progress, gap);
-    DrawStopIndicator(context, track, thumb_x, gap);
+    DrawTicks(context, track, thumb_x, progress, gap, active_tick, inactive_tick);
+    DrawStopIndicator(context, track, thumb_x, gap, stop_indicator);
 
-    if (thumb_width > 0.0F && thumb_height > 0.0F && style_.thumb.alpha > 0.0F) {
+    if (thumb_width > 0.0F && thumb_height > 0.0F && thumb.alpha > 0.0F) {
       context.DrawRect(
           {
               thumb_x - thumb_half_width,
@@ -658,7 +860,7 @@ public:
               thumb_width,
               thumb_height,
           },
-          style_.thumb,
+          thumb,
           std::min(thumb_width, thumb_height) * 0.5F
       );
     }
@@ -695,7 +897,15 @@ private:
     context.FillPath(std::move(path), color);
   }
 
-  void DrawTicks(PaintContext& context, const Rect& track, float thumb_x, float progress, float gap) const {
+  void DrawTicks(
+      PaintContext& context,
+      const Rect& track,
+      float thumb_x,
+      float progress,
+      float gap,
+      Color active_color,
+      Color inactive_color
+  ) const {
     const float tick_size = std::max(0.0F, style_.tick_size);
     if (!step_.has_value() || tick_size <= 0.0F || track.width <= 0.0F || track.height <= 0.0F) {
       return;
@@ -714,16 +924,16 @@ private:
       if (std::abs(tick_x - thumb_x) <= gap + radius) {
         continue;
       }
-      const Color color = tick_progress < progress ? style_.active_tick : style_.inactive_tick;
+      const Color color = tick_progress < progress ? active_color : inactive_color;
       if (color.alpha > 0.0F) {
         context.DrawCircle({tick_x, center_y}, radius, color);
       }
     }
   }
 
-  void DrawStopIndicator(PaintContext& context, const Rect& track, float thumb_x, float gap) const {
+  void DrawStopIndicator(PaintContext& context, const Rect& track, float thumb_x, float gap, Color color) const {
     const float size = std::max(0.0F, style_.stop_indicator_size);
-    if (size <= 0.0F || track.width <= 0.0F || track.height <= 0.0F || style_.stop_indicator.alpha <= 0.0F) {
+    if (size <= 0.0F || track.width <= 0.0F || track.height <= 0.0F || color.alpha <= 0.0F) {
       return;
     }
     const float radius = size * 0.5F;
@@ -731,7 +941,7 @@ private:
     if (std::abs(stop_x - thumb_x) <= gap + radius) {
       return;
     }
-    context.DrawCircle({stop_x, track.y + track.height * 0.5F}, radius, style_.stop_indicator);
+    context.DrawCircle({stop_x, track.y + track.height * 0.5F}, radius, color);
   }
 
   [[nodiscard]] float Snap(float value) const {
@@ -772,13 +982,13 @@ private:
     detail::EmitEvent<SliderEvents::Changed>(static_cast<detail::MountedNode&>(node).event_bindings, snapped);
   }
 
-  void UpdateThumbSize() {
+  void UpdateThumbSize(bool enabled) {
     float target_width = style_.thumb_width;
     float target_height = style_.thumb_height;
-    if (pressed_ || focused_) {
+    if (enabled && (pressed_ || focused_)) {
       target_width = style_.pressed_thumb_width;
       target_height = style_.pressed_thumb_height;
-    } else if (hovered_) {
+    } else if (enabled && hovered_) {
       target_width = style_.hovered_thumb_width;
       target_height = style_.hovered_thumb_height;
     }
@@ -838,10 +1048,15 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::Button) {
     const ButtonStyle style =
         ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
+    spec.layout_values.insert_or_assign(typeid(detail::ResolvedButtonStyle), detail::MakeErasedLayoutValue(style));
     spec.properties.padding = style.padding;
     spec.properties.background = style.background;
     spec.properties.text_style = style.label_style;
-    spec.properties.corner_radius = style.corner_radius;
+    spec.properties.corner_radii = style.corner_radius;
+    spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
+    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec.properties.indication_override = style.indication;
+    spec.properties.disabled_opacity = 1.0F;
     return;
   }
   if (spec.kind == detail::NodeKind::TextField) {
@@ -852,26 +1067,38 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.padding = style.padding;
     spec.properties.background = style.background;
     spec.properties.text_style = style.text_style;
-    spec.properties.corner_radius = style.corner_radius;
+    spec.properties.corner_radii = style.corner_radius;
     spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec.properties.disabled_opacity = 1.0F;
     return;
   }
   if (spec.kind == detail::NodeKind::Checkbox) {
     const CheckboxStyle style =
         ResolveStyleOverride<CheckboxStyle>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.frame.width = std::max(0.0F, style.size);
-    spec.properties.frame.height = std::max(0.0F, style.size);
-    spec.properties.corner_radius = std::max(0.0F, style.corner_radius);
+    const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
+    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+    spec.properties.frame.width = interactive_size;
+    spec.properties.frame.height = interactive_size;
+    spec.properties.corner_radii = state_layer_size * 0.5F;
+    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
+    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    spec.properties.disabled_opacity = 1.0F;
     return;
   }
   if (spec.kind == detail::NodeKind::Switch) {
     const SwitchStyle style =
         ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
     spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.frame.width = std::max(0.0F, style.width);
-    spec.properties.frame.height = std::max(0.0F, style.height);
-    spec.properties.corner_radius = std::max(0.0F, style.corner_radius);
+    const float width = std::max(0.0F, style.width);
+    const float height = std::max(0.0F, std::max(style.height, style.minimum_interactive_height));
+    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), std::min(width, height));
+    spec.properties.frame.width = width;
+    spec.properties.frame.height = height;
+    spec.properties.corner_radii = state_layer_size * 0.5F;
+    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
+    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    spec.properties.disabled_opacity = 1.0F;
     return;
   }
   if (spec.kind == detail::NodeKind::ProgressCircle) {
@@ -896,7 +1123,11 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.layout_values.insert_or_assign(typeid(ResolvedSliderStyle), detail::MakeErasedLayoutValue(style));
     spec.properties.frame.width = std::max(0.0F, style.width);
     spec.properties.frame.height = std::max(0.0F, style.height);
-    spec.properties.corner_radius = std::max(0.0F, style.height * 0.5F);
+    spec.properties.corner_radii = std::max(0.0F, style.height * 0.5F);
+    if (style.focus_ring_width.has_value()) {
+      spec.properties.focus_ring_width = std::max(0.0F, *style.focus_ring_width);
+    }
+    spec.properties.disabled_opacity = 1.0F;
   }
 }
 
@@ -1026,6 +1257,10 @@ const detail::ModifierDescriptor& Frame::Descriptor() {
 
 const detail::ModifierDescriptor& CornerRadius::Descriptor() {
   return ApplyOnlyModifierDescriptor<CornerRadius, ApplyCornerRadius>();
+}
+
+const detail::ModifierDescriptor& ClipChildren::Descriptor() {
+  return ApplyOnlyModifierDescriptor<ClipChildren, ApplyClipChildren>();
 }
 
 const detail::ModifierDescriptor& Spacing::Descriptor() {

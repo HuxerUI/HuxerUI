@@ -81,6 +81,10 @@ It follows presentation transforms and group opacity without changing measuremen
 The blur radius is the outer falloff extent in logical units, while positive and negative spread expand and contract the shadow caster.
 The complete shadow overflow participates in visibility and damage calculation.
 
+`ClipChildren{}` explicitly clips descendant drawing and pointer hit testing to the View bounds, using its `CornerRadius` when present. Clipping is opt-in, so transformed or overflowing children remain visible and interactive by default. A ScrollView additionally retains its content-viewport clip when `ClipChildren{}` contributes a separate rounded container clip.
+
+`CornerRadius` accepts either one radius or `CornerRadii` for independent corners. For example, `CornerRadius{CornerRadii::Top(28.0F)}` rounds only the top edge of a bottom sheet. Uniform corners keep the renderer's native rounded-rectangle command, while asymmetric corners use the shared Path command path without changing layout semantics.
+
 Component-specific configuration remains on the component:
 
 ```cpp

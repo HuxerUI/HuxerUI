@@ -16,6 +16,7 @@ struct TestEnvironmentValue {
 
 std::vector<std::string> observed_environment_values;
 State<bool> alternate_theme;
+State<bool> alternate_disabled_button_style;
 Color observed_theme_color;
 Color observed_nested_theme_color;
 
@@ -74,6 +75,18 @@ const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std:
   }
   for (const auto& child : node.children) {
     if (const detail::MountedNode* found = FindMountedText(*child, text)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+const detail::MountedNode* FindMountedKind(const detail::MountedNode& node, detail::NodeKind kind) {
+  if (node.kind == kind) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (const detail::MountedNode* found = FindMountedKind(*child, kind)) {
       return found;
     }
   }
@@ -183,9 +196,9 @@ View TestThemeProvider(std::function<View()> content) {
   ThemeSpec spec;
   spec.colors.primary = alternate_theme ? Color::Rgb(220, 70, 50) : Color::Rgb(40, 100, 220);
   spec.colors.on_surface = Color::Rgb(30, 90, 55);
-  spec.typography.body = 18.0F;
-  spec.typography.label = 16.0F;
-  spec.typography.title = 25.0F;
+  spec.typography.body_medium = 18.0F;
+  spec.typography.label_large = 16.0F;
+  spec.typography.title_large = 25.0F;
   return Theme(ThemeDefinition{spec}, std::move(content));
 }
 
@@ -214,6 +227,18 @@ View FlatThemeInteractionApp() {
 
 View MaterialThemeApp() {
   return HUXERUI_THEME(huxerui::MaterialTheme, Button("material button").OnClick([] {}));
+}
+
+View MaterialToggleApp() {
+  return HUXERUI_THEME(huxerui::MaterialTheme, Row {Checkbox(false), Switch(false)});
+}
+
+View MaterialControlledSwitchApp() {
+  auto value = UseState(false);
+  switch_checked = value;
+  return HUXERUI_THEME(huxerui::MaterialTheme, Switch(value).OnChanged([value](bool checked) {
+    value = checked;
+  }));
 }
 
 View MaterialDarkThemeApp() {
@@ -267,6 +292,22 @@ View ReducedMotionProgressCircleApp() {
   return HUXERUI_THEME(ReducedMotionProgressTheme, ProgressCircle());
 }
 
+View MaterialDeterminateProgressCircleApp() {
+  return huxerui::MaterialTheme([] {
+    return Row {
+      ProgressCircle(0.25F),
+    };
+  });
+}
+
+View MaterialIndeterminateProgressCircleApp() {
+  return huxerui::MaterialTheme([] {
+    return Row {
+      ProgressCircle(),
+    };
+  });
+}
+
 View DeterminateProgressBarApp() {
   auto progress = UseState(0.25F);
   progress_bar_value = progress;
@@ -300,6 +341,24 @@ View ReducedMotionProgressBarApp() {
         ProgressBar(),
       }
   );
+}
+
+View MaterialDeterminateProgressBarApp() {
+  return HUXERUI_THEME(huxerui::MaterialTheme, ProgressBar(0.25F));
+}
+
+View MaterialIndeterminateProgressBarApp() {
+  return HUXERUI_THEME(huxerui::MaterialTheme, ProgressBar());
+}
+
+template <class Factory> View ReducedMotionMaterialTheme(Factory&& content) {
+  ThemeSpec spec = huxerui::MaterialLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  return Theme(huxerui::MaterialThemeDefinition(std::move(spec)), std::forward<Factory>(content));
+}
+
+View ReducedMotionMaterialProgressBarApp() {
+  return HUXERUI_THEME(ReducedMotionMaterialTheme, ProgressBar());
 }
 
 View AdjustableProgressBarApp() {
@@ -337,7 +396,10 @@ View MaterialSliderApp() {
 }
 
 View DisabledSliderApp() {
-  return Slider(0.5F).OnChanged([](float) { ++slider_changes; }).With(Enabled{false});
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Slider(0.5F).OnChanged([](float) { ++slider_changes; }).With(Enabled{false})
+  );
 }
 
 template <class Factory> View InteractionTestTheme(Factory&& content) {
@@ -359,6 +421,10 @@ template <class Factory> View FocusTestTheme(Factory&& content) {
   spec.interactions.focus_ring_width = 3.0F;
   spec.interactions.disabled_opacity = 0.3F;
   return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
+}
+
+View FlatSliderFocusApp() {
+  return FocusTestTheme([] { return Slider(0.5F); });
 }
 
 View FocusContent() {
@@ -398,6 +464,16 @@ View DisabledSubtreeApp() {
   return Column {
     Button("disabled child").With(Enabled{true}).OnClick([] { ++disabled_clicks; }),
   }.With(Enabled{false});
+}
+
+View DisabledButtonStyleUpdateApp() {
+  auto alternate = UseState(false);
+  alternate_disabled_button_style = alternate;
+  ButtonStyle style = ButtonStyle::Default();
+  style.disabled_background = alternate ? Color::Rgb(180, 40, 60) : Color::Rgb(30, 80, 170);
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme(std::move(definition), [] { return Button("disabled style").With(Enabled{false}); });
 }
 
 View FocusDialogApp() {
@@ -670,11 +746,11 @@ TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   const DrawTextCommand* body = FindText(scene, "dark body");
   REQUIRE(body != nullptr);
   REQUIRE(body->style.foreground.red == dark.colors.on_surface.red);
-  REQUIRE(body->style.font.Size() == dark.typography.body);
+  REQUIRE(body->style.font.Size() == dark.typography.body_medium);
 
   const DrawTextCommand* title = FindText(scene, "dark title");
   REQUIRE(title != nullptr);
-  REQUIRE(title->style.font.Size() == dark.typography.title);
+  REQUIRE(title->style.font.Size() == dark.typography.title_large);
 
   const DrawTextCommand* button = FindText(scene, "dark button");
   REQUIRE(button != nullptr);
@@ -708,6 +784,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
 
   const MenuStyle menu_style = ThemeDefinitionValue<MenuStyle>(definition);
   REQUIRE(menu_style.separator_mode == MenuSeparatorMode::BetweenItems);
+  REQUIRE(menu_style.content_padding == EdgeInsets{});
   REQUIRE_FALSE(menu_style.motion.has_value());
   REQUIRE(std::holds_alternative<StateOverlayIndication>(menu_style.item_indication));
 
@@ -749,8 +826,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const ThemeSpec dark = huxerui::MaterialDarkThemeSpec();
   REQUIRE(light.colors.primary.red == Color::Rgb(103, 80, 164).red);
   REQUIRE(dark.colors.primary.blue == Color::Rgb(208, 188, 255).blue);
-  REQUIRE(light.typography.title == 22.0F);
-  REQUIRE(light.shapes.large == 28.0F);
+  REQUIRE(light.typography.title_large == 22.0F);
+  REQUIRE(light.shapes.extra_large == 28.0F);
   REQUIRE(light.elevation.medium == 3.0F);
   REQUIRE(light.interactions.indication == huxerui::IndicationKind::Ripple);
 
@@ -758,27 +835,47 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const ButtonStyle button_style = ThemeDefinitionValue<ButtonStyle>(definition);
   REQUIRE(button_style.corner_radius == 20.0F);
   REQUIRE(button_style.padding.left == 24.0F);
-  REQUIRE(button_style.padding.top == 10.0F);
+  REQUIRE(button_style.padding.top == 8.0F);
+  REQUIRE(button_style.minimum_width == 58.0F);
+  REQUIRE(button_style.minimum_height == 40.0F);
+  REQUIRE(button_style.indication.has_value());
+  const auto* button_indication = std::get_if<RippleIndication>(&*button_style.indication);
+  REQUIRE(button_indication != nullptr);
+  REQUIRE(button_indication->color.red == light.colors.on_primary.red);
 
   const CheckboxStyle checkbox_style = ThemeDefinitionValue<CheckboxStyle>(definition);
-  REQUIRE(checkbox_style.size == 20.0F);
+  REQUIRE(checkbox_style.size == 18.0F);
+  REQUIRE(checkbox_style.minimum_interactive_size == 48.0F);
   REQUIRE(checkbox_style.corner_radius == 2.0F);
   REQUIRE(checkbox_style.checked_background.red == light.colors.primary.red);
 
   const SwitchStyle switch_style = ThemeDefinitionValue<SwitchStyle>(definition);
   REQUIRE(switch_style.width == 52.0F);
   REQUIRE(switch_style.height == 32.0F);
-  REQUIRE(switch_style.thumb_radius == 12.0F);
+  REQUIRE(switch_style.unchecked_thumb_radius == 8.0F);
+  REQUIRE(switch_style.checked_thumb_radius == 12.0F);
 
   const ProgressCircleStyle progress_circle_style = ThemeDefinitionValue<ProgressCircleStyle>(definition);
   REQUIRE(progress_circle_style.size == 40.0F);
   REQUIRE(progress_circle_style.stroke_width == 4.0F);
+  REQUIRE(progress_circle_style.track_color == light.colors.secondary_container);
+  REQUIRE(progress_circle_style.indeterminate_track_color == Color::Transparent());
   REQUIRE(progress_circle_style.indicator_color.red == light.colors.primary.red);
+  REQUIRE(progress_circle_style.track_gap == 4.0F);
+  REQUIRE(progress_circle_style.indeterminate_motion == huxerui::ProgressCircleIndeterminateMotion::PulsingArc);
+  REQUIRE(progress_circle_style.minimum_indeterminate_arc_fraction == 0.1F);
+  REQUIRE(progress_circle_style.maximum_indeterminate_arc_fraction == 0.87F);
+  REQUIRE(progress_circle_style.animation_duration == 6.0);
 
   const ProgressBarStyle progress_bar_style = ThemeDefinitionValue<ProgressBarStyle>(definition);
-  REQUIRE(progress_bar_style.width == 160.0F);
+  REQUIRE(progress_bar_style.width == 240.0F);
   REQUIRE(progress_bar_style.height == 4.0F);
+  REQUIRE(progress_bar_style.track_color == light.colors.secondary_container);
   REQUIRE(progress_bar_style.indicator_color.red == light.colors.primary.red);
+  REQUIRE(progress_bar_style.track_gap == 4.0F);
+  REQUIRE(progress_bar_style.stop_indicator_size == 4.0F);
+  REQUIRE(progress_bar_style.indeterminate_motion == huxerui::ProgressBarIndeterminateMotion::Segmented);
+  REQUIRE(progress_bar_style.animation_duration == 1.75);
 
   const SliderStyle slider_style = ThemeDefinitionValue<SliderStyle>(definition);
   REQUIRE(slider_style.width == 160.0F);
@@ -792,6 +889,10 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(slider_style.tick_size == 4.0F);
   REQUIRE(slider_style.active_track.red == light.colors.primary.red);
   REQUIRE(slider_style.inactive_track == light.colors.secondary_container);
+  REQUIRE(slider_style.disabled_active_track.alpha == 0.38F);
+  REQUIRE(slider_style.disabled_inactive_track.alpha == 0.12F);
+  REQUIRE(slider_style.disabled_thumb.alpha == 0.38F);
+  REQUIRE(slider_style.focus_ring_width == 0.0F);
 
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
@@ -799,7 +900,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const huxerui::DialogStyle dialog_style = ThemeDefinitionValue<huxerui::DialogStyle>(definition);
   REQUIRE(dialog_style.scrim.alpha == light.colors.scrim.alpha);
   REQUIRE(dialog_style.shadow.offset == Point{});
-  REQUIRE(dialog_style.shadow.blur_radius == light.elevation.high * 4.0F);
+  REQUIRE(dialog_style.shadow.blur_radius == light.elevation.medium * 4.0F);
+  REQUIRE(dialog_style.minimum_width == 280.0F);
   REQUIRE(dialog_style.shadow.spread == 0.0F);
   REQUIRE(dialog_style.motion.has_value());
   REQUIRE(dialog_style.motion->initial_scale == 0.94F);
@@ -811,10 +913,13 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(positive_indication->color.alpha < light.colors.primary.alpha);
 
   const huxerui::BottomSheetStyle bottom_sheet_style = ThemeDefinitionValue<huxerui::BottomSheetStyle>(definition);
-  REQUIRE(bottom_sheet_style.background.red == light.colors.surface.red);
+  REQUIRE(bottom_sheet_style.background.red == light.colors.surface_container_low.red);
 
   const huxerui::MenuStyle menu_style = ThemeDefinitionValue<huxerui::MenuStyle>(definition);
   REQUIRE(menu_style.separator_mode == huxerui::MenuSeparatorMode::None);
+  REQUIRE(menu_style.content_padding == EdgeInsets{});
+  REQUIRE(menu_style.minimum_width == 112.0F);
+  REQUIRE(menu_style.minimum_item_height == 48.0F);
   REQUIRE(menu_style.motion.has_value());
   REQUIRE(std::holds_alternative<RippleIndication>(menu_style.item_indication));
 
@@ -829,7 +934,10 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(brand_button_style.background.green == brand.colors.primary.green);
 
   const ThemeDefinition dark_definition = huxerui::MaterialDarkThemeDefinition();
-  REQUIRE(ThemeDefinitionValue<huxerui::DialogStyle>(dark_definition).background.red == dark.colors.surface.red);
+  REQUIRE(
+      ThemeDefinitionValue<huxerui::DialogStyle>(dark_definition).background.red ==
+      dark.colors.surface_container_high.red
+  );
 
   TestPlatform platform;
   Runtime runtime{MaterialThemeApp, platform};
@@ -838,7 +946,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const DrawTextCommand* button = FindText(initial, "material button");
   REQUIRE(button != nullptr);
   REQUIRE(button->style.foreground.red == light.colors.on_primary.red);
-  REQUIRE(button->style.font.Size() == light.typography.label);
+  REQUIRE(button->style.font.Size() == light.typography.label_large);
   const DrawRectCommand* background = FindRect(initial, button->rect);
   REQUIRE(background != nullptr);
   REQUIRE(background->color.red == light.colors.primary.red);
@@ -856,7 +964,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.fast);
   const FlattenedScene& hovered = runtime.BuildFrame();
-  REQUIRE(FindRectWithColor(hovered, light.interactions.hover_overlay) != nullptr);
+  REQUIRE(FindRectWithColor(hovered, button_indication->hover_color) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
@@ -882,7 +990,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(ripple_clip != nullptr);
   REQUIRE(ripple_clip->corner_radius == 20.0F);
   REQUIRE(ripple->radius > 0.0F);
-  REQUIRE(ripple->color.alpha == light.interactions.ripple.alpha);
+  REQUIRE(ripple->color == button_indication->color);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Up,
@@ -928,6 +1036,43 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const DrawRectCommand* dark_background = FindRect(dark_display, dark_button->rect);
   REQUIRE(dark_background != nullptr);
   REQUIRE(dark_background->color.red == dark.colors.primary.red);
+
+  Runtime toggle_runtime{MaterialToggleApp, platform};
+  toggle_runtime.SetViewport({160.0F, 64.0F});
+  toggle_runtime.BuildFrame();
+  const detail::MountedNode* toggle_root = toggle_runtime.RootNode();
+  REQUIRE(toggle_root != nullptr);
+  const detail::MountedNode* material_checkbox = FindMountedKind(*toggle_root, detail::NodeKind::Checkbox);
+  const detail::MountedNode* material_switch = FindMountedKind(*toggle_root, detail::NodeKind::Switch);
+  REQUIRE(material_checkbox != nullptr);
+  REQUIRE(material_switch != nullptr);
+  REQUIRE(material_checkbox->measured_size == Size{48.0F, 48.0F});
+  REQUIRE(material_switch->measured_size == Size{52.0F, 48.0F});
+}
+
+TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
+  TestPlatform platform;
+  Runtime runtime{MaterialControlledSwitchApp, platform};
+  runtime.SetViewport({80.0F, 64.0F});
+  runtime.BuildFrame();
+
+  const auto* switch_node = FindMountedKind(*runtime.RootNode(), detail::NodeKind::Switch);
+  REQUIRE(switch_node != nullptr);
+  REQUIRE(switch_node->indication_frame.has_value());
+  const float initial_center = switch_node->indication_frame->x + switch_node->indication_frame->width * 0.5F;
+
+  const Rect bounds = switch_node->PresentationBounds();
+  ClickAt(runtime, {bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F}, 120);
+  runtime.BuildFrame();
+  platform.AdvanceTime(ThemeDefinitionValue<SwitchStyle>(MaterialThemeDefinition()).animation_duration * 0.5);
+  runtime.BuildFrame();
+
+  switch_node = FindMountedKind(*runtime.RootNode(), detail::NodeKind::Switch);
+  REQUIRE(switch_node != nullptr);
+  REQUIRE(switch_node->indication_frame.has_value());
+  const float animated_center = switch_node->indication_frame->x + switch_node->indication_frame->width * 0.5F;
+  REQUIRE(animated_center > initial_center);
+  REQUIRE(animated_center < initial_center + 20.0F);
 }
 
 TEST_CASE("TestControlledTogglesAndAnimation") {
@@ -1124,6 +1269,49 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
 }
 
+TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
+  constexpr float pi = 3.14159265358979323846F;
+  const auto arcs = [](const FlattenedScene& scene) {
+    std::vector<DrawArcCommand> result;
+    for (const PaintCommand& command : scene.Commands()) {
+      if (const auto* arc = std::get_if<DrawArcCommand>(&command)) {
+        result.push_back(*arc);
+      }
+    }
+    return result;
+  };
+  const ProgressCircleStyle style = ThemeDefinitionValue<ProgressCircleStyle>(MaterialThemeDefinition());
+
+  TestPlatform determinate_platform;
+  Runtime determinate{MaterialDeterminateProgressCircleApp, determinate_platform};
+  determinate.SetViewport({64.0F, 64.0F});
+  const auto determinate_arcs = arcs(determinate.BuildFrame());
+  REQUIRE(determinate_arcs.size() == 2);
+  const DrawArcCommand& track = determinate_arcs[0];
+  const DrawArcCommand& indicator = determinate_arcs[1];
+  const float expected_gap_angle =
+      (style.track_gap + style.stroke_width) / (style.size * 0.5F - style.stroke_width * 0.5F);
+  REQUIRE(track.color == style.track_color);
+  REQUIRE(track.cap == StrokeCap::Round);
+  REQUIRE(indicator.cap == StrokeCap::Round);
+  REQUIRE(std::abs(track.start_angle - (indicator.start_angle + indicator.sweep_angle + expected_gap_angle)) < 0.001F);
+  REQUIRE(std::abs(track.sweep_angle - (pi * 2.0F - indicator.sweep_angle - expected_gap_angle * 2.0F)) < 0.001F);
+
+  TestPlatform animated_platform;
+  Runtime animated{MaterialIndeterminateProgressCircleApp, animated_platform};
+  animated.SetViewport({64.0F, 64.0F});
+  const auto initial = arcs(animated.BuildFrame());
+  REQUIRE(initial.size() == 1);
+  REQUIRE(initial[0].color == style.indicator_color);
+  REQUIRE(std::abs(initial[0].sweep_angle - pi * 2.0F * style.minimum_indeterminate_arc_fraction) < 0.001F);
+
+  animated_platform.AdvanceTime(style.animation_duration * 0.1);
+  const auto advanced = arcs(animated.BuildFrame());
+  REQUIRE(advanced.size() == 1);
+  REQUIRE(advanced[0].sweep_angle > initial[0].sweep_angle);
+  REQUIRE(std::abs(advanced[0].start_angle - initial[0].start_angle) > 0.1F);
+}
+
 TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   const ProgressBarStyle style = ProgressBarStyle::Default();
   const float indeterminate_width = style.width * style.indeterminate_fraction;
@@ -1236,6 +1424,66 @@ TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
   const auto faster = DrawRectangles(runtime.BuildFrame());
   REQUIRE(faster.size() == 2);
   REQUIRE(std::abs(faster[1].rect.x - style.width * 0.35F) < 0.001F);
+}
+
+TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
+  const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
+  const ProgressBarStyle style = ThemeDefinitionValue<ProgressBarStyle>(definition);
+
+  TestPlatform determinate_platform;
+  Runtime determinate{MaterialDeterminateProgressBarApp, determinate_platform};
+  determinate.SetViewport({280.0F, 20.0F});
+  const FlattenedScene& determinate_scene = determinate.BuildFrame();
+  const detail::MountedNode* progress_node = FindMountedKind(*determinate.RootNode(), detail::NodeKind::ProgressBar);
+  REQUIRE(progress_node != nullptr);
+  const float bar_width = progress_node->Bounds().width;
+  const DrawRectCommand* track = nullptr;
+  const DrawRectCommand* indicator = nullptr;
+  const DrawCircleCommand* stop = nullptr;
+  for (const PaintCommand& command : determinate_scene.Commands()) {
+    if (const auto* rectangle = std::get_if<DrawRectCommand>(&command)) {
+      if (rectangle->color == style.track_color) {
+        track = rectangle;
+      } else if (rectangle->color == style.indicator_color) {
+        indicator = rectangle;
+      }
+    } else if (const auto* circle = std::get_if<DrawCircleCommand>(&command)) {
+      if (circle->color == style.indicator_color && circle->radius == style.stop_indicator_size * 0.5F) {
+        stop = circle;
+      }
+    }
+  }
+  REQUIRE(track != nullptr);
+  REQUIRE(indicator != nullptr);
+  REQUIRE(stop != nullptr);
+  REQUIRE(std::abs(indicator->rect.width - bar_width * 0.25F) < 0.001F);
+  REQUIRE(std::abs(track->rect.x - (bar_width * 0.25F + style.track_gap)) < 0.001F);
+  REQUIRE(std::abs(track->rect.width - (bar_width * 0.75F - style.track_gap)) < 0.001F);
+  REQUIRE(std::abs(stop->center.x - (bar_width - style.stop_indicator_size * 0.5F)) < 0.001F);
+
+  TestPlatform animated_platform;
+  Runtime animated{MaterialIndeterminateProgressBarApp, animated_platform};
+  animated.SetViewport({280.0F, 20.0F});
+  animated.BuildFrame();
+  animated_platform.AdvanceTime(style.animation_duration * 0.6);
+  const FlattenedScene& animated_scene = animated.BuildFrame();
+  const auto indicator_segments = std::ranges::count_if(animated_scene.Commands(), [&](const PaintCommand& command) {
+    const auto* rectangle = std::get_if<DrawRectCommand>(&command);
+    return rectangle != nullptr && rectangle->color == style.indicator_color;
+  });
+  REQUIRE(indicator_segments == 2);
+
+  TestPlatform reduced_platform;
+  Runtime reduced{ReducedMotionMaterialProgressBarApp, reduced_platform};
+  reduced.SetViewport({280.0F, 20.0F});
+  const int requests_before = reduced_platform.requested_frames;
+  const FlattenedScene& reduced_scene = reduced.BuildFrame();
+  REQUIRE(std::ranges::count_if(reduced_scene.Commands(), [&](const PaintCommand& command) {
+            const auto* rectangle = std::get_if<DrawRectCommand>(&command);
+            return rectangle != nullptr && rectangle->color == style.indicator_color;
+          }) == 2);
+  REQUIRE(reduced_platform.requested_frames == requests_before);
+  REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
 }
 
 TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
@@ -1395,6 +1643,21 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   REQUIRE(thumb->corner_radius == style.thumb_width * 0.5F);
   REQUIRE(drew_inactive_track);
   REQUIRE(indicators >= 3);
+
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.BuildFrame();
+  platform.AdvanceTime(style.animation_duration);
+  const FlattenedScene& focused = runtime.BuildFrame();
+  const bool drew_node_focus_ring = std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<DrawBorderCommand>(command);
+  });
+  const bool drew_focused_handle = std::ranges::any_of(focused.Commands(), [&](const PaintCommand& command) {
+    const auto* rectangle = std::get_if<DrawRectCommand>(&command);
+    return rectangle != nullptr && rectangle->color == style.thumb &&
+           rectangle->rect.width == style.pressed_thumb_width;
+  });
+  REQUIRE_FALSE(drew_node_focus_ring);
+  REQUIRE(drew_focused_handle);
 }
 
 TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
@@ -1402,9 +1665,9 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
   TestPlatform platform;
   Runtime runtime{DisabledSliderApp, platform};
   runtime.SetViewport({200.0F, 64.0F});
-  runtime.BuildFrame();
+  const FlattenedScene& scene = runtime.BuildFrame();
 
-  const auto* slider = runtime.RootNode();
+  const auto* slider = FindMountedKind(*runtime.RootNode(), huxerui::detail::NodeKind::Slider);
   REQUIRE(slider != nullptr);
   REQUIRE(slider->kind == huxerui::detail::NodeKind::Slider);
   REQUIRE_FALSE(slider->enabled);
@@ -1416,6 +1679,37 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
       .device_kind = PointerDeviceKind::Mouse,
   });
   REQUIRE(slider_changes == 0);
+
+  const SliderStyle style = ThemeDefinitionValue<SliderStyle>(huxerui::MaterialThemeDefinition());
+  bool drew_disabled_active_track = false;
+  bool drew_disabled_inactive_track = false;
+  bool drew_disabled_thumb = false;
+  for (const PaintCommand& command : scene.Commands()) {
+    if (const auto* fill = std::get_if<FillPathCommand>(&command)) {
+      drew_disabled_active_track |= fill->color == style.disabled_active_track;
+      drew_disabled_inactive_track |= fill->color == style.disabled_inactive_track;
+    } else if (const auto* rectangle = std::get_if<DrawRectCommand>(&command)) {
+      drew_disabled_thumb |= rectangle->color == style.disabled_thumb;
+    }
+  }
+  REQUIRE(drew_disabled_active_track);
+  REQUIRE(drew_disabled_inactive_track);
+  REQUIRE(drew_disabled_thumb);
+}
+
+TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
+  TestPlatform platform;
+  Runtime runtime{FlatSliderFocusApp, platform};
+  runtime.SetViewport({200.0F, 64.0F});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  const FlattenedScene& focused = runtime.BuildFrame();
+
+  const bool drew_focus_ring = std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->width == 3.0F;
+  });
+  REQUIRE(drew_focus_ring);
 }
 
 TEST_CASE("TestSliderRejectsInvalidConfiguration") {
@@ -1495,13 +1789,13 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   const FlattenedScene& scene = overlay.BuildFrame();
   const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
   REQUIRE(disabled != nullptr);
-  REQUIRE(disabled->style.foreground.alpha == 1.0F);
+  REQUIRE(std::abs(disabled->style.foreground.alpha - 0.42F) < 0.001F);
 
   const auto* overlay_root = overlay.RootNode();
   REQUIRE(overlay_root != nullptr);
   REQUIRE(overlay_root->children.size() == 2);
   REQUIRE(!overlay_root->children[1]->IsEnabled());
-  REQUIRE(std::abs(overlay_root->children[1]->render_node.opacity - 0.42F) < 0.001F);
+  REQUIRE(overlay_root->children[1]->render_node.opacity == 1.0F);
   ClickAt(
       overlay,
       {
@@ -1519,10 +1813,15 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   const auto* subtree_root = subtree.RootNode();
   REQUIRE(subtree_root != nullptr);
   REQUIRE(!subtree_root->IsEnabled());
+  REQUIRE(subtree_root->disabled_visual_state);
+  REQUIRE(subtree_root->render_node.opacity == Catch::Approx(0.42F));
   REQUIRE(subtree_root->children.size() == 1);
   REQUIRE(!subtree_root->children[0]->IsEnabled());
+  REQUIRE_FALSE(subtree_root->children[0]->disabled_visual_state);
+  REQUIRE(subtree_root->children[0]->render_node.opacity == 1.0F);
   const DrawTextCommand* child = FindText(subtree_display, "disabled child");
   REQUIRE(child != nullptr);
+  REQUIRE(child->style.foreground.alpha == 1.0F);
   ClickAt(
       subtree,
       {
@@ -1532,6 +1831,21 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
       103
   );
   REQUIRE(disabled_clicks == 0);
+}
+
+TEST_CASE("TestDisabledButtonStyleChangeInvalidatesContentPaint") {
+  TestPlatform platform;
+  Runtime runtime{DisabledButtonStyleUpdateApp, platform};
+  runtime.SetViewport({180.0F, 64.0F});
+
+  const Color initial = Color::Rgb(30, 80, 170);
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), initial) != nullptr);
+
+  alternate_disabled_button_style = true;
+  const Color updated = Color::Rgb(180, 40, 60);
+  const FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(scene, initial) == nullptr);
+  REQUIRE(FindRectWithColor(scene, updated) != nullptr);
 }
 
 TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
@@ -1573,10 +1887,10 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   REQUIRE(focus_changes.back() == "first:off");
   const DrawTextCommand* first_text = FindText(disabled_first, "first");
   REQUIRE(first_text != nullptr);
-  REQUIRE(first_text->style.foreground.alpha == 1.0F);
+  REQUIRE(std::abs(first_text->style.foreground.alpha - 0.3F) < 0.001F);
   const detail::MountedNode* first_node = FindMountedText(*runtime.RootNode(), "first");
   REQUIRE(first_node != nullptr);
-  REQUIRE(std::abs(first_node->render_node.opacity - 0.3F) < 0.001F);
+  REQUIRE(first_node->render_node.opacity == 1.0F);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
@@ -2185,10 +2499,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   REQUIRE(toast_text != nullptr);
   REQUIRE(toast_text->style.foreground.red == dark.colors.surface.red);
 
-  saved_dialogs->Show(
-      [] { return Text("dark dialog"); },
-      huxerui::DialogOptions{.dismiss_on_outside_press = false}
-  );
+  saved_dialogs->Show([] { return Text("dark dialog"); }, huxerui::DialogOptions{.dismiss_on_outside_press = false});
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   const FlattenedScene& dialog = runtime.BuildFrame();

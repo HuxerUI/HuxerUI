@@ -213,7 +213,7 @@ public:
     return bounds_;
   }
 
-  void DrawRect(Rect rect, Color color, float corner_radius = 0.0F);
+  void DrawRect(Rect rect, Color color, CornerRadii corner_radii = {});
   void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
   void
   DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});
@@ -241,10 +241,11 @@ public:
       float width,
       StrokeCap cap = StrokeCap::Butt
   );
-  void DrawBorder(Rect rect, Color color, float width, float corner_radius = 0.0F);
+  void DrawBorder(Rect rect, Color color, float width, CornerRadii corner_radii = {});
   // blur_radius is the outer falloff extent around the spread shadow shape; spread may contract the caster.
-  void
-  DrawShadow(Rect rect, Color color, Point offset, float blur_radius, float spread = 0.0F, float corner_radius = 0.0F);
+  void DrawShadow(
+      Rect rect, Color color, Point offset, float blur_radius, float spread = 0.0F, CornerRadii corner_radii = {}
+  );
   void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
   void StrokePath(
       Path path,
@@ -257,7 +258,7 @@ public:
   void DrawPathShadow(
       Path path, Color color, Point offset, float blur_radius, PathFillRule fill_rule = PathFillRule::NonZero
   );
-  void PushClip(Rect rect, float corner_radius = 0.0F);
+  void PushClip(Rect rect, CornerRadii corner_radii = {});
   void PushPathClip(Path path, PathFillRule fill_rule = PathFillRule::NonZero);
   void PopClip();
   void PushTransform(Transform2D transform);

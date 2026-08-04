@@ -640,6 +640,12 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   REQUIRE(natural_surface->width >= MenuStyle::Default().minimum_width);
   REQUIRE(natural_surface->width < 300.0F);
 
+  const auto menu_clip = std::ranges::find_if(natural.Commands(), [](const PaintCommand& command) {
+    const auto* clip = std::get_if<PushClipCommand>(&command);
+    return clip && clip->corner_radius == MenuStyle::Default().corner_radius;
+  });
+  REQUIRE(menu_clip != natural.Commands().end());
+
   const std::optional<Rect> icon_label = FindPresentedTextRect(natural, "With icon");
   const std::optional<Rect> plain_label = FindPresentedTextRect(natural, "No icon");
   REQUIRE(icon_label.has_value());
@@ -698,7 +704,7 @@ TEST_CASE("TestBottomSheetPlacementContextAndBackDismissal") {
   REQUIRE(layer_bottom_sheet_context.has_value());
   REQUIRE(layer_bottom_sheet_context->Id() == sheet);
   REQUIRE(ContainsText(shown, "bottom sheet"));
-  const Rect expected_bounds{0.0F, 90.0F, 80.0F, 30.0F};
+  const Rect expected_bounds{0.0F, 90.0F, 200.0F, 30.0F};
   const std::optional<Rect> sheet_bounds = FindPresentedRectWithColor(shown, sheet_color);
   REQUIRE(sheet_bounds.has_value());
   CAPTURE(sheet_bounds->x, sheet_bounds->y, sheet_bounds->width, sheet_bounds->height);
@@ -727,6 +733,31 @@ TEST_CASE("TestBottomSheetFillsCompactViewportsAndHonorsItsDesktopWidthLimit") {
   REQUIRE(surface.has_value());
   REQUIRE(surface->width == Catch::Approx(320.0F));
   REQUIRE(surface->x == Catch::Approx(240.0F));
+}
+
+TEST_CASE("TestMaterialBottomSheetPlacesItsDragHandleWithVerticalPadding") {
+  layer_bottom_sheet.reset();
+  TestPlatform platform;
+  Runtime runtime{MaterialLayerApp, platform};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+
+  constexpr Color content_color = Color::Rgb(16, 96, 176);
+  layer_bottom_sheet->Show([] { return Spacer().With(Frame{.height = 40.0F}, Background{content_color}); });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const BottomSheetStyle style = ThemeDefinitionValue<BottomSheetStyle>(MaterialThemeDefinition());
+  const std::optional<Rect> surface = FindPresentedRectWithColor(scene, style.background);
+  const std::optional<Rect> handle = FindPresentedRectWithColor(scene, style.drag_handle, style.drag_handle_size);
+  const std::optional<Rect> content = FindPresentedRectWithColor(scene, content_color);
+  REQUIRE(surface.has_value());
+  REQUIRE(handle.has_value());
+  REQUIRE(content.has_value());
+  REQUIRE(handle->width == style.drag_handle_size.width);
+  REQUIRE(handle->height == style.drag_handle_size.height);
+  REQUIRE(handle->y - surface->y == style.drag_handle_padding.top);
+  REQUIRE(content->y - (handle->y + handle->height) == style.drag_handle_padding.bottom);
 }
 
 TEST_CASE("TestCapturedReducedMotionSettlesBothLayerAndPresentationMotionImmediately") {

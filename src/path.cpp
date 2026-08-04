@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "geometry_internal.h"
 #include "path_internal.h"
 
 namespace huxerui {
@@ -196,6 +197,58 @@ Path& Path::Close() {
 
 void Path::Reset() {
   data_ = std::make_shared<Data>();
+}
+
+Path Path::RoundedRect(Rect rect, CornerRadii corner_radii) {
+  if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) || !std::isfinite(rect.height) ||
+      rect.width < 0.0F || rect.height < 0.0F) {
+    throw std::invalid_argument("HuxerUI rounded rectangle must be finite with non-negative dimensions");
+  }
+  const float radii[] = {
+      corner_radii.top_left,
+      corner_radii.top_right,
+      corner_radii.bottom_right,
+      corner_radii.bottom_left,
+  };
+  for (const float radius : radii) {
+    if (!std::isfinite(radius) || radius < 0.0F) {
+      throw std::invalid_argument("HuxerUI corner radii must be finite and non-negative");
+    }
+  }
+
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
+
+  const float right = rect.x + rect.width;
+  const float bottom = rect.y + rect.height;
+  constexpr float cubic_circle = 0.5522847498F;
+  Path path;
+  path.MoveTo({rect.x + corner_radii.top_left, rect.y})
+      .LineTo({right - corner_radii.top_right, rect.y})
+      .CubicTo(
+          {right - corner_radii.top_right * (1.0F - cubic_circle), rect.y},
+          {right, rect.y + corner_radii.top_right * (1.0F - cubic_circle)},
+          {right, rect.y + corner_radii.top_right}
+      )
+      .LineTo({right, bottom - corner_radii.bottom_right})
+      .CubicTo(
+          {right, bottom - corner_radii.bottom_right * (1.0F - cubic_circle)},
+          {right - corner_radii.bottom_right * (1.0F - cubic_circle), bottom},
+          {right - corner_radii.bottom_right, bottom}
+      )
+      .LineTo({rect.x + corner_radii.bottom_left, bottom})
+      .CubicTo(
+          {rect.x + corner_radii.bottom_left * (1.0F - cubic_circle), bottom},
+          {rect.x, bottom - corner_radii.bottom_left * (1.0F - cubic_circle)},
+          {rect.x, bottom - corner_radii.bottom_left}
+      )
+      .LineTo({rect.x, rect.y + corner_radii.top_left})
+      .CubicTo(
+          {rect.x, rect.y + corner_radii.top_left * (1.0F - cubic_circle)},
+          {rect.x + corner_radii.top_left * (1.0F - cubic_circle), rect.y},
+          {rect.x + corner_radii.top_left, rect.y}
+      )
+      .Close();
+  return path;
 }
 
 bool Path::IsEmpty() const noexcept {

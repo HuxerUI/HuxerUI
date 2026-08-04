@@ -146,13 +146,17 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
     return false;
   }
   const auto local_position = node.presentation.resolved_transform.Inverse(position);
-  if (!local_position.has_value() || !node.bounds.Contains(*local_position)) {
+  if (!local_position.has_value()) {
     return false;
   }
 
   route.push_back(&node);
+  const bool within_node = node.bounds.Contains(*local_position);
   const Rect content = node.ContentBounds();
-  const bool can_hit_children = !IsScrollContainer(node) || content.Contains(*local_position);
+  const bool within_scroll_viewport = !IsScrollContainer(node) || content.Contains(*local_position);
+  const bool within_child_clip =
+      !node.properties.clip_children || RoundedRectContains(node.bounds, node.properties.corner_radii, *local_position);
+  const bool can_hit_children = within_scroll_viewport && within_child_clip;
   if (can_hit_children) {
     for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
       if (BuildPointerRouteImpl(**child, position, route)) {
@@ -161,7 +165,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
     }
   }
 
-  if (HandlesPointer(node) || IsScrollContainer(node) || node.focusable) {
+  if (within_node && (HandlesPointer(node) || IsScrollContainer(node) || node.focusable)) {
     return true;
   }
   route.pop_back();

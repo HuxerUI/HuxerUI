@@ -789,11 +789,17 @@ struct TextFieldStyle {
   Color background;
   TextStyle text_style;
   TextStyle placeholder_style;
+  Color disabled_text;
+  Color disabled_placeholder;
+  Color disabled_supporting_text;
   Color selection;
   Color caret;
+  Color error_caret;
   Color composition;
   Color border;
+  Color hovered_border;
   Color focused_border;
+  Color disabled_border;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 0.0F;
@@ -801,7 +807,8 @@ struct TextFieldStyle {
   float minimum_height = 0.0F;
   double caret_blink_interval = 0.5;
   Color validation_error;
-  float validation_border_width = 2.0F;
+  float validation_border_width = 1.0F;
+  float focused_validation_border_width = 2.0F;
   TextStyle validation_text_style;
   float validation_spacing = 4.0F;
 
@@ -809,7 +816,7 @@ struct TextFieldStyle {
 };
 ```
 
-Flat and Material Theme definitions provide their own TextField styles. TextField draws its focused and validation borders from `TextFieldStyle`, so the common node focus ring does not surround supporting text. TextField does not attach the generic hover and pressed indication used by activation controls. A future field-specific hover treatment belongs to TextField style and must remain inside the editor frame. Disabled opacity continues to use the common interaction infrastructure.
+Flat and Material Theme definitions provide their own TextField styles. TextField draws its hover, focus, validation, and disabled states from `TextFieldStyle`, so the common node indication and focus ring do not surround supporting text. Hover changes only the editor outline, and disabled colors are resolved per element instead of reducing the opacity of the complete field subtree.
 
 `TextFieldStyle` belongs in `theme.h` with the existing built-in component styles. Its type is also its Theme override identity.
 

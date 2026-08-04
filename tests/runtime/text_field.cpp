@@ -165,6 +165,23 @@ View MaterialSecureInvalidTextFieldApp() {
   });
 }
 
+View MaterialEmptyTextFieldApp() {
+  return MaterialTheme([] {
+    return TextField(TextEditingValue::FromText(""))
+        .Placeholder("Material placeholder")
+        .With(huxerui::Frame{.width = 160.0F});
+  });
+}
+
+View MaterialDisabledTextFieldApp() {
+  return MaterialTheme([] {
+    return TextField(TextEditingValue::FromText(""))
+        .Placeholder("Disabled placeholder")
+        .Validation(ValidationResult::Pending("Disabled supporting"))
+        .With(huxerui::Frame{.width = 160.0F}, Enabled{false});
+  });
+}
+
 View ValidTextFieldApp() {
   return Stack {
     TextField(TextEditingValue::FromText(""))
@@ -447,6 +464,28 @@ const RenderNode* FindRenderNodeById(const RenderNode& node, std::uint64_t id) {
   return nullptr;
 }
 
+View MaterialDisabledSelectedTextFieldApp() {
+  TextEditingValue value = TextEditingValue::FromText("Selected text");
+  value.selection = {0, 8};
+  return MaterialTheme([value = std::move(value)] {
+    return TextField(value).With(huxerui::Frame{.width = 160.0F}, Enabled{false});
+  });
+}
+
+const detail::MountedNode* FindMountedNodeKind(const detail::MountedNode& node, detail::NodeKind kind) {
+  if (node.kind == kind) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      if (const detail::MountedNode* found = FindMountedNodeKind(*child, kind)) {
+        return found;
+      }
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
@@ -472,6 +511,11 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   const ThemeDefinition material = huxerui::MaterialThemeDefinition();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(material);
   REQUIRE(style.minimum_height == 56.0F);
+  REQUIRE(style.padding == EdgeInsets::All(16.0F));
+  REQUIRE(style.selection.alpha == 0.4F);
+  REQUIRE(style.border_width == 1.0F);
+  REQUIRE(style.validation_border_width == 1.0F);
+  REQUIRE(style.focused_validation_border_width == 2.0F);
   REQUIRE(style.focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
 }
 
@@ -562,8 +606,59 @@ TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessag
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const TextFieldStyle style = TextFieldStyle::Default();
-  REQUIRE(FindBorderWithColor(scene, style.validation_error) != nullptr);
+  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->width == style.focused_validation_border_width);
   REQUIRE(FindBorderWithColor(scene, style.focused_border) == nullptr);
+}
+
+TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
+  TestPlatform hover_platform;
+  Runtime hovered{MaterialEmptyTextFieldApp, hover_platform};
+  hovered.SetViewport({200.0F, 100.0F});
+  hovered.BuildFrame();
+  hovered.HandlePointerEvent({
+      PointerEventType::Move,
+      702,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Mouse,
+  });
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+  const DrawBorderCommand* hover_border = FindBorderWithColor(hovered.BuildFrame(), style.hovered_border);
+  REQUIRE(hover_border != nullptr);
+  REQUIRE(hover_border->width == style.border_width);
+
+  TestPlatform invalid_platform;
+  Runtime invalid{MaterialSecureInvalidTextFieldApp, invalid_platform};
+  invalid.SetViewport({200.0F, 120.0F});
+  invalid.BuildFrame();
+  Pointer(invalid, PointerEventType::Down, 20.0F);
+  const FlattenedScene& focused_invalid = invalid.BuildFrame();
+  const DrawBorderCommand* error_border = FindBorderWithColor(focused_invalid, style.validation_error);
+  REQUIRE(error_border != nullptr);
+  REQUIRE(error_border->width == style.focused_validation_border_width);
+  const DrawRectCommand* error_caret = FindRectWithColor(focused_invalid, style.error_caret);
+  REQUIRE(error_caret != nullptr);
+
+  TestPlatform disabled_platform;
+  Runtime disabled{MaterialDisabledTextFieldApp, disabled_platform};
+  disabled.SetViewport({200.0F, 120.0F});
+  const FlattenedScene& disabled_scene = disabled.BuildFrame();
+  const DrawTextCommand* placeholder = FindText(disabled_scene, "Disabled placeholder");
+  const DrawTextCommand* supporting = FindText(disabled_scene, "Disabled supporting");
+  REQUIRE(placeholder != nullptr);
+  REQUIRE(supporting != nullptr);
+  REQUIRE(placeholder->style.foreground == style.disabled_placeholder);
+  REQUIRE(supporting->style.foreground == style.disabled_supporting_text);
+  REQUIRE(FindBorderWithColor(disabled_scene, style.disabled_border) != nullptr);
+  const detail::MountedNode* field = FindMountedNodeKind(*disabled.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->render_node.opacity == 1.0F);
+
+  TestPlatform selected_platform;
+  Runtime selected{MaterialDisabledSelectedTextFieldApp, selected_platform};
+  selected.SetViewport({200.0F, 100.0F});
+  REQUIRE(FindRectWithColor(selected.BuildFrame(), style.selection) == nullptr);
 }
 
 TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
@@ -628,7 +723,7 @@ TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
   const FlattenedScene& scene = runtime.BuildFrame();
 
   REQUIRE(FindText(scene, "a\xF0\x9F\x98\x80"
-                                 "e\xCC\x81") == nullptr);
+                          "e\xCC\x81") == nullptr);
   REQUIRE(FindText(scene, "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2") != nullptr);
 
   Pointer(runtime, PointerEventType::Down, 230.0F);

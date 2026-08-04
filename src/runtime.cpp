@@ -349,18 +349,6 @@ bool IsCompatibleVirtualItemState(const MountedNode& mounted, const VirtualItemS
          IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, state.virtual_layout_descriptor);
 }
 
-bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  if (incoming.kind == NodeKind::Canvas) {
-    return false;
-  }
-  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
-         mounted.properties.ContentPaintEquals(incoming.properties);
-}
-
-bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.properties.ForegroundPaintEquals(incoming.properties);
-}
-
 bool LayoutValuesEquivalent(
     const std::unordered_map<std::type_index, ErasedLayoutValue>& left,
     const std::unordered_map<std::type_index, ErasedLayoutValue>& right
@@ -372,6 +360,21 @@ bool LayoutValuesEquivalent(
     const auto found = right.find(entry.first);
     return found != right.end() && entry.second.EquivalentForReconciliation(found->second);
   });
+}
+
+bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  if (incoming.kind == NodeKind::Canvas) {
+    return false;
+  }
+  const bool resolved_style_equal =
+      incoming.kind != NodeKind::Button || LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
+  return resolved_style_equal && mounted.text == incoming.text &&
+         mounted.image_properties == incoming.image_properties &&
+         mounted.properties.ContentPaintEquals(incoming.properties);
+}
+
+bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
+  return mounted.properties.ForegroundPaintEquals(incoming.properties);
 }
 
 bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
@@ -589,10 +592,13 @@ void PrepareExtensionGeometry(MountedNode& node) {
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
   const bool enabled = parent_enabled && node.local_enabled;
-  if (node.enabled != enabled) {
+  const bool disabled_visual_state = parent_enabled && !node.local_enabled;
+  if (node.disabled_visual_state != disabled_visual_state) {
+    node.content_paint_dirty = true;
     node.foreground_paint_dirty = true;
   }
   node.enabled = enabled;
+  node.disabled_visual_state = disabled_visual_state;
   for (auto& child : node.children) {
     ResolveEnabledTree(*child, node.enabled);
   }

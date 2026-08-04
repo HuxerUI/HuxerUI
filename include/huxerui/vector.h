@@ -31,6 +31,8 @@ public:
   Path& Close();
   void Reset();
 
+  static Path RoundedRect(Rect rect, CornerRadii corner_radii);
+
   [[nodiscard]] bool IsEmpty() const noexcept;
   [[nodiscard]] Rect Bounds() const noexcept;
 

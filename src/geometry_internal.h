@@ -73,6 +73,57 @@ inline Rect TransformBounds(const Transform2D& transform, Rect rect) noexcept {
   };
 }
 
+inline CornerRadii NormalizeCornerRadii(Rect rect, CornerRadii corner_radii) noexcept {
+  float scale = 1.0F;
+  const auto constrain_pair = [&scale](float available, float first, float second) {
+    const float total = std::max(0.0F, first) + std::max(0.0F, second);
+    if (total > 0.0F) {
+      scale = std::min(scale, available / total);
+    }
+  };
+  constrain_pair(rect.width, corner_radii.top_left, corner_radii.top_right);
+  constrain_pair(rect.width, corner_radii.bottom_left, corner_radii.bottom_right);
+  constrain_pair(rect.height, corner_radii.top_left, corner_radii.bottom_left);
+  constrain_pair(rect.height, corner_radii.top_right, corner_radii.bottom_right);
+  scale = std::clamp(scale, 0.0F, 1.0F);
+  corner_radii.top_left = std::max(0.0F, corner_radii.top_left) * scale;
+  corner_radii.top_right = std::max(0.0F, corner_radii.top_right) * scale;
+  corner_radii.bottom_right = std::max(0.0F, corner_radii.bottom_right) * scale;
+  corner_radii.bottom_left = std::max(0.0F, corner_radii.bottom_left) * scale;
+  return corner_radii;
+}
+
+inline bool RoundedRectContains(Rect rect, CornerRadii corner_radii, Point point) noexcept {
+  if (!rect.Contains(point)) {
+    return false;
+  }
+  corner_radii = NormalizeCornerRadii(rect, corner_radii);
+
+  float radius = 0.0F;
+  Point center;
+  if (point.x < rect.x + corner_radii.top_left && point.y < rect.y + corner_radii.top_left) {
+    radius = corner_radii.top_left;
+    center = {rect.x + radius, rect.y + radius};
+  } else if (point.x > rect.x + rect.width - corner_radii.top_right && point.y < rect.y + corner_radii.top_right) {
+    radius = corner_radii.top_right;
+    center = {rect.x + rect.width - radius, rect.y + radius};
+  } else if (
+      point.x > rect.x + rect.width - corner_radii.bottom_right &&
+      point.y > rect.y + rect.height - corner_radii.bottom_right
+  ) {
+    radius = corner_radii.bottom_right;
+    center = {rect.x + rect.width - radius, rect.y + rect.height - radius};
+  } else if (point.x < rect.x + corner_radii.bottom_left && point.y > rect.y + rect.height - corner_radii.bottom_left) {
+    radius = corner_radii.bottom_left;
+    center = {rect.x + radius, rect.y + rect.height - radius};
+  } else {
+    return true;
+  }
+  const float delta_x = point.x - center.x;
+  const float delta_y = point.y - center.y;
+  return delta_x * delta_x + delta_y * delta_y <= radius * radius;
+}
+
 inline std::optional<Rect> InverseTransformBounds(const Transform2D& transform, Rect rect) noexcept {
   const std::optional<Point> top_left = transform.Inverse({rect.x, rect.y});
   const std::optional<Point> top_right = transform.Inverse({rect.x + rect.width, rect.y});

@@ -21,7 +21,11 @@ State<bool> child_order_reversed;
 State<bool> overflowing_paint_changed;
 State<bool> shadow_changed;
 State<bool> canvas_changed;
+State<bool> clip_children_enabled;
+State<bool> overflow_clip_enabled;
 int canvas_paint_count = 0;
+int clipped_child_clicks = 0;
+int overflowing_child_clicks = 0;
 
 struct OverflowPaint;
 struct FramePaintInvalidation;
@@ -134,6 +138,48 @@ View CanvasApp() {
         REQUIRE(paint.Bounds() == Rect{0.0F, 0.0F, 60.0F, 40.0F});
         paint.DrawRect({0.0F, 0.0F, size.width, size.height}, color);
       }).With(Frame{80.0F, 60.0F}, Padding(10.0F)),
+  };
+}
+
+View ClipChildrenApp() {
+  auto enabled = UseState(true);
+  clip_children_enabled = enabled;
+  View result = Stack {
+    Button("clipped child").With(Frame{80.0F, 80.0F}).OnClick([] { ++clipped_child_clicks; }),
+  }.With(Frame{80.0F, 80.0F}, Background{Color::White()}, CornerRadius{20.0F});
+  if (enabled.Get()) {
+    result = std::move(result).With(ClipChildren{});
+  }
+  return result;
+}
+
+View AsymmetricClipChildrenApp() {
+  return Stack {
+    Spacer().With(Frame{80.0F, 80.0F}, Background{Color::White()}),
+  }.With(Frame{80.0F, 80.0F}, CornerRadius{CornerRadii::Top(20.0F)}, ClipChildren{});
+}
+
+View OverflowChildHitTestApp() {
+  auto clipped = UseState(true);
+  overflow_clip_enabled = clipped;
+  View result = Stack {
+    Button("overflowing child")
+        .With(Frame{80.0F, 40.0F}, Offset{Point{40.0F, 20.0F}})
+        .OnClick([] { ++overflowing_child_clicks; }),
+  }.With(Frame{80.0F, 80.0F});
+  if (clipped.Get()) {
+    result = std::move(result).With(ClipChildren{});
+  }
+  return Row {
+    std::move(result),
+  };
+}
+
+View ClippedScrollViewApp() {
+  return Row {
+    ScrollView {
+      Spacer().With(Frame{160.0F, 160.0F}),
+    }.With(Frame{80.0F, 80.0F}, Padding{10.0F}, CornerRadius{CornerRadii::Top(16.0F)}, ClipChildren{}),
   };
 }
 
@@ -303,6 +349,92 @@ TEST_CASE("RuntimePublishesStableRenderSceneNodes") {
   REQUIRE(second_text->content.Commands().data() == first_text_commands);
   REQUIRE_FALSE(second_frame.damage.full);
   REQUIRE(second_frame.damage.rects.empty());
+}
+
+TEST_CASE("ClipChildrenPublishesARoundedClipAndRestrictsDescendantHitTesting") {
+  clipped_child_clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{ClipChildrenApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE(frame.scene.root != nullptr);
+  const detail::MountedNode* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  const RenderNode* render_node = FindRenderNode(*frame.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->child_clips.size() == 1);
+  const auto* child_clip = std::get_if<PushClipCommand>(&render_node->child_clips.front());
+  REQUIRE(child_clip != nullptr);
+  REQUIRE(child_clip->rect == mounted->bounds);
+  REQUIRE(child_clip->corner_radius == 20.0F);
+
+  ClickAt(runtime, {1.0F, 1.0F}, 1);
+  REQUIRE(clipped_child_clicks == 0);
+
+  clip_children_enabled = false;
+  const RenderFrame& unclipped_frame = runtime.BuildRenderFrame();
+  render_node = FindRenderNode(*unclipped_frame.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->child_clips.empty());
+  ClickAt(runtime, {1.0F, 1.0F}, 2);
+  REQUIRE(clipped_child_clicks == 1);
+  ClickAt(runtime, {40.0F, 40.0F}, 3);
+  REQUIRE(clipped_child_clicks == 2);
+}
+
+TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
+  TestPlatform platform;
+  Runtime runtime{AsymmetricClipChildrenApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE(frame.scene.root != nullptr);
+  const detail::MountedNode* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  const RenderNode* render_node = FindRenderNode(*frame.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->child_clips.size() == 1);
+  const auto* child_clip = std::get_if<PushPathClipCommand>(&render_node->child_clips.front());
+  REQUIRE(child_clip != nullptr);
+  REQUIRE(child_clip->path.Bounds() == mounted->bounds);
+}
+
+TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {
+  overflowing_child_clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{OverflowChildHitTestApp, platform};
+  runtime.SetViewport({140.0F, 100.0F});
+
+  runtime.BuildRenderFrame();
+  ClickAt(runtime, {100.0F, 40.0F}, 1);
+  REQUIRE(overflowing_child_clicks == 0);
+
+  overflow_clip_enabled = false;
+  runtime.BuildRenderFrame();
+  ClickAt(runtime, {100.0F, 40.0F}, 2);
+  REQUIRE(overflowing_child_clicks == 1);
+}
+
+TEST_CASE("ScrollViewRetainsContainerAndContentClips") {
+  TestPlatform platform;
+  Runtime runtime{ClippedScrollViewApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE(frame.scene.root != nullptr);
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const detail::MountedNode* scroll_view = root->children.front().get();
+  REQUIRE(scroll_view->kind == detail::NodeKind::ScrollView);
+  const RenderNode* render_node = FindRenderNode(*frame.scene.root, scroll_view->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->child_clips.size() == 2);
+  REQUIRE(std::holds_alternative<PushPathClipCommand>(render_node->child_clips[0]));
+  const auto* content_clip = std::get_if<PushClipCommand>(&render_node->child_clips[1]);
+  REQUIRE(content_clip != nullptr);
+  REQUIRE(content_clip->rect == Rect{10.0F, 10.0F, 60.0F, 60.0F});
 }
 
 TEST_CASE("RenderSceneRerecordsOnlyChangedDeclarativePaint") {

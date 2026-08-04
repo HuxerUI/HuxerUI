@@ -23,11 +23,18 @@
 #include <huxerui/app.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
+#include <huxerui/indication.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
 #include <huxerui/view.h>
 
 #include "geometry_internal.h"
+
+namespace huxerui {
+
+struct ButtonStyle;
+
+} // namespace huxerui
 
 namespace huxerui::detail {
 
@@ -35,6 +42,10 @@ struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 class AppResources;
+
+struct ResolvedButtonStyle {
+  using Value = ButtonStyle;
+};
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -350,7 +361,11 @@ struct ViewProperties {
   std::optional<Color> background;
   std::optional<Shadow> shadow;
   TextStyle text_style;
-  float corner_radius = 0.0F;
+  CornerRadii corner_radii;
+  bool clip_children = false;
+  std::optional<Size> indication_size;
+  float indication_corner_radius = 0.0F;
+  std::optional<IndicationSpec> indication_override;
   float spacing = 0.0F;
   float grow = 0.0F;
   MainAxisAlignment main_axis_alignment = MainAxisAlignment::Start;
@@ -374,12 +389,14 @@ struct ViewProperties {
 
   [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
     return padding == other.padding && background == other.background && shadow == other.shadow &&
-           text_style == other.text_style && corner_radius == other.corner_radius;
+           text_style == other.text_style && corner_radii == other.corner_radii;
   }
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewProperties& other) const {
-    return corner_radius == other.corner_radius && focus_ring == other.focus_ring &&
-           focus_ring_width == other.focus_ring_width;
+    return corner_radii == other.corner_radii && focus_ring == other.focus_ring &&
+           focus_ring_width == other.focus_ring_width && indication_size == other.indication_size &&
+           indication_corner_radius == other.indication_corner_radius &&
+           indication_override == other.indication_override;
   }
 };
 
@@ -559,6 +576,11 @@ struct MountedNode final : public huxerui::MountedNode {
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool enabled = true;
+  // True only for the node that first disables an otherwise enabled subtree. Stateful controls use their disabled
+  // colors at this boundary; inherited disabled descendants remain visually enabled under the boundary group opacity.
+  bool disabled_visual_state = false;
+  // A visual extension can override the default centered indication frame with retained animated geometry.
+  std::optional<Rect> indication_frame;
   bool focusable = false;
   bool focused = false;
   bool focus_visible = false;
@@ -656,7 +678,7 @@ struct RenderNodeSnapshot {
   Transform2D world_children_transform;
   std::optional<Rect> world_clip;
   std::optional<Rect> world_child_clip;
-  std::optional<float> child_clip_corner_radius;
+  std::vector<RenderClip> child_clips;
   Rect own_bounds;
   Rect subtree_bounds;
   std::vector<std::uint64_t> children;

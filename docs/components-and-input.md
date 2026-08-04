@@ -58,7 +58,7 @@ ProgressCircle(0.65F);
 ProgressCircle(progress);
 ```
 
-Indeterminate progress advances through retained animation state. Reduced motion themes keep it static.
+Indeterminate progress advances through retained animation state. Material Theme uses its trackless pulsing-arc motion, while Flat Theme keeps the denser sweep treatment. Reduced motion themes keep the retained phase static.
 
 ## ProgressBar
 
@@ -70,9 +70,9 @@ ProgressBar(0.65F);
 ProgressBar(progress);
 ```
 
-ProgressBar is a controlled display component and does not emit events. Its default width, height, colors, corner radius, and indeterminate animation come from `ProgressBarStyle`; layout modifiers can override its dimensions.
+ProgressBar is a controlled display component and does not emit events. Its default width, height, colors, corner radius, track gap, stop indicator, and indeterminate animation come from `ProgressBarStyle`; layout modifiers can override its dimensions.
 
-`ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps the indicator static.
+`ProgressBarIndeterminateMotion::Sweep` moves one fixed-width segment and is the Flat Theme default. `Segmented` uses independent head and tail positions for two segments and is the Material Theme default. `ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps a representative static indicator without requesting frames.
 
 ## Slider
 
@@ -89,7 +89,7 @@ Pointer and touch input update the value while dragging. Arrow keys adjust by `S
 
 `OnChanged` is the convenience wrapper for `On<SliderEvents::Changed>`.
 
-`SliderStyle` controls the split track, thumb dimensions, track gap, discrete tick and stop indicators, and interaction animation. Layout modifiers can override the component dimensions.
+`SliderStyle` controls the split track, enabled and disabled colors, thumb dimensions, track gap, discrete tick and stop indicators, focus-ring policy, and interaction animation. Layout modifiers can override the component dimensions. Flat Theme retains a compact track, conventional thumb, and node focus ring. Material Theme uses its taller track, narrow handle, component-specific disabled colors, and handle-width focus treatment without drawing a focus ring around the complete slider bounds.
 
 ## Image
 

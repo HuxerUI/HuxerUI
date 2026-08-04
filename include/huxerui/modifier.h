@@ -340,9 +340,15 @@ struct Frame {
 struct CornerRadius {
   static const detail::ModifierDescriptor& Descriptor();
 
-  float value;
+  CornerRadii value;
 
   bool operator==(const CornerRadius&) const = default;
+};
+
+struct ClipChildren {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const ClipChildren&) const = default;
 };
 
 struct Spacing {

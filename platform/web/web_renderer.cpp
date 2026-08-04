@@ -765,8 +765,8 @@ void WebRenderer::RenderSceneNode(const RenderNode& node) {
   context_.set("globalAlpha", context_["globalAlpha"].as<double>() * opacity);
 
   RenderSequence(node.content);
-  if (node.child_clip.has_value()) {
-    RenderCommand(PushClipCommand{node.child_clip->rect, node.child_clip->corner_radius});
+  for (const RenderClip& clip : node.child_clips) {
+    std::visit([this](const auto& command) { RenderCommand(command); }, clip);
   }
   if (!node.children_transform.IsIdentity()) {
     RenderCommand(PushTransformCommand{node.children_transform});
@@ -779,7 +779,7 @@ void WebRenderer::RenderSceneNode(const RenderNode& node) {
   if (!node.children_transform.IsIdentity()) {
     RenderCommand(PopTransformCommand{});
   }
-  if (node.child_clip.has_value()) {
+  for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
     RenderCommand(PopClipCommand{});
   }
   RenderSequence(node.foreground);

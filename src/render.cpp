@@ -79,8 +79,34 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
   draw(full_source, destination);
 }
 
-bool ClipsChildren(const MountedNode& node) {
-  return IsScrollContainer(node);
+Rect RenderClipBounds(const RenderClip& clip) {
+  return std::visit(
+      [](const auto& command) -> Rect {
+        using Command = std::decay_t<decltype(command)>;
+        if constexpr (std::is_same_v<Command, PushClipCommand>) {
+          return command.rect;
+        } else {
+          return command.path.Bounds();
+        }
+      },
+      clip
+  );
+}
+
+std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
+  std::vector<RenderClip> clips;
+  if (node.properties.clip_children) {
+    if (node.properties.corner_radii.IsUniform()) {
+      clips.emplace_back(PushClipCommand{node.bounds, std::max(0.0F, node.properties.corner_radii.top_left)});
+    } else {
+      clips.emplace_back(PushPathClipCommand{Path::RoundedRect(node.bounds, node.properties.corner_radii)});
+    }
+  }
+  if (IsScrollContainer(node)) {
+    const Rect bounds = node.ContentBounds();
+    clips.emplace_back(PushClipCommand{bounds, 0.0F});
+  }
+  return clips;
 }
 
 Transform2D ResolveChildrenTransform(const MountedNode& node) {
@@ -121,16 +147,14 @@ std::optional<Rect> ClipBounds(std::optional<Rect> bounds, const std::optional<R
 std::optional<Rect> ResolveClip(
     const std::optional<Rect>& inherited_clip,
     const Transform2D& world_transform,
-    const std::optional<RenderClip>& local_clip
+    const std::vector<RenderClip>& local_clips
 ) {
-  if (!local_clip.has_value()) {
-    return inherited_clip;
+  std::optional<Rect> resolved = inherited_clip;
+  for (const RenderClip& local_clip : local_clips) {
+    const Rect world_clip = TransformBounds(world_transform, RenderClipBounds(local_clip));
+    resolved = resolved.has_value() ? resolved->Intersection(world_clip) : world_clip;
   }
-  const Rect world_clip = TransformBounds(world_transform, local_clip->rect);
-  if (!inherited_clip.has_value()) {
-    return world_clip;
-  }
-  return inherited_clip->Intersection(world_clip);
+  return resolved;
 }
 
 std::optional<Rect> SnapshotRenderNode(
@@ -145,9 +169,8 @@ std::optional<Rect> SnapshotRenderNode(
   node_snapshot.visible = node.visible;
   node_snapshot.opacity = node.opacity;
   node_snapshot.world_clip = inherited_clip;
-  if (node.child_clip.has_value()) {
-    node_snapshot.child_clip_corner_radius = node.child_clip->corner_radius;
-  }
+  node_snapshot.child_clips = node.child_clips;
+
   node_snapshot.children.reserve(node.children.size());
   for (const RenderNode* child : node.children) {
     if (child != nullptr) {
@@ -175,7 +198,7 @@ std::optional<Rect> SnapshotRenderNode(
     node_snapshot.has_own_bounds = true;
   }
 
-  node_snapshot.world_child_clip = ResolveClip(inherited_clip, node_snapshot.world_transform, node.child_clip);
+  node_snapshot.world_child_clip = ResolveClip(inherited_clip, node_snapshot.world_transform, node.child_clips);
   std::optional<Rect> subtree_bounds = own_bounds;
   for (const RenderNode* child : node.children) {
     if (child == nullptr) {
@@ -252,9 +275,7 @@ bool CommonChildOrderChanged(const std::vector<std::uint64_t>& previous, const s
   return previous_common != current_common;
 }
 
-void ResolvePresentationTreeImpl(
-    MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity, bool inherited_enabled
-) {
+void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity) {
   const Transform2D node_transform =
       ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
   node.presentation.resolved_transform = ComposeTransform(inherited_transform, node_transform);
@@ -263,7 +284,7 @@ void ResolvePresentationTreeImpl(
   float render_opacity = std::clamp(node.presentation.local_opacity, 0.0F, 1.0F);
   // Apply disabled opacity only when entering a disabled subtree; descendants inherit the result without multiplying
   // the same disabled state again.
-  if (inherited_enabled && !node.enabled) {
+  if (node.disabled_visual_state) {
     render_opacity *= node.properties.disabled_opacity;
   }
   node.presentation.render_opacity = render_opacity;
@@ -271,7 +292,7 @@ void ResolvePresentationTreeImpl(
   const Transform2D children_transform =
       ComposeTransform(node.presentation.resolved_transform, ResolveChildrenTransform(node));
   for (auto& child : node.children) {
-    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity, node.enabled);
+    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity);
   }
 }
 
@@ -287,7 +308,12 @@ void PaintFocusRing(const MountedNode& node, const Rect& bounds, PaintContext& c
   if (!node.focus_visible || !node.enabled || node.properties.focus_ring_width <= 0.0F) {
     return;
   }
-  context.DrawBorder(bounds, node.properties.focus_ring, node.properties.focus_ring_width, node.properties.corner_radius);
+  context.DrawBorder(
+      bounds,
+      node.properties.focus_ring,
+      node.properties.focus_ring_width,
+      node.properties.corner_radii
+  );
 }
 
 void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
@@ -298,14 +324,9 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   const float opacity = node.presentation.resolved_opacity;
 
   Rect child_clip = clip;
-  std::optional<RenderClip> render_clip;
-  if (ClipsChildren(node)) {
-    const Rect viewport = node.ContentBounds();
-    render_clip = RenderClip{
-        viewport,
-        0.0F,
-    };
-    child_clip = clip.Intersection(TransformBounds(transform, viewport));
+  std::vector<RenderClip> child_clips = ResolveChildClips(node);
+  for (const RenderClip& render_clip : child_clips) {
+    child_clip = child_clip.Intersection(TransformBounds(transform, RenderClipBounds(render_clip)));
   }
 
   bool changed = false;
@@ -320,13 +341,28 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                      }
                                    : bounds;
     PaintContext content{render_node.content, canvas_bounds};
+    std::optional<Color> background = node.properties.background;
+    TextStyle text_style = node.properties.text_style;
+    if (node.kind == NodeKind::Button) {
+      const ButtonStyle style = node.LayoutValueOr<ResolvedButtonStyle>(ButtonStyle::Default());
+      if (node.disabled_visual_state) {
+        background = style.disabled_background;
+        text_style.foreground = style.disabled_label;
+      }
+    }
     if (node.properties.shadow.has_value() && node.properties.shadow->color.alpha > 0.0F) {
       const Shadow& shadow = *node.properties.shadow;
-      content
-          .DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread, node.properties.corner_radius);
+      content.DrawShadow(
+          bounds,
+          shadow.color,
+          shadow.offset,
+          shadow.blur_radius,
+          shadow.spread,
+          node.properties.corner_radii
+      );
     }
-    if (node.properties.background.has_value() && node.properties.background->alpha > 0.0F) {
-      content.DrawRect(bounds, *node.properties.background, node.properties.corner_radius);
+    if (background.has_value() && background->alpha > 0.0F) {
+      content.DrawRect(bounds, *background, node.properties.corner_radii);
     }
     if (node.kind == NodeKind::Text) {
       content.DrawText(node.ContentBounds(), node.text, node.properties.text_style);
@@ -334,7 +370,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
       content.DrawText(
           bounds,
           node.text,
-          node.properties.text_style,
+          text_style,
           TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
       );
     } else if (node.kind == NodeKind::Image) {
@@ -399,8 +435,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
     render_node.opacity = node.presentation.render_opacity;
     changed = true;
   }
-  if (render_node.child_clip != render_clip) {
-    render_node.child_clip = render_clip;
+  if (render_node.child_clips != child_clips) {
+    render_node.child_clips = std::move(child_clips);
     changed = true;
   }
   if (render_node.children_transform != children_transform) {
@@ -423,7 +459,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
 } // namespace
 
 void ResolvePresentationTree(MountedNode& node) {
-  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F, true);
+  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F);
 }
 
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay) {
@@ -468,7 +504,7 @@ DamageRegion ComputeDamageRegion(
                                         current.world_children_transform != previous.world_children_transform ||
                                         current.world_clip != previous.world_clip ||
                                         current.world_child_clip != previous.world_child_clip ||
-                                        current.child_clip_corner_radius != previous.child_clip_corner_radius;
+                                        current.child_clips != previous.child_clips;
       if (presentation_changed || CommonChildOrderChanged(previous.children, current.children)) {
         // Presentation and ordering changes can move or recomposite descendant pixels, so both old and new subtree
         // bounds must be invalidated.

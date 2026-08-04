@@ -13,7 +13,7 @@ Framework capability work:
 - Framework string migration, plural messages, and inherited Locale text shaping
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
 - Navigation stacks, scoped navigation controllers, navigation-aware predictive Back, and page transitions
-- General-purpose clipping modifiers
+- Shape and path-based clipping modifiers
 - Event capture, bubbling, and explicit pointer capture
 - Saveable state, keyframe and decay animation, and overscroll effects
 - Semantics tree and accessibility

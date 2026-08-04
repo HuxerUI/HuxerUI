@@ -266,4 +266,25 @@ TEST_CASE("PaintContextRecordsPathCommandsAndBounds") {
   REQUIRE(sequence.Bounds() == Rect{6.0F, 18.0F, 46.0F, 46.0F});
 }
 
+TEST_CASE("PaintContextUsesPathCommandsForAsymmetricCornerRadii") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  const CornerRadii corners = CornerRadii::Top(16.0F);
+  context.DrawShadow({10.0F, 10.0F, 60.0F, 40.0F}, Color::Black(), {}, 4.0F, 0.0F, corners);
+  context.DrawRect({10.0F, 10.0F, 60.0F, 40.0F}, Color::White(), corners);
+  context.DrawBorder({10.0F, 10.0F, 60.0F, 40.0F}, Color::Black(), 1.0F, corners);
+  context.PushClip({10.0F, 10.0F, 60.0F, 40.0F}, corners);
+  context.PopClip();
+  context.Finish();
+
+  REQUIRE(std::holds_alternative<DrawPathShadowCommand>(sequence.Commands()[0]));
+  REQUIRE(std::holds_alternative<FillPathCommand>(sequence.Commands()[1]));
+  REQUIRE(std::holds_alternative<StrokePathCommand>(sequence.Commands()[2]));
+  const auto* border = std::get_if<StrokePathCommand>(&sequence.Commands()[2]);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->path.Bounds() == Rect{10.5F, 10.5F, 59.0F, 39.0F});
+  REQUIRE(std::holds_alternative<PushPathClipCommand>(sequence.Commands()[3]));
+  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
+}
+
 } // namespace huxerui::test

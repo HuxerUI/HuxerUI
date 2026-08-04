@@ -290,7 +290,7 @@ void Runtime::PaintTextSelectionOverlay() {
   render_node.offset = {};
   render_node.transform = {};
   render_node.opacity = 1.0F;
-  render_node.child_clip.reset();
+  render_node.child_clips.clear();
   render_node.children.clear();
   render_node.visible = overlay.visible;
   ++render_node.revision;
@@ -449,7 +449,7 @@ void Runtime::PaintTextSelectionOverlay() {
     }
   }
 
-  const float font_size = theme.typography.label;
+  const float font_size = theme.typography.label_large;
   const TextStyle toolbar_text_style{Font::System(font_size), theme.colors.on_surface};
   constexpr float item_padding = 12.0F;
   constexpr float toolbar_height = 40.0F;

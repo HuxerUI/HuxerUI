@@ -493,9 +493,9 @@ Cancel
 
 A Press records the pointer ID and local press position. Release and Cancel refer to the corresponding Press. This supports multiple simultaneous pointers and multiple active ripple instances.
 
-`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Default controls resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`; component-owned transparent actions can provide an explicit `IndicationSpec` through their typed style. Reduced-motion themes snap those transitions.
+`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Default controls resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`; a typed component style can provide an explicit `IndicationSpec` when its foreground differs from the theme-wide state-layer color. Reduced-motion themes snap those transitions.
 
-`Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. The renderer applies disabled opacity once at the boundary instead of repeatedly dimming every descendant.
+`Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. A control that directly establishes the disabled boundary uses its component-specific disabled state colors. A non-control boundary applies disabled group opacity once; inherited descendants keep their enabled paint colors so the subtree is not dimmed again.
 
 `Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space shows pressed indication and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring color, width, disabled opacity, and key indication timing resolve from Theme.
 
@@ -752,6 +752,8 @@ A complete Theme establishes a design system boundary. A Theme override inherits
 `ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent. Explicit View modifiers run after semantic style resolution and win without a separate runtime style branch.
 
 Built-in elevation styles keep `Shadow::offset` and `Shadow::spread` at zero so elevation remains a platform-neutral ambient effect. Custom drawing and explicit `Shadow` modifiers retain directional offset and spread when a design calls for a drop shadow rather than semantic elevation.
+
+Material theme definitions map stable semantic roles into typed component styles. Surface-container colors, typography roles, and shape roles remain in `ThemeSpec`; control geometry, component-specific disabled colors, interaction target sizes, presentation motion, and surface composition remain in their owning styles. Runtime and platform renderers receive only the resolved View and PaintCommand data and never branch on Material identity.
 
 Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select the corresponding typography token. A component `TextStyle` value can still replace the complete Text style for a local subtree.
 
@@ -1068,7 +1070,7 @@ Declarative custom Dialog presentation and command-created Dialogs share style r
 
 Menu already receives semantic `MenuItem` and `MenuSection` values. `MenuSection` remains a logical boundary: Theme may render it as a separator, spacing, or no visible element.
 
-`MenuStyle` controls menu surface and item treatment, including foreground and background colors, item indication, shape, shadow, icon geometry, padding, minimum metrics, separator policy, and root or submenu motion. `MenuOptions` owns call-specific anchor placement, gap, viewport margin, offset, and width decisions.
+`MenuStyle` controls menu surface and item treatment, including foreground and background colors, item indication, shape, shadow, icon geometry, padding, minimum metrics, separator policy, and root or submenu motion. The menu surface clips descendants to its rounded bounds so edge-to-edge item feedback cannot escape the shape. `MenuOptions` owns call-specific anchor placement, gap, viewport margin, offset, and width decisions.
 
 The service retains ownership of submenu chains, focus, outside press, Cancel routing, action dispatch, and automatic chain dismissal. Theme cannot change those behavioral guarantees.
 

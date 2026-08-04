@@ -195,16 +195,8 @@ bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject
   if (!RenderSequence(environment, view, canvas, node.content)) {
     return false;
   }
-  if (node.child_clip.has_value()) {
-    RenderCommand(
-        environment,
-        view,
-        canvas,
-        PushClipCommand{
-            node.child_clip->rect,
-            node.child_clip->corner_radius,
-        }
-    );
+  for (const RenderClip& clip : node.child_clips) {
+    std::visit([&](const auto& command) { RenderCommand(environment, view, canvas, command); }, clip);
     if (environment->ExceptionCheck()) {
       return false;
     }
@@ -227,7 +219,7 @@ bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject
       return false;
     }
   }
-  if (node.child_clip.has_value()) {
+  for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
     RenderCommand(environment, view, canvas, PopClipCommand{});
     if (environment->ExceptionCheck()) {
       return false;

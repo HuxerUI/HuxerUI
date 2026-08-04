@@ -218,7 +218,7 @@ public:
     TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyle::Default());
     next_style.background = node.properties.background.value_or(next_style.background);
     next_style.text_style = node.properties.text_style;
-    next_style.corner_radius = node.properties.corner_radius;
+    corner_radii_ = node.properties.corner_radii;
     if (!initialized_ || text_layout_mode_changed || next_style.text_style.font != style_.text_style.font ||
         next_style.placeholder_style.font != style_.placeholder_style.font ||
         next_style.validation_text_style.font != style_.validation_text_style.font ||
@@ -332,17 +332,26 @@ public:
     return changed;
   }
 
-  void Paint(const detail::MountedNode& node, PaintContext& context) const {
+  void Paint(const detail::MountedNode& node, PaintContext& context, bool hovered) const {
     if (!text_layout_) {
       return;
     }
 
+    const bool enabled = node.IsEnabled();
+    const bool disabled_visual_state = node.disabled_visual_state;
+    const bool invalid = validation_.IsInvalid();
+    TextStyle text_style = style_.text_style;
+    TextStyle placeholder_style = style_.placeholder_style;
+    if (disabled_visual_state) {
+      text_style.foreground = style_.disabled_text;
+      placeholder_style.foreground = style_.disabled_placeholder;
+    }
     const Rect editor_frame = EditorFrame(node);
     const Rect content = EditorContentRect(node);
     const Point origin = TextOrigin(node);
-    context.PushClip(content, std::max(0.0F, style_.corner_radius));
+    context.PushClip(content, corner_radii_);
 
-    if (!editing_.value.selection.IsCollapsed()) {
+    if (enabled && !editing_.value.selection.IsCollapsed()) {
       for (const Rect& rect : text_layout_->RangeRects(editing_.value.selection.Range())) {
         context.DrawRect(OffsetRect(rect, origin), style_.selection);
       }
@@ -358,7 +367,7 @@ public:
               size.height,
           },
           placeholder_,
-          style_.placeholder_style
+          std::move(placeholder_style)
       );
     } else {
       const Size size = text_layout_->Measure();
@@ -370,11 +379,11 @@ public:
               size.height,
           },
           laid_out_text_,
-          style_.text_style
+          std::move(text_style)
       );
     }
 
-    if (editing_.value.composition.has_value()) {
+    if (enabled && editing_.value.composition.has_value()) {
       for (const Rect& rect : text_layout_->RangeRects(*editing_.value.composition)) {
         const Rect translated = OffsetRect(rect, origin);
         context.DrawRect(
@@ -395,7 +404,7 @@ public:
           origin
       );
       caret.width = std::max(1.0F, caret.width);
-      context.DrawRect(caret, style_.caret);
+      context.DrawRect(caret, invalid ? style_.error_caret : style_.caret);
     }
     context.PopClip();
 
@@ -403,10 +412,12 @@ public:
       const Rect node_content = node.ContentBounds();
       const Size size = validation_layout_->Measure();
       TextStyle validation_style = style_.validation_text_style;
-      if (!validation_.IsInvalid()) {
+      if (disabled_visual_state) {
+        validation_style.foreground = style_.disabled_supporting_text;
+      } else if (!invalid) {
         validation_style.foreground = style_.placeholder_style.foreground;
       }
-      context.PushClip(node.bounds, std::max(0.0F, style_.corner_radius));
+      context.PushClip(node.bounds, corner_radii_);
       context.DrawText(
           {
               node_content.x,
@@ -420,18 +431,22 @@ public:
       context.PopClip();
     }
 
-    const bool invalid = validation_.IsInvalid();
     float border_width = std::max(0.0F, style_.border_width);
     Color border = style_.border;
-    if (invalid) {
-      border_width = std::max(0.0F, style_.validation_border_width);
+    if (disabled_visual_state) {
+      border = style_.disabled_border;
+    } else if (invalid) {
+      border_width =
+          std::max(0.0F, node.focused ? style_.focused_validation_border_width : style_.validation_border_width);
       border = style_.validation_error;
     } else if (node.focused) {
       border_width = std::max(0.0F, style_.focused_border_width);
       border = style_.focused_border;
+    } else if (hovered) {
+      border = style_.hovered_border;
     }
     if (border_width > 0.0F && border.alpha > 0.0F) {
-      context.DrawBorder(editor_frame, border, border_width, std::max(0.0F, style_.corner_radius));
+      context.DrawBorder(editor_frame, border, border_width, corner_radii_);
     }
   }
 
@@ -1665,6 +1680,7 @@ private:
   std::optional<std::size_t> max_length_;
   ValidationResult validation_;
   TextFieldStyle style_;
+  CornerRadii corner_radii_;
   detail::TextFieldEditingState editing_;
   std::optional<TextEditingValue> last_emitted_;
   std::optional<TextEditingValue> composition_history_start_;
@@ -1708,6 +1724,9 @@ public:
 
   void Update(MountedNode& node, const detail::TextFieldModifier& modifier) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
+    if (!node.IsEnabled()) {
+      hovered_ = false;
+    }
     client_->Update(mounted, modifier);
   }
 
@@ -1724,6 +1743,19 @@ public:
 
   bool HitTest(MountedNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
+  }
+
+  bool HoverHitTest(MountedNode& node, Point position) const override {
+    return HitTest(node, position);
+  }
+
+  void OnHoverChanged(MountedNode& node, bool hovered) override {
+    static_cast<void>(node);
+    if (hovered_ == hovered) {
+      return;
+    }
+    hovered_ = hovered;
+    InvalidatePaint();
   }
 
   void OnFocusChanged(MountedNode& node, bool focused) override {
@@ -1756,7 +1788,7 @@ public:
   }
 
   void Paint(const MountedNode& node, PaintContext& context) const override {
-    client_->Paint(static_cast<const detail::MountedNode&>(node), context);
+    client_->Paint(static_cast<const detail::MountedNode&>(node), context, hovered_);
   }
 
   Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
@@ -1765,6 +1797,7 @@ public:
 
 private:
   std::shared_ptr<TextFieldClient> client_;
+  bool hovered_ = false;
 };
 
 TextFieldExtension& FindTextFieldExtension(detail::MountedNode& node) {

@@ -186,13 +186,8 @@ private:
       commands_.emplace_back(PushTransformCommand{transform});
     }
     Append(node.content);
-    if (node.child_clip.has_value()) {
-      commands_.emplace_back(
-          PushClipCommand{
-              node.child_clip->rect,
-              node.child_clip->corner_radius,
-          }
-      );
+    for (const RenderClip& clip : node.child_clips) {
+      std::visit([this](const auto& command) { commands_.emplace_back(command); }, clip);
     }
     const bool children_transformed = !node.children_transform.IsIdentity();
     if (children_transformed) {
@@ -206,7 +201,7 @@ private:
     if (children_transformed) {
       commands_.emplace_back(PopTransformCommand{});
     }
-    if (node.child_clip.has_value()) {
+    for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
       commands_.emplace_back(PopClipCommand{});
     }
     Append(node.foreground);
@@ -657,7 +652,11 @@ inline const DrawRectCommand* FindRectWithColor(const FlattenedScene& scene, Col
   return nullptr;
 }
 
-inline std::optional<Rect> FindPresentedRectWithColor(const FlattenedScene& scene, Color expected) {
+inline std::optional<Rect> FindPresentedRectWithColor(
+    const FlattenedScene& scene,
+    Color expected,
+    std::optional<Size> expected_size = std::nullopt
+) {
   std::vector<Transform2D> transform_stack{Transform2D{}};
   for (const auto& command : scene.Commands()) {
     if (const auto* transform = std::get_if<PushTransformCommand>(&command)) {
@@ -669,8 +668,14 @@ inline std::optional<Rect> FindPresentedRectWithColor(const FlattenedScene& scen
       continue;
     }
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == expected) {
+    if (rect && rect->color == expected &&
+        (!expected_size.has_value() || Size{rect->rect.width, rect->rect.height} == *expected_size)) {
       return detail::TransformBounds(transform_stack.back(), rect->rect);
+    }
+    const auto* path = std::get_if<FillPathCommand>(&command);
+    if (path && path->color == expected &&
+        (!expected_size.has_value() || Size{path->path.Bounds().width, path->path.Bounds().height} == *expected_size)) {
+      return detail::TransformBounds(transform_stack.back(), path->path.Bounds());
     }
   }
   return std::nullopt;
