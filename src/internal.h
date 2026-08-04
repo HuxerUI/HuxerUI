@@ -330,6 +330,7 @@ enum class NodeKind {
   Checkbox,
   Switch,
   ProgressCircle,
+  ProgressBar,
   Image,
   Canvas,
   Spacer,

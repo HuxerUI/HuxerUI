@@ -60,6 +60,20 @@ ProgressCircle(progress);
 
 Indeterminate progress advances through retained animation state. Reduced motion themes keep it static.
 
+## ProgressBar
+
+An empty constructor creates an indeterminate progress bar. A value from `0` to `1` creates determinate progress:
+
+```cpp
+ProgressBar();
+ProgressBar(0.65F);
+ProgressBar(progress);
+```
+
+ProgressBar is a controlled display component and does not emit events. Its default width, height, colors, corner radius, and indeterminate animation come from `ProgressBarStyle`; layout modifiers can override its dimensions.
+
+`ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps the indicator static.
+
 ## Image
 
 Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:

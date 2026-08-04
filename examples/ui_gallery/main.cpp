@@ -67,6 +67,14 @@ View ControlsDemo() {
             progress.Update([](float& value) { value = value >= 0.95F ? 0.15F : value + 0.2F; });
           }),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          ProgressBar(),
+          Text("Indeterminate"),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          ProgressBar(progress),
+          Text::Format("{}%", static_cast<int>(progress * 100.0F)),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         TextField(password)
             .Secure()
             .MaxLength(64)

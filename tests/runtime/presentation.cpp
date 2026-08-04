@@ -54,6 +54,8 @@ State<bool> switch_checked;
 int checkbox_changes = 0;
 int switch_changes = 0;
 State<float> progress_circle_value;
+State<float> progress_bar_value;
+State<double> progress_bar_animation_duration;
 constexpr Color policy_dialog_background = Color::Rgb(32, 84, 132);
 constexpr Color policy_dialog_separator = Color::Rgb(220, 120, 30);
 constexpr Color policy_toast_background = Color::Rgb(42, 52, 62);
@@ -79,6 +81,16 @@ bool PaintsText(const PaintSequence& sequence, std::string_view text) {
     const auto* draw_text = std::get_if<DrawTextCommand>(&command);
     return draw_text != nullptr && draw_text->text == text;
   });
+}
+
+std::vector<DrawRectCommand> DrawRectangles(const FlattenedScene& scene) {
+  std::vector<DrawRectCommand> result;
+  for (const auto& command : scene.Commands()) {
+    if (const auto* rectangle = std::get_if<DrawRectCommand>(&command)) {
+      result.push_back(*rectangle);
+    }
+  }
+  return result;
 }
 
 std::optional<float>
@@ -249,6 +261,55 @@ template <class Factory> View ReducedMotionProgressTheme(Factory&& content) {
 
 View ReducedMotionProgressCircleApp() {
   return HUXERUI_THEME(ReducedMotionProgressTheme, ProgressCircle());
+}
+
+View DeterminateProgressBarApp() {
+  auto progress = UseState(0.25F);
+  progress_bar_value = progress;
+  return Row {
+    ProgressBar(progress),
+  };
+}
+
+View IndeterminateProgressBarApp() {
+  return Row {
+    ProgressBar(),
+  };
+}
+
+View EmptyProgressBarApp() {
+  return Row {
+    ProgressBar(-1.0F),
+  };
+}
+
+View FullProgressBarApp() {
+  return Row {
+    ProgressBar(2.0F),
+  };
+}
+
+View ReducedMotionProgressBarApp() {
+  return HUXERUI_THEME(
+      ReducedMotionProgressTheme,
+      Row {
+        ProgressBar(),
+      }
+  );
+}
+
+View AdjustableProgressBarApp() {
+  auto duration = UseState(ProgressBarStyle::Default().animation_duration);
+  progress_bar_animation_duration = duration;
+  ProgressBarStyle style = ProgressBarStyle::Default();
+  style.animation_duration = duration.Get();
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme(std::move(definition), [] {
+    return Row {
+      ProgressBar(),
+    };
+  });
 }
 
 template <class Factory> View InteractionTestTheme(Factory&& content) {
@@ -686,6 +747,11 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(progress_circle_style.stroke_width == 4.0F);
   REQUIRE(progress_circle_style.indicator_color.red == light.colors.primary.red);
 
+  const ProgressBarStyle progress_bar_style = ThemeDefinitionValue<ProgressBarStyle>(definition);
+  REQUIRE(progress_bar_style.width == 160.0F);
+  REQUIRE(progress_bar_style.height == 4.0F);
+  REQUIRE(progress_bar_style.indicator_color.red == light.colors.primary.red);
+
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
 
@@ -1015,6 +1081,120 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE(reduced_arcs.size() == 2);
   REQUIRE(reduced_platform.requested_frames == reduced_requests_before);
   REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
+}
+
+TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
+  const ProgressBarStyle style = ProgressBarStyle::Default();
+  const float indeterminate_width = style.width * style.indeterminate_fraction;
+
+  TestPlatform platform;
+  Runtime determinate{DeterminateProgressBarApp, platform};
+  determinate.SetViewport({200.0F, 20.0F});
+  const auto initial_rectangles = DrawRectangles(determinate.BuildFrame());
+  REQUIRE(initial_rectangles.size() == 2);
+  REQUIRE(initial_rectangles[0].rect.width == style.width);
+  REQUIRE(initial_rectangles[0].rect.height == style.height);
+  REQUIRE(initial_rectangles[0].corner_radius == style.corner_radius);
+  REQUIRE(initial_rectangles[1].rect.width == style.width * 0.25F);
+
+  const auto* root = determinate.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* progress_node = root->children[0].get();
+  REQUIRE(progress_node->kind == huxerui::detail::NodeKind::ProgressBar);
+  REQUIRE(progress_node->measured_size.width == style.width);
+  REQUIRE(progress_node->measured_size.height == style.height);
+  const std::uint64_t identity = progress_node->identity;
+
+  progress_bar_value = 0.75F;
+  const auto updated_rectangles = DrawRectangles(determinate.BuildFrame());
+  REQUIRE(updated_rectangles.size() == 2);
+  REQUIRE(updated_rectangles[1].rect.width == style.width * 0.75F);
+  REQUIRE(determinate.RootNode()->children[0]->identity == identity);
+
+  Runtime empty{EmptyProgressBarApp, platform};
+  empty.SetViewport({200.0F, 20.0F});
+  REQUIRE(DrawRectangles(empty.BuildFrame()).size() == 1);
+
+  Runtime full{FullProgressBarApp, platform};
+  full.SetViewport({200.0F, 20.0F});
+  const auto full_rectangles = DrawRectangles(full.BuildFrame());
+  REQUIRE(full_rectangles.size() == 2);
+  REQUIRE(full_rectangles[1].rect.width == style.width);
+
+  TestPlatform animated_platform;
+  Runtime animated{IndeterminateProgressBarApp, animated_platform};
+  animated.SetViewport({200.0F, 20.0F});
+  const int requests_before = animated_platform.requested_frames;
+  const auto animated_initial = DrawRectangles(animated.BuildFrame());
+  REQUIRE(animated_initial.size() == 2);
+  REQUIRE(animated_platform.requested_frames == requests_before);
+  REQUIRE(animated.LastCommit().next_frame_deadline == animated_platform.current_time);
+  const float initial_x = animated_initial[1].rect.x;
+  const double animation_duration = style.animation_duration;
+
+  animated_platform.AdvanceTime(animation_duration * 0.4);
+  const auto animated_next = DrawRectangles(animated.BuildFrame());
+  REQUIRE(animated_next.size() == 2);
+  REQUIRE(animated_next[1].rect.x > initial_x);
+
+  animated_platform.AdvanceTime(animation_duration * 0.59);
+  const FlattenedScene& wrapped_scene = animated.BuildFrame();
+  const auto wrapped = DrawRectangles(wrapped_scene);
+  REQUIRE(wrapped.size() == 3);
+  REQUIRE(wrapped[1].rect.width == indeterminate_width);
+  REQUIRE(wrapped[2].rect.width == indeterminate_width);
+  REQUIRE(std::abs(wrapped[2].rect.x - (wrapped[1].rect.x - style.width)) < 0.001F);
+  REQUIRE(
+      std::ranges::count_if(wrapped_scene.Commands(), [](const auto& command) {
+        return std::holds_alternative<PushClipCommand>(command);
+      }) == 1
+  );
+  REQUIRE(
+      std::ranges::count_if(wrapped_scene.Commands(), [](const auto& command) {
+        return std::holds_alternative<PopClipCommand>(command);
+      }) == 1
+  );
+
+  animated_platform.AdvanceTime(animation_duration * 0.02);
+  const auto after_wrap = DrawRectangles(animated.BuildFrame());
+  REQUIRE(after_wrap.size() == 2);
+  REQUIRE(after_wrap[1].rect.x > 0.0F);
+  REQUIRE(after_wrap[1].rect.x < style.width * 0.025F);
+  REQUIRE(after_wrap[1].rect.width == indeterminate_width);
+
+  TestPlatform reduced_platform;
+  Runtime reduced{ReducedMotionProgressBarApp, reduced_platform};
+  reduced.SetViewport({200.0F, 20.0F});
+  const int reduced_requests_before = reduced_platform.requested_frames;
+  const auto reduced_rectangles = DrawRectangles(reduced.BuildFrame());
+  REQUIRE(reduced_rectangles.size() == 2);
+  REQUIRE(reduced_platform.requested_frames == reduced_requests_before);
+  REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
+}
+
+TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
+  const ProgressBarStyle style = ProgressBarStyle::Default();
+  TestPlatform platform;
+  Runtime runtime{AdjustableProgressBarApp, platform};
+  runtime.SetViewport({200.0F, 20.0F});
+  runtime.BuildFrame();
+
+  platform.AdvanceTime(style.animation_duration * 0.25);
+  const auto before_change = DrawRectangles(runtime.BuildFrame());
+  REQUIRE(before_change.size() == 2);
+  REQUIRE(std::abs(before_change[1].rect.x - style.width * 0.25F) < 0.001F);
+
+  const double faster_duration = style.animation_duration * 0.5;
+  progress_bar_animation_duration = faster_duration;
+  const auto duration_changed = DrawRectangles(runtime.BuildFrame());
+  REQUIRE(duration_changed.size() == 2);
+  REQUIRE(std::abs(duration_changed[1].rect.x - before_change[1].rect.x) < 0.001F);
+
+  platform.AdvanceTime(faster_duration * 0.1);
+  const auto faster = DrawRectangles(runtime.BuildFrame());
+  REQUIRE(faster.size() == 2);
+  REQUIRE(std::abs(faster[1].rect.x - style.width * 0.35F) < 0.001F);
 }
 
 TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {

@@ -80,6 +80,8 @@ using huxerui::PopClipCommand;
 using huxerui::PopTransformCommand;
 using huxerui::PopupContext;
 using huxerui::PopupHandle;
+using huxerui::ProgressBar;
+using huxerui::ProgressBarStyle;
 using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
 using huxerui::PushClipCommand;

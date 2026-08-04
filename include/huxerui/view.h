@@ -639,6 +639,13 @@ public:
   explicit ProgressCircle(const State<float>& progress) : ProgressCircle(progress.Get()) {}
 };
 
+class ProgressBar final : public detail::TypedView<ProgressBar> {
+public:
+  ProgressBar();
+  explicit ProgressBar(float progress);
+  explicit ProgressBar(const State<float>& progress) : ProgressBar(progress.Get()) {}
+};
+
 class Scope final : public View {
 public:
   explicit Scope(std::function<View()> factory);

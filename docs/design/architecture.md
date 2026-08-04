@@ -639,6 +639,7 @@ ButtonStyle
 CheckboxStyle
 SwitchStyle
 ProgressCircleStyle
+ProgressBarStyle
 DialogStyle
 BottomSheetStyle
 MenuStyle

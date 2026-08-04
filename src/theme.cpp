@@ -225,6 +225,20 @@ ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec& theme) {
   };
 }
 
+ProgressBarStyle MaterialProgressBarStyle(const ThemeSpec& theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.12F;
+  return {
+      .width = 160.0F,
+      .height = 4.0F,
+      .track_color = track,
+      .indicator_color = theme.colors.primary,
+      .corner_radius = 2.0F,
+      .indeterminate_fraction = 0.35F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow * 4.0,
+  };
+}
+
 ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   Color thumb = theme.colors.on_surface;
   thumb.alpha *= 0.38F;
@@ -341,6 +355,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialCheckboxStyle(theme));
   definition.Set(MaterialSwitchStyle(theme));
   definition.Set(MaterialProgressCircleStyle(theme));
+  definition.Set(MaterialProgressBarStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
   definition.Set(MaterialToastStyle(theme));
   definition.Set(MaterialDialogStyle(theme));
@@ -480,6 +495,20 @@ ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme) {
   };
 }
 
+ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme) {
+  Color track = theme.colors.on_surface;
+  track.alpha *= 0.16F;
+  return {
+      .width = 160.0F,
+      .height = 4.0F,
+      .track_color = track,
+      .indicator_color = theme.colors.primary,
+      .corner_radius = 2.0F,
+      .indeterminate_fraction = 0.35F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow * 4.0,
+  };
+}
+
 } // namespace detail
 
 TextStyle TextStyle::Default() {
@@ -504,6 +533,10 @@ SwitchStyle SwitchStyle::Default() {
 
 ProgressCircleStyle ProgressCircleStyle::Default() {
   return detail::DefaultProgressCircleStyle(ThemeSpec::Default());
+}
+
+ProgressBarStyle ProgressBarStyle::Default() {
+  return detail::DefaultProgressBarStyle(ThemeSpec::Default());
 }
 
 ToastStyle ToastStyle::Default() {

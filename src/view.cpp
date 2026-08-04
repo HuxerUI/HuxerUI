@@ -163,6 +163,44 @@ struct ResolvedProgressCircleStyle {
   using Value = ProgressCircleStyle;
 };
 
+struct ResolvedProgressBarStyle {
+  using Value = ProgressBarStyle;
+};
+
+class LoopingPhase {
+public:
+  bool Reset() {
+    previous_timestamp_.reset();
+    const bool changed = value_ != 0.0F;
+    value_ = 0.0F;
+    return changed;
+  }
+
+  bool Advance(const FrameInfo& frame, double duration) {
+    if (!previous_timestamp_.has_value()) {
+      previous_timestamp_ = frame.timestamp;
+      return false;
+    }
+    const double elapsed = std::max(0.0, frame.timestamp - *previous_timestamp_);
+    previous_timestamp_ = frame.timestamp;
+    if (elapsed <= 0.0) {
+      return false;
+    }
+    const float previous = value_;
+    const double increment = std::fmod(elapsed, duration) / duration;
+    value_ = static_cast<float>(std::fmod(static_cast<double>(value_) + increment, 1.0));
+    return value_ != previous;
+  }
+
+  [[nodiscard]] float Value() const noexcept {
+    return value_;
+  }
+
+private:
+  std::optional<double> previous_timestamp_;
+  float value_ = 0.0F;
+};
+
 struct ToggleVisual {
   static const detail::ModifierDescriptor& Descriptor();
 
@@ -300,28 +338,19 @@ public:
     style_ = node.LayoutValueOr<ResolvedProgressCircleStyle>(ProgressCircleStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
-      animation_start_.reset();
-      phase_ = 0.0F;
+      phase_.Reset();
     }
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
-    const float previous_phase = phase_;
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
-      animation_start_.reset();
-      phase_ = 0.0F;
-      if (phase_ != previous_phase) {
+      if (phase_.Reset()) {
         InvalidatePaint();
       }
       return {};
     }
-    if (!animation_start_.has_value()) {
-      animation_start_ = frame.timestamp;
-    }
-    const double elapsed = std::max(0.0, frame.timestamp - *animation_start_);
-    phase_ = static_cast<float>(std::fmod(elapsed, style_.animation_duration) / style_.animation_duration);
-    if (phase_ != previous_phase) {
+    if (phase_.Advance(frame, style_.animation_duration)) {
       InvalidatePaint();
     }
     return {
@@ -353,7 +382,7 @@ public:
     if (progress <= 0.0F) {
       return;
     }
-    const float start = -pi * 0.5F + (progress_.has_value() ? 0.0F : phase_ * full_circle);
+    const float start = -pi * 0.5F + (progress_.has_value() ? 0.0F : phase_.Value() * full_circle);
     context
         .DrawArc(center, radius, start, progress * full_circle, style_.indicator_color, stroke_width, StrokeCap::Round);
   }
@@ -361,12 +390,108 @@ public:
 private:
   ProgressCircleStyle style_;
   std::optional<float> progress_;
-  std::optional<double> animation_start_;
-  float phase_ = 0.0F;
+  LoopingPhase phase_;
 };
 
 const detail::ModifierDescriptor& ProgressCircleVisual::Descriptor() {
   return detail::ModifierDescriptorFor<ProgressCircleVisual, ProgressCircleVisualExtension>();
+}
+
+struct ProgressBarVisual {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  std::optional<float> progress;
+
+  bool operator==(const ProgressBarVisual&) const = default;
+};
+
+class ProgressBarVisualExtension final : public NodeExtension {
+public:
+  ProgressBarVisualExtension(MountedNode& node, const ProgressBarVisual& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const ProgressBarVisual& modifier) {
+    style_ = node.LayoutValueOr<ResolvedProgressBarStyle>(ProgressBarStyle::Default());
+    if (progress_ != modifier.progress) {
+      progress_ = modifier.progress;
+      phase_.Reset();
+    }
+  }
+
+  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+    static_cast<void>(node);
+    if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
+      if (phase_.Reset()) {
+        InvalidatePaint();
+      }
+      return {};
+    }
+    if (phase_.Advance(frame, style_.animation_duration)) {
+      InvalidatePaint();
+    }
+    return {
+        .needs_frame = true,
+        .wake_after = std::nullopt,
+    };
+  }
+
+  void Paint(const MountedNode& node, PaintContext& context) const override {
+    const Rect frame = node.Bounds();
+    if (frame.width <= 0.0F || frame.height <= 0.0F) {
+      return;
+    }
+
+    const float track_radius = std::clamp(style_.corner_radius, 0.0F, frame.height * 0.5F);
+    if (style_.track_color.alpha > 0.0F) {
+      context.DrawRect(frame, style_.track_color, track_radius);
+    }
+
+    if (style_.indicator_color.alpha <= 0.0F) {
+      return;
+    }
+    const auto draw_indicator = [&](float x, float width) {
+      if (width <= 0.0F) {
+        return;
+      }
+      context.DrawRect(
+          {
+              x,
+              frame.y,
+              width,
+              frame.height,
+          },
+          style_.indicator_color,
+          std::min(track_radius, width * 0.5F)
+      );
+    };
+
+    if (progress_.has_value()) {
+      draw_indicator(frame.x, frame.width * *progress_);
+      return;
+    }
+
+    const float indicator_width = frame.width * std::clamp(style_.indeterminate_fraction, 0.0F, 1.0F);
+    if (indicator_width <= 0.0F) {
+      return;
+    }
+    const float indicator_x = frame.x + frame.width * phase_.Value();
+    context.PushClip(frame, track_radius);
+    draw_indicator(indicator_x, indicator_width);
+    if (indicator_x + indicator_width > frame.x + frame.width) {
+      draw_indicator(indicator_x - frame.width, indicator_width);
+    }
+    context.PopClip();
+  }
+
+private:
+  ProgressBarStyle style_;
+  std::optional<float> progress_;
+  LoopingPhase phase_;
+};
+
+const detail::ModifierDescriptor& ProgressBarVisual::Descriptor() {
+  return detail::ModifierDescriptorFor<ProgressBarVisual, ProgressBarVisualExtension>();
 }
 
 template <class Style>
@@ -435,6 +560,14 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), detail::MakeErasedLayoutValue(style));
     spec.properties.frame.width = std::max(0.0F, style.size);
     spec.properties.frame.height = std::max(0.0F, style.size);
+    return;
+  }
+  if (spec.kind == detail::NodeKind::ProgressBar) {
+    const ProgressBarStyle style =
+        ResolveStyleOverride<ProgressBarStyle>(spec.environment).value_or(detail::DefaultProgressBarStyle(theme));
+    spec.layout_values.insert_or_assign(typeid(ResolvedProgressBarStyle), detail::MakeErasedLayoutValue(style));
+    spec.properties.frame.width = std::max(0.0F, style.width);
+    spec.properties.frame.height = std::max(0.0F, style.height);
   }
 }
 
@@ -479,6 +612,15 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressCircle);
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeProgressBarSpec(std::optional<float> progress) {
+  if (progress.has_value()) {
+    progress = NormalizeProgress(*progress);
+  }
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressBar);
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressBarVisual{progress}));
   return spec;
 }
 
@@ -812,6 +954,10 @@ Switch::Switch(bool checked)
 ProgressCircle::ProgressCircle() : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(std::nullopt)) {}
 
 ProgressCircle::ProgressCircle(float progress) : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(progress)) {}
+
+ProgressBar::ProgressBar() : detail::TypedView<ProgressBar>(MakeProgressBarSpec(std::nullopt)) {}
+
+ProgressBar::ProgressBar(float progress) : detail::TypedView<ProgressBar>(MakeProgressBarSpec(progress)) {}
 
 Canvas::Canvas(CanvasPainter painter) : View(MakeCanvasSpec(std::move(painter))) {}
 

@@ -182,6 +182,20 @@ struct ProgressCircleStyle {
   bool operator==(const ProgressCircleStyle&) const = default;
 };
 
+struct ProgressBarStyle {
+  float width = 160.0F;
+  float height = 4.0F;
+  Color track_color = Color::Rgb(87, 96, 106, 0.16F);
+  Color indicator_color = Color::Rgb(31, 111, 235);
+  float corner_radius = 2.0F;
+  float indeterminate_fraction = 0.35F;
+  double animation_duration = 1.2;
+
+  static ProgressBarStyle Default();
+
+  bool operator==(const ProgressBarStyle&) const = default;
+};
+
 class ThemeDefinition;
 
 namespace detail {
@@ -277,6 +291,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
 ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);
+ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme);
 
 } // namespace detail
 
