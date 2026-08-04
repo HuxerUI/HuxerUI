@@ -100,6 +100,18 @@ std::string FromByteArray(JNIEnv* environment, jbyteArray bytes) {
 
 Key TranslateKey(jint key_code) {
   switch (key_code) {
+  case AKEYCODE_SHIFT_LEFT:
+  case AKEYCODE_SHIFT_RIGHT:
+    return Key::Shift;
+  case AKEYCODE_CTRL_LEFT:
+  case AKEYCODE_CTRL_RIGHT:
+    return Key::Control;
+  case AKEYCODE_ALT_LEFT:
+  case AKEYCODE_ALT_RIGHT:
+    return Key::Alt;
+  case AKEYCODE_META_LEFT:
+  case AKEYCODE_META_RIGHT:
+    return Key::Meta;
   case AKEYCODE_TAB:
     return Key::Tab;
   case AKEYCODE_ENTER:

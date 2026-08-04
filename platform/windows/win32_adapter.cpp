@@ -135,6 +135,21 @@ private:
 };
 Key TranslateKey(WPARAM virtual_key) {
   switch (virtual_key) {
+  case VK_SHIFT:
+  case VK_LSHIFT:
+  case VK_RSHIFT:
+    return Key::Shift;
+  case VK_CONTROL:
+  case VK_LCONTROL:
+  case VK_RCONTROL:
+    return Key::Control;
+  case VK_MENU:
+  case VK_LMENU:
+  case VK_RMENU:
+    return Key::Alt;
+  case VK_LWIN:
+  case VK_RWIN:
+    return Key::Meta;
   case VK_TAB:
     return Key::Tab;
   case VK_RETURN:
@@ -803,18 +818,22 @@ private:
       return 0;
     }
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
       text_input_.ClearPendingResult();
-      if (text_input_.Active() && (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
+      if (message == WM_KEYDOWN && text_input_.Active() &&
+          (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
         return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
       }
       SendKey(KeyEventType::Down, w_param, l_param);
-      return 0;
+      return message == WM_SYSKEYDOWN ? DefWindowProcW(window, message, w_param, l_param) : 0;
     case WM_KEYUP:
-      if (text_input_.Active() && (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
+    case WM_SYSKEYUP:
+      if (message == WM_KEYUP && text_input_.Active() &&
+          (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
         return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
       }
       SendKey(KeyEventType::Up, w_param, l_param);
-      return 0;
+      return message == WM_SYSKEYUP ? DefWindowProcW(window, message, w_param, l_param) : 0;
     case WM_CHAR:
       return text_input_.CommitCharacter(static_cast<wchar_t>(w_param))
                  ? 0

@@ -174,6 +174,7 @@ private:
   const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
   void InvalidateLayers();
+  void DeactivateLayerInput(LayerId id);
   void InvalidateLayerPlacement(LayerId id);
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);

@@ -43,6 +43,7 @@ double TimevalSeconds(const timeval& value) noexcept {
   huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
   NSPoint huxeruiPointerPosition;
   NSTrackingArea* huxeruiTrackingArea;
+  NSEventModifierFlags huxeruiModifierFlags;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
@@ -646,6 +647,37 @@ int RunPlatformApp(AppDefinition definition) {
   [self sendKeyEvent:event type:huxerui::KeyEventType::Up];
 }
 
+- (void)flagsChanged:(NSEvent*)event {
+  const huxerui::KeyEvent key_event = huxerui::detail::MakeMacKeyEvent(event, huxerui::KeyEventType::Down);
+  NSEventModifierFlags modifier_flag = 0;
+  switch (key_event.key) {
+  case huxerui::Key::Shift:
+    modifier_flag = NSEventModifierFlagShift;
+    break;
+  case huxerui::Key::Control:
+    modifier_flag = NSEventModifierFlagControl;
+    break;
+  case huxerui::Key::Alt:
+    modifier_flag = NSEventModifierFlagOption;
+    break;
+  case huxerui::Key::Meta:
+    modifier_flag = NSEventModifierFlagCommand;
+    break;
+  default:
+    break;
+  }
+
+  const NSEventModifierFlags next_flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+  // HuxerUI collapses left and right modifiers, so only emit the first press and final release.
+  const bool was_down = modifier_flag != 0 && (huxeruiModifierFlags & modifier_flag) != 0;
+  const bool is_down = modifier_flag != 0 && (next_flags & modifier_flag) != 0;
+  huxeruiModifierFlags = next_flags;
+  if (was_down == is_down) {
+    return;
+  }
+  [self sendKeyEvent:event type:is_down ? huxerui::KeyEventType::Down : huxerui::KeyEventType::Up];
+}
+
 - (void)cancelOperation:(id)sender {
   static_cast<void>(sender);
   [self cancelPointer];
@@ -654,6 +686,7 @@ int RunPlatformApp(AppDefinition definition) {
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow {
   if (newWindow == nil) {
     [self cancelPointer];
+    huxeruiModifierFlags = 0;
   }
   [super viewWillMoveToWindow:newWindow];
 }

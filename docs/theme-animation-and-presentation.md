@@ -39,7 +39,7 @@ View AccentTheme(Factory&& content) {
 
 Explicit modifiers such as `Background`, `Foreground`, and `FontSize` are applied after Theme resolution and therefore win.
 
-To customize Material semantic tokens while retaining Material component mapping:
+To customize built-in semantic tokens while retaining that Theme's complete component mapping:
 
 ```cpp
 template <class Factory>
@@ -51,9 +51,13 @@ View BrandTheme(Factory&& content) {
 }
 ```
 
+`FlatTheme(theme, content)` provides the same token-to-style rebuild path for a branded Flat Theme.
+
+Built-in Theme elevation shadows use a zero two-dimensional offset. Elevation controls their falloff through blur radius, while the shadow color controls opacity. An explicit `Shadow` modifier remains available when custom content needs a directional drop shadow.
+
 ## Indications
 
-Interactive built-ins derive hover, focus, pressed, disabled, and ripple or state-overlay treatment from the nearest Theme. Pointer and keyboard activation share the same semantic state transitions.
+Interactive built-ins derive hover, focus, pressed, disabled, and ripple or state-overlay treatment from the nearest Theme. Pointer and keyboard activation share the same semantic state transitions. Component-owned transparent actions, such as Dialog actions and Menu items, use the indication stored in their component style instead of inheriting the filled Button indication.
 
 An explicit `Indication` modifier can replace the default interaction visual for a custom control. `NoIndication` disables it deliberately.
 
@@ -88,7 +92,7 @@ Presentation transforms do not change measured size or parent layout. They trans
 
 Animation state is retained by the mounted node extension. Compatible recomposition retargets from the current presentation value rather than restarting from the previous declaration. Reduced-motion themes resolve animations immediately where appropriate.
 
-Dialog and BottomSheet use the same animation values for their retained layer transitions. Dialog fades and scales its content, while BottomSheet fades the modal barrier and translates its sheet from the bottom edge. Dismissal disables content input immediately and removes the retained layer only after its exit animation completes.
+Dialog, BottomSheet, Menu, and Toast use the same retained Layer transition machinery when their active style enables motion. Dialog resolves fade, scale, or slide policy from `DialogStyle`, while BottomSheet fades the modal barrier and translates its sheet from the bottom edge. Dismissal disables content input immediately and removes the retained layer only after its exit animation completes.
 
 ## Toast
 
@@ -102,7 +106,7 @@ return Button("Saved").OnClick([toast] {
 });
 ```
 
-Toast captures the current Environment when shown, draws above application content, passes input through, and dismisses after its configured duration.
+Toast captures the current Environment when shown, draws above application content, passes input through, and dismisses after its configured duration. `ToastStyle` controls text and surface styling, width, viewport padding, top or bottom placement, shadow, and optional motion.
 
 ## Dialog
 
@@ -110,7 +114,7 @@ Declarative Dialog keeps visibility in application state:
 
 ```cpp
 Button("Open").With(
-    Dialog{
+    Dialog {
         .visible = visible,
         .content = ConfirmDialog,
         .dismiss_on_outside_press = true,
@@ -127,9 +131,27 @@ Command-oriented presentation uses the per-window Dialog service:
 auto dialog = UseDialog();
 
 return Button("Open").OnClick([dialog] {
-  dialog.Show(ConfirmDialog);
+  dialog.Show("Network unavailable", "Check your connection and try again.");
 });
 ```
+
+The shortcut creates a standard themed Dialog with one default positive action. Supply positive and negative labels when both actions are needed:
+
+```cpp
+dialog.Show("Save changes?", "The current document has unsaved changes.", "Save", SaveDocument);
+
+dialog.Show(
+    "Delete item?",
+    "This action cannot be undone.",
+    "Delete",
+    "Cancel",
+    DeleteItem
+);
+```
+
+Each built-in Theme installs complete Dialog, BottomSheet, Menu, and Toast styles in addition to its control styles. Presentation services resolve those typed values without branching on Theme identity. Popup remains an arbitrary anchored-content primitive and therefore does not impose a themed surface on its content.
+
+`StringVariant` lets standard Dialog, Toast, and Menu values retain either direct text or `StringResource` until they are composed in the captured Environment. Empty standard Dialog action labels currently fall back to `OK` and `Cancel`; framework-owned localization remains part of the planned built-in resource bundle. `DialogStyle` owns the standard surface, typography, content geometry, positive and negative action appearance and indication, vertical placement, scrim, and optional `PresentationMotion`, so Material, Flat, and future platform themes can keep one semantic request while presenting it differently.
 
 Modal layers trap focus and restore the previously focused node after its exit transition completes. The topmost modal layer controls outside-press dismissal and its scrim. Setting `dismiss_on_cancel` to `false` consumes Cancel without dismissing the presentation, so Back or Escape cannot close content behind it or leave the native window. `DialogStyle` and `BottomSheetStyle` independently define their scrim and motion, while BottomSheet also owns its surface, maximum width, corner radius, and shadow.
 
@@ -139,7 +161,7 @@ For lifecycle and rendering details, see the [architecture design](design/archit
 
 Command-oriented, per-window services are the primary API for temporary presentation.
 
-Dialog remains explicit and ergonomic rather than being replaced by a generic presentation mode:
+Custom Dialog content remains available when the standard title, message, and action model is not sufficient:
 
 ```cpp
 auto dialog = UseDialog();
@@ -217,6 +239,8 @@ Menu accepts a recursive sequence of semantic `MenuItem` values rather than an a
 Only the root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, which keeps every visible ancestor interactive and lets sibling submenus replace one another without blocking their parent. Back closes the deepest open level, the default outside-press behavior or a leaf action closes the complete chain, and focus is restored when the root closes. A custom `on_dismiss_request` remains a request callback and decides whether to close the menu. Disabled and checked items, Material ripple, and Flat state-overlay feedback are provided consistently by the framework. Arbitrary custom anchored content belongs in Popup.
 
 Menu surfaces use the widest item's natural width plus themed content padding, subject to `MenuStyle::minimum_width` and viewport constraints. Set `MenuOptions::width` only when one menu needs an explicit surface width. Items without an image or checked marker do not reserve a hidden leading slot, and section separators stretch only after the surface width has been resolved.
+
+`MenuStyle::item_indication` controls item hover and pressed feedback independently from ordinary Buttons. `MenuStyle::motion` controls root and submenu fade, scale, or slide treatment. An empty optional motion attaches no retained animation extension, while Material themes use a short scale-and-fade transition.
 
 Each Popup or Menu handle owns at most one active entry, so calling `Show()` or `ShowAt()` again replaces its previous entry. `PopupContext` can dismiss arbitrary popup content directly; Menu actions dismiss automatically and do not expose layer identity to the item model.
 

@@ -4,8 +4,8 @@ Status: initial implementation
 
 This document defines application resource identity, packaging, resolution, immutable image and raw assets, the Image component, image paint commands, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, macOS, and Windows, Runtime-owned resolution, raw assets, positional localized strings, ImageAsset, Image, image PaintCommands, native image caches, and generated-assets wiring for the repository Android demo.
-SDK manifest integration, reusable consumer Gradle integration, module bundle merging, framework string migration, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
+The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, macOS, and Windows, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, Image, image PaintCommands, native image caches, and generated-assets wiring for the repository Android demo.
+SDK manifest integration, reusable consumer Gradle integration, module bundle merging, built-in framework string bundles, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
 
@@ -112,6 +112,7 @@ std::string UseString(StringResource resource, Arguments&&... arguments);
 
 These operations read the current root service and Environment but do not allocate ordered UseState slots.
 There is no public mutable ResourceManager, global resource singleton, or second context system.
+Deferred presentation APIs use `StringVariant`, which stores direct text or a `StringResource` and its positional arguments until composition occurs in the captured Environment.
 Text also accepts a zero-argument StringResource directly and mirrors its existing Format surface for localized arguments:
 
 ```cpp
@@ -123,7 +124,7 @@ Text::Format(TextRole::Label, app_resources::strings::file_count, user_name, fil
 
 The constructors keep the common static-string case compact.
 The named Format operation avoids a variadic constructor that could conflict with TextRole or future Text configuration.
-UseString remains the general operation for Button labels, placeholders, presentation messages, and application logic.
+Button and TextField placeholder provide direct StringResource overloads. UseString remains the explicit operation for application logic and Validation that need the resolved UTF-8 value immediately. StringVariant retains direct text or a StringResource with positional arguments for Dialog, Toast, and Menu APIs that may be composed after the call returns.
 
 ## Build and package model
 
@@ -655,6 +656,7 @@ Missing or extra arguments produce `std::invalid_argument` diagnostics containin
 Text::Format with a string view remains the lightweight formatter for non-localized application text.
 Its StringResource overload performs locale resolution and message validation before Text stores the final UTF-8 value.
 UseString exposes the same resolution for non-Text consumers.
+StringVariant::Format retains the resource identity and formatted arguments until a deferred consumer composes in its captured Environment.
 
 ### Deferred plural and select messages
 
@@ -685,7 +687,7 @@ huxerui:strings/select_all
 The framework bundle provides a default locale and supported translations.
 An application override is explicit and validated rather than achieved by claiming the framework domain.
 
-Once framework localization is implemented, ad hoc built-in label Environment values should be removed in the same breaking change rather than retained as legacy aliases.
+Once framework localization is implemented, current internal fallback labels move into the framework bundle without adding an ad hoc public label Environment value.
 
 ## Invalidation and retained rendering
 

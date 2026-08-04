@@ -56,7 +56,7 @@ public:
   [[nodiscard]] ResourceConfiguration Configuration() const noexcept;
   [[nodiscard]] RawAsset Resolve(RawResource resource);
   [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale);
-  [[nodiscard]] ResolvedStringResource Resolve(StringResource resource, const Locale& locale) const;
+  [[nodiscard]] ResolvedStringResource Resolve(const StringResource& resource, const Locale& locale) const;
 
 private:
   [[nodiscard]] const ResourceIndexEntry&

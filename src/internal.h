@@ -106,6 +106,7 @@ public:
   explicit DebugMetricsState(PlatformAdapter& platform) : platform_(&platform) {}
 
   void RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept;
+  void ResetSampling() noexcept;
   DebugMetricsSnapshot Sample(double timestamp) noexcept;
 
 private:
@@ -127,6 +128,7 @@ void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> m
 enum class LayerPlacementKind : std::uint8_t {
   Natural,
   Center,
+  TopCenter,
   BottomCenter,
   Fill,
   Anchored,
@@ -149,7 +151,10 @@ struct LayerTransitionState {
   // LayerEntry owns this while retained modifiers observe it. The completion callback holds the controller weakly and
   // removes the entry only after the exit value settles.
   bool target_visible = true;
+  // A transition attached to content that is already visible starts settled and is retained only for its later exit.
+  bool enter_on_mount = true;
   bool reduced_motion = false;
+  float hidden_opacity = 0.0F;
   AnimationSpec enter = TweenSpec{.duration = 0.2};
   AnimationSpec exit = TweenSpec{.duration = 0.14};
   std::function<void()> on_exit_complete;

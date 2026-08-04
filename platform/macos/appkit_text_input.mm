@@ -25,6 +25,18 @@ namespace {
 
 Key TranslateKey(unsigned short key_code) {
   switch (key_code) {
+  case 56:
+  case 60:
+    return Key::Shift;
+  case 59:
+  case 62:
+    return Key::Control;
+  case 58:
+  case 61:
+    return Key::Alt;
+  case 54:
+  case 55:
+    return Key::Meta;
   case 48:
     return Key::Tab;
   case 36:

@@ -66,20 +66,7 @@ LayerId LayerController::AttachCaptured(
           .transition = std::move(transition),
       }
   );
-  if (state_->entries.back().transition) {
-    state_->entries.back().transition->on_exit_complete = [state = std::weak_ptr<State>(state_), id] {
-      const std::shared_ptr<State> locked = state.lock();
-      if (!locked || locked->runtime == nullptr) {
-        return;
-      }
-      const auto found = std::ranges::find(locked->entries, id, &detail::LayerEntry::id);
-      if (found == locked->entries.end()) {
-        return;
-      }
-      locked->entries.erase(found);
-      locked->runtime->InvalidateLayers();
-    };
-  }
+  BindTransitionCompletion(id, state_->entries.back().transition);
   state_->runtime->InvalidateLayers();
   return id;
 }
@@ -100,12 +87,61 @@ bool LayerController::UpdatePlacement(LayerId id, detail::LayerPlacement placeme
   return true;
 }
 
+std::optional<LayerOptions> LayerController::EntryOptions(LayerId id) const {
+  if (state_->runtime == nullptr) {
+    return std::nullopt;
+  }
+  const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
+  return found == state_->entries.end() ? std::nullopt : std::optional<LayerOptions>{found->options};
+}
+
 std::shared_ptr<detail::LayerTransitionState> LayerController::Transition(LayerId id) const {
   if (state_->runtime == nullptr) {
     return {};
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
   return found == state_->entries.end() ? nullptr : found->transition;
+}
+
+void LayerController::BindTransitionCompletion(
+    LayerId id, const std::shared_ptr<detail::LayerTransitionState>& transition
+) const {
+  if (!transition) {
+    return;
+  }
+  transition->on_exit_complete = [state = std::weak_ptr<State>(state_),
+                                  transition = std::weak_ptr<detail::LayerTransitionState>(transition),
+                                  id] {
+    const std::shared_ptr<State> locked = state.lock();
+    const std::shared_ptr<detail::LayerTransitionState> completed = transition.lock();
+    if (!locked || locked->runtime == nullptr || !completed) {
+      return;
+    }
+    const auto found = std::ranges::find(locked->entries, id, &detail::LayerEntry::id);
+    if (found == locked->entries.end() || found->transition != completed) {
+      return;
+    }
+    locked->entries.erase(found);
+    locked->runtime->InvalidateLayers();
+  };
+}
+
+bool LayerController::UpdateTransition(LayerId id, std::shared_ptr<detail::LayerTransitionState> transition) const {
+  if (state_->runtime == nullptr) {
+    return false;
+  }
+  const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
+  if (found == state_->entries.end()) {
+    return false;
+  }
+  if (found->transition == transition) {
+    return true;
+  }
+  found->transition = std::move(transition);
+  BindTransitionCompletion(id, found->transition);
+  ++found->revision;
+  state_->runtime->InvalidateLayers();
+  return true;
 }
 
 bool LayerController::Update(LayerId id, ViewFactory content) const {
@@ -171,10 +207,12 @@ bool LayerController::Dismiss(LayerId id) const {
     found->transition->target_visible = false;
     ++found->revision;
     state_->runtime->InvalidateLayers();
+    state_->runtime->DeactivateLayerInput(id);
     return true;
   }
   state_->entries.erase(found);
   state_->runtime->InvalidateLayers();
+  state_->runtime->DeactivateLayerInput(id);
   return true;
 }
 

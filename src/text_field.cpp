@@ -390,8 +390,10 @@ public:
     }
 
     if (node.focused && editing_.value.selection.IsCollapsed() && caret_visible_) {
-      Rect caret =
-          OffsetRect(text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity), origin);
+      Rect caret = OffsetRect(
+          text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity),
+          origin
+      );
       caret.width = std::max(1.0F, caret.width);
       context.DrawRect(caret, style_.caret);
     }
@@ -1828,6 +1830,10 @@ TextField::TextField(TextEditingValue value)
     throw std::invalid_argument("HuxerUI TextField value is invalid");
   }
   UpdateModifier();
+}
+
+TextField TextField::Placeholder(StringResource resource) && {
+  return std::move(*this).Placeholder(UseString(std::move(resource)));
 }
 
 TextField TextField::Placeholder(std::string value) && {

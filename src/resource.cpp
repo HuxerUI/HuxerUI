@@ -14,6 +14,22 @@
 
 namespace huxerui {
 
+StringVariant::StringVariant(std::string value) : value_(std::move(value)) {}
+
+StringVariant::StringVariant(std::string_view value) : value_(std::string(value)) {}
+
+StringVariant::StringVariant(const char* value) : value_(value == nullptr ? std::string{} : std::string(value)) {}
+
+StringVariant::StringVariant(StringResource resource) : value_(std::move(resource)) {}
+
+StringVariant::StringVariant(StringResource resource, std::vector<std::string> arguments)
+    : value_(std::move(resource)), arguments_(std::move(arguments)) {}
+
+bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept {
+  const auto* literal = std::get_if<std::string>(&value.value_);
+  return literal != nullptr && literal->empty();
+}
+
 namespace {
 
 bool IsAsciiAlpha(char value) noexcept {

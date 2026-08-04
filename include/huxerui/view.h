@@ -522,6 +522,7 @@ public:
 
 class Button final : public View {
 public:
+  explicit Button(StringResource resource);
   explicit Button(std::string label);
   explicit Button(std::string_view label);
   explicit Button(const char* label);
@@ -578,6 +579,7 @@ public:
   explicit TextField(TextEditingValue value);
   explicit TextField(const State<TextEditingValue>& value) : TextField(value.Get()) {}
 
+  TextField Placeholder(StringResource resource) &&;
   TextField Placeholder(std::string value) &&;
   TextField Placeholder(std::string_view value) &&;
   TextField Placeholder(const char* value) &&;

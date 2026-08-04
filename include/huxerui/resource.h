@@ -10,14 +10,20 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <huxerui/geometry.h>
 
 namespace huxerui {
 
+class StringVariant;
+
 namespace detail {
 class ResourceAccess;
+bool IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
+std::string ResolveStringVariant(const StringVariant& value);
+std::string ResolveStringVariant(StringVariant&& value);
 } // namespace detail
 
 class ResourceId {
@@ -53,6 +59,30 @@ public:
   using ResourceId::ResourceId;
 
   bool operator==(const StringResource&) const = default;
+};
+
+// Retains either direct text or a localized template for APIs that compose the value after the call returns.
+class StringVariant {
+public:
+  StringVariant() = default;
+  StringVariant(std::string value);
+  StringVariant(std::string_view value);
+  StringVariant(const char* value);
+  StringVariant(StringResource resource);
+
+  template <class... Arguments> static StringVariant Format(StringResource resource, Arguments&&... arguments);
+
+  bool operator==(const StringVariant&) const = default;
+
+private:
+  StringVariant(StringResource resource, std::vector<std::string> arguments);
+
+  std::variant<std::string, StringResource> value_;
+  std::vector<std::string> arguments_;
+
+  friend bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
+  friend std::string detail::ResolveStringVariant(const StringVariant& value);
+  friend std::string detail::ResolveStringVariant(StringVariant&& value);
 };
 
 class RawResource final : public ResourceId {
@@ -168,7 +198,7 @@ ImageAsset UseImage(ImageResource resource);
 
 namespace detail {
 
-std::string UseStringArguments(StringResource resource, std::span<const std::string> arguments);
+std::string UseStringArguments(const StringResource& resource, std::span<const std::string> arguments);
 
 template <class Value> std::string FormatResourceArgument(Value&& value) {
   std::ostringstream stream;
@@ -183,7 +213,14 @@ template <class... Arguments> std::string UseString(StringResource resource, Arg
   const std::vector<std::string> formatted{
       detail::FormatResourceArgument(std::forward<Arguments>(arguments))...,
   };
-  return detail::UseStringArguments(std::move(resource), formatted);
+  return detail::UseStringArguments(resource, formatted);
+}
+
+template <class... Arguments> StringVariant StringVariant::Format(StringResource resource, Arguments&&... arguments) {
+  std::vector<std::string> formatted{
+      detail::FormatResourceArgument(std::forward<Arguments>(arguments))...,
+  };
+  return StringVariant(std::move(resource), std::move(formatted));
 }
 
 } // namespace huxerui

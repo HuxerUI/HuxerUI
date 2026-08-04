@@ -1,6 +1,7 @@
 #include <huxerui/app.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,25 @@ namespace huxerui::detail {
 namespace {
 
 using emscripten::val;
+
+constexpr std::array web_key_order{
+    Key::Unknown,   Key::Tab,        Key::Enter,   Key::Space,     Key::Escape, Key::Backspace, Key::Delete,
+    Key::ArrowLeft, Key::ArrowRight, Key::ArrowUp, Key::ArrowDown, Key::Home,   Key::End,       Key::PageUp,
+    Key::PageDown,  Key::A,          Key::C,       Key::V,         Key::X,      Key::Y,         Key::Z,
+    Key::Shift,     Key::Control,    Key::Alt,     Key::Meta,
+};
+
+static_assert(
+    [] {
+      for (std::size_t index = 0; index < web_key_order.size(); ++index) {
+        if (static_cast<std::size_t>(web_key_order[index]) != index) {
+          return false;
+        }
+      }
+      return true;
+    }(),
+    "HuxerUI Web key mapping must match the Key enum order"
+);
 
 class WebSession;
 
@@ -296,6 +316,14 @@ EM_JS(
           case "z":
           case "Z":
             return 20;
+          case "Shift":
+            return 21;
+          case "Control":
+            return 22;
+          case "Alt":
+            return 23;
+          case "Meta":
+            return 24;
           default:
             return 0;
           }

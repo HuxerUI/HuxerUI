@@ -119,7 +119,11 @@ View LocalizedResourceApp() {
 }
 
 View DirectLocalizedResourceApp() {
-  return Text(StringResource("test", "strings/title"), TextRole::Title);
+  return Column {
+    Text(StringResource("test", "strings/title"), TextRole::Title),
+    Button(StringResource("test", "strings/action")),
+    TextField(TextEditingValue::FromText("")).Placeholder(StringResource("test", "strings/placeholder")),
+  };
 }
 
 View MissingResourceArgumentsApp() {
@@ -222,7 +226,7 @@ TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   REQUIRE(FirstText(runtime.BuildFrame()) == "Hello Ada");
 }
 
-TEST_CASE("TextResolvesStringResourcesDirectly") {
+TEST_CASE("TextAndControlsResolveStringResourcesDirectly") {
   TestResources resources;
   resources.assets.emplace(
       detail::resource_index_path,
@@ -238,16 +242,45 @@ TEST_CASE("TextResolvesStringResourcesDirectly") {
               .key = "strings/title",
               .mime_type = "text/plain",
               .locale = "zh",
-              .value = "标题",
+              .value = "Localized title",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/action",
+              .mime_type = "text/plain",
+              .value = "Action",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/action",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Localized action",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/placeholder",
+              .mime_type = "text/plain",
+              .value = "Placeholder",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/placeholder",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Localized placeholder",
           },
       })
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
   Runtime runtime{DirectLocalizedResourceApp, platform};
-  runtime.SetViewport({200.0F, 60.0F});
+  runtime.SetViewport({200.0F, 160.0F});
 
-  REQUIRE(FirstText(runtime.BuildFrame()) == "标题");
+  const FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(ContainsText(scene, "Localized title"));
+  REQUIRE(ContainsText(scene, "Localized action"));
+  REQUIRE(ContainsText(scene, "Localized placeholder"));
 }
 
 TEST_CASE("MenuItemsResolveStringAndImageResources") {
@@ -262,6 +295,13 @@ TEST_CASE("MenuItemsResolveStringAndImageResources") {
               .key = "strings/menu_item",
               .mime_type = "text/plain",
               .value = "Resource item",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/greeting",
+              .mime_type = "text/plain",
+              .value = "Hello {0}",
+              .argument_count = 1,
           },
           {
               .kind = detail::ResourceEntryKind::Image,
@@ -284,17 +324,54 @@ TEST_CASE("MenuItemsResolveStringAndImageResources") {
   REQUIRE(resource_menu.has_value());
 
   resource_menu->Show({
-      MenuItem(
-          ImageResource("test", "images/menu_icon"),
-          StringResource("test", "strings/menu_item"),
-          [] {}
-      ),
+      MenuItem(ImageResource("test", "images/menu_icon"), StringResource("test", "strings/menu_item"), [] {}),
+      MenuItem(StringVariant::Format(StringResource("test", "strings/greeting"), "Ada"), [] {}),
   });
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "Resource item"));
+  REQUIRE(ContainsText(shown, "Hello Ada"));
   REQUIRE(std::ranges::any_of(shown.Commands(), [](const PaintCommand& command) {
     return std::holds_alternative<huxerui::DrawImageCommand>(command);
   }));
+}
+
+TEST_CASE("PresentedStringVariantsRefreshWhenTheResourceConfigurationChanges") {
+  resource_menu.reset();
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/menu_item",
+              .mime_type = "text/plain",
+              .value = "English item",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/menu_item",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Chinese item",
+          },
+      })
+  );
+
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{ResourceMenuApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+  REQUIRE(resource_menu.has_value());
+
+  resource_menu->Show({MenuItem(StringResource("test", "strings/menu_item"), [] {})});
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Chinese item"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(!ContainsText(updated, "Chinese item"));
+  REQUIRE(ContainsText(updated, "English item"));
 }
 
 TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {

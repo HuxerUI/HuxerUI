@@ -3,8 +3,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string>
-#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -12,9 +10,12 @@
 #include <huxerui/animation.h>
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
+#include <huxerui/indication.h>
 #include <huxerui/layer.h>
+#include <huxerui/layout.h>
 #include <huxerui/modifier.h>
 #include <huxerui/resource.h>
+#include <huxerui/text.h>
 
 namespace huxerui {
 
@@ -31,11 +32,31 @@ class ToastService;
 struct LayerAnchorState;
 } // namespace detail
 
+struct PresentationMotion {
+  float initial_scale = 1.0F;
+  float slide_distance = 0.0F;
+  AnimationSpec enter = TweenSpec{.duration = 0.2};
+  AnimationSpec exit = TweenSpec{.duration = 0.14};
+
+  bool operator==(const PresentationMotion&) const = default;
+};
+
+enum class VerticalPlacement {
+  Top,
+  Center,
+  Bottom,
+};
+
 struct ToastStyle {
   Color background = Color::Rgb(31, 35, 40, 0.94F);
-  Color foreground = Color::White();
-  float padding = 12.0F;
+  TextStyle text_style{Font::System(14.0F), Color::White()};
+  EdgeInsets padding = EdgeInsets::Symmetric(16.0F, 12.0F);
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.24F), {}, 10.0F, 0.0F};
   float corner_radius = 8.0F;
+  float maximum_width = 480.0F;
+  EdgeInsets viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F};
+  VerticalPlacement placement = VerticalPlacement::Bottom;
+  std::optional<PresentationMotion> motion;
 
   static ToastStyle Default();
 
@@ -44,8 +65,35 @@ struct ToastStyle {
 
 struct DialogStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
-  AnimationSpec enter = TweenSpec{.duration = 0.2};
-  AnimationSpec exit = TweenSpec{.duration = 0.14};
+  Color background = Color::White();
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.24F), {}, 24.0F, 0.0F};
+  TextStyle title_style{Font::System(20.0F).WithWeight(FontWeight::Bold), Color::Rgb(31, 35, 40)};
+  TextStyle message_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  TextStyle positive_action_style{Font::System(14.0F), Color::White()};
+  TextStyle negative_action_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  Color positive_action_background = Color::Rgb(31, 111, 235);
+  Color negative_action_background = Color::Transparent();
+  IndicationSpec positive_action_indication = StateOverlayIndication{
+      .color = Color::Rgb(255, 255, 255, 0.18F),
+      .hover_color = Color::Rgb(255, 255, 255, 0.1F),
+  };
+  IndicationSpec negative_action_indication = StateOverlayIndication{};
+  Color action_separator_color = Color::Rgb(31, 35, 40, 0.12F);
+  EdgeInsets content_padding = EdgeInsets::All(24.0F);
+  EdgeInsets action_padding = EdgeInsets::Symmetric(14.0F, 8.0F);
+  float content_spacing = 12.0F;
+  float action_spacing = 8.0F;
+  float action_separator_thickness = 0.0F;
+  float action_corner_radius = 6.0F;
+  float minimum_action_height = 36.0F;
+  float corner_radius = 12.0F;
+  float maximum_width = 480.0F;
+  float viewport_margin = 24.0F;
+  VerticalPlacement placement = VerticalPlacement::Center;
+  HorizontalAlignment content_alignment = HorizontalAlignment::Start;
+  Axis action_layout = Axis::Horizontal;
+  HorizontalAlignment action_alignment = HorizontalAlignment::End;
+  std::optional<PresentationMotion> motion = PresentationMotion{};
 
   static DialogStyle Default();
 
@@ -55,7 +103,7 @@ struct DialogStyle {
 struct BottomSheetStyle {
   Color scrim = Color::Rgb(0, 0, 0, 0.42F);
   Color background = Color::White();
-  Shadow shadow{Color::Rgb(0, 0, 0, 0.22F), {0.0F, -2.0F}, 18.0F, 0.0F};
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.22F), {}, 18.0F, 0.0F};
   float corner_radius = 14.0F;
   float maximum_width = 640.0F;
   AnimationSpec enter = TweenSpec{.duration = 0.24};
@@ -75,6 +123,7 @@ enum class MenuSeparatorMode {
 struct MenuStyle {
   Color background = Color::White();
   Color foreground = Color::Rgb(31, 35, 40);
+  IndicationSpec item_indication = StateOverlayIndication{};
   Color separator_color = Color::Rgb(31, 35, 40, 0.12F);
   MenuSeparatorMode separator_mode = MenuSeparatorMode::BetweenItems;
   float separator_thickness = 1.0F;
@@ -83,10 +132,11 @@ struct MenuStyle {
   EdgeInsets item_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
   float item_content_spacing = 8.0F;
   float icon_size = 18.0F;
-  Shadow shadow{Color::Rgb(0, 0, 0, 0.2F), {0.0F, 4.0F}, 16.0F, 0.0F};
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.2F), {}, 16.0F, 0.0F};
   float corner_radius = 8.0F;
   float minimum_width = 180.0F;
   float minimum_item_height = 36.0F;
+  std::optional<PresentationMotion> motion;
 
   static MenuStyle Default();
 
@@ -101,7 +151,7 @@ struct ToastOptions {
 
 class ToastHandle {
 public:
-  LayerId Show(std::string message, ToastOptions options = {}) const;
+  LayerId Show(StringVariant message, ToastOptions options = {}) const;
   bool Dismiss(LayerId id) const;
 
 private:
@@ -145,6 +195,22 @@ using DialogFactory = std::function<View(DialogContext)>;
 
 class DialogHandle {
 public:
+  LayerId Show(
+      StringVariant title,
+      StringVariant message,
+      StringVariant positive = {},
+      std::function<void()> on_positive_click = {},
+      DialogOptions options = {}
+  ) const;
+  LayerId Show(
+      StringVariant title,
+      StringVariant message,
+      StringVariant positive,
+      StringVariant negative,
+      std::function<void()> on_positive_click = {},
+      std::function<void()> on_negative_click = {},
+      DialogOptions options = {}
+  ) const;
   LayerId Show(ViewFactory content, DialogOptions options = {}) const;
   LayerId Show(DialogFactory content, DialogOptions options = {}) const;
   bool Update(LayerId id, ViewFactory content) const;
@@ -317,19 +383,13 @@ struct MenuSection {};
 
 class MenuItem {
 public:
-  MenuItem(std::string_view label, std::function<void()> on_item_click);
-  MenuItem(StringResource label, std::function<void()> on_item_click);
-  MenuItem(ImageResource icon, std::string_view label, std::function<void()> on_item_click);
-  MenuItem(ImageResource icon, StringResource label, std::function<void()> on_item_click);
-  MenuItem(ImageAsset icon, std::string_view label, std::function<void()> on_item_click);
-  MenuItem(ImageAsset icon, StringResource label, std::function<void()> on_item_click);
+  MenuItem(StringVariant label, std::function<void()> on_item_click);
+  MenuItem(ImageResource icon, StringVariant label, std::function<void()> on_item_click);
+  MenuItem(ImageAsset icon, StringVariant label, std::function<void()> on_item_click);
 
-  MenuItem(std::string_view label, std::vector<MenuEntry> children);
-  MenuItem(StringResource label, std::vector<MenuEntry> children);
-  MenuItem(ImageResource icon, std::string_view label, std::vector<MenuEntry> children);
-  MenuItem(ImageResource icon, StringResource label, std::vector<MenuEntry> children);
-  MenuItem(ImageAsset icon, std::string_view label, std::vector<MenuEntry> children);
-  MenuItem(ImageAsset icon, StringResource label, std::vector<MenuEntry> children);
+  MenuItem(StringVariant label, std::vector<MenuEntry> children);
+  MenuItem(ImageResource icon, StringVariant label, std::vector<MenuEntry> children);
+  MenuItem(ImageAsset icon, StringVariant label, std::vector<MenuEntry> children);
 
   MenuItem(const MenuItem& other);
   MenuItem(MenuItem&& other) noexcept;
@@ -341,14 +401,13 @@ public:
   MenuItem Checked(bool checked) &&;
 
 private:
-  using Label = std::variant<std::string, StringResource>;
   using Icon = std::variant<std::monostate, ImageResource, ImageAsset>;
   using Destination = std::variant<std::function<void()>, std::vector<MenuEntry>>;
 
-  MenuItem(Label label, Icon icon, std::function<void()> on_item_click);
-  MenuItem(Label label, Icon icon, std::vector<MenuEntry> children);
+  MenuItem(StringVariant label, Icon icon, std::function<void()> on_item_click);
+  MenuItem(StringVariant label, Icon icon, std::vector<MenuEntry> children);
 
-  Label label_;
+  StringVariant label_;
   Icon icon_;
   Destination destination_;
   bool enabled_ = true;

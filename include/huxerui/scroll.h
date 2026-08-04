@@ -4,14 +4,10 @@
 #include <memory>
 #include <source_location>
 
+#include <huxerui/geometry.h>
 #include <huxerui/state.h>
 
 namespace huxerui {
-
-enum class Axis {
-  Horizontal,
-  Vertical,
-};
 
 enum class ScrollAlignment {
   Start,

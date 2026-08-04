@@ -87,7 +87,10 @@ private:
       std::optional<std::shared_ptr<const Environment>> environment
   ) const;
   bool UpdatePlacement(LayerId id, detail::LayerPlacement placement) const;
+  bool UpdateTransition(LayerId id, std::shared_ptr<detail::LayerTransitionState> transition) const;
+  std::optional<LayerOptions> EntryOptions(LayerId id) const;
   std::shared_ptr<detail::LayerTransitionState> Transition(LayerId id) const;
+  void BindTransitionCompletion(LayerId id, const std::shared_ptr<detail::LayerTransitionState>& transition) const;
 
   explicit LayerController(Runtime& runtime);
   void Disconnect() noexcept;

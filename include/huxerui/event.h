@@ -68,6 +68,10 @@ enum class Key {
   X,
   Y,
   Z,
+  Shift,
+  Control,
+  Alt,
+  Meta,
 };
 
 enum class KeyEventType {

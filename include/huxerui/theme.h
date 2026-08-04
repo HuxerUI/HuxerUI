@@ -222,6 +222,7 @@ View Theme(ThemeDefinition definition, Factory&& content) {
 
 ThemeSpec FlatLightThemeSpec();
 ThemeSpec FlatDarkThemeSpec();
+ThemeDefinition FlatThemeDefinition(ThemeSpec theme);
 ThemeDefinition FlatThemeDefinition();
 ThemeDefinition FlatDarkThemeDefinition();
 ThemeSpec MaterialLightThemeSpec();
@@ -229,6 +230,12 @@ ThemeSpec MaterialDarkThemeSpec();
 ThemeDefinition MaterialThemeDefinition(ThemeSpec theme);
 ThemeDefinition MaterialThemeDefinition();
 ThemeDefinition MaterialDarkThemeDefinition();
+
+template <class Factory>
+  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
+View FlatTheme(ThemeSpec theme, Factory&& content) {
+  return Theme(FlatThemeDefinition(std::move(theme)), std::forward<Factory>(content));
+}
 
 template <class Factory>
   requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>

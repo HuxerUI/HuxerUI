@@ -26,6 +26,8 @@ int layer_app_compositions = 0;
 int layer_background_clicks = 0;
 int popup_focus_clicks = 0;
 int parent_menu_clicks = 0;
+int exiting_layer_clicks = 0;
+int exiting_layer_pointer_cancels = 0;
 constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
 constexpr Color section_separator_color = Color::Rgb(210, 70, 40);
 constexpr Color bottom_sheet_width_color = Color::Rgb(35, 125, 175);
@@ -68,6 +70,25 @@ View SectionMenuLayerApp() {
   ThemeDefinition definition;
   definition.Set(style);
   return Theme(std::move(definition), LayerApp);
+}
+
+View AnimatedMenuLayerApp() {
+  MenuStyle style = MenuStyle::Default();
+  style.motion = PresentationMotion{
+      .initial_scale = 0.9F,
+      .enter = TweenSpec{.duration = 0.2},
+      .exit = TweenSpec{.duration = 0.2},
+  };
+  ThemeDefinition definition;
+  definition.Set(std::move(style));
+  return Theme(std::move(definition), LayerApp);
+}
+
+View ExitingLayerInputContent() {
+  return Button("exiting input")
+      .With(huxerui::Frame{100.0F, 36.0F})
+      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++exiting_layer_pointer_cancels; })
+      .OnClick([] { ++exiting_layer_clicks; });
 }
 
 struct LayerEnvironmentValue {
@@ -160,7 +181,7 @@ View BottomSheetThemeContent() {
 View BottomSheetThemeApp() {
   ThemeSpec spec = FlatLightThemeSpec();
   spec.colors.scrim = Color::Rgb(20, 80, 160, 0.25F);
-  ThemeDefinition definition{spec};
+  ThemeDefinition definition = FlatThemeDefinition(spec);
   definition.Set(DialogStyle{.scrim = Color::Rgb(180, 20, 20, 0.75F)});
   return Theme(std::move(definition), BottomSheetThemeContent);
 }
@@ -194,25 +215,6 @@ View InvalidBottomSheetShadowApp() {
   ThemeDefinition definition;
   definition.Set(style);
   return Theme(std::move(definition), LayerApp);
-}
-
-std::optional<Rect> FindPresentedTextRect(const FlattenedScene& scene, std::string_view expected) {
-  std::vector<Transform2D> transform_stack{Transform2D{}};
-  for (const PaintCommand& command : scene.Commands()) {
-    if (const auto* transform = std::get_if<PushTransformCommand>(&command)) {
-      transform_stack.push_back(detail::ComposeTransform(transform_stack.back(), transform->transform));
-      continue;
-    }
-    if (std::holds_alternative<PopTransformCommand>(command)) {
-      transform_stack.pop_back();
-      continue;
-    }
-    const auto* text = std::get_if<DrawTextCommand>(&command);
-    if (text && text->text == expected) {
-      return detail::TransformBounds(transform_stack.back(), text->rect);
-    }
-  }
-  return std::nullopt;
 }
 
 } // namespace
@@ -351,6 +353,7 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
   );
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::function<void()>{})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::vector<MenuEntry>{})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("", [] {})}), std::invalid_argument);
   REQUIRE_THROWS_AS(
       layer_menu->Show(TestMenu("menu"), MenuOptions{.width = 0.0F}),
       std::invalid_argument
@@ -565,6 +568,8 @@ TEST_CASE("TestMenuSeparatorPolicyComesFromTheme") {
       MenuSection{},
       MenuItem("Third", [] {}),
   });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
   const FlattenedScene& menu = runtime.BuildFrame();
   REQUIRE(ContainsText(menu, "First"));
 
@@ -593,6 +598,25 @@ TEST_CASE("TestMenuSectionMarksThemedSeparatorBoundaries") {
       MenuItem("Second", [] {}),
   });
   REQUIRE(FindRectWithColor(runtime.BuildFrame(), section_separator_color) != nullptr);
+}
+
+TEST_CASE("TestThemedMenuMotionRetainsTheLayerThroughExit") {
+  layer_menu.reset();
+
+  TestPlatform platform;
+  Runtime runtime{AnimatedMenuLayerApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+
+  const LayerId menu = layer_menu->Show({MenuItem("Animated item", [] {})});
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Animated item"));
+
+  REQUIRE(layer_menu->Dismiss(menu));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Animated item"));
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "Animated item"));
 }
 
 TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
@@ -630,6 +654,27 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
       FindPresentedRectWithColor(runtime.BuildFrame(), MenuStyle::Default().background);
   REQUIRE(fixed_surface.has_value());
   REQUIRE(fixed_surface->width == Catch::Approx(240.0F));
+
+  layer_menu->Show(
+      {MenuItem("Fixed submenu", std::vector<MenuEntry>{MenuItem("Child", [] {})})},
+      MenuOptions{.width = 240.0F}
+  );
+  const FlattenedScene& fixed_submenu = runtime.BuildFrame();
+  const std::optional<Rect> submenu_label = FindPresentedTextRect(fixed_submenu, "Fixed submenu");
+  const std::optional<Rect> submenu_arrow = FindPresentedTextRect(fixed_submenu, "\xE2\x80\xBA");
+  REQUIRE(submenu_label.has_value());
+  REQUIRE(submenu_arrow.has_value());
+  REQUIRE(submenu_arrow->x > fixed_surface->x + fixed_surface->width * 0.75F);
+
+  layer_menu->Show({MenuItem("Natural submenu", std::vector<MenuEntry>{MenuItem("Child", [] {})})});
+  const FlattenedScene& natural_submenu = runtime.BuildFrame();
+  const std::optional<Rect> natural_submenu_surface =
+      FindPresentedRectWithColor(natural_submenu, MenuStyle::Default().background);
+  const std::optional<Rect> natural_submenu_arrow = FindPresentedTextRect(natural_submenu, "\xE2\x80\xBA");
+  REQUIRE(natural_submenu_surface.has_value());
+  REQUIRE(natural_submenu_surface->width < 300.0F);
+  REQUIRE(natural_submenu_arrow.has_value());
+  REQUIRE(natural_submenu_arrow->x > natural_submenu_surface->x + natural_submenu_surface->width * 0.75F);
 }
 
 TEST_CASE("TestBottomSheetPlacementContextAndBackDismissal") {
@@ -936,6 +981,38 @@ TEST_CASE("TestNestedLayerFocusRestoresAcrossRemovedLowerLayer") {
   REQUIRE(layer_background_clicks == 1);
 }
 
+TEST_CASE("TestExitingLayerCancelsInputUntilRemoval") {
+  layer_dialogs.reset();
+  exiting_layer_clicks = 0;
+  exiting_layer_pointer_cancels = 0;
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+
+  const LayerId dialog = layer_dialogs->Show(ExitingLayerInputContent);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const std::optional<Rect> button = FindPresentedTextRect(runtime.BuildFrame(), "exiting input");
+  REQUIRE(button.has_value());
+  const Point pointer{
+      button->x + button->width * 0.5F,
+      button->y + button->height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 126, pointer});
+  REQUIRE(layer_dialogs->Dismiss(dialog));
+  REQUIRE(exiting_layer_pointer_cancels == 1);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Up, 126, pointer});
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Enter});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Tab});
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Enter});
+  REQUIRE(exiting_layer_clicks == 0);
+}
+
 TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   layer_app_compositions = 0;
   layer_background_clicks = 0;
@@ -1011,6 +1088,30 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   platform.AdvanceTime(1.0);
   runtime.BuildFrame();
   REQUIRE(!runtime.LastCommit().next_frame_deadline.has_value());
+
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 5.0,
+      .memory_usage_bytes = 96ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
+  ClickAt(runtime, {332.0F, 28.0F}, 127);
+  const FlattenedScene& reopened = runtime.BuildFrame();
+  REQUIRE(ContainsText(reopened, "HuxerUI Performance"));
+  REQUIRE(!ContainsText(reopened, "72.0 MiB"));
+  REQUIRE(!ContainsText(reopened, "5.0%"));
+
+  const FlattenedScene& reset_baseline = runtime.BuildFrame();
+  REQUIRE(ContainsText(reset_baseline, "96.0 MiB"));
+  REQUIRE(!ContainsText(reset_baseline, "5.0%"));
+
+  platform.AdvanceTime(1.0);
+  platform.process_metrics = ProcessMetrics{
+      .cpu_time_seconds = 5.4,
+      .memory_usage_bytes = 96ULL * 1024ULL * 1024ULL,
+      .processor_count = 4,
+  };
+  runtime.BuildFrame();
+  REQUIRE(ContainsText(runtime.BuildFrame(), "10.0%"));
 }
 
 TEST_CASE("TestDebugMetricsSamplesPaintedFramesAndProcessUsage") {

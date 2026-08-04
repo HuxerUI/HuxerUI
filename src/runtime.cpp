@@ -29,6 +29,10 @@ bool LayerPaintsAbove(const LayerEntry& candidate, const LayerEntry& current) no
   return candidate_level != current_level ? candidate_level > current_level : candidate.sequence > current.sequence;
 }
 
+bool IsModifierKey(Key key) noexcept {
+  return key == Key::Shift || key == Key::Control || key == Key::Alt || key == Key::Meta;
+}
+
 std::vector<LayerEntry> OrderedLayerEntries(const std::vector<LayerEntry>& entries) {
   std::vector<LayerEntry> ordered = entries;
   std::stable_sort(ordered.begin(), ordered.end(), [](const LayerEntry& left, const LayerEntry& right) {
@@ -100,13 +104,18 @@ public:
       return {};
     }
     if (!initialized_) {
-      opacity_.Set(state_->target_visible ? 0.0F : 1.0F);
-      target_visible_ = !state_->target_visible;
+      if (state_->target_visible && state_->enter_on_mount) {
+        opacity_.Set(state_->hidden_opacity);
+        target_visible_ = false;
+      } else {
+        opacity_.Set(1.0F);
+        target_visible_ = true;
+      }
       initialized_ = true;
     }
     if (target_visible_ != state_->target_visible) {
       target_visible_ = state_->target_visible;
-      opacity_.Update(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
+      opacity_.Update(target_visible_ ? 1.0F : state_->hidden_opacity, target_visible_ ? state_->enter : state_->exit);
       if (target_visible_) {
         completion_sent_ = false;
       }
@@ -115,6 +124,9 @@ public:
     auto& mounted = static_cast<MountedNode&>(node);
     const bool running = opacity_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
     mounted.presentation.local_opacity *= opacity_.Value();
+    if (!running && target_visible_) {
+      state_->enter_on_mount = false;
+    }
     if (!running && !target_visible_ && !completion_sent_) {
       completion_sent_ = true;
       if (state_->on_exit_complete) {
@@ -146,6 +158,17 @@ MountedNode* FindLayerStack(MountedNode& root) {
   return found == root.children.end() ? nullptr : found->get();
 }
 
+MountedNode* FindLayerEntryNode(MountedNode& root, LayerId id) {
+  MountedNode* layer_stack = FindLayerStack(root);
+  if (!layer_stack) {
+    return nullptr;
+  }
+  const auto found = std::ranges::find_if(layer_stack->children, [id](const auto& child) {
+    return child && child->template LayoutValueOr<LayerEntryIdValue>(0) == id;
+  });
+  return found == layer_stack->children.end() ? nullptr : found->get();
+}
+
 class LayerEntryLayout final : public huxerui::Layout<LayerEntryLayout> {
 public:
   using Layout::Layout;
@@ -164,6 +187,16 @@ public:
     const float viewport_width = constraints.max_width;
     const float viewport_height = constraints.max_height;
     const Constraints loose = constraints.Loose();
+    const float horizontal_margin =
+        std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_width * 0.5F));
+    const float vertical_margin =
+        std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_height * 0.5F));
+    const Constraints inset_constraints{
+        0.0F,
+        std::max(0.0F, viewport_width - horizontal_margin * 2.0F),
+        0.0F,
+        std::max(0.0F, viewport_height - vertical_margin * 2.0F),
+    };
 
     Size child_size;
     Point child_offset;
@@ -175,41 +208,38 @@ public:
       child_size = context.Measure(child, constraints);
       break;
     case LayerPlacementKind::Center:
-      child_size = context.Measure(child, loose);
+      child_size = context.Measure(child, inset_constraints);
       child_offset = {
           (viewport_width - child_size.width) * 0.5F,
           (viewport_height - child_size.height) * 0.5F,
       };
       break;
+    case LayerPlacementKind::TopCenter:
+      child_size = context.Measure(child, inset_constraints);
+      child_offset = {
+          (viewport_width - child_size.width) * 0.5F,
+          vertical_margin,
+      };
+      break;
     case LayerPlacementKind::BottomCenter:
       if (placement.fill_cross_axis) {
-        const float margin = std::clamp(placement.viewport_margin, 0.0F, viewport_width * 0.5F);
-        const float available = std::max(0.0F, viewport_width - margin * 2.0F);
+        const float available = std::max(0.0F, viewport_width - horizontal_margin * 2.0F);
         const float width = std::min(available, std::max(0.0F, placement.maximum_cross_axis_extent));
-        child_size = context.Measure(child, Constraints{width, width, 0.0F, viewport_height});
+        child_size = context.Measure(
+            child,
+            Constraints{width, width, 0.0F, std::max(0.0F, viewport_height - vertical_margin * 2.0F)}
+        );
       } else {
-        child_size = context.Measure(child, loose);
+        child_size = context.Measure(child, inset_constraints);
       }
       child_offset = {
           (viewport_width - child_size.width) * 0.5F,
-          viewport_height - child_size.height,
+          viewport_height - vertical_margin - child_size.height,
       };
       break;
     case LayerPlacementKind::Anchored: {
       // Anchors use final presentation coordinates; LayerEntryLayout itself shares the host-view coordinate space.
-      const float horizontal_margin =
-          std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_width * 0.5F));
-      const float vertical_margin =
-          std::min(std::max(0.0F, placement.viewport_margin), std::max(0.0F, viewport_height * 0.5F));
-      child_size = context.Measure(
-          child,
-          Constraints{
-              0.0F,
-              std::max(0.0F, viewport_width - horizontal_margin * 2.0F),
-              0.0F,
-              std::max(0.0F, viewport_height - vertical_margin * 2.0F),
-          }
-      );
+      child_size = context.Measure(child, inset_constraints);
       LayerAnchorSide side = placement.preferred_side;
       const float anchor_right = placement.anchor.x + placement.anchor.width;
       const float anchor_bottom = placement.anchor.y + placement.anchor.height;
@@ -599,6 +629,26 @@ bool ContainsNodeIdentity(const MountedNode& node, std::uint64_t identity) {
   });
 }
 
+bool PointerSessionReferencesNode(const PointerSession& session, const MountedNode& root) {
+  const auto contains = [&root](const std::optional<std::uint64_t>& identity) {
+    return identity.has_value() && ContainsNodeIdentity(root, *identity);
+  };
+  if (contains(session.target_identity) || contains(session.pending_focus_identity) ||
+      contains(session.active_scroll_node)) {
+    return true;
+  }
+  if (session.extension_capture.has_value() &&
+      ContainsNodeIdentity(root, session.extension_capture->node_identity)) {
+    return true;
+  }
+  return std::ranges::any_of(session.scroll_chain, [&root](std::uint64_t identity) {
+           return ContainsNodeIdentity(root, identity);
+         }) ||
+         std::ranges::any_of(session.extension_observers, [&root](const NodeExtensionHandle& observer) {
+           return ContainsNodeIdentity(root, observer.node_identity);
+         });
+}
+
 bool IsActivatable(const MountedNode& node) {
   return static_cast<bool>(node.activation) || HasEventBinding<ViewEvents::Click>(node.event_bindings);
 }
@@ -975,6 +1025,12 @@ detail::MountedNode* Runtime::ActiveFocusLayerRoot() {
   }
   const LayerId focus_id = state_->layer_focus_stack_.back().id;
 
+  const auto entry = std::ranges::find(state_->layer_controller_.state_->entries, focus_id, &LayerEntry::id);
+  if (entry == state_->layer_controller_.state_->entries.end() ||
+      (entry->transition && !entry->transition->target_visible)) {
+    return nullptr;
+  }
+
   detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
   if (!layer_stack) {
     return nullptr;
@@ -1250,6 +1306,9 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
     return;
   }
+  if (!state_->layer_focus_stack_.empty() && ActiveFocusLayerRoot() == nullptr) {
+    return;
+  }
   if (event.type == KeyEventType::Down && event.key == Key::Tab && !event.repeat) {
     MoveFocus(event.modifiers.shift);
     RefreshTextInputSession();
@@ -1266,7 +1325,7 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
     return;
   }
 
-  if (event.type == KeyEventType::Down) {
+  if (event.type == KeyEventType::Down && !IsModifierKey(event.key)) {
     SetFocusedNode(focused->identity, true);
   }
   if (event.type == KeyEventType::Down && !event.repeat && !event.modifiers.alt &&
@@ -1327,19 +1386,61 @@ void Runtime::InvalidateLayers() {
   RequestFrame();
 }
 
+void Runtime::DeactivateLayerInput(LayerId id) {
+  if (!state_->mounted_root_) {
+    return;
+  }
+  detail::MountedNode* layer = FindLayerEntryNode(*state_->mounted_root_, id);
+  if (!layer) {
+    return;
+  }
+
+  std::vector<PointerEvent> cancellations;
+  for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
+    if (PointerSessionReferencesNode(session, *layer)) {
+      cancellations.push_back(PointerEvent{
+          PointerEventType::Cancel,
+          pointer_id,
+          session.last_position,
+          session.device_kind,
+      });
+    }
+  }
+  for (const PointerEvent& cancellation : cancellations) {
+    HandlePointerCancel(cancellation);
+    TrackTouchTextSelectionGesture(cancellation);
+  }
+
+  if (state_->hovered_extension_.has_value() &&
+      ContainsNodeIdentity(*layer, state_->hovered_extension_->node_identity)) {
+    const detail::NodeExtensionHandle hovered = *state_->hovered_extension_;
+    if (NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered)) {
+      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity)) {
+        extension->OnHoverChanged(*node, false);
+      }
+    }
+    state_->hovered_extension_.reset();
+  }
+
+  const bool text_input_belongs_to_layer =
+      state_->text_input_session_.has_value() &&
+      ContainsNodeIdentity(*layer, state_->text_input_session_->node_identity);
+  if (state_->focused_node_identity_.has_value() && ContainsNodeIdentity(*layer, *state_->focused_node_identity_)) {
+    SetFocusedNode(std::nullopt);
+  }
+  if (text_input_belongs_to_layer) {
+    StopTextInputSession(TextInputEndReason::FocusLost);
+  }
+}
+
 void Runtime::InvalidateLayerPlacement(LayerId id) {
   if (state_->mounted_root_) {
-    if (detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_)) {
-      const auto found = std::ranges::find_if(layer_stack->children, [id](const auto& child) {
-        return child->template LayoutValueOr<LayerEntryIdValue>(0) == id;
-      });
-      if (found != layer_stack->children.end()) {
-        MarkLayoutDirtyPath(*state_->mounted_root_, (*found)->identity);
-        if (!state_->building_frame_) {
-          RequestFrame();
-        }
-        return;
+    if (detail::MountedNode* layer = FindLayerEntryNode(*state_->mounted_root_, id)) {
+      MarkLayoutDirtyPath(*state_->mounted_root_, layer->identity);
+      if (!state_->building_frame_) {
+        RequestFrame();
       }
+      return;
     }
   }
   RequestFrame();

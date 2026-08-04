@@ -10,9 +10,10 @@ Current implementation status:
 - ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
+- Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, while BottomSheet dragging remains follow-up work.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- General View exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and profiler timelines remain follow-up work. Dialog and BottomSheet already retain their Layer entries through component-specific exit motion.
+- General View exit transitions, keyframes, decay animation, advanced Toast queue policy, BottomSheet drag behavior, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
 
@@ -458,7 +459,7 @@ run the exit transition
 unmount after completion
 ```
 
-Dialog and BottomSheet already apply this lifecycle to Layer entries through a shared internal transition state. They reuse `AnimationSpec`, `AnimatedValue`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
+Dialog, BottomSheet, Menu, and Toast apply this lifecycle to Layer entries through a shared internal transition state when their active style enables motion. They reuse `AnimationSpec`, `AnimatedValue`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
 
 ### Reduced motion
 
@@ -492,11 +493,11 @@ Cancel
 
 A Press records the pointer ID and local press position. Release and Cancel refer to the corresponding Press. This supports multiple simultaneous pointers and multiple active ripple instances.
 
-`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Both resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`. Reduced-motion themes snap those transitions.
+`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Default controls resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`; component-owned transparent actions can provide an explicit `IndicationSpec` through their typed style. Reduced-motion themes snap those transitions.
 
 `Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. The renderer applies disabled opacity once at the boundary instead of repeatedly dimming every descendant.
 
-`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space shows pressed indication and activates on key up. Focus ring color, width, disabled opacity, and key indication timing resolve from Theme.
+`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space shows pressed indication and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring color, width, disabled opacity, and key indication timing resolve from Theme.
 
 The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 
@@ -678,7 +679,7 @@ MaterialTheme(Content)
 MaterialDarkTheme(Content)
 ```
 
-`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the token subset consumed by the current built-in components. Passing a customized Material ThemeSpec to `MaterialTheme(theme, factory)` rebuilds the Material component styles from those tokens.
+`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the corresponding Material tokens. Flat and Material Theme definitions explicitly register their complete Dialog, BottomSheet, Menu, and Toast styles rather than relying on presentation services to infer a style from ThemeSpec. Passing customized tokens to `FlatTheme(theme, factory)` or `MaterialTheme(theme, factory)` rebuilds that system's component styles from those tokens.
 
 ### Theme syntax
 
@@ -717,7 +718,7 @@ Nested usage:
 ```cpp
 return HUXERUI_THEME(
     MaterialTheme,
-    Column{
+    Column {
         Header(),
         HUXERUI_THEME(
             LiquidTheme,
@@ -747,6 +748,8 @@ platform defaults
 A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. Runtime does not branch on Material, flat, liquid, or third-party theme identity.
 
 `ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent. Explicit View modifiers run after semantic style resolution and win without a separate runtime style branch.
+
+Built-in elevation styles keep `Shadow::offset` and `Shadow::spread` at zero so elevation remains a platform-neutral ambient effect. Custom drawing and explicit `Shadow` modifiers retain directional offset and spread when a design calls for a drop shadow rather than semantic elevation.
 
 Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select the corresponding typography token. A component `TextStyle` value can still replace the complete Text style for a local subtree.
 
@@ -831,7 +834,7 @@ Concrete presentation policy remains outside Runtime. Typed per-window services 
 
 ```text
 UseToast()       -> Notification, pass-through, timed bottom placement
-UseDialog()      -> Presentation, modal barrier, centered content
+UseDialog()      -> Presentation, modal barrier, theme-controlled vertical placement
 UseBottomSheet() -> Presentation, modal barrier, bottom content
 UsePopup()       -> Presentation, anchored arbitrary content
 UseMenu()        -> Presentation, anchored menu semantics and focus
@@ -861,13 +864,13 @@ The anchor modifier records final PresentationBounds without creating a layer. `
 
 Menu is structurally distinct from Popup. Its public input is a recursive sequence of `MenuEntry` values created implicitly from `MenuItem` and `MenuSection`. Menu items directly contain either an action or another entry sequence, while `MenuSection{}` is a non-interactive logical boundary whose visual treatment belongs to the theme. Items retain resource identifiers and image assets as semantic values; the presentation service resolves resources from the captured Environment and composes themed surfaces and interaction. The root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, so their parent menu remains interactive; Back closes the deepest open level, the default outside-press behavior closes the complete chain, and opening another submenu replaces only that level and its descendants. Arbitrary custom anchored content remains a Popup responsibility.
 
-Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, Environment, and retained Layer transition machinery, while their layout, surface, motion, and options remain component-specific. Dialog fades and scales centered content. BottomSheet owns an adaptive-width bottom surface and translates it from the window edge. The existing command-oriented `UseDialog()` path remains the primary ergonomic model.
+Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, Environment, and retained Layer transition machinery, while their layout, surface, motion, and options remain component-specific. Dialog resolves placement and motion from `DialogStyle`, while BottomSheet owns an adaptive-width bottom surface that translates from the window edge. The command-oriented `UseDialog()` path remains the primary ergonomic model.
 
 The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its top-right corner ribbon toggles an upper-left metrics panel within the entry's own state. Both are composed from ordinary Views; the ribbon is one rotated component clipped by the viewport rather than separately positioned background and label geometry. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime records painted-frame count, frame-commit time, and damage ratio in a dedicated debug metrics state. PlatformAdapter optionally supplies cumulative process CPU time, a platform-preferred process-memory footprint, and logical processor count so interval utilization can be derived without platform state leaking into LayerController.
 
 The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling Runtime accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
-Ordinary LayerController entries are removed immediately. Dialog and BottomSheet entries first become non-interactive, retain their modal barrier and presentation state through the configured exit animation, and are removed after completion. Focus restoration occurs with actual removal, so content behind a visually exiting modal cannot be activated early.
+LayerController entries without a transition are removed immediately. Dialog, BottomSheet, Menu, and Toast entries with configured motion first become non-interactive, retain their presentation state through the exit animation, and are removed after completion. Modal barriers remain until actual removal, so focus cannot be restored and content behind a visually exiting modal cannot be activated early.
 
 ## RootHook
 
@@ -951,6 +954,128 @@ RootHook does not provide:
 - Root replacement.
 - Dynamic installation and removal.
 
+## Theme-driven presentation policy
+
+Status: implemented for standard Dialog and theme-owned Dialog, BottomSheet, Menu, and Toast presentation policy
+
+The shared LayerStack foundation owns presentation lifetime, ordering, focus, barriers, Cancel routing, outside-press handling, Environment capture, and removal. It must not also define a single visual structure for every Theme.
+
+Presentation is divided into three contracts:
+
+```text
+semantic request
+    Dialog title, message, and actions
+    Menu items, sections, and submenus
+    Toast message
+        -> theme presentation policy
+    structure, surface, geometry, placement, and motion
+        -> window presentation lifetime
+    Layer entry, focus, barrier, dismissal, and scheduling
+```
+
+Runtime and LayerController only implement the final contract. Typed services resolve the captured Theme, compose the themed content, and attach it to the shared LayerStack. No layer or Runtime code checks whether a Theme is Material, Flat, iOS, MIUI, or third-party.
+
+`ThemeDefinition` continues to carry typed component styles. A presentation style is a complete value description rather than only a color bundle. Depending on the component, it may describe:
+
+- Surface background, shape, shadow, and size constraints.
+- Typography, padding, spacing, alignment, and action arrangement.
+- Separator policy and item treatment.
+- Default window or anchor placement and viewport margins.
+- Enter and exit motion.
+
+The framework composes these semantic values through ordinary HuxerUI Views. A Theme does not receive arbitrary Layer access, own dismissal callbacks, or replace a presentation service. Theme values also do not contain application actions.
+
+`PresentationMotion` is a public Theme value shared by presentation styles, while motion execution remains private to presentation. An absent optional motion disables the transition; otherwise neutral scale and slide values express a fade, and non-neutral values add scale or placement-relative translation without a second motion-kind hierarchy. The implementation interpolates opacity, scale, translation, and transform origin through `AnimationSpec`, retained Layer transition state, and presentation properties. Dialog, Menu, and Toast derive motion from their styles; BottomSheet maps its component-specific motion values into the same private executor.
+
+Menu motion direction and transform origin derive from the requested anchor placement. Making the origin follow a runtime fallback to the opposite side remains follow-up work because the resolved side currently belongs to LayerStack layout rather than the semantic Menu request.
+
+Theme policy does not erase semantic component identity:
+
+- Dialog remains modal content with focus containment and a barrier.
+- BottomSheet remains an edge-attached modal surface.
+- Menu remains an anchored semantic item hierarchy.
+- Popup remains arbitrary anchored content.
+- Toast remains a transient notification.
+
+Custom View factories are escape hatches for application-specific content. They still receive themed outer placement, scrim, and motion where appropriate, but they do not implicitly receive the standard component's surface, padding, or internal layout.
+
+### Standard Dialog model
+
+Dialog supports standard title-and-message requests in addition to custom View factories. A standard request has one positive action and may have one negative action. Empty callbacks retain the normal dismissal behavior without adding application work.
+
+The standard model allows Theme to select a native-feeling arrangement without inspecting application content:
+
+- Material can use a centered surface with trailing horizontal actions.
+- Flat can use a compact desktop surface and its own button treatment.
+- iOS can center content blocks, stretch actions, and place separators between them.
+- MIUI can use a different viewport position and slide or scale motion.
+
+Positive and negative semantics provide styling and arrangement information without exposing a general action model. Either action requests dismissal through the normal retained exit path and then invokes its non-empty callback; actual Layer removal still completes after the exit animation. A custom interaction that must keep the Dialog open uses the custom `DialogFactory` form.
+
+The command-oriented API provides compact overloads for the common single-action case:
+
+```cpp
+auto dialog = UseDialog();
+
+dialog.Show("Network unavailable", "Check your connection and try again.");
+
+dialog.Show(
+    "Save changes?",
+    "The current document has unsaved changes.",
+    "Save",
+    [] {
+      SaveDocument();
+    });
+```
+
+Both overloads construct the same internal standard Dialog request. They do not bypass Theme resolution or create another service path. Public parameter naming follows `positive`, `negative`, `on_positive_click`, and `on_negative_click`.
+
+`Show(title, message)` creates one default positive action whose only behavior is dismissal. Supplying a positive label and callback adds application behavior to that same action. The two-action overload requires both labels so it cannot be ambiguous with the compact form.
+
+An empty positive label falls back to `OK`, while an empty negative label in the two-action overload falls back to `Cancel`. Migrating these framework-owned strings into the built-in resource bundle remains part of framework localization rather than introducing a temporary public label Environment value. Explicit `StringResource` inputs resolve through the same resource context as other deferred presentation content.
+
+The two-action form remains compact:
+
+```cpp
+dialog.Show(
+    "Delete item?",
+    "This action cannot be undone.",
+    "Delete",
+    "Cancel",
+    DeleteItem
+);
+```
+
+`StringVariant` is the shared deferred display-string representation for Dialog, Toast, and Menu. It owns direct text or a `StringResource` plus positional arguments. Ordinary Text, Button, TextField placeholder, and Validation construction keep direct strings or explicit `UseString` resolution, so immediate component declarations do not pay for a deferred wrapper.
+
+`DialogStyle` is the complete standard Dialog presentation policy. It covers the modal scrim, default placement, viewport margins, enter and exit motion, surface appearance and width constraints, content padding and alignment, title and message styles, action direction and alignment, positive and negative action appearance and indication, and action separator policy.
+
+The existing custom factory remains available:
+
+```cpp
+dialog.Show([](DialogContext dialog) {
+  return CustomDialogContent(dialog);
+});
+```
+
+This path uses themed modal placement, scrim, and motion but leaves the custom content's own surface and internal layout untouched.
+
+Declarative custom Dialog presentation and command-created Dialogs share style resolution, Layer entry, and the retained dismissal path. The declarative modifier accepts custom content; its visibility remains controlled state, so outside press and Cancel request a source-state update rather than directly overriding it.
+
+### Menu presentation policy
+
+Menu already receives semantic `MenuItem` and `MenuSection` values. `MenuSection` remains a logical boundary: Theme may render it as a separator, spacing, or no visible element.
+
+`MenuStyle` controls menu surface and item treatment, including foreground and background colors, item indication, shape, shadow, icon geometry, padding, minimum metrics, separator policy, and root or submenu motion. `MenuOptions` owns call-specific anchor placement, gap, viewport margin, offset, and width decisions.
+
+The service retains ownership of submenu chains, focus, outside press, Cancel routing, action dispatch, and automatic chain dismissal. Theme cannot change those behavioral guarantees.
+
+### Toast presentation policy
+
+`ToastStyle` controls surface background, text style, padding, shape, shadow, maximum width, viewport margins, top or bottom placement, and enter and exit motion. Toast duration, timed dismissal, queueing, and deduplication remain service policy rather than Theme values.
+
+The message-only API remains the common entry point. Future semantic actions or icons extend the Toast request model rather than requiring callers to construct the Theme's internal View layout.
+
 ## Toast
 
 Toast is naturally command-oriented:
@@ -978,7 +1103,7 @@ Declarative presentation is a modifier:
 
 ```cpp
 return Content().With(
-    Dialog{
+    Dialog {
         .visible = show_dialog,
         .content = ConfirmDialog,
         .dismiss_on_outside_press = true,
@@ -1000,11 +1125,11 @@ auto dialog = UseDialog();
 return Button("Delete")
     .OnClick([dialog] {
       dialog.Show([](DialogContext dialog) {
-        return Column{
-            Text("Delete item?"),
-            Button("Cancel").OnClick([dialog] {
-              dialog.Dismiss();
-            }),
+        return Column {
+          Text("Delete item?"),
+          Button("Cancel").OnClick([dialog] {
+            dialog.Dismiss();
+          }),
         };
       });
     });

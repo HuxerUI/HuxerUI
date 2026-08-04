@@ -141,7 +141,7 @@ ImageAsset AppResources::Resolve(ImageResource resource, const Locale& locale) {
   return asset;
 }
 
-ResolvedStringResource AppResources::Resolve(StringResource resource, const Locale& locale) const {
+ResolvedStringResource AppResources::Resolve(const StringResource& resource, const Locale& locale) const {
   const ResourceIndexEntry& entry = ResolveLocalized(resource, ResourceEntryKind::String, locale);
   return {entry.value, entry.argument_count};
 }
@@ -172,7 +172,21 @@ ImageAsset UseImage(ImageResource resource) {
 
 namespace detail {
 
-std::string UseStringArguments(StringResource resource, std::span<const std::string> arguments) {
+std::string ResolveStringVariant(const StringVariant& value) {
+  if (const auto* literal = std::get_if<std::string>(&value.value_)) {
+    return *literal;
+  }
+  return UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
+}
+
+std::string ResolveStringVariant(StringVariant&& value) {
+  if (auto* literal = std::get_if<std::string>(&value.value_)) {
+    return std::move(*literal);
+  }
+  return UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
+}
+
+std::string UseStringArguments(const StringResource& resource, std::span<const std::string> arguments) {
   const ResolvedStringResource resolved = CurrentResources()->Resolve(resource, UseEnvironment<Locale>());
   if (arguments.size() != resolved.argument_count) {
     throw std::invalid_argument(

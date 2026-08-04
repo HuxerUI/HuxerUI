@@ -1,6 +1,7 @@
 #include "runtime_test_support.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -233,6 +234,7 @@ void TextInputProbeExtension::Update(MountedNode& node, const TextInputProbe& pr
 
 std::shared_ptr<ProbeTextInputClient> first_text_client;
 std::shared_ptr<ProbeTextInputClient> second_text_client;
+std::optional<DialogHandle> text_input_dialog;
 State<bool> text_client_visible;
 State<bool> use_second_text_client;
 int text_key_events = 0;
@@ -280,6 +282,15 @@ View MultipleTextClientsApp() {
   return Text("Invalid").With(Focusable{}, TextInputProbe{first_text_client}, TextInputProbe{second_text_client});
 }
 
+View DialogTextInputApp() {
+  text_input_dialog = UseDialog();
+  return Text("Application");
+}
+
+View DialogTextInputContent() {
+  return Text("Dialog input").With(Focusable{}, TextInputProbe{first_text_client});
+}
+
 View TextKeyClientApp() {
   return Text("Keys").OnClick(
                          [] { ++text_activations; }
@@ -291,6 +302,7 @@ View TextKeyClientApp() {
 void ResetTextInputProbes() {
   first_text_client = std::make_shared<ProbeTextInputClient>();
   second_text_client = std::make_shared<ProbeTextInputClient>();
+  text_input_dialog.reset();
   text_client_visible = State<bool>{};
   use_second_text_client = State<bool>{};
   text_key_events = 0;
@@ -335,6 +347,42 @@ TEST_CASE("TestTextInputSessionFollowsFocus") {
   REQUIRE(second_text_client->end_count == 1);
   REQUIRE(second_text_client->end_reasons.back() == TextInputEndReason::RuntimeDestroyed);
   REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1, 2});
+}
+
+TEST_CASE("TestExitingDialogStopsAndCanRestoreTextInput") {
+  ResetTextInputProbes();
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+
+  Runtime runtime{DialogTextInputApp, platform};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+  REQUIRE(text_input_dialog.has_value());
+
+  const LayerId dialog = text_input_dialog->Show(DialogTextInputContent);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+
+  REQUIRE(text_input_dialog->Dismiss(dialog));
+  REQUIRE(first_text_client->end_count == 1);
+  REQUIRE(first_text_client->end_reasons.back() == TextInputEndReason::FocusLost);
+  REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE(
+      runtime.HandleTextInputCommands(TextInputCommandBatch{.session_id = 1}).result_code ==
+      TextInputResultCode::SessionMismatch
+  );
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::A});
+  REQUIRE(first_text_client->key_count == 0);
+
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(text_input_dialog->Update(dialog, DialogTextInputContent));
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->begin_count == 2);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1, 2});
 }
 
 TEST_CASE("TestTextInputSessionSurvivesRecompositionAndSynchronizesState") {

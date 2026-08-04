@@ -48,7 +48,7 @@ Android receives the same committed damage but invalidates the complete native V
 All three backends replay only the committed scene during native paint callbacks.
 Exact `DrawTextRunsCommand` geometry is supplied by TextMeasurer and is not replaced by renderer-side layout decisions.
 Native font, layout, and decoded-image caches are platform-owned and bounded; see [Text and Font Design](design/text.md) and [App Resources, Images, and Localization Design](design/resources.md).
-When the debug performance panel is open, `PlatformAdapter::QueryProcessMetrics()` optionally reports cumulative process CPU time, a current process-memory footprint, and logical processor count. Android reports proportional set size (PSS); Windows and macOS report their current working-set or resident-set values. Runtime derives interval CPU utilization and keeps the sampling lifecycle in the platform layer.
+When the debug performance panel is open, `PlatformAdapter::QueryProcessMetrics()` optionally reports cumulative process CPU time, a current process-memory footprint, and logical processor count. Android reports proportional set size (PSS); Windows and macOS report their current working-set or resident-set values. Runtime owns the sampling lifecycle and derives interval CPU utilization while platform-specific metric collection remains behind the adapter boundary.
 
 ## Android
 

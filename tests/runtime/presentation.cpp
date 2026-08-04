@@ -30,6 +30,8 @@ std::optional<DialogHandle> saved_dialogs;
 std::optional<DialogContext> saved_dialog_context;
 State<bool> declarative_dialog_visible;
 State<int> declarative_dialog_value;
+State<bool> declarative_dialog_motion_enabled;
+State<bool> alternate_dialog_update_environment;
 State<bool> animation_target;
 State<bool> transform_animation_target;
 int indication_clicks = 0;
@@ -46,11 +48,19 @@ int underlying_clicks = 0;
 int background_dialog_clicks = 0;
 int first_dialog_clicks = 0;
 int second_dialog_clicks = 0;
+int positive_dialog_clicks = 0;
 State<bool> checkbox_checked;
 State<bool> switch_checked;
 int checkbox_changes = 0;
 int switch_changes = 0;
 State<float> progress_circle_value;
+constexpr Color policy_dialog_background = Color::Rgb(32, 84, 132);
+constexpr Color policy_dialog_separator = Color::Rgb(220, 120, 30);
+constexpr Color policy_toast_background = Color::Rgb(42, 52, 62);
+constexpr Color initial_dialog_update_theme = Color::Rgb(40, 100, 220);
+constexpr Color updated_dialog_update_theme = Color::Rgb(220, 70, 50);
+constexpr Color initial_dialog_update_scrim = Color::Rgb(20, 30, 40, 0.2F);
+constexpr Color updated_dialog_update_scrim = Color::Rgb(80, 20, 100, 0.45F);
 
 const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
   if (node.text == text) {
@@ -62,6 +72,30 @@ const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std:
     }
   }
   return nullptr;
+}
+
+bool PaintsText(const PaintSequence& sequence, std::string_view text) {
+  return std::ranges::any_of(sequence.Commands(), [text](const PaintCommand& command) {
+    const auto* draw_text = std::get_if<DrawTextCommand>(&command);
+    return draw_text != nullptr && draw_text->text == text;
+  });
+}
+
+std::optional<float>
+RenderedTextOpacity(const RenderNode& node, std::string_view text, float inherited_opacity = 1.0F) {
+  const float opacity = inherited_opacity * node.opacity;
+  if (PaintsText(node.content, text) || PaintsText(node.foreground, text)) {
+    return opacity;
+  }
+  for (const RenderNode* child : node.children) {
+    if (child == nullptr) {
+      continue;
+    }
+    if (const std::optional<float> found = RenderedTextOpacity(*child, text, opacity); found.has_value()) {
+      return found;
+    }
+  }
+  return std::nullopt;
 }
 
 View EnvironmentReader() {
@@ -184,8 +218,7 @@ View ToggleApp() {
       ++switch_changes;
       switch_value = checked;
     }),
-  }
-      .With(huxerui::Spacing{8.0F});
+  }.With(huxerui::Spacing{8.0F});
 }
 
 View DeterminateProgressCircleApp() {
@@ -275,8 +308,7 @@ View DisabledHitTestApp() {
 View DisabledSubtreeApp() {
   return Column {
     Button("disabled child").With(Enabled{true}).OnClick([] { ++disabled_clicks; }),
-  }
-      .With(Enabled{false});
+  }.With(Enabled{false});
 }
 
 View FocusDialogApp() {
@@ -303,15 +335,67 @@ View PresentationApp() {
 
 View PresentationThemeApp() {
   ThemeDefinition definition;
-  definition.Set(huxerui::ToastStyle{
-      .background = Color::Rgb(20, 30, 40, 0.9F),
-      .foreground = Color::Rgb(240, 245, 250),
-      .padding = 10.0F,
-      .corner_radius = 9.0F,
-  });
-  definition.Set(huxerui::DialogStyle{
-      .scrim = Color::Rgb(180, 20, 20, 0.3F),
-  });
+  definition.Set(
+      huxerui::ToastStyle{
+          .background = Color::Rgb(20, 30, 40, 0.9F),
+          .text_style = TextStyle{Font::System(14.0F), Color::Rgb(240, 245, 250)},
+          .padding = EdgeInsets::All(10.0F),
+          .corner_radius = 9.0F,
+      }
+  );
+  definition.Set(
+      huxerui::DialogStyle{
+          .scrim = Color::Rgb(180, 20, 20, 0.3F),
+      }
+  );
+  return Theme(std::move(definition), PresentationApp);
+}
+
+View MaterialPresentationApp() {
+  return huxerui::MaterialTheme(PresentationApp);
+}
+
+View DialogUpdateEnvironmentContent() {
+  return Text(
+      UseTheme().colors.primary == updated_dialog_update_theme ? "updated dialog environment"
+                                                               : "initial dialog environment"
+  );
+}
+
+View DialogUpdateEnvironmentApp() {
+  alternate_dialog_update_environment = UseState(false);
+  ThemeSpec theme = FlatLightThemeSpec();
+  theme.colors.primary =
+      alternate_dialog_update_environment ? updated_dialog_update_theme : initial_dialog_update_theme;
+
+  DialogStyle dialog_style = DialogStyle::Default();
+  dialog_style.scrim = alternate_dialog_update_environment ? updated_dialog_update_scrim : initial_dialog_update_scrim;
+  dialog_style.motion.reset();
+
+  ThemeDefinition definition{std::move(theme)};
+  definition.Set(std::move(dialog_style));
+  return Theme(std::move(definition), PresentationApp);
+}
+
+View ThemedPresentationPolicyApp() {
+  DialogStyle dialog_style = DialogStyle::Default();
+  dialog_style.background = policy_dialog_background;
+  dialog_style.action_separator_color = policy_dialog_separator;
+  dialog_style.action_separator_thickness = 2.0F;
+  dialog_style.placement = VerticalPlacement::Bottom;
+  dialog_style.action_layout = Axis::Vertical;
+  dialog_style.action_alignment = HorizontalAlignment::Stretch;
+  dialog_style.viewport_margin = 10.0F;
+  dialog_style.motion.reset();
+
+  ToastStyle toast_style = ToastStyle::Default();
+  toast_style.background = policy_toast_background;
+  toast_style.placement = VerticalPlacement::Top;
+  toast_style.motion.reset();
+
+  ThemeDefinition definition;
+  definition.Set(std::move(dialog_style));
+  definition.Set(std::move(toast_style));
   return Theme(std::move(definition), PresentationApp);
 }
 
@@ -323,11 +407,33 @@ View DeclarativeDialogApp() {
   declarative_dialog_visible = UseState(false);
   declarative_dialog_value = UseState(1);
   const std::string label = "declarative dialog " + std::to_string(declarative_dialog_value.Get());
-  return Text("content").With(Dialog {
-      .visible = declarative_dialog_visible,
-      .content = [label] { return Text(label); },
-      .dismiss_on_outside_press = true,
-      .on_dismiss_request = [visible = declarative_dialog_visible] { visible = false; },
+  return Text("content").With(
+      Dialog {
+          .visible = declarative_dialog_visible,
+          .content = [label] { return Text(label); },
+          .dismiss_on_outside_press = true,
+          .on_dismiss_request = [visible = declarative_dialog_visible] { visible = false; },
+      }
+  );
+}
+
+View DeclarativeDialogMotionApp() {
+  declarative_dialog_visible = UseState(false);
+  declarative_dialog_motion_enabled = UseState(false);
+
+  DialogStyle style = DialogStyle::Default();
+  if (!declarative_dialog_motion_enabled) {
+    style.motion.reset();
+  }
+  ThemeDefinition definition;
+  definition.Set(std::move(style));
+  return Theme(std::move(definition), [] {
+    return Text("content").With(
+        Dialog {
+            .visible = declarative_dialog_visible,
+            .content = [] { return Text("motion dialog"); },
+        }
+    );
   });
 }
 
@@ -375,9 +481,11 @@ View PresentedIndicationApp() {
 View ExplicitIndicationApp() {
   return Button("explicit")
       .OnClick([] { ++indication_clicks; })
-      .With(huxerui::Indication{
-          huxerui::NoIndication{},
-      });
+      .With(
+          huxerui::Indication{
+              huxerui::NoIndication{},
+          }
+      );
 }
 
 View NodeExtensionPruningApp() {
@@ -495,6 +603,28 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   REQUIRE(std::abs(dark.interactions.hover_overlay.alpha - 0.12F) < 0.001F);
   REQUIRE(std::abs(dark.interactions.pressed_overlay.alpha - 0.18F) < 0.001F);
 
+  const ThemeDefinition definition = huxerui::FlatThemeDefinition();
+  const ToastStyle toast_style = ThemeDefinitionValue<ToastStyle>(definition);
+  REQUIRE(toast_style.background.red == light.colors.inverse_surface.red);
+  REQUIRE_FALSE(toast_style.motion.has_value());
+
+  const DialogStyle dialog_style = ThemeDefinitionValue<DialogStyle>(definition);
+  REQUIRE(dialog_style.background.red == light.colors.surface.red);
+  REQUIRE(dialog_style.motion.has_value());
+  REQUIRE(std::holds_alternative<StateOverlayIndication>(dialog_style.positive_action_indication));
+  REQUIRE(std::holds_alternative<StateOverlayIndication>(dialog_style.negative_action_indication));
+
+  const BottomSheetStyle bottom_sheet_style = ThemeDefinitionValue<BottomSheetStyle>(definition);
+  REQUIRE(bottom_sheet_style.background.red == light.colors.surface.red);
+
+  const MenuStyle menu_style = ThemeDefinitionValue<MenuStyle>(definition);
+  REQUIRE(menu_style.separator_mode == MenuSeparatorMode::BetweenItems);
+  REQUIRE_FALSE(menu_style.motion.has_value());
+  REQUIRE(std::holds_alternative<StateOverlayIndication>(menu_style.item_indication));
+
+  const ThemeDefinition dark_definition = huxerui::FlatDarkThemeDefinition();
+  REQUIRE(ThemeDefinitionValue<DialogStyle>(dark_definition).background.red == dark.colors.surface.red);
+
   TestPlatform platform;
   Runtime runtime{FlatThemeInteractionApp, platform};
   runtime.SetViewport({200.0F, 80.0F});
@@ -561,8 +691,25 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   const huxerui::DialogStyle dialog_style = ThemeDefinitionValue<huxerui::DialogStyle>(definition);
   REQUIRE(dialog_style.scrim.alpha == light.colors.scrim.alpha);
-  REQUIRE(std::get<TweenSpec>(dialog_style.enter).duration == light.motion.normal);
-  REQUIRE(std::get<TweenSpec>(dialog_style.exit).duration == light.motion.fast);
+  REQUIRE(dialog_style.shadow.offset == Point{});
+  REQUIRE(dialog_style.shadow.blur_radius == light.elevation.high * 4.0F);
+  REQUIRE(dialog_style.shadow.spread == 0.0F);
+  REQUIRE(dialog_style.motion.has_value());
+  REQUIRE(dialog_style.motion->initial_scale == 0.94F);
+  REQUIRE(std::get<TweenSpec>(dialog_style.motion->enter).duration == light.motion.normal);
+  REQUIRE(std::get<TweenSpec>(dialog_style.motion->exit).duration == light.motion.fast);
+  const auto* positive_indication = std::get_if<RippleIndication>(&dialog_style.positive_action_indication);
+  REQUIRE(positive_indication != nullptr);
+  REQUIRE(positive_indication->color.red == light.colors.primary.red);
+  REQUIRE(positive_indication->color.alpha < light.colors.primary.alpha);
+
+  const huxerui::BottomSheetStyle bottom_sheet_style = ThemeDefinitionValue<huxerui::BottomSheetStyle>(definition);
+  REQUIRE(bottom_sheet_style.background.red == light.colors.surface.red);
+
+  const huxerui::MenuStyle menu_style = ThemeDefinitionValue<huxerui::MenuStyle>(definition);
+  REQUIRE(menu_style.separator_mode == huxerui::MenuSeparatorMode::None);
+  REQUIRE(menu_style.motion.has_value());
+  REQUIRE(std::holds_alternative<RippleIndication>(menu_style.item_indication));
 
   const huxerui::ScrollBarStyle scroll_bar_style = ThemeDefinitionValue<huxerui::ScrollBarStyle>(definition);
   REQUIRE(scroll_bar_style.thickness == 4.0F);
@@ -573,6 +720,9 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const ThemeDefinition brand_definition = huxerui::MaterialThemeDefinition(brand);
   const ButtonStyle brand_button_style = ThemeDefinitionValue<ButtonStyle>(brand_definition);
   REQUIRE(brand_button_style.background.green == brand.colors.primary.green);
+
+  const ThemeDefinition dark_definition = huxerui::MaterialDarkThemeDefinition();
+  REQUIRE(ThemeDefinitionValue<huxerui::DialogStyle>(dark_definition).background.red == dark.colors.surface.red);
 
   TestPlatform platform;
   Runtime runtime{MaterialThemeApp, platform};
@@ -1060,10 +1210,9 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
       .key = Key::Tab,
-      .modifiers =
-          {
-              .shift = true,
-          },
+      .modifiers = {
+          .shift = true,
+      },
   });
   runtime.BuildFrame();
   REQUIRE(focus_changes.back() == "third:on");
@@ -1098,6 +1247,23 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
       104,
       pointer,
   });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Control,
+      .modifiers = {
+          .control = true,
+      },
+  });
+  const FlattenedScene& modifier_only = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(modifier_only, Color::Rgb(40, 180, 90)) == nullptr);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Unknown,
+  });
+  const FlattenedScene& unknown_key = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(unknown_key, Color::Rgb(40, 180, 90)) != nullptr);
+
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
       .key = Key::Tab,
@@ -1353,6 +1519,211 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(!saved_dialogs->Dismiss(outside_dialog));
 }
 
+TEST_CASE("TestToastRejectsAnEmptyLiteralBeforeAttachingALayer") {
+  saved_toast.reset();
+
+  TestPlatform platform;
+  Runtime runtime{PresentationApp, platform};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(saved_toast->Show(""), std::invalid_argument);
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+}
+
+TEST_CASE("TestToastRetainsItsLayerUntilExitMotionCompletes") {
+  saved_toast.reset();
+
+  TestPlatform platform;
+  Runtime runtime{MaterialPresentationApp, platform};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+
+  const LayerId toast = saved_toast->Show("animated toast", ToastOptions{10.0});
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "animated toast"));
+
+  REQUIRE(saved_toast->Dismiss(toast));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "animated toast"));
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "animated toast"));
+}
+
+TEST_CASE("TestCommandDialogUpdateRefreshesCapturedEnvironmentAndBarrier") {
+  saved_dialogs.reset();
+
+  TestPlatform platform;
+  Runtime runtime{DialogUpdateEnvironmentApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+
+  const LayerId dialog = saved_dialogs->Show(
+      DialogUpdateEnvironmentContent,
+      DialogOptions{
+          .dismiss_on_outside_press = false,
+      }
+  );
+  const FlattenedScene& initial = runtime.BuildFrame();
+  REQUIRE(ContainsText(initial, "initial dialog environment"));
+  REQUIRE(FindRectWithColor(initial, initial_dialog_update_scrim) != nullptr);
+
+  alternate_dialog_update_environment = true;
+  runtime.BuildFrame();
+  REQUIRE(saved_dialogs->Update(dialog, DialogUpdateEnvironmentContent));
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(!ContainsText(updated, "initial dialog environment"));
+  REQUIRE(ContainsText(updated, "updated dialog environment"));
+  REQUIRE(FindRectWithColor(updated, updated_dialog_update_scrim) != nullptr);
+
+  ClickAt(runtime, {1.0F, 1.0F}, 146);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "updated dialog environment"));
+}
+
+TEST_CASE("TestStandardDialogUsesDefaultLabelsAndTwoActions") {
+  saved_dialogs.reset();
+  positive_dialog_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{PresentationThemeApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+
+  saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", {}, [] {
+    ++positive_dialog_clicks;
+  });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const FlattenedScene& shortcut = runtime.BuildFrame();
+  REQUIRE(ContainsText(shortcut, "Save changes?"));
+  REQUIRE(ContainsText(shortcut, "The current document has unsaved changes."));
+  const std::optional<Rect> positive = FindPresentedTextRect(shortcut, "OK");
+  REQUIRE(positive.has_value());
+
+  ClickAt(runtime, {positive->x + positive->width * 0.5F, positive->y + positive->height * 0.5F}, 141);
+  REQUIRE(positive_dialog_clicks == 1);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "Save changes?"));
+
+  saved_dialogs->Show("Remove item?", "This action cannot be undone.", "Remove", "Cancel");
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const FlattenedScene& two_actions = runtime.BuildFrame();
+  REQUIRE(ContainsText(two_actions, "Remove item?"));
+  REQUIRE(ContainsText(two_actions, "Cancel"));
+  REQUIRE(ContainsText(two_actions, "Remove"));
+  const std::optional<Rect> negative = FindPresentedTextRect(two_actions, "Cancel");
+  REQUIRE(negative.has_value());
+  ClickAt(runtime, {negative->x + negative->width * 0.5F, negative->y + negative->height * 0.5F}, 142);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "Remove item?"));
+}
+
+TEST_CASE("TestStandardDialogKeepsNaturalWidthAndRejectsEmptyLiteralContent") {
+  saved_dialogs.reset();
+
+  TestPlatform platform;
+  Runtime runtime{MaterialPresentationApp, platform};
+  runtime.SetViewport({800.0F, 480.0F});
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(saved_dialogs->Show("", "Message"), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_dialogs->Show("Title", ""), std::invalid_argument);
+
+  saved_dialogs->Show("Short", "Message");
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const DialogStyle style = ThemeDefinitionValue<DialogStyle>(MaterialThemeDefinition());
+  const std::optional<Rect> surface = FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  REQUIRE(surface.has_value());
+  REQUIRE(surface->width < style.maximum_width);
+}
+
+TEST_CASE("TestMaterialDialogActionUsesThemeRipple") {
+  saved_dialogs.reset();
+
+  TestPlatform platform;
+  Runtime runtime{MaterialPresentationApp, platform};
+  runtime.SetViewport({640.0F, 360.0F});
+  runtime.BuildFrame();
+
+  saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", "Save");
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const FlattenedScene& shown = runtime.BuildFrame();
+  const std::optional<Rect> save = FindPresentedTextRect(shown, "Save");
+  REQUIRE(save.has_value());
+
+  const Point pointer{
+      save->x + save->width * 0.5F,
+      save->y + save->height * 0.5F,
+  };
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      143,
+      pointer,
+  });
+  runtime.BuildFrame();
+  const ThemeSpec material = MaterialLightThemeSpec();
+  platform.AdvanceTime(material.motion.slow * 0.5);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+
+  const auto expected = std::get<RippleIndication>(
+      ThemeDefinitionValue<DialogStyle>(MaterialThemeDefinition()).positive_action_indication
+  );
+  const DrawCircleCommand* ripple = nullptr;
+  for (const auto& command : pressed.Commands()) {
+    const auto* circle = std::get_if<DrawCircleCommand>(&command);
+    if (circle && circle->radius > 0.0F && circle->color == expected.color) {
+      ripple = circle;
+      break;
+    }
+  }
+  REQUIRE(ripple != nullptr);
+}
+
+TEST_CASE("TestPresentationThemeControlsDialogLayoutAndVerticalPlacement") {
+  saved_toast.reset();
+  saved_dialogs.reset();
+
+  TestPlatform platform;
+  Runtime runtime{ThemedPresentationPolicyApp, platform};
+  runtime.SetViewport({320.0F, 240.0F});
+  runtime.BuildFrame();
+
+  const LayerId toast_id = saved_toast->Show("top toast", ToastOptions{10.0});
+  const FlattenedScene& toast = runtime.BuildFrame();
+  const std::optional<Rect> toast_surface = FindPresentedRectWithColor(toast, policy_toast_background);
+  REQUIRE(toast_surface.has_value());
+  REQUIRE(toast_surface->y < 40.0F);
+  REQUIRE(saved_toast->Dismiss(toast_id));
+
+  const LayerId policy_dialog =
+      saved_dialogs->Show("Policy dialog", "Theme-owned placement and actions", "Second", "First");
+  const FlattenedScene& dialog = runtime.BuildFrame();
+  const std::optional<Rect> dialog_surface = FindPresentedRectWithColor(dialog, policy_dialog_background);
+  REQUIRE(dialog_surface.has_value());
+  REQUIRE(dialog_surface->y + dialog_surface->height <= 230.0F);
+  REQUIRE(dialog_surface->y + dialog_surface->height > 220.0F);
+  REQUIRE(FindRectWithColor(dialog, policy_dialog_separator) != nullptr);
+
+  const std::optional<Rect> first = FindPresentedTextRect(dialog, "First");
+  const std::optional<Rect> second = FindPresentedTextRect(dialog, "Second");
+  REQUIRE(first.has_value());
+  REQUIRE(second.has_value());
+  REQUIRE(first->y < second->y);
+
+  REQUIRE(saved_dialogs->Dismiss(policy_dialog));
+  const LayerId custom_dialog = saved_dialogs->Show([] { return Text("before update"); });
+  REQUIRE(ContainsText(runtime.BuildFrame(), "before update"));
+  REQUIRE(saved_dialogs->Update(custom_dialog, [] { return Text("after update"); }));
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(!ContainsText(updated, "before update"));
+  REQUIRE(ContainsText(updated, "after update"));
+}
+
 TEST_CASE("TestDialogRetainsExitPresentationWithoutRetainingInput") {
   saved_dialogs.reset();
   first_dialog_clicks = 0;
@@ -1456,6 +1827,62 @@ TEST_CASE("TestDeclarativeDialogModifier") {
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "declarative dialog 2"));
+}
+
+TEST_CASE("TestDeclarativeDialogMotionStyleUpdatesWithoutReentering") {
+  TestPlatform platform;
+  Runtime runtime{DeclarativeDialogMotionApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const std::optional<float> unanimated_opacity =
+      RenderedTextOpacity(*runtime.LastCommit().render_frame.scene.root, "motion dialog");
+  REQUIRE(unanimated_opacity.has_value());
+  REQUIRE(*unanimated_opacity == Catch::Approx(1.0F));
+
+  declarative_dialog_motion_enabled = true;
+  runtime.BuildFrame();
+  const std::optional<float> updated_opacity =
+      RenderedTextOpacity(*runtime.LastCommit().render_frame.scene.root, "motion dialog");
+  REQUIRE(updated_opacity.has_value());
+  REQUIRE(*updated_opacity == Catch::Approx(1.0F));
+
+  declarative_dialog_visible = false;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE_FALSE(RenderedTextOpacity(*runtime.LastCommit().render_frame.scene.root, "motion dialog").has_value());
+
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  const std::optional<float> entering_opacity =
+      RenderedTextOpacity(*runtime.LastCommit().render_frame.scene.root, "motion dialog");
+  REQUIRE(entering_opacity.has_value());
+  REQUIRE(*entering_opacity < 1.0F);
+}
+
+TEST_CASE("TestDeclarativeDialogCanRemoveMotionWhileReentering") {
+  TestPlatform platform;
+  Runtime runtime{DeclarativeDialogMotionApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  runtime.BuildFrame();
+
+  declarative_dialog_motion_enabled = true;
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "motion dialog"));
+
+  declarative_dialog_visible = false;
+  runtime.BuildFrame();
+  platform.AdvanceTime(1.0);
+  declarative_dialog_motion_enabled = false;
+  declarative_dialog_visible = true;
+  runtime.BuildFrame();
+  REQUIRE(ContainsText(runtime.BuildFrame(), "motion dialog"));
 }
 
 TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {

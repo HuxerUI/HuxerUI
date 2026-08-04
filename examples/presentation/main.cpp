@@ -63,45 +63,38 @@ View App() {
             .With(Foreground(secondary_text_color)),
         Text("Feedback and modal content").With(FontSize(20.0F), Foreground(primary_text_color)),
         Flow {
-          Button("Show toast").OnClick([toast] {
-            toast.Show("Changes saved", ToastOptions{2.5});
+          Button("Show toast").OnClick([toast] { toast.Show("Changes saved", ToastOptions{2.5}); }),
+          Button("Open alert").OnClick([dialog] {
+            dialog.Show("Save changes?", "The current document has unsaved changes.", "Save");
           }),
-          Button("Open dialog").OnClick([dialog] {
+          Button("Open custom dialog").OnClick([dialog] {
             dialog.Show(CommandDialogCard, DialogOptions{.dismiss_on_outside_press = false});
           }),
           Button("Open declarative dialog").OnClick([declarative_dialog_visible] {
             declarative_dialog_visible = true;
           }),
         }.With(Spacing(12.0F)),
-        Button("Open bottom sheet").OnClick([bottom_sheet] {
-          bottom_sheet.Show(BottomSheetCard);
-        }),
+        Button("Open bottom sheet").OnClick([bottom_sheet] { bottom_sheet.Show(BottomSheetCard); }),
         Text("Anchored content").With(FontSize(20.0F), Foreground(primary_text_color)),
         Text("Popup and Menu follow the final bounds of their anchor View.")
             .With(Foreground(secondary_text_color)),
         Flow {
-          Button("Show popup")
-              .With(popup.Anchor())
-              .OnClick([popup] {
-                popup.Show(PopupCard);
-              }),
-          Button("Show menu")
-              .With(menu.Anchor())
-              .OnClick([menu] {
-                menu.Show({
-                  MenuItem("Rename", [] {}),
-                  MenuItem("Duplicate", [] {}),
-                  MenuItem(
-                      "Move to",
-                      {
+          Button("Show popup").With(popup.Anchor()).OnClick([popup] { popup.Show(PopupCard); }),
+          Button("Show menu").With(menu.Anchor()).OnClick([menu] {
+            menu.Show({
+                MenuItem("Rename", [] {}),
+                MenuItem("Duplicate", [] {}),
+                MenuItem(
+                    "Move to",
+                    {
                         MenuItem("Archive", [] {}),
                         MenuItem("Trash", [] {}),
-                      }
-                  ),
-                  MenuSection{},
-                  MenuItem("Delete", [] {}),
-                });
-              }),
+                    }
+                ),
+                MenuSection{},
+                MenuItem("Delete", [] {}),
+            });
+          }),
         }.With(Spacing(12.0F)),
       }.With(Spacing(16.0F), CrossAlign(CrossAxisAlignment::Start)),
     }.With(ScrollBar(), Grow()),
@@ -117,8 +110,12 @@ View App() {
   );
 }
 
+View PresentationRoot() {
+  return MaterialTheme(App);
+}
+
 HUXERUI_APP(
-    App,
+    PresentationRoot,
     {
         .title = "HuxerUI Presentation",
         .width = 720.0F,

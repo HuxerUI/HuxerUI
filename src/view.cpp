@@ -627,10 +627,11 @@ void View::AddModifier(detail::ModifierSpec modifier) {
       return detail::IsDefaultIndicationDescriptor(existing.descriptor);
     });
   } else if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
-    const bool already_has_indication = std::ranges::any_of(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
-      return detail::IsDefaultIndicationDescriptor(existing.descriptor) ||
-             detail::IsExplicitIndicationDescriptor(existing.descriptor);
-    });
+    const bool already_has_indication =
+        std::ranges::any_of(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
+          return detail::IsDefaultIndicationDescriptor(existing.descriptor) ||
+                 detail::IsExplicitIndicationDescriptor(existing.descriptor);
+        });
     if (already_has_indication) {
       return;
     }
@@ -754,6 +755,8 @@ Text Text::Style(TextStyle style) && {
   SetTextStyle(std::move(style));
   return std::move(*this);
 }
+
+Button::Button(StringResource resource) : Button(UseString(std::move(resource))) {}
 
 Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
 

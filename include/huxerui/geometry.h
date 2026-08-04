@@ -7,6 +7,11 @@
 
 namespace huxerui {
 
+enum class Axis {
+  Horizontal,
+  Vertical,
+};
+
 struct Point {
   float x = 0.0F;
   float y = 0.0F;

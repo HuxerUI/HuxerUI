@@ -1,5 +1,7 @@
 #include <huxerui/theme.h>
 
+#include <optional>
+
 #include <huxerui/modifier.h>
 #include <huxerui/presentation.h>
 
@@ -8,6 +10,136 @@
 namespace huxerui {
 
 namespace {
+
+constexpr float material_shadow_blur_per_elevation = 4.0F;
+
+StateOverlayIndication FlatIndication(Color color, const ThemeSpec& theme) {
+  Color hover = color;
+  color.alpha *= 0.16F;
+  hover.alpha *= 0.1F;
+  return {
+      .color = color,
+      .fade_in_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+      .fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+      .hover_color = hover,
+  };
+}
+
+RippleIndication MaterialIndication(Color color, const ThemeSpec& theme) {
+  Color hover = color;
+  color.alpha *= 0.16F;
+  hover.alpha *= 0.08F;
+  return {
+      .color = color,
+      .expansion_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow,
+      .fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+      .hover_color = hover,
+      .hover_fade_in_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+      .hover_fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+  };
+}
+
+Shadow MaterialShadow(Color color, float elevation) {
+  return {color, {}, elevation * material_shadow_blur_per_elevation, 0.0F};
+}
+
+ToastStyle FlatToastStyle(const ThemeSpec& theme) {
+  Color background = theme.colors.inverse_surface;
+  background.alpha *= 0.94F;
+  return {
+      .background = background,
+      .text_style = TextStyle{Font::System(theme.typography.body), theme.colors.inverse_on_surface},
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.24F), {}, theme.elevation.medium, 0.0F},
+      .corner_radius = theme.shapes.medium,
+      .maximum_width = 480.0F,
+      .viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F},
+      .placement = VerticalPlacement::Bottom,
+      .motion = std::nullopt,
+  };
+}
+
+DialogStyle FlatDialogStyle(const ThemeSpec& theme) {
+  Color separator = theme.colors.on_surface;
+  separator.alpha *= 0.12F;
+  return {
+      .scrim = theme.colors.scrim,
+      .background = theme.colors.surface,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.24F), {}, theme.elevation.high, 0.0F},
+      .title_style =
+          TextStyle{Font::System(theme.typography.title).WithWeight(FontWeight::Bold), theme.colors.on_surface},
+      .message_style = TextStyle{Font::System(theme.typography.body), theme.colors.on_surface},
+      .positive_action_style = TextStyle{Font::System(theme.typography.label), theme.colors.on_primary},
+      .negative_action_style = TextStyle{Font::System(theme.typography.label), theme.colors.on_surface},
+      .positive_action_background = theme.colors.primary,
+      .negative_action_background = Color::Transparent(),
+      .positive_action_indication = FlatIndication(theme.colors.on_primary, theme),
+      .negative_action_indication = FlatIndication(theme.colors.on_surface, theme),
+      .action_separator_color = separator,
+      .content_padding = EdgeInsets::All(theme.spacing.large),
+      .action_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .content_spacing = theme.spacing.small + theme.spacing.extra_small,
+      .action_spacing = theme.spacing.small,
+      .action_separator_thickness = 0.0F,
+      .action_corner_radius = theme.shapes.small,
+      .minimum_action_height = 36.0F,
+      .corner_radius = theme.shapes.large,
+      .maximum_width = 480.0F,
+      .viewport_margin = theme.spacing.large,
+      .placement = VerticalPlacement::Center,
+      .content_alignment = HorizontalAlignment::Start,
+      .action_layout = Axis::Horizontal,
+      .action_alignment = HorizontalAlignment::End,
+      .motion = PresentationMotion{
+          .enter = TweenSpec{.duration = theme.motion.normal},
+          .exit = TweenSpec{.duration = theme.motion.fast},
+      },
+  };
+}
+
+BottomSheetStyle FlatBottomSheetStyle(const ThemeSpec& theme) {
+  return {
+      .scrim = theme.colors.scrim,
+      .background = theme.colors.surface,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.22F), {}, theme.elevation.high, 0.0F},
+      .corner_radius = theme.shapes.large,
+      .maximum_width = 640.0F,
+      .enter = TweenSpec{.duration = theme.motion.slow},
+      .exit = TweenSpec{.duration = theme.motion.normal},
+  };
+}
+
+MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
+  Color separator = theme.colors.on_surface;
+  separator.alpha *= 0.12F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .item_indication = FlatIndication(theme.colors.on_surface, theme),
+      .separator_color = separator,
+      .separator_mode = MenuSeparatorMode::BetweenItems,
+      .separator_thickness = 1.0F,
+      .separator_padding = {},
+      .content_padding = EdgeInsets::All(theme.spacing.extra_small),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
+      .item_content_spacing = theme.spacing.small,
+      .icon_size = 18.0F,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {}, theme.elevation.medium, 0.0F},
+      .corner_radius = theme.shapes.medium,
+      .minimum_width = 180.0F,
+      .minimum_item_height = 36.0F,
+      .motion = std::nullopt,
+  };
+}
+
+ThemeDefinition FlatDefinition(ThemeSpec theme) {
+  ThemeDefinition definition{theme};
+  definition.Set(FlatToastStyle(theme));
+  definition.Set(FlatDialogStyle(theme));
+  definition.Set(FlatBottomSheetStyle(theme));
+  definition.Set(FlatMenuStyle(theme));
+  return definition;
+}
 
 ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   return {
@@ -109,12 +241,79 @@ ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   };
 }
 
+ToastStyle MaterialToastStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.inverse_surface,
+      .text_style = TextStyle{Font::System(theme.typography.body), theme.colors.inverse_on_surface},
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.18F), theme.elevation.medium),
+      .corner_radius = theme.shapes.small,
+      .maximum_width = 480.0F,
+      .viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F},
+      .placement = VerticalPlacement::Bottom,
+      .motion = PresentationMotion{
+          .slide_distance = 12.0F,
+          .enter = TweenSpec{.duration = theme.motion.normal},
+          .exit = TweenSpec{.duration = theme.motion.fast},
+      },
+  };
+}
+
+DialogStyle MaterialDialogStyle(const ThemeSpec& theme) {
+  return {
+      .scrim = theme.colors.scrim,
+      .background = theme.colors.surface,
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.16F), theme.elevation.high),
+      .title_style = TextStyle{Font::System(24.0F), theme.colors.on_surface},
+      .message_style = TextStyle{Font::System(theme.typography.body), theme.colors.on_surface},
+      .positive_action_style = TextStyle{Font::System(theme.typography.label), theme.colors.primary},
+      .negative_action_style = TextStyle{Font::System(theme.typography.label), theme.colors.primary},
+      .positive_action_background = Color::Transparent(),
+      .negative_action_background = Color::Transparent(),
+      .positive_action_indication = MaterialIndication(theme.colors.primary, theme),
+      .negative_action_indication = MaterialIndication(theme.colors.primary, theme),
+      .action_separator_color = Color::Transparent(),
+      .content_padding = EdgeInsets::All(theme.spacing.large),
+      .action_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
+      .content_spacing = theme.spacing.medium,
+      .action_spacing = theme.spacing.small,
+      .action_separator_thickness = 0.0F,
+      .action_corner_radius = theme.shapes.large,
+      .minimum_action_height = 40.0F,
+      .corner_radius = theme.shapes.large,
+      .maximum_width = 560.0F,
+      .viewport_margin = theme.spacing.large,
+      .placement = VerticalPlacement::Center,
+      .content_alignment = HorizontalAlignment::Start,
+      .action_layout = Axis::Horizontal,
+      .action_alignment = HorizontalAlignment::End,
+      .motion = PresentationMotion{
+          .initial_scale = 0.94F,
+          .enter = TweenSpec{.duration = theme.motion.normal},
+          .exit = TweenSpec{.duration = theme.motion.fast},
+      },
+  };
+}
+
+BottomSheetStyle MaterialBottomSheetStyle(const ThemeSpec& theme) {
+  return {
+      .scrim = theme.colors.scrim,
+      .background = theme.colors.surface,
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.16F), theme.elevation.high),
+      .corner_radius = theme.shapes.large,
+      .maximum_width = 640.0F,
+      .enter = TweenSpec{.duration = theme.motion.slow},
+      .exit = TweenSpec{.duration = theme.motion.normal},
+  };
+}
+
 MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
   Color separator = theme.colors.on_surface;
-  separator.alpha = 0.12F;
+  separator.alpha *= 0.12F;
   return {
       .background = theme.colors.surface,
       .foreground = theme.colors.on_surface,
+      .item_indication = MaterialIndication(theme.colors.on_surface, theme),
       .separator_color = separator,
       .separator_mode = MenuSeparatorMode::None,
       .separator_thickness = 1.0F,
@@ -123,10 +322,15 @@ MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
       .item_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
       .item_content_spacing = theme.spacing.small,
       .icon_size = 18.0F,
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {0.0F, 4.0F}, theme.elevation.medium, 0.0F},
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.18F), theme.elevation.medium),
       .corner_radius = theme.shapes.medium,
       .minimum_width = 180.0F,
       .minimum_item_height = 36.0F,
+      .motion = PresentationMotion{
+          .initial_scale = 0.96F,
+          .enter = TweenSpec{.duration = theme.motion.fast},
+          .exit = TweenSpec{.duration = theme.motion.fast},
+      },
   };
 }
 
@@ -137,19 +341,11 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialCheckboxStyle(theme));
   definition.Set(MaterialSwitchStyle(theme));
   definition.Set(MaterialProgressCircleStyle(theme));
-  definition.Set(ToastStyle{
-      .background = theme.colors.inverse_surface,
-      .foreground = theme.colors.inverse_on_surface,
-      .padding = theme.spacing.small + theme.spacing.extra_small,
-      .corner_radius = theme.shapes.small,
-  });
-  definition.Set(DialogStyle{
-      .scrim = theme.colors.scrim,
-      .enter = TweenSpec{.duration = theme.motion.normal},
-      .exit = TweenSpec{.duration = theme.motion.fast},
-  });
-  definition.Set(MaterialMenuStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
+  definition.Set(MaterialToastStyle(theme));
+  definition.Set(MaterialDialogStyle(theme));
+  definition.Set(MaterialBottomSheetStyle(theme));
+  definition.Set(MaterialMenuStyle(theme));
   return definition;
 }
 
@@ -310,6 +506,22 @@ ProgressCircleStyle ProgressCircleStyle::Default() {
   return detail::DefaultProgressCircleStyle(ThemeSpec::Default());
 }
 
+ToastStyle ToastStyle::Default() {
+  return FlatToastStyle(FlatLightThemeSpec());
+}
+
+DialogStyle DialogStyle::Default() {
+  return FlatDialogStyle(FlatLightThemeSpec());
+}
+
+BottomSheetStyle BottomSheetStyle::Default() {
+  return FlatBottomSheetStyle(FlatLightThemeSpec());
+}
+
+MenuStyle MenuStyle::Default() {
+  return FlatMenuStyle(FlatLightThemeSpec());
+}
+
 ThemeSpec FlatLightThemeSpec() {
   ThemeSpec theme;
   theme.interactions = {
@@ -347,6 +559,18 @@ ThemeSpec FlatDarkThemeSpec() {
       .disabled_opacity = 0.42F,
   };
   return theme;
+}
+
+ThemeDefinition FlatThemeDefinition(ThemeSpec theme) {
+  return FlatDefinition(std::move(theme));
+}
+
+ThemeDefinition FlatThemeDefinition() {
+  return FlatThemeDefinition(FlatLightThemeSpec());
+}
+
+ThemeDefinition FlatDarkThemeDefinition() {
+  return FlatDefinition(FlatDarkThemeSpec());
 }
 
 ThemeSpec MaterialLightThemeSpec() {
@@ -437,14 +661,6 @@ ThemeSpec MaterialDarkThemeSpec() {
       .disabled_opacity = 0.38F,
   };
   return theme;
-}
-
-ThemeDefinition FlatThemeDefinition() {
-  return ThemeDefinition{FlatLightThemeSpec()};
-}
-
-ThemeDefinition FlatDarkThemeDefinition() {
-  return ThemeDefinition{FlatDarkThemeSpec()};
 }
 
 ThemeDefinition MaterialThemeDefinition(ThemeSpec theme) {
