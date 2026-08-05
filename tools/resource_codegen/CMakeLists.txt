@@ -19,5 +19,5 @@ target_compile_options(huxerui_resource_codegen PRIVATE
 
 set_target_properties(huxerui_resource_codegen PROPERTIES
         CXX_EXTENSIONS OFF
-        OUTPUT_NAME "huxerui-resource-codegen"
+        OUTPUT_NAME "hapt"
 )

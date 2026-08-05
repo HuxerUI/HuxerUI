@@ -25,12 +25,12 @@ struct Arguments {
       arguments.output = argv[++index];
     } else {
       throw std::invalid_argument(
-          "usage: huxerui-codegen --input <path> --output <path>");
+          "usage: hcg --input <path> --output <path>");
     }
   }
   if (arguments.input.empty() || arguments.output.empty()) {
     throw std::invalid_argument(
-        "usage: huxerui-codegen --input <path> --output <path>");
+        "usage: hcg --input <path> --output <path>");
   }
   return arguments;
 }
@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
       return 1;
     }
   } catch (const std::exception& error) {
-    std::cerr << "huxerui-codegen: error: "
+    std::cerr << "hcg: error: "
               << error.what() << '\n';
     return 1;
   }

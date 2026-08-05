@@ -18,11 +18,11 @@ huxerui::resource_codegen::Options ParseArguments(int argc, char** argv) {
     } else if (argument == "--namespace" && index + 1 < argc) {
       options.resource_namespace = argv[++index];
     } else {
-      throw std::invalid_argument("usage: huxerui-resource-codegen --root <path> --output <path> --namespace <name>");
+      throw std::invalid_argument("usage: hapt --root <path> --output <path> --namespace <name>");
     }
   }
   if (options.root.empty() || options.output.empty() || options.resource_namespace.empty()) {
-    throw std::invalid_argument("usage: huxerui-resource-codegen --root <path> --output <path> --namespace <name>");
+    throw std::invalid_argument("usage: hapt --root <path> --output <path> --namespace <name>");
   }
   return options;
 }
@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
     huxerui::resource_codegen::Generate(ParseArguments(argc, argv));
     return 0;
   } catch (const std::exception& error) {
-    std::cerr << "huxerui-resource-codegen: " << error.what() << '\n';
+    std::cerr << "hapt: " << error.what() << '\n';
     return 1;
   }
 }

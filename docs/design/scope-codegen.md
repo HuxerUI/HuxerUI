@@ -102,7 +102,7 @@ All returns in the original body therefore return from the deferred scope factor
 A representative output layout is:
 
 ```text
-<binary-dir>/huxerui-codegen/<target>/<source-path-hash>/<source-file-name>
+<binary-dir>/hcg/<target>/<source-path-hash>/<source-file-name>
 ```
 
 Combining a hash of the absolute input path with the original source basename prevents equal basenames in different directories from colliding.

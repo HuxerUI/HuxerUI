@@ -153,7 +153,7 @@ Both forms configure the same resource target and generated package.
 Native platform shells consume its generated staging projection and do not redeclare asset roots.
 
 Resource processing is distinct from C++ scope transformation.
-A dedicated `resource_codegen` host tool belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the scope code generator into an unrelated packager.
+The HuxerUI Asset Packaging Tool (`hapt`) belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the HuxerUI Code Generator (`hcg`) into an unrelated packager.
 
 The resource tool:
 
@@ -783,7 +783,7 @@ ImageAsset::FromFile uses `std::invalid_argument` for inaccessible or unreadable
 Image and PaintContext validate non-finite geometry, invalid source rectangles, invalid alignment values, and opacity outside `[0, 1]` at the earliest public boundary.
 
 Public API and runtime diagnostics are English, begin with `HuxerUI`, and include the relevant ResourceId, path, locale, variant, or argument index.
-Resource generator diagnostics are English and use the `huxerui-resource-codegen:` CLI prefix.
+Asset packaging diagnostics are English and use the `hapt:` CLI prefix.
 
 ## Validation
 

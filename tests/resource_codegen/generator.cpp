@@ -25,7 +25,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory() {
     path_ = std::filesystem::temp_directory_path() /
-            ("huxerui-resource-codegen-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            ("hapt-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(path_);
   }
 

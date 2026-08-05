@@ -160,8 +160,11 @@ function(huxerui_resolve_host_tool tool_name output_variable)
                 ABSOLUTE
         )
     endif ()
+    set(HUXERUI_HOST_TOOL_DIRECTORY
+            "${HUXERUI_RESOLVED_HOST_TOOL_ROOT}/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}"
+    )
     set(HUXERUI_HOST_TOOL
-            "${HUXERUI_RESOLVED_HOST_TOOL_ROOT}/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}/huxerui-${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
+            "${HUXERUI_HOST_TOOL_DIRECTORY}/${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
     )
     if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
         message(FATAL_ERROR
@@ -178,7 +181,7 @@ function(huxerui_enable_codegen target_name)
         )
     endif ()
 
-    huxerui_resolve_host_tool("codegen" HUXERUI_CODEGEN_COMMAND)
+    huxerui_resolve_host_tool("hcg" HUXERUI_CODEGEN_COMMAND)
 
     get_target_property(HUXERUI_CODEGEN_ALREADY_ENABLED
             ${target_name}
@@ -286,8 +289,11 @@ function(huxerui_enable_codegen target_name)
                 DIRECTORY
         )
 
+        set(HUXERUI_CODEGEN_OUTPUT_DIRECTORY
+                "${HUXERUI_CODEGEN_BINARY_DIR}/hcg/${target_name}/${HUXERUI_CODEGEN_SOURCE_HASH}"
+        )
         set(HUXERUI_CODEGEN_OUTPUT
-                "${HUXERUI_CODEGEN_BINARY_DIR}/huxerui-codegen/${target_name}/${HUXERUI_CODEGEN_SOURCE_HASH}/${HUXERUI_CODEGEN_SOURCE_NAME}"
+                "${HUXERUI_CODEGEN_OUTPUT_DIRECTORY}/${HUXERUI_CODEGEN_SOURCE_NAME}"
         )
         add_custom_command(
                 OUTPUT "${HUXERUI_CODEGEN_OUTPUT}"
@@ -381,7 +387,7 @@ function(huxerui_add_resources target_name)
         )
     endif ()
 
-    huxerui_resolve_host_tool("resource-codegen" HUXERUI_RESOURCE_CODEGEN_COMMAND)
+    huxerui_resolve_host_tool("hapt" HUXERUI_RESOURCE_CODEGEN_COMMAND)
     set(HUXERUI_RESOURCE_OUTPUT
             "${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/${target_name}"
     )

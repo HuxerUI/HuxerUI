@@ -122,4 +122,5 @@ install(DIRECTORY "${HUXERUI_PROJECT_DIR}/cmake/platform"
 install(DIRECTORY "${HUXERUI_PROJECT_DIR}/tools/prebuilt/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/tools"
         PATTERN "README.md" EXCLUDE
+        PATTERN ".DS_Store" EXCLUDE
 )

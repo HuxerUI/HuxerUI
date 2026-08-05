@@ -3,16 +3,29 @@
 Host tools are distributed by operating system and architecture:
 
 ```text
-prebuilt/<windows|macos|linux>/<x86_64|arm64>/huxerui-<tool>[.exe]
+prebuilt/<windows|macos|linux>/<x86_64|arm64>/<hcg|hapt>[.exe]
 ```
 
 These executables run on the build host. Their platform and architecture are independent of the application target and Android ABI. CMake selects the matching executable automatically and stops configuration when that host package is unavailable.
 
 Current host tools are:
 
-- `huxerui-codegen` for `[[huxerui::scope]]` transformation
-- `huxerui-resource-codegen` for typed keys, the resource index, and package staging
+- HuxerUI Code Generator (`hcg`) for `[[huxerui::scope]]` transformation
+- HuxerUI Asset Packaging Tool (`hapt`) for typed keys, the resource index, and package staging
 
 Each distributed host and architecture directory must contain every tool required by the project configuration.
 
 Prebuilt executables must be rebuilt from the matching tool source whenever that source changes. Tests compile the tool sources directly and therefore do not prove that a distributed executable is current.
+
+## macOS distribution
+
+Release binaries must be signed with a Developer ID Application certificate, packaged for distribution, and submitted to Apple's notarization service.
+Use a distribution format supported by Apple's current notarization and ticket-stapling workflow when an offline-verifiable release is required.
+
+For a trusted local checkout whose downloaded tools were quarantined by an archive utility, remove that attribute explicitly:
+
+```bash
+xattr -dr com.apple.quarantine tools/prebuilt/macos
+```
+
+This local operation does not replace release signing or notarization and must not run implicitly during CMake configuration.
