@@ -187,6 +187,23 @@ struct CheckboxStyle {
   bool operator==(const CheckboxStyle&) const = default;
 };
 
+struct RadioButtonStyle {
+  float size = 20.0F;
+  float minimum_interactive_size = 20.0F;
+  float state_layer_size = 20.0F;
+  Color selected_color = Color::Rgb(31, 111, 235);
+  Color unselected_color = Color::Rgb(87, 96, 106);
+  Color disabled_selected_color = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_unselected_color = Color::Rgb(31, 35, 40, 0.38F);
+  float border_width = 2.0F;
+  float dot_radius = 5.0F;
+  double animation_duration = 0.1;
+
+  static RadioButtonStyle Default();
+
+  bool operator==(const RadioButtonStyle&) const = default;
+};
+
 struct SwitchStyle {
   float width = 40.0F;
   float height = 24.0F;
@@ -388,6 +405,7 @@ TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Bod
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
+RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
 ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);
 ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme);

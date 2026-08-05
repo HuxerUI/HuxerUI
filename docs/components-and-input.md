@@ -20,9 +20,9 @@ SelectionArea {
 };
 ```
 
-## Button, Checkbox, and Switch
+## Button, Checkbox, RadioButton, and Switch
 
-Button, Checkbox, and Switch participate in focus traversal and share their pointer and keyboard activation paths. Checkbox and Switch are controlled:
+Button, Checkbox, RadioButton, and Switch participate in focus traversal and share their pointer and keyboard activation paths. Checkbox, RadioButton, and Switch are controlled:
 
 ```cpp
 auto checked = UseState(false);
@@ -33,6 +33,25 @@ return Row {
   }),
   Switch(checked).OnChanged([checked](bool value) {
     checked = value;
+  }),
+};
+```
+
+RadioButton represents one controlled choice rather than owning a group. Application state defines mutual exclusion, and activating an already selected RadioButton leaves the selection unchanged:
+
+```cpp
+auto choice = UseState(0);
+
+return Row {
+  RadioButton(choice == 0).OnChanged([choice](bool selected) {
+    if (selected) {
+      choice = 0;
+    }
+  }),
+  RadioButton(choice == 1).OnChanged([choice](bool selected) {
+    if (selected) {
+      choice = 1;
+    }
   }),
 };
 ```

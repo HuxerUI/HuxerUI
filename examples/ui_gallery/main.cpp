@@ -36,6 +36,7 @@ View Panel(View content) {
 View ControlsDemo() {
   const ThemeSpec& theme = UseTheme();
   auto checkbox_checked = UseState(true);
+  auto radio_choice = UseState(0);
   auto switch_checked = UseState(false);
   auto progress = UseState(0.35F);
   auto password = UseState(TextEditingValue::FromText(""));
@@ -44,9 +45,11 @@ View ControlsDemo() {
   return Panel(
       Column {
         Text("Controls", TextRole::Title),
-        Flow {
+        Row {
           Button("Button").OnClick([] {}),
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
           Row {
             Checkbox(checkbox_checked).OnChanged(
                 [checkbox_checked](bool checked) { checkbox_checked = checked; }
@@ -56,6 +59,24 @@ View ControlsDemo() {
           Row {
             Switch(switch_checked).OnChanged([switch_checked](bool checked) { switch_checked = checked; }),
             Text(switch_checked ? "On" : "Off"),
+          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          Row {
+            RadioButton(radio_choice == 0).OnChanged([radio_choice](bool selected) {
+              if (selected) {
+                radio_choice = 0;
+              }
+            }),
+            Text("Option A"),
+          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+          Row {
+            RadioButton(radio_choice == 1).OnChanged([radio_choice](bool selected) {
+              if (selected) {
+                radio_choice = 1;
+              }
+            }),
+            Text("Option B"),
           }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Row {

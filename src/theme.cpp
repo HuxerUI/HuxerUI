@@ -222,6 +222,23 @@ CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
   };
 }
 
+RadioButtonStyle MaterialRadioButtonStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= 0.38F;
+  return {
+      .size = 20.0F,
+      .minimum_interactive_size = 48.0F,
+      .state_layer_size = 40.0F,
+      .selected_color = theme.colors.primary,
+      .unselected_color = theme.colors.on_surface_variant,
+      .disabled_selected_color = disabled,
+      .disabled_unselected_color = disabled,
+      .border_width = 2.0F,
+      .dot_radius = 5.0F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+  };
+}
+
 SwitchStyle MaterialSwitchStyle(const ThemeSpec& theme) {
   Color disabled_track = theme.colors.on_surface;
   disabled_track.alpha *= 0.12F;
@@ -440,6 +457,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialButtonStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
   definition.Set(MaterialCheckboxStyle(theme));
+  definition.Set(MaterialRadioButtonStyle(theme));
   definition.Set(MaterialSwitchStyle(theme));
   definition.Set(MaterialProgressCircleStyle(theme));
   definition.Set(MaterialProgressBarStyle(theme));
@@ -583,6 +601,25 @@ CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme) {
   };
 }
 
+RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme) {
+  Color unselected = theme.colors.on_surface;
+  unselected.alpha *= 0.55F;
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .size = 20.0F,
+      .minimum_interactive_size = 20.0F,
+      .state_layer_size = 20.0F,
+      .selected_color = theme.colors.primary,
+      .unselected_color = unselected,
+      .disabled_selected_color = disabled,
+      .disabled_unselected_color = disabled,
+      .border_width = 2.0F,
+      .dot_radius = 5.0F,
+      .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+  };
+}
+
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.28F;
@@ -703,6 +740,10 @@ TextFieldStyle TextFieldStyle::Default() {
 
 CheckboxStyle CheckboxStyle::Default() {
   return detail::DefaultCheckboxStyle(ThemeSpec::Default());
+}
+
+RadioButtonStyle RadioButtonStyle::Default() {
+  return detail::DefaultRadioButtonStyle(ThemeSpec::Default());
 }
 
 SwitchStyle SwitchStyle::Default() {

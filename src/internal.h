@@ -339,6 +339,7 @@ enum class NodeKind {
   Button,
   TextField,
   Checkbox,
+  RadioButton,
   Switch,
   ProgressCircle,
   ProgressBar,

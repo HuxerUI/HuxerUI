@@ -86,6 +86,8 @@ using huxerui::ProgressCircle;
 using huxerui::ProgressCircleStyle;
 using huxerui::PushClipCommand;
 using huxerui::PushTransformCommand;
+using huxerui::RadioButton;
+using huxerui::RadioButtonStyle;
 using huxerui::Rect;
 using huxerui::RenderFrame;
 using huxerui::RenderNode;

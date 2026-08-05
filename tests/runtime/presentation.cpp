@@ -53,8 +53,10 @@ int first_dialog_clicks = 0;
 int second_dialog_clicks = 0;
 int positive_dialog_clicks = 0;
 State<bool> checkbox_checked;
+State<bool> radio_selected;
 State<bool> switch_checked;
 int checkbox_changes = 0;
+int radio_changes = 0;
 int switch_changes = 0;
 State<float> progress_circle_value;
 State<float> progress_bar_value;
@@ -230,7 +232,14 @@ View MaterialThemeApp() {
 }
 
 View MaterialToggleApp() {
-  return HUXERUI_THEME(huxerui::MaterialTheme, Row {Checkbox(false), Switch(false)});
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        Checkbox(false),
+        RadioButton(false),
+        Switch(false),
+      }
+  );
 }
 
 View MaterialControlledSwitchApp() {
@@ -247,8 +256,10 @@ View MaterialDarkThemeApp() {
 
 View ToggleApp() {
   auto checkbox = UseState(false);
+  auto radio = UseState(false);
   auto switch_value = UseState(false);
   checkbox_checked = checkbox;
+  radio_selected = radio;
   switch_checked = switch_value;
   return Row {
     Checkbox(checkbox).OnChanged([checkbox](bool checked) {
@@ -259,7 +270,15 @@ View ToggleApp() {
       ++switch_changes;
       switch_value = checked;
     }),
+    RadioButton(radio).OnChanged([radio](bool selected) {
+      ++radio_changes;
+      radio = selected;
+    }),
   }.With(huxerui::Spacing{8.0F});
+}
+
+View DisabledRadioButtonApp() {
+  return RadioButton(false).OnChanged([](bool) { ++radio_changes; }).With(Enabled(false));
 }
 
 View DeterminateProgressCircleApp() {
@@ -849,6 +868,13 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(checkbox_style.corner_radius == 2.0F);
   REQUIRE(checkbox_style.checked_background.red == light.colors.primary.red);
 
+  const RadioButtonStyle radio_button_style = ThemeDefinitionValue<RadioButtonStyle>(definition);
+  REQUIRE(radio_button_style.size == 20.0F);
+  REQUIRE(radio_button_style.minimum_interactive_size == 48.0F);
+  REQUIRE(radio_button_style.state_layer_size == 40.0F);
+  REQUIRE(radio_button_style.selected_color.red == light.colors.primary.red);
+  REQUIRE(radio_button_style.unselected_color.red == light.colors.on_surface_variant.red);
+
   const SwitchStyle switch_style = ThemeDefinitionValue<SwitchStyle>(definition);
   REQUIRE(switch_style.width == 52.0F);
   REQUIRE(switch_style.height == 32.0F);
@@ -1038,15 +1064,18 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(dark_background->color.red == dark.colors.primary.red);
 
   Runtime toggle_runtime{MaterialToggleApp, platform};
-  toggle_runtime.SetViewport({160.0F, 64.0F});
+  toggle_runtime.SetViewport({200.0F, 64.0F});
   toggle_runtime.BuildFrame();
   const detail::MountedNode* toggle_root = toggle_runtime.RootNode();
   REQUIRE(toggle_root != nullptr);
   const detail::MountedNode* material_checkbox = FindMountedKind(*toggle_root, detail::NodeKind::Checkbox);
+  const detail::MountedNode* material_radio = FindMountedKind(*toggle_root, detail::NodeKind::RadioButton);
   const detail::MountedNode* material_switch = FindMountedKind(*toggle_root, detail::NodeKind::Switch);
   REQUIRE(material_checkbox != nullptr);
+  REQUIRE(material_radio != nullptr);
   REQUIRE(material_switch != nullptr);
   REQUIRE(material_checkbox->measured_size == Size{48.0F, 48.0F});
+  REQUIRE(material_radio->measured_size == Size{48.0F, 48.0F});
   REQUIRE(material_switch->measured_size == Size{52.0F, 48.0F});
 }
 
@@ -1077,6 +1106,7 @@ TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
 
 TEST_CASE("TestControlledTogglesAndAnimation") {
   checkbox_changes = 0;
+  radio_changes = 0;
   switch_changes = 0;
 
   TestPlatform platform;
@@ -1086,15 +1116,19 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->children.size() == 2);
+  REQUIRE(root->children.size() == 3);
   const auto* checkbox = root->children[0].get();
   const auto* switch_node = root->children[1].get();
+  const auto* radio = root->children[2].get();
   REQUIRE(checkbox->kind == huxerui::detail::NodeKind::Checkbox);
   REQUIRE(switch_node->kind == huxerui::detail::NodeKind::Switch);
+  REQUIRE(radio->kind == huxerui::detail::NodeKind::RadioButton);
   REQUIRE(checkbox->focusable);
   REQUIRE(switch_node->focusable);
+  REQUIRE(radio->focusable);
   REQUIRE(checkbox->measured_size.width == 20.0F);
   REQUIRE(switch_node->measured_size.width == 40.0F);
+  REQUIRE(radio->measured_size.width == 20.0F);
 
   const huxerui::DrawCircleCommand* initial_thumb = nullptr;
   for (const auto& command : initial.Commands()) {
@@ -1194,6 +1228,47 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   });
   REQUIRE(switch_changes == 2);
   REQUIRE(!switch_checked.Get());
+
+  radio = runtime.RootNode()->children[2].get();
+  const std::uint64_t radio_identity = radio->identity;
+  const Rect radio_bounds = radio->PresentationBounds();
+  const Point radio_center{
+      radio_bounds.x + radio_bounds.width * 0.5F,
+      radio_bounds.y + radio_bounds.height * 0.5F,
+  };
+  ClickAt(runtime, radio_center);
+  runtime.BuildFrame();
+  REQUIRE(radio_changes == 1);
+  REQUIRE(radio_selected.Get());
+  REQUIRE(runtime.RootNode()->children[2]->identity == radio_identity);
+
+  platform.AdvanceTime(RadioButtonStyle::Default().animation_duration);
+  const FlattenedScene& selected_radio = runtime.BuildFrame();
+  const bool paints_dot = std::ranges::any_of(selected_radio.Commands(), [radio_center](const PaintCommand& command) {
+    const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
+    return circle != nullptr && std::abs(circle->center.x - radio_center.x) < 0.001F &&
+           std::abs(circle->center.y - radio_center.y) < 0.001F;
+  });
+  REQUIRE(paints_dot);
+
+  ClickAt(runtime, radio_center);
+  runtime.BuildFrame();
+  REQUIRE(radio_changes == 1);
+  REQUIRE(radio_selected.Get());
+}
+
+TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {
+  radio_changes = 0;
+  TestPlatform platform;
+  Runtime runtime{DisabledRadioButtonApp, platform};
+  runtime.SetViewport({64.0F, 64.0F});
+  runtime.BuildFrame();
+  const auto* radio = runtime.RootNode();
+  REQUIRE(radio != nullptr);
+  REQUIRE(radio->kind == huxerui::detail::NodeKind::RadioButton);
+  const Rect bounds = radio->PresentationBounds();
+  ClickAt(runtime, {bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F});
+  REQUIRE(radio_changes == 0);
 }
 
 TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {

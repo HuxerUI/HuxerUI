@@ -622,6 +622,16 @@ public:
   }
 };
 
+class RadioButton final : public detail::TypedView<RadioButton> {
+public:
+  explicit RadioButton(bool selected);
+  explicit RadioButton(const State<bool>& selected) : RadioButton(selected.Get()) {}
+
+  template <class Function> RadioButton OnChanged(Function&& function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(std::forward<Function>(function));
+  }
+};
+
 class Switch final : public detail::TypedView<Switch> {
 public:
   explicit Switch(bool checked);

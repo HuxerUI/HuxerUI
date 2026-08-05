@@ -637,6 +637,7 @@ Component styles are typed Environment values:
 TextStyle
 ButtonStyle
 CheckboxStyle
+RadioButtonStyle
 SwitchStyle
 ProgressCircleStyle
 ProgressBarStyle

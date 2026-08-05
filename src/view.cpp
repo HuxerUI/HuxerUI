@@ -167,11 +167,16 @@ bool UsesDisabledVisualState(const MountedNode& node) {
 
 enum class ToggleVisualKind {
   Checkbox,
+  RadioButton,
   Switch,
 };
 
 struct ResolvedCheckboxStyle {
   using Value = CheckboxStyle;
+};
+
+struct ResolvedRadioButtonStyle {
+  using Value = RadioButtonStyle;
 };
 
 struct ResolvedSwitchStyle {
@@ -298,8 +303,13 @@ public:
 
   void Update(MountedNode& node, const ToggleVisual& modifier) {
     kind_ = modifier.kind;
-    checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyle::Default());
-    switch_style_ = node.LayoutValueOr<ResolvedSwitchStyle>(SwitchStyle::Default());
+    if (kind_ == ToggleVisualKind::Checkbox) {
+      checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyle::Default());
+    } else if (kind_ == ToggleVisualKind::RadioButton) {
+      radio_button_style_ = node.LayoutValueOr<ResolvedRadioButtonStyle>(RadioButtonStyle::Default());
+    } else {
+      switch_style_ = node.LayoutValueOr<ResolvedSwitchStyle>(SwitchStyle::Default());
+    }
     if (!initialized_) {
       checked_ = modifier.checked;
       progress_.Set(checked_ ? 1.0F : 0.0F);
@@ -315,7 +325,7 @@ public:
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     const float previous_progress = progress_.Value();
-    if (kind_ != ToggleVisualKind::Switch) {
+    if (kind_ == ToggleVisualKind::Checkbox) {
       progress_.Set(checked_ ? 1.0F : 0.0F);
       target_pending_ = false;
       if (progress_.Value() != previous_progress) {
@@ -324,7 +334,9 @@ public:
       return {};
     }
     if (target_pending_) {
-      progress_.Update(checked_ ? 1.0F : 0.0F, TweenSpec{switch_style_.animation_duration});
+      const double duration = kind_ == ToggleVisualKind::RadioButton ? radio_button_style_.animation_duration
+                                                                     : switch_style_.animation_duration;
+      progress_.Update(checked_ ? 1.0F : 0.0F, TweenSpec{duration});
       target_pending_ = false;
     }
     progress_.Advance(frame.timestamp, frame.delta_time);
@@ -363,6 +375,8 @@ public:
   void Paint(const MountedNode& node, PaintContext& context) const override {
     if (kind_ == ToggleVisualKind::Checkbox) {
       PaintCheckbox(node, context);
+    } else if (kind_ == ToggleVisualKind::RadioButton) {
+      PaintRadioButton(node, context);
     } else {
       PaintSwitch(node, context);
     }
@@ -391,6 +405,30 @@ private:
         std::max(0.0F, checkbox_style_.border_width),
         std::max(0.0F, checkbox_style_.corner_radius)
     );
+  }
+
+  void PaintRadioButton(const MountedNode& node, PaintContext& context) const {
+    constexpr float full_circle = 6.28318530717958647692F;
+    const Rect frame = CenteredRect(node.Bounds(), {radio_button_style_.size, radio_button_style_.size});
+    const float progress = progress_.Value();
+    const bool disabled = UsesDisabledVisualState(node);
+    const Color unselected =
+        disabled ? radio_button_style_.disabled_unselected_color : radio_button_style_.unselected_color;
+    const Color selected = disabled ? radio_button_style_.disabled_selected_color : radio_button_style_.selected_color;
+    const Color color = InterpolateColor(unselected, selected, progress);
+    const float maximum_radius = std::max(0.0F, std::min(frame.width, frame.height) * 0.5F);
+    const float border_width = std::clamp(radio_button_style_.border_width, 0.0F, maximum_radius);
+    const Point center{
+        frame.x + frame.width * 0.5F,
+        frame.y + frame.height * 0.5F,
+    };
+    context.DrawArc(
+        center, std::max(0.0F, maximum_radius - border_width * 0.5F), 0.0F, full_circle, color, border_width
+    );
+    const float dot_radius = std::clamp(radio_button_style_.dot_radius * progress, 0.0F, maximum_radius);
+    if (dot_radius > 0.0F) {
+      context.DrawCircle(center, dot_radius, color);
+    }
   }
 
   void PaintSwitch(const MountedNode& node, PaintContext& context) const {
@@ -439,6 +477,7 @@ private:
 
   ToggleVisualKind kind_ = ToggleVisualKind::Checkbox;
   CheckboxStyle checkbox_style_;
+  RadioButtonStyle radio_button_style_;
   SwitchStyle switch_style_;
   detail::AnimatedValue<float> progress_;
   bool checked_ = false;
@@ -1086,6 +1125,20 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
+  if (spec.kind == detail::NodeKind::RadioButton) {
+    const RadioButtonStyle style =
+        ResolveStyleOverride<RadioButtonStyle>(spec.environment).value_or(detail::DefaultRadioButtonStyle(theme));
+    spec.layout_values.insert_or_assign(typeid(ResolvedRadioButtonStyle), detail::MakeErasedLayoutValue(style));
+    const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
+    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+    spec.properties.frame.width = interactive_size;
+    spec.properties.frame.height = interactive_size;
+    spec.properties.corner_radii = state_layer_size * 0.5F;
+    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
+    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    spec.properties.disabled_opacity = 1.0F;
+    return;
+  }
   if (spec.kind == detail::NodeKind::Switch) {
     const SwitchStyle style =
         ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
@@ -1148,7 +1201,10 @@ std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
 std::shared_ptr<detail::ViewSpec> MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked) {
   auto spec = std::make_shared<detail::ViewSpec>(kind);
   spec->focusable = true;
-  spec->activation = [checked](const detail::EventBindings& bindings) {
+  spec->activation = [visual_kind, checked](const detail::EventBindings& bindings) {
+    if (visual_kind == ToggleVisualKind::RadioButton && checked) {
+      return;
+    }
     detail::EmitEvent<ToggleEvents::Changed>(bindings, !checked);
   };
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ToggleVisual{visual_kind, checked}));
@@ -1518,6 +1574,11 @@ Image Image::Tint(Color tint) && {
 
 Checkbox::Checkbox(bool checked)
     : detail::TypedView<Checkbox>(MakeToggleSpec(detail::NodeKind::Checkbox, ToggleVisualKind::Checkbox, checked)) {}
+
+RadioButton::RadioButton(bool selected)
+    : detail::TypedView<RadioButton>(
+          MakeToggleSpec(detail::NodeKind::RadioButton, ToggleVisualKind::RadioButton, selected)
+      ) {}
 
 Switch::Switch(bool checked)
     : detail::TypedView<Switch>(MakeToggleSpec(detail::NodeKind::Switch, ToggleVisualKind::Switch, checked)) {}

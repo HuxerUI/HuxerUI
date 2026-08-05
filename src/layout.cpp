@@ -236,6 +236,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     content_size = MeasureTextField(node, platform, content_constraints);
     break;
   case NodeKind::Checkbox:
+  case NodeKind::RadioButton:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
   case NodeKind::ProgressBar:
@@ -420,6 +421,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::Button:
   case NodeKind::TextField:
   case NodeKind::Checkbox:
+  case NodeKind::RadioButton:
   case NodeKind::Switch:
   case NodeKind::ProgressCircle:
   case NodeKind::ProgressBar:
