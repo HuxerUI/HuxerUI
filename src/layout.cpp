@@ -141,6 +141,12 @@ bool HandlesPointer(const MountedNode& node) {
          HasEventBinding<ViewEvents::PointerCancel>(node.event_bindings);
 }
 
+bool ExtensionHandlesPointer(MountedNode& node, Point position) {
+  return std::any_of(node.extensions.begin(), node.extensions.end(), [&](const NodeExtensionEntry& entry) {
+    return entry.extension && entry.extension->HitTest(node, position);
+  });
+}
+
 bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
   if (!node.pointer_events_enabled) {
     return false;
@@ -165,7 +171,9 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
     }
   }
 
-  if (within_node && (HandlesPointer(node) || IsScrollContainer(node) || node.focusable)) {
+  if (within_node &&
+      (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) || IsScrollContainer(node) ||
+       node.focusable)) {
     return true;
   }
   route.pop_back();
@@ -198,6 +206,33 @@ Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints con
   return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime);
 }
 
+Size MeasureLabelContent(
+    MountedNode& node,
+    PlatformAdapter& platform,
+    const Constraints& constraints,
+    TextLayoutOptions text_options
+) {
+  const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
+  const Size icon_size{
+      std::max(0.0F, metrics.icon_size.width),
+      std::max(0.0F, metrics.icon_size.height),
+  };
+  const bool show_label = metrics.show_label && !node.text.empty();
+  const float spacing = show_label ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
+  const float maximum_text_width = constraints.HasBoundedWidth()
+                                       ? std::max(0.0F, constraints.max_width - icon_size.width - spacing)
+                                       : std::numeric_limits<float>::infinity();
+  TextLayoutMetrics text;
+  if (show_label) {
+    text = platform.MeasureText(node.text, node.properties.text_style, maximum_text_width, text_options);
+  }
+  node.layout_cache.insert_or_assign(typeid(LabelLayoutCache), LabelLayoutCache{text});
+  return {
+      icon_size.width + spacing + text.size.width,
+      std::max(icon_size.height, text.size.height),
+  };
+}
+
 } // namespace
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime) {
@@ -220,10 +255,25 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
 
   switch (node.kind) {
   case NodeKind::Text:
-    content_size = platform.MeasureText(node.text, node.properties.text_style, content_constraints.max_width).size;
+    if (node.image_properties.HasValue()) {
+      content_size = MeasureLabelContent(
+          node,
+          platform,
+          content_constraints,
+          TextLayoutOptions{.wrap = TextWrap::NoWrap}
+      );
+    } else {
+      content_size = platform
+                         .MeasureText(
+                             node.text,
+                             node.properties.text_style,
+                             content_constraints.max_width,
+                             node.properties.text_layout_options
+                         )
+                         .size;
+    }
     break;
   case NodeKind::Button:
-  case NodeKind::Chip:
     content_size = platform
                        .MeasureText(
                            node.text,
@@ -233,12 +283,68 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
                        )
                        .size;
     break;
+  case NodeKind::Chip:
+    if (node.image_properties.HasValue()) {
+      content_size = MeasureLabelContent(
+          node,
+          platform,
+          content_constraints,
+          TextLayoutOptions{.wrap = TextWrap::NoWrap}
+      );
+    } else {
+      content_size = platform
+                         .MeasureText(
+                             node.text,
+                             node.properties.text_style,
+                             std::numeric_limits<float>::infinity(),
+                             TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                         )
+                         .size;
+    }
+    break;
+  case NodeKind::Divider: {
+    const Axis axis = node.LayoutValueOr<detail::DividerAxisBinding>(Axis::Horizontal);
+    const float thickness = std::max(0.0F, node.LayoutValueOr<detail::DividerThicknessBinding>(1.0F));
+    if (axis == Axis::Horizontal) {
+      content_size = {
+          content_constraints.HasBoundedWidth() ? content_constraints.max_width : content_constraints.min_width,
+          thickness,
+      };
+    } else {
+      content_size = {
+          thickness,
+          content_constraints.HasBoundedHeight() ? content_constraints.max_height : content_constraints.min_height,
+      };
+    }
+    break;
+  }
   case NodeKind::TextField:
     content_size = MeasureTextField(node, platform, content_constraints);
     break;
   case NodeKind::Checkbox:
   case NodeKind::RadioButton:
-  case NodeKind::Switch:
+  case NodeKind::Switch: {
+    if (!node.text.empty()) {
+      const detail::ToggleLayoutMetrics metrics = node.LayoutValueOr<detail::ToggleLayoutMetrics>({});
+      const float label_leading = detail::ToggleLabelLeading(metrics);
+      const float maximum_label_width = content_constraints.HasBoundedWidth()
+                                            ? std::max(0.0F, content_constraints.max_width - label_leading)
+                                            : std::numeric_limits<float>::infinity();
+      const Size label_size = platform
+                                  .MeasureText(
+                                      node.text,
+                                      node.properties.text_style,
+                                      maximum_label_width,
+                                      node.properties.text_layout_options
+                                  )
+                                  .size;
+      content_size = {
+          std::max(metrics.interactive_size.width, label_leading + label_size.width),
+          std::max(metrics.interactive_size.height, label_size.height),
+      };
+    }
+    break;
+  }
   case NodeKind::ProgressCircle:
   case NodeKind::ProgressBar:
   case NodeKind::Slider:
@@ -421,6 +527,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::Text:
   case NodeKind::Button:
   case NodeKind::Chip:
+  case NodeKind::Divider:
   case NodeKind::TextField:
   case NodeKind::Checkbox:
   case NodeKind::RadioButton:

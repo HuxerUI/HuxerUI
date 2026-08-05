@@ -24,9 +24,13 @@ float AlignOffset(float available, float extent, VerticalAlignment alignment) no
   return alignment == VerticalAlignment::Center ? (available - extent) * 0.5F : 0.0F;
 }
 
-void PaintImage(const MountedNode& node, PaintContext& context) {
+void PaintImage(
+    const MountedNode& node,
+    PaintContext& context,
+    Rect content,
+    std::optional<Color> vector_tint
+) {
   const Size intrinsic = node.image_properties.IntrinsicSize();
-  const Rect content = node.ContentBounds();
   if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
     return;
   }
@@ -37,7 +41,7 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
           if constexpr (std::same_as<Asset, ImageAsset>) {
             context.DrawImageRect(asset, source, destination, node.image_properties.sampling);
           } else {
-            context.DrawImageRect(asset, source, destination, node.image_properties.tint);
+            context.DrawImageRect(asset, source, destination, vector_tint);
           }
         },
         node.image_properties.asset
@@ -75,6 +79,49 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
       destination_size.height,
   };
   draw(full_source, destination);
+}
+
+void PaintImage(const MountedNode& node, PaintContext& context) {
+  PaintImage(node, context, node.ContentBounds(), node.image_properties.tint);
+}
+
+void PaintLabelContent(
+    const MountedNode& node,
+    PaintContext& context,
+    const TextStyle& text_style
+) {
+  const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
+  const Rect content = node.ContentBounds();
+  const float icon_width = std::min(std::max(0.0F, metrics.icon_size.width), content.width);
+  const float icon_height = std::min(std::max(0.0F, metrics.icon_size.height), content.height);
+  const bool show_label = metrics.show_label && !node.text.empty();
+  const auto cached = node.layout_cache.find(typeid(LabelLayoutCache));
+  const auto* layout = cached == node.layout_cache.end() ? nullptr : std::any_cast<LabelLayoutCache>(&cached->second);
+  const Size measured_text = show_label && layout != nullptr ? layout->text.size : Size{};
+  const float spacing = show_label ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
+  const float available_text_width = std::max(0.0F, content.width - icon_width - spacing);
+  const float text_width = std::min(measured_text.width, available_text_width);
+  const float group_width = icon_width + spacing + text_width;
+  const float leading = content.x + std::max(0.0F, (content.width - group_width) * 0.5F);
+  const Rect icon_bounds{
+      leading,
+      content.y + std::max(0.0F, (content.height - icon_height) * 0.5F),
+      icon_width,
+      icon_height,
+  };
+  PaintImage(node, context, icon_bounds, text_style.foreground);
+  if (!show_label || text_width <= 0.0F) {
+    return;
+  }
+  TextLayoutOptions options = node.properties.text_layout_options;
+  options.align = TextAlign::Leading;
+  options.wrap = TextWrap::NoWrap;
+  context.DrawText(
+      {leading + icon_width + spacing, content.y, text_width, content.height},
+      node.text,
+      text_style,
+      options
+  );
 }
 
 Rect RenderClipBounds(const RenderClip& clip) {
@@ -365,19 +412,40 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
       );
     }
     if (background.has_value() && background->alpha > 0.0F) {
-      content.DrawRect(bounds, *background, node.properties.corner_radii);
+      content.DrawRect(
+          node.kind == NodeKind::Divider ? node.ContentBounds() : bounds,
+          *background,
+          node.properties.corner_radii
+      );
     }
     if (border.has_value() && border->alpha > 0.0F && node.properties.border_width > 0.0F) {
       content.DrawBorder(bounds, *border, node.properties.border_width, node.properties.corner_radii);
     }
     if (node.kind == NodeKind::Text) {
-      content.DrawText(node.ContentBounds(), node.text, node.properties.text_style);
+      if (node.image_properties.HasValue()) {
+        PaintLabelContent(node, content, text_style);
+      } else {
+        content.DrawText(
+            node.ContentBounds(), node.text, node.properties.text_style, node.properties.text_layout_options
+        );
+      }
+    } else if (node.kind == NodeKind::Chip && node.image_properties.HasValue()) {
+      PaintLabelContent(node, content, text_style);
     } else if (node.kind == NodeKind::Button || node.kind == NodeKind::Chip) {
       content.DrawText(
           bounds,
           node.text,
           text_style,
           TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
+      );
+    } else if ((node.kind == NodeKind::Checkbox || node.kind == NodeKind::RadioButton ||
+                node.kind == NodeKind::Switch) &&
+               !node.text.empty()) {
+      content.DrawText(
+          ResolveToggleLabelBounds(node),
+          node.text,
+          text_style,
+          node.properties.text_layout_options
       );
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);

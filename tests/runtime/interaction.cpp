@@ -14,6 +14,7 @@ ScrollController nested_inner_scroll;
 State<bool> include_apply_only_modifier;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
+int covered_pointer_clicks = 0;
 
 View PointerInputApp() {
   auto visible = UseState(true);
@@ -32,6 +33,18 @@ View PointerInputApp() {
           .On<ViewEvents::PointerUp>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .On<ViewEvents::PointerCancel>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .OnClick([] { ++pointer_clicks; }),
+  };
+}
+
+View ExtensionPointerTargetApp() {
+  return Stack{
+      Button("Behind")
+          .With(huxerui::Frame{100.0F, 40.0F})
+          .OnClick([] { ++covered_pointer_clicks; }),
+      Text("Overlay").With(
+          huxerui::Frame{100.0F, 40.0F},
+          huxerui::Indication{huxerui::StateOverlayIndication{}}
+      ),
   };
 }
 
@@ -281,6 +294,18 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   );
   REQUIRE(received_pointer_events.size() == events_before_release);
   REQUIRE(pointer_clicks == 2);
+}
+
+TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {
+  covered_pointer_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{ExtensionPointerTargetApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+  runtime.BuildFrame();
+
+  ClickAt(runtime, {50.0F, 20.0F}, 122);
+  REQUIRE(covered_pointer_clicks == 0);
 }
 
 TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {

@@ -185,11 +185,42 @@ ChipStyle MaterialChipStyle(const ThemeSpec& theme) {
       .disabled_border = disabled_border,
       .disabled_selected_border = Color::Transparent(),
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.extra_small),
+      .icon_size = 18.0F,
+      .icon_spacing = theme.spacing.small,
       .minimum_height = 32.0F,
       .corner_radius = theme.shapes.small,
       .border_width = 1.0F,
       .indication = MaterialIndication(theme.colors.on_surface_variant, theme),
       .selected_indication = MaterialIndication(theme.colors.on_secondary_container, theme),
+  };
+}
+
+SegmentedButtonStyle MaterialSegmentedButtonStyle(const ThemeSpec& theme) {
+  return {
+      .background = Color::Transparent(),
+      .selected_background = theme.colors.secondary_container,
+      .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface},
+      .selected_label = theme.colors.on_secondary_container,
+      .border = theme.colors.outline,
+      .selected_border = theme.colors.outline,
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .icon_size = 18.0F,
+      .icon_spacing = theme.spacing.small,
+      .minimum_segment_width = 48.0F,
+      .minimum_height = 40.0F,
+      .corner_radius = 20.0F,
+      .border_width = 1.0F,
+      .indication = MaterialIndication(theme.colors.on_surface, theme),
+      .selected_indication = MaterialIndication(theme.colors.on_secondary_container, theme),
+  };
+}
+
+DividerStyle MaterialDividerStyle(const ThemeSpec& theme) {
+  Color color = theme.colors.outline;
+  color.alpha *= 0.4F;
+  return {
+      .color = color,
+      .thickness = 1.0F,
   };
 }
 
@@ -485,6 +516,8 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
   definition.Set(MaterialChipStyle(theme));
+  definition.Set(MaterialSegmentedButtonStyle(theme));
+  definition.Set(MaterialDividerStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
   definition.Set(MaterialCheckboxStyle(theme));
   definition.Set(MaterialRadioButtonStyle(theme));
@@ -592,11 +625,44 @@ ChipStyle DefaultChipStyle(const ThemeSpec& theme) {
       .disabled_border = disabled_border,
       .disabled_selected_border = Color::Transparent(),
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.extra_small),
+      .icon_size = 16.0F,
+      .icon_spacing = theme.spacing.small,
       .minimum_height = 28.0F,
       .corner_radius = 14.0F,
       .border_width = 1.0F,
       .indication = std::nullopt,
       .selected_indication = std::nullopt,
+  };
+}
+
+SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.24F;
+  return {
+      .background = theme.colors.surface,
+      .selected_background = theme.colors.primary,
+      .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface},
+      .selected_label = theme.colors.on_primary,
+      .border = border,
+      .selected_border = theme.colors.primary,
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .icon_size = 16.0F,
+      .icon_spacing = theme.spacing.small,
+      .minimum_segment_width = 48.0F,
+      .minimum_height = 32.0F,
+      .corner_radius = theme.shapes.small,
+      .border_width = 1.0F,
+      .indication = std::nullopt,
+      .selected_indication = std::nullopt,
+  };
+}
+
+DividerStyle DefaultDividerStyle(const ThemeSpec& theme) {
+  Color color = theme.colors.on_surface;
+  color.alpha *= 0.12F;
+  return {
+      .color = color,
+      .thickness = 1.0F,
   };
 }
 
@@ -801,6 +867,14 @@ ButtonStyle ButtonStyle::Default() {
 
 ChipStyle ChipStyle::Default() {
   return detail::DefaultChipStyle(ThemeSpec::Default());
+}
+
+SegmentedButtonStyle SegmentedButtonStyle::Default() {
+  return detail::DefaultSegmentedButtonStyle(ThemeSpec::Default());
+}
+
+DividerStyle DividerStyle::Default() {
+  return detail::DefaultDividerStyle(ThemeSpec::Default());
 }
 
 TextFieldStyle TextFieldStyle::Default() {

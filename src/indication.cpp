@@ -257,11 +257,11 @@ public:
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
-    return node.IsEnabled() && node.Bounds().Contains(position);
+    return !std::holds_alternative<NoIndication>(spec_) && node.IsEnabled() && node.Bounds().Contains(position);
   }
 
   bool HoverHitTest(MountedNode& node, Point position) const override {
-    return !std::holds_alternative<NoIndication>(spec_) && HitTest(node, position);
+    return HitTest(node, position);
   }
 
   void OnHoverChanged(MountedNode& node, bool hovered) override {
@@ -313,7 +313,10 @@ public:
     }
     if (event.type == PointerEventType::Down) {
       const Rect frame = ResolveIndicationFrame(node);
-      indication_.Press(event.pointer_id, {event.position.x - frame.x, event.position.y - frame.y});
+      const Point origin = frame.Contains(event.position)
+                               ? Point{event.position.x - frame.x, event.position.y - frame.y}
+                               : Point{frame.width * 0.5F, frame.height * 0.5F};
+      indication_.Press(event.pointer_id, origin);
       InvalidatePaint();
       return NodeExtension::PointerResult::Observe;
     }

@@ -28,14 +28,16 @@ Button, Checkbox, RadioButton, and Switch participate in focus traversal and sha
 auto checked = UseState(false);
 
 return Row {
-  Checkbox(checked).OnChanged([checked](bool value) {
+  Checkbox("Remember me", checked).OnChanged([checked](bool value) {
     checked = value;
   }),
-  Switch(checked).OnChanged([checked](bool value) {
+  Switch("Notifications", checked).OnChanged([checked](bool value) {
     checked = value;
   }),
 };
 ```
+
+Checkbox, RadioButton, and Switch also retain their label-free constructors for custom composition. A labeled control owns its label, uses the Theme spacing between the visual control and text, and treats the complete control as one focusable and clickable target.
 
 RadioButton represents one controlled choice rather than owning a group. Application state defines mutual exclusion, and activating an already selected RadioButton leaves the selection unchanged:
 
@@ -43,12 +45,12 @@ RadioButton represents one controlled choice rather than owning a group. Applica
 auto choice = UseState(0);
 
 return Row {
-  RadioButton(choice == 0).OnChanged([choice](bool selected) {
+  RadioButton("Option A", choice == 0).OnChanged([choice](bool selected) {
     if (selected) {
       choice = 0;
     }
   }),
-  RadioButton(choice == 1).OnChanged([choice](bool selected) {
+  RadioButton("Option B", choice == 1).OnChanged([choice](bool selected) {
     if (selected) {
       choice = 1;
     }
@@ -86,7 +88,70 @@ return Chip(selected ? "Selected" : "Selectable", selected)
     });
 ```
 
-`OnChanged` delegates to `On<ToggleEvents::Changed>`. Both forms participate in focus traversal and use the active Theme's indication and component style. Use `Enabled(false)` for a disabled Chip.
+Chip also accepts a leading image resource or resolved image asset while retaining its required text label:
+
+```cpp
+Chip(app_resources::images::filter, "Filters").OnClick(OpenFilters);
+
+Chip(vector_icon, "Selectable", selected)
+    .OnChanged([selected](bool value) {
+      selected = value;
+    });
+```
+
+`OnChanged` delegates to `On<ToggleEvents::Changed>`. Both forms participate in focus traversal and use the active Theme's indication and component style. `ChipStyle` owns the icon size and spacing. Vector icons follow the current label color, while raster assets preserve their encoded colors. Use `Enabled(false)` for a disabled Chip. Chip intentionally retains a visible label; compose a custom image action when an action should be icon-only.
+
+## SegmentedButton
+
+SegmentedButton presents a compact set of side-by-side choices and keeps selection controlled by the owner:
+
+```cpp
+auto period = UseState<std::size_t>(0);
+
+return SegmentedButton({"Day", "Week", "Month"}, period)
+    .OnChanged([period](std::size_t index) {
+      period = index;
+    });
+```
+
+Use `SegmentedButtonItem` when a segment includes an icon or visually displays only an icon:
+
+```cpp
+SegmentedButton(
+    {
+        SegmentedButtonItem("List"),
+        SegmentedButtonItem(app_resources::images::grid, "Grid"),
+        SegmentedButtonItem::IconOnly(app_resources::images::map, "Map"),
+    },
+    mode
+).OnChanged([mode](std::size_t index) {
+  mode = index;
+});
+```
+
+The label passed to `IconOnly` is required semantic content and is not drawn. `OnChanged` delegates to `On<SegmentedButtonEvents::Changed>`. Left and Right move through the choices with wrapping, while Home and End select the first and last choice. Use `Enabled(false)` to disable the complete control. `SegmentedButtonStyle` owns shared geometry, icon sizing and spacing, and selected and unselected colors. Use Chip when choices are independently selectable.
+
+SegmentedButton is intended for a small set of short choices, usually two to five. A larger or more descriptive choice set is clearer as RadioButton rows, Chip content, or a Menu.
+
+## Divider
+
+Divider is horizontal by default and expands across a bounded width. Pass `Axis::Vertical` for a vertical divider:
+
+```cpp
+Column {
+  Text("First"),
+  Divider(),
+  Text("Second"),
+};
+
+Row {
+  Text("Left"),
+  Divider(Axis::Vertical).With(Frame{.height = 24.0F}),
+  Text("Right"),
+};
+```
+
+`DividerStyle` supplies the Theme color and thickness. `Frame`, `Padding`, and `Background` remain available for local geometry, inset, and color overrides. A vertical divider needs a bounded height, an explicit `Frame`, or a stretching parent layout.
 
 ## ProgressCircle
 

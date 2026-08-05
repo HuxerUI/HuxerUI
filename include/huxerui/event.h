@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -119,6 +120,10 @@ struct ToggleEvents {
 
 struct SliderEvents {
   struct Changed : Event<float> {};
+};
+
+struct SegmentedButtonEvents {
+  struct Changed : Event<std::size_t> {};
 };
 
 struct TextFieldEvents {

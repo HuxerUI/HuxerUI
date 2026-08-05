@@ -14,7 +14,58 @@
 
 namespace huxerui {
 
+namespace detail {
+
+struct SegmentedButtonItemAccess {
+  static std::optional<ResolvedImageAsset> ResolveIcon(SegmentedButtonItem& item) {
+    return std::visit(
+        [](auto& icon) -> std::optional<ResolvedImageAsset> {
+          using Icon = std::decay_t<decltype(icon)>;
+          if constexpr (std::same_as<Icon, std::monostate>) {
+            return std::nullopt;
+          } else if constexpr (std::same_as<Icon, ImageResource>) {
+            return UseImageResource(std::move(icon));
+          } else {
+            if (!icon.HasValue()) {
+              throw std::invalid_argument("HuxerUI control icon asset must not be empty");
+            }
+            return ResolvedImageAsset{std::move(icon)};
+          }
+        },
+        item.icon_
+    );
+  }
+
+  static std::string ResolveLabel(SegmentedButtonItem& item) {
+    return ResolveStringVariant(std::move(item.label_));
+  }
+
+  static bool ShowsLabel(const SegmentedButtonItem& item) noexcept {
+    return item.show_label_;
+  }
+};
+
+} // namespace detail
+
 namespace {
+
+detail::ResolvedImageAsset ResolveControlIcon(ImageResource icon) {
+  return detail::UseImageResource(std::move(icon));
+}
+
+detail::ResolvedImageAsset ResolveControlIcon(ImageAsset icon) {
+  if (!icon.HasValue()) {
+    throw std::invalid_argument("HuxerUI control icon asset must not be empty");
+  }
+  return icon;
+}
+
+detail::ResolvedImageAsset ResolveControlIcon(VectorAsset icon) {
+  if (!icon.HasValue()) {
+    throw std::invalid_argument("HuxerUI control icon asset must not be empty");
+  }
+  return icon;
+}
 
 template <class Modifier, void (*Apply)(detail::ViewSpec&, const Modifier&)>
 const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
@@ -147,17 +198,6 @@ Color InterpolateColor(Color from, Color to, float progress) {
       from.green + (to.green - from.green) * value,
       from.blue + (to.blue - from.blue) * value,
       from.alpha + (to.alpha - from.alpha) * value,
-  };
-}
-
-Rect CenteredRect(Rect outer, Size size) {
-  const float width = std::clamp(size.width, 0.0F, outer.width);
-  const float height = std::clamp(size.height, 0.0F, outer.height);
-  return {
-      outer.x + (outer.width - width) * 0.5F,
-      outer.y + (outer.height - height) * 0.5F,
-      width,
-      height,
   };
 }
 
@@ -353,7 +393,7 @@ public:
     auto& mounted = static_cast<detail::MountedNode&>(node);
     std::optional<Rect> indication_frame;
     if (kind_ == ToggleVisualKind::Switch) {
-      const Rect track = CenteredRect(node.Bounds(), {switch_style_.width, switch_style_.height});
+      const Rect track = detail::ResolveToggleControlBounds(mounted);
       const float state_layer_size =
           std::min(std::max(0.0F, switch_style_.state_layer_size), std::min(node.Bounds().width, node.Bounds().height));
       const float thumb_center_x =
@@ -363,6 +403,21 @@ public:
           track.y + (track.height - state_layer_size) * 0.5F,
           state_layer_size,
           state_layer_size,
+      };
+    } else {
+      const Rect control = detail::ResolveToggleControlBounds(mounted);
+      const detail::ToggleLayoutMetrics metrics = node.LayoutValueOr<detail::ToggleLayoutMetrics>({});
+      const float configured_state_layer_size =
+          kind_ == ToggleVisualKind::Checkbox ? checkbox_style_.state_layer_size : radio_button_style_.state_layer_size;
+      const float size = std::min(
+          std::max(0.0F, configured_state_layer_size),
+          std::min(metrics.interactive_size.width, metrics.interactive_size.height)
+      );
+      indication_frame = Rect{
+          control.x + control.width * 0.5F - size * 0.5F,
+          control.y + control.height * 0.5F - size * 0.5F,
+          size,
+          size,
       };
     }
     if (mounted.indication_frame == indication_frame) {
@@ -384,7 +439,7 @@ public:
 
 private:
   void PaintCheckbox(const MountedNode& node, PaintContext& context) const {
-    const Rect frame = CenteredRect(node.Bounds(), {checkbox_style_.size, checkbox_style_.size});
+    const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const bool disabled = UsesDisabledVisualState(node);
     if (checked_) {
       const Color background =
@@ -409,7 +464,7 @@ private:
 
   void PaintRadioButton(const MountedNode& node, PaintContext& context) const {
     constexpr float full_circle = 6.28318530717958647692F;
-    const Rect frame = CenteredRect(node.Bounds(), {radio_button_style_.size, radio_button_style_.size});
+    const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const float progress = progress_.Value();
     const bool disabled = UsesDisabledVisualState(node);
     const Color unselected =
@@ -432,7 +487,7 @@ private:
   }
 
   void PaintSwitch(const MountedNode& node, PaintContext& context) const {
-    const Rect frame = CenteredRect(node.Bounds(), {switch_style_.width, switch_style_.height});
+    const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const float progress = progress_.Value();
     const bool disabled = UsesDisabledVisualState(node);
     const Color track =
@@ -488,6 +543,160 @@ private:
 const detail::ModifierDescriptor& ToggleVisual::Descriptor() {
   return detail::ModifierDescriptorFor<ToggleVisual, ToggleVisualExtension>();
 }
+
+struct SegmentedButtonBorderWidth {
+  using Value = float;
+};
+
+struct SegmentedButtonInput {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  std::size_t selected_index;
+  std::size_t segment_count;
+
+  bool operator==(const SegmentedButtonInput&) const = default;
+};
+
+class SegmentedButtonInputExtension final : public NodeExtension {
+public:
+  SegmentedButtonInputExtension(MountedNode& node, const SegmentedButtonInput& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const SegmentedButtonInput& modifier) {
+    selected_index_ = modifier.selected_index;
+    segment_count_ = modifier.segment_count;
+    if (!node.IsEnabled()) {
+      pointer_id_.reset();
+      pressed_index_.reset();
+    }
+  }
+
+  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+    return node.IsEnabled() && SegmentIndexAt(node, position).has_value();
+  }
+
+  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+    if (!node.IsEnabled()) {
+      pointer_id_.reset();
+      pressed_index_.reset();
+      return PointerResult::Ignored;
+    }
+    if (event.type == PointerEventType::Down) {
+      const std::optional<std::size_t> index = SegmentIndexAt(node, event.position);
+      if (!index.has_value()) {
+        return PointerResult::Ignored;
+      }
+      pointer_id_ = event.pointer_id;
+      pressed_index_ = index;
+      return PointerResult::Observe;
+    }
+    if (!pointer_id_.has_value() || *pointer_id_ != event.pointer_id) {
+      return PointerResult::Ignored;
+    }
+    if (event.type == PointerEventType::Up) {
+      const std::optional<std::size_t> released_index = SegmentIndexAt(node, event.position);
+      if (released_index.has_value() && released_index == pressed_index_) {
+        EmitSelection(node, *released_index);
+      }
+      pointer_id_.reset();
+      pressed_index_.reset();
+      return PointerResult::Handled;
+    }
+    if (event.type == PointerEventType::Cancel) {
+      pointer_id_.reset();
+      pressed_index_.reset();
+    }
+    return PointerResult::Handled;
+  }
+
+  void OnKey(MountedNode& node, const KeyEvent& event) override {
+    if (!node.IsEnabled() || segment_count_ == 0 || event.type != KeyEventType::Down || event.modifiers.alt ||
+        event.modifiers.control || event.modifiers.meta) {
+      return;
+    }
+    std::optional<std::size_t> requested;
+    if (event.key == Key::ArrowLeft) {
+      requested = selected_index_ == 0 ? segment_count_ - 1 : selected_index_ - 1;
+    } else if (event.key == Key::ArrowRight) {
+      requested = selected_index_ + 1 == segment_count_ ? 0 : selected_index_ + 1;
+    } else if (event.key == Key::Home) {
+      requested = 0;
+    } else if (event.key == Key::End) {
+      requested = segment_count_ - 1;
+    }
+    if (requested.has_value()) {
+      EmitSelection(node, *requested);
+    }
+  }
+
+private:
+  static std::optional<std::size_t> SegmentIndexAt(MountedNode& node, Point position) {
+    for (std::size_t index = node.ChildCount(); index > 0; --index) {
+      const MountedNode& child = node.ChildAt(index - 1);
+      const Point offset = child.LayoutOffset();
+      const Size size = child.LayoutSize();
+      if (Rect{offset.x, offset.y, size.width, size.height}.Contains(position)) {
+        return index - 1;
+      }
+    }
+    return std::nullopt;
+  }
+
+  void EmitSelection(MountedNode& node, std::size_t index) {
+    if (index == selected_index_ || index >= segment_count_) {
+      return;
+    }
+    detail::EmitEvent<SegmentedButtonEvents::Changed>(static_cast<detail::MountedNode&>(node).event_bindings, index);
+  }
+
+  std::optional<std::int64_t> pointer_id_;
+  std::optional<std::size_t> pressed_index_;
+  std::size_t selected_index_ = 0;
+  std::size_t segment_count_ = 0;
+};
+
+const detail::ModifierDescriptor& SegmentedButtonInput::Descriptor() {
+  return detail::ModifierDescriptorFor<SegmentedButtonInput, SegmentedButtonInputExtension>();
+}
+
+struct SegmentedButtonLayoutPolicy {
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+    const std::size_t count = node.ChildCount();
+    if (count == 0) {
+      LayoutResult empty;
+      empty.SetSize(constraints.Constrain({}));
+      return empty;
+    }
+
+    float maximum_width = 0.0F;
+    float maximum_height = 0.0F;
+    for (MountedNode& child : node.Children()) {
+      const Size size = context.Measure(child, constraints.Loose());
+      maximum_width = std::max(maximum_width, size.width);
+      maximum_height = std::max(maximum_height, size.height);
+    }
+
+    const float requested_overlap = std::max(0.0F, node.LayoutValueOr<SegmentedButtonBorderWidth>(0.0F));
+    const float count_value = static_cast<float>(count);
+    const float natural_width =
+        maximum_width * count_value - std::min(requested_overlap, maximum_width) * static_cast<float>(count - 1);
+    const float width = constraints.ConstrainWidth(natural_width);
+    const float overlap = std::min(requested_overlap, std::max(0.0F, width));
+    const float segment_width = (width + overlap * static_cast<float>(count - 1)) / count_value;
+    const float height = constraints.ConstrainHeight(maximum_height);
+
+    LayoutResult result;
+    float x = 0.0F;
+    for (MountedNode& child : node.Children()) {
+      static_cast<void>(context.Measure(child, {segment_width, segment_width, height, height}));
+      result.Place(child, {x, 0.0F});
+      x += segment_width - overlap;
+    }
+    result.SetSize({width, height});
+    return result;
+  }
+};
 
 struct ProgressCircleVisual {
   static const detail::ModifierDescriptor& Descriptor();
@@ -1074,6 +1283,110 @@ std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const Environmen
   return std::nullopt;
 }
 
+CornerRadii SegmentCornerRadii(std::size_t index, std::size_t count, float radius) {
+  const float value = std::max(0.0F, radius);
+  if (count <= 1) {
+    return CornerRadii{value};
+  }
+  if (index == 0) {
+    return {value, 0.0F, 0.0F, value};
+  }
+  if (index + 1 == count) {
+    return {0.0F, value, value, 0.0F};
+  }
+  return {};
+}
+
+void ApplyToggleLayoutDefaults(
+    detail::ViewSpec& spec,
+    const ThemeSpec& theme,
+    detail::ToggleLayoutMetrics metrics
+) {
+  metrics.visual_size.width = std::max(0.0F, metrics.visual_size.width);
+  metrics.visual_size.height = std::max(0.0F, metrics.visual_size.height);
+  metrics.interactive_size.width = std::max(metrics.visual_size.width, metrics.interactive_size.width);
+  metrics.interactive_size.height = std::max(metrics.visual_size.height, metrics.interactive_size.height);
+  metrics.label_spacing = std::max(0.0F, metrics.label_spacing);
+  spec.layout_values.insert_or_assign(
+      typeid(detail::ToggleLayoutMetrics),
+      detail::MakeErasedLayoutValue(metrics)
+  );
+  if (spec.text.empty()) {
+    spec.properties.frame.width = metrics.interactive_size.width;
+    spec.properties.frame.height = metrics.interactive_size.height;
+    return;
+  }
+
+  spec.properties.frame.min_width = metrics.interactive_size.width;
+  spec.properties.frame.min_height = metrics.interactive_size.height;
+  spec.properties.text_style =
+      ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, TextRole::Body));
+  spec.properties.text_layout_options = {.wrap = TextWrap::NoWrap};
+  Color disabled_label = spec.properties.text_style.foreground;
+  disabled_label.alpha *= spec.properties.disabled_opacity;
+  spec.properties.disabled_foreground = disabled_label;
+}
+
+class SegmentedButtonLabel final : public View {
+public:
+  SegmentedButtonLabel(
+      std::string label,
+      std::optional<detail::ResolvedImageAsset> icon,
+      bool show_label,
+      const SegmentedButtonStyle& style,
+      bool selected,
+      std::size_t index,
+      std::size_t count
+  )
+      : View(MakeSpec(std::move(label), std::move(icon), show_label, style, selected, index, count)) {
+    TextStyle text_style = style.label_style;
+    if (selected) {
+      text_style.foreground = style.selected_label;
+    }
+    SetTextStyle(std::move(text_style));
+  }
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(
+      std::string label,
+      std::optional<detail::ResolvedImageAsset> icon,
+      bool show_label,
+      const SegmentedButtonStyle& style,
+      bool selected,
+      std::size_t index,
+      std::size_t count
+  ) {
+    auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
+    spec->text = std::move(label);
+    if (icon.has_value()) {
+      spec->image_properties.asset = std::move(*icon);
+      spec->layout_values.insert_or_assign(
+          typeid(detail::LabelContentMetrics),
+          detail::MakeErasedLayoutValue(detail::LabelContentMetrics{
+              {std::max(0.0F, style.icon_size), std::max(0.0F, style.icon_size)},
+              std::max(0.0F, style.icon_spacing),
+              show_label,
+          })
+      );
+    }
+    spec->properties.padding = style.padding;
+    spec->properties.background = selected ? style.selected_background : style.background;
+    spec->properties.border = selected ? style.selected_border : style.border;
+    spec->properties.border_width = std::max(0.0F, style.border_width);
+    spec->properties.corner_radii = SegmentCornerRadii(index, count, style.corner_radius);
+    spec->properties.frame.min_width = std::max(0.0F, style.minimum_segment_width);
+    spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec->properties.text_layout_options = {
+        .align = TextAlign::Center,
+        .wrap = TextWrap::NoWrap,
+    };
+    spec->properties.indication_override =
+        selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
+    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+    return spec;
+  }
+};
+
 void ApplyThemeDefaults(detail::ViewSpec& spec) {
   const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
   spec.properties.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
@@ -1113,11 +1426,31 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.text_style = style.label_style;
     spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
     spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
+    if (spec.image_properties.HasValue()) {
+      spec.layout_values.insert_or_assign(
+          typeid(detail::LabelContentMetrics),
+          detail::MakeErasedLayoutValue(detail::LabelContentMetrics{
+              {std::max(0.0F, style.icon_size), std::max(0.0F, style.icon_size)},
+              std::max(0.0F, style.icon_spacing),
+              true,
+          })
+      );
+    }
     spec.properties.corner_radii = style.corner_radius;
     spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec.properties.indication_override =
         selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
     spec.properties.disabled_opacity = 1.0F;
+    return;
+  }
+  if (spec.kind == detail::NodeKind::Divider) {
+    const DividerStyle style =
+        ResolveStyleOverride<DividerStyle>(spec.environment).value_or(detail::DefaultDividerStyle(theme));
+    spec.properties.background = style.color;
+    spec.layout_values.insert_or_assign(
+        typeid(detail::DividerThicknessBinding),
+        detail::MakeErasedLayoutValue(std::max(0.0F, style.thickness))
+    );
     return;
   }
   if (spec.kind == detail::NodeKind::TextField) {
@@ -1139,8 +1472,11 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), detail::MakeErasedLayoutValue(style));
     const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
     const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
-    spec.properties.frame.width = interactive_size;
-    spec.properties.frame.height = interactive_size;
+    ApplyToggleLayoutDefaults(
+        spec,
+        theme,
+        {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
+    );
     spec.properties.corner_radii = state_layer_size * 0.5F;
     spec.properties.indication_size = Size{state_layer_size, state_layer_size};
     spec.properties.indication_corner_radius = state_layer_size * 0.5F;
@@ -1153,8 +1489,11 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.layout_values.insert_or_assign(typeid(ResolvedRadioButtonStyle), detail::MakeErasedLayoutValue(style));
     const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
     const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
-    spec.properties.frame.width = interactive_size;
-    spec.properties.frame.height = interactive_size;
+    ApplyToggleLayoutDefaults(
+        spec,
+        theme,
+        {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
+    );
     spec.properties.corner_radii = state_layer_size * 0.5F;
     spec.properties.indication_size = Size{state_layer_size, state_layer_size};
     spec.properties.indication_corner_radius = state_layer_size * 0.5F;
@@ -1168,8 +1507,11 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     const float width = std::max(0.0F, style.width);
     const float height = std::max(0.0F, std::max(style.height, style.minimum_interactive_height));
     const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), std::min(width, height));
-    spec.properties.frame.width = width;
-    spec.properties.frame.height = height;
+    ApplyToggleLayoutDefaults(
+        spec,
+        theme,
+        {{style.width, style.height}, {width, height}, theme.spacing.small}
+    );
     spec.properties.corner_radii = state_layer_size * 0.5F;
     spec.properties.indication_size = Size{state_layer_size, state_layer_size};
     spec.properties.indication_corner_radius = state_layer_size * 0.5F;
@@ -1220,9 +1562,19 @@ std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeChipSpec(std::string label, std::optional<bool> selection) {
+std::shared_ptr<detail::ViewSpec> MakeChipSpec(
+    std::string label,
+    std::optional<bool> selection,
+    std::optional<detail::ResolvedImageAsset> icon = std::nullopt
+) {
+  if (icon.has_value() && label.empty()) {
+    throw std::invalid_argument("HuxerUI Chip with an icon requires a non-empty label");
+  }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Chip);
   spec->text = std::move(label);
+  if (icon.has_value()) {
+    spec->image_properties.asset = std::move(*icon);
+  }
   spec->focusable = true;
   spec->chip_selection = selection;
   const bool selected = selection.value_or(false);
@@ -1237,8 +1589,76 @@ std::shared_ptr<detail::ViewSpec> MakeChipSpec(std::string label, std::optional<
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked) {
+std::shared_ptr<detail::ViewSpec> MakeDividerSpec(Axis axis) {
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Divider);
+  spec->layout_values.insert_or_assign(typeid(detail::DividerAxisBinding), detail::MakeErasedLayoutValue(axis));
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec>
+MakeSegmentedButtonSpec(std::vector<SegmentedButtonItem> items, std::size_t selected_index) {
+  if (items.empty()) {
+    throw std::invalid_argument("HuxerUI SegmentedButton requires at least one item");
+  }
+  if (selected_index >= items.size()) {
+    throw std::invalid_argument("HuxerUI SegmentedButton selected index is out of range");
+  }
+
+  const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
+  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const SegmentedButtonStyle style =
+      ResolveStyleOverride<SegmentedButtonStyle>(environment).value_or(detail::DefaultSegmentedButtonStyle(theme));
+
+  std::vector<View> segments;
+  segments.reserve(items.size());
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    const bool show_label = detail::SegmentedButtonItemAccess::ShowsLabel(items[index]);
+    std::string label = detail::SegmentedButtonItemAccess::ResolveLabel(items[index]);
+    std::optional<detail::ResolvedImageAsset> icon =
+        detail::SegmentedButtonItemAccess::ResolveIcon(items[index]);
+    if (label.empty()) {
+      throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
+    }
+    if (!show_label && !icon.has_value()) {
+      throw std::invalid_argument("HuxerUI icon-only SegmentedButton item requires an icon and semantic label");
+    }
+    segments.emplace_back(SegmentedButtonLabel(
+        std::move(label),
+        std::move(icon),
+        show_label,
+        style,
+        index == selected_index,
+        index,
+        items.size()
+    ));
+  }
+
+  auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<SegmentedButtonLayoutPolicy>(), std::move(segments));
+  spec->focusable = true;
+  spec->properties.corner_radii = std::max(0.0F, style.corner_radius);
+  spec->properties.clip_children = true;
+  spec->layout_values.insert_or_assign(
+      typeid(SegmentedButtonBorderWidth),
+      detail::MakeErasedLayoutValue(std::max(0.0F, style.border_width))
+  );
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(SegmentedButtonInput{selected_index, items.size()}));
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec>
+MakeSegmentedButtonSpec(std::vector<StringVariant> labels, std::size_t selected_index) {
+  std::vector<SegmentedButtonItem> items;
+  items.reserve(labels.size());
+  for (StringVariant& label : labels) {
+    items.emplace_back(std::move(label));
+  }
+  return MakeSegmentedButtonSpec(std::move(items), selected_index);
+}
+
+std::shared_ptr<detail::ViewSpec>
+MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked, std::string label = {}) {
   auto spec = std::make_shared<detail::ViewSpec>(kind);
+  spec->text = std::move(label);
   spec->focusable = true;
   spec->activation = [visual_kind, checked](const detail::EventBindings& bindings) {
     if (visual_kind == ToggleVisualKind::RadioButton && checked) {
@@ -1379,6 +1799,40 @@ const detail::ModifierDescriptor& Grow::Descriptor() {
 }
 
 namespace detail {
+
+float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept {
+  return metrics.visual_size.width + metrics.label_spacing;
+}
+
+Rect ResolveToggleControlBounds(const MountedNode& node) noexcept {
+  const ToggleLayoutMetrics metrics = node.LayoutValueOr<ToggleLayoutMetrics>({});
+  const Rect content = node.ContentBounds();
+  const float width = std::min(metrics.visual_size.width, content.width);
+  const float height = std::min(metrics.visual_size.height, content.height);
+  const float requested_horizontal_offset =
+      node.text.empty() ? (content.width - metrics.visual_size.width) * 0.5F : 0.0F;
+  return {
+      content.x + std::clamp(requested_horizontal_offset, 0.0F, content.width - width),
+      content.y + std::max(0.0F, (content.height - height) * 0.5F),
+      width,
+      height,
+  };
+}
+
+Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept {
+  if (node.text.empty()) {
+    return {};
+  }
+  const ToggleLayoutMetrics metrics = node.LayoutValueOr<ToggleLayoutMetrics>({});
+  const Rect content = node.ContentBounds();
+  const float leading = std::min(content.width, ToggleLabelLeading(metrics));
+  return {
+      content.x + leading,
+      content.y,
+      std::max(0.0F, content.width - leading),
+      content.height,
+  };
+}
 
 std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor& layout, std::vector<View> children) {
   auto spec = std::make_shared<ViewSpec>(NodeKind::Layout);
@@ -1603,6 +2057,83 @@ Chip::Chip(std::string_view label, bool selected) : Chip(std::string(label), sel
 Chip::Chip(const char* label, bool selected)
     : Chip(label == nullptr ? std::string{} : std::string(label), selected) {}
 
+Chip::Chip(ImageResource icon, StringVariant label)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          std::nullopt,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Chip::Chip(ImageAsset icon, StringVariant label)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          std::nullopt,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Chip::Chip(VectorAsset icon, StringVariant label)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          std::nullopt,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Chip::Chip(ImageResource icon, StringVariant label, bool selected)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          selected,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Chip::Chip(ImageAsset icon, StringVariant label, bool selected)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          selected,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Chip::Chip(VectorAsset icon, StringVariant label, bool selected)
+    : detail::TypedView<Chip>(MakeChipSpec(
+          detail::ResolveStringVariant(std::move(label)),
+          selected,
+          ResolveControlIcon(std::move(icon))
+      )) {}
+
+Divider::Divider(Axis axis) : View(MakeDividerSpec(axis)) {}
+
+SegmentedButtonItem::SegmentedButtonItem(StringVariant label)
+    : SegmentedButtonItem(Icon{std::monostate{}}, std::move(label), true) {}
+
+SegmentedButtonItem::SegmentedButtonItem(ImageResource icon, StringVariant label)
+    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
+
+SegmentedButtonItem::SegmentedButtonItem(ImageAsset icon, StringVariant label)
+    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
+
+SegmentedButtonItem::SegmentedButtonItem(VectorAsset icon, StringVariant label)
+    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
+
+SegmentedButtonItem SegmentedButtonItem::IconOnly(ImageResource icon, StringVariant semantic_label) {
+  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+}
+
+SegmentedButtonItem SegmentedButtonItem::IconOnly(ImageAsset icon, StringVariant semantic_label) {
+  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+}
+
+SegmentedButtonItem SegmentedButtonItem::IconOnly(VectorAsset icon, StringVariant semantic_label) {
+  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+}
+
+SegmentedButtonItem::SegmentedButtonItem(Icon icon, StringVariant label, bool show_label)
+    : icon_(std::move(icon)), label_(std::move(label)), show_label_(show_label) {}
+
+SegmentedButton::SegmentedButton(std::vector<StringVariant> labels, std::size_t selected_index)
+    : detail::TypedView<SegmentedButton>(MakeSegmentedButtonSpec(std::move(labels), selected_index)) {}
+
+SegmentedButton::SegmentedButton(std::vector<SegmentedButtonItem> items, std::size_t selected_index)
+    : detail::TypedView<SegmentedButton>(MakeSegmentedButtonSpec(std::move(items), selected_index)) {}
+
 Image::Image(ImageResource resource) : View(MakeImageSpec(detail::UseImageResource(std::move(resource)))) {}
 
 Image::Image(ImageAsset asset) : View(MakeImageSpec(std::move(asset))) {}
@@ -1632,13 +2163,37 @@ Image Image::Tint(Color tint) && {
 Checkbox::Checkbox(bool checked)
     : detail::TypedView<Checkbox>(MakeToggleSpec(detail::NodeKind::Checkbox, ToggleVisualKind::Checkbox, checked)) {}
 
+Checkbox::Checkbox(StringVariant label, bool checked)
+    : detail::TypedView<Checkbox>(MakeToggleSpec(
+          detail::NodeKind::Checkbox,
+          ToggleVisualKind::Checkbox,
+          checked,
+          detail::ResolveStringVariant(std::move(label))
+      )) {}
+
 RadioButton::RadioButton(bool selected)
     : detail::TypedView<RadioButton>(
           MakeToggleSpec(detail::NodeKind::RadioButton, ToggleVisualKind::RadioButton, selected)
       ) {}
 
+RadioButton::RadioButton(StringVariant label, bool selected)
+    : detail::TypedView<RadioButton>(MakeToggleSpec(
+          detail::NodeKind::RadioButton,
+          ToggleVisualKind::RadioButton,
+          selected,
+          detail::ResolveStringVariant(std::move(label))
+      )) {}
+
 Switch::Switch(bool checked)
     : detail::TypedView<Switch>(MakeToggleSpec(detail::NodeKind::Switch, ToggleVisualKind::Switch, checked)) {}
+
+Switch::Switch(StringVariant label, bool checked)
+    : detail::TypedView<Switch>(MakeToggleSpec(
+          detail::NodeKind::Switch,
+          ToggleVisualKind::Switch,
+          checked,
+          detail::ResolveStringVariant(std::move(label))
+      )) {}
 
 ProgressCircle::ProgressCircle() : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(std::nullopt)) {}
 

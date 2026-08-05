@@ -16,6 +16,31 @@ View Tag(std::string label, Color color) {
   );
 }
 
+VectorAsset ListIcon() {
+  static const VectorAsset icon = VectorAsset::Create({18.0F, 18.0F}, [](VectorBuilder& builder) {
+    for (float y : {4.0F, 9.0F, 14.0F}) {
+      builder.StrokePath(
+          Path{}.MoveTo({3.0F, y}).LineTo({15.0F, y}),
+          Color::Black(),
+          2.0F,
+          StrokeCap::Round
+      );
+    }
+  });
+  return icon;
+}
+
+VectorAsset GridIcon() {
+  static const VectorAsset icon = VectorAsset::Create({18.0F, 18.0F}, [](VectorBuilder& builder) {
+    for (float y : {3.0F, 10.0F}) {
+      for (float x : {3.0F, 10.0F}) {
+        builder.FillPath(Path::RoundedRect({x, y, 5.0F, 5.0F}, CornerRadii{1.0F}), Color::Black());
+      }
+    }
+  });
+  return icon;
+}
+
 View Panel(View content) {
   const ThemeSpec& theme = UseTheme();
   return std::move(content).With(
@@ -37,6 +62,7 @@ View ControlsDemo() {
   const ThemeSpec& theme = UseTheme();
   auto checkbox_checked = UseState(true);
   auto chip_selected = UseState(false);
+  auto period = UseState<std::size_t>(0);
   auto radio_choice = UseState(0);
   auto switch_checked = UseState(false);
   auto progress = UseState(0.35F);
@@ -51,40 +77,41 @@ View ControlsDemo() {
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Row {
-          Chip("Action").OnClick([] {}),
+          Chip(ListIcon(), "Action").OnClick([] {}),
           Chip(chip_selected ? "Selected" : "Selectable", chip_selected)
               .OnChanged([chip_selected](bool selected) { chip_selected = selected; }),
           Chip("Disabled", false).OnChanged([](bool) {}).With(Enabled(false)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         Row {
-          Row {
-            Checkbox(checkbox_checked).OnChanged(
-                [checkbox_checked](bool checked) { checkbox_checked = checked; }
-            ),
-            Text(checkbox_checked ? "Checked" : "Unchecked"),
-          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
-          Row {
-            Switch(switch_checked).OnChanged([switch_checked](bool checked) { switch_checked = checked; }),
-            Text(switch_checked ? "On" : "Off"),
-          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+          SegmentedButton(
+              {
+                  SegmentedButtonItem("Day"),
+                  SegmentedButtonItem(ListIcon(), "Week"),
+                  SegmentedButtonItem::IconOnly(GridIcon(), "Month"),
+              },
+              period
+          ).OnChanged([period](std::size_t index) { period = index; }),
+          Text(period == 0 ? "Day view" : period == 1 ? "Week view" : "Month view"),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Row {
-          Row {
-            RadioButton(radio_choice == 0).OnChanged([radio_choice](bool selected) {
-              if (selected) {
-                radio_choice = 0;
-              }
-            }),
-            Text("Option A"),
-          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
-          Row {
-            RadioButton(radio_choice == 1).OnChanged([radio_choice](bool selected) {
-              if (selected) {
-                radio_choice = 1;
-              }
-            }),
-            Text("Option B"),
-          }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+          Checkbox(checkbox_checked ? "Checked" : "Unchecked", checkbox_checked).OnChanged(
+              [checkbox_checked](bool checked) { checkbox_checked = checked; }
+          ),
+          Switch(switch_checked ? "On" : "Off", switch_checked).OnChanged(
+              [switch_checked](bool checked) { switch_checked = checked; }
+          ),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          RadioButton("Option A", radio_choice == 0).OnChanged([radio_choice](bool selected) {
+            if (selected) {
+              radio_choice = 0;
+            }
+          }),
+          RadioButton("Option B", radio_choice == 1).OnChanged([radio_choice](bool selected) {
+            if (selected) {
+              radio_choice = 1;
+            }
+          }),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Row {
           ProgressCircle(),
@@ -129,6 +156,7 @@ View LayoutDemo() {
   return Panel(
       Column {
         Text("Layout", TextRole::Title),
+        Divider().With(Frame{.width = gallery_width - theme.spacing.extra_large}),
         Row {
           Tag("Fixed", theme.colors.error),
           Text("Grow").With(
@@ -144,6 +172,11 @@ View LayoutDemo() {
             Spacing(theme.spacing.small),
             CrossAlign(CrossAxisAlignment::Center)
         ),
+        Row {
+          Text("Horizontal"),
+          Divider(Axis::Vertical).With(Frame{.height = 24.0F}),
+          Text("Vertical"),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Flow {
           Tag("Android", Color::Rgb(26, 127, 55)),
           Tag("macOS", theme.colors.primary),

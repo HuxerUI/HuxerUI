@@ -41,6 +41,14 @@ struct ScrollBarBinding {
   using Value = ScrollBarStyle;
 };
 
+struct DividerAxisBinding {
+  using Value = Axis;
+};
+
+struct DividerThicknessBinding {
+  using Value = float;
+};
+
 struct ScrollAxisBinding {
   using Value = Axis;
 };
@@ -328,6 +336,7 @@ enum class NodeKind {
   Text,
   Button,
   Chip,
+  Divider,
   TextField,
   Checkbox,
   RadioButton,
@@ -345,6 +354,30 @@ enum class NodeKind {
   VirtualLayout,
 };
 
+struct ToggleLayoutMetrics {
+  using Value = ToggleLayoutMetrics;
+
+  Size visual_size;
+  Size interactive_size;
+  float label_spacing = 0.0F;
+
+  bool operator==(const ToggleLayoutMetrics&) const = default;
+};
+
+struct LabelContentMetrics {
+  using Value = LabelContentMetrics;
+
+  Size icon_size;
+  float icon_spacing = 0.0F;
+  bool show_label = true;
+
+  bool operator==(const LabelContentMetrics&) const = default;
+};
+
+struct LabelLayoutCache {
+  TextLayoutMetrics text;
+};
+
 using ViewKey = std::variant<std::int64_t, std::uint64_t, std::string>;
 
 struct ViewProperties {
@@ -357,6 +390,7 @@ struct ViewProperties {
   float border_width = 0.0F;
   std::optional<Shadow> shadow;
   TextStyle text_style;
+  TextLayoutOptions text_layout_options;
   std::optional<Color> disabled_foreground;
   CornerRadii corner_radii;
   bool clip_children = false;
@@ -379,16 +413,16 @@ struct ViewProperties {
   // New property fields must participate in every projection whose stage reads them.
   [[nodiscard]] bool LayoutEquals(const ViewProperties& other) const {
     return padding == other.padding && frame == other.frame && text_style.font == other.text_style.font &&
-           spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
-           cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
-           vertical_alignment == other.vertical_alignment;
+           text_layout_options == other.text_layout_options && spacing == other.spacing && grow == other.grow &&
+           main_axis_alignment == other.main_axis_alignment && cross_axis_alignment == other.cross_axis_alignment &&
+           horizontal_alignment == other.horizontal_alignment && vertical_alignment == other.vertical_alignment;
   }
 
   [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
     return padding == other.padding && background == other.background &&
            disabled_background == other.disabled_background && border == other.border &&
-           disabled_border == other.disabled_border && border_width == other.border_width &&
-           shadow == other.shadow && text_style == other.text_style &&
+           disabled_border == other.disabled_border && border_width == other.border_width && shadow == other.shadow &&
+           text_style == other.text_style && text_layout_options == other.text_layout_options &&
            disabled_foreground == other.disabled_foreground && corner_radii == other.corner_radii;
   }
 
@@ -414,6 +448,10 @@ struct ImageProperties {
 
   [[nodiscard]] bool IsVector() const noexcept {
     return std::holds_alternative<VectorAsset>(asset);
+  }
+
+  [[nodiscard]] bool HasValue() const noexcept {
+    return std::visit([](const auto& value) { return value.HasValue(); }, asset);
   }
 
   // Only intrinsic logical size affects measurement; image contents, fit, alignment, and sampling are paint inputs.
@@ -1027,6 +1065,9 @@ struct RuntimeAccess {
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime);
 void LayoutNode(MountedNode& node, Point offset);
+float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept;
+Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
+Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 void ResolvePresentationTree(MountedNode& node);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);

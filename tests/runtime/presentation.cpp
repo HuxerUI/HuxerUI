@@ -55,13 +55,23 @@ int positive_dialog_clicks = 0;
 State<bool> checkbox_checked;
 State<bool> radio_selected;
 State<bool> switch_checked;
+State<bool> labeled_checkbox_checked;
+State<bool> labeled_radio_selected;
+State<bool> labeled_switch_checked;
 State<bool> chip_selected;
+State<std::size_t> segmented_button_selection;
 int checkbox_changes = 0;
 int radio_changes = 0;
 int switch_changes = 0;
+int labeled_checkbox_changes = 0;
+int labeled_radio_changes = 0;
+int labeled_switch_changes = 0;
 int action_chip_clicks = 0;
 int selectable_chip_changes = 0;
 int disabled_chip_changes = 0;
+int segmented_button_changes = 0;
+int disabled_segmented_button_changes = 0;
+int rejected_segmented_button_changes = 0;
 State<float> progress_circle_value;
 State<float> progress_bar_value;
 State<double> progress_bar_animation_duration;
@@ -114,6 +124,16 @@ std::vector<DrawRectCommand> DrawRectangles(const FlattenedScene& scene) {
     }
   }
   return result;
+}
+
+VectorAsset ControlIcon() {
+  static const VectorAsset icon = VectorAsset::Create({12.0F, 12.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(
+        Path{}.MoveTo({1.0F, 1.0F}).LineTo({11.0F, 6.0F}).LineTo({1.0F, 11.0F}).Close(),
+        Color::Black()
+    );
+  });
+  return icon;
 }
 
 std::optional<float>
@@ -246,6 +266,39 @@ View MaterialToggleApp() {
   );
 }
 
+View MaterialLabeledToggleApp() {
+  auto checkbox = UseState(false);
+  auto radio = UseState(false);
+  auto switch_value = UseState(false);
+  labeled_checkbox_checked = checkbox;
+  labeled_radio_selected = radio;
+  labeled_switch_checked = switch_value;
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        Checkbox("Checkbox label", checkbox).OnChanged([checkbox](bool checked) {
+          ++labeled_checkbox_changes;
+          checkbox = checked;
+        }),
+        RadioButton("Radio label", radio).OnChanged([radio](bool selected) {
+          ++labeled_radio_changes;
+          radio = selected;
+        }),
+        Switch("Switch label", switch_value).OnChanged([switch_value](bool checked) {
+          ++labeled_switch_changes;
+          switch_value = checked;
+        }),
+      }.With(Spacing(16.0F))
+  );
+}
+
+View MaterialPaddedLabeledToggleApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Checkbox("Padded label", false).With(Padding({.top = 3.0F, .right = 11.0F, .bottom = 5.0F, .left = 7.0F}))
+  );
+}
+
 View MaterialChipApp() {
   return HUXERUI_THEME(
       huxerui::MaterialTheme,
@@ -253,6 +306,31 @@ View MaterialChipApp() {
         Chip("Action").OnClick([] {}),
         Chip("Selected", true).OnChanged([](bool) {}),
       }.With(Spacing(8.0F))
+  );
+}
+
+View MaterialSegmentedButtonApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        SegmentedButton({"Day", "Week", "Month"}, 1).OnChanged([](std::size_t) {}),
+      }
+  );
+}
+
+View MaterialIconControlsApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        Chip(ControlIcon(), "With icon", false).OnChanged([](bool) {}),
+        SegmentedButton(
+            std::vector<SegmentedButtonItem>{
+                SegmentedButtonItem(ControlIcon(), "Mixed"),
+                SegmentedButtonItem::IconOnly(ControlIcon(), "Icon only"),
+            },
+            1
+        ).OnChanged([](std::size_t) {}),
+      }.With(Spacing(12.0F))
   );
 }
 
@@ -303,6 +381,29 @@ View ChipApp() {
     Chip("Disabled", false)
         .OnChanged([](bool) { ++disabled_chip_changes; })
         .With(Enabled(false)),
+  }.With(Spacing(8.0F));
+}
+
+View DividerApp() {
+  return Column {
+    Divider().With(Padding(EdgeInsets::Symmetric(8.0F, 0.0F))),
+    Divider(Axis::Vertical).With(Frame{.height = 24.0F}),
+  }.With(Frame{.width = 120.0F}, Spacing(4.0F));
+}
+
+View SegmentedButtonApp() {
+  auto selected = UseState<std::size_t>(0);
+  segmented_button_selection = selected;
+  return Column {
+    SegmentedButton({"Day", "Week", "Month"}, selected).OnChanged([selected](std::size_t index) {
+      ++segmented_button_changes;
+      selected = index;
+    }),
+    SegmentedButton({"One", "Two"}, 0)
+        .On<SegmentedButtonEvents::Changed>([](std::size_t) { ++disabled_segmented_button_changes; })
+        .With(Enabled(false)),
+    SegmentedButton({"Keep", "Reject"}, 0).OnChanged([](std::size_t) { ++rejected_segmented_button_changes; }),
+    SegmentedButton({"A", "B", "C"}, 0).OnChanged([](std::size_t) {}).With(Frame{.width = 0.5F}),
   }.With(Spacing(8.0F));
 }
 
@@ -902,6 +1003,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(chip_style.selected_background == light.colors.secondary_container);
   REQUIRE(chip_style.label_style.foreground == light.colors.on_surface_variant);
   REQUIRE(chip_style.selected_label == light.colors.on_secondary_container);
+  REQUIRE(chip_style.icon_size == 18.0F);
+  REQUIRE(chip_style.icon_spacing == light.spacing.small);
   REQUIRE(chip_style.minimum_height == 32.0F);
   REQUIRE(chip_style.corner_radius == light.shapes.small);
   REQUIRE(chip_style.border == light.colors.outline);
@@ -910,6 +1013,23 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const auto* selected_chip_indication = std::get_if<RippleIndication>(&*chip_style.selected_indication);
   REQUIRE(selected_chip_indication != nullptr);
   REQUIRE(selected_chip_indication->color.red == light.colors.on_secondary_container.red);
+
+  const SegmentedButtonStyle segmented_button_style = ThemeDefinitionValue<SegmentedButtonStyle>(definition);
+  REQUIRE(segmented_button_style.background == Color::Transparent());
+  REQUIRE(segmented_button_style.selected_background == light.colors.secondary_container);
+  REQUIRE(segmented_button_style.selected_label == light.colors.on_secondary_container);
+  REQUIRE(segmented_button_style.icon_size == 18.0F);
+  REQUIRE(segmented_button_style.icon_spacing == light.spacing.small);
+  REQUIRE(segmented_button_style.minimum_height == 40.0F);
+  REQUIRE(segmented_button_style.corner_radius == 20.0F);
+  REQUIRE(segmented_button_style.border == light.colors.outline);
+  REQUIRE(segmented_button_style.indication.has_value());
+  REQUIRE(segmented_button_style.selected_indication.has_value());
+
+  const DividerStyle divider_style = ThemeDefinitionValue<DividerStyle>(definition);
+  REQUIRE(divider_style.color.red == light.colors.outline.red);
+  REQUIRE(divider_style.color.alpha == light.colors.outline.alpha * 0.4F);
+  REQUIRE(divider_style.thickness == 1.0F);
 
   const RadioButtonStyle radio_button_style = ThemeDefinitionValue<RadioButtonStyle>(definition);
   REQUIRE(radio_button_style.size == 20.0F);
@@ -1145,6 +1265,118 @@ TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
   const float animated_center = switch_node->indication_frame->x + switch_node->indication_frame->width * 0.5F;
   REQUIRE(animated_center > initial_center);
   REQUIRE(animated_center < initial_center + 20.0F);
+}
+
+TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
+  labeled_checkbox_changes = 0;
+  labeled_radio_changes = 0;
+  labeled_switch_changes = 0;
+
+  TestPlatform platform;
+  Runtime runtime{MaterialLabeledToggleApp, platform};
+  runtime.SetViewport({560.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const auto* checkbox = FindMountedKind(*root, detail::NodeKind::Checkbox);
+  const auto* radio = FindMountedKind(*root, detail::NodeKind::RadioButton);
+  const auto* switch_node = FindMountedKind(*root, detail::NodeKind::Switch);
+  REQUIRE(checkbox != nullptr);
+  REQUIRE(radio != nullptr);
+  REQUIRE(switch_node != nullptr);
+  REQUIRE(checkbox->measured_size.width > 48.0F);
+  REQUIRE(checkbox->measured_size.height == 48.0F);
+  REQUIRE(radio->measured_size.width > 48.0F);
+  REQUIRE(radio->measured_size.height == 48.0F);
+  REQUIRE(switch_node->measured_size.width > 52.0F);
+  REQUIRE(switch_node->measured_size.height == 48.0F);
+
+  const auto checkbox_label = FindPresentedTextRect(scene, "Checkbox label");
+  const auto radio_label = FindPresentedTextRect(scene, "Radio label");
+  const auto switch_label = FindPresentedTextRect(scene, "Switch label");
+  REQUIRE(checkbox_label.has_value());
+  REQUIRE(radio_label.has_value());
+  REQUIRE(switch_label.has_value());
+  const ThemeSpec material = MaterialLightThemeSpec();
+  const CheckboxStyle checkbox_style = ThemeDefinitionValue<CheckboxStyle>(MaterialThemeDefinition());
+  const RadioButtonStyle radio_style = ThemeDefinitionValue<RadioButtonStyle>(MaterialThemeDefinition());
+  const SwitchStyle switch_style = ThemeDefinitionValue<SwitchStyle>(MaterialThemeDefinition());
+  const float checkbox_label_x = checkbox_style.size + material.spacing.small;
+  const float radio_label_x = radio_style.size + material.spacing.small;
+  const float checkbox_control_center_x = checkbox_style.size * 0.5F;
+  REQUIRE(std::abs(checkbox_label->x - checkbox->PresentationBounds().x - checkbox_label_x) < 0.01F);
+  REQUIRE(std::abs(radio_label->x - radio->PresentationBounds().x - radio_label_x) < 0.01F);
+  REQUIRE(
+      std::abs(
+          switch_label->x - switch_node->PresentationBounds().x - switch_style.width - material.spacing.small
+      ) < 0.01F
+  );
+  REQUIRE(checkbox->indication_frame.has_value());
+  REQUIRE(
+      std::abs(
+          checkbox->indication_frame->x + checkbox->indication_frame->width * 0.5F - checkbox_control_center_x
+      ) < 0.01F
+  );
+
+  const Point checkbox_label_point{checkbox_label->x + checkbox_label->width * 0.5F, checkbox_label->y + 1.0F};
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 123, checkbox_label_point});
+  runtime.BuildFrame();
+  platform.AdvanceTime(material.motion.slow * 0.5);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+  const bool indication_centered_on_checkbox = std::ranges::any_of(
+      pressed.Commands(),
+      [checkbox_control_center_x](const PaintCommand& command) {
+        const auto* circle = std::get_if<DrawCircleCommand>(&command);
+        return circle != nullptr && circle->radius > 0.0F &&
+               std::abs(circle->center.x - checkbox_control_center_x) < 0.01F &&
+               std::abs(circle->center.y - 24.0F) < 0.01F;
+      }
+  );
+  REQUIRE(indication_centered_on_checkbox);
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Up, 123, checkbox_label_point});
+  ClickAt(runtime, {radio_label->x + radio_label->width * 0.5F, radio_label->y + 1.0F}, 124);
+  ClickAt(runtime, {switch_label->x + switch_label->width * 0.5F, switch_label->y + 1.0F}, 125);
+  REQUIRE(labeled_checkbox_changes == 1);
+  REQUIRE(labeled_radio_changes == 1);
+  REQUIRE(labeled_switch_changes == 1);
+  REQUIRE(labeled_checkbox_checked.Get());
+  REQUIRE(labeled_radio_selected.Get());
+  REQUIRE(labeled_switch_checked.Get());
+}
+
+TEST_CASE("TestLabeledToggleGeometryUsesContentBounds") {
+  TestPlatform platform;
+  Runtime runtime{MaterialPaddedLabeledToggleApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const auto* checkbox = FindMountedKind(*root, detail::NodeKind::Checkbox);
+  REQUIRE(checkbox != nullptr);
+  REQUIRE(checkbox->ContentBounds().x == 7.0F);
+  REQUIRE(checkbox->ContentBounds().y == 3.0F);
+  REQUIRE(checkbox->indication_frame.has_value());
+
+  const ThemeSpec material = MaterialLightThemeSpec();
+  const CheckboxStyle style = ThemeDefinitionValue<CheckboxStyle>(MaterialThemeDefinition());
+  const float expected_control_center = checkbox->ContentBounds().x + style.size * 0.5F;
+  REQUIRE(
+      std::abs(
+          checkbox->indication_frame->x + checkbox->indication_frame->width * 0.5F - expected_control_center
+      ) < 0.01F
+  );
+
+  const auto label = FindPresentedTextRect(scene, "Padded label");
+  REQUIRE(label.has_value());
+  const float expected_label_x =
+      checkbox->PresentationBounds().x + checkbox->ContentBounds().x + style.size + material.spacing.small;
+  REQUIRE(std::abs(label->x - expected_label_x) < 0.01F);
+  REQUIRE(
+      label->x + label->width <=
+      checkbox->PresentationBounds().x + checkbox->ContentBounds().x + checkbox->ContentBounds().width + 0.01F
+  );
 }
 
 TEST_CASE("TestControlledTogglesAndAnimation") {
@@ -1401,6 +1633,268 @@ TEST_CASE("TestMaterialChipGeometryAndColors") {
     return border != nullptr && border->color == style.border && border->width == style.border_width;
   });
   REQUIRE(paints_outline);
+}
+
+TEST_CASE("TestHorizontalAndVerticalDividerGeometry") {
+  TestPlatform platform;
+  Runtime runtime{DividerApp, platform};
+  runtime.SetViewport({120.0F, 40.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 2);
+  const auto* horizontal = root->children[0].get();
+  const auto* vertical = root->children[1].get();
+  REQUIRE(horizontal->kind == detail::NodeKind::Divider);
+  REQUIRE(vertical->kind == detail::NodeKind::Divider);
+  REQUIRE(horizontal->measured_size == Size{120.0F, DividerStyle::Default().thickness});
+  REQUIRE(horizontal->ContentBounds() == Rect{8.0F, 0.0F, 104.0F, DividerStyle::Default().thickness});
+  REQUIRE(vertical->measured_size == Size{DividerStyle::Default().thickness, 24.0F});
+  REQUIRE(vertical->layout_offset == Point{0.0F, 5.0F});
+
+  const std::vector<DrawRectCommand> rectangles = DrawRectangles(scene);
+  REQUIRE(rectangles.size() == 2);
+  REQUIRE(rectangles[0].rect == Rect{8.0F, 0.0F, 104.0F, DividerStyle::Default().thickness});
+  REQUIRE(rectangles[0].color == DividerStyle::Default().color);
+  REQUIRE(rectangles[1].rect == Rect{0.0F, 0.0F, DividerStyle::Default().thickness, 24.0F});
+  REQUIRE(rectangles[1].color == DividerStyle::Default().color);
+}
+
+TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
+  segmented_button_changes = 0;
+  disabled_segmented_button_changes = 0;
+  rejected_segmented_button_changes = 0;
+
+  TestPlatform platform;
+  Runtime runtime{SegmentedButtonApp, platform};
+  runtime.SetViewport({360.0F, 240.0F});
+  const FlattenedScene& initial = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 4);
+  const auto* group = root->children[0].get();
+  const auto* disabled_group = root->children[1].get();
+  const auto* rejected_group = root->children[2].get();
+  const auto* narrow_group = root->children[3].get();
+  REQUIRE(group->kind == detail::NodeKind::Layout);
+  REQUIRE(group->focusable);
+  REQUIRE(group->children.size() == 3);
+  REQUIRE(group->children[0]->measured_size == group->children[1]->measured_size);
+  REQUIRE(group->children[1]->measured_size == group->children[2]->measured_size);
+  REQUIRE(group->children[0]->measured_size.height >= SegmentedButtonStyle::Default().minimum_height);
+  REQUIRE(
+      group->children[1]->layout_offset.x ==
+      group->children[0]->measured_size.width - SegmentedButtonStyle::Default().border_width
+  );
+  REQUIRE(group->children[0]->properties.background == SegmentedButtonStyle::Default().selected_background);
+  REQUIRE(group->children[1]->properties.background == SegmentedButtonStyle::Default().background);
+  REQUIRE(disabled_group->render_node.opacity == ThemeSpec::Default().interactions.disabled_opacity);
+  REQUIRE(narrow_group->measured_size.width == 0.5F);
+  REQUIRE(narrow_group->children.size() == 3);
+  REQUIRE(narrow_group->children[1]->layout_offset.x >= narrow_group->children[0]->layout_offset.x);
+  REQUIRE(narrow_group->children[2]->layout_offset.x >= narrow_group->children[1]->layout_offset.x);
+
+  const DrawTextCommand* initial_day = FindText(initial, "Day");
+  const DrawTextCommand* initial_week = FindText(initial, "Week");
+  REQUIRE(initial_day != nullptr);
+  REQUIRE(initial_week != nullptr);
+  REQUIRE(initial_day->style.foreground == SegmentedButtonStyle::Default().selected_label);
+  REQUIRE(initial_week->style.foreground == SegmentedButtonStyle::Default().label_style.foreground);
+
+  const Rect month_bounds = group->children[2]->PresentationBounds();
+  const Point month_center{
+      month_bounds.x + month_bounds.width * 0.5F,
+      month_bounds.y + month_bounds.height * 0.5F,
+  };
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      120,
+      month_center,
+  });
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Cancel,
+      120,
+      month_center,
+  });
+  REQUIRE(segmented_button_changes == 0);
+  REQUIRE(segmented_button_selection.Get() == 0);
+
+  const Rect initial_selected_bounds = group->children[0]->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          initial_selected_bounds.x + initial_selected_bounds.width * 0.5F,
+          initial_selected_bounds.y + initial_selected_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(segmented_button_changes == 0);
+
+  const std::uint64_t group_identity = group->identity;
+  const Rect week_bounds = group->children[1]->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          week_bounds.x + week_bounds.width * 0.5F,
+          week_bounds.y + week_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(segmented_button_changes == 1);
+  REQUIRE(segmented_button_selection.Get() == 1);
+
+  const FlattenedScene& selected_week = runtime.BuildFrame();
+  group = runtime.RootNode()->children[0].get();
+  REQUIRE(group->identity == group_identity);
+  REQUIRE(group->children[1]->properties.background == SegmentedButtonStyle::Default().selected_background);
+  const DrawTextCommand* selected_week_label = FindText(selected_week, "Week");
+  REQUIRE(selected_week_label != nullptr);
+  REQUIRE(selected_week_label->style.foreground == SegmentedButtonStyle::Default().selected_label);
+
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowRight});
+  REQUIRE(segmented_button_changes == 2);
+  REQUIRE(segmented_button_selection.Get() == 2);
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowRight});
+  REQUIRE(segmented_button_changes == 3);
+  REQUIRE(segmented_button_selection.Get() == 0);
+
+  const Rect disabled_bounds = disabled_group->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          disabled_bounds.x + disabled_bounds.width * 0.75F,
+          disabled_bounds.y + disabled_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(disabled_segmented_button_changes == 0);
+
+  const Rect rejected_bounds = rejected_group->children[1]->PresentationBounds();
+  const Point rejected_center{
+      rejected_bounds.x + rejected_bounds.width * 0.5F,
+      rejected_bounds.y + rejected_bounds.height * 0.5F,
+  };
+  ClickAt(runtime, rejected_center, 126);
+  ClickAt(runtime, rejected_center, 127);
+  REQUIRE(rejected_segmented_button_changes == 2);
+}
+
+TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
+  REQUIRE_THROWS_AS(
+      SegmentedButton(std::vector<StringVariant>{}, 0),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      SegmentedButton(std::vector<StringVariant>{"One", "Two"}, 2),
+      std::invalid_argument
+  );
+
+  TestPlatform platform;
+  Runtime runtime{MaterialSegmentedButtonApp, platform};
+  runtime.SetViewport({320.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const SegmentedButtonStyle style = ThemeDefinitionValue<SegmentedButtonStyle>(MaterialThemeDefinition());
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* row = root->children[0].get();
+  REQUIRE(row->children.size() == 1);
+  const auto* group = row->children[0].get();
+  REQUIRE(group->children.size() == 3);
+  REQUIRE(group->children[0]->measured_size.height == style.minimum_height);
+  REQUIRE(group->children[1]->properties.background == style.selected_background);
+  REQUIRE(group->children[1]->properties.indication_override == style.selected_indication);
+  REQUIRE(group->children[0]->properties.border == style.border);
+  REQUIRE(group->children[0]->properties.border_width == style.border_width);
+  const DrawTextCommand* selected = FindText(scene, "Week");
+  REQUIRE(selected != nullptr);
+  REQUIRE(selected->style.foreground == style.selected_label);
+
+  REQUIRE(style.indication.has_value());
+  const auto* ripple_style = std::get_if<RippleIndication>(&*style.indication);
+  REQUIRE(ripple_style != nullptr);
+  const Rect first_bounds = group->children[0]->PresentationBounds();
+  const Point first_center{
+      first_bounds.x + first_bounds.width * 0.5F,
+      first_bounds.y + first_bounds.height * 0.5F,
+  };
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      121,
+      first_center,
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(ripple_style->expansion_duration * 0.5);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+  const DrawCircleCommand* ripple = nullptr;
+  for (const PaintCommand& command : pressed.Commands()) {
+    const auto* circle = std::get_if<DrawCircleCommand>(&command);
+    if (circle && circle->color.alpha > 0.0F) {
+      ripple = circle;
+      break;
+    }
+  }
+  REQUIRE(ripple != nullptr);
+  REQUIRE(ripple->radius > 0.0F);
+  REQUIRE(ripple->color == ripple_style->color);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Cancel,
+      121,
+      first_center,
+  });
+}
+
+TEST_CASE("TestChipAndSegmentedButtonIconContent") {
+  REQUIRE_THROWS_AS(Chip(ImageAsset{}, "Invalid"), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      SegmentedButton(
+          std::vector<SegmentedButtonItem>{
+              SegmentedButtonItem::IconOnly(ControlIcon(), ""),
+          },
+          0
+      ),
+      std::invalid_argument
+  );
+
+  TestPlatform platform;
+  Runtime runtime{MaterialIconControlsApp, platform};
+  runtime.SetViewport({420.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* row = root->children[0].get();
+  REQUIRE(row->children.size() == 2);
+  const auto* chip = row->children[0].get();
+  const auto* segments = row->children[1].get();
+  REQUIRE(chip->kind == detail::NodeKind::Chip);
+  REQUIRE(chip->image_properties.HasValue());
+  REQUIRE(segments->children.size() == 2);
+  REQUIRE(segments->children[0]->image_properties.HasValue());
+  REQUIRE(segments->children[1]->image_properties.HasValue());
+
+  const ChipStyle chip_style = ThemeDefinitionValue<ChipStyle>(MaterialThemeDefinition());
+  const detail::LabelContentMetrics chip_content = chip->LayoutValueOr<detail::LabelContentMetrics>({});
+  REQUIRE(chip_content.icon_size == Size{chip_style.icon_size, chip_style.icon_size});
+  REQUIRE(chip_content.icon_spacing == chip_style.icon_spacing);
+  REQUIRE(chip_content.show_label);
+
+  const SegmentedButtonStyle segmented_style =
+      ThemeDefinitionValue<SegmentedButtonStyle>(MaterialThemeDefinition());
+  const detail::LabelContentMetrics mixed_content =
+      segments->children[0]->LayoutValueOr<detail::LabelContentMetrics>({});
+  const detail::LabelContentMetrics icon_only_content =
+      segments->children[1]->LayoutValueOr<detail::LabelContentMetrics>({});
+  REQUIRE(mixed_content.icon_size == Size{segmented_style.icon_size, segmented_style.icon_size});
+  REQUIRE(mixed_content.icon_spacing == segmented_style.icon_spacing);
+  REQUIRE(mixed_content.show_label);
+  REQUIRE_FALSE(icon_only_content.show_label);
+  REQUIRE(FindText(scene, "With icon") != nullptr);
+  REQUIRE(FindText(scene, "Mixed") != nullptr);
+  REQUIRE(FindText(scene, "Icon only") == nullptr);
+  REQUIRE(FindPresentedRectWithColor(scene, segmented_style.selected_label).has_value());
 }
 
 TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {
