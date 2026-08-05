@@ -1,6 +1,6 @@
 # Text Input and TextField Design
 
-Status: implemented foundation with Android, macOS, and Windows platform adapters
+Status: implemented foundation with Android, iOS, macOS, and Windows platform adapters
 
 This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformAdapter`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
@@ -892,7 +892,9 @@ The adapter can retain a bounded surrounding-text mirror for Android query behav
 
 ## Apple adapter
 
-An AppKit-specific client owned by `MacTextInput` conforms to `NSTextInputClient` on macOS. The host view remains the first responder and exposes the client's explicit `NSTextInputContext`. A future iOS adapter uses the matching UIKit text input protocols.
+An AppKit-specific client owned by `MacTextInput` conforms to `NSTextInputClient` on macOS. The host view remains the first responder and exposes the client's explicit `NSTextInputContext`.
+
+On iOS, the HuxerUI View conforms to `UITextInput` through a dedicated `UIKitTextInput` bridge. Native UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same Runtime session and command protocol. The UIKit bridge keeps only session and native-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
 
 The macOS adapter maps:
 
@@ -1101,11 +1103,11 @@ The usable control contains:
 - Bounded TextField-local undo and redo with composition grouping.
 - Static selection through `SelectionArea`.
 
-Android, macOS, and Windows now provide end-to-end native IME adapters.
+Android, iOS, macOS, and Windows now provide end-to-end native IME adapters.
 
 The extension milestone validates one non-TextField client through a SweetEditor bridge or equivalent fake document client.
 
-Accessibility semantics, iOS, OHOS, and TSF are incremental features built on the same protocol.
+Accessibility semantics, richer iOS selection integration, OHOS, and TSF are incremental features built on the same protocol.
 
 ## Final design constraints
 

@@ -6,15 +6,15 @@ This document defines the HuxerUI SDK and CLI ownership model, the implemented p
 
 The current implementation provides:
 
-- An installable desktop CMake package with canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
+- An installable platform-specific CMake package with canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
 - `huxerui_add_app`, installed host code generators, and generated application integration metadata.
-- A `huxerui` CLI with `create`, `platform add`, `doctor`, `devices`, `build`, and `run`.
-- Source-controlled Android, Windows, macOS, and Web shell templates.
-- Source-SDK Android and Web integration and installed-SDK Windows and macOS builds.
-- Android device discovery and deterministic device selection.
+- A `huxerui` CLI with `create`, `platform add`, `doctor`, `devices`, `build`, `run`, and `open ios`.
+- Source-controlled Android, iOS, Windows, macOS, and Web shell templates.
+- Source-SDK Android and Web integration, source- or installed-SDK iOS integration, and installed-SDK Windows and macOS builds.
+- Android and iOS device discovery with deterministic device selection.
 
-Android binary distribution, `package` and `clean` commands, module integration, NativeView, iOS, OHOS, and Linux remain proposed.
-The current Android and Web CLI paths require a source SDK checkout; Android does not claim Maven or AAR delivery.
+Android binary distribution, `package` and `clean` commands, module integration, NativeView, iOS device distribution, OHOS, and Linux remain proposed.
+The current Android and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives and export automation are not implemented.
 
 ## Decisions
 
@@ -77,6 +77,19 @@ hello_huxer/
       build.gradle
       huxerui.cmake
       app/
+    ios/
+      .gitignore
+      App/
+        main.mm
+        Info.plist
+        LaunchScreen.storyboard
+        Assets.xcassets/
+      Config/
+        Base.xcconfig
+        Debug.xcconfig
+        Release.xcconfig
+        Local.xcconfig.example
+      hello_huxer.xcodeproj/
     windows/
       huxerui.cmake
       app.manifest
@@ -121,8 +134,8 @@ View App() {
 HUXERUI_APP(App, {})
 ```
 
-Desktop builds generate the process entry point.
-Hosted platforms register the immutable application definition consumed by their platform shell.
+Native executable targets generate the process entry point.
+Hosted platforms such as Android and Web register the immutable application definition consumed by their platform shell.
 
 ## CMake SDK
 
@@ -164,7 +177,7 @@ Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and alw
 ## Generated integration
 
 Generated files are projections, not another source of truth.
-The shared application helper emits an application plan containing only the target, platform identifier, artifact path, and bundle path needed to launch desktop applications.
+The shared application helper emits an application plan containing the target, platform identifier, artifact path, bundle path, and bundle identifier needed by native launch commands.
 
 Android additionally generates `.huxerui/generated/android/app.json` from the application-owned `platform/android/huxerui.cmake` and canonical SDK Android properties.
 The Gradle shell reads that file to obtain:
@@ -186,8 +199,9 @@ huxerui create <name> [-p|--platform <platform-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui devices [platform]
-huxerui build [platform-list] [--profile debug|release] [--generator <name>]
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]
 huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]
+huxerui open ios
 ```
 
 A platform list is comma-separated or `all`.
@@ -219,16 +233,18 @@ A missing Android toolchain does not make a Windows-only diagnostic fail.
 ### Devices
 
 Device discovery does not require a project.
-The current Android driver parses `adb devices -l` and preserves ready, offline, unauthorized, and unavailable states.
+The Android driver parses `adb devices -l` and preserves ready, offline, unauthorized, and unavailable states. The iOS driver combines paired physical devices from `devicectl` with booted Simulators from `simctl` and retains the selected device kind through build and launch.
 Desktop drivers do not expose synthetic devices.
 
 ### Build
 
-Builds retain native output below `.huxerui/build/<platform>/<profile>`.
+Builds retain native output below `.huxerui/build/<platform>/<profile>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
 The CLI validates the complete requested set before executing commands and prints each native command.
 
 Desktop builds configure the root CMake project and then build it.
 Fresh desktop builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
+
+iOS builds invoke the source-controlled native Xcode project. A build without `--device` uses the generic Simulator destination; selecting a Simulator or physical device uses its Xcode destination identifier, and a physical-device build allows automatic provisioning updates. The native App target invokes CMake to produce a destination-specific application core and links it into the bundle.
 
 Android builds first execute `HuxerUIAndroidPlan.cmake`, then invoke the source-controlled Gradle shell.
 The shell uses its local `gradlew` or `gradlew.bat` when present and otherwise requires `gradle` on `PATH`.
@@ -240,7 +256,7 @@ The Web shell owns the HTML document and Canvas mount code rather than hiding th
 ### Run
 
 `run` accepts exactly one enabled platform and performs a build before launch.
-Windows starts the executable, macOS opens the application bundle, Android installs and launches the generated APK, and Web delegates the generated HTML entry point to `emrun`.
+Windows starts the executable, macOS opens the application bundle, Android installs and launches the generated APK, iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device, and Web delegates the generated HTML entry point to `emrun`.
 
 For Android, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
@@ -255,9 +271,10 @@ The CLI resolves a source or installed SDK in this order:
 A source root contains the repository CMake helpers and public headers.
 An installed root contains public headers and a standard `HuxerUIConfig.cmake` under a portable CMake install location.
 
-The current installed SDK supports desktop consumers.
+The current installed SDK supports desktop consumers and iOS consumers when the package matches the selected Apple SDK and architectures.
 Android applications currently use a source SDK because the generated Gradle shell includes `platform/android/huxerui` directly.
 Web applications use a source SDK so the framework and application are compiled together by Emscripten rather than linking a native installed library.
+The iOS preview accepts a source checkout or a compatible installed prefix. Versioned Simulator and device artifacts, archive export, and distribution signing policy still require an explicit distribution design.
 An installed Android artifact and its version-selection policy must be designed and validated before this restriction is removed.
 
 No `sdk.json` is required: standard CMake package files describe desktop targets, while platform-specific facts remain in the platform integration that owns them.
@@ -277,7 +294,7 @@ A driver owns:
 The interface deliberately contains only capabilities implemented by the current command surface.
 Package, clean, signing, and artifact collection operations should be added when those commands exist rather than anticipated as empty virtual methods.
 
-The current registry contains Android, Windows, macOS, and Web.
+The current registry contains Android, iOS, Windows, macOS, and Web.
 The registry is compiled into the CLI; it is not a dynamic extension mechanism.
 Adding a platform may split template storage or driver implementations when their size justifies it, but does not change project discovery or command parsing.
 
@@ -301,6 +318,16 @@ The driver runs only on Windows.
 The shell supplies bundle metadata through `Info.plist.in` and optional native CMake inputs.
 The root CMake project creates the application bundle.
 The driver runs only on macOS.
+
+### iOS
+
+The shell is a source-controlled native Xcode application project. It owns the Info.plist, launch screen, asset catalog, build configurations, shared scheme, product identifier, signing, Capabilities, native sources, archive behavior, and final App Bundle.
+
+On iOS, `HUXERUI_APP` exports the fixed application entry consumed by the shell's minimal Objective-C++ `main.mm`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, native resources, destination selection, signing, packaging, installation metadata, and debugging.
+
+iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_SDK_ROOT` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding remain outside the current preview.
+
+`huxerui open ios` writes the resolved SDK location only to the ignored local Xcode configuration. Repository examples use one source-controlled native runner whose `HUXERUI_APP_TARGET` build setting selects an `example_*` application core; adding an example does not add another Xcode project or native application target.
 
 ### Web
 
@@ -363,7 +390,7 @@ They should extend the existing ownership model:
 - `package` invokes the source-controlled native shell's release path and collects user-facing output under `dist`.
 - `clean` removes only driver-owned generated and build output.
 - SDK selection uses standard CMake compatibility plus user-level tool selection, not project-local hidden state.
-- iOS, OHOS, and Linux add drivers and platform integrations without changing the common application model.
+- iOS device distribution, OHOS, and Linux extend their native integration without changing the common application model.
 
 No future command may silently skip an explicitly requested platform or claim an artifact that was not produced.
 

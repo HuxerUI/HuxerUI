@@ -32,7 +32,7 @@ add_executable(huxerui_tests
         runtime/virtual_layout.cpp
 )
 
-if (APPLE)
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
             platform/macos_text_input.mm
     )

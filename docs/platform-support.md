@@ -5,6 +5,7 @@
 | Platform | Application surface | Text layout | Rendering | Text input |
 |---|---|---|---|---|
 | Android | Native View | StaticLayout | Canvas | InputConnection and IME |
+| iOS preview | UIKit View | CoreText | CoreGraphics | UITextInput |
 | macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient |
 | Windows | Win32 | DirectWrite | Direct2D | Native keyboard and IME adapter |
 | Web preview | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events |
@@ -87,6 +88,27 @@ Debug process metrics use `getrusage`, Mach task information, and `NSProcessInfo
 
 Example targets build as application bundles and can be launched from `build/bin`.
 
+## iOS technical preview
+
+The iOS backend creates a UIKit window and safe-area-constrained HuxerUI View, measures text with CoreText, and replays the shared RenderScene through an independent CoreGraphics renderer. CADisplayLink schedules Runtime commits before UIKit invalidation, while `drawRect:` presents only the committed frame.
+
+Multi-touch, Apple Pencil, indirect pointer, hardware keyboard, clipboard, locale, display scale, keyboard viewport, and packaged-resource events cross one UIKit adapter boundary. A dedicated UITextInput implementation maps native UTF-16 positions, selection, marked text, actions, and caret geometry to the shared text-input session and revision protocol. UIKit does not own a second editing value.
+
+The minimum deployment target is iOS 13. CLI projects contain a source-controlled native Xcode project that owns application packaging, signing, native assets, launch metadata, and debugging. Its build phase links an architecture-correct CMake application core containing the common C++ application and HuxerUI. The CLI discovers paired devices through `devicectl`, discovers booted Simulators through `simctl`, and keeps their DerivedData directories separate:
+
+```bash
+huxerui create hello_huxer --platform ios
+cd hello_huxer
+huxerui doctor ios
+huxerui devices ios
+huxerui open ios
+huxerui run ios --device <id>
+```
+
+Physical-device development builds use Xcode automatic signing and the `DEVELOPMENT_TEAM` value in `platform/ios/Config/Local.xcconfig` or the native project settings. `huxerui open ios` records the detected HuxerUI SDK in that ignored local file before opening the project. Distribution archive automation, export signing, a public embeddable UIView, native selection rectangles, and accessibility semantics remain outside the preview.
+
+The repository-owned `platform/ios/example_runner/HuxerUIExamples.xcodeproj` provides one native debugging host for every CMake `example_*` application target. Its ignored local configuration selects the example and optional signing team, while the shared project continues to build the selected application core through CMake.
+
 ## Windows
 
 The Windows backend targets Windows 10 and later by default.
@@ -144,6 +166,6 @@ See [Web Platform Design](design/web.md) for the implemented boundary and deferr
 
 ## Planned platforms
 
-iOS, OHOS, and Linux should reuse the same Runtime and add one platform-specific `PlatformAdapter` integration. Platform availability and cross-build support must be reported explicitly by future SDK and CLI tooling.
+OHOS and Linux should reuse the same Runtime and add one platform-specific `PlatformAdapter` integration. Platform availability and cross-build support must be reported explicitly by future SDK and CLI tooling.
 
 See the [SDK, CLI, and Module Design](design/sdk-cli.md) for the planned distribution and native-module model.

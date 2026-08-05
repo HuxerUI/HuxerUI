@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -222,6 +226,14 @@ int RunApp(AppDefinition definition);
     }); \
     return true; \
   }(); \
+  }
+#elif defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#define HUXERUI_APP(app_root, ...) \
+  extern "C" int HuxerUIRunApplication() { \
+    return ::huxerui::RunApp({ \
+        .root_factory = (app_root), \
+        .options = __VA_ARGS__, \
+    }); \
   }
 #else
 #define HUXERUI_APP(app_root, ...) \

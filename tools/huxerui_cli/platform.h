@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,10 +28,18 @@ enum class DeviceState {
   Unavailable,
 };
 
+enum class DeviceKind {
+  Unspecified,
+  Physical,
+  Simulator,
+};
+
 struct PlatformDevice {
   std::string id;
   std::string name;
   DeviceState state = DeviceState::Unavailable;
+  DeviceKind kind = DeviceKind::Unspecified;
+  std::string destination_id;
 
   bool operator==(const PlatformDevice&) const = default;
 };
@@ -49,7 +58,7 @@ struct PlatformCommandContext {
   std::filesystem::path build_directory;
   std::string cmake_generator;
   std::string profile;
-  std::string device;
+  std::optional<PlatformDevice> device;
 };
 
 class PlatformDriver {
@@ -65,10 +74,13 @@ public:
   [[nodiscard]] virtual std::vector<PlatformDevice> DiscoverDevices() const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
+  [[nodiscard]] virtual std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const;
 };
 
 [[nodiscard]] std::string_view DeviceStateName(DeviceState state) noexcept;
 [[nodiscard]] std::vector<PlatformDevice> ParseAdbDevices(std::string_view output);
+[[nodiscard]] std::vector<PlatformDevice> ParseIosPhysicalDevices(std::string_view output);
+[[nodiscard]] std::vector<PlatformDevice> ParseIosSimulatorDevices(std::string_view output);
 [[nodiscard]] std::string_view CurrentHostId() noexcept;
 [[nodiscard]] const PlatformDriver* FindPlatformDriver(std::string_view id) noexcept;
 [[nodiscard]] std::vector<std::string_view> PlatformIds();

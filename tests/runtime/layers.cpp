@@ -32,7 +32,9 @@ constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
 constexpr Color section_separator_color = Color::Rgb(210, 70, 40);
 constexpr Color bottom_sheet_width_color = Color::Rgb(35, 125, 175);
 
-std::vector<MenuEntry> TestMenu(std::string label, std::function<void()> action = [] {}) {
+std::vector<MenuEntry> TestMenu(
+    std::string label, std::function<void()> action = [] {}
+) {
   return {
       MenuItem(std::move(label), std::move(action)),
   };
@@ -50,11 +52,11 @@ View LayerApp() {
     layer_menu = menu;
     layer_anchor_offset = UseState(20.0F);
     return Column {
-      Button("popup anchor")
-          .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, popup.Anchor())
-          .OnClick([] { ++layer_background_clicks; }),
-      Button("menu anchor").With(huxerui::Frame{60.0F, 30.0F}, menu.Anchor()),
-      Text("application content"),
+        Button("popup anchor")
+            .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, popup.Anchor())
+            .OnClick([] { ++layer_background_clicks; }),
+        Button("menu anchor").With(huxerui::Frame{60.0F, 30.0F}, menu.Anchor()),
+        Text("application content"),
     };
   });
 }
@@ -105,17 +107,13 @@ View LayerEnvironmentDialogContent() {
 
 View LayerEnvironmentApp() {
   layer_environment_value = UseState(1);
-  return ProvideEnvironment(
-      LayerEnvironmentValue{layer_environment_value.Get()},
-      [] {
-        return Text("application").With(
-            Dialog {
-                .visible = true,
-                .content = LayerEnvironmentDialogContent,
-            }
-        );
-      }
-  );
+  return ProvideEnvironment(LayerEnvironmentValue{layer_environment_value.Get()}, [] {
+    return Text("application")
+        .With(Dialog{
+            .visible = true,
+            .content = LayerEnvironmentDialogContent,
+        });
+  });
 }
 
 View DebugOverlayApp() {
@@ -165,12 +163,10 @@ View FocusTrapApp() {
 
 View DestructionApp() {
   return Text("application")
-      .With(
-          Dialog {
-              .visible = true,
-              .content = [] { return Button("dialog"); },
-          }
-      );
+      .With(Dialog{
+          .visible = true,
+          .content = [] { return Button("dialog"); },
+      });
 }
 
 View BottomSheetThemeContent() {
@@ -354,10 +350,7 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::function<void()>{})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::vector<MenuEntry>{})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("", [] {})}), std::invalid_argument);
-  REQUIRE_THROWS_AS(
-      layer_menu->Show(TestMenu("menu"), MenuOptions{.width = 0.0F}),
-      std::invalid_argument
-  );
+  REQUIRE_THROWS_AS(layer_menu->Show(TestMenu("menu"), MenuOptions{.width = 0.0F}), std::invalid_argument);
 }
 
 TEST_CASE("TestPresentationStylesRejectInvalidShadowsBeforeAttachingLayers") {
@@ -388,7 +381,11 @@ TEST_CASE("TestAnchoredPresentationClampsOversizedViewportMargin") {
   runtime.SetViewport({10.0F, 10.0F});
   runtime.BuildFrame();
 
-  layer_popup->ShowAt({5.0F, 5.0F}, [] { return Text("tiny popup"); }, PopupOptions{.viewport_margin = 100.0F});
+  layer_popup->ShowAt(
+      {5.0F, 5.0F},
+      [] { return Text("tiny popup"); },
+      PopupOptions{.viewport_margin = 100.0F}
+  );
   REQUIRE_NOTHROW(runtime.BuildFrame());
 }
 
@@ -402,7 +399,9 @@ TEST_CASE("TestAnchoredPresentationAlignsAndOffsetsFromAnchor") {
 
   constexpr Color popup_color = Color::Rgb(190, 70, 40);
   const LayerId popup = layer_popup->Show(
-      [popup_color] { return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color}); },
+      [popup_color] {
+        return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color});
+      },
       PopupOptions{
           .placement =
               AnchorPlacement{
@@ -433,7 +432,7 @@ TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
       MenuItem(
           "Move to",
           {
-            MenuItem("Archive", [] { ++popup_focus_clicks; }),
+              MenuItem("Archive", [] { ++popup_focus_clicks; }),
           }
       ),
   });
@@ -490,7 +489,7 @@ TEST_CASE("TestSubmenuLeavesItsParentInteractiveAndOutsideDismissesTheCascade") 
         MenuItem(
             "More",
             {
-              MenuItem("Child action", [] {}),
+                MenuItem("Child action", [] {}),
             }
         ),
     });
@@ -634,8 +633,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
       MenuItem("No icon", [] {}),
   });
   const FlattenedScene& natural = runtime.BuildFrame();
-  const std::optional<Rect> natural_surface =
-      FindPresentedRectWithColor(natural, MenuStyle::Default().background);
+  const std::optional<Rect> natural_surface = FindPresentedRectWithColor(natural, MenuStyle::Default().background);
   REQUIRE(natural_surface.has_value());
   REQUIRE(natural_surface->width >= MenuStyle::Default().minimum_width);
   REQUIRE(natural_surface->width < 300.0F);
@@ -743,7 +741,9 @@ TEST_CASE("TestMaterialBottomSheetPlacesItsDragHandleWithVerticalPadding") {
   runtime.BuildFrame();
 
   constexpr Color content_color = Color::Rgb(16, 96, 176);
-  layer_bottom_sheet->Show([] { return Spacer().With(Frame{.height = 40.0F}, Background{content_color}); });
+  layer_bottom_sheet->Show([content_color] {
+    return Spacer().With(Frame{.height = 40.0F}, Background{content_color});
+  });
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -970,7 +970,9 @@ TEST_CASE("TestPointerFocusDoesNotEscapeTrappedLayer") {
 
   layer_popup->ShowAt(
       {120.0F, 40.0F},
-      [] { return Button("popup focus").With(huxerui::Frame{80.0F, 30.0F}).OnClick([] { ++popup_focus_clicks; }); },
+      [] {
+        return Button("popup focus").With(huxerui::Frame{80.0F, 30.0F}).OnClick([] { ++popup_focus_clicks; });
+      },
       PopupOptions{
           .dismiss_on_outside_press = false,
           .trap_focus = true,

@@ -6,6 +6,7 @@ endif ()
 
 add_library(huxerui_cli_core STATIC
         cli.cpp
+        ios_project.cpp
         platform.cpp
         process_runner.cpp
         project.cpp

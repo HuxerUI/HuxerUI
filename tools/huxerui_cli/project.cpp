@@ -89,6 +89,10 @@ Thumbs.db
       {"CMakeLists.txt", context.Render(R"TEMPLATE(cmake_minimum_required(VERSION 3.20)
 project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(HUXERUI_SDK_ROOT "$ENV{HUXERUI_SDK_ROOT}" CACHE PATH "HuxerUI SDK or source directory")
 if (HUXERUI_SDK_ROOT AND EXISTS "${HUXERUI_SDK_ROOT}/CMakeLists.txt"
         AND EXISTS "${HUXERUI_SDK_ROOT}/include/huxerui/huxerui.h")
@@ -97,17 +101,27 @@ if (HUXERUI_SDK_ROOT AND EXISTS "${HUXERUI_SDK_ROOT}/CMakeLists.txt"
     add_subdirectory("${HUXERUI_SDK_ROOT}" "${CMAKE_BINARY_DIR}/huxerui-sdk" EXCLUDE_FROM_ALL)
 else ()
     if (HUXERUI_SDK_ROOT)
-        list(PREPEND CMAKE_PREFIX_PATH "${HUXERUI_SDK_ROOT}")
+        find_package(HuxerUI CONFIG REQUIRED
+                PATHS "${HUXERUI_SDK_ROOT}"
+                NO_DEFAULT_PATH
+                NO_CMAKE_FIND_ROOT_PATH
+        )
+    else ()
+        find_package(HuxerUI CONFIG REQUIRED)
     endif ()
-    find_package(HuxerUI CONFIG REQUIRED)
 endif ()
 
 if (WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/huxerui.cmake" OPTIONAL)
-elseif (APPLE)
+elseif (APPLE AND NOT IOS)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/huxerui.cmake" OPTIONAL)
 elseif (EMSCRIPTEN)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/web/huxerui.cmake" OPTIONAL)
+endif ()
+
+set(HUXERUI_APP_BUNDLE_IDENTIFIER "@PACKAGE_NAME@")
+if (APPLE AND NOT IOS AND HUXERUI_MACOS_BUNDLE_IDENTIFIER)
+    set(HUXERUI_APP_BUNDLE_IDENTIFIER "${HUXERUI_MACOS_BUNDLE_IDENTIFIER}")
 endif ()
 
 file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
@@ -126,13 +140,13 @@ huxerui_add_app(@TARGET_NAME@
         BUNDLE_NAME
             "@PROJECT_NAME@"
         BUNDLE_IDENTIFIER
-            "@PACKAGE_NAME@"
+            "${HUXERUI_APP_BUNDLE_IDENTIFIER}"
 )
 
 if (WIN32 AND HUXERUI_WINDOWS_MANIFEST)
     target_sources(@TARGET_NAME@ PRIVATE "${HUXERUI_WINDOWS_MANIFEST}")
 endif ()
-if (APPLE AND HUXERUI_MACOS_INFO_PLIST)
+if (APPLE AND NOT IOS AND HUXERUI_MACOS_INFO_PLIST)
     set_target_properties(@TARGET_NAME@ PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${HUXERUI_MACOS_INFO_PLIST}"
     )

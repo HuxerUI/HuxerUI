@@ -1481,6 +1481,9 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
       .key = Key::Tab,
+      .modifiers = {
+          .shift = true,
+      },
   });
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
@@ -1504,6 +1507,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   REQUIRE(switch_changes == 2);
   REQUIRE(!switch_checked.Get());
 
+  runtime.BuildFrame();
   radio = runtime.RootNode()->children[2].get();
   const std::uint64_t radio_identity = radio->identity;
   const Rect radio_bounds = radio->PresentationBounds();
@@ -1519,11 +1523,19 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
 
   platform.AdvanceTime(RadioButtonStyle::Default().animation_duration);
   const FlattenedScene& selected_radio = runtime.BuildFrame();
-  const bool paints_dot = std::ranges::any_of(selected_radio.Commands(), [radio_center](const PaintCommand& command) {
-    const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
-    return circle != nullptr && std::abs(circle->center.x - radio_center.x) < 0.001F &&
-           std::abs(circle->center.y - radio_center.y) < 0.001F;
-  });
+  const bool paints_dot = std::ranges::any_of(
+      selected_radio.Commands(),
+      [&selected_radio](const PaintCommand& command) {
+        const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
+        if (circle == nullptr || std::abs(circle->radius - RadioButtonStyle::Default().dot_radius) >= 0.001F) {
+          return false;
+        }
+        return std::ranges::any_of(selected_radio.Commands(), [circle](const PaintCommand& candidate) {
+          const auto* arc = std::get_if<huxerui::DrawArcCommand>(&candidate);
+          return arc != nullptr && arc->center == circle->center;
+        });
+      }
+  );
   REQUIRE(paints_dot);
 
   ClickAt(runtime, radio_center);

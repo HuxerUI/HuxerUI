@@ -38,7 +38,12 @@ function(huxerui_add_app target_name)
         )
     endif ()
 
-    if (ANDROID)
+    if (IOS)
+        add_library(${target_name} STATIC ${HUXERUI_APP_SOURCES})
+        set_target_properties(${target_name} PROPERTIES
+                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+        )
+    elseif (ANDROID)
         add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES})
         set_target_properties(${target_name} PROPERTIES
                 OUTPUT_NAME "huxerui_app"
@@ -62,7 +67,7 @@ function(huxerui_add_app target_name)
             ${HUXERUI_APP_FRAMEWORK_TARGET}
     )
 
-    if (APPLE)
+    if (APPLE AND NOT IOS)
         set_target_properties(${target_name} PROPERTIES MACOSX_BUNDLE TRUE)
         if (HUXERUI_APP_BUNDLE_NAME)
             set_target_properties(${target_name} PROPERTIES
@@ -85,6 +90,69 @@ function(huxerui_add_app target_name)
         )
     endif ()
 
+    if (IOS)
+        find_program(HUXERUI_IOS_LIBTOOL libtool REQUIRED)
+        set(HUXERUI_IOS_CORE_DIRECTORY
+                "${CMAKE_BINARY_DIR}/huxerui-ios/${target_name}"
+        )
+        set(HUXERUI_IOS_CORE_ARCHIVE
+                "${HUXERUI_IOS_CORE_DIRECTORY}/lib${target_name}_huxerui.a"
+        )
+        set(HUXERUI_IOS_LINK_OPTIONS_FILE
+                "${HUXERUI_IOS_CORE_DIRECTORY}/link.rsp"
+        )
+        get_target_property(HUXERUI_IOS_LINK_LIBRARIES
+                ${HUXERUI_APP_FRAMEWORK_TARGET}
+                INTERFACE_LINK_LIBRARIES
+        )
+        get_target_property(HUXERUI_IOS_LINK_OPTIONS
+                ${HUXERUI_APP_FRAMEWORK_TARGET}
+                INTERFACE_LINK_OPTIONS
+        )
+        if (NOT HUXERUI_IOS_LINK_LIBRARIES
+                OR HUXERUI_IOS_LINK_LIBRARIES MATCHES "-NOTFOUND$")
+            message(FATAL_ERROR
+                    "huxerui_add_app() requires iOS platform link arguments"
+            )
+        endif ()
+        if (HUXERUI_IOS_LINK_OPTIONS MATCHES "-NOTFOUND$")
+            set(HUXERUI_IOS_LINK_OPTIONS)
+        endif ()
+        set(HUXERUI_IOS_LINK_OPTIONS_CONTENT
+                "-force_load\n\"${HUXERUI_IOS_CORE_ARCHIVE}\"\n"
+        )
+        foreach (HUXERUI_IOS_LINK_ARGUMENT IN LISTS
+                HUXERUI_IOS_LINK_LIBRARIES
+                HUXERUI_IOS_LINK_OPTIONS
+        )
+            string(APPEND HUXERUI_IOS_LINK_OPTIONS_CONTENT
+                    "${HUXERUI_IOS_LINK_ARGUMENT}\n"
+            )
+        endforeach ()
+        file(MAKE_DIRECTORY "${HUXERUI_IOS_CORE_DIRECTORY}")
+        file(WRITE "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
+                "${HUXERUI_IOS_LINK_OPTIONS_CONTENT}"
+        )
+        add_custom_command(
+                OUTPUT "${HUXERUI_IOS_CORE_ARCHIVE}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${HUXERUI_IOS_CORE_DIRECTORY}"
+                COMMAND "${HUXERUI_IOS_LIBTOOL}" -static
+                        -o "${HUXERUI_IOS_CORE_ARCHIVE}"
+                        "$<TARGET_FILE:${target_name}>"
+                        "$<TARGET_FILE:${HUXERUI_APP_FRAMEWORK_TARGET}>"
+                DEPENDS
+                        ${target_name}
+                        ${HUXERUI_APP_FRAMEWORK_TARGET}
+                COMMENT "Linking HuxerUI iOS application core ${target_name}"
+                VERBATIM
+        )
+        add_custom_target(${target_name}_huxerui_ios_core
+                DEPENDS "${HUXERUI_IOS_CORE_ARCHIVE}"
+        )
+        return()
+    endif ()
+
     if (NOT HUXERUI_PLATFORM_ID)
         if (EMSCRIPTEN)
             set(HUXERUI_PLATFORM_ID "web")
@@ -101,6 +169,7 @@ function(huxerui_add_app target_name)
 
     _huxerui_escape_json("${target_name}" HUXERUI_APP_JSON_TARGET)
     _huxerui_escape_json("${HUXERUI_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
+    _huxerui_escape_json("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
 
     set(HUXERUI_APP_INTEGRATION_DIRECTORY
             "${CMAKE_CURRENT_BINARY_DIR}/huxerui-integration/${target_name}"
@@ -115,6 +184,6 @@ function(huxerui_add_app target_name)
     file(MAKE_DIRECTORY "${HUXERUI_APP_INTEGRATION_DIRECTORY}")
     file(GENERATE
             OUTPUT "${HUXERUI_APP_INTEGRATION_PLAN}"
-            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"platform\": \"${HUXERUI_APP_JSON_PLATFORM}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\"\n}\n"
+            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"platform\": \"${HUXERUI_APP_JSON_PLATFORM}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\",\n  \"bundleIdentifier\": \"${HUXERUI_APP_JSON_BUNDLE_IDENTIFIER}\"\n}\n"
     )
 endfunction()

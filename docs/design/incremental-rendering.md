@@ -554,4 +554,4 @@ Instrumentation used by these tests belongs in test support or internal debug co
 It is not part of the application API.
 
 Every adoption stage runs the full common test suite and all platform builds available on the development host.
-Scene-boundary changes require renderer audits for Android, macOS, and Windows even when a platform cannot be built locally.
+Scene-boundary changes require renderer audits for Android, iOS, macOS, Windows, and Web even when a platform cannot be built locally.

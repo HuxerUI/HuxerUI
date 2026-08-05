@@ -1,7 +1,14 @@
 include_guard(GLOBAL)
 
 function(huxerui_add_example target_name bundle_name bundle_identifier)
-    if (ANDROID)
+    if (IOS)
+        huxerui_add_app(${target_name}
+                SOURCES main.cpp
+                BUNDLE_NAME "${bundle_name}"
+                BUNDLE_IDENTIFIER "${bundle_identifier}"
+        )
+        return()
+    elseif (ANDROID)
         add_library(${target_name} SHARED
                 main.cpp
         )

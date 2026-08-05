@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "ios_project.h"
 #include "platform.h"
 #include "process_runner.h"
 #include "project.h"
@@ -31,8 +32,9 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui devices [platform]\n"
-         << "  huxerui build [platform-list] [--profile debug|release] [--generator <name>]\n"
+         << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]\n"
          << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]\n"
+         << "  huxerui open ios\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n";
 }
@@ -331,13 +333,13 @@ int RunDevices(std::span<const std::string_view> arguments, std::ostream& output
     throw std::runtime_error("no device-capable platform is available from this host");
   }
   for (const PlatformDriver* platform : platforms) {
+    if (!platform->SupportsDeviceDiscovery()) {
+      throw std::runtime_error("platform does not support device discovery: " + std::string(platform->Id()));
+    }
     if (!platform->SupportsCurrentHost()) {
       throw std::runtime_error(
           "platform " + std::string(platform->Id()) + " is unavailable from host " + std::string(CurrentHostId())
       );
-    }
-    if (!platform->SupportsDeviceDiscovery()) {
-      throw std::runtime_error("platform does not support device discovery: " + std::string(platform->Id()));
     }
     PrintDevices(*platform, platform->DiscoverDevices(), output);
   }
@@ -349,9 +351,10 @@ struct BuildOptions {
   std::string profile = "debug";
   std::string device;
   std::string cmake_generator;
+  std::optional<PlatformDevice> selected_device;
 };
 
-BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, bool require_platform, bool allow_device) {
+BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
   BuildOptions options;
   for (std::size_t index = 1; index < arguments.size(); ++index) {
     if (arguments[index] == "--profile") {
@@ -363,9 +366,6 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, bool
         throw UsageError("profile must be debug or release");
       }
     } else if (arguments[index] == "--device") {
-      if (!allow_device) {
-        throw UsageError("--device is only valid for run");
-      }
       if (++index >= arguments.size()) {
         throw UsageError("--device requires a value");
       }
@@ -381,14 +381,18 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, bool
       throw UsageError("unexpected argument: " + std::string(arguments[index]));
     }
   }
-  if (require_platform && !options.platforms) {
-    throw UsageError("run requires one platform");
+  if (!command.empty() && !options.platforms) {
+    throw UsageError(std::string(command) + " requires one platform");
   }
   return options;
 }
 
-std::vector<const PlatformDriver*>
-ResolveBuildPlatforms(const Project& project, const std::optional<std::string_view>& requested, bool single) {
+std::vector<const PlatformDriver*> ResolveBuildPlatforms(
+    const Project& project,
+    const std::optional<std::string_view>& requested,
+    std::string_view command,
+    std::string_view requested_device
+) {
   std::vector<const PlatformDriver*> platforms;
   if (!requested) {
     const PlatformDriver* current = FindPlatformDriver(CurrentHostId());
@@ -405,8 +409,16 @@ ResolveBuildPlatforms(const Project& project, const std::optional<std::string_vi
     platforms = ResolvePlatforms(*requested);
   }
 
-  if (single && platforms.size() != 1) {
-    throw UsageError("run accepts exactly one platform");
+  if (!command.empty() && platforms.size() != 1) {
+    throw UsageError(std::string(command) + " accepts exactly one platform");
+  }
+  if (!requested_device.empty()) {
+    if (platforms.size() != 1) {
+      throw UsageError("--device requires exactly one build platform");
+    }
+    if (!platforms.front()->SupportsDeviceDiscovery()) {
+      throw UsageError("--device is not supported for platform " + std::string(platforms.front()->Id()));
+    }
   }
   for (const PlatformDriver* platform : platforms) {
     if (std::find(project.platforms.begin(), project.platforms.end(), platform->Id()) == project.platforms.end()) {
@@ -432,9 +444,15 @@ PlatformCommandContext MakeCommandContext(
     const std::filesystem::path& sdk_root,
     const BuildOptions& options
 ) {
-  const std::filesystem::path build_directory = project.root / ".huxerui/build" / platform.Id() / options.profile;
+  std::string build_variant(platform.Id());
+  if (platform.Id() == "ios") {
+    build_variant +=
+        options.selected_device && options.selected_device->kind == DeviceKind::Physical ? "-device" : "-simulator";
+  }
+  const std::filesystem::path build_directory = project.root / ".huxerui/build" / build_variant / options.profile;
   std::string cmake_generator = options.cmake_generator;
-  if (cmake_generator.empty() && !std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
+  if (platform.Id() != "ios" && cmake_generator.empty() &&
+      !std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
       !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {
     cmake_generator = "Ninja";
   }
@@ -444,7 +462,7 @@ PlatformCommandContext MakeCommandContext(
       build_directory,
       std::move(cmake_generator),
       options.profile,
-      options.device,
+      options.selected_device,
   };
 }
 
@@ -474,7 +492,7 @@ void BuildPlatform(
   ExecuteCommands(commands, output);
 }
 
-std::optional<PlatformDevice> SelectRunDevice(const PlatformDriver& platform, std::string_view requested) {
+std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::string_view requested) {
   if (!platform.SupportsDeviceDiscovery()) {
     if (!requested.empty()) {
       throw UsageError("--device is not supported for platform " + std::string(platform.Id()));
@@ -525,12 +543,16 @@ int RunBuild(
   if (sdk_root.empty()) {
     throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
   }
-  const BuildOptions options = ParseBuildOptions(arguments, false, false);
+  BuildOptions options = ParseBuildOptions(arguments, {});
   const Project project = DiscoverProject(working_directory);
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options.platforms, false);
+  const std::vector<const PlatformDriver*> platforms =
+      ResolveBuildPlatforms(project, options.platforms, {}, options.device);
+  if (!options.device.empty()) {
+    options.selected_device = SelectDevice(*platforms.front(), options.device);
+  }
   for (const PlatformDriver* platform : platforms) {
     BuildPlatform(project, *platform, sdk_root, options, output);
   }
@@ -546,16 +568,17 @@ int RunApplication(
   if (sdk_root.empty()) {
     throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
   }
-  BuildOptions options = ParseBuildOptions(arguments, true, true);
+  BuildOptions options = ParseBuildOptions(arguments, "run");
   const Project project = DiscoverProject(working_directory);
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options.platforms, true);
+  const std::vector<const PlatformDriver*> platforms =
+      ResolveBuildPlatforms(project, options.platforms, "run", options.device);
   const PlatformDriver& platform = *platforms.front();
-  const std::optional<PlatformDevice> device = SelectRunDevice(platform, options.device);
+  const std::optional<PlatformDevice> device = SelectDevice(platform, options.device);
   if (device) {
-    options.device = device->id;
+    options.selected_device = device;
     output << "Device: " << device->id;
     if (!device->name.empty()) {
       output << " (" << device->name << ')';
@@ -568,6 +591,37 @@ int RunApplication(
   const PlatformCommandContext context = MakeCommandContext(project, platform, sdk_root, options);
   const std::vector<ProcessCommand> commands = platform.RunCommands(context);
   ExecuteCommands(commands, output);
+  return 0;
+}
+
+int RunOpen(
+    std::span<const std::string_view> arguments,
+    const std::filesystem::path& working_directory,
+    const std::filesystem::path& sdk_root,
+    std::ostream& output
+) {
+  if (arguments.size() != 2 || arguments[1] != "ios") {
+    throw UsageError("open usage: huxerui open ios");
+  }
+  BuildOptions options;
+  options.platforms = "ios";
+  const Project project = DiscoverProject(working_directory);
+  if (!project.unknown_platforms.empty()) {
+    throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
+  }
+  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options.platforms, "open", {});
+  const PlatformDriver& platform = *platforms.front();
+  if (platform.Id() != "ios") {
+    throw UsageError("open currently supports ios only");
+  }
+  if (sdk_root.empty()) {
+    throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
+  }
+
+  ConfigureIosLocalSdk(project.root, sdk_root);
+  output << "Opening ios Xcode project\n";
+  const PlatformCommandContext context = MakeCommandContext(project, platform, sdk_root, options);
+  ExecuteCommands(platform.OpenCommands(context), output);
   return 0;
 }
 
@@ -606,6 +660,9 @@ int Run(
     }
     if (arguments[0] == "run") {
       return RunApplication(arguments, working_directory, sdk_root, output);
+    }
+    if (arguments[0] == "open") {
+      return RunOpen(arguments, working_directory, sdk_root, output);
     }
     throw UsageError("unknown command: " + std::string(arguments[0]));
   } catch (const UsageError& exception) {

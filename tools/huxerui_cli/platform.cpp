@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
+#include "ios_project.h"
 #include "sdk.h"
 
 namespace huxerui::cli {
@@ -95,11 +97,52 @@ std::filesystem::path AppIntegrationPlan(const PlatformCommandContext& context) 
   return plans.front();
 }
 
-std::vector<std::string> DeviceArguments(std::string_view device) {
-  if (device.empty()) {
+std::vector<std::string> DeviceArguments(const std::optional<PlatformDevice>& device) {
+  if (!device) {
     return {};
   }
-  return {"-s", std::string(device)};
+  return {"-s", device->id};
+}
+
+std::string_view Trim(std::string_view value) {
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+    value.remove_prefix(1);
+  }
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+    value.remove_suffix(1);
+  }
+  return value;
+}
+
+bool IsUuidCharacter(char character) {
+  return std::isxdigit(static_cast<unsigned char>(character)) || character == '-';
+}
+
+std::optional<std::size_t> FindUuid(std::string_view value) {
+  constexpr std::size_t uuid_length = 36;
+  for (std::size_t position = 0; position + uuid_length <= value.size(); ++position) {
+    const std::string_view candidate = value.substr(position, uuid_length);
+    if (candidate[8] != '-' || candidate[13] != '-' || candidate[18] != '-' || candidate[23] != '-') {
+      continue;
+    }
+    if (std::all_of(candidate.begin(), candidate.end(), IsUuidCharacter)) {
+      return position;
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<std::filesystem::path> IosProjects(const std::filesystem::path& shell_root) {
+  std::vector<std::filesystem::path> projects;
+  if (!std::filesystem::is_directory(shell_root)) {
+    return projects;
+  }
+  for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(shell_root)) {
+    if (entry.is_directory() && entry.path().extension() == ".xcodeproj") {
+      projects.push_back(entry.path());
+    }
+  }
+  return projects;
 }
 
 std::string ProfileConfiguration(std::string_view profile) {
@@ -110,6 +153,40 @@ std::string ProfileConfiguration(std::string_view profile) {
     return "Release";
   }
   throw std::invalid_argument("unknown build profile: " + std::string(profile));
+}
+
+ProjectTemplateContext AppleTemplateContext(const ProjectTemplateContext& context) {
+  ProjectTemplateContext result = context;
+  std::replace(result.package_name.begin(), result.package_name.end(), '_', '-');
+  return result;
+}
+
+bool IsIosPhysicalDevice(const PlatformCommandContext& context) {
+  if (!context.device) {
+    return false;
+  }
+  if (context.device->kind == DeviceKind::Physical) {
+    return true;
+  }
+  if (context.device->kind == DeviceKind::Simulator) {
+    return false;
+  }
+  throw std::invalid_argument("iOS device kind is unspecified");
+}
+
+std::filesystem::path IosProjectPath(const PlatformCommandContext& context) {
+  std::vector<std::filesystem::path> projects = IosProjects(context.project_root / "platform/ios");
+  if (projects.size() != 1) {
+    throw std::runtime_error(projects.empty() ? "iOS Xcode project is missing" : "multiple iOS Xcode projects found");
+  }
+  return std::move(projects.front());
+}
+
+std::string IosDestination(const PlatformCommandContext& context) {
+  if (!context.device) {
+    return "generic/platform=iOS Simulator";
+  }
+  return "id=" + context.device->destination_id;
 }
 
 std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& context) {
@@ -538,13 +615,14 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
+    const ProjectTemplateContext apple_context = AppleTemplateContext(context);
     return {
         {".gitignore", "DerivedData/\nxcuserdata/\n*.xcuserstate\narchives/\n"},
-        {"huxerui.cmake", context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
+        {"huxerui.cmake", apple_context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
 set(HUXERUI_MACOS_BUNDLE_IDENTIFIER "@PACKAGE_NAME@")
 set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
 )TEMPLATE")},
-        {"Info.plist.in", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
+        {"Info.plist.in", apple_context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -581,6 +659,165 @@ set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
       throw std::runtime_error("macOS application bundle is missing: " + bundle);
     }
     return {{"open", {bundle}, context.project_root}};
+  }
+};
+
+class IosDriver final : public PlatformDriver {
+public:
+  std::string_view Id() const noexcept override {
+    return "ios";
+  }
+
+  bool SupportsCurrentHost() const noexcept override {
+    return CurrentHostId() == "macos";
+  }
+
+  std::span<const std::string_view> RequiredTools() const noexcept override {
+    static constexpr std::array tools{
+        std::string_view{"cmake"},
+        std::string_view{"xcodebuild"},
+        std::string_view{"xcrun"},
+    };
+    return tools;
+  }
+
+  std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
+    return CreateIosProject(context);
+  }
+
+  std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
+    static constexpr std::array required{
+        std::string_view{"App/main.mm"},
+        std::string_view{"App/Info.plist"},
+        std::string_view{"App/LaunchScreen.storyboard"},
+        std::string_view{"App/Assets.xcassets/Contents.json"},
+        std::string_view{"Config/Base.xcconfig"},
+        std::string_view{"Config/Debug.xcconfig"},
+        std::string_view{"Config/Release.xcconfig"},
+    };
+    std::vector<Diagnostic> diagnostics = ValidateRequiredFiles(shell_root, required);
+    const std::vector<std::filesystem::path> projects = IosProjects(shell_root);
+    if (projects.size() != 1) {
+      diagnostics.push_back({true, projects.empty() ? "missing Xcode project" : "multiple Xcode projects"});
+      return diagnostics;
+    }
+    if (!std::filesystem::is_regular_file(projects.front() / "project.pbxproj")) {
+      diagnostics.push_back({true, "missing Xcode project.pbxproj"});
+    }
+    const std::filesystem::path scheme =
+        projects.front() / "xcshareddata/xcschemes" / (projects.front().stem().string() + ".xcscheme");
+    if (!std::filesystem::is_regular_file(scheme)) {
+      diagnostics.push_back({true, "missing shared Xcode scheme"});
+    }
+    return diagnostics;
+  }
+
+  bool SupportsDeviceDiscovery() const noexcept override {
+    return true;
+  }
+
+  std::vector<PlatformDevice> DiscoverDevices() const override {
+    const ProcessCommand physical_command{
+        "xcrun",
+        {
+            "devicectl",
+            "list",
+            "devices",
+            "--hide-default-columns",
+            "--columns",
+            "name",
+            "identifier",
+            "state",
+            "udid",
+            "--hide-headers",
+        },
+        {},
+    };
+    const ProcessCommand simulator_command{"xcrun", {"simctl", "list", "devices", "booted"}, {}};
+    const ProcessResult physical_result = RunProcessCapture(physical_command);
+    const ProcessResult simulator_result = RunProcessCapture(simulator_command);
+    if (physical_result.exit_code != 0 && simulator_result.exit_code != 0) {
+      throw std::runtime_error("cannot discover iOS devices through devicectl or simctl");
+    }
+
+    std::vector<PlatformDevice> devices;
+    if (physical_result.exit_code == 0) {
+      devices = ParseIosPhysicalDevices(physical_result.output);
+    }
+    if (simulator_result.exit_code == 0) {
+      std::vector<PlatformDevice> simulators = ParseIosSimulatorDevices(simulator_result.output);
+      devices.insert(
+          devices.end(),
+          std::make_move_iterator(simulators.begin()),
+          std::make_move_iterator(simulators.end())
+      );
+    }
+    return devices;
+  }
+
+  std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
+    if (!context.cmake_generator.empty()) {
+      throw std::invalid_argument("iOS native builds do not use a CMake generator option");
+    }
+    const std::string configuration = ProfileConfiguration(context.profile);
+    const std::filesystem::path project = IosProjectPath(context);
+    std::vector<std::string> build_arguments{
+        "-project",
+        project.string(),
+        "-scheme",
+        project.stem().string(),
+        "-configuration",
+        configuration,
+        "-derivedDataPath",
+        (context.build_directory / "DerivedData").string(),
+        "-destination",
+        IosDestination(context),
+        "HUXERUI_SDK_ROOT=" + context.sdk_root.string(),
+        "HUXERUI_INTEGRATION_PLAN=" + (context.build_directory / "huxerui-integration/app.json").string(),
+    };
+    if (IsIosPhysicalDevice(context)) {
+      build_arguments.push_back("-allowProvisioningUpdates");
+    }
+    build_arguments.push_back("build");
+    return {{"xcodebuild", std::move(build_arguments), context.project_root}};
+  }
+
+  std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
+    const std::string plan = ReadFile(AppIntegrationPlan(context));
+    const std::string bundle = JsonString(plan, "bundle");
+    const std::string bundle_identifier = JsonString(plan, "bundleIdentifier");
+    if (!std::filesystem::is_directory(bundle)) {
+      throw std::runtime_error("iOS application bundle is missing: " + bundle);
+    }
+    if (bundle_identifier.empty()) {
+      throw std::runtime_error("iOS application bundle identifier is missing");
+    }
+    if (IsIosPhysicalDevice(context)) {
+      return {
+          {"xcrun",
+           {"devicectl", "device", "install", "app", "--device", context.device->id, bundle},
+           context.project_root},
+          {"xcrun",
+           {"devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            context.device->id,
+            "--terminate-existing",
+            bundle_identifier},
+           context.project_root},
+      };
+    }
+    const std::string simulator = context.device ? context.device->id : "booted";
+    return {
+        {"xcrun", {"simctl", "install", simulator, bundle}, context.project_root},
+        {"xcrun", {"simctl", "launch", simulator, bundle_identifier}, context.project_root},
+    };
+  }
+
+  std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const override {
+    return {{"open", {"-a", "Xcode", IosProjectPath(context).string()}, context.project_root}};
   }
 };
 
@@ -717,11 +954,13 @@ endfunction()
 const AndroidDriver android_driver;
 const WindowsDriver windows_driver;
 const MacOSDriver macos_driver;
+const IosDriver ios_driver;
 const WebDriver web_driver;
-constexpr std::array<const PlatformDriver*, 4> platform_drivers{
+constexpr std::array<const PlatformDriver*, 5> platform_drivers{
     &android_driver,
     &windows_driver,
     &macos_driver,
+    &ios_driver,
     &web_driver,
 };
 
@@ -733,6 +972,10 @@ bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {
 
 std::vector<PlatformDevice> PlatformDriver::DiscoverDevices() const {
   throw std::logic_error("platform does not support device discovery: " + std::string(Id()));
+}
+
+std::vector<ProcessCommand> PlatformDriver::OpenCommands(const PlatformCommandContext&) const {
+  throw std::logic_error("platform does not support opening a development project: " + std::string(Id()));
 }
 
 std::string_view DeviceStateName(DeviceState state) noexcept {
@@ -786,7 +1029,75 @@ std::vector<PlatformDevice> ParseAdbDevices(std::string_view output) {
         break;
       }
     }
-    devices.push_back({std::move(id), std::move(name), state});
+    devices.push_back({std::move(id), std::move(name), state, DeviceKind::Unspecified, {}});
+  }
+  return devices;
+}
+
+std::vector<PlatformDevice> ParseIosPhysicalDevices(std::string_view output) {
+  std::vector<PlatformDevice> devices;
+  std::istringstream lines{std::string(output)};
+  std::string line;
+  while (std::getline(lines, line)) {
+    const std::optional<std::size_t> identifier = FindUuid(line);
+    if (!identifier) {
+      continue;
+    }
+    const std::string_view value(line);
+    const std::string_view name = Trim(value.substr(0, *identifier));
+    const std::string_view details = Trim(value.substr(*identifier + 36));
+    const std::size_t destination_separator = details.find_last_of(" \t");
+    if (destination_separator == std::string_view::npos) {
+      continue;
+    }
+    const std::string_view state = Trim(details.substr(0, destination_separator));
+    const std::string_view destination = Trim(details.substr(destination_separator + 1));
+    if (destination.empty()) {
+      continue;
+    }
+    devices.push_back({
+        std::string(value.substr(*identifier, 36)),
+        std::string(name),
+        state.starts_with("available") ? DeviceState::Ready : DeviceState::Unavailable,
+        DeviceKind::Physical,
+        std::string(destination),
+    });
+  }
+  return devices;
+}
+
+std::vector<PlatformDevice> ParseIosSimulatorDevices(std::string_view output) {
+  std::vector<PlatformDevice> devices;
+  std::istringstream lines{std::string(output)};
+  std::string runtime;
+  std::string line;
+  while (std::getline(lines, line)) {
+    const std::string_view trimmed = Trim(line);
+    if (trimmed.starts_with("-- ") && trimmed.ends_with(" --")) {
+      runtime = std::string(trimmed.substr(3, trimmed.size() - 6));
+      continue;
+    }
+    const std::optional<std::size_t> identifier = FindUuid(line);
+    if (!identifier || runtime.starts_with("Unavailable")) {
+      continue;
+    }
+    const std::string_view value(line);
+    std::string_view name_value = Trim(value.substr(0, *identifier));
+    if (name_value.ends_with('(')) {
+      name_value = Trim(name_value.substr(0, name_value.size() - 1));
+    }
+    std::string name(name_value);
+    if (!runtime.empty()) {
+      name += " — " + runtime;
+    }
+    const std::string_view state = Trim(value.substr(*identifier + 36));
+    devices.push_back({
+        std::string(value.substr(*identifier, 36)),
+        std::move(name),
+        state.find("(Booted)") != std::string_view::npos ? DeviceState::Ready : DeviceState::Offline,
+        DeviceKind::Simulator,
+        std::string(value.substr(*identifier, 36)),
+    });
   }
   return devices;
 }

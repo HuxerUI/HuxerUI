@@ -18,14 +18,17 @@ function(huxerui_configure_platform)
     elseif (ANDROID)
         set(HUXERUI_PLATFORM_ID "android")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Android.cmake")
-    elseif (APPLE)
+    elseif (IOS)
+        set(HUXERUI_PLATFORM_ID "ios")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/IOS.cmake")
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         set(HUXERUI_PLATFORM_ID "macos")
-        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Apple.cmake")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/MacOS.cmake")
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports Android, macOS, Windows, and Web only")
+        message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, and Web only")
     endif ()
 
     huxerui_platform_configure()
@@ -83,8 +86,8 @@ function(huxerui_configure_targets)
     if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
         message(FATAL_ERROR "At least one HuxerUI library target must be enabled")
     endif ()
-    if (EMSCRIPTEN AND HUXERUI_BUILD_SHARED)
-        message(FATAL_ERROR "HuxerUI Web supports the static library target only")
+    if ((EMSCRIPTEN OR IOS) AND HUXERUI_BUILD_SHARED)
+        message(FATAL_ERROR "HuxerUI Web and iOS support the static library target only")
     endif ()
 
     huxerui_configure_platform()
@@ -93,16 +96,24 @@ function(huxerui_configure_targets)
             "${HUXERUI_PROJECT_DIR}/src/*.cpp"
     )
 
-    add_library(huxerui_core_objects OBJECT
-            ${HUXERUI_CORE_SOURCE_FILES}
-            ${HUXERUI_PLATFORM_SOURCE_FILES}
-    )
-    set_target_properties(huxerui_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    huxerui_configure_compile_target(huxerui_core_objects)
+    if (IOS)
+        set(HUXERUI_LIBRARY_SOURCE_FILES
+                ${HUXERUI_CORE_SOURCE_FILES}
+                ${HUXERUI_PLATFORM_SOURCE_FILES}
+        )
+    else ()
+        add_library(huxerui_core_objects OBJECT
+                ${HUXERUI_CORE_SOURCE_FILES}
+                ${HUXERUI_PLATFORM_SOURCE_FILES}
+        )
+        set_target_properties(huxerui_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        huxerui_configure_compile_target(huxerui_core_objects)
+        set(HUXERUI_LIBRARY_SOURCE_FILES $<TARGET_OBJECTS:huxerui_core_objects>)
+    endif ()
 
     if (HUXERUI_BUILD_SHARED)
         add_library(${HUXERUI_SHARED_LIB_NAME} SHARED
-                $<TARGET_OBJECTS:huxerui_core_objects>
+                ${HUXERUI_LIBRARY_SOURCE_FILES}
         )
         huxerui_configure_public_target(${HUXERUI_SHARED_LIB_NAME})
         add_library(HuxerUI::huxerui ALIAS ${HUXERUI_SHARED_LIB_NAME})
@@ -110,8 +121,12 @@ function(huxerui_configure_targets)
 
     if (HUXERUI_BUILD_STATIC)
         add_library(${HUXERUI_STATIC_LIB_NAME} STATIC
-                $<TARGET_OBJECTS:huxerui_core_objects>
+                ${HUXERUI_LIBRARY_SOURCE_FILES}
         )
+        if (IOS)
+            set_target_properties(${HUXERUI_STATIC_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+            huxerui_configure_compile_target(${HUXERUI_STATIC_LIB_NAME})
+        endif ()
         huxerui_configure_public_target(${HUXERUI_STATIC_LIB_NAME})
         add_library(HuxerUI::huxerui_static ALIAS ${HUXERUI_STATIC_LIB_NAME})
         if (NOT TARGET HuxerUI::huxerui)
@@ -458,7 +473,7 @@ function(huxerui_add_resources target_name)
                 "${HUXERUI_RESOURCE_STAMP}"
                 "${HUXERUI_RESOURCE_INDEX}"
         )
-    elseif (APPLE)
+    elseif (APPLE AND NOT IOS)
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
         )

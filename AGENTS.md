@@ -211,9 +211,15 @@ JNI changes update C++ signatures, Java declarations, cached IDs, and call sites
 
 The minimum Android API is 23. Guard newer APIs or obtain approval to raise it.
 
+### iOS
+
+iOS platform configuration lives in `cmake/platform/IOS.cmake`. Register new UIKit sources and frameworks there.
+
+Keep UIKit application lifecycle, `UITextInput`, and `CADisplayLink` work on the main thread. Preserve ARC-compatible ownership, balance Core Foundation and Core Graphics Create/Copy objects, and convert native coordinates at the View boundary. The minimum deployment target is iOS 13.
+
 ### macOS
 
-macOS platform configuration lives in `cmake/platform/Apple.cmake`. Register new sources and frameworks there.
+macOS platform configuration lives in `cmake/platform/MacOS.cmake`. Register new AppKit sources and frameworks there.
 
 Keep AppKit work and `NSTextInputClient` interaction on the main thread. Preserve ARC-compatible ownership, balance Core Foundation and Core Graphics Create/Copy objects, and convert native coordinates at the host boundary.
 
