@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(huxerui LANGUAGES CXX)
+project(huxerui VERSION 0.1.0 LANGUAGES CXX)
 
 if (APPLE)
     enable_language(OBJCXX)
@@ -17,12 +17,15 @@ if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR AND NOT ANDROID)
     set(HUXERUI_DEFAULT_BUILD_EXAMPLES ON)
     if (EMSCRIPTEN)
         set(HUXERUI_DEFAULT_BUILD_TESTS OFF)
+        set(HUXERUI_DEFAULT_BUILD_CLI OFF)
     else ()
         set(HUXERUI_DEFAULT_BUILD_TESTS ON)
+        set(HUXERUI_DEFAULT_BUILD_CLI ON)
     endif ()
 else ()
     set(HUXERUI_DEFAULT_BUILD_TESTS OFF)
     set(HUXERUI_DEFAULT_BUILD_EXAMPLES OFF)
+    set(HUXERUI_DEFAULT_BUILD_CLI OFF)
 endif ()
 
 if (EMSCRIPTEN)
@@ -35,6 +38,7 @@ option(HUXERUI_BUILD_SHARED "Build the HuxerUI shared library" ${HUXERUI_DEFAULT
 option(HUXERUI_BUILD_STATIC "Build the HuxerUI static library" ON)
 option(HUXERUI_BUILD_TESTS "Build HuxerUI tests" ${HUXERUI_DEFAULT_BUILD_TESTS})
 option(HUXERUI_BUILD_EXAMPLES "Build HuxerUI examples" ${HUXERUI_DEFAULT_BUILD_EXAMPLES})
+option(HUXERUI_BUILD_CLI "Build the HuxerUI command-line tool" ${HUXERUI_DEFAULT_BUILD_CLI})
 if (WIN32)
     option(HUXERUI_WINDOWS_7_COMPAT "Build the Windows backend for Windows 7 SP1 with Platform Update" OFF)
 endif ()
@@ -47,6 +51,11 @@ set(HUXERUI_STATIC_LIB_NAME "${PROJECT_NAME}_static")
 
 include(cmake/HuxerUITargets.cmake)
 huxerui_configure_targets()
+include(cmake/HuxerUIApp.cmake)
+
+if (HUXERUI_BUILD_CLI)
+    add_subdirectory(tools/huxerui_cli)
+endif ()
 
 if (HUXERUI_BUILD_TESTS)
     enable_testing()
@@ -68,6 +77,7 @@ endif ()
 
 if (HUXERUI_INSTALL_TARGETS)
     install(TARGETS ${HUXERUI_INSTALL_TARGETS}
+            EXPORT HuxerUIImportedTargets
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -77,4 +87,39 @@ endif ()
 install(DIRECTORY "${HUXERUI_PUBLIC_HEADER_DIR}"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+include(CMakePackageConfigHelpers)
+set(HUXERUI_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/HuxerUI")
+
+configure_package_config_file(
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
+        INSTALL_DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+)
+
+install(EXPORT HuxerUIImportedTargets
+        FILE HuxerUIImportedTargets.cmake
+        NAMESPACE HuxerUI::
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIAndroidPlan.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUITargets.cmake"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+install(DIRECTORY "${HUXERUI_PROJECT_DIR}/cmake/platform"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+install(DIRECTORY "${HUXERUI_PROJECT_DIR}/tools/prebuilt/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/tools"
+        PATTERN "README.md" EXCLUDE
 )

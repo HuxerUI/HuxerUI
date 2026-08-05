@@ -2,18 +2,34 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+def huxeruiDefaults = new Properties()
+file("../gradle.properties").withInputStream { huxeruiDefaults.load(it) }
+def huxeruiProperty = { String name ->
+    providers.gradleProperty(name).orElse(huxeruiDefaults.getProperty(name)).get()
+}
+def huxeruiCompileSdk = huxeruiProperty("huxeruiCompileSdk").toInteger()
+def huxeruiMinCompileSdk = huxeruiProperty("huxeruiMinCompileSdk").toInteger()
+def huxeruiMinSdk = huxeruiProperty("huxeruiMinSdk").toInteger()
+def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
+def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
+def huxeruiStl = huxeruiProperty("huxeruiStl")
+
 android {
-    namespace "org.huxerui"
-    compileSdk 36
-    ndkVersion "29.0.14206865"
+    namespace = "org.huxerui"
+    compileSdk = huxeruiCompileSdk
+    ndkVersion = huxeruiNdkVersion
 
     defaultConfig {
-        minSdk 23
+        minSdk = huxeruiMinSdk
         consumerProguardFiles "consumer-rules.pro"
+
+        aarMetadata {
+            minCompileSdk = huxeruiMinCompileSdk
+        }
 
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=c++_shared",
+                arguments "-DANDROID_STL=${huxeruiStl}",
                         "-DHUXERUI_BUILD_SHARED=ON",
                         "-DHUXERUI_BUILD_STATIC=OFF",
                         "-DHUXERUI_BUILD_TESTS=OFF",
@@ -22,28 +38,29 @@ android {
         }
 
         ndk {
-            abiFilters "arm64-v8a", "x86_64"
+            abiFilters(*huxeruiAbis)
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     externalNativeBuild {
         cmake {
-            path file("../../../CMakeLists.txt")
+            path = file("../../../CMakeLists.txt")
         }
     }
 
     buildFeatures {
-        prefabPublishing true
+        prefabPublishing = true
     }
 
     prefab {
         huxerui {
-            headers "../../../include"
+            headers = "../../../include"
         }
     }
+
 }

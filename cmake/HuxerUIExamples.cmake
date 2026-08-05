@@ -8,7 +8,7 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
         set_target_properties(${target_name} PROPERTIES
                 OUTPUT_NAME "huxerui_app"
         )
-        target_link_libraries(${target_name} PRIVATE huxerui::huxerui)
+        target_link_libraries(${target_name} PRIVATE HuxerUI::huxerui)
     else ()
         add_executable(${target_name}
                 main.cpp

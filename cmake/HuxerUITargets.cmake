@@ -151,8 +151,17 @@ function(huxerui_resolve_host_tool tool_name output_variable)
     if (HUXERUI_HOST_SYSTEM STREQUAL "windows")
         set(HUXERUI_HOST_TOOL_SUFFIX ".exe")
     endif ()
+    if (HUXERUI_HOST_TOOL_ROOT)
+        set(HUXERUI_RESOLVED_HOST_TOOL_ROOT "${HUXERUI_HOST_TOOL_ROOT}")
+    else ()
+        # Source builds resolve tools beside this module; an installed package supplies HUXERUI_HOST_TOOL_ROOT.
+        get_filename_component(HUXERUI_RESOLVED_HOST_TOOL_ROOT
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/prebuilt"
+                ABSOLUTE
+        )
+    endif ()
     set(HUXERUI_HOST_TOOL
-            "${HUXERUI_PROJECT_DIR}/tools/prebuilt/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}/huxerui-${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
+            "${HUXERUI_RESOLVED_HOST_TOOL_ROOT}/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}/huxerui-${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
     )
     if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
         message(FATAL_ERROR

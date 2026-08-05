@@ -56,7 +56,8 @@ The Android integration provides:
 
 - `HuxerUIActivity` for full-screen applications
 - `HuxerUIView` for embedding HuxerUI in an existing Android interface
-- The `huxerui` Gradle library module
+- The `HuxerUI` Gradle library module
+- Prefab metadata in the source Gradle module for source-SDK application builds
 - The `demo` application module
 
 A full-screen launcher derives from `HuxerUIActivity`:
@@ -123,6 +124,19 @@ python3 -m http.server 8000 --directory cmake-build-web/bin
 
 For example, open `http://127.0.0.1:8000/example_ui_gallery.html`.
 Each example produces an HTML entry point, an ES module, a WebAssembly module, and resource data when the target packages resources.
+
+CLI applications can generate and run a source-controlled Web shell directly:
+
+```bash
+huxerui create hello_huxer --platform web
+cd hello_huxer
+huxerui doctor web
+huxerui build web
+huxerui run web
+```
+
+The CLI uses `emcmake` for configuration and `emrun` to serve and open the generated application entry point.
+Web CLI projects currently require `HUXERUI_SDK_ROOT` to identify a source SDK checkout.
 
 The configured Emscripten compiler must provide the C++20 language and library support required by HuxerUI; obsolete toolchains are not supported through compatibility headers.
 The backend remains a technical preview until platform-neutral semantics and browser accessibility mapping, broader browser integration tests, production packaging, and real mobile-browser IME validation are complete.

@@ -1,6 +1,6 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, Android, macOS, and Windows backends, and an Emscripten Web technical preview.
+The current foundation includes shared state and recomposition, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on macOS and Windows, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, installable desktop CMake targets, CLI project generation, diagnostics, Android device discovery, platform build and launch orchestration, Android, macOS, and Windows backends, and an Emscripten Web technical preview.
 
 Runtime foundation work:
 
@@ -20,8 +20,8 @@ Framework capability work:
 
 SDK, native integration, and distribution work:
 
-- Installed CMake package, host code-generator resolution, and external consumer validation
-- SDK and CLI project creation, build, run, package, and diagnostics
+- Signed HuxerUI Android releases on Maven Central
+- CLI package and native artifact collection
 - Typed platform modules and generated static registration
 - NativeView lifecycle, reconciliation, host composition, focus, and accessibility
 - Versioned SDK distribution and signing support

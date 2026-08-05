@@ -54,12 +54,13 @@ HUXERUI_APP(
 )
 ```
 
-Add the application target and enable scope generation:
+Add the application target. The helper links HuxerUI and enables scope generation:
 
 ```cmake
-add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE HuxerUI::huxerui)
-huxerui_enable_codegen(my_app)
+huxerui_add_app(my_app
+        SOURCES
+            main.cpp
+)
 ```
 
 Build the repository on macOS:
@@ -69,6 +70,20 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
+
+Top-level builds also produce the `huxerui` CLI:
+
+```bash
+huxerui create hello_huxer --platform android,windows,macos,web
+huxerui doctor
+huxerui devices android
+huxerui build windows
+huxerui run windows
+```
+
+The CLI creates and validates source-controlled platform shells, discovers Android devices, builds enabled Android, Windows, macOS, and Web targets from compatible hosts, and launches development artifacts.
+The CMake install exports a desktop SDK package, the CLI, and host code generators.
+Android and Web CLI projects currently build against a source SDK checkout; installed Android artifacts, package commands, and module integration remain staged work.
 
 See [Getting Started](docs/getting-started.md) for application setup, Windows and Android builds, CMake options, code generation, and example launch commands.
 

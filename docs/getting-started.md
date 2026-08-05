@@ -49,12 +49,15 @@ HUXERUI_APP(
 ## CMake target
 
 ```cmake
-add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE HuxerUI::huxerui)
-huxerui_enable_codegen(my_app)
+huxerui_add_app(my_app
+        SOURCES
+            main.cpp
+)
 ```
 
-Call `huxerui_enable_codegen()` after adding all sources to the target. The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
+`huxerui_add_app()` creates the platform-appropriate application target, links HuxerUI, and enables scope code generation after all declared sources are known.
+Advanced embedded targets may still create their target directly and call `huxerui_enable_codegen()` after adding all sources.
+The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
 
 ## App resources
 
@@ -135,10 +138,46 @@ cd platform/android
 ./gradlew :demo:assembleDebug -PhuxeruiDemoExample=image
 ```
 
-The Android project contains the reusable `huxerui` library and a `demo` application.
+The Android project contains the reusable `HuxerUI` library module and a `demo` application.
 The demo uses `ui_gallery` by default and accepts any example directory through the `huxeruiDemoExample` Gradle property.
 It adds that example with CMake `add_subdirectory()`, emits `libhuxerui_app.so`, and registers the example's generated resources as variant assets.
 Cross-compilation resolves the matching host code generators from `tools/prebuilt/<system>/<architecture>`.
+
+## Project CLI
+
+Top-level repository builds enable the `huxerui` CLI by default:
+
+```bash
+cmake --build build --target huxerui_cli --parallel
+```
+
+Create a project with source-controlled platform shells:
+
+```bash
+huxerui create hello_huxer --platform windows,web
+cd hello_huxer
+huxerui platform add android
+huxerui doctor
+huxerui devices android
+huxerui build windows
+huxerui run windows
+huxerui run web
+```
+
+`create` writes the common CMake application, `.gitignore`, `assets/images`, `assets/raw`, the default string catalog, and the selected platform shells.
+The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`.
+`doctor` discovers the nearest project from a nested directory, validates each platform shell, and checks host tools without changing the project.
+`devices android` lists ready, offline, unauthorized, and otherwise unavailable ADB devices without requiring a project.
+`build` preserves native incremental output under `.huxerui/build`, while `run` builds and launches exactly one target platform.
+`run android` selects the only ready device automatically or requires `--device <id>` when several are available.
+For a fresh desktop build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence.
+The CLI locates an installed desktop SDK beside its executable or uses `HUXERUI_SDK_ROOT` when developing against a source checkout.
+Android and Web CLI projects currently require a source SDK.
+Android includes that checkout's `HuxerUI` Gradle module directly, while Web compiles the framework and application together through Emscripten.
+The generated Android shell uses a local Gradle wrapper when the project supplies one and otherwise requires `gradle` on `PATH`.
+
+Installed Android artifacts, package commands, and module resolution remain staged work.
+Their native integration contracts are defined in [SDK, CLI, Native Shell, and Module Design](design/sdk-cli.md).
 
 ## Run examples
 
@@ -166,4 +205,5 @@ See the [README](../README.md#examples) for the complete example index.
 | `HUXERUI_BUILD_STATIC` | `ON` | Build the static library |
 | `HUXERUI_BUILD_TESTS` | `ON` for the top-level project | Build tests |
 | `HUXERUI_BUILD_EXAMPLES` | `ON` for the top-level project | Build examples |
+| `HUXERUI_BUILD_CLI` | `ON` for the top-level project | Build the `huxerui` project CLI |
 | `HUXERUI_WINDOWS_7_COMPAT` | `OFF` | Build the Windows backend for Windows 7 SP1 with Platform Update |

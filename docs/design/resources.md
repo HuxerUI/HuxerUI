@@ -5,7 +5,7 @@ Status: initial implementation
 This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
 The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android demo.
-SDK manifest integration, reusable consumer Gradle integration, module bundle merging, built-in framework string bundles, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
+Reusable installed-Android integration, module bundle merging, built-in framework string bundles, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
 
@@ -129,14 +129,7 @@ Button and TextField placeholder provide direct StringResource overloads. UseStr
 
 ## Build and package model
 
-Managed projects continue to declare asset roots in `huxerui.toml`:
-
-```toml
-[app]
-assets = ["assets"]
-```
-
-Direct CMake consumers use a target-scoped operation:
+Application resources are target-scoped CMake inputs:
 
 ```cmake
 huxerui_add_resources(
@@ -146,7 +139,18 @@ huxerui_add_resources(
 )
 ```
 
-The managed SDK generates equivalent target configuration from the project manifest.
+`huxerui_add_app` may expose the same operation compactly:
+
+```cmake
+huxerui_add_app(application_target
+    SOURCES src/main.cpp
+    RESOURCES assets
+    RESOURCE_NAMESPACE app
+)
+```
+
+Both forms configure the same resource target and generated package.
+Native platform shells consume its generated staging projection and do not redeclare asset roots.
 
 Resource processing is distinct from C++ scope transformation.
 A dedicated `resource_codegen` host tool belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the scope code generator into an unrelated packager.

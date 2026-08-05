@@ -77,7 +77,9 @@ The Web platform configuration supplies Web sources, platform-owned application 
 
 Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a macOS, Windows, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 
-SDK and CLI commands later wrap the same CMake path for project creation, local serving, release builds, resource packaging, and diagnostics. The Web backend does not introduce a parallel JavaScript component build system.
+The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, and local serving through `emrun`.
+The project-owned Web shell keeps its HTML and Canvas mount code under `platform/web`, while the backend continues to avoid a parallel JavaScript component build system.
+Release packaging remains separate future work.
 
 ## Viewport and display scale
 

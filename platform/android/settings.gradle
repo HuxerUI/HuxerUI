@@ -15,5 +15,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "HuxerUI"
-include(":huxerui")
+include(":HuxerUI")
+project(":HuxerUI").projectDir = file("huxerui")
 include(":demo")

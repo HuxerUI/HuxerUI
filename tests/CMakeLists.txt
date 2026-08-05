@@ -175,6 +175,54 @@ target_link_libraries(huxerui_resource_codegen_tests PRIVATE
 
 add_test(NAME HuxerUIResourceCodegenTests COMMAND huxerui_resource_codegen_tests)
 
+add_test(NAME HuxerUIAndroidPlanTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android_platform_plan.cmake"
+)
+
+if (TARGET huxerui_cli_core)
+    add_executable(huxerui_cli_tests
+            tests_main.cpp
+            cli/cli.cpp
+    )
+    target_compile_features(huxerui_cli_tests PRIVATE cxx_std_20)
+    target_compile_options(huxerui_cli_tests PRIVATE
+            "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
+            "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
+            "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
+            "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+    )
+    target_link_libraries(huxerui_cli_tests PRIVATE
+            HuxerUI3p::Catch2
+            huxerui_cli_core
+    )
+    add_test(NAME HuxerUICliTests COMMAND huxerui_cli_tests)
+endif ()
+
+if (TARGET huxerui_cli AND (WIN32 OR APPLE))
+    if (WIN32)
+        set(HUXERUI_INSTALLED_CONSUMER_PLATFORM windows)
+        set(HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY "$ENV{TEMP}")
+    else ()
+        set(HUXERUI_INSTALLED_CONSUMER_PLATFORM macos)
+        set(HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif ()
+    add_test(NAME HuxerUIInstalledConsumerTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DBUILD_DIRECTORY=${PROJECT_BINARY_DIR}"
+                    "-DBUILD_CONFIG=$<CONFIG>"
+                    "-DWORK_DIRECTORY=${HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY}"
+                    "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
+                    "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+                    "-DPLATFORM_ID=${HUXERUI_INSTALLED_CONSUMER_PLATFORM}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/installed_consumer.cmake"
+    )
+endif ()
+
 add_executable(huxerui_codegen_runtime_tests
         tests_main.cpp
         codegen/runtime.cpp
