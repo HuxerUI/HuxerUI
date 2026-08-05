@@ -1,5 +1,7 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <objbase.h>
+
 #include <limits>
 
 #include <huxerui/text.h>
@@ -9,6 +11,8 @@
 namespace huxerui::test {
 
 TEST_CASE("Win32UnboundedTextMeasurementIgnoresParagraphAlignment") {
+  const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  REQUIRE(SUCCEEDED(com_result));
   detail::Win32Renderer renderer;
   renderer.Initialize();
 
@@ -25,6 +29,7 @@ TEST_CASE("Win32UnboundedTextMeasurementIgnoresParagraphAlignment") {
   REQUIRE(centered.size == leading.size);
   REQUIRE(trailing.size == leading.size);
   renderer.Discard();
+  CoUninitialize();
 }
 
 } // namespace huxerui::test
