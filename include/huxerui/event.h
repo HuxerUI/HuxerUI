@@ -126,6 +126,10 @@ struct SegmentedButtonEvents {
   struct Changed : Event<std::size_t> {};
 };
 
+struct TabsEvents {
+  struct Changed : Event<std::size_t> {};
+};
+
 struct TextFieldEvents {
   struct Changed : Event<const TextEditingValue&> {};
   struct Submitted : Event<> {};

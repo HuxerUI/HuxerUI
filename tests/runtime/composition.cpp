@@ -15,12 +15,20 @@ int extension_creations = 0;
 int extension_updates = 0;
 int extension_destroys = 0;
 TextMeasurer* observed_text_measurer = nullptr;
+ViewportClass observed_viewport_class = ViewportClass::Compact;
+int viewport_compositions = 0;
 
 struct ProbeModifier;
 
 View TextMeasurerApp() {
   observed_text_measurer = &UseTextMeasurer();
   return Text("measured");
+}
+
+View ViewportClassApp() {
+  ++viewport_compositions;
+  observed_viewport_class = UseViewportClass();
+  return Text("viewport");
 }
 
 class ProbeModifierExtension final : public NodeExtension {
@@ -373,6 +381,56 @@ TEST_CASE("TestUseStateAndStateUpdate") {
   const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(FirstText(updated) == "2");
   REQUIRE(runtime.RootNode()->identity == root_identity);
+}
+
+TEST_CASE("TestViewportClassRecomposesOnlyAcrossConfiguredBreakpoints") {
+  viewport_compositions = 0;
+  observed_viewport_class = ViewportClass::Compact;
+
+  TestPlatform platform;
+  Runtime runtime{
+      ViewportClassApp,
+      platform,
+      {
+          .viewport_breakpoints = ViewportBreakpoints{500.0F, 900.0F},
+          .show_debug_overlay = false,
+      },
+  };
+
+  runtime.SetViewport({320.0F, 600.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_compositions == 1);
+  REQUIRE(observed_viewport_class == ViewportClass::Compact);
+
+  runtime.SetViewport({480.0F, 720.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_compositions == 1);
+
+  runtime.SetViewport({500.0F, 720.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_compositions == 2);
+  REQUIRE(observed_viewport_class == ViewportClass::Medium);
+
+  runtime.SetViewport({899.0F, 800.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_compositions == 2);
+
+  runtime.SetViewport({900.0F, 800.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_compositions == 3);
+  REQUIRE(observed_viewport_class == ViewportClass::Expanded);
+
+  REQUIRE_THROWS_AS(
+      Runtime(
+          ViewportClassApp,
+          platform,
+          {
+              .viewport_breakpoints = ViewportBreakpoints{600.0F, 600.0F},
+              .show_debug_overlay = false,
+          }
+      ),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("TestRootCompositionRecoversAfterException") {

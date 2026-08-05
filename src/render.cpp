@@ -98,7 +98,7 @@ void PaintLabelContent(
   const auto cached = node.layout_cache.find(typeid(LabelLayoutCache));
   const auto* layout = cached == node.layout_cache.end() ? nullptr : std::any_cast<LabelLayoutCache>(&cached->second);
   const Size measured_text = show_label && layout != nullptr ? layout->text.size : Size{};
-  const float spacing = show_label ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
+  const float spacing = show_label && icon_width > 0.0F ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
   const float available_text_width = std::max(0.0F, content.width - icon_width - spacing);
   const float text_width = std::min(measured_text.width, available_text_width);
   const float group_width = icon_width + spacing + text_width;
@@ -422,7 +422,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
       content.DrawBorder(bounds, *border, node.properties.border_width, node.properties.corner_radii);
     }
     if (node.kind == NodeKind::Text) {
-      if (node.image_properties.HasValue()) {
+      if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
         PaintLabelContent(node, content, text_style);
       } else {
         content.DrawText(

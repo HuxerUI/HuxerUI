@@ -133,6 +133,38 @@ The label passed to `IconOnly` is required semantic content and is not drawn. `O
 
 SegmentedButton is intended for a small set of short choices, usually two to five. A larger or more descriptive choice set is clearer as RadioButton rows, Chip content, or a Menu.
 
+## Tabs
+
+Tabs represents selection among peer destinations while leaving the corresponding page content and lifecycle with the application. Selection is controlled by an index:
+
+```cpp
+auto selected = UseState<std::size_t>(0);
+
+return Tabs({"Overview", "Activity", "Settings"}, selected)
+    .OnChanged([selected](std::size_t index) {
+      selected = index;
+    });
+```
+
+Use `TabItem` for icons, icon-only presentation, or an individually disabled destination:
+
+```cpp
+Tabs(
+    {
+        TabItem(app_resources::images::home, "Home"),
+        TabItem::IconOnly(app_resources::images::search, "Search"),
+        std::move(TabItem("Reports")).Enabled(false),
+    },
+    selected
+).OnChanged([selected](std::size_t index) {
+  selected = index;
+});
+```
+
+The semantic label of an icon-only item is required but not drawn. Left and Right move with wrapping, Home and End move to the first and last enabled item, and every keyboard path skips disabled items. More tabs than the available width scroll horizontally, and a newly selected item is revealed automatically.
+
+`TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content; those responsibilities belong to a future navigation container rather than this selection control.
+
 ## Divider
 
 Divider is horizontal by default and expands across a bounded width. Pass `Axis::Vertical` for a vertical divider:

@@ -179,6 +179,8 @@ Use a semantic wrapper when two values have the same underlying representation b
 
 Theme is a deferred Environment provider for visual tokens and component styles. See [Theme, Animation, and Presentation](theme-animation-and-presentation.md).
 
+`UseViewportClass()` is the framework-managed responsive Environment read. It exposes Compact, Medium, or Expanded rather than raw dimensions, so an ordinary resize does not continuously recompose the application. The Runtime updates this value only when width crosses the configured `ViewportBreakpoints`; exact responsive geometry remains the responsibility of layout constraints.
+
 ## Runtime flow
 
 ```text

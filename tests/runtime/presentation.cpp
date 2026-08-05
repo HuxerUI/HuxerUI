@@ -28,6 +28,8 @@ struct TestRootService {
 std::shared_ptr<TestRootService> installed_root_service;
 int observed_root_service_value = 0;
 int root_app_clicks = 0;
+ViewportClass observed_layer_viewport_class = ViewportClass::Compact;
+int layer_viewport_compositions = 0;
 std::optional<ToastHandle> saved_toast;
 std::optional<DialogHandle> saved_dialogs;
 std::optional<DialogContext> saved_dialog_context;
@@ -60,6 +62,7 @@ State<bool> labeled_radio_selected;
 State<bool> labeled_switch_checked;
 State<bool> chip_selected;
 State<std::size_t> segmented_button_selection;
+State<std::size_t> tabs_selection;
 int checkbox_changes = 0;
 int radio_changes = 0;
 int switch_changes = 0;
@@ -72,6 +75,7 @@ int disabled_chip_changes = 0;
 int segmented_button_changes = 0;
 int disabled_segmented_button_changes = 0;
 int rejected_segmented_button_changes = 0;
+int tabs_changes = 0;
 State<float> progress_circle_value;
 State<float> progress_bar_value;
 State<double> progress_bar_animation_duration;
@@ -318,6 +322,21 @@ View MaterialSegmentedButtonApp() {
   );
 }
 
+View MaterialTabsApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Tabs(
+          std::vector<TabItem>{
+              TabItem(ControlIcon(), "Overview"),
+              TabItem::IconOnly(ControlIcon(), "Activity"),
+              TabItem("Settings"),
+          },
+          1
+      )
+          .OnChanged([](std::size_t) {})
+  );
+}
+
 View MaterialIconControlsApp() {
   return HUXERUI_THEME(
       huxerui::MaterialTheme,
@@ -405,6 +424,27 @@ View SegmentedButtonApp() {
     SegmentedButton({"Keep", "Reject"}, 0).OnChanged([](std::size_t) { ++rejected_segmented_button_changes; }),
     SegmentedButton({"A", "B", "C"}, 0).OnChanged([](std::size_t) {}).With(Frame{.width = 0.5F}),
   }.With(Spacing(8.0F));
+}
+
+View TabsApp() {
+  auto selected = UseState<std::size_t>(0);
+  tabs_selection = selected;
+  return Column{
+      Tabs(
+          std::vector<TabItem>{
+              TabItem("Overview"),
+              std::move(TabItem("Disabled")).Enabled(false),
+              TabItem("Activity"),
+              TabItem("Settings"),
+          },
+          selected
+      )
+          .OnChanged([selected](std::size_t index) {
+            ++tabs_changes;
+            selected = index;
+          })
+          .With(Frame{.width = 260.0F}),
+  };
 }
 
 View DisabledRadioButtonApp() {
@@ -1857,6 +1897,146 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   });
 }
 
+TEST_CASE("TestTabsSelectionOverflowAndKeyboard") {
+  tabs_changes = 0;
+
+  TestPlatform platform;
+  Runtime runtime{TabsApp, platform};
+  runtime.SetViewport({320.0F, 120.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->kind == detail::NodeKind::Layout);
+  REQUIRE(root->children.size() == 1);
+  const auto* tabs_scope = root->children[0].get();
+  REQUIRE(tabs_scope->kind == detail::NodeKind::Scope);
+  REQUIRE(tabs_scope->children.size() == 1);
+  const auto* scroll = tabs_scope->children[0].get();
+  REQUIRE(scroll->kind == detail::NodeKind::ScrollView);
+  REQUIRE(scroll->measured_size.width == 260.0F);
+  REQUIRE(scroll->children.size() == 1);
+  const auto* tabs = scroll->children[0].get();
+  REQUIRE(tabs->kind == detail::NodeKind::Layout);
+  REQUIRE(tabs->focusable);
+  REQUIRE(tabs->children.size() == 4);
+  REQUIRE(tabs->measured_size.width > scroll->measured_size.width);
+  REQUIRE(tabs->children[0]->measured_size.height >= TabsStyle::Default().minimum_height);
+  REQUIRE(tabs->children[1]->enabled == false);
+
+  const detail::MountedNode* selected = FindMountedText(*tabs, "Overview");
+  const detail::MountedNode* unselected = FindMountedText(*tabs, "Activity");
+  REQUIRE(selected != nullptr);
+  REQUIRE(unselected != nullptr);
+  REQUIRE(selected->properties.text_style.foreground == TabsStyle::Default().selected_label);
+  REQUIRE(unselected->properties.text_style.foreground == TabsStyle::Default().label_style.foreground);
+
+  const Rect disabled_bounds = tabs->children[1]->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          disabled_bounds.x + disabled_bounds.width * 0.5F,
+          disabled_bounds.y + disabled_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(tabs_changes == 0);
+  REQUIRE(tabs_selection.Get() == 0);
+
+  const Rect activity_bounds = tabs->children[2]->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          activity_bounds.x + 8.0F,
+          activity_bounds.y + activity_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(tabs_changes == 1);
+  REQUIRE(tabs_selection.Get() == 2);
+
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowRight});
+  REQUIRE(tabs_changes == 2);
+  REQUIRE(tabs_selection.Get() == 3);
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowRight});
+  REQUIRE(tabs_changes == 3);
+  REQUIRE(tabs_selection.Get() == 0);
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::End});
+  REQUIRE(tabs_changes == 4);
+  REQUIRE(tabs_selection.Get() == 3);
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+
+  scroll = runtime.RootNode()->children[0]->children[0].get();
+  REQUIRE(scroll->scroll_state->offset_x > 0.0F);
+}
+
+TEST_CASE("TestMaterialTabsStyleAndValidation") {
+  REQUIRE_THROWS_AS(Tabs(std::vector<StringVariant>{}, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(Tabs(std::vector<StringVariant>{"One", "Two"}, 2), std::invalid_argument);
+  REQUIRE_THROWS_AS(Tabs(std::vector<TabItem>{TabItem("")}, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(Tabs(std::vector<TabItem>{TabItem::IconOnly(ImageAsset{}, "Invalid")}, 0), std::invalid_argument);
+
+  TestPlatform platform;
+  Runtime runtime{MaterialTabsApp, platform};
+  runtime.SetViewport({360.0F, 80.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const TabsStyle style = ThemeDefinitionValue<TabsStyle>(MaterialThemeDefinition());
+  REQUIRE(style.expand_items);
+  REQUIRE(style.indication.has_value());
+  REQUIRE(style.indicator_sizing == TabIndicatorSizing::Content);
+  REQUIRE(style.indicator_min_width == 24.0F);
+  REQUIRE(style.divider_height == 1.0F);
+  REQUIRE(FindText(scene, "Activity") == nullptr);
+
+  const auto* theme_scope = runtime.RootNode();
+  REQUIRE(theme_scope != nullptr);
+  REQUIRE(theme_scope->children.size() == 1);
+  const auto* tabs_scope = theme_scope->children[0].get();
+  REQUIRE(tabs_scope->children.size() == 1);
+  const auto* scroll = tabs_scope->children[0].get();
+  REQUIRE(scroll->children.size() == 1);
+  const auto* tabs = scroll->children[0].get();
+  REQUIRE(tabs->children.size() == 3);
+  REQUIRE(tabs->children[0]->measured_size.width == tabs->children[1]->measured_size.width);
+  REQUIRE(tabs->children[1]->measured_size.width == tabs->children[2]->measured_size.width);
+  REQUIRE(tabs->children[0]->measured_size.height >= style.minimum_height);
+  REQUIRE(tabs->children[0]->image_properties.HasValue());
+  REQUIRE(tabs->children[1]->image_properties.HasValue());
+  REQUIRE(tabs->children[1]->properties.text_style.foreground == style.selected_label);
+  REQUIRE_FALSE(tabs->children[1]->LayoutValueOr<detail::LabelContentMetrics>({}).show_label);
+
+  const DrawRectCommand* indicator = nullptr;
+  const DrawRectCommand* divider = nullptr;
+  const std::vector<DrawRectCommand> rectangles = DrawRectangles(scene);
+  for (const DrawRectCommand& rectangle : rectangles) {
+    if (rectangle.color == style.indicator && rectangle.rect.height == style.indicator_height) {
+      indicator = &rectangle;
+    }
+    if (rectangle.color == style.divider_color && rectangle.rect.height == style.divider_height) {
+      divider = &rectangle;
+    }
+  }
+  REQUIRE(indicator != nullptr);
+  REQUIRE(indicator->rect.width == style.indicator_min_width);
+  REQUIRE(divider != nullptr);
+  REQUIRE(divider->rect.width == tabs->measured_size.width);
+
+  const TabsStyle flat_style = TabsStyle::Default();
+  REQUIRE(flat_style.indicator_sizing == TabIndicatorSizing::Item);
+  REQUIRE(flat_style.divider_height == 0.0F);
+
+  TestPlatform overflow_platform;
+  Runtime overflow{MaterialTabsApp, overflow_platform};
+  overflow.SetViewport({160.0F, 80.0F});
+  const std::vector<DrawRectCommand> overflow_rectangles = DrawRectangles(overflow.BuildFrame());
+  REQUIRE_FALSE(std::ranges::any_of(overflow_rectangles, [&style](const DrawRectCommand& rectangle) {
+    return rectangle.color == style.divider_color && rectangle.rect.height == style.divider_height;
+  }));
+}
+
 TEST_CASE("TestChipAndSegmentedButtonIconContent") {
   REQUIRE_THROWS_AS(Chip(ImageAsset{}, "Invalid"), std::invalid_argument);
   REQUIRE_THROWS_AS(
@@ -2874,6 +3054,45 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   REQUIRE(installed_root_service->layers->Dismiss(toast));
   const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(dismissed, "toast"));
+}
+
+TEST_CASE("TestViewportClassRecomposesExistingLayersAcrossBreakpoints") {
+  installed_root_service.reset();
+  observed_layer_viewport_class = ViewportClass::Compact;
+  layer_viewport_compositions = 0;
+
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.root_hooks.push_back([](RootContext& root) {
+    installed_root_service = std::make_shared<TestRootService>(TestRootService{
+        &root.Layers(),
+        0,
+    });
+    root.Provide(installed_root_service);
+  });
+
+  TestPlatform platform;
+  Runtime runtime{RootHookApp, platform, std::move(options)};
+  runtime.SetViewport({480.0F, 600.0F});
+  runtime.BuildFrame();
+
+  installed_root_service->layers->Attach({}, [] {
+    ++layer_viewport_compositions;
+    observed_layer_viewport_class = UseViewportClass();
+    return Text("responsive layer");
+  });
+  runtime.BuildFrame();
+  REQUIRE(layer_viewport_compositions == 1);
+  REQUIRE(observed_layer_viewport_class == ViewportClass::Compact);
+
+  runtime.SetViewport({560.0F, 600.0F});
+  runtime.BuildFrame();
+  REQUIRE(layer_viewport_compositions == 1);
+
+  runtime.SetViewport({600.0F, 600.0F});
+  runtime.BuildFrame();
+  REQUIRE(layer_viewport_compositions == 2);
+  REQUIRE(observed_layer_viewport_class == ViewportClass::Medium);
 }
 
 TEST_CASE("TestToastAndDialogPresentation") {

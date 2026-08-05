@@ -113,16 +113,19 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Layou
   }
 
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const bool fill_viewport = node.LayoutValueOr<detail::ScrollFillViewport>(false);
+  const float viewport_width = std::isfinite(constraints.max_width) ? constraints.max_width : constraints.min_width;
+  const float viewport_height = std::isfinite(constraints.max_height) ? constraints.max_height : constraints.min_height;
   const Constraints child_constraints =
       vertical
           ? Constraints{
                 constraints.min_width,
                 constraints.max_width,
-                0.0F,
+                fill_viewport ? viewport_height : 0.0F,
                 std::numeric_limits<float>::infinity(),
             }
           : Constraints{
-                0.0F,
+                fill_viewport ? viewport_width : 0.0F,
                 std::numeric_limits<float>::infinity(),
                 constraints.min_height,
                 constraints.max_height,
@@ -218,7 +221,7 @@ Size MeasureLabelContent(
       std::max(0.0F, metrics.icon_size.height),
   };
   const bool show_label = metrics.show_label && !node.text.empty();
-  const float spacing = show_label ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
+  const float spacing = show_label && icon_size.width > 0.0F ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
   const float maximum_text_width = constraints.HasBoundedWidth()
                                        ? std::max(0.0F, constraints.max_width - icon_size.width - spacing)
                                        : std::numeric_limits<float>::infinity();
@@ -255,7 +258,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
 
   switch (node.kind) {
   case NodeKind::Text:
-    if (node.image_properties.HasValue()) {
+    if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
       content_size = MeasureLabelContent(
           node,
           platform,

@@ -15,7 +15,28 @@ namespace huxerui {
 
 class Environment;
 
+enum class ViewportClass {
+  Compact,
+  Medium,
+  Expanded,
+};
+
+struct ViewportBreakpoints {
+  float medium_width = 600.0F;
+  float expanded_width = 840.0F;
+
+  bool operator==(const ViewportBreakpoints&) const = default;
+};
+
 namespace detail {
+struct ViewportEnvironment {
+  ViewportClass value = ViewportClass::Compact;
+
+  static ViewportEnvironment Default() {
+    return {};
+  }
+};
+
 void SetEnvironmentValue(Environment& environment, std::type_index key, std::any value);
 void MergeEnvironment(Environment& target, const Environment& source);
 const std::any* FindLocalEnvironmentValue(const Environment& environment, std::type_index key) noexcept;
@@ -63,6 +84,10 @@ template <EnvironmentValue Value> const Value& UseEnvironment() {
   }
   static const Value fallback = Value::Default();
   return fallback;
+}
+
+inline ViewportClass UseViewportClass() {
+  return UseEnvironment<detail::ViewportEnvironment>().value;
 }
 
 View ProvideEnvironment(Environment environment, std::function<View()> content);

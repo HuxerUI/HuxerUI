@@ -33,6 +33,23 @@ bool IsModifierKey(Key key) noexcept {
   return key == Key::Shift || key == Key::Control || key == Key::Alt || key == Key::Meta;
 }
 
+void ValidateViewportBreakpoints(const ViewportBreakpoints& breakpoints) {
+  if (!std::isfinite(breakpoints.medium_width) || breakpoints.medium_width <= 0.0F ||
+      !std::isfinite(breakpoints.expanded_width) || breakpoints.expanded_width <= breakpoints.medium_width) {
+    throw std::invalid_argument("HuxerUI viewport breakpoints must be finite, positive, and increasing");
+  }
+}
+
+ViewportClass ResolveViewportClass(float width, const ViewportBreakpoints& breakpoints) noexcept {
+  if (width >= breakpoints.expanded_width) {
+    return ViewportClass::Expanded;
+  }
+  if (width >= breakpoints.medium_width) {
+    return ViewportClass::Medium;
+  }
+  return ViewportClass::Compact;
+}
+
 std::vector<LayerEntry> OrderedLayerEntries(const std::vector<LayerEntry>& entries) {
   std::vector<LayerEntry> ordered = entries;
   std::stable_sort(ordered.begin(), ordered.end(), [](const LayerEntry& left, const LayerEntry& right) {
@@ -672,13 +689,16 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   if (definition.root_factory == nullptr) {
     throw std::invalid_argument("HuxerUI root factory must not be null");
   }
+  ValidateViewportBreakpoints(definition.options.viewport_breakpoints);
   state_ = std::make_unique<State>(
       definition.root_factory,
       &platform,
       std::make_shared<RecomposeScope>(*this, 1),
-      LayerController(*this)
+      LayerController(*this),
+      definition.options.viewport_breakpoints
   );
   state_->root_environment_ = std::make_shared<Environment>();
+  state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
   RootContext
       root{state_->layer_controller_, *state_->root_environment_, state_->root_service_types_, state_->root_services_};
   state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
@@ -722,6 +742,17 @@ void Runtime::SetViewport(Size viewport) {
   state_->viewport_ = viewport;
   if (state_->text_selection_overlay_.state.visible) {
     state_->text_selection_overlay_.state.paint_dirty = true;
+  }
+  const ViewportClass viewport_class = ResolveViewportClass(viewport.width, state_->viewport_breakpoints_);
+  if (viewport_class != state_->viewport_class_) {
+    state_->viewport_class_ = viewport_class;
+    state_->root_environment_->Set(detail::ViewportEnvironment{viewport_class});
+    for (LayerEntry& entry : state_->layer_controller_.state_->entries) {
+      ++entry.revision;
+    }
+    InvalidateRoot();
+    InvalidateLayers();
+    return;
   }
   RequestFrame();
 }

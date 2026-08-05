@@ -599,10 +599,13 @@ Environment carries:
 
 - Theme values.
 - Platform and accessibility values.
+- The runtime-managed viewport width class.
 - Per-window services.
 - Other typed third-party values.
 
 Theme and services reuse Environment rather than introducing parallel tree propagation systems.
+
+The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetViewport()` updates that value and invalidates the application root and layers only when the resolved class changes. Width and height do not become raw Environment values: measurement receives exact `Constraints`, and repeated resizing inside one class remains an incremental layout operation rather than a composition dependency.
 
 ## Theme
 

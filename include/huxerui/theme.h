@@ -195,6 +195,37 @@ struct SegmentedButtonStyle {
   bool operator==(const SegmentedButtonStyle&) const = default;
 };
 
+enum class TabIndicatorSizing {
+  Item,
+  Content,
+};
+
+struct TabsStyle {
+  Color background = Color::Transparent();
+  TextStyle label_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  Color selected_label = Color::Rgb(31, 111, 235);
+  Color disabled_label = Color::Rgb(31, 35, 40, 0.38F);
+  Color indicator = Color::Rgb(31, 111, 235);
+  TabIndicatorSizing indicator_sizing = TabIndicatorSizing::Item;
+  float indicator_min_width = 0.0F;
+  float indicator_height = 2.0F;
+  float indicator_corner_radius = 1.0F;
+  Color divider_color = Color::Transparent();
+  float divider_height = 0.0F;
+  EdgeInsets item_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
+  float icon_size = 18.0F;
+  float icon_spacing = 8.0F;
+  float minimum_item_width = 48.0F;
+  float minimum_height = 36.0F;
+  bool expand_items = false;
+  std::optional<IndicationSpec> indication;
+  double indicator_animation_duration = 0.16;
+
+  static TabsStyle Default();
+
+  bool operator==(const TabsStyle&) const = default;
+};
+
 struct TextFieldStyle {
   Color background = Color::White();
   TextStyle text_style;
@@ -464,6 +495,7 @@ ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
 ChipStyle DefaultChipStyle(const ThemeSpec& theme);
 DividerStyle DefaultDividerStyle(const ThemeSpec& theme);
 SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme);
+TabsStyle DefaultTabsStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);

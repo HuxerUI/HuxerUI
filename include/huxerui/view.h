@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -55,6 +56,7 @@ enum class ImageFit {
 namespace detail {
 struct ViewSpec;
 struct SegmentedButtonItemAccess;
+struct TabItemAccess;
 class VirtualMeasureSession;
 } // namespace detail
 
@@ -586,6 +588,10 @@ private:
 
 class SegmentedButton final : public detail::TypedView<SegmentedButton> {
 public:
+  SegmentedButton(std::initializer_list<StringVariant> labels, std::size_t selected_index)
+      : SegmentedButton(std::vector<StringVariant>(labels), selected_index) {}
+  SegmentedButton(std::initializer_list<StringVariant> labels, const State<std::size_t>& selected_index)
+      : SegmentedButton(std::vector<StringVariant>(labels), selected_index.Get()) {}
   SegmentedButton(std::vector<StringVariant> labels, std::size_t selected_index);
   SegmentedButton(std::vector<StringVariant> labels, const State<std::size_t>& selected_index)
       : SegmentedButton(std::move(labels), selected_index.Get()) {}
@@ -595,6 +601,50 @@ public:
 
   template <class Function> SegmentedButton OnChanged(Function&& function) && {
     return std::move(*this).On<SegmentedButtonEvents::Changed>(std::forward<Function>(function));
+  }
+};
+
+class TabItem final {
+public:
+  explicit TabItem(StringVariant label);
+  TabItem(ImageResource icon, StringVariant label);
+  TabItem(ImageAsset icon, StringVariant label);
+  TabItem(VectorAsset icon, StringVariant label);
+
+  static TabItem IconOnly(ImageResource icon, StringVariant semantic_label);
+  static TabItem IconOnly(ImageAsset icon, StringVariant semantic_label);
+  static TabItem IconOnly(VectorAsset icon, StringVariant semantic_label);
+
+  TabItem Enabled(bool enabled) &&;
+
+private:
+  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
+
+  TabItem(Icon icon, StringVariant label, bool show_label);
+
+  Icon icon_;
+  StringVariant label_;
+  bool show_label_ = true;
+  bool enabled_ = true;
+
+  friend struct detail::TabItemAccess;
+};
+
+class Tabs final : public detail::TypedView<Tabs> {
+public:
+  Tabs(std::initializer_list<StringVariant> labels, std::size_t selected_index)
+      : Tabs(std::vector<StringVariant>(labels), selected_index) {}
+  Tabs(std::initializer_list<StringVariant> labels, const State<std::size_t>& selected_index)
+      : Tabs(std::vector<StringVariant>(labels), selected_index.Get()) {}
+  Tabs(std::vector<StringVariant> labels, std::size_t selected_index);
+  Tabs(std::vector<StringVariant> labels, const State<std::size_t>& selected_index)
+      : Tabs(std::move(labels), selected_index.Get()) {}
+  Tabs(std::vector<TabItem> items, std::size_t selected_index);
+  Tabs(std::vector<TabItem> items, const State<std::size_t>& selected_index)
+      : Tabs(std::move(items), selected_index.Get()) {}
+
+  template <class Function> Tabs OnChanged(Function&& function) && {
+    return std::move(*this).On<TabsEvents::Changed>(std::forward<Function>(function));
   }
 };
 

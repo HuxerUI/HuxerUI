@@ -53,6 +53,10 @@ struct ScrollAxisBinding {
   using Value = Axis;
 };
 
+struct ScrollFillViewport {
+  using Value = bool;
+};
+
 struct VirtualListItemExtent {
   using Value = float;
 };
@@ -1007,14 +1011,17 @@ struct Runtime::State {
       RootFactory root_factory,
       PlatformAdapter* platform,
       std::shared_ptr<detail::RecomposeScope> root_scope,
-      LayerController layer_controller
+      LayerController layer_controller,
+      ViewportBreakpoints viewport_breakpoints
   )
-      : root_factory_(root_factory), platform_(platform), root_scope_(std::move(root_scope)),
-        layer_controller_(std::move(layer_controller)) {}
+      : root_factory_(root_factory), platform_(platform), viewport_breakpoints_(viewport_breakpoints),
+        root_scope_(std::move(root_scope)), layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
   PlatformAdapter* platform_;
   Size viewport_;
+  ViewportBreakpoints viewport_breakpoints_;
+  ViewportClass viewport_class_ = ViewportClass::Compact;
   std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
   std::vector<std::shared_ptr<void>> root_services_;

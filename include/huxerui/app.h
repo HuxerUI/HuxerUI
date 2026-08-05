@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <huxerui/clipboard.h>
+#include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/layer.h>
 #include <huxerui/render_scene.h>
@@ -33,6 +34,7 @@ struct AppOptions {
   std::string title = "HuxerUI";
   float width = 520.0F;
   float height = 360.0F;
+  ViewportBreakpoints viewport_breakpoints;
 #if defined(NDEBUG)
   bool show_debug_overlay = false;
 #else
