@@ -366,10 +366,7 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
   if (incoming.kind == NodeKind::Canvas) {
     return false;
   }
-  const bool resolved_style_equal =
-      incoming.kind != NodeKind::Button || LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
-  return resolved_style_equal && mounted.text == incoming.text &&
-         mounted.image_properties == incoming.image_properties &&
+  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
          mounted.properties.ContentPaintEquals(incoming.properties);
 }
 

@@ -164,6 +164,35 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   };
 }
 
+ChipStyle MaterialChipStyle(const ThemeSpec& theme) {
+  Color disabled_container = theme.colors.on_surface;
+  disabled_container.alpha *= 0.12F;
+  Color disabled_content = theme.colors.on_surface;
+  disabled_content.alpha *= 0.38F;
+  Color disabled_border = theme.colors.on_surface;
+  disabled_border.alpha *= 0.12F;
+  return {
+      .background = Color::Transparent(),
+      .selected_background = theme.colors.secondary_container,
+      .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface_variant},
+      .selected_label = theme.colors.on_secondary_container,
+      .disabled_background = Color::Transparent(),
+      .disabled_selected_background = disabled_container,
+      .disabled_label = disabled_content,
+      .disabled_selected_label = disabled_content,
+      .border = theme.colors.outline,
+      .selected_border = Color::Transparent(),
+      .disabled_border = disabled_border,
+      .disabled_selected_border = Color::Transparent(),
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.extra_small),
+      .minimum_height = 32.0F,
+      .corner_radius = theme.shapes.small,
+      .border_width = 1.0F,
+      .indication = MaterialIndication(theme.colors.on_surface_variant, theme),
+      .selected_indication = MaterialIndication(theme.colors.on_secondary_container, theme),
+  };
+}
+
 TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   Color disabled_content = theme.colors.on_surface;
   disabled_content.alpha *= 0.38F;
@@ -455,6 +484,7 @@ MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
+  definition.Set(MaterialChipStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
   definition.Set(MaterialCheckboxStyle(theme));
   definition.Set(MaterialRadioButtonStyle(theme));
@@ -532,6 +562,41 @@ ButtonStyle DefaultButtonStyle(const ThemeSpec& theme) {
       .minimum_height = 0.0F,
       .corner_radius = theme.shapes.extra_small,
       .indication = std::nullopt,
+  };
+}
+
+ChipStyle DefaultChipStyle(const ThemeSpec& theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.24F;
+  Color disabled_background = theme.colors.surface;
+  disabled_background.alpha *= theme.interactions.disabled_opacity;
+  Color disabled_selected_background = theme.colors.primary;
+  disabled_selected_background.alpha *= theme.interactions.disabled_opacity;
+  Color disabled_label = theme.colors.on_surface;
+  disabled_label.alpha *= theme.interactions.disabled_opacity;
+  Color disabled_selected_label = theme.colors.on_primary;
+  disabled_selected_label.alpha *= theme.interactions.disabled_opacity;
+  Color disabled_border = theme.colors.on_surface;
+  disabled_border.alpha *= theme.interactions.disabled_opacity * 0.5F;
+  return {
+      .background = theme.colors.surface,
+      .selected_background = theme.colors.primary,
+      .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface},
+      .selected_label = theme.colors.on_primary,
+      .disabled_background = disabled_background,
+      .disabled_selected_background = disabled_selected_background,
+      .disabled_label = disabled_label,
+      .disabled_selected_label = disabled_selected_label,
+      .border = border,
+      .selected_border = Color::Transparent(),
+      .disabled_border = disabled_border,
+      .disabled_selected_border = Color::Transparent(),
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.extra_small),
+      .minimum_height = 28.0F,
+      .corner_radius = 14.0F,
+      .border_width = 1.0F,
+      .indication = std::nullopt,
+      .selected_indication = std::nullopt,
   };
 }
 
@@ -732,6 +797,10 @@ TextStyle TextStyle::Default() {
 
 ButtonStyle ButtonStyle::Default() {
   return detail::DefaultButtonStyle(ThemeSpec::Default());
+}
+
+ChipStyle ChipStyle::Default() {
+  return detail::DefaultChipStyle(ThemeSpec::Default());
 }
 
 TextFieldStyle TextFieldStyle::Default() {

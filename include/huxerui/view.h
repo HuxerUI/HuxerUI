@@ -530,6 +530,23 @@ public:
   explicit Button(const char* label);
 };
 
+class Chip final : public detail::TypedView<Chip> {
+public:
+  explicit Chip(StringResource resource);
+  explicit Chip(std::string label);
+  explicit Chip(std::string_view label);
+  explicit Chip(const char* label);
+
+  Chip(StringResource resource, bool selected);
+  Chip(std::string label, bool selected);
+  Chip(std::string_view label, bool selected);
+  Chip(const char* label, bool selected);
+
+  template <class Function> Chip OnChanged(Function&& function) && {
+    return std::move(*this).On<ToggleEvents::Changed>(std::forward<Function>(function));
+  }
+};
+
 class Image final : public View {
 public:
   explicit Image(ImageResource resource);

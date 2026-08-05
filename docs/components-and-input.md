@@ -67,6 +67,27 @@ CustomControl()
     .On<ViewEvents::KeyDown>(HandleKey);
 ```
 
+## Chip
+
+Chip has action and selectable forms. An action Chip emits Click:
+
+```cpp
+Chip("Open filters").OnClick(OpenFilters);
+```
+
+A selectable Chip is controlled. Its `bool` constructor value defines the current selection, and `OnChanged` requests the next value:
+
+```cpp
+auto selected = UseState(false);
+
+return Chip(selected ? "Selected" : "Selectable", selected)
+    .OnChanged([selected](bool value) {
+      selected = value;
+    });
+```
+
+`OnChanged` delegates to `On<ToggleEvents::Changed>`. Both forms participate in focus traversal and use the active Theme's indication and component style. Use `Enabled(false)` for a disabled Chip.
+
 ## ProgressCircle
 
 An empty constructor creates indeterminate progress. A value from `0` to `1` creates determinate progress:

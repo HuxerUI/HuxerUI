@@ -223,6 +223,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     content_size = platform.MeasureText(node.text, node.properties.text_style, content_constraints.max_width).size;
     break;
   case NodeKind::Button:
+  case NodeKind::Chip:
     content_size = platform
                        .MeasureText(
                            node.text,
@@ -419,6 +420,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   }
   case NodeKind::Text:
   case NodeKind::Button:
+  case NodeKind::Chip:
   case NodeKind::TextField:
   case NodeKind::Checkbox:
   case NodeKind::RadioButton:

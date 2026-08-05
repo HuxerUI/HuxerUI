@@ -1087,14 +1087,36 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::Button) {
     const ButtonStyle style =
         ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(detail::ResolvedButtonStyle), detail::MakeErasedLayoutValue(style));
     spec.properties.padding = style.padding;
     spec.properties.background = style.background;
+    spec.properties.disabled_background = style.disabled_background;
     spec.properties.text_style = style.label_style;
+    spec.properties.disabled_foreground = style.disabled_label;
     spec.properties.corner_radii = style.corner_radius;
     spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
     spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec.properties.indication_override = style.indication;
+    spec.properties.disabled_opacity = 1.0F;
+    return;
+  }
+  if (spec.kind == detail::NodeKind::Chip) {
+    const ChipStyle style =
+        ResolveStyleOverride<ChipStyle>(spec.environment).value_or(detail::DefaultChipStyle(theme));
+    const bool selected = spec.chip_selection.value_or(false);
+    spec.properties.padding = style.padding;
+    spec.properties.background = selected ? style.selected_background : style.background;
+    spec.properties.disabled_background =
+        selected ? style.disabled_selected_background : style.disabled_background;
+    spec.properties.border = selected ? style.selected_border : style.border;
+    spec.properties.disabled_border = selected ? style.disabled_selected_border : style.disabled_border;
+    spec.properties.border_width = std::max(0.0F, style.border_width);
+    spec.properties.text_style = style.label_style;
+    spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
+    spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
+    spec.properties.corner_radii = style.corner_radius;
+    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec.properties.indication_override =
+        selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
@@ -1195,6 +1217,23 @@ std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
   spec->text = std::move(label);
   spec->focusable = true;
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeChipSpec(std::string label, std::optional<bool> selection) {
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Chip);
+  spec->text = std::move(label);
+  spec->focusable = true;
+  spec->chip_selection = selection;
+  const bool selected = selection.value_or(false);
+  if (selection.has_value()) {
+    spec->activation = [selected](const detail::EventBindings& bindings) {
+      detail::EmitEvent<ToggleEvents::Changed>(bindings, !selected);
+    };
+  }
+  if (selection.has_value()) {
+    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  }
   return spec;
 }
 
@@ -1545,6 +1584,24 @@ Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
 Button::Button(std::string_view label) : Button(std::string(label)) {}
 
 Button::Button(const char* label) : Button(label == nullptr ? std::string{} : std::string(label)) {}
+
+Chip::Chip(StringResource resource) : Chip(UseString(std::move(resource))) {}
+
+Chip::Chip(std::string label) : detail::TypedView<Chip>(MakeChipSpec(std::move(label), std::nullopt)) {}
+
+Chip::Chip(std::string_view label) : Chip(std::string(label)) {}
+
+Chip::Chip(const char* label) : Chip(label == nullptr ? std::string{} : std::string(label)) {}
+
+Chip::Chip(StringResource resource, bool selected) : Chip(UseString(std::move(resource)), selected) {}
+
+Chip::Chip(std::string label, bool selected)
+    : detail::TypedView<Chip>(MakeChipSpec(std::move(label), selected)) {}
+
+Chip::Chip(std::string_view label, bool selected) : Chip(std::string(label), selected) {}
+
+Chip::Chip(const char* label, bool selected)
+    : Chip(label == nullptr ? std::string{} : std::string(label), selected) {}
 
 Image::Image(ImageResource resource) : View(MakeImageSpec(detail::UseImageResource(std::move(resource)))) {}
 

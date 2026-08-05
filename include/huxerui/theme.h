@@ -137,6 +137,31 @@ struct ButtonStyle {
   bool operator==(const ButtonStyle&) const = default;
 };
 
+struct ChipStyle {
+  Color background = Color::White();
+  Color selected_background = Color::Rgb(31, 111, 235);
+  TextStyle label_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  Color selected_label = Color::White();
+  Color disabled_background = Color::Rgb(31, 35, 40, 0.08F);
+  Color disabled_selected_background = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_label = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_selected_label = Color::Rgb(31, 35, 40, 0.38F);
+  Color border = Color::Rgb(31, 35, 40, 0.24F);
+  Color selected_border = Color::Transparent();
+  Color disabled_border = Color::Rgb(31, 35, 40, 0.12F);
+  Color disabled_selected_border = Color::Transparent();
+  EdgeInsets padding = EdgeInsets::Symmetric(12.0F, 5.0F);
+  float minimum_height = 28.0F;
+  float corner_radius = 14.0F;
+  float border_width = 1.0F;
+  std::optional<IndicationSpec> indication;
+  std::optional<IndicationSpec> selected_indication;
+
+  static ChipStyle Default();
+
+  bool operator==(const ChipStyle&) const = default;
+};
+
 struct TextFieldStyle {
   Color background = Color::White();
   TextStyle text_style;
@@ -403,6 +428,7 @@ ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment);
 const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key);
 TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
+ChipStyle DefaultChipStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);

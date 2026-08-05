@@ -30,22 +30,12 @@
 
 #include "geometry_internal.h"
 
-namespace huxerui {
-
-struct ButtonStyle;
-
-} // namespace huxerui
-
 namespace huxerui::detail {
 
 struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 class AppResources;
-
-struct ResolvedButtonStyle {
-  using Value = ButtonStyle;
-};
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -337,6 +327,7 @@ public:
 enum class NodeKind {
   Text,
   Button,
+  Chip,
   TextField,
   Checkbox,
   RadioButton,
@@ -360,8 +351,13 @@ struct ViewProperties {
   EdgeInsets padding;
   Frame frame;
   std::optional<Color> background;
+  std::optional<Color> disabled_background;
+  std::optional<Color> border;
+  std::optional<Color> disabled_border;
+  float border_width = 0.0F;
   std::optional<Shadow> shadow;
   TextStyle text_style;
+  std::optional<Color> disabled_foreground;
   CornerRadii corner_radii;
   bool clip_children = false;
   std::optional<Size> indication_size;
@@ -389,8 +385,11 @@ struct ViewProperties {
   }
 
   [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
-    return padding == other.padding && background == other.background && shadow == other.shadow &&
-           text_style == other.text_style && corner_radii == other.corner_radii;
+    return padding == other.padding && background == other.background &&
+           disabled_background == other.disabled_background && border == other.border &&
+           disabled_border == other.disabled_border && border_width == other.border_width &&
+           shadow == other.shadow && text_style == other.text_style &&
+           disabled_foreground == other.disabled_foreground && corner_radii == other.corner_radii;
   }
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewProperties& other) const {
@@ -447,6 +446,7 @@ struct ViewSpec {
   std::function<void(const EventBindings&)> activation;
   std::vector<ModifierSpec> retained_modifiers;
   std::shared_ptr<const Environment> environment;
+  std::optional<bool> chip_selection;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool focusable = false;

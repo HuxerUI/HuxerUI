@@ -55,9 +55,13 @@ int positive_dialog_clicks = 0;
 State<bool> checkbox_checked;
 State<bool> radio_selected;
 State<bool> switch_checked;
+State<bool> chip_selected;
 int checkbox_changes = 0;
 int radio_changes = 0;
 int switch_changes = 0;
+int action_chip_clicks = 0;
+int selectable_chip_changes = 0;
+int disabled_chip_changes = 0;
 State<float> progress_circle_value;
 State<float> progress_bar_value;
 State<double> progress_bar_animation_duration;
@@ -242,6 +246,16 @@ View MaterialToggleApp() {
   );
 }
 
+View MaterialChipApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        Chip("Action").OnClick([] {}),
+        Chip("Selected", true).OnChanged([](bool) {}),
+      }.With(Spacing(8.0F))
+  );
+}
+
 View MaterialControlledSwitchApp() {
   auto value = UseState(false);
   switch_checked = value;
@@ -275,6 +289,21 @@ View ToggleApp() {
       radio = selected;
     }),
   }.With(huxerui::Spacing{8.0F});
+}
+
+View ChipApp() {
+  auto selected = UseState(false);
+  chip_selected = selected;
+  return Row {
+    Chip("Action").OnClick([] { ++action_chip_clicks; }),
+    Chip("Selectable", selected).OnChanged([selected](bool value) {
+      ++selectable_chip_changes;
+      selected = value;
+    }),
+    Chip("Disabled", false)
+        .OnChanged([](bool) { ++disabled_chip_changes; })
+        .With(Enabled(false)),
+  }.With(Spacing(8.0F));
 }
 
 View DisabledRadioButtonApp() {
@@ -868,6 +897,20 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(checkbox_style.corner_radius == 2.0F);
   REQUIRE(checkbox_style.checked_background.red == light.colors.primary.red);
 
+  const ChipStyle chip_style = ThemeDefinitionValue<ChipStyle>(definition);
+  REQUIRE(chip_style.background == Color::Transparent());
+  REQUIRE(chip_style.selected_background == light.colors.secondary_container);
+  REQUIRE(chip_style.label_style.foreground == light.colors.on_surface_variant);
+  REQUIRE(chip_style.selected_label == light.colors.on_secondary_container);
+  REQUIRE(chip_style.minimum_height == 32.0F);
+  REQUIRE(chip_style.corner_radius == light.shapes.small);
+  REQUIRE(chip_style.border == light.colors.outline);
+  REQUIRE(chip_style.indication.has_value());
+  REQUIRE(chip_style.selected_indication.has_value());
+  const auto* selected_chip_indication = std::get_if<RippleIndication>(&*chip_style.selected_indication);
+  REQUIRE(selected_chip_indication != nullptr);
+  REQUIRE(selected_chip_indication->color.red == light.colors.on_secondary_container.red);
+
   const RadioButtonStyle radio_button_style = ThemeDefinitionValue<RadioButtonStyle>(definition);
   REQUIRE(radio_button_style.size == 20.0F);
   REQUIRE(radio_button_style.minimum_interactive_size == 48.0F);
@@ -1255,6 +1298,109 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   runtime.BuildFrame();
   REQUIRE(radio_changes == 1);
   REQUIRE(radio_selected.Get());
+}
+
+TEST_CASE("TestActionSelectableAndDisabledChips") {
+  action_chip_clicks = 0;
+  selectable_chip_changes = 0;
+  disabled_chip_changes = 0;
+
+  TestPlatform platform;
+  Runtime runtime{ChipApp, platform};
+  runtime.SetViewport({360.0F, 64.0F});
+  const FlattenedScene& initial = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 3);
+  const auto* action = root->children[0].get();
+  const auto* selectable = root->children[1].get();
+  const auto* disabled = root->children[2].get();
+  REQUIRE(action->kind == detail::NodeKind::Chip);
+  REQUIRE(selectable->kind == detail::NodeKind::Chip);
+  REQUIRE(disabled->kind == detail::NodeKind::Chip);
+  REQUIRE(action->focusable);
+  REQUIRE(selectable->focusable);
+  REQUIRE(disabled->focusable);
+  REQUIRE(action->measured_size.height == ChipStyle::Default().minimum_height);
+
+  const DrawTextCommand* initial_selectable = FindText(initial, "Selectable");
+  REQUIRE(initial_selectable != nullptr);
+  REQUIRE(initial_selectable->style.foreground == ChipStyle::Default().label_style.foreground);
+  const DrawTextCommand* initial_disabled = FindText(initial, "Disabled");
+  REQUIRE(initial_disabled != nullptr);
+  REQUIRE(initial_disabled->style.foreground == ChipStyle::Default().disabled_label);
+
+  const Rect action_bounds = action->PresentationBounds();
+  ClickAt(runtime, {action_bounds.x + action_bounds.width * 0.5F, action_bounds.y + action_bounds.height * 0.5F});
+  REQUIRE(action_chip_clicks == 1);
+
+  const std::uint64_t selectable_identity = selectable->identity;
+  const Rect selectable_bounds = selectable->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          selectable_bounds.x + selectable_bounds.width * 0.5F,
+          selectable_bounds.y + selectable_bounds.height * 0.5F,
+      }
+  );
+  const FlattenedScene& selected = runtime.BuildFrame();
+  REQUIRE(selectable_chip_changes == 1);
+  REQUIRE(chip_selected.Get());
+  REQUIRE(runtime.RootNode()->children[1]->identity == selectable_identity);
+  REQUIRE(FindRectWithColor(selected, ChipStyle::Default().selected_background) != nullptr);
+  const DrawTextCommand* selected_label = FindText(selected, "Selectable");
+  REQUIRE(selected_label != nullptr);
+  REQUIRE(selected_label->style.foreground == ChipStyle::Default().selected_label);
+
+  disabled = runtime.RootNode()->children[2].get();
+  const Rect disabled_bounds = disabled->PresentationBounds();
+  ClickAt(
+      runtime,
+      {
+          disabled_bounds.x + disabled_bounds.width * 0.5F,
+          disabled_bounds.y + disabled_bounds.height * 0.5F,
+      }
+  );
+  REQUIRE(disabled_chip_changes == 0);
+
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Enter});
+  REQUIRE(action_chip_clicks == 2);
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Space});
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Up, .key = Key::Space});
+  REQUIRE(selectable_chip_changes == 2);
+  REQUIRE(!chip_selected.Get());
+}
+
+TEST_CASE("TestMaterialChipGeometryAndColors") {
+  TestPlatform platform;
+  Runtime runtime{MaterialChipApp, platform};
+  runtime.SetViewport({260.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const ChipStyle style = ThemeDefinitionValue<ChipStyle>(MaterialThemeDefinition());
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* row = root->children[0].get();
+  REQUIRE(row->children.size() == 2);
+  REQUIRE(row->children[0]->measured_size.height == style.minimum_height);
+  REQUIRE(row->children[1]->measured_size.height == style.minimum_height);
+  REQUIRE(row->children[1]->properties.indication_override == style.selected_indication);
+  REQUIRE(FindRectWithColor(scene, style.selected_background) != nullptr);
+  const DrawTextCommand* action = FindText(scene, "Action");
+  const DrawTextCommand* selected = FindText(scene, "Selected");
+  REQUIRE(action != nullptr);
+  REQUIRE(selected != nullptr);
+  REQUIRE(action->style.foreground == style.label_style.foreground);
+  REQUIRE(selected->style.foreground == style.selected_label);
+  const bool paints_outline = std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == style.border && border->width == style.border_width;
+  });
+  REQUIRE(paints_outline);
 }
 
 TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {

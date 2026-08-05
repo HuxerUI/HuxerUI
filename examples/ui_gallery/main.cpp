@@ -36,6 +36,7 @@ View Panel(View content) {
 View ControlsDemo() {
   const ThemeSpec& theme = UseTheme();
   auto checkbox_checked = UseState(true);
+  auto chip_selected = UseState(false);
   auto radio_choice = UseState(0);
   auto switch_checked = UseState(false);
   auto progress = UseState(0.35F);
@@ -49,6 +50,12 @@ View ControlsDemo() {
           Button("Button").OnClick([] {}),
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+        Row {
+          Chip("Action").OnClick([] {}),
+          Chip(chip_selected ? "Selected" : "Selectable", chip_selected)
+              .OnChanged([chip_selected](bool selected) { chip_selected = selected; }),
+          Chip("Disabled", false).OnChanged([](bool) {}).With(Enabled(false)),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         Row {
           Row {
             Checkbox(checkbox_checked).OnChanged(

@@ -6,8 +6,6 @@
 #include <unordered_set>
 #include <utility>
 
-#include <huxerui/theme.h>
-
 namespace huxerui::detail {
 
 namespace {
@@ -342,12 +340,17 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                    : bounds;
     PaintContext content{render_node.content, canvas_bounds};
     std::optional<Color> background = node.properties.background;
+    std::optional<Color> border = node.properties.border;
     TextStyle text_style = node.properties.text_style;
-    if (node.kind == NodeKind::Button) {
-      const ButtonStyle style = node.LayoutValueOr<ResolvedButtonStyle>(ButtonStyle::Default());
-      if (node.disabled_visual_state) {
-        background = style.disabled_background;
-        text_style.foreground = style.disabled_label;
+    if (node.disabled_visual_state) {
+      if (node.properties.disabled_background.has_value()) {
+        background = node.properties.disabled_background;
+      }
+      if (node.properties.disabled_foreground.has_value()) {
+        text_style.foreground = *node.properties.disabled_foreground;
+      }
+      if (node.properties.disabled_border.has_value()) {
+        border = node.properties.disabled_border;
       }
     }
     if (node.properties.shadow.has_value() && node.properties.shadow->color.alpha > 0.0F) {
@@ -364,9 +367,12 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
     if (background.has_value() && background->alpha > 0.0F) {
       content.DrawRect(bounds, *background, node.properties.corner_radii);
     }
+    if (border.has_value() && border->alpha > 0.0F && node.properties.border_width > 0.0F) {
+      content.DrawBorder(bounds, *border, node.properties.border_width, node.properties.corner_radii);
+    }
     if (node.kind == NodeKind::Text) {
       content.DrawText(node.ContentBounds(), node.text, node.properties.text_style);
-    } else if (node.kind == NodeKind::Button) {
+    } else if (node.kind == NodeKind::Button || node.kind == NodeKind::Chip) {
       content.DrawText(
           bounds,
           node.text,
