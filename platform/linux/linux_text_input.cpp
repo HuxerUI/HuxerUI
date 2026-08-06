@@ -1,5 +1,7 @@
 #include "linux_text_input.h"
 
+#include <X11/keysym.h>
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -178,6 +180,80 @@ std::string LocaleBytesToUtf8(const char* input) {
 
 } // namespace
 
+bool IsTextProducingKey(Key key) noexcept {
+  switch (key) {
+  case Key::Unknown:
+  case Key::Tab:
+  case Key::Enter:
+  case Key::Space:
+  case Key::Escape:
+  case Key::Backspace:
+  case Key::Delete:
+  case Key::ArrowLeft:
+  case Key::ArrowRight:
+  case Key::ArrowUp:
+  case Key::ArrowDown:
+  case Key::Home:
+  case Key::End:
+  case Key::PageUp:
+  case Key::PageDown:
+  case Key::A:
+  case Key::C:
+  case Key::V:
+  case Key::X:
+  case Key::Y:
+  case Key::Z:
+  case Key::Shift:
+  case Key::Control:
+  case Key::Alt:
+  case Key::Meta:
+    return false;
+  }
+  return true;
+}
+
+bool IsEditingKeySym(KeySym keysym) noexcept {
+  switch (keysym) {
+  case XK_Tab:
+  case XK_Return:
+  case XK_KP_Enter:
+  case XK_space:
+  case XK_Escape:
+  case XK_BackSpace:
+  case XK_Delete:
+  case XK_Left:
+  case XK_Right:
+  case XK_Up:
+  case XK_Down:
+  case XK_Home:
+  case XK_End:
+  case XK_Page_Up:
+  case XK_Page_Down:
+  case XK_a:
+  case XK_A:
+  case XK_c:
+  case XK_C:
+  case XK_v:
+  case XK_V:
+  case XK_x:
+  case XK_X:
+  case XK_y:
+  case XK_Y:
+  case XK_z:
+  case XK_Z:
+  case XK_Shift_L:
+  case XK_Shift_R:
+  case XK_Control_L:
+  case XK_Control_R:
+  case XK_Alt_L:
+  case XK_Alt_R:
+  case XK_Meta_L:
+  case XK_Meta_R:
+    return true;
+  }
+  return false;
+}
+
 std::optional<int> Utf8CodePointCount(std::string_view text) noexcept {
   int count = 0;
   std::size_t byte_offset = 0;
@@ -320,25 +396,35 @@ struct LinuxTextInput::State {
     if (display == nullptr || window == 0 || xic == nullptr) {
       return false;
     }
-    if (secure) {
-      const bool is_release = event.type != KeyPress;
-      return is_release ? false : CommitCommittedText(event);
-    }
     const bool is_release = event.type != KeyPress;
+    const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
+    const bool editing_key = IsEditingKeySym(keysym);
+    // Editing, navigation, shortcut, and modifier keys never produce composed
+    // text; route them straight to the focused view so Backspace and friends
+    // are not swallowed or committed as mask characters by the input method.
+    if (is_release || editing_key) {
+      return false;
+    }
+    if (secure) {
+      return CommitCommittedText(event);
+    }
     try {
       XEvent filtered{};
       filtered.xkey = event;
       const bool consumed = XFilterEvent(&filtered, window) != 0;
       if (consumed) {
-        if (!is_release && !composing) {
-          CommitCommittedText(event);
+        // While composing, the input method consumes the key to edit the
+        // composition. Otherwise it committed text through the callbacks, or it
+        // only adjusted internal state and the key must reach the focused view.
+        if (composing) {
+          return true;
         }
-        return true;
+        return CommitCommittedText(event);
       }
       if (!Active()) {
         return false;
       }
-      return is_release ? true : CommitCommittedText(event);
+      return CommitCommittedText(event);
     } catch (...) {
       return false;
     }

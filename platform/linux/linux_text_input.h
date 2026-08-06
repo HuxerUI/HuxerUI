@@ -12,6 +12,11 @@ class Runtime;
 
 namespace huxerui::detail {
 
+// True for keys that must bypass the XIM composition path: editing,
+// navigation, shortcut, modifier, and unknown keys never produce composed
+// text and are routed to the focused view instead.
+[[nodiscard]] bool IsEditingKeySym(KeySym keysym) noexcept;
+
 class LinuxTextInput final : public PlatformTextInput {
 public:
   LinuxTextInput();

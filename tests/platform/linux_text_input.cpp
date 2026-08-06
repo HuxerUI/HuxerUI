@@ -2,10 +2,43 @@
 
 #include <string>
 
+#include <huxerui/event.h>
+
 #include "linux_text_input_internal.h"
 
 namespace huxerui::test {
 namespace {
+
+TEST_CASE("IsTextProducingKey classifies editing keys") {
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Backspace));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Delete));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowLeft));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowRight));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowUp));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowDown));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Home));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::End));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::PageUp));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::PageDown));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Enter));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Tab));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Escape));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Space));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Unknown));
+}
+
+TEST_CASE("IsTextProducingKey classifies shortcut and modifier keys") {
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::A));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::C));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::V));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::X));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Y));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Z));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Shift));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Control));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Alt));
+  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Meta));
+}
 
 TEST_CASE("ApplyXimPreeditEdit replaces the reported code-point range") {
   // "你好abc" is 5 code points: two 3-byte CJK characters plus three ASCII.
