@@ -229,6 +229,12 @@ Windows platform configuration lives in `cmake/platform/Windows.cmake`. The back
 
 Keep shared layout in DIPs and convert pixels, screen coordinates, DPI, UTF-16, and IME geometry at the boundary. Check HRESULTs, handles, COM lifetime, clipboard ownership, and resource recreation; prefer RAII and `ComPtr`.
 
+### Linux
+
+Linux platform configuration lives in `cmake/platform/Linux.cmake`; source files live under `platform/linux/`. The graphics and text stack (Cairo, fontconfig, pixman, FreeType, HarfBuzz, libpng, libjpeg, zlib, expat) is fetched from pinned git tags and built as static libraries through FetchContent and meson-driven ExternalProject into a staging prefix; X11, xkbcommon, EGL, and OpenGL ES 2 resolve through pkg-config.
+
+Include `linux_internal.h` before any huxerui header in Linux sources: Xlib defines C macros (`None`, `Bool`, `True`, `False`, `Status`) that collide with shared enumerators, and the header undefines them after including X headers. Keep the shared layout in DIPs and convert pixels, DPI, and IME geometry at the host boundary. The renderer rasterizes PaintCommands with Cairo into a retained bitmap and presents it through an EGL/OpenGL ES swap; keep damage-limited Cairo redraw and whole-bitmap or damaged-row presentation. X11 clipboard transfers and XIM composition are event-driven: never block the event loop without a timeout.
+
 Add equivalent focused guidance when a new backend gains repository-owned implementation.
 
 ## Build, validation, and documentation

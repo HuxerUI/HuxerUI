@@ -10,6 +10,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES)
     set(HUXERUI_PLATFORM_LINK_OPTIONS)
 
     if (EMSCRIPTEN)
@@ -27,8 +28,11 @@ function(huxerui_configure_platform)
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
+    elseif (UNIX)
+        set(HUXERUI_PLATFORM_ID "linux")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Linux.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, and Web only")
+        message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, Linux, and Web only")
     endif ()
 
     huxerui_platform_configure()
@@ -39,6 +43,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_OPTIONS ${HUXERUI_PLATFORM_LINK_OPTIONS} PARENT_SCOPE)
 endfunction()
 
@@ -47,6 +52,7 @@ function(huxerui_configure_compile_target target_name)
     target_include_directories(${target_name} PRIVATE
             "${HUXERUI_PUBLIC_INCLUDE_DIR}"
             "${HUXERUI_PROJECT_DIR}/src"
+            ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES}
     )
     target_compile_options(${target_name} PRIVATE
             "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
@@ -182,8 +188,64 @@ function(huxerui_resolve_host_tool tool_name output_variable)
             "${HUXERUI_HOST_TOOL_DIRECTORY}/${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
     )
     if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
+        if (HUXERUI_HOST_SYSTEM STREQUAL "linux")
+            huxerui_build_host_tool("${tool_name}" HUXERUI_HOST_TOOL)
+        else ()
+            message(FATAL_ERROR
+                    "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
+            )
+        endif ()
+    endif ()
+    set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)
+endfunction()
+
+# Builds a host tool from its tools/ source directory into the build tree when
+# the matching prebuilt executable is unavailable (Linux hosts commonly lack
+# one). The returned path is a custom-command output, so DEPENDS orders the
+# build. Tool output names (hcg, hapt) differ from their source directories
+# (codegen, resource_codegen).
+function(huxerui_build_host_tool tool_name output_variable)
+    if (tool_name STREQUAL "hcg")
+        set(HUXERUI_HOST_TOOL_SOURCE_DIR
+                "${HUXERUI_PROJECT_DIR}/tools/codegen"
+        )
+    elseif (tool_name STREQUAL "hapt")
+        set(HUXERUI_HOST_TOOL_SOURCE_DIR
+                "${HUXERUI_PROJECT_DIR}/tools/resource_codegen"
+        )
+    else ()
         message(FATAL_ERROR
-                "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
+                "HuxerUI host tool source is unknown: ${tool_name}"
+        )
+    endif ()
+    set(HUXERUI_HOST_TOOL_BUILD_DIR
+            "${CMAKE_BINARY_DIR}/huxerui-host-tools/${tool_name}"
+    )
+    set(HUXERUI_HOST_TOOL
+            "${HUXERUI_HOST_TOOL_BUILD_DIR}/${tool_name}"
+    )
+    if (WIN32)
+        set(HUXERUI_HOST_TOOL
+                "${HUXERUI_HOST_TOOL}.exe"
+        )
+    endif ()
+
+    if (NOT TARGET huxerui_host_${tool_name})
+        add_custom_command(
+                OUTPUT "${HUXERUI_HOST_TOOL}"
+                COMMAND ${CMAKE_COMMAND} -E rm -rf
+                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                COMMAND ${CMAKE_COMMAND}
+                        -S "${HUXERUI_HOST_TOOL_SOURCE_DIR}"
+                        -B "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                        -DCMAKE_BUILD_TYPE=Release
+                COMMAND ${CMAKE_COMMAND} --build
+                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
+                        --config Release
+                VERBATIM
+        )
+        add_custom_target(huxerui_host_${tool_name}
+                DEPENDS "${HUXERUI_HOST_TOOL}"
         )
     endif ()
     set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)

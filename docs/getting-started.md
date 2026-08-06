@@ -1,6 +1,6 @@
 # Getting Started
 
-HuxerUI applications use C++20 and share the same declarative UI code across Android, iOS, macOS, Windows, and Web. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each native backend owns its window or host view, text services, and rendering surface.
+HuxerUI applications use C++20 and share the same declarative UI code across Android, iOS, Linux, macOS, Windows, and Web. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each native backend owns its window or host view, text services, and rendering surface.
 
 ## Requirements
 
@@ -121,6 +121,17 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+Linux:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+The Linux backend requires system packages for X11, XKB common, EGL and OpenGL ES 2, Cairo, FreeType, HarfBuzz, fontconfig, libpng, and libjpeg, resolved through pkg-config.
+When `tools/prebuilt/linux/<architecture>/` host tools are absent, CMake builds the code generators from their `tools/` sources on the Linux host.
+
 Windows:
 
 ```powershell
@@ -215,6 +226,13 @@ On macOS:
 ```bash
 open build/bin/example_counter.app
 open build/bin/example_ui_gallery.app
+```
+
+On Linux:
+
+```bash
+./build/bin/example_counter
+./build/bin/example_ui_gallery
 ```
 
 On Windows:

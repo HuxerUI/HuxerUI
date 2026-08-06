@@ -25,7 +25,7 @@ SDK, native integration, and distribution work:
 - NativeView lifecycle, reconciliation, host composition, focus, and accessibility
 - Versioned SDK distribution and signing support
 - iOS archive export, distribution signing, embeddable UIView integration, and accessibility
-- OHOS and Linux backends
+- OHOS backend
 - Web semantics and accessibility, browser integration tests, release packaging, and mobile IME validation following the [Web Platform Design](design/web.md)
 
 The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and NativeView expansion.
