@@ -53,6 +53,12 @@ public final class HuxerUIView extends View {
     private static final int POINTER_DEVICE_TOUCH = 1;
     private static final int POINTER_DEVICE_PEN = 2;
 
+    // These values form the JNI protocol decoded explicitly by the native adapter.
+    private static final int BACK_BEGIN = 0;
+    private static final int BACK_UPDATE = 1;
+    private static final int BACK_CANCEL = 2;
+    private static final int BACK_COMMIT = 3;
+
     private static final int TEXT_ALIGN_CENTER = 1;
     private static final int TEXT_ALIGN_TRAILING = 2;
     private static final int TEXT_WRAP_WORD = 1;
@@ -304,7 +310,23 @@ public final class HuxerUIView extends View {
     }
 
     public boolean handleBack() {
-        return nativeHandle != 0L && nativeHandleBack(nativeHandle);
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle, BACK_COMMIT, 1.0F);
+    }
+
+    boolean beginBack() {
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle, BACK_BEGIN, 0.0F);
+    }
+
+    boolean updateBack(float progress) {
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle, BACK_UPDATE, progress);
+    }
+
+    boolean cancelBack() {
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle, BACK_CANCEL, 0.0F);
+    }
+
+    boolean commitBack() {
+        return nativeHandle != 0L && nativeHandleBack(nativeHandle, BACK_COMMIT, 1.0F);
     }
 
     @Override
@@ -1098,5 +1120,5 @@ public final class HuxerUIView extends View {
     private static native void nativeKey(long handle, boolean down, int keyCode, byte[] text, boolean shift,
             boolean control, boolean alt, boolean meta, boolean repeat);
 
-    private static native boolean nativeHandleBack(long handle);
+    private static native boolean nativeHandleBack(long handle, int phase, float progress);
 }

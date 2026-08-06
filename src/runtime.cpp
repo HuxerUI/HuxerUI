@@ -175,6 +175,14 @@ MountedNode* FindLayerStack(MountedNode& root) {
   return found == root.children.end() ? nullptr : found->get();
 }
 
+MountedNode* FindApplicationRoot(MountedNode& root) {
+  MountedNode* layer_stack = FindLayerStack(root);
+  const auto found = std::ranges::find_if(root.children, [layer_stack](const auto& child) {
+    return child && child.get() != layer_stack;
+  });
+  return found == root.children.end() ? nullptr : found->get();
+}
+
 MountedNode* FindLayerEntryNode(MountedNode& root, LayerId id) {
   MountedNode* layer_stack = FindLayerStack(root);
   if (!layer_stack) {
@@ -669,6 +677,36 @@ bool PointerSessionReferencesNode(const PointerSession& session, const MountedNo
          });
 }
 
+MountedNode* FindBackEventHandler(MountedNode& node) {
+  if (!node.enabled) {
+    return nullptr;
+  }
+  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
+    if (MountedNode* handler = FindBackEventHandler(**child)) {
+      return handler;
+    }
+  }
+  return HasEventBinding<ViewEvents::BackRequested>(node.event_bindings) ? &node : nullptr;
+}
+
+std::optional<NodeExtensionHandle> DispatchBackToExtensions(MountedNode& node, const BackEvent& event) {
+  if (!node.enabled) {
+    return std::nullopt;
+  }
+  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
+    if (auto target = DispatchBackToExtensions(**child, event)) {
+      return target;
+    }
+  }
+  for (std::size_t index = node.extensions.size(); index > 0; --index) {
+    NodeExtensionEntry& entry = node.extensions[index - 1];
+    if (entry.extension && entry.extension->OnBack(node, event)) {
+      return NodeExtensionHandle{node.identity, index - 1, entry.descriptor};
+    }
+  }
+  return std::nullopt;
+}
+
 bool IsActivatable(const MountedNode& node) {
   return static_cast<bool>(node.activation) || HasEventBinding<ViewEvents::Click>(node.event_bindings);
 }
@@ -955,13 +993,7 @@ const detail::MountedNode* Runtime::RootNode() const noexcept {
   if (!state_->mounted_root_) {
     return nullptr;
   }
-  const detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
-  for (const auto& child : state_->mounted_root_->children) {
-    if (child.get() != layer_stack) {
-      return child.get();
-    }
-  }
-  return nullptr;
+  return FindApplicationRoot(*state_->mounted_root_);
 }
 
 void Runtime::UpdateHoveredExtension(Point position) {
@@ -1002,6 +1034,41 @@ void Runtime::RefreshInteractionTree() {
   }
 
   ResolveEnabledTree(*state_->mounted_root_, true);
+  std::vector<PointerEvent> cancellations;
+  for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
+    const auto inactive = [this](std::optional<std::uint64_t> identity) {
+      if (!identity.has_value()) {
+        return false;
+      }
+      detail::MountedNode* node = FindNode(*state_->mounted_root_, *identity);
+      return node == nullptr || !node->enabled;
+    };
+    bool references_inactive = inactive(session.target_identity) || inactive(session.pending_focus_identity) ||
+                               inactive(session.active_scroll_node);
+    if (session.extension_capture.has_value()) {
+      references_inactive = references_inactive || inactive(session.extension_capture->node_identity);
+    }
+    references_inactive =
+        references_inactive ||
+        std::ranges::any_of(session.scroll_chain, [&inactive](std::uint64_t identity) { return inactive(identity); }) ||
+        std::ranges::any_of(session.extension_observers, [&inactive](const detail::NodeExtensionHandle& observer) {
+          return inactive(observer.node_identity);
+        });
+    if (references_inactive) {
+      cancellations.push_back(
+          PointerEvent{
+              PointerEventType::Cancel,
+              pointer_id,
+              session.last_position,
+              session.device_kind,
+          }
+      );
+    }
+  }
+  for (const PointerEvent& cancellation : cancellations) {
+    HandlePointerCancel(cancellation);
+    TrackTouchTextSelectionGesture(cancellation);
+  }
   const std::optional<LayerId> focus_layer = ActiveFocusLayerId();
   const std::optional<LayerId> previous_focus_layer =
       state_->layer_focus_stack_.empty() ? std::nullopt : std::optional{state_->layer_focus_stack_.back().id};
@@ -1110,37 +1177,142 @@ std::optional<LayerId> Runtime::ActiveFocusLayerId() const {
   return active == nullptr ? std::nullopt : std::optional{active->id};
 }
 
-bool Runtime::HandleTopLayerBack() {
-  const LayerEntry* topmost = nullptr;
-  for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
-    if (entry.options.cancel_policy != LayerCancelPolicy::PassThrough &&
-        (topmost == nullptr || LayerPaintsAbove(entry, *topmost))) {
-      topmost = &entry;
-    }
-  }
-  if (topmost == nullptr) {
-    return false;
-  }
-  if (topmost->options.cancel_policy == LayerCancelPolicy::Consume) {
-    return true;
-  }
-  const LayerId id = topmost->id;
-  const std::function<void()> dismiss = topmost->options.on_dismiss_request;
-  if (dismiss) {
-    dismiss();
-  } else {
-    state_->layer_controller_.Dismiss(id);
-  }
-  return true;
+bool Runtime::HandleBack() {
+  return HandleBack(BackEvent{});
 }
 
-bool Runtime::HandleBack() {
+bool Runtime::HandleBack(const BackEvent& incoming) {
+  BackEvent event = incoming;
+  if (!std::isfinite(event.progress)) {
+    event.progress = event.phase == BackPhase::Commit ? 1.0F : 0.0F;
+  }
+  event.progress = std::clamp(event.progress, 0.0F, 1.0F);
+
+  const auto dispatch_captured = [this, &event](const detail::BackTarget& target) {
+    switch (target.kind) {
+    case detail::BackTargetKind::SelectionOverlay:
+      if (event.phase == BackPhase::Commit) {
+        HideTextSelectionOverlay();
+      }
+      return true;
+    case detail::BackTargetKind::Layer: {
+      if (event.phase != BackPhase::Commit) {
+        return true;
+      }
+      const auto found = std::ranges::find(state_->layer_controller_.state_->entries, target.layer_id, &LayerEntry::id);
+      if (found == state_->layer_controller_.state_->entries.end()) {
+        return true;
+      }
+      if (found->options.cancel_policy == LayerCancelPolicy::Consume) {
+        return true;
+      }
+      const std::function<void()> dismiss = found->options.on_dismiss_request;
+      if (dismiss) {
+        dismiss();
+      } else {
+        state_->layer_controller_.Dismiss(found->id);
+      }
+      return true;
+    }
+    case detail::BackTargetKind::Event: {
+      if (event.phase != BackPhase::Commit || !state_->mounted_root_) {
+        return true;
+      }
+      detail::MountedNode* node = FindNode(*state_->mounted_root_, target.node_identity);
+      if (node != nullptr && node->enabled) {
+        static_cast<void>(EmitEvent<ViewEvents::BackRequested>(node->event_bindings));
+      }
+      return true;
+    }
+    case detail::BackTargetKind::Extension: {
+      if (!state_->mounted_root_) {
+        return true;
+      }
+      detail::MountedNode* node = FindNode(*state_->mounted_root_, target.extension.node_identity);
+      NodeExtension* extension = FindExtension(*state_->mounted_root_, target.extension);
+      if (node != nullptr && node->enabled && extension != nullptr) {
+        static_cast<void>(extension->OnBack(*node, event));
+      }
+      // A target captured at Begin owns the whole transaction even when it disappears before Commit.
+      return true;
+    }
+    }
+    return false;
+  };
+
+  if (event.phase == BackPhase::Begin && state_->back_target_.has_value()) {
+    const BackEvent begin = event;
+    event = {BackPhase::Cancel, 0.0F};
+    static_cast<void>(dispatch_captured(*state_->back_target_));
+    state_->back_target_.reset();
+    event = begin;
+  }
+
+  if (event.phase != BackPhase::Begin && state_->back_target_.has_value()) {
+    const detail::BackTarget target = *state_->back_target_;
+    const bool handled = dispatch_captured(target);
+    if (event.phase == BackPhase::Cancel || event.phase == BackPhase::Commit || !handled) {
+      state_->back_target_.reset();
+    }
+    if (handled) {
+      RequestFrame();
+    }
+    return handled;
+  }
+
+  if (event.phase == BackPhase::Update || event.phase == BackPhase::Cancel) {
+    return false;
+  }
+  state_->back_target_.reset();
+  if (!state_->mounted_root_) {
+    return false;
+  }
+  detail::MountedNode* application_root = FindApplicationRoot(*state_->mounted_root_);
+  if (!application_root) {
+    return false;
+  }
+
+  detail::BackTarget target;
+  bool already_dispatched = false;
   if (state_->text_selection_overlay_.state.visible) {
-    HideTextSelectionOverlay();
+    target.kind = detail::BackTargetKind::SelectionOverlay;
+  } else {
+    const LayerEntry* topmost = nullptr;
+    for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
+      if (entry.options.cancel_policy != LayerCancelPolicy::PassThrough &&
+          (topmost == nullptr || LayerPaintsAbove(entry, *topmost))) {
+        topmost = &entry;
+      }
+    }
+    if (topmost != nullptr) {
+      target.kind = detail::BackTargetKind::Layer;
+      target.layer_id = topmost->id;
+    } else if (detail::MountedNode* handler = FindBackEventHandler(*application_root)) {
+      target.kind = detail::BackTargetKind::Event;
+      target.node_identity = handler->identity;
+    } else if (auto extension = DispatchBackToExtensions(*application_root, event)) {
+      target.kind = detail::BackTargetKind::Extension;
+      target.extension = *extension;
+      already_dispatched = true;
+    } else {
+      return false;
+    }
+  }
+
+  if (event.phase == BackPhase::Begin) {
+    state_->back_target_ = target;
     RequestFrame();
     return true;
   }
-  return HandleTopLayerBack();
+  if (already_dispatched) {
+    RequestFrame();
+    return true;
+  }
+  const bool handled = dispatch_captured(target);
+  if (handled) {
+    RequestFrame();
+  }
+  return handled;
 }
 
 void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible) {

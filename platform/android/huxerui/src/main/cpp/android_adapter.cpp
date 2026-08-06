@@ -836,8 +836,8 @@ public:
     });
   }
 
-  bool HandleBack() {
-    return runtime_.HandleBack();
+  bool HandleBack(BackPhase phase, float progress) {
+    return runtime_.HandleBack({phase, progress});
   }
 
   bool ApplyTextInputCommand(
@@ -1083,10 +1083,27 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_org_huxerui_HuxerUIView_nativeHandleBack(JNIEnv* environment, jclass, jlong handle) {
+Java_org_huxerui_HuxerUIView_nativeHandleBack(JNIEnv* environment, jclass, jlong handle, jint phase, jfloat progress) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      return session->HandleBack() ? JNI_TRUE : JNI_FALSE;
+      huxerui::BackPhase back_phase;
+      switch (phase) {
+      case 0:
+        back_phase = huxerui::BackPhase::Begin;
+        break;
+      case 1:
+        back_phase = huxerui::BackPhase::Update;
+        break;
+      case 2:
+        back_phase = huxerui::BackPhase::Cancel;
+        break;
+      case 3:
+        back_phase = huxerui::BackPhase::Commit;
+        break;
+      default:
+        throw std::invalid_argument("HuxerUI Android back phase is invalid");
+      }
+      return session->HandleBack(back_phase, progress) ? JNI_TRUE : JNI_FALSE;
     }
     return JNI_FALSE;
   } catch (const std::exception& exception) {

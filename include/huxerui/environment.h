@@ -92,12 +92,25 @@ inline ViewportClass UseViewportClass() {
 
 View ProvideEnvironment(Environment environment, std::function<View()> content);
 
-template <EnvironmentValue Value, class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View ProvideEnvironment(Value value, Factory&& content) {
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View ProvideEnvironment(Environment environment, Factory&& content, Arguments&&... arguments) {
+  return ProvideEnvironment(
+      std::move(environment),
+      detail::BindViewFactory(std::forward<Factory>(content), std::forward<Arguments>(arguments)...)
+  );
+}
+
+template <EnvironmentValue Value, class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View ProvideEnvironment(Value value, Factory&& content, Arguments&&... arguments) {
   Environment environment;
   environment.Set(std::move(value));
-  return ProvideEnvironment(std::move(environment), std::forward<Factory>(content));
+  return ProvideEnvironment(
+      std::move(environment),
+      std::forward<Factory>(content),
+      std::forward<Arguments>(arguments)...
+  );
 }
 
 } // namespace huxerui

@@ -22,6 +22,7 @@ add_executable(huxerui_tests
         runtime/interaction.cpp
         runtime/layers.cpp
         runtime/layout.cpp
+        runtime/navigation.cpp
         runtime/presentation.cpp
         runtime/render_scene.cpp
         runtime/resources.cpp
@@ -81,6 +82,7 @@ set(HUXERUI_PUBLIC_HEADERS
         layer.h
         layout.h
         modifier.h
+        navigation.h
         paint.h
         presentation.h
         render_scene.h

@@ -431,12 +431,16 @@ inline const ThemeSpec& UseTheme() {
   return UseEnvironment<ThemeSpec>();
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View Theme(ThemeDefinition definition, Factory&& content) {
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View Theme(ThemeDefinition definition, Factory&& content, Arguments&&... arguments) {
   Environment environment;
   detail::ApplyThemeDefinition(environment, definition);
-  return ProvideEnvironment(std::move(environment), std::forward<Factory>(content));
+  return ProvideEnvironment(
+      std::move(environment),
+      std::forward<Factory>(content),
+      std::forward<Arguments>(arguments)...
+  );
 }
 
 ThemeSpec FlatLightThemeSpec();
@@ -450,40 +454,48 @@ ThemeDefinition MaterialThemeDefinition(ThemeSpec theme);
 ThemeDefinition MaterialThemeDefinition();
 ThemeDefinition MaterialDarkThemeDefinition();
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View FlatTheme(ThemeSpec theme, Factory&& content) {
-  return Theme(FlatThemeDefinition(std::move(theme)), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View FlatTheme(ThemeSpec theme, Factory&& content, Arguments&&... arguments) {
+  return Theme(
+      FlatThemeDefinition(std::move(theme)),
+      std::forward<Factory>(content),
+      std::forward<Arguments>(arguments)...
+  );
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View FlatTheme(Factory&& content) {
-  return Theme(FlatThemeDefinition(), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View FlatTheme(Factory&& content, Arguments&&... arguments) {
+  return Theme(FlatThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View FlatDarkTheme(Factory&& content) {
-  return Theme(FlatDarkThemeDefinition(), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View FlatDarkTheme(Factory&& content, Arguments&&... arguments) {
+  return Theme(FlatDarkThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View MaterialTheme(ThemeSpec theme, Factory&& content) {
-  return Theme(MaterialThemeDefinition(std::move(theme)), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View MaterialTheme(ThemeSpec theme, Factory&& content, Arguments&&... arguments) {
+  return Theme(
+      MaterialThemeDefinition(std::move(theme)),
+      std::forward<Factory>(content),
+      std::forward<Arguments>(arguments)...
+  );
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View MaterialTheme(Factory&& content) {
-  return Theme(MaterialThemeDefinition(), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View MaterialTheme(Factory&& content, Arguments&&... arguments) {
+  return Theme(MaterialThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
 }
 
-template <class Factory>
-  requires std::invocable<Factory&> && std::convertible_to<std::invoke_result_t<Factory&>, View>
-View MaterialDarkTheme(Factory&& content) {
-  return Theme(MaterialDarkThemeDefinition(), std::forward<Factory>(content));
+template <class Factory, class... Arguments>
+  requires detail::ViewFactoryFor<Factory, Arguments...>
+View MaterialDarkTheme(Factory&& content, Arguments&&... arguments) {
+  return Theme(MaterialDarkThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
 }
 
 namespace detail {

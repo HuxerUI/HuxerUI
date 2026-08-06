@@ -995,6 +995,20 @@ struct LayerFocusFrame {
   std::optional<std::uint64_t> restore_identity;
 };
 
+enum class BackTargetKind : std::uint8_t {
+  SelectionOverlay,
+  Layer,
+  Event,
+  Extension,
+};
+
+struct BackTarget {
+  BackTargetKind kind = BackTargetKind::Event;
+  LayerId layer_id = 0;
+  std::uint64_t node_identity = 0;
+  NodeExtensionHandle extension;
+};
+
 } // namespace huxerui::detail
 
 namespace huxerui {
@@ -1054,6 +1068,7 @@ struct Runtime::State {
   detail::TextSelectionOverlay text_selection_overlay_;
   TextInputSessionId next_text_input_session_id_ = 1;
   std::vector<detail::LayerFocusFrame> layer_focus_stack_;
+  std::optional<detail::BackTarget> back_target_;
 };
 
 } // namespace huxerui

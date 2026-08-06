@@ -1,8 +1,11 @@
 #pragma once
 
+#include <concepts>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -30,6 +33,36 @@ class MenuService;
 class PopupService;
 class ToastService;
 struct LayerAnchorState;
+
+template <class Context, class Factory, class... Arguments>
+concept PresentationFactoryFor =
+    ViewFactoryFor<Factory, Arguments...> ||
+    (std::copy_constructible<std::decay_t<Factory>> && (std::copy_constructible<std::decay_t<Arguments>> && ...) &&
+     requires(std::decay_t<Factory>& factory, Context& context, const std::decay_t<Arguments>&... arguments) {
+       { std::invoke(factory, context, arguments...) } -> std::convertible_to<View>;
+     });
+
+template <class Context, class Factory, class... Arguments>
+  requires PresentationFactoryFor<Context, Factory, Arguments...>
+auto BindPresentationFactory(Factory&& factory, Arguments&&... arguments) {
+  if constexpr (ViewFactoryFor<Factory, Arguments...>) {
+    return BindViewFactory(std::forward<Factory>(factory), std::forward<Arguments>(arguments)...);
+  } else {
+    using StoredFactory = std::decay_t<Factory>;
+    using StoredArguments = std::tuple<std::decay_t<Arguments>...>;
+    StoredFactory stored_factory(std::forward<Factory>(factory));
+    StoredArguments stored_arguments(std::forward<Arguments>(arguments)...);
+    return std::function<View(Context)>{
+        [factory = std::move(stored_factory),
+         arguments = std::move(stored_arguments)](Context context) mutable -> View {
+          return std::apply(
+              [&factory, &context](const auto&... values) -> View { return std::invoke(factory, context, values...); },
+              arguments
+          );
+        },
+    };
+  }
+}
 } // namespace detail
 
 struct PresentationMotion {
@@ -218,8 +251,33 @@ public:
   ) const;
   LayerId Show(ViewFactory content, DialogOptions options = {}) const;
   LayerId Show(DialogFactory content, DialogOptions options = {}) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<DialogContext, Factory, Arguments...>
+  LayerId Show(Factory&& content, Arguments&&... arguments) const {
+    return Show(
+        detail::BindPresentationFactory<DialogContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
   bool Update(LayerId id, ViewFactory content) const;
   bool Update(LayerId id, DialogFactory content) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<DialogContext, Factory, Arguments...>
+  bool Update(LayerId id, Factory&& content, Arguments&&... arguments) const {
+    return Update(
+        id,
+        detail::BindPresentationFactory<DialogContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
   bool Dismiss(LayerId id) const;
 
 private:
@@ -265,6 +323,18 @@ class BottomSheetHandle {
 public:
   LayerId Show(ViewFactory content, BottomSheetOptions options = {}) const;
   LayerId Show(BottomSheetFactory content, BottomSheetOptions options = {}) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<BottomSheetContext, Factory, Arguments...>
+  LayerId Show(Factory&& content, Arguments&&... arguments) const {
+    return Show(
+        detail::BindPresentationFactory<BottomSheetContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
   bool Dismiss(LayerId id) const;
 
 private:
@@ -360,8 +430,33 @@ public:
   [[nodiscard]] LayerAnchor Anchor() const;
   LayerId Show(ViewFactory content, PopupOptions options = {}) const;
   LayerId Show(PopupFactory content, PopupOptions options = {}) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
+  LayerId Show(Factory&& content, Arguments&&... arguments) const {
+    return Show(
+        detail::BindPresentationFactory<PopupContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
   LayerId ShowAt(Point point, ViewFactory content, PopupOptions options = {}) const;
   LayerId ShowAt(Point point, PopupFactory content, PopupOptions options = {}) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
+  LayerId ShowAt(Point point, Factory&& content, Arguments&&... arguments) const {
+    return ShowAt(
+        point,
+        detail::BindPresentationFactory<PopupContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
   bool Dismiss(LayerId id) const;
 
 private:

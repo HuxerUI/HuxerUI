@@ -4,13 +4,14 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include <huxerui/color.h>
+#include <huxerui/view.h>
 
 namespace huxerui {
 
 class Runtime;
-class View;
 class Environment;
 
 namespace detail {
@@ -63,8 +64,35 @@ public:
 
   LayerId Attach(LayerOptions options, ViewFactory content) const;
 
+  template <class Factory, class... Arguments>
+    requires detail::ViewFactoryFor<Factory, Arguments...>
+  LayerId Attach(LayerOptions options, Factory&& content, Arguments&&... arguments) const {
+    return Attach(
+        std::move(options),
+        detail::BindViewFactory(std::forward<Factory>(content), std::forward<Arguments>(arguments)...)
+    );
+  }
+
   bool Update(LayerId id, ViewFactory content) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::ViewFactoryFor<Factory, Arguments...>
+  bool Update(LayerId id, Factory&& content, Arguments&&... arguments) const {
+    return Update(id, detail::BindViewFactory(std::forward<Factory>(content), std::forward<Arguments>(arguments)...));
+  }
+
   bool Update(LayerId id, LayerOptions options, ViewFactory content) const;
+
+  template <class Factory, class... Arguments>
+    requires detail::ViewFactoryFor<Factory, Arguments...>
+  bool Update(LayerId id, LayerOptions options, Factory&& content, Arguments&&... arguments) const {
+    return Update(
+        id,
+        std::move(options),
+        detail::BindViewFactory(std::forward<Factory>(content), std::forward<Arguments>(arguments)...)
+    );
+  }
+
   bool Dismiss(LayerId id) const;
 
 private:

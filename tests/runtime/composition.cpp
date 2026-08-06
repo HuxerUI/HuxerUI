@@ -18,6 +18,30 @@ TextMeasurer* observed_text_measurer = nullptr;
 ViewportClass observed_viewport_class = ViewportClass::Compact;
 int viewport_compositions = 0;
 
+struct ParameterizedEnvironmentValue {
+  int value = 0;
+
+  static ParameterizedEnvironmentValue Default() {
+    return {};
+  }
+};
+
+View ParameterizedScopeContent(std::string label, int value) {
+  return Text(label + " " + std::to_string(value));
+}
+
+View ParameterizedEnvironmentContent(std::string label) {
+  return Scope(ParameterizedScopeContent, std::move(label), UseEnvironment<ParameterizedEnvironmentValue>().value);
+}
+
+View ParameterizedThemeContent(int value, std::string label) {
+  return ProvideEnvironment(ParameterizedEnvironmentValue{value}, ParameterizedEnvironmentContent, std::move(label));
+}
+
+View ParameterizedFactoryApp() {
+  return MaterialTheme(ParameterizedThemeContent, 42, std::string{"bound"});
+}
+
 struct ProbeModifier;
 
 View TextMeasurerApp() {
@@ -833,6 +857,14 @@ TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
   runtime.BuildFrame();
 
   REQUIRE(observed_text_measurer == &platform);
+}
+
+TEST_CASE("ViewFactoriesBindTypedArgumentsAcrossCompositionWrappers") {
+  TestPlatform platform;
+  Runtime runtime{ParameterizedFactoryApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+
+  REQUIRE(ContainsText(runtime.BuildFrame(), "bound 42"));
 }
 
 } // namespace huxerui::test

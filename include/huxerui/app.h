@@ -113,6 +113,7 @@ public:
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
   bool HandleBack();
+  bool HandleBack(const BackEvent& event);
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
   [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
   bool PerformTextEditingAction(TextEditingAction action);
@@ -149,7 +150,6 @@ private:
   bool HandleFocusedTextInputKey(const KeyEvent& event);
   [[nodiscard]] std::optional<LayerId> ActiveFocusLayerId() const;
   detail::MountedNode* ActiveFocusLayerRoot();
-  bool HandleTopLayerBack();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
   void MoveFocus(bool reverse, bool wrap = true);
   bool BringTextInputIntoView();

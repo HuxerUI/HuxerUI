@@ -612,10 +612,11 @@ The public `UseViewportClass()` read resolves an internal Environment value with
 Theme is a direct, deferred subtree provider built on Environment:
 
 ```cpp
-template <class Factory>
+template <class Factory, class... Arguments>
 View Theme(
     ThemeDefinition definition,
-    Factory&& content);
+    Factory&& content,
+    Arguments&&... arguments);
 ```
 
 The content factory is stored and invoked only after the Theme Environment is active. This allows `UseTheme()` inside child component composition.
@@ -662,12 +663,13 @@ Third-party components can define their own style keys without extending a singl
 Material, flat, liquid, and third-party themes are theme provider functions, not Runtime types and not subclasses:
 
 ```cpp
-template <class Factory>
-View MaterialTheme(Factory&& content)
+template <class Factory, class... Arguments>
+View MaterialTheme(Factory&& content, Arguments&&... arguments)
 {
   return Theme(
       MaterialThemeDefinition(),
-      std::forward<Factory>(content));
+      std::forward<Factory>(content),
+      std::forward<Arguments>(arguments)...);
 }
 ```
 
@@ -700,13 +702,15 @@ Pass a component function directly in the common case:
 return MaterialTheme(AppContent);
 ```
 
-A content factory remains available when arguments must be captured:
+A component function can receive typed arguments directly:
 
 ```cpp
-return MaterialTheme([=] {
-  return AppContent(user_id);
-});
+return MaterialTheme(AppContent, user_id);
 ```
+
+Scope, Environment, Theme, Navigation, Layer, Dialog, BottomSheet, and Popup factories share this binding contract.
+Bound arguments are decayed and retained by value because a content factory may execute repeatedly during recomposition.
+A lambda remains appropriate when argument derivation or capture behavior is more complex than direct function invocation.
 
 `HUXERUI_THEME` is optional syntax sugar for an inline View expression or a component call with arguments:
 
@@ -825,9 +829,9 @@ struct LayerOptions {
 
 Pointer `PassThrough` never participates in hit testing. `Content` allows uncovered areas to reach lower layers. `Barrier` consumes input outside the presented content and optionally requests dismissal. A dismissible or colored barrier requires `Barrier`.
 
-Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the native window. Toast and passive diagnostic content pass through. Future page navigation extends this same Runtime-owned chain after layers. Only a completely unhandled request reaches the platform fallback.
+Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the native window. Toast and passive diagnostic content pass through. [Navigation](navigation.md) extends this Runtime-owned chain after layers with application Back handlers, nested page stacks, and a captured predictive Back transaction. Only a completely unhandled request reaches the platform fallback.
 
-Desktop adapters map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback and asks `Runtime::HandleBack()` before invoking its native fallback. `HuxerUIView` only exposes `handleBack()`; an embedded host decides when to call it and owns any unhandled behavior. Runtime never pushes Back-handler state into a platform adapter.
+Desktop adapters map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback, maps API 34 predictive phases to `BackEvent`, and asks Runtime before invoking its native fallback. API 23 through 33 and an embedded `HuxerUIView` retain the Commit-only `handleBack()` entry point. Runtime never pushes Back-handler state into a platform adapter.
 
 Focus follows actual paint order rather than raw insertion order. The topmost `trap_focus` entry excludes lower entries and application content from focus traversal while still allowing higher System content to interact. Dismissing Menu over Dialog restores Dialog focus; dismissing Dialog then restores the previous application focus when that node is still valid.
 
@@ -1070,6 +1074,14 @@ dialog.Show([](DialogContext dialog) {
   return CustomDialogContent(dialog);
 });
 ```
+
+Typed arguments follow the factory:
+
+```cpp
+dialog.Show(CustomDialogContent, document_id);
+```
+
+When custom presentation options and bound arguments are both required, a lambda keeps the existing `(factory, options)` ordering explicit without adding another overload family.
 
 This path uses themed modal placement, scrim, and motion but leaves the custom content's own surface and internal layout untouched.
 

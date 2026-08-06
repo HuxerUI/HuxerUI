@@ -32,12 +32,29 @@ constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
 constexpr Color section_separator_color = Color::Rgb(210, 70, 40);
 constexpr Color bottom_sheet_width_color = Color::Rgb(35, 125, 175);
 
-std::vector<MenuEntry> TestMenu(
-    std::string label, std::function<void()> action = [] {}
-) {
+std::vector<MenuEntry> TestMenu(std::string label, std::function<void()> action = [] {}) {
   return {
       MenuItem(std::move(label), std::move(action)),
   };
+}
+
+View ParameterizedLayerContent(std::string label, int value) {
+  return Text(label + " " + std::to_string(value));
+}
+
+View ParameterizedDialogContent(DialogContext context, std::string label, int value) {
+  static_cast<void>(context);
+  return ParameterizedLayerContent(std::move(label), value);
+}
+
+View ParameterizedBottomSheetContent(BottomSheetContext context, std::string label, int value) {
+  layer_bottom_sheet_context = context;
+  return ParameterizedLayerContent(std::move(label), value);
+}
+
+View ParameterizedPopupContent(PopupContext context, std::string label, int value) {
+  layer_popup_context = context;
+  return ParameterizedLayerContent(std::move(label), value);
 }
 
 View LayerApp() {
@@ -234,6 +251,46 @@ TEST_CASE("TestLayerMutationsDoNotRecomposeApplicationRoot") {
   const FlattenedScene& dismissed = runtime.BuildFrame();
   REQUIRE(!ContainsText(dismissed, "detached popup"));
   REQUIRE(layer_app_compositions == 1);
+}
+
+TEST_CASE("PresentationFactoriesBindTypedArguments") {
+  raw_layers.reset();
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.root_hooks.push_back([](RootContext& root) { raw_layers = root.Layers(); });
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform, std::move(options)};
+  runtime.SetViewport({240.0F, 160.0F});
+  runtime.BuildFrame();
+
+  REQUIRE(raw_layers.has_value());
+  const LayerId layer = raw_layers->Attach({}, ParameterizedLayerContent, std::string{"Layer"}, 1);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Layer 1"));
+  REQUIRE(raw_layers->Update(layer, ParameterizedLayerContent, std::string{"Updated"}, 2));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Updated 2"));
+  REQUIRE(raw_layers->Dismiss(layer));
+
+  const LayerId dialog = layer_dialogs->Show(ParameterizedDialogContent, std::string{"Dialog"}, 3);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Dialog 3"));
+  REQUIRE(layer_dialogs->Dismiss(dialog));
+  SettlePresentation(platform, runtime);
+
+  const LayerId sheet = layer_bottom_sheet->Show(ParameterizedBottomSheetContent, std::string{"Sheet"}, 4);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Sheet 4"));
+  REQUIRE(layer_bottom_sheet->Dismiss(sheet));
+  SettlePresentation(platform, runtime);
+
+  const LayerId popup =
+      layer_popup->ShowAt({80.0F, 40.0F}, ParameterizedPopupContent, std::string{"Popup"}, 5);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Popup 5"));
+  REQUIRE(layer_popup->Dismiss(popup));
 }
 
 TEST_CASE("TestPopupAndMenuHandlesReplaceTheirActiveEntries") {

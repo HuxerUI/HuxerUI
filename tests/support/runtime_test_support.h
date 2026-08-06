@@ -21,6 +21,8 @@ class Runtime;
 
 using huxerui::AnimateTo;
 using huxerui::Axis;
+using huxerui::BackEvent;
+using huxerui::BackPhase;
 using huxerui::BottomSheetContext;
 using huxerui::BottomSheetHandle;
 using huxerui::Button;
@@ -67,6 +69,8 @@ using huxerui::MenuHandle;
 using huxerui::MenuItem;
 using huxerui::MenuSection;
 using huxerui::MountedNode;
+using huxerui::NavigationController;
+using huxerui::NavigationStack;
 using huxerui::NodeExtension;
 using huxerui::Offset;
 using huxerui::Opacity;
@@ -148,6 +152,7 @@ using huxerui::UseDialog;
 using huxerui::UseEnvironment;
 using huxerui::UseEvents;
 using huxerui::UseMenu;
+using huxerui::UseNavigation;
 using huxerui::UsePopup;
 using huxerui::UseScrollController;
 using huxerui::UseService;
@@ -294,6 +299,10 @@ public:
 
   bool HandleBack() {
     return runtime_.HandleBack();
+  }
+
+  bool HandleBack(const BackEvent& event) {
+    return runtime_.HandleBack(event);
   }
 
   bool PerformTextInputAction(TextInputSessionId session_id, huxerui::TextInputAction action) {

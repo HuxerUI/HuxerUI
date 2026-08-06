@@ -99,6 +99,20 @@ struct KeyEvent {
   bool operator==(const KeyEvent&) const = default;
 };
 
+enum class BackPhase {
+  Begin,
+  Update,
+  Cancel,
+  Commit,
+};
+
+struct BackEvent {
+  BackPhase phase = BackPhase::Commit;
+  float progress = 1.0F;
+
+  bool operator==(const BackEvent&) const = default;
+};
+
 template <class... Arguments> struct Event {
   using Signature = void(Arguments...);
 };
@@ -112,6 +126,7 @@ struct ViewEvents {
   struct FocusChanged : Event<bool> {};
   struct KeyDown : Event<const KeyEvent&> {};
   struct KeyUp : Event<const KeyEvent&> {};
+  struct BackRequested : Event<> {};
 };
 
 struct ToggleEvents {

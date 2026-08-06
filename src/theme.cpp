@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <huxerui/modifier.h>
+#include <huxerui/navigation.h>
 #include <huxerui/presentation.h>
 
 #include "internal.h"
@@ -136,12 +137,24 @@ MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
   };
 }
 
+NavigationStyle FlatNavigationStyle(const ThemeSpec& theme) {
+  return {
+      .motion = NavigationMotion{
+          .entering_offset_fraction = {1.0F, 0.0F},
+          .covered_offset_fraction = {-1.0F, 0.0F},
+          .push = TweenSpec{.duration = theme.motion.normal},
+          .pop = TweenSpec{.duration = theme.motion.normal},
+      },
+  };
+}
+
 ThemeDefinition FlatDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(FlatToastStyle(theme));
   definition.Set(FlatDialogStyle(theme));
   definition.Set(FlatBottomSheetStyle(theme));
   definition.Set(FlatMenuStyle(theme));
+  definition.Set(FlatNavigationStyle(theme));
   return definition;
 }
 
@@ -543,6 +556,17 @@ MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
   };
 }
 
+NavigationStyle MaterialNavigationStyle(const ThemeSpec& theme) {
+  return {
+      .motion = NavigationMotion{
+          .entering_offset_fraction = {1.0F, 0.0F},
+          .covered_offset_fraction = {-0.2F, 0.0F},
+          .push = TweenSpec{.duration = theme.motion.slow},
+          .pop = TweenSpec{.duration = theme.motion.normal},
+      },
+  };
+}
+
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
@@ -562,6 +586,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialDialogStyle(theme));
   definition.Set(MaterialBottomSheetStyle(theme));
   definition.Set(MaterialMenuStyle(theme));
+  definition.Set(MaterialNavigationStyle(theme));
   return definition;
 }
 

@@ -1,11 +1,47 @@
 #include <huxerui/huxerui.h>
 
+#include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace huxerui;
 
-constexpr float gallery_width = 560.0F;
+constexpr std::size_t controls_page = 0;
+constexpr std::size_t layout_page = 1;
+constexpr std::size_t motion_page = 2;
+constexpr std::size_t tools_page = 3;
+
+const char* PageName(std::size_t page) {
+  switch (page) {
+  case controls_page:
+    return "Controls";
+  case layout_page:
+    return "Layout";
+  case motion_page:
+    return "Motion";
+  case tools_page:
+    return "Tools";
+  default:
+    return "Controls";
+  }
+}
+
+std::size_t ResolveGalleryPage(std::size_t selected_page, bool tools_as_page) {
+  return selected_page == tools_page && !tools_as_page ? controls_page : selected_page;
+}
+
+const char* ViewportName(ViewportClass viewport_class) {
+  switch (viewport_class) {
+  case ViewportClass::Compact:
+    return "Compact";
+  case ViewportClass::Medium:
+    return "Medium";
+  case ViewportClass::Expanded:
+    return "Expanded";
+  }
+  return "Unknown";
+}
 
 View Tag(std::string label, Color color) {
   return Text(std::move(label)).With(
@@ -44,7 +80,6 @@ VectorAsset GridIcon() {
 View Panel(View content) {
   const ThemeSpec& theme = UseTheme();
   return std::move(content).With(
-      Frame{.width = gallery_width},
       Padding(theme.spacing.medium),
       Background(theme.colors.surface),
       Shadow{
@@ -72,17 +107,17 @@ View ControlsDemo() {
   return Panel(
       Column {
         Text("Controls", TextRole::Title),
-        Row {
+        Flow {
           Button("Button").OnClick([] {}),
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
-        Row {
+        Flow {
           Chip(ListIcon(), "Action").OnClick([] {}),
           Chip(chip_selected ? "Selected" : "Selectable", chip_selected)
               .OnChanged([chip_selected](bool selected) { chip_selected = selected; }),
           Chip("Disabled", false).OnChanged([](bool) {}).With(Enabled(false)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
-        Row {
+        Column {
           SegmentedButton(
               {
                   SegmentedButtonItem("Day"),
@@ -92,16 +127,14 @@ View ControlsDemo() {
               period
           ).OnChanged([period](std::size_t index) { period = index; }),
           Text(period == 0 ? "Day view" : period == 1 ? "Week view" : "Month view"),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Start)),
+        Flow {
+          Checkbox(checkbox_checked ? "Checked" : "Unchecked", checkbox_checked)
+              .OnChanged([checkbox_checked](bool checked) { checkbox_checked = checked; }),
+          Switch(switch_checked ? "On" : "Off", switch_checked)
+              .OnChanged([switch_checked](bool checked) { switch_checked = checked; }),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
-        Row {
-          Checkbox(checkbox_checked ? "Checked" : "Unchecked", checkbox_checked).OnChanged(
-              [checkbox_checked](bool checked) { checkbox_checked = checked; }
-          ),
-          Switch(switch_checked ? "On" : "Off", switch_checked).OnChanged(
-              [switch_checked](bool checked) { switch_checked = checked; }
-          ),
-        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
-        Row {
+        Flow {
           RadioButton("Option A", radio_choice == 0).OnChanged([radio_choice](bool selected) {
             if (selected) {
               radio_choice = 0;
@@ -113,7 +146,7 @@ View ControlsDemo() {
             }
           }),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
-        Row {
+        Flow {
           ProgressCircle(),
           Text("Indeterminate"),
           ProgressCircle(progress),
@@ -139,15 +172,13 @@ View ControlsDemo() {
             .MaxLength(64)
             .Placeholder("Password")
             .Validation(Validate(password.Get().text, Required("Password is required")))
-            .OnChanged([password](const TextEditingValue& value) { password = value; })
-            .With(Frame{.width = gallery_width - theme.spacing.extra_large}),
+            .OnChanged([password](const TextEditingValue& value) { password = value; }),
         TextField(message)
             .LineLimits(TextFieldLineLimits::MultiLine(3, 5))
             .MaxLength(240)
             .Placeholder("Message")
-            .OnChanged([message](const TextEditingValue& value) { message = value; })
-            .With(Frame{.width = gallery_width - theme.spacing.extra_large}),
-      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+            .OnChanged([message](const TextEditingValue& value) { message = value; }),
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
   );
 }
 
@@ -156,7 +187,7 @@ View LayoutDemo() {
   return Panel(
       Column {
         Text("Layout", TextRole::Title),
-        Divider().With(Frame{.width = gallery_width - theme.spacing.extra_large}),
+        Divider(),
         Row {
           Tag("Fixed", theme.colors.error),
           Text("Grow").With(
@@ -167,11 +198,7 @@ View LayoutDemo() {
               Grow()
           ),
           Tag("Trailing", Color::Rgb(26, 127, 55)),
-        }.With(
-            Frame{.width = gallery_width - theme.spacing.extra_large},
-            Spacing(theme.spacing.small),
-            CrossAlign(CrossAxisAlignment::Center)
-        ),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
         Row {
           Text("Horizontal"),
           Divider(Axis::Vertical).With(Frame{.height = 24.0F}),
@@ -185,7 +212,7 @@ View LayoutDemo() {
           Tag("Native", theme.colors.primary),
           Tag("C++", Color::Rgb(26, 127, 55)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
-      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
   );
 }
 
@@ -197,44 +224,167 @@ View MotionDemo() {
   return Panel(
       Column {
         Text("Motion", TextRole::Title),
-        Row {
+        Flow {
           Button(transformed ? "Reset" : "Transform").OnClick([transformed] { transformed = !transformed; }),
           Tag("Scale + rotation", Color::Rgb(130, 80, 223)).With(
               Scale(AnimateTo(transformed ? 1.2F : 1.0F, TweenSpec(theme.motion.normal, Easing::EaseOut))),
               Rotation(AnimateTo(transformed ? 10.0F : 0.0F, SpringSpec()))
           ),
         }.With(Spacing(theme.spacing.large), CrossAlign(CrossAxisAlignment::Center)),
-      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+      }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
   );
 }
 
-View GalleryContent() {
-  auto& theme = UseTheme();
-  return ScrollView {
-    Column {
-      Text("UI Gallery").With(FontSize(28.0F)),
-      Text("Controls, layout, and motion in one compact overview", TextRole::Label),
-      ControlsDemo(),
-      LayoutDemo(),
-      MotionDemo(),
-    }.With(
+View ToolValue(const char* label, const char* value) {
+  const ThemeSpec& theme = UseTheme();
+  return Row {
+    Text(label, TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    Spacer(),
+    Text(value),
+  }.With(CrossAlign(CrossAxisAlignment::Center));
+}
+
+View GalleryToolsContent(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text("Tools", TextRole::Title),
+    Text("Appearance", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    SegmentedButton({"Material", "Flat"}, theme_family)
+        .OnChanged([theme_family](std::size_t index) { theme_family = index; }),
+    Switch(dark_mode ? "Dark mode" : "Light mode", dark_mode)
+        .OnChanged([dark_mode](bool enabled) { dark_mode = enabled; }),
+    Divider(),
+    Text("Context", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    ToolValue("Page", PageName(selected_page)),
+    ToolValue("Viewport", ViewportName(UseViewportClass())),
+  }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+View GalleryNavigation() {
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text("HuxerUI", TextRole::Title),
+    Text("UI Gallery", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    Divider(),
+    Text("Workspace", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    Text("Component gallery").With(
+        Padding(EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small)),
+        Background(theme.colors.secondary_container),
+        Foreground(theme.colors.on_secondary_container),
+        CornerRadius(theme.shapes.medium)
+    ),
+    Spacer(),
+    Text("Navigation drawer", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
+    Text("Reserved for additional destinations.", TextRole::Label)
+        .With(Foreground(theme.colors.on_surface_variant)),
+  }.With(
+      Frame{.width = 208.0F},
+      Padding(theme.spacing.large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.surface_container_low),
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
+}
+
+View GalleryTools(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+  const ThemeSpec& theme = UseTheme();
+  return GalleryToolsContent(selected_page, theme_family, dark_mode).With(
+      Frame{.width = 248.0F},
+      Padding(theme.spacing.large),
+      Background(theme.colors.surface_container_low)
+  );
+}
+
+View GalleryPage(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+  switch (selected_page) {
+  case controls_page:
+    return ControlsDemo();
+  case layout_page:
+    return LayoutDemo();
+  case motion_page:
+    return MotionDemo();
+  case tools_page:
+    return Panel(GalleryToolsContent(selected_page, theme_family, dark_mode));
+  default:
+    return ControlsDemo();
+  }
+}
+
+View GalleryMain(
+    State<std::size_t> selected_page, State<std::size_t> theme_family, State<bool> dark_mode, bool tools_as_page
+) {
+  const ThemeSpec& theme = UseTheme();
+  const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), tools_as_page);
+  std::vector<StringVariant> tabs{"Controls", "Layout", "Motion"};
+  if (tools_as_page) {
+    tabs.emplace_back("Tools");
+  }
+
+  return Column {
+    Text("UI Gallery").With(FontSize(28.0F)),
+    Text("Controls, layout, and motion in one responsive workspace", TextRole::Label)
+        .With(Foreground(theme.colors.on_surface_variant)),
+    Tabs(std::move(tabs), active_page)
+        .OnChanged([selected_page](std::size_t index) { selected_page = index; }),
+    ScrollView {
+      Column {
+        GalleryPage(active_page, theme_family, dark_mode),
+      }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
+    }.With(ScrollBar(), Grow()),
+  }.With(
       Padding(theme.spacing.large),
       Spacing(theme.spacing.medium),
       Background(theme.colors.background),
-      CrossAlign(CrossAxisAlignment::Center)
-    )
-  }.With(ScrollBar());
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
+}
+
+View GalleryShell(State<std::size_t> selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+  const ThemeSpec& theme = UseTheme();
+  const ViewportClass viewport_class = UseViewportClass();
+  if (viewport_class == ViewportClass::Compact) {
+    return GalleryMain(selected_page, theme_family, dark_mode, true);
+  }
+
+  if (viewport_class == ViewportClass::Medium) {
+    const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), false);
+    return Row {
+      GalleryMain(selected_page, theme_family, dark_mode, false).With(Grow()),
+      Divider(Axis::Vertical),
+      GalleryTools(active_page, theme_family, dark_mode),
+    }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch));
+  }
+
+  const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), false);
+  return Row {
+    GalleryNavigation(),
+    Divider(Axis::Vertical),
+    GalleryMain(selected_page, theme_family, dark_mode, false).With(Grow()),
+    Divider(Axis::Vertical),
+    GalleryTools(active_page, theme_family, dark_mode),
+  }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch));
 }
 
 View App() {
-  return MaterialTheme(GalleryContent);
+  auto selected_page = UseState<std::size_t>(0);
+  auto theme_family = UseState<std::size_t>(0);
+  auto dark_mode = UseState(false);
+
+  if (theme_family == 1) {
+    return dark_mode ? FlatDarkTheme(GalleryShell, selected_page, theme_family, dark_mode)
+                     : FlatTheme(GalleryShell, selected_page, theme_family, dark_mode);
+  }
+
+  return dark_mode ? MaterialDarkTheme(GalleryShell, selected_page, theme_family, dark_mode)
+                   : MaterialTheme(GalleryShell, selected_page, theme_family, dark_mode);
 }
 
 HUXERUI_APP(
     App,
     {
         .title = "HuxerUI UI Gallery",
-        .width = 640.0F,
-        .height = 640.0F,
+        .width = 1200.0F,
+        .height = 760.0F,
+        .viewport_breakpoints = ViewportBreakpoints{720.0F, 1040.0F},
     }
 )

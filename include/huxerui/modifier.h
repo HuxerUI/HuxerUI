@@ -92,6 +92,12 @@ public:
     static_cast<void>(event);
   }
 
+  [[nodiscard]] virtual bool OnBack(MountedNode& node, const BackEvent& event) {
+    static_cast<void>(node);
+    static_cast<void>(event);
+    return false;
+  }
+
   [[nodiscard]] virtual std::shared_ptr<TextInputClient> GetTextInputClient() noexcept {
     return {};
   }

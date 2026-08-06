@@ -11,6 +11,7 @@
 #include <huxerui/layout.h>
 #include <huxerui/layer.h>
 #include <huxerui/modifier.h>
+#include <huxerui/navigation.h>
 #include <huxerui/paint.h>
 #include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>

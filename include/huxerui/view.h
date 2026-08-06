@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <typeindex>
 #include <utility>
@@ -171,6 +172,25 @@ private:
 namespace detail {
 
 std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor& layout, std::vector<View> children);
+
+template <class Factory, class... Arguments>
+concept ViewFactoryFor =
+    std::copy_constructible<std::decay_t<Factory>> && (std::copy_constructible<std::decay_t<Arguments>> && ...) &&
+    requires(std::decay_t<Factory>& factory, const std::decay_t<Arguments>&... arguments) {
+      { std::invoke(factory, arguments...) } -> std::convertible_to<View>;
+    };
+
+template <class Factory, class... Arguments>
+  requires ViewFactoryFor<Factory, Arguments...>
+std::function<View()> BindViewFactory(Factory&& factory, Arguments&&... arguments) {
+  using StoredFactory = std::decay_t<Factory>;
+  using StoredArguments = std::tuple<std::decay_t<Arguments>...>;
+  StoredFactory stored_factory(std::forward<Factory>(factory));
+  StoredArguments stored_arguments(std::forward<Arguments>(arguments)...);
+  return [factory = std::move(stored_factory), arguments = std::move(stored_arguments)]() mutable -> View {
+    return std::apply([&factory](const auto&... values) -> View { return std::invoke(factory, values...); }, arguments);
+  };
+}
 
 } // namespace detail
 
@@ -805,9 +825,10 @@ class Scope final : public View {
 public:
   explicit Scope(std::function<View()> factory);
 
-  template <class Function>
-    requires std::invocable<Function&> && std::convertible_to<std::invoke_result_t<Function&>, View>
-  explicit Scope(Function&& factory) : Scope(std::function<View()>(std::forward<Function>(factory))) {}
+  template <class Factory, class... Arguments>
+    requires detail::ViewFactoryFor<Factory, Arguments...>
+  explicit Scope(Factory&& factory, Arguments&&... arguments)
+      : Scope(detail::BindViewFactory(std::forward<Factory>(factory), std::forward<Arguments>(arguments)...)) {}
 };
 
 class SelectionArea final : public View {
