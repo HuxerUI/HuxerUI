@@ -687,6 +687,12 @@ public:
   explicit Canvas(CanvasPainter painter);
 };
 
+enum class TextFieldVariant {
+  Filled,
+  Outlined,
+  Standard,
+};
+
 class TextFieldLineLimits final {
 public:
   static TextFieldLineLimits SingleLine() noexcept;
@@ -721,10 +727,21 @@ public:
   explicit TextField(TextEditingValue value);
   explicit TextField(const State<TextEditingValue>& value) : TextField(value.Get()) {}
 
+  TextField Label(StringResource resource) &&;
+  TextField Label(std::string value) &&;
+  TextField Label(std::string_view value) &&;
+  TextField Label(const char* value) &&;
   TextField Placeholder(StringResource resource) &&;
   TextField Placeholder(std::string value) &&;
   TextField Placeholder(std::string_view value) &&;
   TextField Placeholder(const char* value) &&;
+  TextField LeadingIcon(ImageResource resource) &&;
+  TextField LeadingIcon(ImageAsset asset) &&;
+  TextField LeadingIcon(VectorAsset asset) &&;
+  TextField TrailingIcon(ImageResource resource) &&;
+  TextField TrailingIcon(ImageAsset asset) &&;
+  TextField TrailingIcon(VectorAsset asset) &&;
+  TextField Variant(TextFieldVariant value) &&;
   TextField LineLimits(TextFieldLineLimits value) &&;
   TextField MaxLength(std::size_t value) &&;
   TextField Validation(ValidationResult value) &&;
@@ -740,10 +757,16 @@ public:
   }
 
 private:
+  using Icon = std::variant<ImageAsset, VectorAsset>;
+
   void UpdateModifier();
 
   TextEditingValue value_;
+  std::string label_;
   std::string placeholder_;
+  std::optional<Icon> leading_icon_;
+  std::optional<Icon> trailing_icon_;
+  std::optional<TextFieldVariant> variant_;
   TextInputConfiguration configuration_;
   TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();
   std::optional<std::size_t> max_length_;

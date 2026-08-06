@@ -536,7 +536,8 @@ View LoginForm() {
   auto name = UseState(TextEditingValue::FromText(""));
 
   return TextField(name)
-      .Placeholder("Name")
+      .Label("Name")
+      .Placeholder("Enter your name")
       .OnChanged([name](const TextEditingValue& value) mutable {
         name = value;
       })
@@ -561,6 +562,22 @@ struct TextFieldEvents {
 `TextFieldEvents` belongs in `event.h`, following the existing `ToggleEvents` convention.
 
 `OnChanged()` and `OnSubmitted()` are convenience wrappers over the matching typed events.
+
+`Label()` and `Placeholder()` have separate presentation roles.
+When an empty field is unfocused, its label occupies the input line and its placeholder is hidden.
+Focus or non-empty text moves the label to the selected variant's floating position; an empty focused field then reveals its placeholder.
+A TextField without a label retains placeholder-only behavior.
+The label transition is retained visual state and uses the resolved Theme motion duration without recomposing application state.
+
+`Variant(TextFieldVariant::Standard)` uses a transparent container and bottom state indicator.
+`Variant(TextFieldVariant::Filled)` adds a top-rounded container fill to the same indicator and label geometry.
+`Variant(TextFieldVariant::Outlined)` uses a full outline interrupted by the floating label.
+Material defaults to Filled while Flat defaults to Standard; an explicit variant is stable across themes.
+
+`LeadingIcon()` and `TrailingIcon()` accept image resources, raster assets, and vector assets.
+They are decorative content within the editor geometry rather than independent controls.
+Their occupied width participates in text layout, selection, caret geometry, scrolling, and native text-input geometry.
+Vector assets resolve the TextField state color, while raster assets retain their encoded colors.
 
 Text semantics such as placeholder, multiline behavior, keyboard type, and submission action are component configuration. Intrinsic line limits and input length limits follow the same rule:
 
@@ -746,19 +763,22 @@ TextField is a leaf node. A single-line field has the intrinsic height provided 
 The content pipeline is:
 
 ```text
-background and border
+variant background
 selection rectangles
-text or placeholder
+text, placeholder, or expanded label
 composition underline
 caret
-focused or validation border
+decorative icons and supporting text
+bottom indicator or outlined border
+floating label
 ```
 
 The current `PaintContext` already provides the necessary primitives:
 
-- `DrawRect` for selection, caret, and a thin composition underline.
-- `DrawText` for text and placeholder.
-- `DrawBorder` for the field border.
+- `DrawRect` for selection, caret, a thin composition underline, and Standard or Filled state indicators.
+- `DrawText` for text, labels, placeholders, and supporting text.
+- `DrawBorder` for an ordinary field border and `StrokePath` for an outlined border interrupted by a floating label.
+- `DrawImageRect` for decorative raster and vector icons.
 - `PushClip` and `PopClip` for content clipping.
 
 TextField does not require a component-specific drawing command.
@@ -769,7 +789,7 @@ A multiline field maintains a retained vertical scroll offset when its content i
 
 The field participates in the same retained scroll chain as other scrollable nodes. Wheel and touch movement scroll the field first and pass unconsumed movement to an enclosing scroll container. Mouse and pen dragging retain text selection semantics, and dragging a selection beyond the viewport advances the internal text offset. Manual scrolling temporarily suppresses automatic caret reveal until editing or navigation resumes.
 
-The caret blink timer is retained by the TextField extension. It requests frames through the existing mounted extension scheduling path and respects reduced motion where appropriate. Pointer or keyboard edits reset the visible caret phase.
+The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. The resolved `caret_width` controls only painted caret thickness; text hit testing, scrolling, and native input geometry continue to use the logical caret boundary from TextLayout.
 
 The first pointer behavior includes:
 
@@ -785,26 +805,53 @@ Mouse or pen double-click selects a word immediately. Touch double-tap selects o
 TextField uses a semantic style key:
 
 ```cpp
-struct TextFieldStyle {
+struct TextFieldVariantStyle {
   Color background;
-  TextStyle text_style;
-  TextStyle placeholder_style;
-  Color disabled_text;
-  Color disabled_placeholder;
-  Color disabled_supporting_text;
-  Color selection;
-  Color caret;
-  Color error_caret;
-  Color composition;
+  std::optional<Color> disabled_background;
   Color border;
   Color hovered_border;
   Color focused_border;
   Color disabled_border;
+  float minimum_height = 0.0F;
+};
+
+struct TextFieldStyle {
+  TextFieldVariant variant;
+  TextFieldVariantStyle standard;
+  TextFieldVariantStyle filled;
+  TextFieldVariantStyle outlined;
+  TextStyle text_style;
+  TextStyle label_style;
+  TextStyle floating_label_style;
+  TextStyle placeholder_style;
+  Color disabled_text;
+  Color focused_label;
+  Color disabled_label;
+  Color error_label;
+  Color disabled_placeholder;
+  Color disabled_supporting_text;
+  Color leading_icon;
+  Color focused_leading_icon;
+  Color disabled_leading_icon;
+  Color error_leading_icon;
+  Color trailing_icon;
+  Color focused_trailing_icon;
+  Color disabled_trailing_icon;
+  Color error_trailing_icon;
+  Color selection;
+  Color caret;
+  Color error_caret;
+  Color composition;
+  float caret_width = 1.0F;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 0.0F;
   EdgeInsets padding;
-  float minimum_height = 0.0F;
+  float leading_icon_size = 0.0F;
+  float trailing_icon_size = 0.0F;
+  float icon_spacing = 0.0F;
+  float label_cutout_padding = 0.0F;
+  double label_animation_duration = 0.0;
   double caret_blink_interval = 0.5;
   Color validation_error;
   float validation_border_width = 1.0F;
@@ -816,11 +863,15 @@ struct TextFieldStyle {
 };
 ```
 
-Flat and Material Theme definitions provide their own TextField styles. TextField draws its hover, focus, validation, and disabled states from `TextFieldStyle`, so the common node indication and focus ring do not surround supporting text. Hover changes only the editor outline, and disabled colors are resolved per element instead of reducing the opacity of the complete field subtree.
+Flat and Material Theme definitions provide their own TextField styles. Material defaults to a 56-unit Filled field and provides 56-unit Standard and Outlined alternatives. Flat defaults to a 36-unit Standard field, retains a 36-unit Outlined alternative, and provides a 44-unit compact Filled alternative. Material paints a 2-unit caret and uses 24-unit leading and trailing icons, while Flat retains a 1-unit caret and 18-unit icons.
+
+Standard uses a transparent container and bottom state indicator. Filled adds a top-rounded container fill to the same indicator geometry. Outlined keeps the same radius on all four corners and uses a segmented top outline so a floating label does not depend on painting an opaque background over the border. Material Filled and Standard indicators use `on_surface_variant`, while Outlined uses `outline`; hover, focus, and disabled colors also resolve from the selected variant bundle. Container backgrounds are painted only within the editor frame and never extend through supporting text.
+
+Each `TextFieldVariantStyle` owns one variant's background, optional disabled background, stateful border colors, and minimum height. An absent disabled background falls back to the ordinary background. `TextFieldStyle::variant` selects the Theme default, while an explicit component variant selects the corresponding bundle without duplicating active aliases. TextField draws its hover, focus, validation, and disabled states from these style values, so the common node indication and focus ring do not surround supporting text. Hover changes only the variant's indicator or outline, and disabled colors are resolved per element instead of reducing the opacity of the complete field subtree.
 
 `TextFieldStyle` belongs in `theme.h` with the existing built-in component styles. Its type is also its Theme override identity.
 
-Text input configuration, selection behavior, and placeholder content are not Theme values.
+Text input configuration, selection behavior, an explicit variant, label and placeholder content, and icon assets are not Theme values.
 
 The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Menu surfaces, typography, shapes, and pressed states use the current Theme. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Material menu items use the shared ripple indication, while Flat menu items use the shared hover and pressed state overlay. Editing actions execute on release; the menu becomes non-interactive until the indication exit animation finishes. The public Menu service has separate LayerStack lifecycle, anchoring, focus, and dismissal; sharing a future menu-item visual component does not move text selection into the public LayerStack.
 

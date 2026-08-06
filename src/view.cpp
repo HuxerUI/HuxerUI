@@ -1833,13 +1833,14 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   if (spec.kind == detail::NodeKind::TextField) {
     const TextFieldStyle style =
         ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
+    const TextFieldVariantStyle& variant_style = detail::ResolveTextFieldVariantStyle(style, style.variant);
     spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), detail::MakeErasedLayoutValue(style));
     spec.properties.focus_ring_width = 0.0F;
     spec.properties.padding = style.padding;
-    spec.properties.background = style.background;
+    spec.properties.background = variant_style.background;
     spec.properties.text_style = style.text_style;
-    spec.properties.corner_radii = style.corner_radius;
-    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+    spec.properties.corner_radii = detail::ResolveTextFieldCornerRadii(style, style.variant);
+    spec.properties.frame.min_height = std::max(0.0F, variant_style.minimum_height);
     spec.properties.disabled_opacity = 1.0F;
     return;
   }

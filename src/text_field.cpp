@@ -1,4 +1,6 @@
 #include "internal.h"
+#include "geometry_internal.h"
+#include "resource_internal.h"
 #include "text_field_internal.h"
 #include "text_input_internal.h"
 #include "text_layout_internal.h"
@@ -10,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -171,6 +174,149 @@ void ValidateLimits(
   }
 }
 
+Rect ContainedIconBounds(Size intrinsic, Rect bounds) {
+  if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || bounds.IsEmpty()) {
+    return {};
+  }
+  const float scale = std::min(bounds.width / intrinsic.width, bounds.height / intrinsic.height);
+  const Size size{
+      intrinsic.width * scale,
+      intrinsic.height * scale,
+  };
+  return {
+      bounds.x + (bounds.width - size.width) * 0.5F,
+      bounds.y + (bounds.height - size.height) * 0.5F,
+      size.width,
+      size.height,
+  };
+}
+
+Color InterpolateTextFieldColor(Color from, Color to, float progress) {
+  progress = std::clamp(progress, 0.0F, 1.0F);
+  return {
+      from.red + (to.red - from.red) * progress,
+      from.green + (to.green - from.green) * progress,
+      from.blue + (to.blue - from.blue) * progress,
+      from.alpha + (to.alpha - from.alpha) * progress,
+  };
+}
+
+void PaintTextFieldIcon(PaintContext& context, const detail::TextFieldModifier::Icon& icon, Rect bounds, Color tint) {
+  std::visit(
+      [&](const auto& asset) {
+        const Size intrinsic = asset.IntrinsicSize();
+        const Rect destination = ContainedIconBounds(intrinsic, bounds);
+        if (destination.IsEmpty()) {
+          return;
+        }
+        const Rect source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
+        using Asset = std::decay_t<decltype(asset)>;
+        if constexpr (std::is_same_v<Asset, ImageAsset>) {
+          context.DrawImageRect(asset, source, destination, ImageSampling::Linear);
+        } else {
+          context.DrawImageRect(asset, source, destination, tint);
+        }
+      },
+      icon
+  );
+}
+
+Path OutlinedBorderPath(Rect frame, float width, CornerRadii corner_radii, float gap_start, float gap_end) {
+  const float inset = width * 0.5F;
+  const Rect centerline{
+      frame.x + inset,
+      frame.y + inset,
+      std::max(0.0F, frame.width - width),
+      std::max(0.0F, frame.height - width),
+  };
+  corner_radii = {
+      std::max(0.0F, corner_radii.top_left - inset),
+      std::max(0.0F, corner_radii.top_right - inset),
+      std::max(0.0F, corner_radii.bottom_right - inset),
+      std::max(0.0F, corner_radii.bottom_left - inset),
+  };
+  corner_radii = detail::NormalizeCornerRadii(centerline, corner_radii);
+  const float right = centerline.x + centerline.width;
+  const float bottom = centerline.y + centerline.height;
+  const float minimum_gap = centerline.x + corner_radii.top_left;
+  const float maximum_gap = right - corner_radii.top_right;
+  if (maximum_gap <= minimum_gap) {
+    return Path::RoundedRect(centerline, corner_radii);
+  }
+  const float start = std::clamp(gap_start, minimum_gap, maximum_gap);
+  const float end = std::clamp(gap_end, start, maximum_gap);
+  if (end <= start) {
+    return Path::RoundedRect(centerline, corner_radii);
+  }
+
+  constexpr float cubic_circle = 0.5522847498F;
+  Path path;
+  path.MoveTo({end, centerline.y})
+      .LineTo({right - corner_radii.top_right, centerline.y})
+      .CubicTo(
+          {right - corner_radii.top_right * (1.0F - cubic_circle), centerline.y},
+          {right, centerline.y + corner_radii.top_right * (1.0F - cubic_circle)},
+          {right, centerline.y + corner_radii.top_right}
+      )
+      .LineTo({right, bottom - corner_radii.bottom_right})
+      .CubicTo(
+          {right, bottom - corner_radii.bottom_right * (1.0F - cubic_circle)},
+          {right - corner_radii.bottom_right * (1.0F - cubic_circle), bottom},
+          {right - corner_radii.bottom_right, bottom}
+      )
+      .LineTo({centerline.x + corner_radii.bottom_left, bottom})
+      .CubicTo(
+          {centerline.x + corner_radii.bottom_left * (1.0F - cubic_circle), bottom},
+          {centerline.x, bottom - corner_radii.bottom_left * (1.0F - cubic_circle)},
+          {centerline.x, bottom - corner_radii.bottom_left}
+      )
+      .LineTo({centerline.x, centerline.y + corner_radii.top_left})
+      .CubicTo(
+          {centerline.x, centerline.y + corner_radii.top_left * (1.0F - cubic_circle)},
+          {centerline.x + corner_radii.top_left * (1.0F - cubic_circle), centerline.y},
+          {centerline.x + corner_radii.top_left, centerline.y}
+      )
+      .LineTo({start, centerline.y});
+  return path;
+}
+
+bool UsesTextFieldIndicator(TextFieldVariant variant) {
+  return variant != TextFieldVariant::Outlined;
+}
+
+struct TextFieldVariantVisual {
+  std::optional<TextFieldVariant> variant;
+  bool clear_node_background = false;
+
+  static const detail::ModifierDescriptor& Descriptor() {
+    static const detail::ModifierDescriptor descriptor{
+        [](detail::ViewSpec& spec, const void* value) {
+          TextFieldStyle style = TextFieldStyle::Default();
+          const auto found = spec.layout_values.find(typeid(detail::ResolvedTextFieldStyle));
+          if (found != spec.layout_values.end()) {
+            if (const auto* resolved = std::any_cast<TextFieldStyle>(&found->second.value)) {
+              style = *resolved;
+            }
+          }
+          const auto* visual = static_cast<const TextFieldVariantVisual*>(value);
+          const TextFieldVariant variant = visual->variant.value_or(style.variant);
+          if (visual->clear_node_background) {
+            spec.properties.background = Color::Transparent();
+          }
+          const TextFieldVariantStyle& variant_style = detail::ResolveTextFieldVariantStyle(style, variant);
+          spec.properties.frame.min_height = std::max(0.0F, variant_style.minimum_height);
+          spec.properties.corner_radii = detail::ResolveTextFieldCornerRadii(style, variant);
+        },
+        nullptr,
+        nullptr,
+        false,
+        nullptr,
+        nullptr,
+    };
+    return descriptor;
+  }
+};
+
 class TextFieldClient final : public TextInputClient, public TextSelectionClient {
 public:
   void Attach(detail::MountedNode& node) noexcept {
@@ -186,6 +332,9 @@ public:
     ValidateLimits(modifier.configuration, modifier.min_lines, modifier.max_lines);
     if (!detail::IsValidTextEditingValue(modifier.value)) {
       throw std::invalid_argument("HuxerUI TextField value is invalid");
+    }
+    if (!detail::Utf16Length(modifier.label).has_value()) {
+      throw std::invalid_argument("HuxerUI TextField label must contain valid UTF-8");
     }
     if (!detail::Utf16Length(modifier.placeholder).has_value()) {
       throw std::invalid_argument("HuxerUI TextField placeholder must contain valid UTF-8");
@@ -204,6 +353,7 @@ public:
                          configuration_.secure != modifier.configuration.secure);
     const bool length_limit_changed = initialized_ && max_length_ != modifier.max_length;
     const bool validation_changed = validation_ != modifier.validation;
+    const bool label_changed = label_ != modifier.label;
     configuration_ = modifier.configuration;
     min_lines_ = modifier.min_lines;
     max_lines_ = modifier.max_lines;
@@ -213,17 +363,25 @@ public:
       ClearHistory();
     }
     ConfigureScrollNode(node);
+    label_ = modifier.label;
     placeholder_ = modifier.placeholder;
+    leading_icon_ = modifier.leading_icon;
+    trailing_icon_ = modifier.trailing_icon;
 
     TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyle::Default());
-    next_style.background = node.properties.background.value_or(next_style.background);
+    const TextFieldVariant next_variant = modifier.variant.value_or(next_style.variant);
+    const TextFieldVariantStyle next_variant_style = detail::ResolveTextFieldVariantStyle(next_style, next_variant);
     next_style.text_style = node.properties.text_style;
     corner_radii_ = node.properties.corner_radii;
     if (!initialized_ || text_layout_mode_changed || next_style.text_style.font != style_.text_style.font ||
+        next_style.label_style.font != style_.label_style.font ||
+        next_style.floating_label_style.font != style_.floating_label_style.font ||
         next_style.placeholder_style.font != style_.placeholder_style.font ||
-        next_style.validation_text_style.font != style_.validation_text_style.font ||
+        next_style.validation_text_style.font != style_.validation_text_style.font || label_changed ||
         placeholder_ != laid_out_placeholder_ || validation_changed) {
       text_layout_.reset();
+      label_layout_.reset();
+      floating_label_layout_.reset();
       placeholder_layout_.reset();
       validation_layout_.reset();
     }
@@ -233,19 +391,24 @@ public:
       RequestCaretReveal();
     }
     style_ = next_style;
+    variant_style_ = next_variant_style;
+    variant_ = next_variant;
 
     if (!initialized_) {
       editing_.value = modifier.value;
       initialized_ = true;
+      UpdateLabelTarget(node.focused);
       return;
     }
 
     const bool acknowledged = last_emitted_.has_value() && modifier.value == *last_emitted_;
     if (acknowledged) {
       last_emitted_.reset();
+      UpdateLabelTarget(node.focused);
       return;
     }
     if (modifier.value == editing_.value) {
+      UpdateLabelTarget(node.focused);
       return;
     }
     if (modifier.value.composition.has_value()) {
@@ -272,6 +435,7 @@ public:
     preferred_caret_x_.reset();
     RequestCaretReveal();
     ResetCaretBlink();
+    UpdateLabelTarget(node.focused);
   }
 
   Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
@@ -281,6 +445,8 @@ public:
     if (next_layout_width != text_layout_width_) {
       text_layout_width_ = next_layout_width;
       text_layout_.reset();
+      label_layout_.reset();
+      floating_label_layout_.reset();
       placeholder_layout_.reset();
       RequestCaretReveal();
     }
@@ -292,14 +458,15 @@ public:
     }
     EnsureLayouts(platform);
     const Size text_size = text_layout_->Measure();
+    const Size label_size = label_layout_ ? label_layout_->Measure() : Size{};
+    const Size floating_label_size = floating_label_layout_ ? floating_label_layout_->Measure() : Size{};
     const Size placeholder_size = placeholder_layout_ ? placeholder_layout_->Measure() : Size{};
     const Size validation_size = validation_layout_ ? validation_layout_->Measure() : Size{};
-    const float content_width = std::max({
-        text_size.width,
-        placeholder_size.width,
-        validation_size.width,
-    });
-    const float full_editor_height = std::max(text_size.height, placeholder_size.height);
+    const float editor_content_width =
+        std::max({text_size.width, label_size.width, floating_label_size.width, placeholder_size.width}) +
+        IconContentWidth();
+    const float content_width = std::max(editor_content_width, validation_size.width);
+    const float full_editor_height = std::max({text_size.height, label_size.height, placeholder_size.height});
     if (node.scroll_state) {
       node.scroll_state->content_width = text_size.width;
       node.scroll_state->content_height = full_editor_height + ValidationAreaHeight();
@@ -311,8 +478,12 @@ public:
       if (max_lines_.has_value()) {
         editor_height = std::min(editor_height, line_height * static_cast<float>(*max_lines_));
       }
+      if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
+        editor_height += floating_label_size.height;
+      }
     }
-    const float minimum_editor_height = std::max(0.0F, style_.minimum_height - node.properties.padding.Vertical());
+    const float minimum_editor_height =
+        std::max(0.0F, variant_style_.minimum_height - node.properties.padding.Vertical());
     editor_height = std::max(editor_height, minimum_editor_height);
     return constraints.Constrain({
         content_width,
@@ -340,7 +511,10 @@ public:
     const bool enabled = node.IsEnabled();
     const bool disabled_visual_state = node.disabled_visual_state;
     const bool invalid = validation_.IsInvalid();
+    const float label_progress = std::clamp(label_progress_.Value(), 0.0F, 1.0F);
     TextStyle text_style = style_.text_style;
+    TextStyle label_style = style_.label_style;
+    TextStyle floating_label_style = style_.floating_label_style;
     TextStyle placeholder_style = style_.placeholder_style;
     if (disabled_visual_state) {
       text_style.foreground = style_.disabled_text;
@@ -349,6 +523,12 @@ public:
     const Rect editor_frame = EditorFrame(node);
     const Rect content = EditorContentRect(node);
     const Point origin = TextOrigin(node);
+    const Color background = disabled_visual_state
+                                 ? variant_style_.disabled_background.value_or(variant_style_.background)
+                                 : variant_style_.background;
+    if (background.alpha > 0.0F) {
+      context.DrawRect(editor_frame, background, corner_radii_);
+    }
     context.PushClip(content, corner_radii_);
 
     if (enabled && !editing_.value.selection.IsCollapsed()) {
@@ -357,8 +537,10 @@ public:
       }
     }
 
-    if (editing_.value.text.empty() && !placeholder_.empty() && placeholder_layout_) {
+    const float placeholder_opacity = label_.empty() ? 1.0F : label_progress;
+    if (editing_.value.text.empty() && !placeholder_.empty() && placeholder_layout_ && placeholder_opacity > 0.0F) {
       const Size size = placeholder_layout_->Measure();
+      placeholder_style.foreground.alpha *= placeholder_opacity;
       context.DrawText(
           {
               origin.x,
@@ -369,7 +551,7 @@ public:
           placeholder_,
           std::move(placeholder_style)
       );
-    } else {
+    } else if (!editing_.value.text.empty()) {
       const Size size = text_layout_->Measure();
       context.DrawText(
           {
@@ -403,10 +585,17 @@ public:
           text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity),
           origin
       );
-      caret.width = std::max(1.0F, caret.width);
+      caret.width = std::max({1.0F, style_.caret_width, caret.width});
       context.DrawRect(caret, invalid ? style_.error_caret : style_.caret);
     }
     context.PopClip();
+
+    if (leading_icon_.has_value()) {
+      PaintTextFieldIcon(context, *leading_icon_, IconBounds(node, true), ResolveIconColor(node, invalid, true));
+    }
+    if (trailing_icon_.has_value()) {
+      PaintTextFieldIcon(context, *trailing_icon_, IconBounds(node, false), ResolveIconColor(node, invalid, false));
+    }
 
     if (validation_layout_) {
       const Rect node_content = node.ContentBounds();
@@ -432,21 +621,66 @@ public:
     }
 
     float border_width = std::max(0.0F, style_.border_width);
-    Color border = style_.border;
+    Color border = variant_style_.border;
     if (disabled_visual_state) {
-      border = style_.disabled_border;
+      border = variant_style_.disabled_border;
     } else if (invalid) {
       border_width =
           std::max(0.0F, node.focused ? style_.focused_validation_border_width : style_.validation_border_width);
       border = style_.validation_error;
     } else if (node.focused) {
       border_width = std::max(0.0F, style_.focused_border_width);
-      border = style_.focused_border;
+      border = variant_style_.focused_border;
     } else if (hovered) {
-      border = style_.hovered_border;
+      border = variant_style_.hovered_border;
     }
     if (border_width > 0.0F && border.alpha > 0.0F) {
-      context.DrawBorder(editor_frame, border, border_width, corner_radii_);
+      if (UsesTextFieldIndicator(variant_)) {
+        const float indicator_height = std::min(editor_frame.height, border_width);
+        context.DrawRect(
+            {
+                editor_frame.x,
+                editor_frame.y + editor_frame.height - indicator_height,
+                editor_frame.width,
+                indicator_height,
+            },
+            border
+        );
+      } else if (floating_label_layout_ && label_progress > 0.0F) {
+        const Rect label_bounds = FloatingLabelBounds(node);
+        const float gap_half_width =
+            (label_bounds.width + std::max(0.0F, style_.label_cutout_padding) * 2.0F) * label_progress * 0.5F;
+        const float gap_center = label_bounds.x + label_bounds.width * 0.5F;
+        context.StrokePath(
+            OutlinedBorderPath(
+                editor_frame,
+                border_width,
+                corner_radii_,
+                gap_center - gap_half_width,
+                gap_center + gap_half_width
+            ),
+            border,
+            border_width,
+            StrokeCap::Butt,
+            StrokeJoin::Round
+        );
+      } else {
+        context.DrawBorder(editor_frame, border, border_width, corner_radii_);
+      }
+    }
+
+    if (label_layout_ && floating_label_layout_) {
+      TextStyle animated_label_style = label_progress < 0.5F ? std::move(label_style) : std::move(floating_label_style);
+      animated_label_style.font = animated_label_style.font.WithSize(
+          style_.label_style.font.Size() +
+          (style_.floating_label_style.font.Size() - style_.label_style.font.Size()) * label_progress
+      );
+      animated_label_style.foreground = InterpolateTextFieldColor(
+          ResolveLabelColor(node, invalid, false),
+          ResolveLabelColor(node, invalid, true),
+          label_progress
+      );
+      context.DrawText(AnimatedLabelBounds(node, label_progress), label_, std::move(animated_label_style));
     }
   }
 
@@ -480,8 +714,16 @@ public:
     });
   }
 
+  bool AdvanceLabel(const FrameInfo& frame, bool& paint_changed) {
+    const float previous = label_progress_.Value();
+    const bool running = label_progress_.Advance(frame.timestamp, frame.delta_time);
+    paint_changed = label_progress_.Value() != previous;
+    return running;
+  }
+
   void FocusChanged(bool focused) {
     BreakHistoryMerge();
+    UpdateLabelTarget(focused);
     if (focused) {
       RequestCaretReveal();
       ResetCaretBlink();
@@ -970,6 +1212,23 @@ private:
     if (!text_layout_) {
       throw std::logic_error("HuxerUI platform does not provide editable text layout");
     }
+    if (label_.empty()) {
+      label_layout_.reset();
+      floating_label_layout_.reset();
+      laid_out_label_.clear();
+    } else if (!label_layout_ || !floating_label_layout_ || laid_out_label_ != label_) {
+      const TextLayoutOptions label_options{
+          .shaping = {},
+          .wrap = TextWrap::NoWrap,
+      };
+      label_layout_ = platform.CreateTextLayout(label_, style_.label_style, text_layout_width_, label_options);
+      floating_label_layout_ =
+          platform.CreateTextLayout(label_, style_.floating_label_style, text_layout_width_, label_options);
+      laid_out_label_ = label_;
+      if (!label_layout_ || !floating_label_layout_) {
+        throw std::logic_error("HuxerUI platform does not provide TextField label layout");
+      }
+    }
     if (placeholder_.empty()) {
       placeholder_layout_.reset();
       laid_out_placeholder_.clear();
@@ -1012,19 +1271,134 @@ private:
 
   Rect EditorFrame(const detail::MountedNode& node) const {
     Rect frame = node.bounds;
-    const float minimum_height = std::min(frame.height, std::max(0.0F, style_.minimum_height));
+    const float label_inset = std::min(frame.height, FloatingLabelTopInset());
+    frame.y += label_inset;
+    frame.height = std::max(0.0F, frame.height - label_inset);
+    const float minimum_height = std::min(frame.height, std::max(0.0F, variant_style_.minimum_height - label_inset));
     frame.height = std::clamp(frame.height - ValidationAreaHeight(), minimum_height, frame.height);
     return frame;
   }
 
-  Rect EditorContentRect(const detail::MountedNode& node) const {
+  Rect EditorInnerRect(const detail::MountedNode& node) const {
     const Rect frame = EditorFrame(node);
+    const float top_padding = std::max(0.0F, node.properties.padding.top - FloatingLabelTopInset());
+    const float bottom_padding = UsesTextFieldIndicator(variant_) && floating_label_layout_
+                                     ? std::max(0.0F, node.properties.padding.bottom * 0.5F)
+                                     : node.properties.padding.bottom;
     return {
         frame.x + node.properties.padding.left,
-        frame.y + node.properties.padding.top,
+        frame.y + top_padding,
         std::max(0.0F, frame.width - node.properties.padding.Horizontal()),
-        std::max(0.0F, frame.height - node.properties.padding.Vertical()),
+        std::max(0.0F, frame.height - top_padding - bottom_padding),
     };
+  }
+
+  Rect EditorContentRect(const detail::MountedNode& node) const {
+    Rect content = EditorInnerRect(node);
+    const float leading_width = leading_icon_.has_value() ? IconSlotWidth(true) : 0.0F;
+    const float trailing_width = trailing_icon_.has_value() ? IconSlotWidth(false) : 0.0F;
+    content.x += std::min(content.width, leading_width);
+    content.width = std::max(0.0F, content.width - leading_width - trailing_width);
+    return content;
+  }
+
+  float FloatingLabelTopInset() const {
+    return variant_ == TextFieldVariant::Outlined && floating_label_layout_
+               ? floating_label_layout_->Measure().height * 0.5F
+               : 0.0F;
+  }
+
+  float IconSize(bool leading) const {
+    return std::max(0.0F, leading ? style_.leading_icon_size : style_.trailing_icon_size);
+  }
+
+  float IconSlotWidth(bool leading) const {
+    return IconSize(leading) + std::max(0.0F, style_.icon_spacing);
+  }
+
+  float IconContentWidth() const {
+    return (leading_icon_.has_value() ? IconSlotWidth(true) : 0.0F) +
+           (trailing_icon_.has_value() ? IconSlotWidth(false) : 0.0F);
+  }
+
+  Rect IconBounds(const detail::MountedNode& node, bool leading) const {
+    const Rect inner = EditorInnerRect(node);
+    const Rect frame = EditorFrame(node);
+    const float size = std::min({IconSize(leading), inner.width, frame.height});
+    return {
+        leading ? inner.x : inner.x + std::max(0.0F, inner.width - size),
+        frame.y + (frame.height - size) * 0.5F,
+        size,
+        size,
+    };
+  }
+
+  Rect FloatingLabelBounds(const detail::MountedNode& node) const {
+    if (!floating_label_layout_) {
+      return {};
+    }
+    const Rect content = EditorContentRect(node);
+    const Rect frame = EditorFrame(node);
+    const Size size = floating_label_layout_->Measure();
+    const float y = UsesTextFieldIndicator(variant_) ? frame.y + std::max(0.0F, node.properties.padding.top * 0.5F)
+                                                     : frame.y - size.height * 0.5F;
+    return {
+        content.x,
+        y,
+        std::min(content.width, size.width),
+        size.height,
+    };
+  }
+
+  Rect AnimatedLabelBounds(const detail::MountedNode& node, float progress) const {
+    if (!label_layout_ || !floating_label_layout_) {
+      return {};
+    }
+    const Rect content = EditorContentRect(node);
+    const Rect frame = EditorFrame(node);
+    const Size expanded_size = label_layout_->Measure();
+    const float expanded_y =
+        configuration_.multiline ? content.y : frame.y + std::max(0.0F, (frame.height - expanded_size.height) * 0.5F);
+    const Rect expanded{
+        content.x,
+        expanded_y,
+        expanded_size.width,
+        expanded_size.height,
+    };
+    const Rect floating = FloatingLabelBounds(node);
+    progress = std::clamp(progress, 0.0F, 1.0F);
+    return {
+        expanded.x + (floating.x - expanded.x) * progress,
+        expanded.y + (floating.y - expanded.y) * progress,
+        expanded.width + (floating.width - expanded.width) * progress,
+        expanded.height + (floating.height - expanded.height) * progress,
+    };
+  }
+
+  Color ResolveLabelColor(const detail::MountedNode& node, bool invalid, bool floating) const {
+    if (node.disabled_visual_state) {
+      return style_.disabled_label;
+    }
+    if (invalid) {
+      return style_.error_label;
+    }
+    if (node.focused) {
+      return style_.focused_label;
+    }
+    return floating ? style_.floating_label_style.foreground : style_.label_style.foreground;
+  }
+
+  Color ResolveIconColor(const detail::MountedNode& node, bool invalid, bool leading) const {
+    if (node.disabled_visual_state) {
+      return leading ? style_.disabled_leading_icon : style_.disabled_trailing_icon;
+    }
+    if (invalid) {
+      return leading ? style_.error_leading_icon : style_.error_trailing_icon;
+    }
+    if (node.focused) {
+      return leading ? style_.focused_leading_icon : style_.focused_trailing_icon;
+    }
+    return leading ? style_.leading_icon : style_.trailing_icon;
   }
 
   HistoryMergeKind ResolveHistoryMergeKind(
@@ -1125,6 +1499,7 @@ private:
         EnsureLayouts(*platform_);
       }
     }
+    UpdateLabelTarget(node_ && node_->focused);
     ResetCaretBlink();
     detail::EmitEvent<TextFieldEvents::Changed>(event_bindings_, editing_.value);
     return true;
@@ -1336,6 +1711,7 @@ private:
         EnsureLayouts(*platform_);
       }
     }
+    UpdateLabelTarget(node_ && node_->focused);
     ResetCaretBlink();
     detail::EmitEvent<TextFieldEvents::Changed>(event_bindings_, editing_.value);
     return {
@@ -1520,16 +1896,26 @@ private:
 
   Point TextOrigin(const detail::MountedNode& node) const {
     const Rect content = EditorContentRect(node);
+    const Rect frame = EditorFrame(node);
     const Size size = text_layout_ ? text_layout_->Measure() : Size{};
+    float y = configuration_.multiline ? content.y : frame.y + std::max(0.0F, (frame.height - size.height) * 0.5F);
+    if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
+      const Rect floating_label = FloatingLabelBounds(node);
+      float floating_y = floating_label.y + floating_label.height + 2.0F;
+      if (!configuration_.multiline) {
+        floating_y = frame.y + frame.height - std::max(0.0F, node.properties.padding.bottom * 0.5F) - size.height;
+      }
+      y += (std::max(y, floating_y) - y) * std::clamp(label_progress_.Value(), 0.0F, 1.0F);
+    }
     if (configuration_.multiline) {
       return {
           content.x,
-          content.y - ResolveVerticalScrollOffset(node, content),
+          y - ResolveVerticalScrollOffset(node, content),
       };
     }
     return {
         content.x - ResolveHorizontalScrollOffset(content),
-        content.y + std::max(0.0F, (content.height - size.height) * 0.5F),
+        y,
     };
   }
 
@@ -1621,11 +2007,11 @@ private:
       return std::numeric_limits<float>::infinity();
     }
     if (constraints.HasBoundedWidth()) {
-      return std::max(1.0F, constraints.max_width);
+      return std::max(1.0F, constraints.max_width - IconContentWidth());
     }
 
-    float width = std::max(1.0F, constraints.min_width);
-    auto measure_lines = [&](std::string_view text) {
+    float width = std::max(1.0F, constraints.min_width - IconContentWidth());
+    auto measure_lines = [&](std::string_view text, const TextStyle& style) {
       std::size_t start = 0;
       do {
         const std::size_t end = text.find('\n', start);
@@ -1636,7 +2022,7 @@ private:
             platform
                 .MeasureText(
                     line,
-                    style_.text_style,
+                    style,
                     std::numeric_limits<float>::infinity(),
                     TextLayoutOptions{.wrap = TextWrap::NoWrap}
                 )
@@ -1648,8 +2034,10 @@ private:
         start = end + 1;
       } while (start <= text.size());
     };
-    measure_lines(editing_.value.text);
-    measure_lines(placeholder_);
+    measure_lines(editing_.value.text, style_.text_style);
+    measure_lines(label_, style_.label_style);
+    measure_lines(label_, style_.floating_label_style);
+    measure_lines(placeholder_, style_.placeholder_style);
     return width;
   }
 
@@ -1662,6 +2050,11 @@ private:
   void ResetCaretBlink() noexcept {
     caret_reset_pending_ = true;
     caret_visible_ = true;
+  }
+
+  void UpdateLabelTarget(bool focused) {
+    const float target = !label_.empty() && (focused || !editing_.value.text.empty()) ? 1.0F : 0.0F;
+    label_progress_.Update(target, TweenSpec{style_.label_animation_duration});
   }
 
   void RequestCaretReveal() noexcept {
@@ -1680,17 +2073,25 @@ private:
   std::optional<std::size_t> max_length_;
   ValidationResult validation_;
   TextFieldStyle style_;
+  TextFieldVariantStyle variant_style_;
+  TextFieldVariant variant_ = TextFieldVariant::Standard;
   CornerRadii corner_radii_;
   detail::TextFieldEditingState editing_;
   std::optional<TextEditingValue> last_emitted_;
   std::optional<TextEditingValue> composition_history_start_;
   std::vector<HistoryEntry> undo_history_;
   std::vector<HistoryEntry> redo_history_;
+  std::string label_;
   std::string placeholder_;
   std::string laid_out_text_;
+  std::string laid_out_label_;
   std::string laid_out_placeholder_;
   std::string laid_out_validation_message_;
+  std::optional<detail::TextFieldModifier::Icon> leading_icon_;
+  std::optional<detail::TextFieldModifier::Icon> trailing_icon_;
   std::unique_ptr<detail::TextLayout> text_layout_;
+  std::unique_ptr<detail::TextLayout> label_layout_;
+  std::unique_ptr<detail::TextLayout> floating_label_layout_;
   std::unique_ptr<detail::TextLayout> placeholder_layout_;
   std::unique_ptr<detail::TextLayout> validation_layout_;
   std::optional<TextOffset> pointer_anchor_;
@@ -1698,6 +2099,7 @@ private:
   std::optional<Point> pending_touch_origin_;
   std::optional<float> preferred_caret_x_;
   std::optional<double> caret_epoch_;
+  detail::AnimatedValue<float> label_progress_;
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
@@ -1734,8 +2136,10 @@ public:
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const bool geometry_changed = client_->UpdateEditorScrollOffset(mounted);
     bool caret_changed = false;
-    const FrameResult result = client_->AdvanceCaret(mounted, frame, caret_changed);
-    if (geometry_changed || caret_changed) {
+    FrameResult result = client_->AdvanceCaret(mounted, frame, caret_changed);
+    bool label_changed = false;
+    result.needs_frame = client_->AdvanceLabel(frame, label_changed) || result.needs_frame;
+    if (geometry_changed || caret_changed || label_changed) {
       mounted.foreground_paint_dirty = true;
     }
     return result;
@@ -1820,7 +2224,9 @@ std::shared_ptr<detail::ViewSpec> MakeTextFieldSpec() {
 namespace detail {
 
 bool TextFieldModifier::LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right) {
-  return left.value.text == right.value.text && left.placeholder == right.placeholder &&
+  return left.value.text == right.value.text && left.label == right.label && left.placeholder == right.placeholder &&
+         left.leading_icon.has_value() == right.leading_icon.has_value() &&
+         left.trailing_icon.has_value() == right.trailing_icon.has_value() && left.variant == right.variant &&
          left.configuration.multiline == right.configuration.multiline &&
          left.configuration.secure == right.configuration.secure && left.min_lines == right.min_lines &&
          left.max_lines == right.max_lines && left.validation == right.validation;
@@ -1862,7 +2268,29 @@ TextField::TextField(TextEditingValue value)
   if (!detail::IsValidTextEditingValue(value_)) {
     throw std::invalid_argument("HuxerUI TextField value is invalid");
   }
+  ApplyModifiers(TextFieldVariantVisual{std::nullopt, true});
   UpdateModifier();
+}
+
+TextField TextField::Label(StringResource resource) && {
+  return std::move(*this).Label(UseString(std::move(resource)));
+}
+
+TextField TextField::Label(std::string value) && {
+  if (!detail::Utf16Length(value).has_value()) {
+    throw std::invalid_argument("HuxerUI TextField label must contain valid UTF-8");
+  }
+  label_ = std::move(value);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::Label(std::string_view value) && {
+  return std::move(*this).Label(std::string(value));
+}
+
+TextField TextField::Label(const char* value) && {
+  return std::move(*this).Label(value == nullptr ? std::string{} : std::string(value));
 }
 
 TextField TextField::Placeholder(StringResource resource) && {
@@ -1884,6 +2312,61 @@ TextField TextField::Placeholder(std::string_view value) && {
 
 TextField TextField::Placeholder(const char* value) && {
   return std::move(*this).Placeholder(value == nullptr ? std::string{} : std::string(value));
+}
+
+TextField TextField::LeadingIcon(ImageResource resource) && {
+  leading_icon_ = detail::UseImageResource(std::move(resource));
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::LeadingIcon(ImageAsset asset) && {
+  if (!asset.HasValue()) {
+    throw std::invalid_argument("HuxerUI TextField leading icon must not be empty");
+  }
+  leading_icon_ = std::move(asset);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::LeadingIcon(VectorAsset asset) && {
+  if (!asset.HasValue()) {
+    throw std::invalid_argument("HuxerUI TextField leading icon must not be empty");
+  }
+  leading_icon_ = std::move(asset);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::TrailingIcon(ImageResource resource) && {
+  trailing_icon_ = detail::UseImageResource(std::move(resource));
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::TrailingIcon(ImageAsset asset) && {
+  if (!asset.HasValue()) {
+    throw std::invalid_argument("HuxerUI TextField trailing icon must not be empty");
+  }
+  trailing_icon_ = std::move(asset);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::TrailingIcon(VectorAsset asset) && {
+  if (!asset.HasValue()) {
+    throw std::invalid_argument("HuxerUI TextField trailing icon must not be empty");
+  }
+  trailing_icon_ = std::move(asset);
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::Variant(TextFieldVariant value) && {
+  variant_ = value;
+  ApplyModifiers(TextFieldVariantVisual{value, false});
+  UpdateModifier();
+  return std::move(*this);
 }
 
 TextField TextField::LineLimits(TextFieldLineLimits value) && {
@@ -1929,19 +2412,19 @@ TextField TextField::InputConfiguration(TextInputConfiguration configuration) &&
 }
 
 void TextField::UpdateModifier() {
-  SetModifier(
-      detail::MakeModifierSpec(
-          detail::TextFieldModifier{
-              value_,
-              placeholder_,
-              configuration_,
-              line_limits_.Minimum(),
-              line_limits_.Maximum(),
-              max_length_,
-              validation_,
-          }
-      )
-  );
+  SetModifier(detail::MakeModifierSpec(detail::TextFieldModifier{
+      value_,
+      label_,
+      placeholder_,
+      leading_icon_,
+      trailing_icon_,
+      variant_,
+      configuration_,
+      line_limits_.Minimum(),
+      line_limits_.Maximum(),
+      max_length_,
+      validation_,
+  }));
 }
 
 } // namespace huxerui

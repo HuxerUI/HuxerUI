@@ -271,15 +271,60 @@ DividerStyle MaterialDividerStyle(const ThemeSpec& theme) {
 TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   Color disabled_content = theme.colors.on_surface;
   disabled_content.alpha *= 0.38F;
-  Color disabled_border = theme.colors.on_surface;
-  disabled_border.alpha *= 0.12F;
+  Color disabled_indicator = theme.colors.on_surface;
+  disabled_indicator.alpha *= 0.38F;
+  Color disabled_outline = theme.colors.on_surface;
+  disabled_outline.alpha *= 0.12F;
+  Color disabled_container = theme.colors.on_surface;
+  disabled_container.alpha *= 0.04F;
   return {
-      .background = Color::Transparent(),
+      .variant = TextFieldVariant::Filled,
+      .standard =
+          {
+              .background = Color::Transparent(),
+              .border = theme.colors.on_surface_variant,
+              .hovered_border = theme.colors.on_surface,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_indicator,
+              .minimum_height = 56.0F,
+          },
+      .filled =
+          {
+              .background = theme.colors.surface_container_highest,
+              .disabled_background = disabled_container,
+              .border = theme.colors.on_surface_variant,
+              .hovered_border = theme.colors.on_surface,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_indicator,
+              .minimum_height = 56.0F,
+          },
+      .outlined =
+          {
+              .background = Color::Transparent(),
+              .border = theme.colors.outline,
+              .hovered_border = theme.colors.on_surface,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_outline,
+              .minimum_height = 56.0F,
+          },
       .text_style = TextStyle{Font::System(theme.typography.body_large), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_large), theme.colors.on_surface_variant},
+      .floating_label_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.on_surface_variant},
       .placeholder_style = TextStyle{Font::System(theme.typography.body_large), theme.colors.on_surface_variant},
       .disabled_text = disabled_content,
+      .focused_label = theme.colors.primary,
+      .disabled_label = disabled_content,
+      .error_label = theme.colors.error,
       .disabled_placeholder = disabled_content,
       .disabled_supporting_text = disabled_content,
+      .leading_icon = theme.colors.on_surface_variant,
+      .focused_leading_icon = theme.colors.on_surface_variant,
+      .disabled_leading_icon = disabled_content,
+      .error_leading_icon = theme.colors.on_surface_variant,
+      .trailing_icon = theme.colors.on_surface_variant,
+      .focused_trailing_icon = theme.colors.on_surface_variant,
+      .disabled_trailing_icon = disabled_content,
+      .error_trailing_icon = theme.colors.error,
       .selection =
           Color{
               theme.colors.primary.red,
@@ -290,15 +335,16 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
       .caret = theme.colors.primary,
       .error_caret = theme.colors.error,
       .composition = theme.colors.primary,
-      .border = theme.colors.outline,
-      .hovered_border = theme.colors.on_surface,
-      .focused_border = theme.colors.primary,
-      .disabled_border = disabled_border,
+      .caret_width = 2.0F,
       .border_width = 1.0F,
       .focused_border_width = 2.0F,
       .corner_radius = theme.shapes.extra_small,
       .padding = EdgeInsets::All(theme.spacing.medium),
-      .minimum_height = 56.0F,
+      .leading_icon_size = 24.0F,
+      .trailing_icon_size = 24.0F,
+      .icon_spacing = theme.spacing.small,
+      .label_cutout_padding = theme.spacing.extra_small,
+      .label_animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
       .validation_error = theme.colors.error,
       .validation_border_width = 1.0F,
@@ -761,12 +807,52 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
   Color disabled_border = border;
   disabled_border.alpha *= theme.interactions.disabled_opacity;
   return {
-      .background = theme.colors.surface,
+      .variant = TextFieldVariant::Standard,
+      .standard =
+          {
+              .background = Color::Transparent(),
+              .border = border,
+              .hovered_border = hovered_border,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_border,
+              .minimum_height = 36.0F,
+          },
+      .filled =
+          {
+              .background = theme.colors.surface_container_highest,
+              .border = border,
+              .hovered_border = hovered_border,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_border,
+              .minimum_height = 44.0F,
+          },
+      .outlined =
+          {
+              .background = Color::Transparent(),
+              .border = border,
+              .hovered_border = hovered_border,
+              .focused_border = theme.colors.primary,
+              .disabled_border = disabled_border,
+              .minimum_height = 36.0F,
+          },
       .text_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), placeholder},
+      .floating_label_style = TextStyle{Font::System(theme.typography.body_small), placeholder},
       .placeholder_style = TextStyle{Font::System(theme.typography.body_medium), placeholder},
       .disabled_text = disabled_content,
+      .focused_label = theme.colors.primary,
+      .disabled_label = disabled_content,
+      .error_label = theme.colors.error,
       .disabled_placeholder = disabled_content,
       .disabled_supporting_text = disabled_content,
+      .leading_icon = placeholder,
+      .focused_leading_icon = theme.colors.primary,
+      .disabled_leading_icon = disabled_content,
+      .error_leading_icon = theme.colors.error,
+      .trailing_icon = placeholder,
+      .focused_trailing_icon = theme.colors.primary,
+      .disabled_trailing_icon = disabled_content,
+      .error_trailing_icon = theme.colors.error,
       .selection =
           Color{
               theme.colors.primary.red,
@@ -777,15 +863,16 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
       .caret = theme.colors.primary,
       .error_caret = theme.colors.error,
       .composition = theme.colors.primary,
-      .border = border,
-      .hovered_border = hovered_border,
-      .focused_border = theme.colors.primary,
-      .disabled_border = disabled_border,
+      .caret_width = 1.0F,
       .border_width = 1.0F,
       .focused_border_width = 2.0F,
       .corner_radius = theme.shapes.extra_small + 2.0F,
       .padding = EdgeInsets::Symmetric(10.0F, theme.spacing.small),
-      .minimum_height = 36.0F,
+      .leading_icon_size = 18.0F,
+      .trailing_icon_size = 18.0F,
+      .icon_spacing = theme.spacing.small,
+      .label_cutout_padding = theme.spacing.extra_small,
+      .label_animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
       .validation_error = theme.colors.error,
       .validation_border_width = 1.0F,

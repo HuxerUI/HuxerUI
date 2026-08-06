@@ -226,26 +226,58 @@ struct TabsStyle {
   bool operator==(const TabsStyle&) const = default;
 };
 
-struct TextFieldStyle {
-  Color background = Color::White();
-  TextStyle text_style;
-  TextStyle placeholder_style{Font::System(14.0F), Color::Rgb(87, 96, 106)};
-  Color disabled_text = Color::Rgb(31, 35, 40, 0.38F);
-  Color disabled_placeholder = Color::Rgb(31, 35, 40, 0.38F);
-  Color disabled_supporting_text = Color::Rgb(31, 35, 40, 0.38F);
-  Color selection = Color::Rgb(31, 111, 235, 0.24F);
-  Color caret = Color::Rgb(31, 111, 235);
-  Color error_caret = Color::Rgb(207, 34, 46);
-  Color composition = Color::Rgb(31, 111, 235);
+struct TextFieldVariantStyle {
+  Color background = Color::Transparent();
+  std::optional<Color> disabled_background;
   Color border = Color::Rgb(87, 96, 106, 0.55F);
   Color hovered_border = Color::Rgb(31, 35, 40);
   Color focused_border = Color::Rgb(31, 111, 235);
   Color disabled_border = Color::Rgb(31, 35, 40, 0.12F);
+  float minimum_height = 36.0F;
+
+  bool operator==(const TextFieldVariantStyle&) const = default;
+};
+
+struct TextFieldStyle {
+  TextFieldVariant variant = TextFieldVariant::Standard;
+  TextFieldVariantStyle standard;
+  TextFieldVariantStyle filled{
+      .background = Color::Rgb(239, 241, 243),
+      .minimum_height = 44.0F,
+  };
+  TextFieldVariantStyle outlined;
+  TextStyle text_style;
+  TextStyle label_style{Font::System(14.0F), Color::Rgb(87, 96, 106)};
+  TextStyle floating_label_style{Font::System(12.0F), Color::Rgb(87, 96, 106)};
+  TextStyle placeholder_style{Font::System(14.0F), Color::Rgb(87, 96, 106)};
+  Color disabled_text = Color::Rgb(31, 35, 40, 0.38F);
+  Color focused_label = Color::Rgb(31, 111, 235);
+  Color disabled_label = Color::Rgb(31, 35, 40, 0.38F);
+  Color error_label = Color::Rgb(207, 34, 46);
+  Color disabled_placeholder = Color::Rgb(31, 35, 40, 0.38F);
+  Color disabled_supporting_text = Color::Rgb(31, 35, 40, 0.38F);
+  Color leading_icon = Color::Rgb(87, 96, 106);
+  Color focused_leading_icon = Color::Rgb(87, 96, 106);
+  Color disabled_leading_icon = Color::Rgb(31, 35, 40, 0.38F);
+  Color error_leading_icon = Color::Rgb(207, 34, 46);
+  Color trailing_icon = Color::Rgb(87, 96, 106);
+  Color focused_trailing_icon = Color::Rgb(87, 96, 106);
+  Color disabled_trailing_icon = Color::Rgb(31, 35, 40, 0.38F);
+  Color error_trailing_icon = Color::Rgb(207, 34, 46);
+  Color selection = Color::Rgb(31, 111, 235, 0.24F);
+  Color caret = Color::Rgb(31, 111, 235);
+  Color error_caret = Color::Rgb(207, 34, 46);
+  Color composition = Color::Rgb(31, 111, 235);
+  float caret_width = 1.0F;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 6.0F;
   EdgeInsets padding = EdgeInsets::Symmetric(10.0F, 8.0F);
-  float minimum_height = 36.0F;
+  float leading_icon_size = 18.0F;
+  float trailing_icon_size = 18.0F;
+  float icon_spacing = 8.0F;
+  float label_cutout_padding = 4.0F;
+  double label_animation_duration = 0.12;
   double caret_blink_interval = 0.5;
   Color validation_error = Color::Rgb(207, 34, 46);
   float validation_border_width = 1.0F;

@@ -1,4 +1,6 @@
 #include "runtime_test_support.h"
+#include "image_test_support.h"
+#include "path_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -125,6 +127,20 @@ View IndependentPlaceholderFontApp() {
   });
 }
 
+View DefaultVariantTextFieldStyleApp() {
+  TextFieldStyle style = TextFieldStyle::Default();
+  style.variant = TextFieldVariant::Filled;
+  style.filled.background = Color::Rgb(38, 50, 56);
+  style.filled.minimum_height = 52.0F;
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme(std::move(definition), [] {
+    return Column {
+      TextField(TextEditingValue::FromText("Value")).With(huxerui::Frame{.width = 160.0F}),
+    };
+  });
+}
+
 View StableTextFieldApp() {
   auto trigger = UseState(0);
   text_field_recompose_trigger = trigger;
@@ -169,6 +185,103 @@ View MaterialEmptyTextFieldApp() {
   return MaterialTheme([] {
     return TextField(TextEditingValue::FromText(""))
         .Placeholder("Material placeholder")
+        .With(huxerui::Frame{.width = 160.0F});
+  });
+}
+
+View MaterialLabeledTextFieldApp() {
+  return MaterialTheme([] {
+    return Column {
+      TextField(TextEditingValue::FromText(""))
+          .Label("Email")
+          .Placeholder("name@example.com")
+          .With(huxerui::Frame{.width = 160.0F}),
+    };
+  });
+}
+
+View MaterialOutlinedLabeledTextFieldApp() {
+  return MaterialTheme([] {
+    return Column {
+      TextField(TextEditingValue::FromText("Value"))
+          .Label("Email")
+          .Variant(TextFieldVariant::Outlined)
+          .With(huxerui::Frame{.width = 160.0F}),
+    };
+  });
+}
+
+View MaterialStandardLabeledTextFieldApp() {
+  return MaterialTheme([] {
+    return Column {
+      TextField(TextEditingValue::FromText("Value"))
+          .Label("Email")
+          .Variant(TextFieldVariant::Standard)
+          .With(huxerui::Frame{.width = 160.0F}),
+    };
+  });
+}
+
+ImageAsset TextFieldRasterIcon() {
+  static const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(20, 10));
+  return icon;
+}
+
+VectorAsset TextFieldVectorIcon() {
+  static const VectorAsset icon = VectorAsset::Create({10.0F, 10.0F}, [](VectorBuilder& builder) {
+    Path path;
+    path.MoveTo({1.0F, 1.0F}).LineTo({9.0F, 5.0F}).LineTo({1.0F, 9.0F}).Close();
+    builder.FillPath(std::move(path), Color::Black());
+  });
+  return icon;
+}
+
+View FlatLabeledIconTextFieldApp() {
+  return Column {
+    TextField(TextEditingValue::FromText("Value"))
+        .Label("Account")
+        .Placeholder("Placeholder")
+        .LeadingIcon(TextFieldRasterIcon())
+        .TrailingIcon(TextFieldVectorIcon())
+        .With(huxerui::Frame{.width = 180.0F}),
+  };
+}
+
+View FlatLabeledTextFieldApp() {
+  return Column {
+    TextField(TextEditingValue::FromText("Value"))
+        .Label("Account")
+        .With(huxerui::Frame{.width = 180.0F}),
+  };
+}
+
+View FlatFilledTextFieldApp() {
+  return Column {
+    TextField(TextEditingValue::FromText("Value"))
+        .Label("Account")
+        .Variant(TextFieldVariant::Filled)
+        .With(huxerui::Frame{.width = 180.0F}),
+  };
+}
+
+View MaterialInvalidIconTextFieldApp() {
+  return MaterialTheme([] {
+    return TextField(TextEditingValue::FromText("Value"))
+        .Label("Account")
+        .LeadingIcon(TextFieldVectorIcon())
+        .TrailingIcon(TextFieldVectorIcon())
+        .Validation(ValidationResult::Invalid("Invalid account"))
+        .With(huxerui::Frame{.width = 180.0F});
+  });
+}
+
+View ReducedMotionMaterialLabeledTextFieldApp() {
+  ThemeSpec theme = MaterialLightThemeSpec();
+  theme.motion.reduced_motion = true;
+  return MaterialTheme(std::move(theme), [] {
+    return TextField(TextEditingValue::FromText(""))
+        .Label("Email")
+        .Placeholder("name@example.com")
         .With(huxerui::Frame{.width = 160.0F});
   });
 }
@@ -486,6 +599,41 @@ const detail::MountedNode* FindMountedNodeKind(const detail::MountedNode& node, 
   return nullptr;
 }
 
+const DrawRectCommand* FindTextFieldIndicator(
+    const FlattenedScene& scene,
+    Color color,
+    float width,
+    float height
+) {
+  for (const PaintCommand& command : scene.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    if (rect && rect->color == color && rect->rect.width == width && rect->rect.height == height) {
+      return rect;
+    }
+  }
+  return nullptr;
+}
+
+const DrawRectCommand* FindTextFieldCaret(const FlattenedScene& scene, Color color, float width) {
+  for (const PaintCommand& command : scene.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    if (rect && rect->color == color && rect->rect.width == width && rect->rect.height > width) {
+      return rect;
+    }
+  }
+  return nullptr;
+}
+
+const StrokePathCommand* FindTextFieldOutline(const FlattenedScene& scene, Color color, float width) {
+  for (const PaintCommand& command : scene.Commands()) {
+    const auto* path = std::get_if<StrokePathCommand>(&command);
+    if (path && path->color == color && path->width == width) {
+      return path;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
@@ -502,21 +650,53 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
       placeholder->style.foreground.alpha == TextFieldStyle::Default().placeholder_style.foreground.alpha
   );
 
-  const auto border = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
-    const auto* value = std::get_if<DrawBorderCommand>(&command);
-    return value && value->rect.width == 160.0F && value->rect.height == 40.0F;
-  });
-  REQUIRE(border != scene.Commands().end());
+  const TextFieldStyle flat_style = TextFieldStyle::Default();
+  REQUIRE(flat_style.variant == TextFieldVariant::Standard);
+  REQUIRE(flat_style.caret_width == 1.0F);
+  REQUIRE(FindTextFieldIndicator(scene, flat_style.standard.border, 160.0F, flat_style.border_width) != nullptr);
 
   const ThemeDefinition material = huxerui::MaterialThemeDefinition();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(material);
-  REQUIRE(style.minimum_height == 56.0F);
+  const ThemeSpec material_theme = huxerui::MaterialLightThemeSpec();
+  REQUIRE(style.variant == TextFieldVariant::Filled);
+  REQUIRE(style.standard.minimum_height == 56.0F);
+  REQUIRE(style.filled.minimum_height == 56.0F);
+  REQUIRE(style.outlined.minimum_height == 56.0F);
+  REQUIRE(style.filled.border == material_theme.colors.on_surface_variant);
+  REQUIRE(style.outlined.border == material_theme.colors.outline);
   REQUIRE(style.padding == EdgeInsets::All(16.0F));
   REQUIRE(style.selection.alpha == 0.4F);
+  REQUIRE(style.caret_width == 2.0F);
+  REQUIRE(style.leading_icon_size == 24.0F);
+  REQUIRE(style.trailing_icon_size == 24.0F);
+  REQUIRE(style.filled.disabled_background.has_value());
+  Color disabled_background = material_theme.colors.on_surface;
+  disabled_background.alpha *= 0.04F;
+  REQUIRE(*style.filled.disabled_background == disabled_background);
+  REQUIRE(style.error_leading_icon == material_theme.colors.on_surface_variant);
+  REQUIRE(style.error_trailing_icon == material_theme.colors.error);
   REQUIRE(style.border_width == 1.0F);
   REQUIRE(style.validation_border_width == 1.0F);
   REQUIRE(style.focused_validation_border_width == 2.0F);
-  REQUIRE(style.focused_border.red == huxerui::MaterialLightThemeSpec().colors.primary.red);
+  REQUIRE(style.filled.focused_border == material_theme.colors.primary);
+}
+
+TEST_CASE("TestTextFieldUsesThemeCaretWidth") {
+  TestPlatform flat_platform;
+  Runtime flat{EmptyTextFieldApp, flat_platform};
+  flat.SetViewport({200.0F, 80.0F});
+  flat.BuildFrame();
+  Pointer(flat, PointerEventType::Down, 20.0F);
+  const TextFieldStyle flat_style = TextFieldStyle::Default();
+  REQUIRE(FindTextFieldCaret(flat.BuildFrame(), flat_style.caret, flat_style.caret_width) != nullptr);
+
+  TestPlatform material_platform;
+  Runtime material{MaterialLabeledTextFieldApp, material_platform};
+  material.SetViewport({200.0F, 100.0F});
+  material.BuildFrame();
+  Pointer(material, PointerEventType::Down, 40.0F);
+  const TextFieldStyle material_style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+  REQUIRE(FindTextFieldCaret(material.BuildFrame(), material_style.caret, material_style.caret_width) != nullptr);
 }
 
 TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
@@ -530,6 +710,229 @@ TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
   REQUIRE(placeholder->style.font.FamilyKind() == FontFamilyKind::Monospace);
   REQUIRE(placeholder->style.font.Size() == 11.0F);
   REQUIRE(placeholder->style.font.Weight() == FontWeight::Bold);
+}
+
+TEST_CASE("TestTextFieldResolvesThemeDefaultVariantStyle") {
+  TestPlatform platform;
+  Runtime runtime{DefaultVariantTextFieldStyleApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == 52.0F);
+  REQUIRE(field->properties.corner_radii == CornerRadii::Top(TextFieldStyle::Default().corner_radius));
+  REQUIRE(FindPresentedRectWithColor(scene, Color::Rgb(38, 50, 56), Size{160.0F, 52.0F}).has_value());
+}
+
+TEST_CASE("TestMaterialTextFieldFloatsLabelAndRevealsPlaceholderOnFocus") {
+  TestPlatform platform;
+  Runtime runtime{MaterialLabeledTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+
+  const FlattenedScene& resting = runtime.BuildFrame();
+  const DrawTextCommand* expanded_label = FindText(resting, "Email");
+  REQUIRE(expanded_label != nullptr);
+  REQUIRE(expanded_label->style.font == style.label_style.font);
+  REQUIRE(FindText(resting, "name@example.com") == nullptr);
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == style.filled.minimum_height);
+  REQUIRE(field->properties.corner_radii == CornerRadii::Top(style.corner_radius));
+  REQUIRE(FindPresentedRectWithColor(resting, style.filled.background, Size{160.0F, 56.0F}).has_value());
+  REQUIRE(FindTextFieldIndicator(resting, style.filled.border, 160.0F, style.border_width) != nullptr);
+  REQUIRE(FindBorderWithColor(resting, style.filled.border) == nullptr);
+  const float expanded_label_y = expanded_label->rect.y;
+
+  Pointer(runtime, PointerEventType::Down, 40.0F);
+  runtime.BuildFrame();
+  platform.AdvanceTime(style.label_animation_duration * 0.5);
+  const DrawTextCommand* moving_label = FindText(runtime.BuildFrame(), "Email");
+  REQUIRE(moving_label != nullptr);
+  REQUIRE(moving_label->rect.y < expanded_label_y);
+  REQUIRE(moving_label->style.font.Size() < style.label_style.font.Size());
+  REQUIRE(moving_label->style.font.Size() > style.floating_label_style.font.Size());
+
+  platform.AdvanceTime(style.label_animation_duration * 0.5);
+  const FlattenedScene& focused = runtime.BuildFrame();
+  const DrawTextCommand* floating_label = FindText(focused, "Email");
+  const DrawTextCommand* placeholder = FindText(focused, "name@example.com");
+  REQUIRE(floating_label != nullptr);
+  REQUIRE(placeholder != nullptr);
+  REQUIRE(floating_label->style.font == style.floating_label_style.font);
+  REQUIRE(floating_label->style.foreground == style.focused_label);
+  REQUIRE(placeholder->style.font == style.placeholder_style.font);
+  REQUIRE(FindTextFieldIndicator(focused, style.filled.focused_border, 160.0F, style.focused_border_width) != nullptr);
+  REQUIRE(FindBorderWithColor(focused, style.filled.focused_border) == nullptr);
+}
+
+TEST_CASE("TestReducedMotionTextFieldFloatsLabelWithoutTransition") {
+  TestPlatform platform;
+  Runtime runtime{ReducedMotionMaterialLabeledTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  ThemeSpec theme = MaterialLightThemeSpec();
+  theme.motion.reduced_motion = true;
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition(theme));
+
+  const DrawTextCommand* resting_label = FindText(runtime.BuildFrame(), "Email");
+  REQUIRE(resting_label != nullptr);
+  REQUIRE(resting_label->style.font == style.label_style.font);
+
+  Pointer(runtime, PointerEventType::Down, 40.0F);
+  const FlattenedScene& focused = runtime.BuildFrame();
+  const DrawTextCommand* floating_label = FindText(focused, "Email");
+  REQUIRE(floating_label != nullptr);
+  REQUIRE(floating_label->style.font == style.floating_label_style.font);
+  REQUIRE(FindText(focused, "name@example.com") != nullptr);
+}
+
+TEST_CASE("TestMaterialTextFieldSupportsOutlinedVariant") {
+  TestPlatform platform;
+  Runtime runtime{MaterialOutlinedLabeledTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == style.outlined.minimum_height);
+  REQUIRE(field->properties.corner_radii == CornerRadii(style.corner_radius));
+  REQUIRE(FindRectWithColor(scene, style.filled.background) == nullptr);
+  const DrawTextCommand* label = FindText(scene, "Email");
+  const StrokePathCommand* outline = FindTextFieldOutline(scene, style.outlined.border, style.border_width);
+  REQUIRE(label != nullptr);
+  REQUIRE(outline != nullptr);
+  const auto elements = detail::PathAccess::Elements(outline->path);
+  REQUIRE(elements.size() >= 2);
+  REQUIRE(elements.front().verb == detail::PathVerb::MoveTo);
+  REQUIRE(elements.back().verb == detail::PathVerb::LineTo);
+  REQUIRE(elements.front().points[0].x > label->rect.x + label->rect.width);
+  REQUIRE(elements.back().points[0].x < label->rect.x);
+}
+
+TEST_CASE("TestMaterialTextFieldSupportsStandardVariant") {
+  TestPlatform platform;
+  Runtime runtime{MaterialStandardLabeledTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 100.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == style.standard.minimum_height);
+  REQUIRE(field->properties.corner_radii == CornerRadii{});
+  REQUIRE_FALSE(FindPresentedRectWithColor(scene, style.filled.background).has_value());
+  REQUIRE(FindTextFieldIndicator(scene, style.standard.border, 160.0F, style.border_width) != nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.standard.border) == nullptr);
+}
+
+TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
+  TestPlatform platform;
+  Runtime runtime{FlatLabeledIconTextFieldApp, platform};
+  runtime.SetViewport({220.0F, 100.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = TextFieldStyle::Default();
+
+  const DrawTextCommand* label = FindText(scene, "Account");
+  const DrawTextCommand* text = FindText(scene, "Value");
+  REQUIRE(label != nullptr);
+  REQUIRE(text != nullptr);
+  REQUIRE(label->style.font == style.floating_label_style.font);
+  REQUIRE(FindText(scene, "Placeholder") == nullptr);
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == style.standard.minimum_height);
+  REQUIRE(field->properties.corner_radii == CornerRadii{});
+
+  const auto raster = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<DrawImageCommand>(command);
+  });
+  REQUIRE(raster != scene.Commands().end());
+  const DrawImageCommand& raster_command = std::get<DrawImageCommand>(*raster);
+  REQUIRE(raster_command.destination.width == style.leading_icon_size);
+  REQUIRE(raster_command.destination.height == style.leading_icon_size * 0.5F);
+  REQUIRE(text->rect.x >= raster_command.destination.x + raster_command.destination.width + style.icon_spacing);
+  REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
+    const auto* path = std::get_if<FillPathCommand>(&command);
+    return path && path->color == style.trailing_icon;
+  }));
+  REQUIRE(FindTextFieldIndicator(scene, style.standard.border, 180.0F, style.border_width) != nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.standard.border) == nullptr);
+}
+
+TEST_CASE("TestTextFieldIconsOffsetSharedInputGeometry") {
+  TextFieldPlatformInput plain_text_input;
+  TestPlatform plain_platform;
+  plain_platform.platform_text_input = &plain_text_input;
+  Runtime plain{FlatLabeledTextFieldApp, plain_platform};
+  plain.SetViewport({220.0F, 100.0F});
+  plain.BuildFrame();
+  Pointer(plain, PointerEventType::Down, 50.0F);
+  const TextInputGeometry plain_geometry = plain.QueryTextInputGeometry(1, {0, 1});
+
+  TextFieldPlatformInput icon_text_input;
+  TestPlatform icon_platform;
+  icon_platform.platform_text_input = &icon_text_input;
+  Runtime icons{FlatLabeledIconTextFieldApp, icon_platform};
+  icons.SetViewport({220.0F, 100.0F});
+  icons.BuildFrame();
+  Pointer(icons, PointerEventType::Down, 50.0F);
+  const TextInputGeometry icon_geometry = icons.QueryTextInputGeometry(1, {0, 1});
+
+  REQUIRE(plain_geometry.result_code == TextInputResultCode::Ok);
+  REQUIRE(icon_geometry.result_code == TextInputResultCode::Ok);
+  REQUIRE(plain_geometry.range_rects.size() == 1);
+  REQUIRE(icon_geometry.range_rects.size() == 1);
+  const TextFieldStyle style = TextFieldStyle::Default();
+  const float leading_slot = style.leading_icon_size + style.icon_spacing;
+  REQUIRE(icon_geometry.caret.x - plain_geometry.caret.x == leading_slot);
+  REQUIRE(icon_geometry.range_rects.front().x - plain_geometry.range_rects.front().x == leading_slot);
+}
+
+TEST_CASE("TestMaterialTextFieldUsesIndependentIconStateColors") {
+  TestPlatform platform;
+  Runtime runtime{MaterialInvalidIconTextFieldApp, platform};
+  runtime.SetViewport({220.0F, 120.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
+
+  REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
+    const auto* path = std::get_if<FillPathCommand>(&command);
+    return path && path->color == style.error_leading_icon;
+  }));
+  REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
+    const auto* path = std::get_if<FillPathCommand>(&command);
+    return path && path->color == style.error_trailing_icon;
+  }));
+  REQUIRE(style.error_leading_icon != style.error_trailing_icon);
+}
+
+TEST_CASE("TestFlatTextFieldSupportsFilledVariant") {
+  TestPlatform platform;
+  Runtime runtime{FlatFilledTextFieldApp, platform};
+  runtime.SetViewport({220.0F, 100.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = TextFieldStyle::Default();
+
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->bounds.height == style.filled.minimum_height);
+  REQUIRE(field->properties.corner_radii == CornerRadii::Top(style.corner_radius));
+  REQUIRE(FindPresentedRectWithColor(scene, style.filled.background, Size{180.0F, 44.0F}).has_value());
+  REQUIRE(FindTextFieldIndicator(scene, style.filled.border, 180.0F, style.border_width) != nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.filled.border) == nullptr);
+}
+
+TEST_CASE("TestTextFieldRejectsEmptyIconAssets") {
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText("")).LeadingIcon(ImageAsset{}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      TextField(TextEditingValue::FromText("")).TrailingIcon(VectorAsset{}),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
@@ -548,10 +951,7 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   REQUIRE(message->style.font == style.validation_text_style.font);
   REQUIRE(runtime.RootNode()->children.front()->bounds.height == 80.0F);
 
-  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
-  REQUIRE(border != nullptr);
-  REQUIRE(border->width == style.validation_border_width);
-  REQUIRE(border->rect.height == style.minimum_height);
+  REQUIRE(FindTextFieldIndicator(scene, style.validation_error, 160.0F, style.validation_border_width) != nullptr);
 
   Pointer(runtime, PointerEventType::Down, 20.0F);
   runtime.HandleKeyEvent({
@@ -562,7 +962,7 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   const FlattenedScene& valid_scene = runtime.BuildFrame();
   REQUIRE(text_field_value.Get() == TextEditingValue::FromText("x"));
   REQUIRE(FindText(valid_scene, "Email is required") == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->bounds.height == style.minimum_height);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == style.standard.minimum_height);
 }
 
 TEST_CASE("TestMaterialSecureTextFieldReservesValidationHeight") {
@@ -578,12 +978,14 @@ TEST_CASE("TestMaterialSecureTextFieldReservesValidationHeight") {
 
   const detail::MountedNode* field = runtime.RootNode()->children.front()->children.front().get();
   const float validation_height = style.validation_spacing + message->rect.height;
-  REQUIRE(field->bounds.height == style.minimum_height + validation_height);
+  REQUIRE(field->bounds.height == style.filled.minimum_height + validation_height);
   REQUIRE(message->rect.y + message->rect.height == field->bounds.y + field->bounds.height);
 
-  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
-  REQUIRE(border != nullptr);
-  REQUIRE(border->rect.height == style.minimum_height);
+  REQUIRE(FindPresentedRectWithColor(scene, style.filled.background, Size{160.0F, 56.0F}).has_value());
+  REQUIRE_FALSE(
+      FindPresentedRectWithColor(scene, style.filled.background, Size{160.0F, field->bounds.height}).has_value()
+  );
+  REQUIRE(FindTextFieldIndicator(scene, style.validation_error, 160.0F, style.validation_border_width) != nullptr);
 }
 
 TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessage") {
@@ -606,10 +1008,10 @@ TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessag
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const TextFieldStyle style = TextFieldStyle::Default();
-  const DrawBorderCommand* border = FindBorderWithColor(scene, style.validation_error);
-  REQUIRE(border != nullptr);
-  REQUIRE(border->width == style.focused_validation_border_width);
-  REQUIRE(FindBorderWithColor(scene, style.focused_border) == nullptr);
+  REQUIRE(
+      FindTextFieldIndicator(scene, style.validation_error, 160.0F, style.focused_validation_border_width) != nullptr
+  );
+  REQUIRE(FindBorderWithColor(scene, style.standard.focused_border) == nullptr);
 }
 
 TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
@@ -624,9 +1026,18 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
       PointerDeviceKind::Mouse,
   });
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
-  const DrawBorderCommand* hover_border = FindBorderWithColor(hovered.BuildFrame(), style.hovered_border);
-  REQUIRE(hover_border != nullptr);
-  REQUIRE(hover_border->width == style.border_width);
+  const FlattenedScene& hovered_scene = hovered.BuildFrame();
+  const detail::MountedNode* hovered_field =
+      FindMountedNodeKind(*hovered.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(hovered_field != nullptr);
+  REQUIRE(
+      FindTextFieldIndicator(
+          hovered_scene,
+          style.filled.hovered_border,
+          hovered_field->bounds.width,
+          style.border_width
+      ) != nullptr
+  );
 
   TestPlatform invalid_platform;
   Runtime invalid{MaterialSecureInvalidTextFieldApp, invalid_platform};
@@ -634,10 +1045,15 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   invalid.BuildFrame();
   Pointer(invalid, PointerEventType::Down, 20.0F);
   const FlattenedScene& focused_invalid = invalid.BuildFrame();
-  const DrawBorderCommand* error_border = FindBorderWithColor(focused_invalid, style.validation_error);
-  REQUIRE(error_border != nullptr);
-  REQUIRE(error_border->width == style.focused_validation_border_width);
-  const DrawRectCommand* error_caret = FindRectWithColor(focused_invalid, style.error_caret);
+  REQUIRE(
+      FindTextFieldIndicator(
+          focused_invalid,
+          style.validation_error,
+          160.0F,
+          style.focused_validation_border_width
+      ) != nullptr
+  );
+  const DrawRectCommand* error_caret = FindTextFieldCaret(focused_invalid, style.error_caret, style.caret_width);
   REQUIRE(error_caret != nullptr);
 
   TestPlatform disabled_platform;
@@ -650,9 +1066,19 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   REQUIRE(supporting != nullptr);
   REQUIRE(placeholder->style.foreground == style.disabled_placeholder);
   REQUIRE(supporting->style.foreground == style.disabled_supporting_text);
-  REQUIRE(FindBorderWithColor(disabled_scene, style.disabled_border) != nullptr);
   const detail::MountedNode* field = FindMountedNodeKind(*disabled.RootNode(), detail::NodeKind::TextField);
   REQUIRE(field != nullptr);
+  REQUIRE(style.filled.disabled_background.has_value());
+  const auto disabled_background_rect = FindPresentedRectWithColor(disabled_scene, *style.filled.disabled_background);
+  REQUIRE(disabled_background_rect.has_value());
+  REQUIRE(
+      FindTextFieldIndicator(
+          disabled_scene,
+          style.filled.disabled_border,
+          field->bounds.width,
+          style.border_width
+      ) != nullptr
+  );
   REQUIRE(field->render_node.opacity == 1.0F);
 
   TestPlatform selected_platform;
@@ -689,7 +1115,7 @@ TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
   const FlattenedScene& scene = runtime.BuildFrame();
 
   REQUIRE(FindText(scene, "Email is required") == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->bounds.height == TextFieldStyle::Default().minimum_height);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == TextFieldStyle::Default().standard.minimum_height);
   REQUIRE(FindBorderWithColor(scene, TextFieldStyle::Default().validation_error) == nullptr);
 }
 
@@ -1455,10 +1881,8 @@ TEST_CASE("TestMultilineTextFieldWrapsAndGrowsWithoutAHeight") {
   REQUIRE(text != nullptr);
   REQUIRE(text->rect.width == 60.0F);
   REQUIRE(text->rect.height == 40.0F);
-  REQUIRE(std::ranges::any_of(scene.Commands(), [](const PaintCommand& command) {
-    const auto* border = std::get_if<DrawBorderCommand>(&command);
-    return border != nullptr && border->rect.width == 80.0F && border->rect.height == 56.0F;
-  }));
+  const TextFieldStyle style = TextFieldStyle::Default();
+  REQUIRE(FindTextFieldIndicator(scene, style.standard.border, 80.0F, style.border_width) != nullptr);
 }
 
 TEST_CASE("TestMultilineTextFieldEditingInvalidatesLayout") {

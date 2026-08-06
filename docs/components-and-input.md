@@ -250,11 +250,43 @@ Sampling applies only to raster images; Tint applies only to vector images.
 auto value = UseState(TextEditingValue::FromText(""));
 
 return TextField(value)
-    .Placeholder("Name")
+    .Label("Name")
+    .Placeholder("Enter your name")
     .OnChanged([value](const TextEditingValue& next) {
       value = next;
     });
 ```
+
+`Label()` and `Placeholder()` are independent.
+An empty unfocused field displays the label in the input line and hides the placeholder.
+Focus or non-empty text moves the label to the selected variant's floating position, and an empty focused field then displays the placeholder as the editing hint.
+Omitting `Label()` preserves the ordinary placeholder-only behavior.
+Material defaults to the 56-unit Filled variant with a bottom state indicator.
+Flat defaults to the compact Standard variant.
+All three variants can be selected explicitly:
+
+```cpp
+TextField(value)
+    .Label("Repository")
+    .Variant(TextFieldVariant::Standard);
+```
+
+Standard uses a transparent container and bottom state indicator.
+Filled adds a top-rounded container fill to the same indicator geometry, while Outlined uses a complete outline interrupted by its floating label.
+
+Leading and trailing icons accept `ImageResource`, `ImageAsset`, or `VectorAsset`:
+
+```cpp
+TextField(value)
+    .Label("Account")
+    .Placeholder("Email or username")
+    .LeadingIcon(account_icon)
+    .TrailingIcon(status_icon);
+```
+
+TextField icons are decorative and do not create separate pointer, keyboard, or accessibility actions.
+Their independent leading and trailing sizes, spacing, and state colors come from `TextFieldStyle`.
+Vector icons follow the enabled, focused, error, and disabled TextField colors, while raster assets preserve their encoded colors.
 
 Single-line and multiline fields use the same component:
 
@@ -276,7 +308,8 @@ Secure input remains single-line, draws one mask glyph per grapheme, disables Co
 TextField(password)
     .Secure()
     .MaxLength(64)
-    .Placeholder("Password")
+    .Label("Password")
+    .Placeholder("Enter password")
     .OnChanged([password](const TextEditingValue& next) {
       password = next;
     });
@@ -294,7 +327,8 @@ const ValidationResult result = Validate(
 );
 
 return TextField(email)
-    .Placeholder("Email")
+    .Label("Email")
+    .Placeholder("name@example.com")
     .Validation(result)
     .OnChanged([email](const TextEditingValue& next) {
       email = next;

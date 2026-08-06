@@ -77,6 +77,43 @@ VectorAsset GridIcon() {
   return icon;
 }
 
+VectorAsset LinkIcon() {
+  static const VectorAsset icon = VectorAsset::Create({18.0F, 18.0F}, [](VectorBuilder& builder) {
+    builder.StrokePath(Path::RoundedRect({1.0F, 6.0F, 7.0F, 6.0F}, CornerRadii{3.0F}), Color::Black(), 2.0F);
+    builder.StrokePath(Path::RoundedRect({10.0F, 6.0F, 7.0F, 6.0F}, CornerRadii{3.0F}), Color::Black(), 2.0F);
+    builder.StrokePath(Path{}.MoveTo({6.0F, 9.0F}).LineTo({12.0F, 9.0F}), Color::Black(), 2.0F, StrokeCap::Round);
+  });
+  return icon;
+}
+
+VectorAsset LockIcon() {
+  static const VectorAsset icon = VectorAsset::Create({18.0F, 18.0F}, [](VectorBuilder& builder) {
+    builder.StrokePath(
+        Path{}
+            .MoveTo({5.0F, 8.0F})
+            .LineTo({5.0F, 6.0F})
+            .CubicTo({5.0F, 2.0F}, {13.0F, 2.0F}, {13.0F, 6.0F})
+            .LineTo({13.0F, 8.0F}),
+        Color::Black(),
+        2.0F,
+        StrokeCap::Round
+    );
+    builder.FillPath(Path::RoundedRect({3.0F, 7.0F, 12.0F, 9.0F}, CornerRadii{2.0F}), Color::Black());
+  });
+  return icon;
+}
+
+VectorAsset MessageIcon() {
+  static const VectorAsset icon = VectorAsset::Create({18.0F, 18.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(Path::RoundedRect({2.0F, 2.0F, 14.0F, 11.0F}, CornerRadii{2.0F}), Color::Black());
+    builder.FillPath(
+        Path{}.MoveTo({5.0F, 12.0F}).LineTo({5.0F, 16.0F}).LineTo({9.0F, 12.0F}).Close(),
+        Color::Black()
+    );
+  });
+  return icon;
+}
+
 View Panel(View content) {
   const ThemeSpec& theme = UseTheme();
   return std::move(content).With(
@@ -101,6 +138,7 @@ View ControlsDemo() {
   auto radio_choice = UseState(0);
   auto switch_checked = UseState(false);
   auto progress = UseState(0.35F);
+  auto repository_url = UseState(TextEditingValue::FromText("https://github.com/huxerui/huxerui"));
   auto password = UseState(TextEditingValue::FromText(""));
   auto message = UseState(TextEditingValue::FromText(""));
 
@@ -167,16 +205,27 @@ View ControlsDemo() {
           Slider(progress).Step(0.05F).OnChanged([progress](float value) { progress = value; }),
           Text::Format("{}%", static_cast<int>(progress * 100.0F)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+        TextField(repository_url)
+            .Label("HTTPS URL")
+            .Placeholder("https://github.com/owner/repo")
+            .LeadingIcon(LinkIcon())
+            .Variant(TextFieldVariant::Standard)
+            .OnChanged([repository_url](const TextEditingValue& value) { repository_url = value; }),
         TextField(password)
             .Secure()
             .MaxLength(64)
-            .Placeholder("Password")
+            .Label("Password")
+            .Placeholder("Enter password")
+            .LeadingIcon(LockIcon())
             .Validation(Validate(password.Get().text, Required("Password is required")))
             .OnChanged([password](const TextEditingValue& value) { password = value; }),
         TextField(message)
             .LineLimits(TextFieldLineLimits::MultiLine(3, 5))
             .MaxLength(240)
-            .Placeholder("Message")
+            .Label("Message")
+            .Placeholder("Write a message")
+            .LeadingIcon(MessageIcon())
+            .Variant(TextFieldVariant::Outlined)
             .OnChanged([message](const TextEditingValue& value) { message = value; }),
       }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
   );
