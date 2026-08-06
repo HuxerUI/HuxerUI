@@ -1084,4 +1084,19 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   REQUIRE(!ContainsRect(hidden_after_exit, shown_geometry->thumb));
 }
 
+TEST_CASE("TestEaseInTweenStartsSlowlyAndReachesItsTarget") {
+  huxerui::detail::AnimatedValue<float> animated{0.0F};
+  animated.Update(1.0F, TweenSpec{1.0, Easing::EaseIn});
+
+  REQUIRE(animated.Advance(2.0, 0.0));
+  REQUIRE(animated.Advance(2.25, 0.25));
+  REQUIRE(animated.Value() == Catch::Approx(0.015625F));
+  REQUIRE(animated.Advance(2.5, 0.25));
+  REQUIRE(animated.Value() == Catch::Approx(0.125F));
+  REQUIRE(animated.Advance(2.75, 0.25));
+  REQUIRE(animated.Value() == Catch::Approx(0.421875F));
+  REQUIRE_FALSE(animated.Advance(3.0, 0.25));
+  REQUIRE(animated.Value() == 1.0F);
+}
+
 } // namespace huxerui::test

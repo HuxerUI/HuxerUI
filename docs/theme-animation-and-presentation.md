@@ -92,6 +92,8 @@ return Button("Transform")
 
 Presentation transforms do not change measured size or parent layout. They transform the View background, content, children, foreground extensions, clipping, and pointer hit region together. `TransformOrigin` uses normalized coordinates.
 
+`Easing::Linear` keeps constant speed. `Easing::EaseIn` starts at zero speed and accelerates with a cubic curve, while `Easing::EaseOut` starts at its highest speed and decelerates to zero. Matching their endpoint speed with an intervening linear Tween allows a motion sequence to accelerate, cruise, and decelerate without a velocity jump.
+
 Animation state is retained by the mounted node extension. Compatible recomposition retargets from the current presentation value rather than restarting from the previous declaration. Reduced-motion themes resolve animations immediately where appropriate.
 
 Dialog, BottomSheet, Menu, and Toast use the same retained Layer transition machinery when their active style enables motion. Dialog resolves fade, scale, or slide policy from `DialogStyle`, while BottomSheet fades the modal barrier and translates its sheet from the bottom edge. Dismissal disables content input immediately and removes the retained layer only after its exit animation completes.

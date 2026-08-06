@@ -11,6 +11,7 @@ namespace huxerui {
 
 enum class Easing {
   Linear,
+  EaseIn,
   EaseOut,
 };
 

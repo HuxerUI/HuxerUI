@@ -380,6 +380,8 @@ SpringSpec{
 
 `AnimationSpec` is a value. It is not a modifier and does not own runtime state.
 
+`TweenSpec` supports linear interpolation, cubic ease-in, and cubic ease-out. Ease-in begins at zero speed, ease-out ends at zero speed, and their endpoint slopes can be matched to a linear segment when a motion needs a sustained cruising phase.
+
 ### Animated modifier values
 
 `AnimateTo()` combines a target with an animation description:

@@ -279,7 +279,9 @@ public:
       }
       const double progress = std::clamp((timestamp - start_time_) / tween->duration, 0.0, 1.0);
       double eased = progress;
-      if (tween->easing == Easing::EaseOut) {
+      if (tween->easing == Easing::EaseIn) {
+        eased = progress * progress * progress;
+      } else if (tween->easing == Easing::EaseOut) {
         const double inverse = 1.0 - progress;
         eased = 1.0 - inverse * inverse * inverse;
       }
