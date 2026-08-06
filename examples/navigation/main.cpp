@@ -1,6 +1,59 @@
 #include <huxerui/huxerui.h>
 
+#include <cstddef>
+#include <vector>
+
 using namespace huxerui;
+
+VectorAsset HomeIcon() {
+  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
+    builder.StrokePath(
+        Path{}.MoveTo({2.5F, 9.0F}).LineTo({10.0F, 2.5F}).LineTo({17.5F, 9.0F}),
+        Color::Black(),
+        2.0F,
+        StrokeCap::Round,
+        StrokeJoin::Round
+    );
+    builder.StrokePath(
+        Path{}.MoveTo({5.0F, 8.0F}).LineTo({5.0F, 17.0F}).LineTo({15.0F, 17.0F}).LineTo({15.0F, 8.0F}),
+        Color::Black(),
+        2.0F,
+        StrokeCap::Round,
+        StrokeJoin::Round
+    );
+  });
+  return icon;
+}
+
+VectorAsset LibraryIcon() {
+  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(Path::RoundedRect({2.5F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
+    builder.FillPath(Path::RoundedRect({8.0F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
+    builder.FillPath(Path::RoundedRect({13.5F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
+  });
+  return icon;
+}
+
+VectorAsset SettingsIcon() {
+  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
+    builder.StrokePath(
+        Path{}
+            .MoveTo({2.0F, 5.0F})
+            .LineTo({18.0F, 5.0F})
+            .MoveTo({2.0F, 10.0F})
+            .LineTo({18.0F, 10.0F})
+            .MoveTo({2.0F, 15.0F})
+            .LineTo({18.0F, 15.0F}),
+        Color::Black(),
+        2.0F,
+        StrokeCap::Round
+    );
+    builder.FillPath(Path::RoundedRect({5.0F, 3.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
+    builder.FillPath(Path::RoundedRect({12.0F, 8.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
+    builder.FillPath(Path::RoundedRect({7.0F, 13.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
+  });
+  return icon;
+}
 
 View DetailsPage(int section);
 
@@ -64,8 +117,104 @@ View DetailsPage(int section) {
   );
 }
 
+View LibraryPage() {
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text("Library", TextRole::Title),
+    Text("Destination selection is controlled independently from page history."),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+View SettingsPage() {
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text("Settings", TextRole::Title),
+    Text("Applications decide which content a NavigationBar or NavigationPane selects."),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+View DestinationContent(std::size_t destination) {
+  switch (destination) {
+  case 1:
+    return LibraryPage();
+  case 2:
+    return SettingsPage();
+  default:
+    return NavigationStack(HomePage);
+  }
+}
+
+View NavigationDemo() {
+  const ThemeSpec& theme = UseTheme();
+  const ViewportClass viewport_class = UseViewportClass();
+  auto destination = UseState<std::size_t>(0);
+  auto start_open = UseState(false);
+  auto end_open = UseState(false);
+
+  const auto destinations = [] {
+    return std::vector<NavigationItem>{
+        NavigationItem(HomeIcon(), "Home"),
+        NavigationItem(LibraryIcon(), "Library"),
+        NavigationItem(SettingsIcon(), "Settings"),
+    };
+  };
+
+  return DrawerLayout {
+    Column {
+      Row {
+        Button("Menu")
+            .With(Enabled(viewport_class == ViewportClass::Compact))
+            .OnClick([start_open, end_open] {
+              end_open = false;
+              start_open = true;
+            }),
+        Spacer(),
+        Button("Tools")
+            .With(Enabled(viewport_class != ViewportClass::Expanded))
+            .OnClick([start_open, end_open, viewport_class] {
+              if (viewport_class == ViewportClass::Compact) {
+                start_open = false;
+              }
+              end_open = true;
+            }),
+      }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+      DestinationContent(destination.Get()).With(Grow()),
+      NavigationBar(destinations(), destination).OnChanged([destination](std::size_t index) {
+        destination = index;
+      }),
+    }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch)),
+
+    StartDrawer {
+      Column {
+        Text("Destinations", TextRole::Title).With(Padding(theme.spacing.medium)),
+        NavigationPane(destinations(), destination, true)
+            .OnChanged([destination, start_open](std::size_t index) {
+              destination = index;
+              start_open = false;
+            }),
+      }.With(CrossAlign(CrossAxisAlignment::Stretch))
+    }.Open(start_open).OnOpenChanged([start_open](bool open) { start_open = open; }),
+
+    EndDrawer {
+      Column {
+        Text("Tools", TextRole::Title),
+        Text("EndDrawer owns app content and follows the same controlled open state."),
+        Button("Close").OnClick([end_open] { end_open = false; }),
+      }.With(Padding(theme.spacing.large), Spacing(theme.spacing.medium))
+    }.Open(end_open).OnOpenChanged([end_open](bool open) { end_open = open; }),
+  };
+}
+
 View App() {
-  return MaterialTheme([] { return NavigationStack(HomePage); });
+  return MaterialTheme(NavigationDemo);
 }
 
 HUXERUI_APP(

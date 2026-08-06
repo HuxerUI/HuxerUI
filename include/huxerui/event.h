@@ -145,6 +145,14 @@ struct TabsEvents {
   struct Changed : Event<std::size_t> {};
 };
 
+struct NavigationEvents {
+  struct Changed : Event<std::size_t> {};
+};
+
+struct DrawerEvents {
+  struct OpenChanged : Event<bool> {};
+};
+
 struct TextFieldEvents {
   struct Changed : Event<const TextEditingValue&> {};
   struct Submitted : Event<> {};

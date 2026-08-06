@@ -165,6 +165,80 @@ The semantic label of an icon-only item is required but not drawn. Left and Righ
 
 `TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content; those responsibilities belong to a future navigation container rather than this selection control.
 
+## NavigationBar and NavigationPane
+
+NavigationBar and NavigationPane are controlled destination selectors.
+They emit a selected index but do not own page history or construct destination content:
+
+```cpp
+auto selected = UseState<std::size_t>(0);
+
+return NavigationBar(
+    {
+        NavigationItem(images::home, "Home"),
+        NavigationItem(images::search, "Search"),
+        NavigationItem(images::settings, "Settings"),
+    },
+    selected
+).OnChanged([selected](std::size_t index) {
+  selected = index;
+});
+```
+
+NavigationPane uses the same NavigationItem model and is compact by default.
+NavigationBar and compact NavigationPane items require icons because their labels are secondary or semantic rather than the only visible content.
+Expanded NavigationPane items may be label-only.
+Pass `true` as the third constructor argument to show the icon-and-label form:
+
+```cpp
+NavigationPane(items, selected, true)
+    .OnChanged([selected](std::size_t index) {
+      selected = index;
+    });
+```
+
+NavigationItem accepts ImageResource, ImageAsset, or VectorAsset icons, supports a selected icon, and can be disabled.
+Arrow keys move along the control's axis, Home and End select an edge item, and disabled items are skipped.
+NavigationBarStyle and NavigationPaneStyle keep geometry, selection indication, colors, and motion in Theme.
+
+## DrawerLayout
+
+DrawerLayout keeps its main content and optional logical-edge drawers in the application tree:
+
+```cpp
+auto start_open = UseState(false);
+auto end_open = UseState(false);
+
+return DrawerLayout {
+  MainContent(),
+  StartDrawer {
+    StartContent(),
+  }.Open(start_open).OnOpenChanged([start_open](bool open) {
+    start_open = open;
+  }),
+  EndDrawer {
+    EndContent(),
+  }.Open(end_open).OnOpenChanged([end_open](bool open) {
+    end_open = open;
+  }),
+};
+```
+
+Open is the controlled state used whenever a drawer is modal.
+Buttons request modal opening by updating that state, and Back emits DrawerEvents::OpenChanged so the owner supplies the next value.
+DrawerLayout presents both drawers modally in Compact viewports, keeps Start persistently inline and End modal in Medium viewports, and keeps both persistently inline in Expanded viewports.
+Persistent inline drawers are visible regardless of Open and do not mutate it, so resizing back to a modal structure preserves the owner's requested state.
+Modal drawers support edge dragging and scrim dismissal, animate above content, use the theme-owned modal shape and shadow, and confine focus while open.
+Inline drawers participate in layout without a scrim, focus trap, corner radius, shadow, or Back handling.
+When the available width cannot preserve the configured minimum content width, End falls back to modal placement before Start.
+A drawer that falls back to modal placement is visible only when its controlled Open state is true.
+If both controlled states are open when a viewport becomes Compact, the modal drawers stack with End above Start and Back closes them in that order.
+DrawerStyle owns preferred and minimum drawer widths, minimum content width, modal reveal, background, scrim, shadow, shape, gesture edge, and motion.
+Start and End describe logical edges so future right-to-left direction support does not require a new public drawer API.
+
+Use DrawerLayout for application content that participates in ordinary layout and Environment ownership.
+Use Dialog, BottomSheet, Popup, Menu, or another presentation service for content owned by the window LayerStack.
+
 ## Divider
 
 Divider is horizontal by default and expands across a bounded width. Pass `Axis::Vertical` for a vertical divider:

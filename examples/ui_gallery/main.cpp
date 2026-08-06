@@ -3,14 +3,12 @@
 #include <cstddef>
 #include <string>
 #include <utility>
-#include <vector>
 
 using namespace huxerui;
 
 constexpr std::size_t controls_page = 0;
 constexpr std::size_t layout_page = 1;
 constexpr std::size_t motion_page = 2;
-constexpr std::size_t tools_page = 3;
 
 const char* PageName(std::size_t page) {
   switch (page) {
@@ -20,15 +18,9 @@ const char* PageName(std::size_t page) {
     return "Layout";
   case motion_page:
     return "Motion";
-  case tools_page:
-    return "Tools";
   default:
     return "Controls";
   }
-}
-
-std::size_t ResolveGalleryPage(std::size_t selected_page, bool tools_as_page) {
-  return selected_page == tools_page && !tools_as_page ? controls_page : selected_page;
 }
 
 const char* ViewportName(ViewportClass viewport_class) {
@@ -303,25 +295,28 @@ View GalleryToolsContent(std::size_t selected_page, State<std::size_t> theme_fam
   }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
 }
 
-View GalleryNavigation() {
+View GalleryNavigation(State<std::size_t> selected_page, State<bool> start_open) {
   const ThemeSpec& theme = UseTheme();
   return Column {
     Text("HuxerUI", TextRole::Title),
     Text("UI Gallery", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
     Divider(),
-    Text("Workspace", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
-    Text("Component gallery").With(
-        Padding(EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small)),
-        Background(theme.colors.secondary_container),
-        Foreground(theme.colors.on_secondary_container),
-        CornerRadius(theme.shapes.medium)
-    ),
+    NavigationPane(
+      {
+        NavigationItem("Controls"),
+        NavigationItem("Layout"),
+        NavigationItem("Motion"),
+      },
+      selected_page,
+      true
+    ).OnChanged([selected_page, start_open](std::size_t index) {
+      selected_page = index;
+      start_open = false;
+    }),
     Spacer(),
-    Text("Navigation drawer", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
-    Text("Reserved for additional destinations.", TextRole::Label)
+    Text("StartDrawer keeps destination state in the application tree.", TextRole::Label)
         .With(Foreground(theme.colors.on_surface_variant)),
   }.With(
-      Frame{.width = 208.0F},
       Padding(theme.spacing.large),
       Spacing(theme.spacing.medium),
       Background(theme.colors.surface_container_low),
@@ -332,13 +327,12 @@ View GalleryNavigation() {
 View GalleryTools(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
   const ThemeSpec& theme = UseTheme();
   return GalleryToolsContent(selected_page, theme_family, dark_mode).With(
-      Frame{.width = 248.0F},
       Padding(theme.spacing.large),
       Background(theme.colors.surface_container_low)
   );
 }
 
-View GalleryPage(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+View GalleryPage(std::size_t selected_page) {
   switch (selected_page) {
   case controls_page:
     return ControlsDemo();
@@ -346,32 +340,45 @@ View GalleryPage(std::size_t selected_page, State<std::size_t> theme_family, Sta
     return LayoutDemo();
   case motion_page:
     return MotionDemo();
-  case tools_page:
-    return Panel(GalleryToolsContent(selected_page, theme_family, dark_mode));
   default:
     return ControlsDemo();
   }
 }
 
 View GalleryMain(
-    State<std::size_t> selected_page, State<std::size_t> theme_family, State<bool> dark_mode, bool tools_as_page
+    State<std::size_t> selected_page,
+    State<bool> start_open,
+    State<bool> end_open
 ) {
   const ThemeSpec& theme = UseTheme();
-  const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), tools_as_page);
-  std::vector<StringVariant> tabs{"Controls", "Layout", "Motion"};
-  if (tools_as_page) {
-    tabs.emplace_back("Tools");
-  }
+  const ViewportClass viewport_class = UseViewportClass();
 
   return Column {
+    Row {
+      Button("Menu")
+          .With(Enabled(viewport_class == ViewportClass::Compact))
+          .OnClick([start_open, end_open] {
+            end_open = false;
+            start_open = true;
+          }),
+      Spacer(),
+      Button("Tools")
+          .With(Enabled(viewport_class != ViewportClass::Expanded))
+          .OnClick([start_open, end_open, viewport_class] {
+            if (viewport_class == ViewportClass::Compact) {
+              start_open = false;
+            }
+            end_open = true;
+          }),
+    }.With(CrossAlign(CrossAxisAlignment::Center)),
     Text("UI Gallery").With(FontSize(28.0F)),
     Text("Controls, layout, and motion in one responsive workspace", TextRole::Label)
         .With(Foreground(theme.colors.on_surface_variant)),
-    Tabs(std::move(tabs), active_page)
+    Tabs({"Controls", "Layout", "Motion"}, selected_page.Get())
         .OnChanged([selected_page](std::size_t index) { selected_page = index; }),
     ScrollView {
       Column {
-        GalleryPage(active_page, theme_family, dark_mode),
+        GalleryPage(selected_page.Get()),
       }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
     }.With(ScrollBar(), Grow()),
   }.With(
@@ -382,44 +389,41 @@ View GalleryMain(
   );
 }
 
-View GalleryShell(State<std::size_t> selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
+View GalleryShell(
+    State<std::size_t> selected_page,
+    State<std::size_t> theme_family,
+    State<bool> dark_mode,
+    State<bool> start_open,
+    State<bool> end_open
+) {
   const ThemeSpec& theme = UseTheme();
-  const ViewportClass viewport_class = UseViewportClass();
-  if (viewport_class == ViewportClass::Compact) {
-    return GalleryMain(selected_page, theme_family, dark_mode, true);
-  }
+  return DrawerLayout {
+    GalleryMain(selected_page, start_open, end_open).With(Background(theme.colors.background)),
 
-  if (viewport_class == ViewportClass::Medium) {
-    const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), false);
-    return Row {
-      GalleryMain(selected_page, theme_family, dark_mode, false).With(Grow()),
-      Divider(Axis::Vertical),
-      GalleryTools(active_page, theme_family, dark_mode),
-    }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch));
-  }
+    StartDrawer {
+      GalleryNavigation(selected_page, start_open),
+    }.Open(start_open).OnOpenChanged([start_open](bool open) { start_open = open; }),
 
-  const std::size_t active_page = ResolveGalleryPage(selected_page.Get(), false);
-  return Row {
-    GalleryNavigation(),
-    Divider(Axis::Vertical),
-    GalleryMain(selected_page, theme_family, dark_mode, false).With(Grow()),
-    Divider(Axis::Vertical),
-    GalleryTools(active_page, theme_family, dark_mode),
-  }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch));
+    EndDrawer {
+      GalleryTools(selected_page.Get(), theme_family, dark_mode),
+    }.Open(end_open).OnOpenChanged([end_open](bool open) { end_open = open; }),
+  };
 }
 
 View App() {
   auto selected_page = UseState<std::size_t>(0);
   auto theme_family = UseState<std::size_t>(0);
   auto dark_mode = UseState(false);
+  auto start_open = UseState(false);
+  auto end_open = UseState(false);
 
   if (theme_family == 1) {
-    return dark_mode ? FlatDarkTheme(GalleryShell, selected_page, theme_family, dark_mode)
-                     : FlatTheme(GalleryShell, selected_page, theme_family, dark_mode);
+    return dark_mode ? FlatDarkTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)
+                     : FlatTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open);
   }
 
-  return dark_mode ? MaterialDarkTheme(GalleryShell, selected_page, theme_family, dark_mode)
-                   : MaterialTheme(GalleryShell, selected_page, theme_family, dark_mode);
+  return dark_mode ? MaterialDarkTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)
+                   : MaterialTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open);
 }
 
 HUXERUI_APP(

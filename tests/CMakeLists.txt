@@ -23,6 +23,7 @@ add_executable(huxerui_tests
         runtime/layers.cpp
         runtime/layout.cpp
         runtime/navigation.cpp
+        runtime/navigation_ui.cpp
         runtime/presentation.cpp
         runtime/render_scene.cpp
         runtime/resources.cpp

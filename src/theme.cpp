@@ -148,6 +148,70 @@ NavigationStyle FlatNavigationStyle(const ThemeSpec& theme) {
   };
 }
 
+NavigationBarStyle FlatNavigationBarStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface,
+      .label_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.on_surface_variant},
+      .selected_content = theme.colors.primary,
+      .disabled_content = disabled,
+      .indicator = theme.colors.surface_container_highest,
+      .indicator_size = {56.0F, 32.0F},
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.extra_small, theme.spacing.extra_small),
+      .icon_size = 22.0F,
+      .icon_spacing = theme.spacing.extra_small,
+      .minimum_item_width = 64.0F,
+      .height = 64.0F,
+      .indicator_corner_radius = theme.shapes.small,
+      .show_unselected_labels = true,
+      .indication = FlatIndication(theme.colors.on_surface, theme),
+      .selection_animation = TweenSpec{.duration = theme.motion.fast},
+  };
+}
+
+NavigationPaneStyle FlatNavigationPaneStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface,
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface_variant},
+      .selected_content = theme.colors.primary,
+      .disabled_content = disabled,
+      .indicator = theme.colors.surface_container_highest,
+      .item_margin = EdgeInsets::Symmetric(theme.spacing.small, 0.0F),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, 0.0F),
+      .compact_width = 72.0F,
+      .expanded_min_width = 256.0F,
+      .item_height = 48.0F,
+      .icon_size = 22.0F,
+      .icon_spacing = theme.spacing.medium,
+      .compact_indicator_size = {56.0F, 32.0F},
+      .indicator_corner_radius = theme.shapes.small,
+      .indication = FlatIndication(theme.colors.on_surface, theme),
+      .selection_animation = TweenSpec{.duration = theme.motion.fast},
+  };
+}
+
+DrawerStyle FlatDrawerStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.surface,
+      .scrim = theme.colors.scrim,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.22F), {}, theme.elevation.medium, 0.0F},
+      .preferred_width = 320.0F,
+      .minimum_width = 240.0F,
+      .minimum_content_width = 360.0F,
+      .modal_content_reveal = 56.0F,
+      .edge_drag_width = 24.0F,
+      .corner_radius = theme.shapes.large,
+      .motion = theme.motion.reduced_motion ? std::optional<DrawerMotion>{std::nullopt}
+                                            : std::optional<DrawerMotion>{DrawerMotion{
+                                                  .open = TweenSpec{.duration = theme.motion.slow},
+                                                  .close = TweenSpec{.duration = theme.motion.normal},
+                                              }},
+  };
+}
+
 ThemeDefinition FlatDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(FlatToastStyle(theme));
@@ -155,6 +219,9 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
   definition.Set(FlatBottomSheetStyle(theme));
   definition.Set(FlatMenuStyle(theme));
   definition.Set(FlatNavigationStyle(theme));
+  definition.Set(FlatNavigationBarStyle(theme));
+  definition.Set(FlatNavigationPaneStyle(theme));
+  definition.Set(FlatDrawerStyle(theme));
   return definition;
 }
 
@@ -613,6 +680,70 @@ NavigationStyle MaterialNavigationStyle(const ThemeSpec& theme) {
   };
 }
 
+NavigationBarStyle MaterialNavigationBarStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface_container,
+      .label_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.on_surface_variant},
+      .selected_content = theme.colors.on_secondary_container,
+      .disabled_content = disabled,
+      .indicator = theme.colors.secondary_container,
+      .indicator_size = {64.0F, 32.0F},
+      .item_padding = EdgeInsets::Symmetric(0.0F, theme.spacing.small),
+      .icon_size = 24.0F,
+      .icon_spacing = theme.spacing.extra_small,
+      .minimum_item_width = 64.0F,
+      .height = 80.0F,
+      .indicator_corner_radius = theme.shapes.full,
+      .show_unselected_labels = true,
+      .indication = MaterialIndication(theme.colors.on_secondary_container, theme),
+      .selection_animation = TweenSpec{.duration = theme.motion.normal},
+  };
+}
+
+NavigationPaneStyle MaterialNavigationPaneStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface,
+      .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface_variant},
+      .selected_content = theme.colors.on_secondary_container,
+      .disabled_content = disabled,
+      .indicator = theme.colors.secondary_container,
+      .item_margin = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, 0.0F),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, 0.0F),
+      .compact_width = 80.0F,
+      .expanded_min_width = 256.0F,
+      .item_height = 56.0F,
+      .icon_size = 24.0F,
+      .icon_spacing = theme.spacing.medium,
+      .compact_indicator_size = {56.0F, 32.0F},
+      .indicator_corner_radius = theme.shapes.full,
+      .indication = MaterialIndication(theme.colors.on_secondary_container, theme),
+      .selection_animation = TweenSpec{.duration = theme.motion.normal},
+  };
+}
+
+DrawerStyle MaterialDrawerStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.surface_container_low,
+      .scrim = theme.colors.scrim,
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.18F), theme.elevation.medium),
+      .preferred_width = 360.0F,
+      .minimum_width = 240.0F,
+      .minimum_content_width = 360.0F,
+      .modal_content_reveal = 56.0F,
+      .edge_drag_width = 24.0F,
+      .corner_radius = theme.shapes.extra_large,
+      .motion = theme.motion.reduced_motion ? std::optional<DrawerMotion>{std::nullopt}
+                                            : std::optional<DrawerMotion>{DrawerMotion{
+                                                  .open = TweenSpec{.duration = theme.motion.slow},
+                                                  .close = TweenSpec{.duration = theme.motion.normal},
+                                              }},
+  };
+}
+
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
@@ -633,6 +764,9 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialBottomSheetStyle(theme));
   definition.Set(MaterialMenuStyle(theme));
   definition.Set(MaterialNavigationStyle(theme));
+  definition.Set(MaterialNavigationBarStyle(theme));
+  definition.Set(MaterialNavigationPaneStyle(theme));
+  definition.Set(MaterialDrawerStyle(theme));
   return definition;
 }
 

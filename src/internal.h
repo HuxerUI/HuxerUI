@@ -492,7 +492,11 @@ struct ViewSpec {
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool focusable = false;
+  // The highest painted enabled trap confines keyboard and pointer focus to its subtree.
+  bool trap_focus = false;
 };
+
+std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory);
 
 struct StateSlotKey {
   std::string file;
@@ -626,6 +630,7 @@ struct MountedNode final : public huxerui::MountedNode {
   // A visual extension can override the default centered indication frame with retained animated geometry.
   std::optional<Rect> indication_frame;
   bool focusable = false;
+  bool trap_focus = false;
   bool focused = false;
   bool focus_visible = false;
   bool subtree_has_extensions = true;
@@ -995,8 +1000,8 @@ struct TextSelectionOverlay {
   TextSelectionOverlayState state;
 };
 
-struct LayerFocusFrame {
-  LayerId id = 0;
+struct FocusTrapFrame {
+  std::uint64_t identity = 0;
   std::optional<std::uint64_t> restore_identity;
 };
 
@@ -1072,7 +1077,7 @@ struct Runtime::State {
   detail::TextSelectionGestureState text_selection_gesture_;
   detail::TextSelectionOverlay text_selection_overlay_;
   TextInputSessionId next_text_input_session_id_ = 1;
-  std::vector<detail::LayerFocusFrame> layer_focus_stack_;
+  std::vector<detail::FocusTrapFrame> focus_trap_stack_;
   std::optional<detail::BackTarget> back_target_;
 };
 

@@ -1212,6 +1212,7 @@ TEST_CASE("TestNestedLayerFocusRestoresAcrossRemovedLowerLayer") {
 
 TEST_CASE("TestExitingLayerCancelsInputUntilRemoval") {
   layer_dialogs.reset();
+  layer_background_clicks = 0;
   exiting_layer_clicks = 0;
   exiting_layer_pointer_cancels = 0;
 
@@ -1240,6 +1241,12 @@ TEST_CASE("TestExitingLayerCancelsInputUntilRemoval") {
   runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Tab});
   runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Enter});
   REQUIRE(exiting_layer_clicks == 0);
+  REQUIRE(layer_background_clicks == 0);
+
+  SettlePresentation(platform, runtime);
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Tab});
+  runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Enter});
+  REQUIRE(layer_background_clicks == 1);
 }
 
 TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {

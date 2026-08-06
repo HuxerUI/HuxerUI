@@ -2099,15 +2099,6 @@ std::shared_ptr<detail::ViewSpec> MakeSpacerSpec() {
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeScopeSpec(std::function<View()> factory) {
-  if (!factory) {
-    throw std::invalid_argument("HuxerUI scope factory must not be empty");
-  }
-  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Scope);
-  spec->scope_factory = std::move(factory);
-  return spec;
-}
-
 std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::size_t selected_index) {
   if (items.empty()) {
     throw std::invalid_argument("HuxerUI Tabs requires at least one item");
@@ -2134,7 +2125,7 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
     resolved_items.push_back(std::move(resolved));
   }
 
-  return MakeScopeSpec([items = std::move(resolved_items), selected_index]() -> View {
+  return detail::MakeScopeSpec([items = std::move(resolved_items), selected_index]() -> View {
     const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
     const ThemeSpec theme = detail::ResolveThemeSpec(environment);
     const TabsStyle style = ResolveStyleOverride<TabsStyle>(environment).value_or(detail::DefaultTabsStyle(theme));
@@ -2252,6 +2243,15 @@ const detail::ModifierDescriptor& Grow::Descriptor() {
 }
 
 namespace detail {
+
+std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory) {
+  if (!factory) {
+    throw std::invalid_argument("HuxerUI scope factory must not be empty");
+  }
+  auto spec = std::make_shared<ViewSpec>(NodeKind::Scope);
+  spec->scope_factory = std::move(factory);
+  return spec;
+}
 
 float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept {
   return metrics.visual_size.width + metrics.label_spacing;
@@ -2721,7 +2721,7 @@ void Slider::UpdateModifier() {
 
 Canvas::Canvas(CanvasPainter painter) : View(MakeCanvasSpec(std::move(painter))) {}
 
-Scope::Scope(std::function<View()> factory) : View(MakeScopeSpec(std::move(factory))) {}
+Scope::Scope(std::function<View()> factory) : View(detail::MakeScopeSpec(std::move(factory))) {}
 
 Spacer::Spacer() : View(MakeSpacerSpec()) {}
 

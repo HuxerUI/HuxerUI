@@ -412,7 +412,8 @@ bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incomi
          mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
          mounted.environment == incoming.environment &&
          mounted.pointer_events_enabled == incoming.pointer_events_enabled &&
-         mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable;
+         mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable &&
+         mounted.trap_focus == incoming.trap_focus;
 }
 
 // Child structure, virtual sources, and retained modifiers reconcile separately because they carry mounted state.
@@ -433,6 +434,7 @@ void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
   mounted.pointer_events_enabled = incoming.pointer_events_enabled;
   mounted.local_enabled = incoming.local_enabled;
   mounted.focusable = incoming.focusable;
+  mounted.trap_focus = incoming.trap_focus;
 }
 
 bool MarkLayoutDirtyPath(MountedNode& node, std::uint64_t identity) {
@@ -648,6 +650,18 @@ void CollectFocusableNodes(MountedNode& node, std::vector<MountedNode*>& nodes) 
   }
 }
 
+MountedNode* FindTopmostFocusTrap(MountedNode& node) {
+  if (!node.enabled) {
+    return nullptr;
+  }
+  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
+    if (MountedNode* root = FindTopmostFocusTrap(**child)) {
+      return root;
+    }
+  }
+  return node.trap_focus ? &node : nullptr;
+}
+
 bool ContainsNodeIdentity(const MountedNode& node, std::uint64_t identity) {
   if (node.identity == identity) {
     return true;
@@ -677,34 +691,30 @@ bool PointerSessionReferencesNode(const PointerSession& session, const MountedNo
          });
 }
 
-MountedNode* FindBackEventHandler(MountedNode& node) {
+bool RouteBackTarget(MountedNode& node, const BackEvent& event, BackTarget& target, bool& already_dispatched) {
   if (!node.enabled) {
-    return nullptr;
+    return false;
   }
   for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-    if (MountedNode* handler = FindBackEventHandler(**child)) {
-      return handler;
+    if (RouteBackTarget(**child, event, target, already_dispatched)) {
+      return true;
     }
   }
-  return HasEventBinding<ViewEvents::BackRequested>(node.event_bindings) ? &node : nullptr;
-}
-
-std::optional<NodeExtensionHandle> DispatchBackToExtensions(MountedNode& node, const BackEvent& event) {
-  if (!node.enabled) {
-    return std::nullopt;
-  }
-  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-    if (auto target = DispatchBackToExtensions(**child, event)) {
-      return target;
-    }
+  if (HasEventBinding<ViewEvents::BackRequested>(node.event_bindings)) {
+    target.kind = BackTargetKind::Event;
+    target.node_identity = node.identity;
+    return true;
   }
   for (std::size_t index = node.extensions.size(); index > 0; --index) {
     NodeExtensionEntry& entry = node.extensions[index - 1];
     if (entry.extension && entry.extension->OnBack(node, event)) {
-      return NodeExtensionHandle{node.identity, index - 1, entry.descriptor};
+      target.kind = BackTargetKind::Extension;
+      target.extension = NodeExtensionHandle{node.identity, index - 1, entry.descriptor};
+      already_dispatched = true;
+      return true;
     }
   }
-  return std::nullopt;
+  return false;
 }
 
 bool IsActivatable(const MountedNode& node) {
@@ -1069,27 +1079,29 @@ void Runtime::RefreshInteractionTree() {
     HandlePointerCancel(cancellation);
     TrackTouchTextSelectionGesture(cancellation);
   }
-  const std::optional<LayerId> focus_layer = ActiveFocusLayerId();
-  const std::optional<LayerId> previous_focus_layer =
-      state_->layer_focus_stack_.empty() ? std::nullopt : std::optional{state_->layer_focus_stack_.back().id};
-  if (previous_focus_layer != focus_layer) {
-    // Keep nested restoration frames until every higher focus layer leaves, even if a lower layer was removed first.
-    const auto existing = focus_layer.has_value()
-                              ? std::ranges::find(state_->layer_focus_stack_, *focus_layer, &LayerFocusFrame::id)
-                              : state_->layer_focus_stack_.end();
-    if (existing == state_->layer_focus_stack_.end() && focus_layer.has_value()) {
-      state_->layer_focus_stack_.push_back({*focus_layer, state_->focused_node_identity_});
+  detail::MountedNode* focus_root = ActiveFocusTrapRoot();
+  const std::optional<std::uint64_t> focus_identity =
+      focus_root == nullptr ? std::nullopt : std::optional{focus_root->identity};
+  const std::optional<std::uint64_t> previous_focus_identity =
+      state_->focus_trap_stack_.empty() ? std::nullopt : std::optional{state_->focus_trap_stack_.back().identity};
+  if (previous_focus_identity != focus_identity) {
+    // Nested traps retain the focus that each one displaced so removing the topmost trap restores in stack order.
+    const auto existing = focus_identity.has_value()
+                              ? std::ranges::find(state_->focus_trap_stack_, *focus_identity, &FocusTrapFrame::identity)
+                              : state_->focus_trap_stack_.end();
+    if (existing == state_->focus_trap_stack_.end() && focus_identity.has_value()) {
+      state_->focus_trap_stack_.push_back({*focus_identity, state_->focused_node_identity_});
     } else {
       std::optional<std::uint64_t> restore_identity;
-      while (!state_->layer_focus_stack_.empty() &&
-             (!focus_layer.has_value() || state_->layer_focus_stack_.back().id != *focus_layer)) {
-        restore_identity = state_->layer_focus_stack_.back().restore_identity;
-        state_->layer_focus_stack_.pop_back();
+      while (!state_->focus_trap_stack_.empty() &&
+             (!focus_identity.has_value() || state_->focus_trap_stack_.back().identity != *focus_identity)) {
+        restore_identity = state_->focus_trap_stack_.back().restore_identity;
+        state_->focus_trap_stack_.pop_back();
       }
       SetFocusedNode(restore_identity);
     }
   }
-  detail::MountedNode* focus_root = ActiveFocusLayerRoot();
+  focus_root = ActiveFocusTrapRoot();
   if (state_->focused_node_identity_.has_value()) {
     detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
     if (!focused || !focused->enabled || !focused->focusable ||
@@ -1120,28 +1132,11 @@ void Runtime::RefreshInteractionTree() {
   ResolveFocusedFlags(*state_->mounted_root_, state_->focused_node_identity_, state_->focus_visible_);
 }
 
-detail::MountedNode* Runtime::ActiveFocusLayerRoot() {
-  if (!state_->mounted_root_ || state_->layer_focus_stack_.empty()) {
+detail::MountedNode* Runtime::ActiveFocusTrapRoot() {
+  if (!state_->mounted_root_) {
     return nullptr;
   }
-  const LayerId focus_id = state_->layer_focus_stack_.back().id;
-
-  const auto entry = std::ranges::find(state_->layer_controller_.state_->entries, focus_id, &LayerEntry::id);
-  if (entry == state_->layer_controller_.state_->entries.end() ||
-      (entry->transition && !entry->transition->target_visible)) {
-    return nullptr;
-  }
-
-  detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
-  if (!layer_stack) {
-    return nullptr;
-  }
-  for (auto& child : layer_stack->children) {
-    if (child->LayoutValueOr<LayerEntryIdValue>(0) == focus_id) {
-      return child.get();
-    }
-  }
-  return nullptr;
+  return FindTopmostFocusTrap(*state_->mounted_root_);
 }
 
 std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route) {
@@ -1153,7 +1148,7 @@ std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vecto
     }
   }
 
-  detail::MountedNode* focus_root = ActiveFocusLayerRoot();
+  detail::MountedNode* focus_root = ActiveFocusTrapRoot();
   if (!focus_root || (candidate.has_value() && ContainsNodeIdentity(*focus_root, *candidate))) {
     return candidate;
   }
@@ -1165,16 +1160,6 @@ std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vecto
   std::vector<detail::MountedNode*> focusable;
   CollectFocusableNodes(*focus_root, focusable);
   return focusable.empty() ? std::nullopt : std::optional{focusable.front()->identity};
-}
-
-std::optional<LayerId> Runtime::ActiveFocusLayerId() const {
-  const LayerEntry* active = nullptr;
-  for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
-    if (entry.options.trap_focus && (active == nullptr || LayerPaintsAbove(entry, *active))) {
-      active = &entry;
-    }
-  }
-  return active == nullptr ? std::nullopt : std::optional{active->id};
 }
 
 bool Runtime::HandleBack() {
@@ -1287,14 +1272,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
     if (topmost != nullptr) {
       target.kind = detail::BackTargetKind::Layer;
       target.layer_id = topmost->id;
-    } else if (detail::MountedNode* handler = FindBackEventHandler(*application_root)) {
-      target.kind = detail::BackTargetKind::Event;
-      target.node_identity = handler->identity;
-    } else if (auto extension = DispatchBackToExtensions(*application_root, event)) {
-      target.kind = detail::BackTargetKind::Extension;
-      target.extension = *extension;
-      already_dispatched = true;
-    } else {
+    } else if (!RouteBackTarget(*application_root, event, target, already_dispatched)) {
       return false;
     }
   }
@@ -1370,7 +1348,7 @@ void Runtime::MoveFocus(bool reverse, bool wrap) {
     return;
   }
   std::vector<detail::MountedNode*> focusable;
-  detail::MountedNode* root = ActiveFocusLayerRoot();
+  detail::MountedNode* root = ActiveFocusTrapRoot();
   CollectFocusableNodes(root ? *root : *state_->mounted_root_, focusable);
   if (focusable.empty()) {
     SetFocusedNode(std::nullopt, true);
@@ -1510,9 +1488,6 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
     return;
   }
   if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
-    return;
-  }
-  if (!state_->layer_focus_stack_.empty() && ActiveFocusLayerRoot() == nullptr) {
     return;
   }
   if (event.type == KeyEventType::Down && event.key == Key::Tab && !event.repeat) {
@@ -1782,6 +1757,7 @@ void Runtime::ComposeLayers() {
       const bool exiting = entry.transition && !entry.transition->target_visible;
       if (exiting) {
         content.spec_->pointer_events_enabled = false;
+        content.spec_->local_enabled = false;
       }
       if (barrier) {
         content = std::move(content).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
@@ -1791,6 +1767,7 @@ void Runtime::ComposeLayers() {
                        .LayoutValue<LayerPlacementValue>(entry.placement)
                        .LayoutValue<LayerEntryIdValue>(entry.id)
                        .LayoutValue<LayerEntryRevisionValue>(entry.revision);
+      layer.spec_->trap_focus = entry.options.trap_focus;
       if (barrier) {
         layer =
             std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,

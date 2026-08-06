@@ -2,7 +2,7 @@
 
 Status: implemented
 
-This document defines the implemented contract for page stacks, scoped navigation controllers, page transitions, and Back routing, together with the extension boundary for future URL-backed navigation.
+This document defines the implemented contract for page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing, together with the extension boundary for future URL-backed navigation.
 
 The first implementation is intentionally factory-driven and imperative at the navigation boundary.
 It preserves a separate extension point for a future controlled, serializable navigation path without introducing route registries, URL concepts, or platform types into the shared Runtime.
@@ -18,6 +18,8 @@ It preserves a separate extension point for a future controlled, serializable na
 - Cancel input, focus, and text-input work when a page stops accepting interaction.
 - Define a platform-neutral predictive Back transaction that Android can drive immediately and other platforms can adopt when their host integration owns an equivalent gesture.
 - Preserve a direct path to browser URLs, deep links, and saveable navigation state through a future controlled route path.
+- Provide theme-owned NavigationBar and NavigationPane selectors without coupling selection to page history.
+- Provide controlled StartDrawer and EndDrawer content inside ordinary application layout.
 
 ## Non-goals
 
@@ -26,7 +28,7 @@ The initial implementation does not provide:
 - Named routes, string route tables, URI matching, or a destination registry.
 - A public `Page`, `Route`, or `NavigationEntry` base class.
 - A serializable or type-erased NavigationPath.
-- Automatic application bars, titles, Back buttons, navigation rails, or split-view policy.
+- Automatic application bars, titles, Back buttons, or master-detail page composition.
 - Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
 - Shared-element, hero, container-transform, or cross-page layout animation.
 - Automatic suspension or serialization of covered page state.
@@ -35,7 +37,7 @@ The initial implementation does not provide:
 
 Saveable state, route serialization, shared-element transitions, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
 
-## Design summary
+## Page stack design summary
 
 Navigation has four distinct responsibilities:
 
@@ -56,7 +58,48 @@ NavigationStack is part of the application tree rather than the LayerStack becau
 LayerStack continues to own content outside the application tree, including Dialog, BottomSheet, Popup, Menu, Toast, and diagnostic presentation.
 Navigation must not become another Layer level or another root service.
 
-## Public API
+## Destination selection and drawers
+
+NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
+They are controlled selection views: the selected index enters through construction and a requested index leaves through the typed event.
+They do not create pages, retain destination history, or assume that selecting an item always replaces visible content.
+An application may use the selection to switch sibling content, select a tab-owned NavigationStack, or update a future URL-backed route path.
+
+NavigationBar lays destinations along the horizontal axis.
+NavigationPane lays them vertically, supports compact icon-only and expanded icon-and-label presentation, and scrolls when its destinations exceed the viewport.
+NavigationBar and compact NavigationPane items require icons, while an expanded NavigationPane may use label-only items.
+Keyboard traversal lives in one retained selection behavior shared by the two controls and skips disabled destinations.
+Geometry, colors, indication, and selection motion remain separate NavigationBarStyle and NavigationPaneStyle Theme values because the two surfaces follow different visual specifications.
+
+DrawerLayout accepts main content plus optional strongly typed StartDrawer and EndDrawer children.
+The strong child types make ownership and logical edge explicit without a slot enum, runtime child inspection, or a parallel builder protocol.
+Start and End are semantic edges rather than physical Left and Right; layout direction can resolve them later without changing the API.
+
+Drawers remain ordinary application-tree content because they inherit application Environment values, may contain stateful controls or a NavigationPane, and are structurally owned by the surrounding page shell.
+They do not enter LayerStack and do not acquire a LayerId.
+Dialog, BottomSheet, Menu, Popup, Toast, and debug presentation remain window-level layers.
+
+Drawer open state is controlled and applies when the drawer resolves to modal placement.
+Buttons update the owner state directly, while modal scrim input, modal edge dragging, and Back emit DrawerEvents::OpenChanged.
+The retained drawer extension owns only transient modal drag and animation progress.
+It applies the modal panel transform and scrim opacity as presentation changes, so those animations do not require per-frame recomposition, measurement, layout, or PaintSequence recording.
+
+A modal drawer marks its overlay subtree as a focus trap from opening until its exit animation finishes, while a persistent inline drawer remains visible and participates in ordinary focus traversal regardless of the controlled modal state.
+Runtime resolves the highest painted enabled trap generically, so Layer presentation and application drawers share focus confinement and restoration rather than maintaining separate mechanisms.
+Back resolution likewise walks application nodes once in reverse paint order, checking a node's explicit Back event before its retained extensions.
+This lets an open drawer consume Back before underlying page content while a page-local Back handler still precedes its enclosing NavigationStack.
+
+DrawerLayout resolves presentation from ViewportClass while preserving the same StartDrawer and EndDrawer subtrees and controlled modal states.
+Compact presents both edges modally, Medium keeps Start persistently inline and End modal, and Expanded keeps both persistently inline.
+Inline drawers consume application width automatically and never write the owner's Open state.
+They omit modal scrim, shape, shadow, focus trapping, edge gestures, and Back handling.
+If the local constraints cannot preserve DrawerStyle::minimum_content_width plus every requested inline drawer minimum, End falls back to modal placement first and Start follows only when required.
+After fallback, the controlled Open state determines whether that modal drawer is visible.
+This constraint fallback makes the local layout authoritative even when the window-level ViewportClass is wider than the bounds assigned to DrawerLayout.
+If both controlled states are open while the available structure becomes modal, the drawers stack in child paint order with End above Start.
+Back closes End before Start, preserving state continuity across viewport changes without a layout-time state mutation or exception.
+
+## Page stack public API
 
 The initial public API lives in `<huxerui/navigation.h>`:
 
@@ -457,8 +500,8 @@ Runtime routes Back in this order:
 ```text
 framework-owned TextSelectionOverlay
     -> topmost public Layer that does not pass through Cancel
-    -> deepest enabled View BackRequested handler in reverse paint order
-    -> deepest active NavigationStack that can pop
+    -> deepest enabled application Back consumer in reverse paint order
+         -> explicit View BackRequested event before extensions on the same node
     -> platform fallback
 ```
 
@@ -550,6 +593,8 @@ OHOS and future platforms map their native navigation gestures or commands to th
 
 Navigation history and responsive structure remain separate concerns.
 NavigationStack fills its assigned bounds but does not automatically turn a compact page stack into an expanded master-detail layout.
+DrawerLayout is the responsive application-shell exception: it changes whether its declared StartDrawer and EndDrawer children are controlled modal surfaces or persistent inline content.
+It does not synthesize destinations, convert page content into a NavigationPane, or change the owner's controlled modal states.
 
 Applications continue to use ViewportClass to choose structure:
 
@@ -681,10 +726,11 @@ The public files are:
 
 - `include/huxerui/event.h` for BackEvent and ViewEvents::BackRequested.
 - `include/huxerui/modifier.h` for the general NodeExtension Back capability.
-- `include/huxerui/navigation.h` for NavigationController, NavigationStack, UseNavigation, NavigationStyle, and NavigationMotion.
+- `include/huxerui/navigation.h` for page stacks, destination selectors, drawers, and their Theme styles.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
-The primary implementation belongs in `src/navigation.cpp`, including controller state, entry resolution, NavigationStackLayout, navigation retained modifiers, and motion resolution.
+`src/navigation.cpp` owns controller state, entry resolution, NavigationStack layout, retained page modifiers, and page motion.
+`src/navigation_ui.cpp` owns NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
 Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Android, or Web.
@@ -707,6 +753,8 @@ Shared navigation work requires focused Runtime tests for:
 - Disconnected controller queries and mutations.
 - Deterministic operation serialization.
 - Empty factories and exception categories.
+
+Destination selection and drawer tests additionally verify icon requirements, disabled keyboard traversal, dynamic compact and expanded Pane composition, responsive inline fallback, controlled modal state, gesture and Back ordering, exit-time focus confinement, and built-in Theme styles.
 
 Transition and incremental-rendering tests verify:
 

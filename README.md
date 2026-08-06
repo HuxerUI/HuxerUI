@@ -16,7 +16,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Android, Linux, macO
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, UIKit, AppKit, Win32, X11, or an Emscripten Canvas while preserving platform services. |
 
-HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationStack, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationBar, NavigationPane, DrawerLayout, NavigationStack, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
 ## Quick Start
 
@@ -137,7 +137,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Target | Demonstrates |
 |---|---|
 | `example_counter` | Component scopes and local state |
-| `example_ui_gallery` | Responsive gallery shell, controls, layout, motion, and theme tools |
+| `example_ui_gallery` | Responsive drawer shell, controls, layout, motion, and theme tools |
 | `example_dynamic_list` | `ForEach`, stable keys, and per-item state |
 | `example_scroll_view` | Nested scrolling, metrics, controllers, and retained state |
 | `example_virtual_list` | Variable-height virtualization and item positioning |
@@ -147,7 +147,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_presentation` | Toast, Dialog, BottomSheet, Popup, and Menu presentation |
 | `example_theme` | Material, Flat, nested themes, and style precedence |
 | `example_tabs` | Controlled Tabs, disabled items, theme policies, and viewport classes |
-| `example_navigation` | Retained page stacks, Push, Pop, Replace, Back routing, and transitions |
+| `example_navigation` | Page stacks, selection navigation, start and end drawers, Back routing, and transitions |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Path fill, stroke, clipping, shadows, and Canvas-local drawing |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
