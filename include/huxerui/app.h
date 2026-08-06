@@ -128,9 +128,14 @@ public:
 private:
   struct State;
 
+  enum class ScrollActivitySource {
+    External,
+    TextInputReveal,
+  };
+
   void RequestFrame();
   void RequestFrameAfter(double delay_seconds);
-  void NotifyScrollActivity(detail::MountedNode& node);
+  void NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source);
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);

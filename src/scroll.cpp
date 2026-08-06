@@ -67,7 +67,7 @@ bool ScrollConnection::ScrollTo(float offset) {
   }
   SetCurrentOffset(next);
   PublishMetrics();
-  runtime_->NotifyScrollActivity(*node_);
+  runtime_->NotifyScrollActivity(*node_, Runtime::ScrollActivitySource::External);
   return true;
 }
 

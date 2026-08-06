@@ -706,7 +706,7 @@ NavigationPaneStyle MaterialNavigationPaneStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
   disabled.alpha *= theme.interactions.disabled_opacity;
   return {
-      .background = theme.colors.surface,
+      .background = theme.colors.surface_container_low,
       .label_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.on_surface_variant},
       .selected_content = theme.colors.on_secondary_container,
       .disabled_content = disabled,

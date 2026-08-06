@@ -2919,6 +2919,33 @@ TEST_CASE("TestTextFieldPointerSelectionYieldsToParentScroll") {
   REQUIRE(text_field_scroll.Metrics().offset > 0.0F);
 }
 
+TEST_CASE("TestFocusedSingleLineTextFieldAllowsAncestorWheelScrollUntilEditingResumes") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{ScrollableTextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 20.0F);
+  Pointer(runtime, PointerEventType::Up, 20.0F);
+  runtime.BuildFrame();
+
+  runtime.HandleScrollEvent({
+      {20.0F, 20.0F},
+      0.0F,
+      60.0F,
+  });
+  runtime.BuildFrame();
+  REQUIRE(text_field_scroll.Metrics().offset == 60.0F);
+
+  runtime.HandleKeyEvent({
+      KeyEventType::Down,
+      Key::Home,
+  });
+  runtime.BuildFrame();
+  REQUIRE(text_field_scroll.Metrics().offset < 60.0F);
+}
+
 TEST_CASE("TestTouchScrollOverTextFieldDoesNotFocusOrStartTextInput") {
   ResetTextFieldState();
   TextFieldPlatformInput text_input;
@@ -3043,9 +3070,11 @@ TEST_CASE("TestTouchDragOverFocusedTextFieldDoesNotRequestKeyboard") {
       {20.0F, -20.0F},
       PointerDeviceKind::Touch,
   });
+  runtime.BuildFrame();
 
   REQUIRE(text_input.show_requests.empty());
   REQUIRE(text_field_value.Get().selection == TextSelection{1, 1});
+  REQUIRE(text_field_scroll.Metrics().offset > 0.0F);
 }
 
 TEST_CASE("TestTextFieldScrollsIntoReducedViewport") {

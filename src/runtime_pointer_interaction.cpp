@@ -418,7 +418,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
     if (!scrolled.empty()) {
       for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
         if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
-          NotifyScrollActivity(*node);
+          NotifyScrollActivity(*node, ScrollActivitySource::External);
         }
       }
       detail::MountedNode& active = *scrolled.back();
@@ -435,7 +435,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   if (!scrolled.empty()) {
     for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
       if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
-        NotifyScrollActivity(*node);
+        NotifyScrollActivity(*node, ScrollActivitySource::External);
       }
     }
     detail::MountedNode& active = *scrolled.back();

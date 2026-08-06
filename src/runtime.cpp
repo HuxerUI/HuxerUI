@@ -833,8 +833,15 @@ void Runtime::RequestFrameAfter(double delay_seconds) {
   }
 }
 
-void Runtime::NotifyScrollActivity(detail::MountedNode& node) {
+void Runtime::NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source) {
   DispatchScrollActivity(node);
+  if (source == ScrollActivitySource::External && state_->text_input_session_.has_value() &&
+      state_->text_input_session_->node_identity != node.identity) {
+    // External scrolling may move a focused editor off screen; later editing explicitly requests caret reveal again.
+    if (detail::MountedNode* text_input = FindNode(node, state_->text_input_session_->node_identity)) {
+      DispatchScrollActivity(*text_input);
+    }
+  }
   if (state_->text_selection_overlay_.state.visible) {
     state_->text_selection_overlay_.state.paint_dirty = true;
   }
@@ -1443,7 +1450,7 @@ void Runtime::HandleScrollEvent(const ScrollEvent& event) {
     node->scroll_state->motion.Stop();
   }
   for (detail::MountedNode* node : result.scroll_chain) {
-    NotifyScrollActivity(*node);
+    NotifyScrollActivity(*node, ScrollActivitySource::External);
   }
 }
 

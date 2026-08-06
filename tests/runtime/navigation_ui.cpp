@@ -577,6 +577,7 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   );
   REQUIRE(material_bar.indicator_corner_radius == MaterialLightThemeSpec().shapes.full);
   REQUIRE(material_pane.item_height == 56.0F);
+  REQUIRE(material_pane.background == material_drawer.background);
   REQUIRE(
       material_pane.compact_width >=
       material_pane.compact_indicator_size.width + material_pane.item_margin.left + material_pane.item_margin.right

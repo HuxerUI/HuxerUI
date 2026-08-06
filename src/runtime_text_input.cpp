@@ -287,7 +287,7 @@ bool Runtime::BringTextInputIntoView() {
     if (!detail::ScrollNodeRectIntoView(**ancestor, target)) {
       continue;
     }
-    NotifyScrollActivity(**ancestor);
+    NotifyScrollActivity(**ancestor, ScrollActivitySource::TextInputReveal);
     changed = true;
   }
   return changed;
