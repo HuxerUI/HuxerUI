@@ -188,64 +188,8 @@ function(huxerui_resolve_host_tool tool_name output_variable)
             "${HUXERUI_HOST_TOOL_DIRECTORY}/${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"
     )
     if (NOT EXISTS "${HUXERUI_HOST_TOOL}")
-        if (HUXERUI_HOST_SYSTEM STREQUAL "linux")
-            huxerui_build_host_tool("${tool_name}" HUXERUI_HOST_TOOL)
-        else ()
-            message(FATAL_ERROR
-                    "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
-            )
-        endif ()
-    endif ()
-    set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)
-endfunction()
-
-# Builds a host tool from its tools/ source directory into the build tree when
-# the matching prebuilt executable is unavailable (Linux hosts commonly lack
-# one). The returned path is a custom-command output, so DEPENDS orders the
-# build. Tool output names (hcg, hapt) differ from their source directories
-# (codegen, resource_codegen).
-function(huxerui_build_host_tool tool_name output_variable)
-    if (tool_name STREQUAL "hcg")
-        set(HUXERUI_HOST_TOOL_SOURCE_DIR
-                "${HUXERUI_PROJECT_DIR}/tools/codegen"
-        )
-    elseif (tool_name STREQUAL "hapt")
-        set(HUXERUI_HOST_TOOL_SOURCE_DIR
-                "${HUXERUI_PROJECT_DIR}/tools/resource_codegen"
-        )
-    else ()
         message(FATAL_ERROR
-                "HuxerUI host tool source is unknown: ${tool_name}"
-        )
-    endif ()
-    set(HUXERUI_HOST_TOOL_BUILD_DIR
-            "${CMAKE_BINARY_DIR}/huxerui-host-tools/${tool_name}"
-    )
-    set(HUXERUI_HOST_TOOL
-            "${HUXERUI_HOST_TOOL_BUILD_DIR}/${tool_name}"
-    )
-    if (WIN32)
-        set(HUXERUI_HOST_TOOL
-                "${HUXERUI_HOST_TOOL}.exe"
-        )
-    endif ()
-
-    if (NOT TARGET huxerui_host_${tool_name})
-        add_custom_command(
-                OUTPUT "${HUXERUI_HOST_TOOL}"
-                COMMAND ${CMAKE_COMMAND} -E rm -rf
-                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
-                COMMAND ${CMAKE_COMMAND}
-                        -S "${HUXERUI_HOST_TOOL_SOURCE_DIR}"
-                        -B "${HUXERUI_HOST_TOOL_BUILD_DIR}"
-                        -DCMAKE_BUILD_TYPE=Release
-                COMMAND ${CMAKE_COMMAND} --build
-                        "${HUXERUI_HOST_TOOL_BUILD_DIR}"
-                        --config Release
-                VERBATIM
-        )
-        add_custom_target(huxerui_host_${tool_name}
-                DEPENDS "${HUXERUI_HOST_TOOL}"
+                "HuxerUI host tool is missing: ${HUXERUI_HOST_TOOL}"
         )
     endif ()
     set(${output_variable} "${HUXERUI_HOST_TOOL}" PARENT_SCOPE)

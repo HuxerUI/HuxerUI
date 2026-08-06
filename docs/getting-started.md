@@ -130,7 +130,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The Linux backend requires system packages for X11, XKB common, EGL and OpenGL ES 2, Cairo, FreeType, HarfBuzz, fontconfig, libpng, and libjpeg, resolved through pkg-config.
-When `tools/prebuilt/linux/<architecture>/` host tools are absent, CMake builds the code generators from their `tools/` sources on the Linux host.
+Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
 
 Windows:
 

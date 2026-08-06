@@ -134,7 +134,7 @@ Packaged resources are read from the executable-specific `<name>.resources` dire
 Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
 Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
 System dependencies are resolved through pkg-config: X11, XKB common, EGL, OpenGL ES 2, Cairo, FreeType, HarfBuzz, fontconfig, libpng, and libjpeg.
-When `tools/prebuilt/linux/<architecture>/` host tools are absent, CMake builds them from `tools/codegen` and `tools/resource_codegen` sources on the Linux host.
+Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`, matching the macOS and Windows distribution model.
 
 ## Web technical preview
 
