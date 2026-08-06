@@ -50,9 +50,18 @@ if (WIN32)
     )
 endif ()
 
+if (UNIX AND NOT APPLE)
+    target_sources(huxerui_tests PRIVATE
+            platform/linux_damage.cpp
+            platform/linux_renderer.cpp
+            platform/linux_text_input.cpp
+    )
+endif ()
+
 target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
         "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/linux"
         "${HUXERUI_PROJECT_DIR}/platform/macos"
         "${HUXERUI_PROJECT_DIR}/platform/windows"
         "${HUXERUI_PROJECT_DIR}/platform/web"

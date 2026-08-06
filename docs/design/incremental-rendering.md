@@ -1,6 +1,6 @@
 # Incremental Layout and Rendering Design
 
-Status: shared Runtime pipeline implemented; native partial redraw implemented on macOS and Windows
+Status: shared Runtime pipeline implemented; native partial redraw implemented on macOS, Windows, and Linux
 
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
 It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
@@ -47,7 +47,7 @@ The implementation remains conservative in several areas:
 - Transform-only and opacity-only presentation changes retain PaintSequences.
 - Equality-comparable retained modifier values skip unchanged updates when their node inputs are also unchanged; other values update conservatively.
 - Geometry-dependent extensions prepare value snapshots after final presentation resolution and invalidate foreground paint only when those snapshots change.
-- macOS and Windows invalidate conservative native update bounds derived from DamageRegion.
+- macOS, Windows, and Linux invalidate conservative native update bounds derived from DamageRegion.
 - Android still calculates shared DamageRegion output, but the View backend invalidates and replays the full native surface because current Android View invalidation ignores dirty rectangles.
 
 ## Current pipeline
@@ -475,7 +475,8 @@ Shadow commands include their resolved caster and complete blur overflow.
 Unknown or renderer-dependent overflow falls back to the host viewport.
 
 The Android View backend currently ignores regional damage at the native invalidation boundary and redraws the full surface.
-Other future platform implementations may initially do the same.
+The Linux backend restricts Cairo redraw to the damage bounds and presents the retained bitmap whole.
+Other future platform implementations may initially redraw the full surface.
 The shared runtime must still calculate and test damage correctly so a renderer can adopt partial redraw without changing component behavior.
 
 Runtime retains a lightweight snapshot of node identities, PaintSequence revisions, world transforms, effective clips, child order, and transformed bounds from the last committed frame.

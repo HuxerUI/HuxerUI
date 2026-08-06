@@ -10,6 +10,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES)
     set(HUXERUI_PLATFORM_LINK_OPTIONS)
 
     if (EMSCRIPTEN)
@@ -27,8 +28,11 @@ function(huxerui_configure_platform)
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
+    elseif (UNIX)
+        set(HUXERUI_PLATFORM_ID "linux")
+        include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Linux.cmake")
     else ()
-        message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, and Web only")
+        message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, Linux, and Web only")
     endif ()
 
     huxerui_platform_configure()
@@ -39,6 +43,7 @@ function(huxerui_configure_platform)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
+    set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_OPTIONS ${HUXERUI_PLATFORM_LINK_OPTIONS} PARENT_SCOPE)
 endfunction()
 
@@ -47,6 +52,7 @@ function(huxerui_configure_compile_target target_name)
     target_include_directories(${target_name} PRIVATE
             "${HUXERUI_PUBLIC_INCLUDE_DIR}"
             "${HUXERUI_PROJECT_DIR}/src"
+            ${HUXERUI_PLATFORM_INCLUDE_DIRECTORIES}
     )
     target_compile_options(${target_name} PRIVATE
             "$<$<CXX_COMPILER_ID:MSVC>:/W4>"

@@ -5,6 +5,7 @@
 | Platform | Application surface | Text layout | Rendering | Text input |
 |---|---|---|---|---|
 | Android | Native View | StaticLayout | Canvas | InputConnection and IME |
+| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM |
 | iOS preview | UIKit View | CoreText | CoreGraphics | UITextInput |
 | macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient |
 | Windows | Win32 | DirectWrite | Direct2D | Native keyboard and IME adapter |
@@ -123,6 +124,18 @@ Debug process metrics use process times, working-set counters, and the native lo
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.
 Windows 7 without Platform Update is not supported.
 
+## Linux
+
+The Linux backend creates an X11 window, measures text with FreeType and HarfBuzz, rasterizes shared PaintCommands with Cairo into a retained device-pixel bitmap, and presents it through an EGL/OpenGL ES 2 swap.
+Partial Runtime damage limits Cairo redraw to the affected pixel bounds; the retained bitmap is then presented whole or as damaged rows, matching the Windows cost model of a retained scene bitmap plus swap-chain presentation.
+Canvas Paths map to Cairo path geometry for fill, stroke, clipping, and blurred shadow masks.
+Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), locale and `Xft.dpi` changes update the Runtime resource configuration, and libpng/libjpeg decoding produces Cairo bitmap cache entries with a bounded byte budget.
+
+Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
+Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
+System dependencies are resolved through pkg-config: X11, XKB common, EGL, OpenGL ES 2, Cairo, FreeType, HarfBuzz, fontconfig, libpng, and libjpeg.
+Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`, matching the macOS and Windows distribution model.
+
 ## Web technical preview
 
 The Web backend compiles the same `HUXERUI_APP` application through Emscripten, mounts one shared `Runtime` and `WebPlatformAdapter` per browser Canvas, and emits an ES module with WebAssembly output.
@@ -166,6 +179,6 @@ See [Web Platform Design](design/web.md) for the implemented boundary and deferr
 
 ## Planned platforms
 
-OHOS and Linux should reuse the same Runtime and add one platform-specific `PlatformAdapter` integration. Platform availability and cross-build support must be reported explicitly by future SDK and CLI tooling.
+OHOS should reuse the same Runtime and add one platform-specific `PlatformAdapter` integration. Platform availability and cross-build support must be reported explicitly by future SDK and CLI tooling.
 
 See the [SDK, CLI, and Module Design](design/sdk-cli.md) for the planned distribution and native-module model.
