@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/presentation.h>
 #include <huxerui/theme.h>
 
 namespace huxerui {
@@ -31,6 +32,16 @@ const TextSelectionMenuLabels& ResolveSelectionMenuLabels(const detail::MountedN
   return labels;
 }
 
+MenuStyle ResolveSelectionMenuStyle(const detail::MountedNode& node) {
+  if (const std::any* value = detail::FindThemeStyleValue(node.environment, typeid(MenuStyle))) {
+    if (const auto* style = std::any_cast<MenuStyle>(value)) {
+      return *style;
+    }
+    throw std::logic_error("HuxerUI text selection menu style has an invalid environment value");
+  }
+  return MenuStyle::Default();
+}
+
 std::string_view LabelForAction(const TextSelectionMenuLabels& labels, TextEditingAction action) {
   switch (action) {
   case TextEditingAction::Cut:
@@ -43,20 +54,6 @@ std::string_view LabelForAction(const TextSelectionMenuLabels& labels, TextEditi
     return labels.select_all;
   }
   return {};
-}
-
-IndicationSpec ResolveTextSelectionMenuIndication(const ThemeSpec& theme) {
-  IndicationSpec indication = detail::ResolveDefaultIndication(theme);
-  auto* ripple = std::get_if<RippleIndication>(&indication);
-  if (!ripple) {
-    return indication;
-  }
-
-  ripple->color = theme.colors.on_surface;
-  ripple->color.alpha = theme.interactions.ripple.alpha;
-  ripple->hover_color = theme.colors.on_surface;
-  ripple->hover_color.alpha = theme.interactions.hover_overlay.alpha;
-  return indication;
 }
 
 } // namespace
@@ -188,8 +185,14 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
     overlay.pressed_action.reset();
     overlay.paint_dirty = true;
     if (action.has_value()) {
-      static_cast<void>(PerformTextEditingAction(*action));
+      const bool performed = PerformTextEditingAction(*action);
       update_hover(std::nullopt);
+      if (*action == TextEditingAction::SelectAll && performed) {
+        overlay.show_handles = true;
+        overlay.has_painted_geometry = false;
+        RequestFrame();
+        return true;
+      }
       overlay.dismissing = true;
       overlay.show_handles = false;
       RequestFrame();
@@ -318,8 +321,15 @@ void Runtime::PaintTextSelectionOverlay() {
     if (overlay.toolbar_rect.IsEmpty()) {
       return;
     }
+    context.DrawShadow(
+        overlay.toolbar_rect,
+        overlay.toolbar_shadow.color,
+        overlay.toolbar_shadow.offset,
+        overlay.toolbar_shadow.blur_radius,
+        overlay.toolbar_shadow.spread,
+        CornerRadii{overlay.toolbar_corner_radius}
+    );
     context.DrawRect(overlay.toolbar_rect, overlay.toolbar_background, overlay.toolbar_corner_radius);
-    context.DrawBorder(overlay.toolbar_rect, overlay.toolbar_border, 1.0F, overlay.toolbar_corner_radius);
     context.PushClip(overlay.toolbar_rect, overlay.toolbar_corner_radius);
     for (std::size_t index = 0; index < overlay.action_rects.size(); ++index) {
       if (index < overlay.action_indications.size() && overlay.action_indications[index]) {
@@ -331,6 +341,21 @@ void Runtime::PaintTextSelectionOverlay() {
             overlay.action_labels[index],
             overlay.toolbar_text_style,
             TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
+        );
+      }
+      if (overlay.toolbar_separators && index + 1 < overlay.action_rects.size()) {
+        const float separator_x = overlay.action_rects[index].x + overlay.action_rects[index].width -
+                                  overlay.toolbar_separator_thickness * 0.5F;
+        const float separator_height =
+            std::max(0.0F, overlay.toolbar_rect.height - overlay.toolbar_separator_padding.Vertical());
+        context.DrawRect(
+            {
+                separator_x,
+                overlay.toolbar_rect.y + overlay.toolbar_separator_padding.top,
+                overlay.toolbar_separator_thickness,
+                separator_height,
+            },
+            overlay.toolbar_separator
         );
       }
     }
@@ -429,6 +454,7 @@ void Runtime::PaintTextSelectionOverlay() {
   }
 
   const ThemeSpec theme = detail::ResolveThemeSpec(focused->environment);
+  const MenuStyle menu_style = ResolveSelectionMenuStyle(*focused);
   const TextSelectionMenuLabels& labels = ResolveSelectionMenuLabels(*focused);
   if (overlay.actions != available_actions) {
     overlay.actions = std::move(available_actions);
@@ -436,7 +462,7 @@ void Runtime::PaintTextSelectionOverlay() {
     overlay.action_indications.reserve(overlay.actions.size());
     for (std::size_t index = 0; index < overlay.actions.size(); ++index) {
       auto indication = std::make_shared<detail::IndicationState>();
-      indication->Update(ResolveTextSelectionMenuIndication(theme));
+      indication->Update(menu_style.item_indication);
       overlay.action_indications.push_back(std::move(indication));
     }
     overlay.hovered_action.reset();
@@ -444,17 +470,16 @@ void Runtime::PaintTextSelectionOverlay() {
   } else {
     for (const std::shared_ptr<detail::IndicationState>& indication : overlay.action_indications) {
       if (indication) {
-        indication->Update(ResolveTextSelectionMenuIndication(theme));
+        indication->Update(menu_style.item_indication);
       }
     }
   }
 
   const float font_size = theme.typography.label_large;
-  const TextStyle toolbar_text_style{Font::System(font_size), theme.colors.on_surface};
-  constexpr float item_padding = 12.0F;
-  constexpr float toolbar_height = 40.0F;
+  const TextStyle toolbar_text_style{Font::System(font_size), menu_style.foreground};
   constexpr float viewport_padding = 8.0F;
   float toolbar_width = 0.0F;
+  float toolbar_height = menu_style.minimum_item_height;
   std::vector<float> item_widths;
   item_widths.reserve(overlay.actions.size());
   overlay.action_labels.clear();
@@ -462,15 +487,16 @@ void Runtime::PaintTextSelectionOverlay() {
   for (TextEditingAction action : overlay.actions) {
     const std::string_view label = LabelForAction(labels, action);
     overlay.action_labels.emplace_back(label);
-    const float width = state_->platform_
-                            ->MeasureText(
-                                label,
-                                toolbar_text_style,
-                                std::numeric_limits<float>::infinity(),
-                                TextLayoutOptions{.wrap = TextWrap::NoWrap}
-                            )
-                            .size.width +
-                        item_padding * 2.0F;
+    const Size label_size = state_->platform_
+                                ->MeasureText(
+                                    label,
+                                    toolbar_text_style,
+                                    std::numeric_limits<float>::infinity(),
+                                    TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                                )
+                                .size;
+    const float width = label_size.width + menu_style.item_padding.Horizontal();
+    toolbar_height = std::max(toolbar_height, label_size.height + menu_style.item_padding.Vertical());
     item_widths.push_back(width);
     toolbar_width += width;
   }
@@ -501,12 +527,15 @@ void Runtime::PaintTextSelectionOverlay() {
   const float below_gap = below_y - (selection_bottom + handle_extent);
   const float toolbar_y = above_gap >= 0.0F || above_gap >= below_gap ? above_y : below_y;
   overlay.toolbar_rect = {toolbar_x, toolbar_y, toolbar_width, toolbar_height};
-  overlay.toolbar_background = theme.colors.surface;
-  overlay.toolbar_corner_radius = theme.shapes.small;
+  overlay.toolbar_background = menu_style.background;
+  overlay.toolbar_separator = menu_style.separator_color;
+  overlay.toolbar_shadow = menu_style.shadow;
+  overlay.toolbar_separator_padding = menu_style.separator_padding;
+  overlay.toolbar_corner_radius = menu_style.corner_radius;
+  overlay.toolbar_separator_thickness = menu_style.separator_thickness;
+  overlay.toolbar_separators =
+      menu_style.separator_mode == MenuSeparatorMode::BetweenItems && menu_style.separator_thickness > 0.0F;
   overlay.toolbar_text_style = toolbar_text_style;
-  Color border = theme.colors.on_surface;
-  border.alpha *= 0.16F;
-  overlay.toolbar_border = border;
 
   overlay.action_rects.clear();
   float item_x = toolbar_x;

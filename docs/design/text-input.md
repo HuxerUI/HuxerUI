@@ -783,9 +783,9 @@ The current `PaintContext` already provides the necessary primitives:
 
 TextField does not require a component-specific drawing command.
 
-A single-line field maintains a retained horizontal scroll offset and keeps the active caret visible. It does not create an internal ScrollView node.
+A single-line field registers its editor rectangle as a horizontal scroll viewport, maintains a retained offset through the shared scroll state, and keeps the active caret visible. Fixed decorations such as leading and trailing icons remain outside that viewport. The field does not create an internal ScrollView node.
 
-A multiline field maintains a retained vertical scroll offset when its content is taller than its viewport. Pointer hit testing, selection, composition, candidate geometry, and caret painting all resolve through the same translated text origin. Up and Down preserve a preferred horizontal caret position, while Home and End move to visual line boundaries.
+A multiline field uses the same retained scroll state on the vertical axis when its content is taller than its viewport. Pointer hit testing, selection, composition, candidate geometry, and caret painting all resolve through the same translated text origin. Up and Down preserve a preferred horizontal caret position, while Home and End move to visual line boundaries.
 
 The field participates in the same retained scroll chain as other scrollable nodes. Wheel and touch movement scroll the field first and pass unconsumed movement to an enclosing scroll container. Mouse and pen dragging retain text selection semantics, and dragging a selection beyond the viewport advances the internal text offset. Manual scrolling temporarily suppresses automatic caret reveal until editing or navigation resumes.
 
@@ -873,7 +873,7 @@ Each `TextFieldVariantStyle` owns one variant's background, optional disabled ba
 
 Text input configuration, selection behavior, an explicit variant, label and placeholder content, and icon assets are not Theme values.
 
-The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Menu surfaces, typography, shapes, and pressed states use the current Theme. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Material menu items use the shared ripple indication, while Flat menu items use the shared hover and pressed state overlay. Editing actions execute on release; the menu becomes non-interactive until the indication exit animation finishes. The public Menu service has separate LayerStack lifecycle, anchoring, focus, and dismissal; sharing a future menu-item visual component does not move text selection into the public LayerStack.
+The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Its horizontal toolbar reuses the active `MenuStyle` surface, foreground, shape, shadow, item geometry, separators, and indication without adopting the public Menu service lifecycle. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Editing actions execute on release; Cut, Copy, and Paste make the menu non-interactive until the indication exit animation finishes, while Select All retains the overlay, exposes range handles, and recomputes the remaining actions. The public Menu service keeps separate LayerStack lifecycle, anchoring, focus, and dismissal.
 
 A collapsed TextField selection uses a caret-anchored menu without selection handles. This allows an empty field to expose Paste when the clipboard contains text. A range selection uses the same menu together with themed start and end handles.
 

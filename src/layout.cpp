@@ -38,6 +38,21 @@ Axis ScrollAxis(const MountedNode& node) noexcept {
   return node.scroll_state ? node.scroll_state->axis : Axis::Vertical;
 }
 
+Rect ScrollViewport(const MountedNode& node) noexcept {
+  if (!node.scroll_state) {
+    return {};
+  }
+  if (node.scroll_state->viewport_override.has_value()) {
+    return *node.scroll_state->viewport_override;
+  }
+  return {
+      node.properties.padding.left,
+      node.properties.padding.top,
+      std::max(0.0F, node.measured_size.width - node.properties.padding.Horizontal()),
+      std::max(0.0F, node.measured_size.height - node.properties.padding.Vertical()),
+  };
+}
+
 namespace {
 
 struct LayoutContextState {
@@ -234,6 +249,17 @@ Size MeasureLabelContent(
       icon_size.width + spacing + text.size.width,
       std::max(icon_size.height, text.size.height),
   };
+}
+
+void ClampScrollOffsetAndCompleteController(MountedNode& node) {
+  const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const Rect viewport = ScrollViewport(node);
+  const float viewport_extent = vertical ? viewport.height : viewport.width;
+  const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
+  float& scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
+  const float max_offset = std::max(0.0F, content_extent - viewport_extent);
+  scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
+  CompleteScrollController(node);
 }
 
 } // namespace
@@ -438,18 +464,8 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
       content_size.height + node.properties.padding.Vertical(),
   };
   node.measured_size = resolved_constraints.Constrain(measured);
-  if (IsScrollContainer(node)) {
-    const bool vertical = ScrollAxis(node) == Axis::Vertical;
-    const float viewport_extent = std::max(
-        0.0F,
-        vertical ? node.measured_size.height - node.properties.padding.Vertical()
-                 : node.measured_size.width - node.properties.padding.Horizontal()
-    );
-    const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
-    float& scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
-    const float max_offset = std::max(0.0F, content_extent - viewport_extent);
-    scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
-    CompleteScrollController(node);
+  if (IsScrollContainer(node) && node.kind != NodeKind::ScrollView && node.kind != NodeKind::TextField) {
+    ClampScrollOffsetAndCompleteController(node);
   }
   node.measured_constraints = constraints;
   node.measure_dirty = false;
@@ -473,6 +489,9 @@ void LayoutNode(MountedNode& node, Point offset) {
       node.measured_size.width,
       node.measured_size.height,
   };
+  if (node.kind == NodeKind::ScrollView) {
+    ClampScrollOffsetAndCompleteController(node);
+  }
   // Moving a node in its parent does not change descendant placements. The revision still exposes the new resolved
   // geometry to presentation, hit testing, and text-input queries.
   if (!node.layout_dirty && !size_changed) {
@@ -636,7 +655,7 @@ bool CanScrollNode(const MountedNode& node, float delta) {
     return false;
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
-  const Rect viewport = node.ContentBounds();
+  const Rect viewport = ScrollViewport(node);
   const float viewport_extent = vertical ? viewport.height : viewport.width;
   const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
   const float scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
@@ -649,7 +668,7 @@ float ScrollNodeBy(MountedNode& node, float delta) {
     return 0.0F;
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
-  const Rect viewport = node.ContentBounds();
+  const Rect viewport = ScrollViewport(node);
   const float viewport_extent = vertical ? viewport.height : viewport.width;
   const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
   float& scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
@@ -678,7 +697,7 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
   }
 
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
-  const Rect viewport = node.ContentBounds();
+  const Rect viewport = ScrollViewport(node);
   const float viewport_start = vertical ? viewport.y : viewport.x;
   const float viewport_extent = vertical ? viewport.height : viewport.width;
   const float viewport_end = viewport_start + viewport_extent;

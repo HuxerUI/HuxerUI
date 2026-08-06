@@ -32,11 +32,8 @@ bool ScrollConnection::IsVertical() const noexcept {
 }
 
 float ScrollConnection::ViewportExtent() const noexcept {
-  return std::max(
-      0.0F,
-      IsVertical() ? node_->measured_size.height - node_->properties.padding.Vertical()
-                   : node_->measured_size.width - node_->properties.padding.Horizontal()
-  );
+  const Rect viewport = ScrollViewport(*node_);
+  return IsVertical() ? viewport.height : viewport.width;
 }
 
 float ScrollConnection::ContentExtent() const noexcept {

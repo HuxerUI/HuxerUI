@@ -15,6 +15,7 @@ State<TextEditingValue> keyboard_text_field_value;
 State<TextEditingValue> undo_text_field_value;
 State<TextEditingValue> secure_text_field_value;
 State<TextEditingValue> limited_text_field_value;
+State<TextEditingValue> single_line_scroll_value;
 State<int> text_field_recompose_trigger;
 State<bool> text_field_offset;
 TextInputAction submission_action = TextInputAction::Default;
@@ -114,6 +115,14 @@ View EmptyTextFieldApp() {
   return Stack{
       TextField(TextEditingValue::FromText("")).Placeholder("Name").With(huxerui::Frame{160.0F, 40.0F}),
   };
+}
+
+View ScrollableSingleLineTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText("012345678901234567890123456789"));
+  single_line_scroll_value = value;
+  return TextField(value)
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+      .With(huxerui::Frame{100.0F, 40.0F});
 }
 
 View IndependentPlaceholderFontApp() {
@@ -546,6 +555,7 @@ void ResetTextFieldState() {
   undo_text_field_value = {};
   secure_text_field_value = {};
   limited_text_field_value = {};
+  single_line_scroll_value = {};
   text_field_recompose_trigger = State<int>{};
   text_field_offset = State<bool>{};
   submission_action = TextInputAction::Default;
@@ -2151,6 +2161,88 @@ TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
   REQUIRE(multiline_text_field_value.Get().selection == TextSelection{3, 3});
 }
 
+TEST_CASE("TestSingleLineTextFieldUsesTouchDragForHorizontalScroll") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+  runtime.BuildFrame();
+
+  const auto* field = runtime.RootNode();
+  REQUIRE(field->scroll_state != nullptr);
+  REQUIRE(field->scroll_state->axis == Axis::Horizontal);
+  const float initial_offset = field->scroll_state->offset_x;
+  REQUIRE(initial_offset > 0.0F);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 705, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 705, {80.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 705, {80.0F, 20.0F}, PointerDeviceKind::Touch});
+  REQUIRE(field->scroll_state->offset_x < initial_offset);
+  REQUIRE(single_line_scroll_value.Get().selection == TextSelection{30, 30});
+}
+
+TEST_CASE("TestSingleLineTextFieldKeepsMouseDragSelectionSemantics") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+  runtime.BuildFrame();
+
+  const auto* field = runtime.RootNode();
+  const float initial_offset = field->scroll_state->offset_x;
+  runtime.HandlePointerEvent({PointerEventType::Down, 706, {80.0F, 20.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 706, {40.0F, 20.0F}, PointerDeviceKind::Mouse});
+
+  REQUIRE(!single_line_scroll_value.Get().selection.IsCollapsed());
+  REQUIRE(field->scroll_state->offset_x == initial_offset);
+}
+
+TEST_CASE("TestSingleLineTextFieldScrollUpdatesImeGeometryAndEditingRevealsCaret") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, {80.0F, 20.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 707, {80.0F, 20.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+
+  const auto* field = runtime.RootNode();
+  const float initial_offset = field->scroll_state->offset_x;
+  const TextInputGeometry initial_geometry =
+      runtime.QueryTextInputGeometry(1, single_line_scroll_value.Get().selection.Range());
+  text_input.updated_geometry.clear();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 708, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 708, {80.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 708, {80.0F, 20.0F}, PointerDeviceKind::Touch});
+  const float manual_offset = field->scroll_state->offset_x;
+  REQUIRE(manual_offset < initial_offset);
+  runtime.BuildFrame();
+
+  REQUIRE(!text_input.updated_geometry.empty());
+  const TextInputGeometry manual_geometry =
+      runtime.QueryTextInputGeometry(1, single_line_scroll_value.Get().selection.Range());
+  REQUIRE(manual_geometry.caret.x > initial_geometry.caret.x);
+
+  TextInputCommand insert;
+  insert.kind = TextInputCommandKind::CommitText;
+  insert.text = "x";
+  REQUIRE(runtime.HandleTextInputCommands({1, {insert}}).result_code == TextInputResultCode::Ok);
+  runtime.BuildFrame();
+
+  REQUIRE(field->scroll_state->offset_x > manual_offset);
+  const TextInputGeometry revealed =
+      runtime.QueryTextInputGeometry(1, single_line_scroll_value.Get().selection.Range());
+  const Rect viewport = detail::ScrollViewport(*field);
+  REQUIRE(revealed.caret.x >= viewport.x);
+  REQUIRE(revealed.caret.x + revealed.caret.width <= viewport.x + viewport.width);
+}
+
 TEST_CASE("TestMultilineTextFieldEnterInsertsNewlineInsteadOfSubmitting") {
   ResetTextFieldState();
   TestPlatform platform;
@@ -2434,6 +2526,12 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
   const FlattenedScene& overlay = runtime.BuildFrame();
   const DrawTextCommand* copy = FindText(overlay, "复制");
   REQUIRE(copy != nullptr);
+  const MenuStyle menu_style = ThemeDefinitionValue<MenuStyle>(FlatThemeDefinition());
+  REQUIRE(std::ranges::any_of(overlay.Commands(), [&menu_style](const PaintCommand& command) {
+    const auto* shadow = std::get_if<DrawShadowCommand>(&command);
+    return shadow != nullptr && shadow->color == menu_style.shadow.color &&
+           shadow->blur_radius == menu_style.shadow.blur_radius && shadow->corner_radius == menu_style.corner_radius;
+  }));
   const std::size_t themed_handles = std::ranges::count_if(overlay.Commands(), [](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->color.red == Color::Rgb(214, 55, 48).red &&
@@ -2471,7 +2569,9 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
 
   const FlattenedScene& feedback = runtime.BuildFrame();
   REQUIRE(FindText(feedback, "复制") != nullptr);
-  REQUIRE(FindRectWithColor(feedback, FlatLightThemeSpec().interactions.pressed_overlay) != nullptr);
+  const auto* pressed = std::get_if<StateOverlayIndication>(&menu_style.item_indication);
+  REQUIRE(pressed != nullptr);
+  REQUIRE(FindRectWithColor(feedback, pressed->color) != nullptr);
 
   platform.AdvanceTime(0.3);
   const FlattenedScene& dismissed = runtime.BuildFrame();
@@ -2481,6 +2581,54 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
     return circle != nullptr && circle->color.red == Color::Rgb(214, 55, 48).red &&
            circle->color.green == Color::Rgb(214, 55, 48).green;
   }));
+}
+
+TEST_CASE("TestTextSelectionOverlayKeepsSelectionActionsAfterSelectAll") {
+  ResetTextFieldState();
+  TextFieldClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  Runtime runtime{TextSelectionOverlayApp, platform};
+  runtime.SetViewport({240.0F, 120.0F});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      703,
+      {20.0F, 20.0F},
+      PointerDeviceKind::Touch,
+  });
+  platform.AdvanceTime(0.5);
+  const DrawTextCommand* select_all = FindText(runtime.BuildFrame(), "全选");
+  REQUIRE(select_all != nullptr);
+  const Point select_all_center{
+      select_all->rect.x + select_all->rect.width * 0.5F,
+      select_all->rect.y + select_all->rect.height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent({
+      PointerEventType::Down,
+      704,
+      select_all_center,
+      PointerDeviceKind::Touch,
+  });
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      704,
+      select_all_center,
+      PointerDeviceKind::Touch,
+  });
+  REQUIRE(runtime.QueryTextInputContext(1, 0, 10).selection == TextSelection{0, 10});
+
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(FindText(updated, "全选") == nullptr);
+  REQUIRE(FindText(updated, "复制") != nullptr);
+  const std::size_t selection_handles =
+      std::ranges::count_if(updated.Commands(), [](const PaintCommand& command) {
+        const auto* circle = std::get_if<DrawCircleCommand>(&command);
+        return circle != nullptr && circle->radius == 6.0F;
+      });
+  REQUIRE(selection_handles == 2);
 }
 
 TEST_CASE("TestTextSelectionOverlayHandlesBackBeforePlatformFallback") {

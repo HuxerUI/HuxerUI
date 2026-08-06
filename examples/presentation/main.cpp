@@ -26,16 +26,15 @@ View CommandDialogCard(DialogContext dialog) {
 }
 
 View BottomSheetCard(BottomSheetContext bottom_sheet) {
+  const ThemeSpec& theme = UseTheme();
   return Column {
-    Text("Bottom sheet").With(FontSize(24.0F), Foreground(primary_text_color)),
+    Text("Bottom sheet", TextRole::Title),
     Text("BottomSheetContext closes the sheet without exposing its layer id."),
     Button("Close").OnClick([bottom_sheet] { bottom_sheet.Dismiss(); }),
   }.With(
       Frame{.min_width = 280.0F},
-      Padding(24.0F),
-      Spacing(16.0F),
-      Background(surface_color),
-      CornerRadius(16.0F)
+      Padding(theme.spacing.large),
+      Spacing(theme.spacing.medium)
   );
 }
 

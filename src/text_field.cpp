@@ -386,7 +386,10 @@ public:
       validation_layout_.reset();
     }
     if (text_layout_mode_changed) {
-      horizontal_scroll_offset_ = 0.0F;
+      if (node.scroll_state) {
+        node.scroll_state->offset_x = 0.0F;
+        node.scroll_state->offset_y = 0.0F;
+      }
       preferred_caret_x_.reset();
       RequestCaretReveal();
     }
@@ -468,7 +471,8 @@ public:
     const float content_width = std::max(editor_content_width, validation_size.width);
     const float full_editor_height = std::max({text_size.height, label_size.height, placeholder_size.height});
     if (node.scroll_state) {
-      node.scroll_state->content_width = text_size.width;
+      const Rect caret = text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity);
+      node.scroll_state->content_width = text_size.width + (configuration_.multiline ? 0.0F : caret.width);
       node.scroll_state->content_height = full_editor_height + ValidationAreaHeight();
     }
     float editor_height = full_editor_height;
@@ -492,11 +496,15 @@ public:
   }
 
   bool UpdateEditorScrollOffset(detail::MountedNode& node) {
-    const float previous_horizontal_offset = horizontal_scroll_offset_;
+    const float previous_horizontal_offset = node.scroll_state ? node.scroll_state->offset_x : 0.0F;
     const float previous_vertical_offset = node.scroll_state ? node.scroll_state->offset_y : 0.0F;
-    UpdateScrollOffset(node, EditorContentRect(node));
-    const bool changed = horizontal_scroll_offset_ != previous_horizontal_offset ||
-                         (node.scroll_state && node.scroll_state->offset_y != previous_vertical_offset);
+    const Rect content = EditorContentRect(node);
+    if (node.scroll_state) {
+      node.scroll_state->viewport_override = content;
+    }
+    UpdateScrollOffset(node, content);
+    const bool changed = node.scroll_state && (node.scroll_state->offset_x != previous_horizontal_offset ||
+                                               node.scroll_state->offset_y != previous_vertical_offset);
     if (changed) {
       ++revision_;
     }
@@ -1914,23 +1922,25 @@ private:
       };
     }
     return {
-        content.x - ResolveHorizontalScrollOffset(content),
+        content.x - ResolveHorizontalScrollOffset(node, content),
         y,
     };
   }
 
-  float ResolveHorizontalScrollOffset(Rect content) const {
-    if (!text_layout_ || content.width <= 0.0F) {
+  float ResolveHorizontalScrollOffset(const detail::MountedNode& node, Rect content) const {
+    if (!text_layout_ || !node.scroll_state || content.width <= 0.0F) {
       return 0.0F;
     }
     const Rect caret = text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity);
-    float scroll_offset = horizontal_scroll_offset_;
-    if (caret.x < scroll_offset) {
-      scroll_offset = std::max(0.0F, caret.x);
-    } else if (caret.x + caret.width > scroll_offset + content.width) {
-      scroll_offset = caret.x + caret.width - content.width;
+    const float maximum = std::max(0.0F, node.scroll_state->content_width - content.width);
+    float scroll_offset = std::clamp(node.scroll_state->offset_x, 0.0F, maximum);
+    if (caret_reveal_pending_) {
+      if (caret.x < scroll_offset) {
+        scroll_offset = std::max(0.0F, caret.x);
+      } else if (caret.x + caret.width > scroll_offset + content.width) {
+        scroll_offset = caret.x + caret.width - content.width;
+      }
     }
-    const float maximum = std::max(0.0F, text_layout_->Measure().width + caret.width - content.width);
     return std::clamp(scroll_offset, 0.0F, maximum);
   }
 
@@ -1953,14 +1963,16 @@ private:
 
   void UpdateScrollOffset(detail::MountedNode& node, Rect content) {
     if (!text_layout_) {
-      horizontal_scroll_offset_ = 0.0F;
       if (node.scroll_state) {
+        node.scroll_state->offset_x = 0.0F;
         node.scroll_state->offset_y = 0.0F;
       }
       return;
     }
     if (configuration_.multiline) {
-      horizontal_scroll_offset_ = 0.0F;
+      if (node.scroll_state) {
+        node.scroll_state->offset_x = 0.0F;
+      }
       if (!node.scroll_state || content.height <= 0.0F) {
         if (node.scroll_state) {
           node.scroll_state->offset_y = 0.0F;
@@ -1971,31 +1983,37 @@ private:
       caret_reveal_pending_ = false;
       return;
     }
-    horizontal_scroll_offset_ = ResolveHorizontalScrollOffset(content);
+    if (node.scroll_state) {
+      node.scroll_state->offset_y = 0.0F;
+      node.scroll_state->offset_x = ResolveHorizontalScrollOffset(node, content);
+    }
+    caret_reveal_pending_ = false;
   }
 
   void ConfigureScrollNode(detail::MountedNode& node) {
-    if (!configuration_.multiline) {
-      node.scroll_state.reset();
-      return;
-    }
     if (!node.scroll_state) {
       node.scroll_state = std::make_unique<detail::ScrollNodeState>();
     }
-    node.scroll_state->axis = Axis::Vertical;
+    node.scroll_state->axis = configuration_.multiline ? Axis::Vertical : Axis::Horizontal;
     node.scroll_state->touch_drag_only = true;
   }
 
   void ScrollSelectionAtEdge(Point position) {
-    if (!configuration_.multiline || !node_ || !node_->scroll_state) {
+    if (!node_ || !node_->scroll_state) {
       return;
     }
     const Rect content = EditorContentRect(*node_);
     float delta = 0.0F;
-    if (position.y < content.y) {
-      delta = position.y - content.y;
-    } else if (position.y > content.y + content.height) {
-      delta = position.y - (content.y + content.height);
+    if (configuration_.multiline) {
+      if (position.y < content.y) {
+        delta = position.y - content.y;
+      } else if (position.y > content.y + content.height) {
+        delta = position.y - (content.y + content.height);
+      }
+    } else if (position.x < content.x) {
+      delta = position.x - content.x;
+    } else if (position.x > content.x + content.width) {
+      delta = position.x - (content.x + content.width);
     }
     if (detail::ScrollNodeBy(*node_, delta) != 0.0F) {
       caret_reveal_pending_ = false;
@@ -2103,7 +2121,6 @@ private:
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
-  float horizontal_scroll_offset_ = 0.0F;
   float text_layout_width_ = std::numeric_limits<float>::infinity();
   float validation_text_layout_width_ = std::numeric_limits<float>::infinity();
   bool initialized_ = false;

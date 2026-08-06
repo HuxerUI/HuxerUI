@@ -180,7 +180,7 @@ return Button("Delete").OnClick([dialog] {
 });
 ```
 
-BottomSheet is a separate typed service because its bottom placement, adaptive width, surface, slide motion, and future drag behavior differ from Dialog:
+BottomSheet is a separate typed service because its bottom placement, adaptive width, surface, slide motion, and drag behavior differ from Dialog. A visible theme drag handle captures downward movement, follows the pointer, settles after a short or cancelled drag, and uses the same `on_dismiss_request` contract after crossing its distance threshold. A callback that keeps the layer visible causes the sheet to settle back to the edge:
 
 ```cpp
 auto bottom_sheet = UseBottomSheet();

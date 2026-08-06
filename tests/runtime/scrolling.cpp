@@ -9,6 +9,9 @@ ScrollController controlled_grid_scroll;
 ScrollController controlled_view_scroll;
 ScrollController horizontal_view_scroll;
 ScrollController example_scroll;
+ScrollController scoped_grow_scroll;
+State<bool> scoped_scroll_content_changed;
+State<float> scoped_scroll_content_height;
 int scroll_observer_compositions = 0;
 
 View ScrollViewApp() {
@@ -119,6 +122,32 @@ View HorizontalScrollViewApp() {
       .ScrollAxis(Axis::Horizontal)
       .Controller(scroll)
       .With(huxerui::ScrollBar{});
+}
+
+View ScopedScrollContent() {
+  HUXERUI_SCOPE({
+    auto changed = UseState(false);
+    auto content_height = UseState(70.0F);
+    scoped_scroll_content_changed = changed;
+    scoped_scroll_content_height = content_height;
+    return Column {
+      Text(changed ? "Changed" : "Initial").With(huxerui::Frame{100.0F, 20.0F}),
+      Spacer().With(huxerui::Frame{100.0F, content_height.Get()}),
+    };
+  });
+}
+
+View ScopedScrollViewApp() {
+  auto scroll = UseScrollController();
+  scoped_grow_scroll = scroll;
+  return Column {
+    Text("Header").With(huxerui::Frame{100.0F, 40.0F}),
+    ScrollView {
+      Column {
+        ScopedScrollContent(),
+      },
+    }.Controller(scroll).With(huxerui::Grow{}),
+  }.With(huxerui::CrossAlign{CrossAxisAlignment::Stretch});
 }
 
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
@@ -375,6 +404,31 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
   REQUIRE(runtime.RootNode()->scroll_state->offset_y == 50.0F);
   REQUIRE(controlled_view_scroll.Offset() == 50.0F);
   REQUIRE(!controlled_view_scroll.ScrollToItem(std::size_t{3}));
+}
+
+TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
+  TestPlatform platform;
+  Runtime runtime{ScopedScrollViewApp, platform};
+  runtime.SetViewport({100.0F, 100.0F});
+  runtime.BuildFrame();
+  auto* scroll = runtime.RootNode()->children[1].get();
+  REQUIRE(scroll->scroll_state->content_height - scroll->measured_size.height == 30.0F);
+  REQUIRE((scoped_grow_scroll.Metrics() == ScrollMetrics{0.0F, 30.0F, 60.0F, 90.0F}));
+
+  runtime.HandleScrollEvent({{50.0F, 60.0F}, 0.0F, 20.0F});
+  runtime.BuildFrame();
+  REQUIRE(scroll->scroll_state->offset_y == 20.0F);
+  REQUIRE(scoped_grow_scroll.Offset() == 20.0F);
+
+  scoped_scroll_content_changed = true;
+  runtime.BuildFrame();
+  REQUIRE(scroll->scroll_state->offset_y == 20.0F);
+  REQUIRE(scoped_grow_scroll.Offset() == 20.0F);
+
+  scoped_scroll_content_height = 10.0F;
+  runtime.BuildFrame();
+  REQUIRE(scroll->scroll_state->offset_y == 0.0F);
+  REQUIRE((scoped_grow_scroll.Metrics() == ScrollMetrics{0.0F, 0.0F, 60.0F, 30.0F}));
 }
 
 } // namespace huxerui::test

@@ -126,6 +126,8 @@ Controllers hold weak connections and remain safe after the bound container unmo
 
 ## Scroll behavior
 
+Regular `ScrollView` retains its mounted offset across descendant recomposition and clamps it against the final content and viewport extents after layout.
+
 Inertial motion is enabled by default. Use `ScrollPhysics` to tune or disable it without replacing the container's scroll implementation:
 
 ```cpp

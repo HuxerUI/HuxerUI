@@ -247,12 +247,108 @@ BottomSheetStyle ResolveBottomSheetStyle(const std::shared_ptr<const Environment
   return ResolvePresentationStyle<BottomSheetStyle>(environment, BottomSheetStyle::Default());
 }
 
+bool ShowsBottomSheetDragHandle(const BottomSheetStyle& style) {
+  return style.drag_handle_size.width > 0.0F && style.drag_handle_size.height > 0.0F && style.drag_handle.alpha > 0.0F;
+}
+
 MenuStyle ResolveMenuStyle(const std::shared_ptr<const Environment>& environment) {
   return ResolvePresentationStyle<MenuStyle>(environment, MenuStyle::Default());
 }
 
+struct BottomSheetDragState {
+  float offset = 0.0F;
+  float visual_offset = 0.0F;
+  float dismiss_threshold = 0.0F;
+  AnimationSpec settle = SpringSpec{};
+  std::function<bool()> dismiss;
+  std::uint64_t revision = 0;
+  bool dragging = false;
+  bool dismiss_requested = false;
+  bool dismissed = false;
+};
+
+struct BottomSheetDragHandle {
+  std::shared_ptr<BottomSheetDragState> state;
+
+  static const detail::ModifierDescriptor& Descriptor();
+};
+
+class BottomSheetDragHandleExtension final : public NodeExtension {
+public:
+  BottomSheetDragHandleExtension(MountedNode& node, const BottomSheetDragHandle& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const BottomSheetDragHandle& modifier) {
+    static_cast<void>(node);
+    if (state_ == modifier.state) {
+      return;
+    }
+    state_ = modifier.state;
+    pointer_id_.reset();
+  }
+
+  bool HitTest(MountedNode& node, Point position) const override {
+    return state_ && !state_->dismissed && node.IsEnabled() && node.Bounds().Contains(position);
+  }
+
+  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+    if (!state_ || state_->dismissed || !node.IsEnabled()) {
+      pointer_id_.reset();
+      return PointerResult::Ignored;
+    }
+    const Point host_position =
+        static_cast<detail::MountedNode&>(node).presentation.resolved_transform.Apply(event.position);
+    if (event.type == PointerEventType::Down) {
+      pointer_id_ = event.pointer_id;
+      pointer_origin_ = host_position.y;
+      offset_origin_ = state_->visual_offset;
+      state_->offset = offset_origin_;
+      state_->dragging = true;
+      state_->dismiss_requested = false;
+      ++state_->revision;
+      return PointerResult::Capture;
+    }
+    if (!pointer_id_.has_value() || *pointer_id_ != event.pointer_id) {
+      return PointerResult::Ignored;
+    }
+    if (event.type == PointerEventType::Move) {
+      state_->offset = std::max(0.0F, offset_origin_ + host_position.y - pointer_origin_);
+      ++state_->revision;
+      return PointerResult::Handled;
+    }
+    if (event.type == PointerEventType::Up) {
+      state_->offset = std::max(0.0F, offset_origin_ + host_position.y - pointer_origin_);
+      state_->dragging = false;
+      state_->dismiss_requested = state_->offset >= state_->dismiss_threshold;
+      pointer_id_.reset();
+      ++state_->revision;
+      return PointerResult::Handled;
+    }
+    if (event.type == PointerEventType::Cancel) {
+      state_->dragging = false;
+      state_->dismiss_requested = false;
+      pointer_id_.reset();
+      ++state_->revision;
+      return PointerResult::Handled;
+    }
+    return PointerResult::Handled;
+  }
+
+private:
+  std::shared_ptr<BottomSheetDragState> state_;
+  std::optional<std::int64_t> pointer_id_;
+  float pointer_origin_ = 0.0F;
+  float offset_origin_ = 0.0F;
+};
+
+const detail::ModifierDescriptor& BottomSheetDragHandle::Descriptor() {
+  return detail::ModifierDescriptorFor<BottomSheetDragHandle, BottomSheetDragHandleExtension>();
+}
+
 struct PresentationContentMotion {
   std::shared_ptr<detail::LayerTransitionState> state;
+  std::shared_ptr<BottomSheetDragState> bottom_sheet_drag;
   PresentationMotion motion;
   Point slide_direction;
   TransformOrigin origin;
@@ -269,18 +365,25 @@ public:
 
   void Update(MountedNode& node, const PresentationContentMotion& modifier) {
     static_cast<void>(node);
-    if (state_ == modifier.state && motion_ == modifier.motion && slide_direction_ == modifier.slide_direction &&
-        origin_ == modifier.origin && slide_by_content_extent_ == modifier.slide_by_content_extent) {
+    if (state_ == modifier.state && bottom_sheet_drag_ == modifier.bottom_sheet_drag && motion_ == modifier.motion &&
+        slide_direction_ == modifier.slide_direction && origin_ == modifier.origin &&
+        slide_by_content_extent_ == modifier.slide_by_content_extent) {
       return;
     }
     const bool state_changed = state_ != modifier.state;
+    const bool drag_state_changed = bottom_sheet_drag_ != modifier.bottom_sheet_drag;
     state_ = modifier.state;
+    bottom_sheet_drag_ = modifier.bottom_sheet_drag;
     motion_ = modifier.motion;
     slide_direction_ = modifier.slide_direction;
     origin_ = modifier.origin;
     slide_by_content_extent_ = modifier.slide_by_content_extent;
     if (state_changed) {
       initialized_ = false;
+    }
+    if (drag_state_changed) {
+      drag_revision_ = 0;
+      drag_offset_.Set(0.0F);
     }
   }
 
@@ -298,6 +401,25 @@ public:
       }
       initialized_ = true;
     }
+    if (bottom_sheet_drag_) {
+      const float sheet_height = node.Bounds().height;
+      bottom_sheet_drag_->dismiss_threshold = std::clamp(sheet_height / 3.0F, 56.0F, 160.0F);
+      if (drag_revision_ != bottom_sheet_drag_->revision) {
+        drag_revision_ = bottom_sheet_drag_->revision;
+        if (bottom_sheet_drag_->dragging) {
+          drag_offset_.Set(bottom_sheet_drag_->offset);
+        } else if (bottom_sheet_drag_->dismiss_requested) {
+          drag_offset_.Set(bottom_sheet_drag_->offset);
+          bottom_sheet_drag_->dismiss_requested = false;
+          bottom_sheet_drag_->dismissed = bottom_sheet_drag_->dismiss && bottom_sheet_drag_->dismiss();
+          if (!bottom_sheet_drag_->dismissed) {
+            drag_offset_.Update(0.0F, bottom_sheet_drag_->settle);
+          }
+        } else {
+          drag_offset_.Update(0.0F, bottom_sheet_drag_->settle);
+        }
+      }
+    }
     if (target_visible_ != state_->target_visible) {
       target_visible_ = state_->target_visible;
       progress_.Update(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
@@ -305,6 +427,8 @@ public:
 
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const bool running = progress_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
+    const bool drag_running =
+        bottom_sheet_drag_ && drag_offset_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
     const float progress = progress_.Value();
     if (motion_.initial_scale != 1.0F) {
       const float scale_value = motion_.initial_scale + (1.0F - motion_.initial_scale) * progress;
@@ -327,16 +451,26 @@ public:
       mounted.presentation.local_transform =
           detail::ComposeTransform(detail::TranslationTransform(offset), mounted.presentation.local_transform);
     }
-    return {running, std::nullopt};
+    if (bottom_sheet_drag_) {
+      bottom_sheet_drag_->visual_offset = drag_offset_.Value();
+      mounted.presentation.local_transform = detail::ComposeTransform(
+          detail::TranslationTransform({0.0F, bottom_sheet_drag_->visual_offset}),
+          mounted.presentation.local_transform
+      );
+    }
+    return {running || drag_running, std::nullopt};
   }
 
 private:
   std::shared_ptr<detail::LayerTransitionState> state_;
+  std::shared_ptr<BottomSheetDragState> bottom_sheet_drag_;
   PresentationMotion motion_;
   Point slide_direction_;
   TransformOrigin origin_;
   bool slide_by_content_extent_ = false;
   detail::AnimatedValue<float> progress_;
+  detail::AnimatedValue<float> drag_offset_;
+  std::uint64_t drag_revision_ = 0;
   bool initialized_ = false;
   bool target_visible_ = false;
 };
@@ -519,11 +653,14 @@ ViewFactory AnimatedDialogContent(
 }
 
 ViewFactory BottomSheetContent(
-    ViewFactory content, const BottomSheetStyle& style, std::shared_ptr<detail::LayerTransitionState> transition
+    ViewFactory content,
+    const BottomSheetStyle& style,
+    std::shared_ptr<detail::LayerTransitionState> transition,
+    std::shared_ptr<BottomSheetDragState> drag
 ) {
-  return [content = std::move(content), style, transition = std::move(transition)] {
+  return [content = std::move(content), style, transition = std::move(transition), drag = std::move(drag)] {
     std::vector<View> children;
-    if (style.drag_handle_size.width > 0.0F && style.drag_handle_size.height > 0.0F && style.drag_handle.alpha > 0.0F) {
+    if (ShowsBottomSheetDragHandle(style)) {
       Frame handle_frame;
       handle_frame.width = style.drag_handle_size.width;
       handle_frame.height = style.drag_handle_size.height;
@@ -538,7 +675,8 @@ ViewFactory BottomSheetContent(
           }.With(
               Padding{style.drag_handle_padding},
               MainAlign{MainAxisAlignment::Center},
-              CrossAlign{CrossAxisAlignment::Center}
+              CrossAlign{CrossAxisAlignment::Center},
+              BottomSheetDragHandle{drag}
           )
       );
     }
@@ -551,6 +689,7 @@ ViewFactory BottomSheetContent(
         style.shadow,
         PresentationContentMotion{
             .state = transition,
+            .bottom_sheet_drag = drag,
             .motion =
                 PresentationMotion{
                     .enter = style.enter,
@@ -2030,18 +2169,36 @@ LayerId detail::BottomSheetService::Show(
   ValidateBottomSheetStyle(style);
   const std::shared_ptr<detail::LayerTransitionState> transition =
       BottomSheetTransition(style, theme.motion.reduced_motion);
+  std::shared_ptr<BottomSheetDragState> drag;
+  std::function<void()> on_drag_dismiss_request;
+  if (ShowsBottomSheetDragHandle(style)) {
+    drag = std::make_shared<BottomSheetDragState>();
+    drag->settle = style.enter;
+    on_drag_dismiss_request = options.on_dismiss_request;
+  }
   LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::BottomCenter;
   placement.fill_cross_axis = true;
   placement.maximum_cross_axis_extent = style.maximum_width;
-  return layers_.AttachCaptured(
+  const LayerId id = layers_.AttachCaptured(
       std::move(layer_options),
-      BottomSheetContent(std::move(content), style, transition),
+      BottomSheetContent(std::move(content), style, transition, drag),
       std::move(environment),
       std::move(placement),
       transition
   );
+  if (drag) {
+    drag->dismiss = [layers = layers_, id, on_drag_dismiss_request] {
+      if (on_drag_dismiss_request) {
+        on_drag_dismiss_request();
+        const std::shared_ptr<detail::LayerTransitionState> current = layers.Transition(id);
+        return !current || !current->target_visible;
+      }
+      return layers.Dismiss(id);
+    };
+  }
+  return id;
 }
 
 LayerId detail::BottomSheetService::Show(

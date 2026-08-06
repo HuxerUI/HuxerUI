@@ -817,6 +817,145 @@ TEST_CASE("TestMaterialBottomSheetPlacesItsDragHandleWithVerticalPadding") {
   REQUIRE(content->y - (handle->y + handle->height) == style.drag_handle_padding.bottom);
 }
 
+TEST_CASE("TestMaterialBottomSheetDragHandleMovesSettlesCancelsAndDismisses") {
+  layer_bottom_sheet.reset();
+  TestPlatform platform;
+  Runtime runtime{MaterialLayerApp, platform};
+  runtime.SetViewport({240.0F, 180.0F});
+  runtime.BuildFrame();
+
+  constexpr Color content_color = Color::Rgb(18, 100, 180);
+  layer_bottom_sheet->Show([content_color] {
+    return Spacer().With(Frame{.height = 80.0F}, Background{content_color});
+  });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+
+  const BottomSheetStyle style = ThemeDefinitionValue<BottomSheetStyle>(MaterialThemeDefinition());
+  const std::optional<Rect> initial_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  const std::optional<Rect> initial_handle =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.drag_handle, style.drag_handle_size);
+  REQUIRE(initial_surface.has_value());
+  REQUIRE(initial_handle.has_value());
+  const Point handle_center{
+      initial_handle->x + initial_handle->width * 0.5F,
+      initial_handle->y + initial_handle->height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 901, handle_center, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent(
+      {PointerEventType::Move, 901, {handle_center.x, handle_center.y + 24.0F}, PointerDeviceKind::Touch}
+  );
+  const std::optional<Rect> dragged_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  REQUIRE(dragged_surface.has_value());
+  REQUIRE(dragged_surface->y == Catch::Approx(initial_surface->y + 24.0F));
+
+  runtime.HandlePointerEvent(
+      {PointerEventType::Up, 901, {handle_center.x, handle_center.y + 24.0F}, PointerDeviceKind::Touch}
+  );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const std::optional<Rect> settled_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  REQUIRE(settled_surface.has_value());
+  REQUIRE(settled_surface->y == Catch::Approx(initial_surface->y));
+
+  const std::optional<Rect> settled_handle =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.drag_handle, style.drag_handle_size);
+  REQUIRE(settled_handle.has_value());
+  const Point settled_handle_center{
+      settled_handle->x + settled_handle->width * 0.5F,
+      settled_handle->y + settled_handle->height * 0.5F,
+  };
+  runtime.HandlePointerEvent({PointerEventType::Down, 902, settled_handle_center, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      902,
+      {settled_handle_center.x, settled_handle_center.y + 24.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({
+      PointerEventType::Cancel,
+      902,
+      {settled_handle_center.x, settled_handle_center.y + 24.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const std::optional<Rect> cancelled_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  REQUIRE(cancelled_surface.has_value());
+  REQUIRE(cancelled_surface->y == Catch::Approx(initial_surface->y));
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 903, settled_handle_center, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({
+      PointerEventType::Move,
+      903,
+      {settled_handle_center.x, settled_handle_center.y + 80.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({
+      PointerEventType::Up,
+      903,
+      {settled_handle_center.x, settled_handle_center.y + 80.0F},
+      PointerDeviceKind::Touch,
+  });
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(FindPresentedRectWithColor(runtime.BuildFrame(), content_color) == std::nullopt);
+}
+
+TEST_CASE("TestBottomSheetDragUsesDismissRequestCallback") {
+  layer_bottom_sheet.reset();
+  TestPlatform platform;
+  Runtime runtime{MaterialLayerApp, platform};
+  runtime.SetViewport({240.0F, 180.0F});
+  runtime.BuildFrame();
+
+  int dismiss_requests = 0;
+  layer_bottom_sheet->Show(
+      [] { return Spacer().With(Frame{.height = 80.0F}); },
+      BottomSheetOptions{
+          .on_dismiss_request = [&dismiss_requests] { ++dismiss_requests; },
+      }
+  );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+
+  const BottomSheetStyle style = ThemeDefinitionValue<BottomSheetStyle>(MaterialThemeDefinition());
+  const std::optional<Rect> initial_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  const std::optional<Rect> handle =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.drag_handle, style.drag_handle_size);
+  REQUIRE(initial_surface.has_value());
+  REQUIRE(handle.has_value());
+  const Point handle_center{
+      handle->x + handle->width * 0.5F,
+      handle->y + handle->height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 904, handle_center, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent(
+      {PointerEventType::Move, 904, {handle_center.x, handle_center.y + 80.0F}, PointerDeviceKind::Touch}
+  );
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent(
+      {PointerEventType::Up, 904, {handle_center.x, handle_center.y + 80.0F}, PointerDeviceKind::Touch}
+  );
+  runtime.BuildFrame();
+  REQUIRE(dismiss_requests == 1);
+
+  SettlePresentation(platform, runtime);
+  const std::optional<Rect> settled_surface =
+      FindPresentedRectWithColor(runtime.BuildFrame(), style.background);
+  REQUIRE(settled_surface.has_value());
+  REQUIRE(settled_surface->y == Catch::Approx(initial_surface->y));
+}
+
 TEST_CASE("TestCapturedReducedMotionSettlesBothLayerAndPresentationMotionImmediately") {
   layer_dialogs.reset();
 

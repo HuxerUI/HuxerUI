@@ -118,13 +118,7 @@ View Panel(View content) {
   const ThemeSpec& theme = UseTheme();
   return std::move(content).With(
       Padding(theme.spacing.medium),
-      Background(theme.colors.surface),
-      Shadow{
-          .color = Color::Rgb(20, 28, 40, 0.14F),
-          .offset = {0.0F, 6.0F},
-          .blur_radius = 18.0F,
-          .spread = -2.0F,
-      },
+      Background(theme.colors.surface_container_low),
       CornerRadius(theme.shapes.extra_large)
   );
 }
