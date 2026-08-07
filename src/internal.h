@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <any>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <concepts>
@@ -29,6 +30,7 @@
 #include <huxerui/view.h>
 
 #include "geometry_internal.h"
+#include "semantics_internal.h"
 
 namespace huxerui::detail {
 
@@ -478,6 +480,8 @@ struct ViewSpec {
   std::optional<ViewKey> key;
   std::string text;
   ViewProperties properties;
+  SemanticPatch component_semantics;
+  std::optional<SemanticPatch> author_semantics;
   std::vector<View> children;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
@@ -594,6 +598,8 @@ struct MountedNode final : public huxerui::MountedNode {
   std::optional<ViewKey> key;
   std::string text;
   ViewProperties properties;
+  SemanticPatch component_semantics;
+  std::optional<SemanticPatch> author_semantics;
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
   ImageProperties image_properties;
@@ -614,6 +620,8 @@ struct MountedNode final : public huxerui::MountedNode {
   RenderNode render_node;
   std::uint64_t measure_revision = 0;
   std::uint64_t layout_revision = 0;
+  SemanticNodeId semantic_identity = 0;
+  std::unordered_map<VirtualSemanticKey, SemanticNodeId, VirtualSemanticKeyHash> virtual_semantic_identities;
   // Measurement, descendant placement, content recording, and foreground recording are invalidated independently.
   bool measure_dirty = true;
   bool layout_dirty = true;
@@ -912,6 +920,19 @@ struct NodeExtensionHandle {
   bool operator==(const NodeExtensionHandle&) const = default;
 };
 
+struct SemanticExtensionRoute {
+  NodeExtensionHandle extension;
+  std::uint64_t local_id = 0;
+};
+
+inline constexpr std::size_t semantic_standard_action_count = static_cast<std::size_t>(SemanticActionKind::Custom);
+
+struct SemanticActionRoute {
+  std::uint64_t node_identity = 0;
+  std::array<std::optional<SemanticExtensionRoute>, semantic_standard_action_count> extension_actions;
+  std::unordered_map<std::uint64_t, SemanticExtensionRoute> custom_actions;
+};
+
 inline constexpr float touch_gesture_slop = 6.0F;
 
 struct PointerSession {
@@ -1070,6 +1091,10 @@ struct Runtime::State {
   std::optional<double> previous_frame_timestamp_;
   std::uint64_t next_node_identity_ = 1;
   std::uint64_t next_scope_identity_ = 2;
+  SemanticNodeId next_semantic_identity_ = 1;
+  SemanticNodeId semantic_root_identity_ = 0;
+  std::uint64_t semantic_revision_ = 0;
+  std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
   std::optional<detail::NodeExtensionHandle> hovered_extension_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;

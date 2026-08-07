@@ -1,5 +1,6 @@
 function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
+            "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_accessibility.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_adapter.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_renderer.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_text_input.mm"

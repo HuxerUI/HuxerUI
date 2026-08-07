@@ -16,8 +16,10 @@ namespace huxerui {
 
 class PaintContext;
 class Runtime;
+class SemanticBuilder;
 class TextInputClient;
 class TextSelectionClient;
+struct SemanticAction;
 
 struct FrameInfo {
   double timestamp = 0.0;
@@ -112,6 +114,16 @@ public:
     return PointerResult::Ignored;
   }
 
+  virtual void BuildSemantics(SemanticBuilder& builder) const {
+    static_cast<void>(builder);
+  }
+
+  [[nodiscard]] virtual bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) {
+    static_cast<void>(local_id);
+    static_cast<void>(action);
+    return false;
+  }
+
   virtual void Paint(const MountedNode& node, PaintContext& context) const {
     static_cast<void>(node);
     static_cast<void>(context);
@@ -124,12 +136,23 @@ protected:
     }
   }
 
+  void InvalidateSemantics() {
+    if (invalidate_semantics_) {
+      invalidate_semantics_();
+    }
+  }
+
 private:
   void BindPaintInvalidation(std::function<void()> callback) {
     invalidate_paint_ = std::move(callback);
   }
 
+  void BindSemanticsInvalidation(std::function<void()> callback) {
+    invalidate_semantics_ = std::move(callback);
+  }
+
   std::function<void()> invalidate_paint_;
+  std::function<void()> invalidate_semantics_;
 
   friend class Runtime;
 };

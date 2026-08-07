@@ -13,6 +13,7 @@ Current implementation status:
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
+- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -327,6 +328,7 @@ advance retained node extensions and prepare geometry
 resolve presentation properties
 bring focused text input into view
 refresh the text-input session
+resolve and publish SemanticFrame
 record dirty PaintSequences
 compute damage
 return FrameCommit with RenderFrame and an optional absolute deadline
@@ -344,6 +346,11 @@ The retained scene and incremental invalidation architecture are defined in [Inc
 Local geometry, the scene boundary, PaintSequence reuse, transform and opacity presentation updates, retained ScrollView movement, layout and virtual-realization caching, equality-aware modifier and layout-value diffs, and precise shared-runtime damage are implemented.
 macOS and Windows consume shared DamageRegion output for native partial redraw.
 Android retains the same shared damage calculation and committed-scene path but currently invalidates its complete native View.
+
+The semantics pipeline is a parallel Runtime output rather than a RenderScene branch.
+After reconciliation and final presentation geometry, Runtime resolves component declarations, NodeExtension contributions, application overrides, focus, visibility, and secure-data policy into one immutable owning `SemanticFrame`.
+`FrameCommit` publishes a shared pointer to that frame beside `RenderFrame`, allowing native accessibility objects to retain committed data without retaining MountedNode pointers.
+The complete declaration, frame, action, identity, virtualization, security, and platform mapping contract is defined in [Semantics and Accessibility Design](semantics.md).
 
 ## Animation model
 
@@ -1220,6 +1227,9 @@ The current extension points are:
 | Typed presentation library | A service backed by the Runtime LayerStack |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
+The semantics extension keeps the same model: a reusable `Semantics` property modifier supplies author declarations, while a semantic-capable NodeExtension may contribute dynamic properties, stable virtual semantic children, and semantic-only action handling.
+Runtime resolves both into one committed tree instead of adding a separate accessibility plugin host.
+See [Semantics and Accessibility Design](semantics.md).
 
 ## Performance rules
 

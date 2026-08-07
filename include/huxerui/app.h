@@ -17,6 +17,7 @@
 #include <huxerui/layer.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
+#include <huxerui/semantics.h>
 #include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
@@ -124,6 +125,7 @@ public:
   [[nodiscard]] TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const;
   // The point is expressed in logical coordinates relative to the HuxerUI host view.
   [[nodiscard]] TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const;
+  bool PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action);
 
 private:
   struct State;
@@ -180,7 +182,8 @@ private:
       std::optional<double>& next_wakeup,
       bool rebuild_cache
   );
-  void BindExtensionPaintInvalidation(detail::MountedNode& node);
+  void BindExtensionInvalidation(detail::MountedNode& node);
+  void BuildSemantics();
   const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
   void InvalidateLayers();

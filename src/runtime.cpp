@@ -407,7 +407,8 @@ bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
 
 bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
   return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
-         mounted.properties == incoming.properties &&
+         mounted.properties == incoming.properties && mounted.component_semantics == incoming.component_semantics &&
+         mounted.author_semantics == incoming.author_semantics &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
          mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
          mounted.environment == incoming.environment &&
@@ -422,6 +423,8 @@ void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
   mounted.key = incoming.key;
   mounted.text = incoming.text;
   mounted.properties = incoming.properties;
+  mounted.component_semantics = incoming.component_semantics;
+  mounted.author_semantics = incoming.author_semantics;
   mounted.scope_factory = incoming.scope_factory;
   mounted.canvas_painter = incoming.canvas_painter;
   mounted.image_properties = incoming.image_properties;
@@ -913,6 +916,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   if (!state_->mounted_root_ || state_->viewport_.width <= 0.0F || state_->viewport_.height <= 0.0F) {
     RefreshInteractionTree();
     RefreshTextInputSession();
+    BuildSemantics();
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
     state_->committed_scene_snapshot_.clear();
@@ -977,6 +981,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
   AdvanceTextSelectionLongPress(frame.timestamp);
+  BuildSemantics();
 
   AdvanceTextSelectionOverlay(frame);
   PaintTextSelectionOverlay();
@@ -1427,13 +1432,18 @@ bool Runtime::UpdateNodeExtensions(
   return subtree_has_extensions;
 }
 
-void Runtime::BindExtensionPaintInvalidation(detail::MountedNode& node) {
+void Runtime::BindExtensionInvalidation(detail::MountedNode& node) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
     }
     entry.extension->BindPaintInvalidation([this, owner = &node] {
       owner->foreground_paint_dirty = true;
+      if (!state_->building_frame_) {
+        RequestFrame();
+      }
+    });
+    entry.extension->BindSemanticsInvalidation([this] {
       if (!state_->building_frame_) {
         RequestFrame();
       }
@@ -1876,6 +1886,11 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   if (!ForegroundPaintInputsEqual(*mounted, *incoming)) {
     mounted->foreground_paint_dirty = true;
   }
+  std::vector<const ModifierDescriptor*> previous_extension_descriptors;
+  previous_extension_descriptors.reserve(mounted->extensions.size());
+  for (const NodeExtensionEntry& entry : mounted->extensions) {
+    previous_extension_descriptors.push_back(entry.descriptor);
+  }
   const bool extension_node_inputs_equal = ExtensionNodeInputsEqual(*mounted, *incoming);
   ApplyViewDeclaration(*mounted, *incoming);
   const ModifierChanges modifier_changes =
@@ -1885,8 +1900,16 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     mounted->foreground_paint_dirty = true;
   }
   if (modifier_changes.structure_changed) {
+    std::erase_if(
+        mounted->virtual_semantic_identities,
+        [&previous_extension_descriptors, owner = mounted.get()](const auto& entry) {
+          const std::size_t index = entry.first.extension_index;
+          return index >= owner->extensions.size() || index >= previous_extension_descriptors.size() ||
+                 owner->extensions[index].descriptor != previous_extension_descriptors[index];
+        }
+    );
     state_->extension_tree_dirty_ = true;
-    BindExtensionPaintInvalidation(*mounted);
+    BindExtensionInvalidation(*mounted);
   }
   if (mounted->kind == NodeKind::Scope) {
     layout_changed = ComposeScope(*mounted) || layout_changed;
@@ -1920,7 +1943,7 @@ std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSp
     mounted->scroll_state = std::make_unique<ScrollNodeState>();
   }
   static_cast<void>(ReconcileNodeExtensions(*mounted, incoming->retained_modifiers, false));
-  BindExtensionPaintInvalidation(*mounted);
+  BindExtensionInvalidation(*mounted);
   if (mounted->kind == NodeKind::Scope) {
     static_cast<void>(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {

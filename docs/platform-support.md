@@ -12,6 +12,8 @@
 | Web preview | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events |
 
 State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
+The shared Runtime publishes an immutable `SemanticFrame` with initial built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
+macOS has the first native AppKit accessibility bridge; Android, iOS, Windows, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
 
 ## Runtime and PlatformAdapter
 
@@ -42,6 +44,7 @@ if (commit.next_frame_deadline.has_value()) {
 Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, packaged resource reads, and renderer conventions.
 PlatformAdapter also implements the shared `TextMeasurer` service, resolving platform-neutral Font and TextStyle values through the native text stack.
 They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
+`SemanticFrame` is a second committed Runtime output beside RenderFrame, not data reconstructed by a renderer or inferred from concrete components in a platform adapter.
 `PlatformAdapter::RequestFrameAt()` accepts an absolute monotonic deadline.
 Runtime uses it for invalidations outside frame construction; work discovered while building is returned through `FrameCommit::next_frame_deadline`.
 The platform adapter presents the committed frame before scheduling that deadline, which prevents continuous animation from starving the native paint phase.

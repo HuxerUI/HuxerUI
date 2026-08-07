@@ -327,6 +327,22 @@ public:
     node_ = nullptr;
   }
 
+  void BuildSemantics(SemanticBuilder& builder) const {
+    Semantics semantics;
+    semantics.role = SemanticRole::TextField;
+    semantics.label = label_;
+    if (!configuration_.secure) {
+      semantics.value = editing_.value.text;
+    }
+    semantics.placeholder = placeholder_;
+    semantics.read_only = configuration_.read_only;
+    semantics.invalid = validation_.IsInvalid();
+    if (!validation_.message.empty()) {
+      semantics.error = validation_.message;
+    }
+    builder.SetOwner(std::move(semantics));
+  }
+
   void Update(detail::MountedNode& node, const detail::TextFieldModifier& modifier) {
     ValidateConfiguration(modifier.configuration);
     ValidateLimits(modifier.configuration, modifier.min_lines, modifier.max_lines);
@@ -2197,6 +2213,10 @@ public:
 
   TextSelectionClient* GetTextSelectionClient() noexcept override {
     return client_.get();
+  }
+
+  void BuildSemantics(SemanticBuilder& builder) const override {
+    client_->BuildSemantics(builder);
   }
 
   PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {

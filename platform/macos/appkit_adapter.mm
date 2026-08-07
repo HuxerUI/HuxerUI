@@ -19,6 +19,7 @@
 
 #include <huxerui/app.h>
 
+#include "appkit_accessibility.h"
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "platform_frame_internal.h"
@@ -175,6 +176,7 @@ public:
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
+      accessibility_ = std::make_unique<MacAccessibility>(runtime, view_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
@@ -198,6 +200,7 @@ public:
       frame_scheduler_ = nil;
       scheduled_frame_deadline_.reset();
       committed_frame_ = nullptr;
+      accessibility_.reset();
       runtime_ = nullptr;
     }
     return 0;
@@ -231,6 +234,7 @@ public:
     }
     const FrameCommit& commit = runtime_->BuildFrame();
     committed_frame_ = &commit.render_frame;
+    accessibility_->Commit(commit.semantic_frame);
     static_cast<void>(InvalidateDamage(commit.render_frame.damage));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
@@ -389,6 +393,10 @@ public:
     return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
   }
 
+  NSArray* AccessibilityRootChildren() {
+    return accessibility_ ? accessibility_->RootChildren() : @[];
+  }
+
 private:
   void ScheduleFrame(double deadline) {
     if (frame_scheduler_ == nil) {
@@ -456,6 +464,7 @@ private:
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
+  std::unique_ptr<MacAccessibility> accessibility_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
@@ -478,6 +487,14 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+
+- (BOOL)isAccessibilityElement {
+  return NO;
+}
+
+- (NSArray*)accessibilityChildren {
+  return huxeruiAdapter == nullptr ? @[] : huxeruiAdapter->AccessibilityRootChildren();
 }
 
 - (void)setFrameSize:(NSSize)newSize {

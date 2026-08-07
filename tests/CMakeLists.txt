@@ -12,6 +12,7 @@ add_executable(huxerui_tests
         unit/paint.cpp
         unit/path.cpp
         unit/resource.cpp
+        unit/semantics.cpp
         unit/text.cpp
         unit/text_input.cpp
         unit/validation.cpp
@@ -99,6 +100,7 @@ set(HUXERUI_PUBLIC_HEADERS
         resource.h
         root.h
         scroll.h
+        semantics.h
         state.h
         text.h
         text_input.h

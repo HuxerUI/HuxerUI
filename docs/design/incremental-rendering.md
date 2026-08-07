@@ -432,9 +432,10 @@ advance retained extensions and prepare geometry-dependent visual state
 update RenderNode presentation properties
 bring focused text input into view and commit any resulting scroll geometry
 refresh the text-input session
+resolve and publish the immutable SemanticFrame
 record dirty content, foreground, and system-overlay PaintSequences
 compute conservative damage
-publish FrameCommit with the committed RenderFrame and optional next deadline
+publish FrameCommit with the committed RenderFrame, SemanticFrame, and optional next deadline
 invalidate and present the native damage
 schedule the returned deadline
 ```
@@ -453,11 +454,12 @@ struct RenderFrame {
 
 struct FrameCommit {
   RenderFrame render_frame;
+  std::shared_ptr<const SemanticFrame> semantic_frame;
   std::optional<double> next_frame_deadline;
 };
 ```
 
-`RenderScene` remains valid until the next frame construction or Runtime destruction.
+`RenderScene` remains valid until the next frame construction or Runtime destruction, while the immutable `SemanticFrame` may be retained across later commits.
 The platform must finish synchronous traversal before returning unless it explicitly retains a versioned immutable snapshot.
 
 ## Damage tracking

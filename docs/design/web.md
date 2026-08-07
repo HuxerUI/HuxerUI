@@ -171,11 +171,15 @@ The initial locale derives from `navigator.language` and is normalized through t
 
 ## Accessibility and semantics
 
-Canvas pixels alone do not provide the browser accessibility tree required by interactive applications. Stable Web support therefore depends on the planned platform-neutral semantics tree.
+Canvas pixels alone do not provide the browser accessibility tree required by interactive applications. Stable Web support therefore depends on mapping the implemented platform-neutral semantics foundation into the browser.
 
-Runtime semantics describe roles, labels, values, actions, focus, enabled state, selection, ranges, and geometry independently of rendering. WebPlatformAdapter maps the committed semantics tree to minimal browser elements associated with the Canvas. It does not reconstruct semantics from PaintCommands and does not mirror every View or layout node into DOM.
+Runtime publishes the immutable owning `SemanticFrame` defined by [Semantics and Accessibility Design](semantics.md) independently of rendering; collection, live-region, modal, and complete visibility behavior remain part of its staged implementation.
+The planned WebPlatformAdapter mapping retains that frame and maps only meaningful semantic nodes to minimal browser elements associated with the Canvas.
+It does not reconstruct semantics from PaintCommands and does not mirror every View or layout node into DOM.
 
-Semantic DOM is not a second visual renderer. It remains visually hidden or represented as Canvas fallback content, participates in browser focus and assistive technology, forwards semantic actions to Runtime, and follows presentation transforms and clipping where geometry is exposed.
+Semantic DOM is not a second visual renderer.
+It remains visually unobtrusive, participates in browser focus and assistive technology, forwards typed semantic actions to Runtime, maintains live regions and collection metadata, and follows committed order, visibility, transforms, and clipping where geometry is exposed.
+Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
 DOM-backed NativeView is a separate future leaf-node capability. It must follow the NativeView lifecycle, composition, clipping, focus, input, and accessibility contract rather than using the semantics overlay as a general DOM container.
 

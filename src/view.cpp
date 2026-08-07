@@ -1342,7 +1342,49 @@ public:
     maximum_ = modifier.maximum;
     step_ = modifier.step;
     last_emitted_value_ = value_;
+    event_bindings_ = static_cast<detail::MountedNode&>(node).event_bindings;
     UpdateThumbSize(node.IsEnabled());
+  }
+
+  void BuildSemantics(SemanticBuilder& builder) const override {
+    Semantics semantics;
+    semantics.role = SemanticRole::Slider;
+    semantics.range = SemanticRange{
+        minimum_,
+        maximum_,
+        value_,
+        step_.has_value() ? std::optional<double>{*step_} : std::nullopt,
+    };
+    builder.SetOwner(std::move(semantics));
+    builder.AddAction(0, SemanticActionKind::SetValue);
+    builder.AddAction(0, SemanticActionKind::Increment);
+    builder.AddAction(0, SemanticActionKind::Decrement);
+  }
+
+  bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
+    if (local_id != 0) {
+      return false;
+    }
+    float requested = value_;
+    if (action.kind == SemanticActionKind::SetValue) {
+      const auto* value = std::get_if<double>(&action.value);
+      if (value == nullptr || !std::isfinite(*value)) {
+        return false;
+      }
+      requested = static_cast<float>(*value);
+    } else if (action.kind == SemanticActionKind::Increment) {
+      requested += step_.value_or((maximum_ - minimum_) / 100.0F);
+    } else if (action.kind == SemanticActionKind::Decrement) {
+      requested -= step_.value_or((maximum_ - minimum_) / 100.0F);
+    } else {
+      return false;
+    }
+    const float snapped = Snap(requested);
+    if (snapped != last_emitted_value_) {
+      last_emitted_value_ = snapped;
+      detail::EmitEvent<SliderEvents::Changed>(event_bindings_, snapped);
+    }
+    return true;
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
@@ -1631,6 +1673,7 @@ private:
   }
 
   SliderStyle style_;
+  detail::EventBindings event_bindings_;
   detail::AnimatedValue<float> thumb_width_;
   detail::AnimatedValue<float> thumb_height_;
   std::optional<std::int64_t> pointer_id_;
@@ -1930,6 +1973,8 @@ std::shared_ptr<detail::ViewSpec> MakeTextSpec(std::string value, TextRole role)
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
   spec->text = std::move(value);
   spec->text_role = role;
+  spec->component_semantics.role = SemanticRole::Text;
+  spec->component_semantics.label = spec->text;
   return spec;
 }
 
@@ -1937,6 +1982,8 @@ std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
   spec->text = std::move(label);
   spec->focusable = true;
+  spec->component_semantics.role = SemanticRole::Button;
+  spec->component_semantics.label = spec->text;
   return spec;
 }
 
@@ -1955,6 +2002,9 @@ std::shared_ptr<detail::ViewSpec> MakeChipSpec(
   }
   spec->focusable = true;
   spec->chip_selection = selection;
+  spec->component_semantics.role = SemanticRole::Button;
+  spec->component_semantics.label = spec->text;
+  spec->component_semantics.selected = selection;
   const bool selected = selection.value_or(false);
   if (selection.has_value()) {
     spec->activation = [selected](const detail::EventBindings& bindings) {
@@ -2038,6 +2088,11 @@ MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked
   auto spec = std::make_shared<detail::ViewSpec>(kind);
   spec->text = std::move(label);
   spec->focusable = true;
+  spec->component_semantics.role = visual_kind == ToggleVisualKind::Checkbox      ? SemanticRole::Checkbox
+                                   : visual_kind == ToggleVisualKind::RadioButton ? SemanticRole::RadioButton
+                                                                                  : SemanticRole::Switch;
+  spec->component_semantics.label = spec->text;
+  spec->component_semantics.checked = checked ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
   spec->activation = [visual_kind, checked](const detail::EventBindings& bindings) {
     if (visual_kind == ToggleVisualKind::RadioButton && checked) {
       return;
@@ -2064,6 +2119,11 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
     progress = NormalizeProgress(*progress);
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressCircle);
+  spec->component_semantics.role = SemanticRole::ProgressIndicator;
+  spec->component_semantics.busy = !progress.has_value();
+  if (progress.has_value()) {
+    spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
+  }
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
   return spec;
 }
@@ -2073,6 +2133,11 @@ std::shared_ptr<detail::ViewSpec> MakeProgressBarSpec(std::optional<float> progr
     progress = NormalizeProgress(*progress);
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressBar);
+  spec->component_semantics.role = SemanticRole::ProgressIndicator;
+  spec->component_semantics.busy = !progress.has_value();
+  if (progress.has_value()) {
+    spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
+  }
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressBarVisual{progress}));
   return spec;
 }
@@ -2080,6 +2145,7 @@ std::shared_ptr<detail::ViewSpec> MakeProgressBarSpec(std::optional<float> progr
 std::shared_ptr<detail::ViewSpec> MakeSliderSpec(float value) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Slider);
   spec->focusable = true;
+  spec->component_semantics.role = SemanticRole::Slider;
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(SliderVisual{value, 0.0F, 1.0F, std::nullopt}));
   return spec;
 }
