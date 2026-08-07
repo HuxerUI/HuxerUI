@@ -244,6 +244,20 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   };
 }
 
+IconButtonStyle MaterialIconButtonStyle(const ThemeSpec& theme) {
+  Color disabled_foreground = theme.colors.on_surface;
+  disabled_foreground.alpha *= 0.38F;
+  return {
+      .foreground = theme.colors.on_surface_variant,
+      .disabled_foreground = disabled_foreground,
+      .icon_size = 24.0F,
+      .minimum_interactive_size = 48.0F,
+      .state_layer_size = 40.0F,
+      .corner_radius = 24.0F,
+      .indication = MaterialIndication(theme.colors.on_surface_variant, theme),
+  };
+}
+
 ChipStyle MaterialChipStyle(const ThemeSpec& theme) {
   Color disabled_container = theme.colors.on_surface;
   disabled_container.alpha *= 0.12F;
@@ -747,6 +761,7 @@ DrawerStyle MaterialDrawerStyle(const ThemeSpec& theme) {
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
   definition.Set(MaterialButtonStyle(theme));
+  definition.Set(MaterialIconButtonStyle(theme));
   definition.Set(MaterialChipStyle(theme));
   definition.Set(MaterialSegmentedButtonStyle(theme));
   definition.Set(MaterialTabsStyle(theme));
@@ -830,6 +845,20 @@ ButtonStyle DefaultButtonStyle(const ThemeSpec& theme) {
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
       .minimum_width = 0.0F,
       .minimum_height = 0.0F,
+      .corner_radius = theme.shapes.extra_small,
+      .indication = std::nullopt,
+  };
+}
+
+IconButtonStyle DefaultIconButtonStyle(const ThemeSpec& theme) {
+  Color disabled_foreground = theme.colors.on_surface;
+  disabled_foreground.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .foreground = theme.colors.on_surface,
+      .disabled_foreground = disabled_foreground,
+      .icon_size = 20.0F,
+      .minimum_interactive_size = 40.0F,
+      .state_layer_size = 32.0F,
       .corner_radius = theme.shapes.extra_small,
       .indication = std::nullopt,
   };
@@ -1167,6 +1196,10 @@ TextStyle TextStyle::Default() {
 
 ButtonStyle ButtonStyle::Default() {
   return detail::DefaultButtonStyle(ThemeSpec::Default());
+}
+
+IconButtonStyle IconButtonStyle::Default() {
+  return detail::DefaultIconButtonStyle(ThemeSpec::Default());
 }
 
 ChipStyle ChipStyle::Default() {

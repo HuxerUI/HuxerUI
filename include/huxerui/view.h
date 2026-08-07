@@ -554,6 +554,13 @@ public:
   explicit Button(const char* label);
 };
 
+class IconButton final : public detail::TypedView<IconButton> {
+public:
+  IconButton(ImageResource icon, StringVariant semantic_label);
+  IconButton(ImageAsset icon, StringVariant semantic_label);
+  IconButton(VectorAsset icon, StringVariant semantic_label);
+};
+
 class Chip final : public detail::TypedView<Chip> {
 public:
   explicit Chip(StringResource resource);

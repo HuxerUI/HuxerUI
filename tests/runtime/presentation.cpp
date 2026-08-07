@@ -70,6 +70,7 @@ int labeled_checkbox_changes = 0;
 int labeled_radio_changes = 0;
 int labeled_switch_changes = 0;
 int action_chip_clicks = 0;
+int icon_button_clicks = 0;
 int selectable_chip_changes = 0;
 int disabled_chip_changes = 0;
 int segmented_button_changes = 0;
@@ -351,6 +352,24 @@ View MaterialIconControlsApp() {
         ).OnChanged([](std::size_t) {}),
       }.With(Spacing(12.0F))
   );
+}
+
+View MaterialIconButtonApp() {
+  return HUXERUI_THEME(
+      huxerui::MaterialTheme,
+      Row {
+        IconButton(ControlIcon(), "Play").OnClick([] { ++icon_button_clicks; }),
+        IconButton(ControlIcon(), "Disabled play")
+            .OnClick([] { ++icon_button_clicks; })
+            .With(Enabled{false}),
+      }.With(Spacing(8.0F))
+  );
+}
+
+View FlatIconButtonApp() {
+  return Row {
+    IconButton(ControlIcon(), "Flat play").OnClick([] {}),
+  };
 }
 
 View MaterialControlledSwitchApp() {
@@ -1031,6 +1050,20 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   const auto* button_indication = std::get_if<RippleIndication>(&*button_style.indication);
   REQUIRE(button_indication != nullptr);
   REQUIRE(button_indication->color.red == light.colors.on_primary.red);
+
+  const IconButtonStyle icon_button_style = ThemeDefinitionValue<IconButtonStyle>(definition);
+  REQUIRE(icon_button_style.foreground == light.colors.on_surface_variant);
+  REQUIRE(icon_button_style.icon_size == 24.0F);
+  REQUIRE(icon_button_style.minimum_interactive_size == 48.0F);
+  REQUIRE(icon_button_style.state_layer_size == 40.0F);
+  REQUIRE(icon_button_style.corner_radius == 24.0F);
+  REQUIRE(icon_button_style.indication.has_value());
+  const auto* icon_button_indication = std::get_if<RippleIndication>(&*icon_button_style.indication);
+  REQUIRE(icon_button_indication != nullptr);
+  REQUIRE(icon_button_indication->color.red == light.colors.on_surface_variant.red);
+  REQUIRE(icon_button_indication->color.green == light.colors.on_surface_variant.green);
+  REQUIRE(icon_button_indication->color.blue == light.colors.on_surface_variant.blue);
+  REQUIRE(icon_button_indication->color.alpha == light.colors.on_surface_variant.alpha * 0.16F);
 
   const CheckboxStyle checkbox_style = ThemeDefinitionValue<CheckboxStyle>(definition);
   REQUIRE(checkbox_style.size == 18.0F);
@@ -2087,6 +2120,67 @@ TEST_CASE("TestChipAndSegmentedButtonIconContent") {
   REQUIRE(FindText(scene, "Mixed") != nullptr);
   REQUIRE(FindText(scene, "Icon only") == nullptr);
   REQUIRE(FindPresentedRectWithColor(scene, segmented_style.selected_label).has_value());
+}
+
+TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
+  REQUIRE_THROWS_AS(IconButton(ImageAsset{}, "Invalid"), std::invalid_argument);
+  REQUIRE_THROWS_AS(IconButton(ControlIcon(), " \t"), std::invalid_argument);
+  icon_button_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{MaterialIconButtonApp, platform};
+  runtime.SetViewport({120.0F, 64.0F});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* row = root->children[0].get();
+  REQUIRE(row->children.size() == 2);
+  const auto* active = row->children[0].get();
+  const auto* disabled = row->children[1].get();
+  REQUIRE(active->kind == detail::NodeKind::IconButton);
+  REQUIRE(disabled->kind == detail::NodeKind::IconButton);
+  REQUIRE(active->focusable);
+  REQUIRE(active->measured_size == Size{48.0F, 48.0F});
+  REQUIRE(disabled->measured_size == Size{48.0F, 48.0F});
+  REQUIRE(active->properties.indication_size == Size{40.0F, 40.0F});
+  REQUIRE(active->properties.indication_corner_radius == 20.0F);
+  const detail::LabelContentMetrics content = active->LayoutValueOr<detail::LabelContentMetrics>({});
+  REQUIRE(content.icon_size == Size{24.0F, 24.0F});
+  REQUIRE_FALSE(content.show_label);
+  REQUIRE(FindText(scene, "Play") == nullptr);
+  REQUIRE(FindText(scene, "Disabled play") == nullptr);
+
+  const IconButtonStyle style = ThemeDefinitionValue<IconButtonStyle>(MaterialThemeDefinition());
+  REQUIRE(FindPresentedRectWithColor(scene, style.foreground).has_value());
+  REQUIRE(FindPresentedRectWithColor(scene, style.disabled_foreground).has_value());
+
+  const Rect active_bounds = active->PresentationBounds();
+  ClickAt(runtime, {active_bounds.x + active_bounds.width * 0.5F, active_bounds.y + active_bounds.height * 0.5F});
+  REQUIRE(icon_button_clicks == 1);
+  const Rect disabled_bounds = disabled->PresentationBounds();
+  ClickAt(
+      runtime,
+      {disabled_bounds.x + disabled_bounds.width * 0.5F, disabled_bounds.y + disabled_bounds.height * 0.5F}
+  );
+  REQUIRE(icon_button_clicks == 1);
+
+  TestPlatform flat_platform;
+  Runtime flat_runtime{FlatIconButtonApp, flat_platform};
+  flat_runtime.SetViewport({64.0F, 64.0F});
+  flat_runtime.BuildFrame();
+  const auto* flat_root = flat_runtime.RootNode();
+  REQUIRE(flat_root != nullptr);
+  REQUIRE(flat_root->children.size() == 1);
+  const auto* flat = flat_root->children[0].get();
+  REQUIRE(flat->kind == detail::NodeKind::IconButton);
+  REQUIRE(flat->measured_size == Size{40.0F, 40.0F});
+  REQUIRE(flat->properties.indication_size == Size{32.0F, 32.0F});
+  REQUIRE(flat->properties.indication_corner_radius == 4.0F);
+  REQUIRE(flat->properties.corner_radii == CornerRadii{4.0F});
+  const detail::LabelContentMetrics flat_content = flat->LayoutValueOr<detail::LabelContentMetrics>({});
+  REQUIRE(flat_content.icon_size == Size{20.0F, 20.0F});
 }
 
 TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {

@@ -429,7 +429,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
             node.ContentBounds(), node.text, node.properties.text_style, node.properties.text_layout_options
         );
       }
-    } else if (node.kind == NodeKind::Chip && node.image_properties.HasValue()) {
+    } else if (node.kind == NodeKind::IconButton ||
+               (node.kind == NodeKind::Chip && node.image_properties.HasValue())) {
       PaintLabelContent(node, content, text_style);
     } else if (node.kind == NodeKind::Button || node.kind == NodeKind::Chip) {
       content.DrawText(

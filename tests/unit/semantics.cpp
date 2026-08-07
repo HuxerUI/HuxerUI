@@ -7,6 +7,7 @@ namespace huxerui::test {
 namespace {
 
 int semantic_button_clicks = 0;
+int semantic_icon_button_clicks = 0;
 int semantic_lifecycle_clicks = 0;
 int virtual_semantic_activations = 0;
 State<float> semantic_slider_value;
@@ -58,12 +59,23 @@ struct VirtualSemantics {
   bool operator==(const VirtualSemantics&) const = default;
 };
 
+VectorAsset SemanticActionIcon() {
+  static const VectorAsset icon = VectorAsset::Create({12.0F, 12.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(
+        Path{}.MoveTo({1.0F, 1.0F}).LineTo({11.0F, 6.0F}).LineTo({1.0F, 11.0F}).Close(),
+        Color::Black()
+    );
+  });
+  return icon;
+}
+
 View SemanticBasicsApp() {
   auto slider = UseState(0.25F);
   semantic_slider_value = slider;
   return Column {
     Text("Status"),
     Button("Continue").OnClick([] { ++semantic_button_clicks; }),
+    IconButton(SemanticActionIcon(), "Play").OnClick([] { ++semantic_icon_button_clicks; }),
     Checkbox("Remember", true),
     Slider(slider.Get()).Range(0.0F, 10.0F).Step(0.5F).OnChanged([slider](float value) mutable {
       slider = value;
@@ -149,6 +161,7 @@ const SemanticNode* FindSemanticNodeOrNull(const SemanticFrame& frame, std::stri
 
 TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData") {
   semantic_button_clicks = 0;
+  semantic_icon_button_clicks = 0;
   TestPlatform platform;
   Runtime runtime(SemanticBasicsApp, platform);
   runtime.SetViewport({320.0F, 240.0F});
@@ -164,11 +177,19 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
   const SemanticNode& button = FindSemanticNode(*first_frame, "Continue");
   REQUIRE(button.role == SemanticRole::Button);
   REQUIRE((button.actions & SemanticActionMask(SemanticActionKind::Activate)) != 0);
+  const SemanticNode& icon_button = FindSemanticNode(*first_frame, "Play");
+  REQUIRE(icon_button.role == SemanticRole::Button);
+  REQUIRE((icon_button.actions & SemanticActionMask(SemanticActionKind::Activate)) != 0);
   const SemanticNode& checkbox = FindSemanticNode(*first_frame, "Remember");
   REQUIRE(checkbox.checked == SemanticCheckedState::Checked);
 
   REQUIRE(runtime.NativeRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, std::monostate{}}));
   REQUIRE(semantic_button_clicks == 1);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      icon_button.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE(semantic_icon_button_clicks == 1);
   REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, 1.0}));
 
   const FrameCommit& unchanged = runtime.BuildCommit();

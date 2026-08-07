@@ -69,6 +69,25 @@ CustomControl()
     .On<ViewEvents::KeyDown>(HandleKey);
 ```
 
+## IconButton
+
+IconButton is the standard momentary action when the visible content is only an icon:
+
+```cpp
+IconButton(app_resources::images::search, "Search").OnClick(OpenSearch);
+
+IconButton(vector_icon, "Unavailable action")
+    .OnClick(PerformAction)
+    .With(Enabled(false));
+```
+
+The semantic label is required and is not drawn.
+IconButton accepts image resources, raster assets, and vector assets, participates in focus traversal, and emits the same `ViewEvents::Click` event as Button.
+`IconButtonStyle` independently owns icon size, minimum interactive size, state-layer size, corner radius, colors, and indication.
+Material uses a 24-unit icon inside a 48-unit interaction target with a 40-unit circular state layer, while Flat uses denser 20-, 40-, and 32-unit geometry.
+Vector icons follow the style foreground, while raster assets preserve their encoded colors and use the Theme's disabled opacity.
+IconButton is intentionally not selectable; use a controlled component such as Chip when the action has persistent selected state.
+
 ## Chip
 
 Chip has action and selectable forms. An action Chip emits Click:
@@ -99,7 +118,7 @@ Chip(vector_icon, "Selectable", selected)
     });
 ```
 
-`OnChanged` delegates to `On<ToggleEvents::Changed>`. Both forms participate in focus traversal and use the active Theme's indication and component style. `ChipStyle` owns the icon size and spacing. Vector icons follow the current label color, while raster assets preserve their encoded colors. Use `Enabled(false)` for a disabled Chip. Chip intentionally retains a visible label; compose a custom image action when an action should be icon-only.
+`OnChanged` delegates to `On<ToggleEvents::Changed>`. Both forms participate in focus traversal and use the active Theme's indication and component style. `ChipStyle` owns the icon size and spacing. Vector icons follow the current label color, while raster assets preserve their encoded colors. Use `Enabled(false)` for a disabled Chip. Chip intentionally retains a visible label; use IconButton when an action should be icon-only.
 
 ## SegmentedButton
 

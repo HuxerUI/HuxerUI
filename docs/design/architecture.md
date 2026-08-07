@@ -651,6 +651,7 @@ Component styles are typed Environment values:
 ```text
 TextStyle
 ButtonStyle
+IconButtonStyle
 ChipStyle
 SegmentedButtonStyle
 DividerStyle

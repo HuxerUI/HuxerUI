@@ -497,6 +497,7 @@ The implemented component defaults are:
 | Text | Text role and content; Heading only when declared |
 | Image | Decorative by default; Image role only with a label |
 | Button | Button role, label, enabled state, and Activate |
+| IconButton | Button role, required semantic label, enabled state, and Activate |
 | Chip | Button role, selected state where applicable, and Activate |
 | Checkbox | Checkbox role, label, checked state, and Activate |
 | RadioButton | RadioButton role, label, checked state, and Activate |

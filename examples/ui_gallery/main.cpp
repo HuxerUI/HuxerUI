@@ -134,6 +134,8 @@ View ControlsDemo() {
         Flow {
           Button("Button").OnClick([] {}),
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
+          IconButton(LinkIcon(), "Open link").OnClick([] {}),
+          IconButton(LockIcon(), "Disabled secure action").OnClick([] {}).With(Enabled(false)),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Flow {
           Chip(ListIcon(), "Action").OnClick([] {}),

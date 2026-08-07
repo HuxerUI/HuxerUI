@@ -27,6 +27,8 @@ using huxerui::BottomSheetContext;
 using huxerui::BottomSheetHandle;
 using huxerui::Button;
 using huxerui::ButtonStyle;
+using huxerui::IconButton;
+using huxerui::IconButtonStyle;
 using huxerui::Checkbox;
 using huxerui::CheckboxStyle;
 using huxerui::Color;

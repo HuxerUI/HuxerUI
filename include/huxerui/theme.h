@@ -137,6 +137,20 @@ struct ButtonStyle {
   bool operator==(const ButtonStyle&) const = default;
 };
 
+struct IconButtonStyle {
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color disabled_foreground = Color::Rgb(31, 35, 40, 0.38F);
+  float icon_size = 20.0F;
+  float minimum_interactive_size = 40.0F;
+  float state_layer_size = 32.0F;
+  float corner_radius = 4.0F;
+  std::optional<IndicationSpec> indication;
+
+  static IconButtonStyle Default();
+
+  bool operator==(const IconButtonStyle&) const = default;
+};
+
 struct ChipStyle {
   Color background = Color::White();
   Color selected_background = Color::Rgb(31, 111, 235);
@@ -536,6 +550,7 @@ ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment);
 const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key);
 TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
+IconButtonStyle DefaultIconButtonStyle(const ThemeSpec& theme);
 ChipStyle DefaultChipStyle(const ThemeSpec& theme);
 DividerStyle DefaultDividerStyle(const ThemeSpec& theme);
 SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme);

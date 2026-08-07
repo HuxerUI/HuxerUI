@@ -343,6 +343,7 @@ public:
 enum class NodeKind {
   Text,
   Button,
+  IconButton,
   Chip,
   Divider,
   TextField,

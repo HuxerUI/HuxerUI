@@ -1832,6 +1832,30 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
+  if (spec.kind == detail::NodeKind::IconButton) {
+    const IconButtonStyle style =
+        ResolveStyleOverride<IconButtonStyle>(spec.environment).value_or(detail::DefaultIconButtonStyle(theme));
+    const float icon_size = std::max(0.0F, style.icon_size);
+    const float interactive_size = std::max(icon_size, std::max(0.0F, style.minimum_interactive_size));
+    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+    const float corner_radius = std::max(0.0F, style.corner_radius);
+    spec.properties.text_style = TextStyle{Font::System(theme.typography.label_large), style.foreground};
+    spec.properties.disabled_foreground = style.disabled_foreground;
+    spec.layout_values.insert_or_assign(
+        typeid(detail::LabelContentMetrics),
+        detail::MakeErasedLayoutValue(detail::LabelContentMetrics{{icon_size, icon_size}, 0.0F, false})
+    );
+    spec.properties.corner_radii = corner_radius;
+    spec.properties.frame.min_width = interactive_size;
+    spec.properties.frame.min_height = interactive_size;
+    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
+    spec.properties.indication_corner_radius = std::min(corner_radius, state_layer_size * 0.5F);
+    spec.properties.indication_override = style.indication;
+    if (spec.image_properties.IsVector()) {
+      spec.properties.disabled_opacity = 1.0F;
+    }
+    return;
+  }
   if (spec.kind == detail::NodeKind::Chip) {
     const ChipStyle style =
         ResolveStyleOverride<ChipStyle>(spec.environment).value_or(detail::DefaultChipStyle(theme));
@@ -1981,6 +2005,22 @@ std::shared_ptr<detail::ViewSpec> MakeTextSpec(std::string value, TextRole role)
 std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
   spec->text = std::move(label);
+  spec->focusable = true;
+  spec->component_semantics.role = SemanticRole::Button;
+  spec->component_semantics.label = spec->text;
+  return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(
+    detail::ResolvedImageAsset icon,
+    std::string semantic_label
+) {
+  if (semantic_label.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
+    throw std::invalid_argument("HuxerUI IconButton requires a non-empty semantic label");
+  }
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::IconButton);
+  spec->text = std::move(semantic_label);
+  spec->image_properties.asset = std::move(icon);
   spec->focusable = true;
   spec->component_semantics.role = SemanticRole::Button;
   spec->component_semantics.label = spec->text;
@@ -2557,6 +2597,24 @@ Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
 Button::Button(std::string_view label) : Button(std::string(label)) {}
 
 Button::Button(const char* label) : Button(label == nullptr ? std::string{} : std::string(label)) {}
+
+IconButton::IconButton(ImageResource icon, StringVariant semantic_label)
+    : detail::TypedView<IconButton>(MakeIconButtonSpec(
+          ResolveControlIcon(std::move(icon)),
+          detail::ResolveStringVariant(std::move(semantic_label))
+      )) {}
+
+IconButton::IconButton(ImageAsset icon, StringVariant semantic_label)
+    : detail::TypedView<IconButton>(MakeIconButtonSpec(
+          ResolveControlIcon(std::move(icon)),
+          detail::ResolveStringVariant(std::move(semantic_label))
+      )) {}
+
+IconButton::IconButton(VectorAsset icon, StringVariant semantic_label)
+    : detail::TypedView<IconButton>(MakeIconButtonSpec(
+          ResolveControlIcon(std::move(icon)),
+          detail::ResolveStringVariant(std::move(semantic_label))
+      )) {}
 
 Chip::Chip(StringResource resource) : Chip(UseString(std::move(resource))) {}
 

@@ -312,6 +312,14 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
                        )
                        .size;
     break;
+  case NodeKind::IconButton:
+    content_size = MeasureLabelContent(
+        node,
+        platform,
+        content_constraints,
+        TextLayoutOptions{.wrap = TextWrap::NoWrap}
+    );
+    break;
   case NodeKind::Chip:
     if (node.image_properties.HasValue()) {
       content_size = MeasureLabelContent(
@@ -548,6 +556,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   }
   case NodeKind::Text:
   case NodeKind::Button:
+  case NodeKind::IconButton:
   case NodeKind::Chip:
   case NodeKind::Divider:
   case NodeKind::TextField:
