@@ -148,6 +148,19 @@ NavigationStyle FlatNavigationStyle(const ThemeSpec& theme) {
   };
 }
 
+TopAppBarStyle FlatTopAppBarStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.surface,
+      .title_style =
+          TextStyle{Font::System(theme.typography.title_large).WithWeight(FontWeight::Bold), theme.colors.on_surface},
+      .height = 48.0F,
+      .horizontal_padding = theme.spacing.small,
+      .title_inset = theme.spacing.large,
+      .title_spacing = theme.spacing.extra_small,
+      .action_spacing = 0.0F,
+  };
+}
+
 NavigationBarStyle FlatNavigationBarStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
   disabled.alpha *= theme.interactions.disabled_opacity;
@@ -219,6 +232,7 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
   definition.Set(FlatBottomSheetStyle(theme));
   definition.Set(FlatMenuStyle(theme));
   definition.Set(FlatNavigationStyle(theme));
+  definition.Set(FlatTopAppBarStyle(theme));
   definition.Set(FlatNavigationBarStyle(theme));
   definition.Set(FlatNavigationPaneStyle(theme));
   definition.Set(FlatDrawerStyle(theme));
@@ -694,6 +708,18 @@ NavigationStyle MaterialNavigationStyle(const ThemeSpec& theme) {
   };
 }
 
+TopAppBarStyle MaterialTopAppBarStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.surface,
+      .title_style = TextStyle{Font::System(theme.typography.title_large), theme.colors.on_surface},
+      .height = 64.0F,
+      .horizontal_padding = 4.0F,
+      .title_inset = 16.0F,
+      .title_spacing = 4.0F,
+      .action_spacing = 0.0F,
+  };
+}
+
 NavigationBarStyle MaterialNavigationBarStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
   disabled.alpha *= theme.interactions.disabled_opacity;
@@ -779,6 +805,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialBottomSheetStyle(theme));
   definition.Set(MaterialMenuStyle(theme));
   definition.Set(MaterialNavigationStyle(theme));
+  definition.Set(MaterialTopAppBarStyle(theme));
   definition.Set(MaterialNavigationBarStyle(theme));
   definition.Set(MaterialNavigationPaneStyle(theme));
   definition.Set(MaterialDrawerStyle(theme));

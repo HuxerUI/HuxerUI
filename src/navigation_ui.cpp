@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 #include <huxerui/environment.h>
+#include <huxerui/semantics.h>
 #include <huxerui/theme.h>
 
 #include "internal.h"
@@ -81,6 +83,36 @@ enum class DrawerSide {
 enum class DrawerPlacement {
   Modal,
   Inline,
+};
+
+struct TopAppBarConfiguration {
+  TopAppBarStyle style;
+  TopAppBarTitleAlignment title_alignment = TopAppBarTitleAlignment::Start;
+
+  bool operator==(const TopAppBarConfiguration&) const = default;
+};
+
+struct TopAppBarConfigurationValue {
+  using Value = TopAppBarConfiguration;
+};
+
+class TopAppBarTitle final : public View {
+public:
+  TopAppBarTitle(std::string title, TextStyle style) : View(MakeSpec(std::move(title))) {
+    SetTextStyle(std::move(style));
+  }
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(std::string title) {
+    auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
+    spec->text = std::move(title);
+    spec->text_role = TextRole::Title;
+    spec->properties.text_layout_options = {.wrap = TextWrap::NoWrap};
+    spec->component_semantics.role = SemanticRole::Heading;
+    spec->component_semantics.label = spec->text;
+    spec->component_semantics.heading_level = 1;
+    return spec;
+  }
 };
 
 float IndicatorCornerRadius(float shortest_side, float radius) noexcept {
@@ -991,6 +1023,131 @@ DrawerPlacement PreferredDrawerPlacement(ViewportClass viewport_class, DrawerSid
 }
 
 } // namespace
+
+struct TopAppBar::Construction {
+  std::vector<View> children;
+  TopAppBarStyle style;
+};
+
+TopAppBar::Construction TopAppBar::Build(
+    StringVariant title,
+    std::optional<View> leading,
+    std::vector<View> actions
+) {
+  Construction construction;
+  construction.style = ResolveNavigationStyle<TopAppBarStyle>();
+  std::string resolved_title = detail::ResolveStringVariant(std::move(title));
+  if (resolved_title.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
+    throw std::invalid_argument("HuxerUI TopAppBar requires a non-empty title");
+  }
+  if (leading.has_value() && !*leading) {
+    throw std::invalid_argument("HuxerUI TopAppBar leading view must not be empty");
+  }
+  if (std::ranges::any_of(actions, [](const View& action) { return !action; })) {
+    throw std::invalid_argument("HuxerUI TopAppBar actions must not contain empty views");
+  }
+
+  construction.children.reserve(3);
+  construction.children.push_back(leading.has_value() ? std::move(*leading) : View{Spacer()});
+  construction.children.push_back(TopAppBarTitle(std::move(resolved_title), construction.style.title_style));
+  construction.children.push_back(
+      Row(std::move(actions))
+          .With(
+              Spacing(std::max(0.0F, construction.style.action_spacing)),
+              CrossAlign(CrossAxisAlignment::Center),
+              ClipChildren{}
+          )
+  );
+  return construction;
+}
+
+TopAppBar::TopAppBar(StringVariant title, std::optional<View> leading, std::vector<View> actions)
+    : TopAppBar(Build(std::move(title), std::move(leading), std::move(actions))) {}
+
+TopAppBar::TopAppBar(Construction construction)
+    : Layout<TopAppBar>(std::move(construction.children)), style_(std::move(construction.style)) {
+  ApplyModifiers(Background(style_.background), ClipChildren{});
+  UpdateConfiguration();
+}
+
+TopAppBar TopAppBar::TitleAlignment(TopAppBarTitleAlignment alignment) && {
+  title_alignment_ = alignment;
+  UpdateConfiguration();
+  return std::move(*this);
+}
+
+void TopAppBar::UpdateConfiguration() {
+  ApplyLayoutValue<TopAppBarConfigurationValue>(TopAppBarConfiguration{style_, title_alignment_});
+}
+
+LayoutResult TopAppBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  if (node.ChildCount() != 3) {
+    throw std::logic_error("HuxerUI TopAppBar must contain leading, title, and actions slots");
+  }
+  const TopAppBarConfiguration* configuration = node.LayoutValue<TopAppBarConfigurationValue>();
+  if (configuration == nullptr) {
+    throw std::logic_error("HuxerUI TopAppBar is missing its layout configuration");
+  }
+
+  const float desired_height = std::max(0.0F, configuration->style.height);
+  const float height = constraints.Constrain({0.0F, desired_height}).height;
+  const float padding = std::max(0.0F, configuration->style.horizontal_padding);
+  const float title_inset = std::max(padding, std::max(0.0F, configuration->style.title_inset));
+  const float title_spacing = std::max(0.0F, configuration->style.title_spacing);
+  const bool bounded_width = constraints.HasBoundedWidth();
+  const float bounded_layout_width = bounded_width ? constraints.max_width : 0.0F;
+  const float bounded_content_width = bounded_width ? std::max(0.0F, bounded_layout_width - padding * 2.0F) : 0.0F;
+
+  const Constraints leading_constraints{
+      0.0F,
+      bounded_width ? bounded_content_width : std::numeric_limits<float>::infinity(),
+      0.0F,
+      height,
+  };
+  const Size leading_size = context.Measure(node.ChildAt(0), leading_constraints);
+  const float leading_gap = leading_size.width > 0.0F ? title_spacing : 0.0F;
+  const float action_max_width = bounded_width
+                                     ? std::max(0.0F, bounded_content_width - leading_size.width - leading_gap)
+                                     : std::numeric_limits<float>::infinity();
+  const Size actions_size = context.Measure(node.ChildAt(2), {0.0F, action_max_width, 0.0F, height});
+  const float action_gap = actions_size.width > 0.0F ? title_spacing : 0.0F;
+
+  float width = bounded_layout_width;
+  float title_start = leading_size.width > 0.0F ? padding + leading_size.width + leading_gap : title_inset;
+  float title_end = bounded_width ? width - padding - actions_size.width - action_gap
+                                  : std::numeric_limits<float>::infinity();
+  const float title_max_width = bounded_width ? std::max(0.0F, title_end - title_start)
+                                               : std::numeric_limits<float>::infinity();
+  const Size title_size = context.Measure(node.ChildAt(1), {0.0F, title_max_width, 0.0F, height});
+
+  if (!bounded_width) {
+    const float leading_extent = leading_size.width > 0.0F ? padding + leading_size.width + leading_gap : title_inset;
+    const float action_extent = actions_size.width > 0.0F ? action_gap + actions_size.width + padding : padding;
+    const float natural_width = configuration->title_alignment == TopAppBarTitleAlignment::Center
+                                    ? title_size.width + std::max(leading_extent, action_extent) * 2.0F
+                                    : leading_extent + title_size.width + action_extent;
+    width = constraints.Constrain({natural_width, height}).width;
+    title_start = leading_size.width > 0.0F ? padding + leading_size.width + leading_gap : title_inset;
+    title_end = width - padding - actions_size.width - action_gap;
+  }
+
+  float title_x = title_start;
+  if (configuration->title_alignment == TopAppBarTitleAlignment::Center) {
+    const float ideal = (width - title_size.width) * 0.5F;
+    title_x = std::clamp(ideal, title_start, std::max(title_start, title_end - title_size.width));
+  }
+  const float actions_x = std::max(padding, width - padding - actions_size.width);
+
+  LayoutResult result;
+  result.Place(node.ChildAt(0), {padding, std::max(0.0F, (height - leading_size.height) * 0.5F)});
+  result.Place(node.ChildAt(1), {title_x, std::max(0.0F, (height - title_size.height) * 0.5F)});
+  result.Place(node.ChildAt(2), {actions_x, std::max(0.0F, (height - actions_size.height) * 0.5F)});
+  return result.SetSize(constraints.Constrain({width, height}));
+}
+
+TopAppBarStyle TopAppBarStyle::Default() {
+  return {};
+}
 
 NavigationBarStyle NavigationBarStyle::Default() {
   return {};

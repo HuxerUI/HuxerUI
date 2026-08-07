@@ -13,6 +13,7 @@ std::size_t navigation_change = 0;
 int application_back_requests = 0;
 int drawer_actions = 0;
 int content_actions = 0;
+int top_app_bar_actions = 0;
 
 VectorAsset NavigationTestIcon() {
   static const VectorAsset icon = VectorAsset::Create({16.0F, 16.0F}, [](VectorBuilder& builder) {
@@ -61,6 +62,53 @@ View MaterialNavigationBarApp() {
 View MaterialNavigationPaneApp() {
   return MaterialTheme([] {
     return huxerui::NavigationPane({huxerui::NavigationItem(NavigationTestIcon(), "Home")}, 0, true);
+  });
+}
+
+View TopAppBarApp() {
+  return Column {
+    TopAppBar(
+        "Library",
+        IconButton(NavigationTestIcon(), "Back"),
+        {
+            IconButton(NavigationTestIcon(), "More actions").OnClick([] { ++top_app_bar_actions; }),
+        }
+    ),
+  }.With(CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+View CenteredTopAppBarApp() {
+  return Column {
+    TopAppBar(
+        "Centered",
+        std::optional<View>{IconButton(NavigationTestIcon(), "Back")},
+        {
+            IconButton(NavigationTestIcon(), "Search"),
+            IconButton(NavigationTestIcon(), "More actions"),
+        }
+    ).TitleAlignment(TopAppBarTitleAlignment::Center),
+  }.With(CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+View NarrowTopAppBarApp() {
+  return Column {
+    TopAppBar(
+        "A very long title",
+        std::optional<View>{IconButton(NavigationTestIcon(), "Back")},
+        {
+            IconButton(NavigationTestIcon(), "First action"),
+            IconButton(NavigationTestIcon(), "Second action"),
+            IconButton(NavigationTestIcon(), "Third action"),
+        }
+    ),
+  }.With(CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+View MaterialTopAppBarApp() {
+  return MaterialTheme([] {
+    return Column {
+      TopAppBar("Material"),
+    }.With(CrossAlign(CrossAxisAlignment::Stretch));
   });
 }
 
@@ -143,6 +191,26 @@ const detail::MountedNode* FindDrawerLayout(const detail::MountedNode& node) {
   return nullptr;
 }
 
+const detail::MountedNode* FindTopAppBar(const detail::MountedNode& node, std::string_view title) {
+  if (node.ChildCount() == 3 &&
+      ContainsMountedText(static_cast<const detail::MountedNode&>(node.ChildAt(1)), title)) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (const detail::MountedNode* found = FindTopAppBar(*child, title)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+const SemanticNode* FindSemanticNode(const SemanticFrame& frame, std::string_view label) {
+  const auto found = std::ranges::find_if(frame.nodes, [label](const SemanticNode& node) {
+    return node.label == label;
+  });
+  return found == frame.nodes.end() ? nullptr : &*found;
+}
+
 const detail::MountedNode* FindFocusableContaining(const detail::MountedNode& node, std::string_view text) {
   if (node.focusable && ContainsMountedText(node, text)) {
     return &node;
@@ -199,9 +267,93 @@ void ResetNavigationUiState() {
   application_back_requests = 0;
   drawer_actions = 0;
   content_actions = 0;
+  top_app_bar_actions = 0;
 }
 
 } // namespace
+
+TEST_CASE("TopAppBarMeasuresSlotsAndPreservesActionBehavior") {
+  ResetNavigationUiState();
+  TestPlatform platform;
+  Runtime runtime(TopAppBarApp, platform);
+  runtime.SetViewport({320.0F, 100.0F});
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Library"));
+
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const detail::MountedNode* bar = FindTopAppBar(*root, "Library");
+  REQUIRE(bar != nullptr);
+  REQUIRE((bar->LayoutSize() == Size{320.0F, 48.0F}));
+  const auto& leading = static_cast<const detail::MountedNode&>(bar->ChildAt(0));
+  const auto& title = static_cast<const detail::MountedNode&>(bar->ChildAt(1));
+  const auto& actions = static_cast<const detail::MountedNode&>(bar->ChildAt(2));
+  REQUIRE(leading.LayoutOffset().x == 8.0F);
+  REQUIRE(title.LayoutOffset().x == 52.0F);
+  REQUIRE(actions.LayoutOffset().x == 272.0F);
+
+  const detail::MountedNode* action = FindClickableContaining(*bar, "More actions");
+  REQUIRE(action != nullptr);
+  InvokeClick(*action);
+  REQUIRE(top_app_bar_actions == 1);
+}
+
+TEST_CASE("TopAppBarCentersItsTitleWithinAvailableSlots") {
+  TestPlatform platform;
+  Runtime runtime(CenteredTopAppBarApp, platform);
+  runtime.SetViewport({360.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const detail::MountedNode* bar = FindTopAppBar(*root, "Centered");
+  REQUIRE(bar != nullptr);
+  const auto& title = static_cast<const detail::MountedNode&>(bar->ChildAt(1));
+  REQUIRE(title.LayoutOffset().x + title.LayoutSize().width * 0.5F == Catch::Approx(180.0F));
+}
+
+TEST_CASE("TopAppBarConstrainsExcessActionsWithoutOverlappingLeadingContent") {
+  TestPlatform platform;
+  Runtime runtime(NarrowTopAppBarApp, platform);
+  runtime.SetViewport({140.0F, 100.0F});
+  runtime.BuildFrame();
+
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const detail::MountedNode* bar = FindTopAppBar(*root, "A very long title");
+  REQUIRE(bar != nullptr);
+  const auto& leading = static_cast<const detail::MountedNode&>(bar->ChildAt(0));
+  const auto& title = static_cast<const detail::MountedNode&>(bar->ChildAt(1));
+  const auto& actions = static_cast<const detail::MountedNode&>(bar->ChildAt(2));
+  REQUIRE(actions.LayoutOffset().x >= leading.LayoutOffset().x + leading.LayoutSize().width);
+  REQUIRE(actions.LayoutOffset().x + actions.LayoutSize().width <= bar->LayoutSize().width);
+  REQUIRE(title.LayoutSize().width == 0.0F);
+  REQUIRE(title.properties.text_layout_options.wrap == TextWrap::NoWrap);
+  REQUIRE(actions.properties.clip_children);
+}
+
+TEST_CASE("TopAppBarPublishesOneHeadingAndPreservesActionSemantics") {
+  TestPlatform platform;
+  Runtime runtime(TopAppBarApp, platform);
+  runtime.SetViewport({320.0F, 100.0F});
+  const FrameCommit& commit = runtime.BuildCommit();
+  REQUIRE(commit.semantic_frame);
+  const SemanticNode* heading = FindSemanticNode(*commit.semantic_frame, "Library");
+  REQUIRE(heading != nullptr);
+  REQUIRE(heading->role == SemanticRole::Heading);
+  REQUIRE(heading->heading_level == 1);
+  REQUIRE(heading->children.empty());
+  const SemanticNode* leading = FindSemanticNode(*commit.semantic_frame, "Back");
+  const SemanticNode* action = FindSemanticNode(*commit.semantic_frame, "More actions");
+  REQUIRE(leading != nullptr);
+  REQUIRE(action != nullptr);
+  REQUIRE((!leading->parent.has_value() || *leading->parent != heading->id));
+  REQUIRE((!action->parent.has_value() || *action->parent != heading->id));
+  REQUIRE(
+      std::ranges::count_if(commit.semantic_frame->nodes, [](const SemanticNode& node) {
+        return node.label == "Library";
+      }) == 1
+  );
+}
 
 TEST_CASE("NavigationSelectionControlsEmitTypedChanges") {
   ResetNavigationUiState();
@@ -552,6 +704,9 @@ TEST_CASE("DrawerLayoutFallsBackFromTheEndWhenLocalWidthIsConstrained") {
 }
 
 TEST_CASE("NavigationUiValidatesRequiredConfiguration") {
+  REQUIRE_THROWS_AS(TopAppBar(" \t"), std::invalid_argument);
+  REQUIRE_THROWS_AS(TopAppBar("Title", std::optional<View>{View{}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(TopAppBar("Title", std::nullopt, std::vector<View>{View{}}), std::invalid_argument);
   REQUIRE_THROWS_AS(huxerui::NavigationBar(std::vector<huxerui::NavigationItem>{}, 0), std::invalid_argument);
   REQUIRE_THROWS_AS(huxerui::NavigationBar({huxerui::NavigationItem("Home")}, 1), std::invalid_argument);
   REQUIRE_THROWS_AS(huxerui::NavigationBar({huxerui::NavigationItem("Home")}, 0), std::invalid_argument);
@@ -561,11 +716,17 @@ TEST_CASE("NavigationUiValidatesRequiredConfiguration") {
 TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   const ThemeDefinition flat = FlatThemeDefinition();
   const ThemeDefinition material = MaterialThemeDefinition();
+  const TopAppBarStyle flat_top_bar = ThemeDefinitionValue<TopAppBarStyle>(flat);
+  const TopAppBarStyle material_top_bar = ThemeDefinitionValue<TopAppBarStyle>(material);
   const huxerui::NavigationBarStyle flat_bar = ThemeDefinitionValue<huxerui::NavigationBarStyle>(flat);
   const huxerui::NavigationBarStyle material_bar = ThemeDefinitionValue<huxerui::NavigationBarStyle>(material);
   const huxerui::NavigationPaneStyle material_pane = ThemeDefinitionValue<huxerui::NavigationPaneStyle>(material);
   const huxerui::DrawerStyle material_drawer = ThemeDefinitionValue<huxerui::DrawerStyle>(material);
 
+  REQUIRE(flat_top_bar.height == 48.0F);
+  REQUIRE(material_top_bar.height == 64.0F);
+  REQUIRE(flat_top_bar.background == FlatLightThemeSpec().colors.surface);
+  REQUIRE(material_top_bar.background == MaterialLightThemeSpec().colors.surface);
   REQUIRE(flat_bar.height < material_bar.height);
   REQUIRE(
       flat_bar.minimum_item_width >=
@@ -586,6 +747,17 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(material_drawer.minimum_width == 240.0F);
   REQUIRE(material_drawer.minimum_content_width == 360.0F);
   REQUIRE(material_drawer.motion.has_value());
+
+  TestPlatform top_bar_platform;
+  Runtime top_bar_runtime(MaterialTopAppBarApp, top_bar_platform);
+  top_bar_runtime.SetViewport({320.0F, 100.0F});
+  top_bar_runtime.BuildFrame();
+  const detail::MountedNode* top_bar_root = top_bar_runtime.RootNode();
+  REQUIRE(top_bar_root != nullptr);
+  const detail::MountedNode* top_bar = FindTopAppBar(*top_bar_root, "Material");
+  REQUIRE(top_bar != nullptr);
+  REQUIRE(top_bar->LayoutSize().height == 64.0F);
+  REQUIRE(top_bar->properties.background == MaterialLightThemeSpec().colors.surface);
 
   TestPlatform bar_platform;
   Runtime bar_runtime(MaterialNavigationBarApp, bar_platform);

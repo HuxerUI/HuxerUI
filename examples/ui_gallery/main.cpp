@@ -1,8 +1,10 @@
 #include <huxerui/huxerui.h>
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace huxerui;
 
@@ -102,6 +104,34 @@ VectorAsset MessageIcon() {
         Path{}.MoveTo({5.0F, 12.0F}).LineTo({5.0F, 16.0F}).LineTo({9.0F, 12.0F}).Close(),
         Color::Black()
     );
+  });
+  return icon;
+}
+
+VectorAsset MenuIcon() {
+  static const VectorAsset icon = VectorAsset::Create({24.0F, 24.0F}, [](VectorBuilder& builder) {
+    for (float y : {6.0F, 11.0F, 16.0F}) {
+      builder.FillPath(Path::RoundedRect({3.0F, y, 18.0F, 2.0F}, {}), Color::Black());
+    }
+  });
+  return icon;
+}
+
+VectorAsset TuneIcon() {
+  static const VectorAsset icon = VectorAsset::Create({24.0F, 24.0F}, [](VectorBuilder& builder) {
+    for (Rect rect : {
+             Rect{3.0F, 5.0F, 10.0F, 2.0F},
+             Rect{15.0F, 3.0F, 2.0F, 6.0F},
+             Rect{17.0F, 5.0F, 4.0F, 2.0F},
+             Rect{3.0F, 11.0F, 4.0F, 2.0F},
+             Rect{7.0F, 9.0F, 2.0F, 6.0F},
+             Rect{9.0F, 11.0F, 12.0F, 2.0F},
+             Rect{3.0F, 17.0F, 6.0F, 2.0F},
+             Rect{11.0F, 15.0F, 2.0F, 6.0F},
+             Rect{13.0F, 17.0F, 8.0F, 2.0F},
+         }) {
+      builder.FillPath(Path::RoundedRect(rect, {}), Color::Black());
+    }
   });
   return icon;
 }
@@ -355,37 +385,43 @@ View GalleryMain(
   const ThemeSpec& theme = UseTheme();
   const ViewportClass viewport_class = UseViewportClass();
 
+  std::optional<View> leading;
+  if (viewport_class == ViewportClass::Compact) {
+    leading = IconButton(MenuIcon(), "Open navigation")
+                  .OnClick([start_open, end_open] {
+                    end_open = false;
+                    start_open = true;
+                  });
+  }
+  std::vector<View> actions;
+  if (viewport_class != ViewportClass::Expanded) {
+    actions.push_back(IconButton(TuneIcon(), "Open tools").OnClick([start_open, end_open, viewport_class] {
+      if (viewport_class == ViewportClass::Compact) {
+        start_open = false;
+      }
+      end_open = true;
+    }));
+  }
+
   return Column {
-    Row {
-      Button("Menu")
-          .With(Enabled(viewport_class == ViewportClass::Compact))
-          .OnClick([start_open, end_open] {
-            end_open = false;
-            start_open = true;
-          }),
-      Spacer(),
-      Button("Tools")
-          .With(Enabled(viewport_class != ViewportClass::Expanded))
-          .OnClick([start_open, end_open, viewport_class] {
-            if (viewport_class == ViewportClass::Compact) {
-              start_open = false;
-            }
-            end_open = true;
-          }),
-    }.With(CrossAlign(CrossAxisAlignment::Center)),
-    Text("UI Gallery").With(FontSize(28.0F)),
-    Text("Controls, layout, and motion in one responsive workspace", TextRole::Label)
-        .With(Foreground(theme.colors.on_surface_variant)),
-    Tabs({"Controls", "Layout", "Motion"}, selected_page.Get())
-        .OnChanged([selected_page](std::size_t index) { selected_page = index; }),
-    ScrollView {
-      Column {
-        GalleryPage(selected_page.Get()),
-      }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
-    }.With(ScrollBar(), Grow()),
+    TopAppBar("UI Gallery", std::move(leading), std::move(actions)),
+    Column {
+      Text("Controls, layout, and motion in one responsive workspace", TextRole::Label)
+          .With(Foreground(theme.colors.on_surface_variant)),
+      Tabs({"Controls", "Layout", "Motion"}, selected_page.Get())
+          .OnChanged([selected_page](std::size_t index) { selected_page = index; }),
+      ScrollView {
+        Column {
+          GalleryPage(selected_page.Get()),
+        }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
+      }.With(ScrollBar(), Grow()),
+    }.With(
+        Padding(theme.spacing.large),
+        Spacing(theme.spacing.medium),
+        CrossAlign(CrossAxisAlignment::Stretch),
+        Grow()
+    ),
   }.With(
-      Padding(theme.spacing.large),
-      Spacing(theme.spacing.medium),
       Background(theme.colors.background),
       CrossAlign(CrossAxisAlignment::Stretch)
   );

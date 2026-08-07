@@ -2,7 +2,7 @@
 
 Status: implemented
 
-This document defines the implemented contract for page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing, together with the extension boundary for future URL-backed navigation.
+This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing, together with the extension boundary for future URL-backed navigation.
 
 The first implementation is intentionally factory-driven and imperative at the navigation boundary.
 It preserves a separate extension point for a future controlled, serializable navigation path without introducing route registries, URL concepts, or platform types into the shared Runtime.
@@ -18,6 +18,7 @@ It preserves a separate extension point for a future controlled, serializable na
 - Cancel input, focus, and text-input work when a page stops accepting interaction.
 - Define a platform-neutral predictive Back transaction that Android can drive immediately and other platforms can adopt when their host integration owns an equivalent gesture.
 - Preserve a direct path to browser URLs, deep links, and saveable navigation state through a future controlled route path.
+- Provide an explicit theme-owned TopAppBar without coupling its actions to page history or menu presentation.
 - Provide theme-owned NavigationBar and NavigationPane selectors without coupling selection to page history.
 - Provide controlled StartDrawer and EndDrawer content inside ordinary application layout.
 
@@ -28,7 +29,7 @@ The initial implementation does not provide:
 - Named routes, string route tables, URI matching, or a destination registry.
 - A public `Page`, `Route`, or `NavigationEntry` base class.
 - A serializable or type-erased NavigationPath.
-- Automatic application bars, titles, Back buttons, or master-detail page composition.
+- Automatic synthesis of application bars, titles, Back buttons, overflow menus, or master-detail page composition.
 - Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
 - Shared-element, hero, container-transform, or cross-page layout animation.
 - Automatic suspension or serialization of covered page state.
@@ -58,7 +59,27 @@ NavigationStack is part of the application tree rather than the LayerStack becau
 LayerStack continues to own content outside the application tree, including Dialog, BottomSheet, Popup, Menu, Toast, and diagnostic presentation.
 Navigation must not become another Layer level or another root service.
 
-## Destination selection and drawers
+## Top app bars, destination selection, and drawers
+
+TopAppBar is an explicit application-tree layout with a required StringVariant title, an optional leading View, and trailing action Views.
+The title is bar-owned so the component can apply its typography, single-line geometry, and Heading semantics consistently.
+Leading and action slots remain ordinary Views because they independently own events, enabled state, focus, semantics, menu anchors, and custom visuals.
+TopAppBar does not inspect action component types, synthesize callbacks, or couple a leading action to NavigationController or DrawerLayout.
+
+TopAppBar supports Start and Center title alignment within one component.
+Start alignment uses the themed title inset when leading content is absent.
+Center alignment first centers the title within the complete bar and then clamps it between the occupied leading and action regions.
+Leading and actions retain their constrained interaction geometry before the title receives the remaining width.
+Excess action content is clipped with its hit-test region rather than drawing across leading content or outside the bar.
+
+Automatic overflow remains application policy.
+An arbitrary View cannot be converted reliably into a MenuItem because it may represent a composite control rather than a command with an icon, label, enabled state, and callback.
+Applications keep their direct action list intentionally small and use the existing Menu service for secondary actions.
+A future automatic overflow feature requires a reusable structured command model shared by toolbars, menus, and shortcuts rather than a TopAppBar-only item type.
+
+TopAppBar owns neither status-bar nor safe-area padding.
+Those insets require one shared window geometry contract and must not be duplicated when a native host already constrains the application viewport.
+Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing behavior remain deferred until shared nested-scroll coordination exists.
 
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
 They are controlled selection views: the selected index enters through construction and a requested index leaves through the typed event.
@@ -101,7 +122,7 @@ Back closes End before Start, preserving state continuity across viewport change
 
 ## Page stack public API
 
-The initial public API lives in `<huxerui/navigation.h>`:
+The page-stack public API lives in `<huxerui/navigation.h>`:
 
 ```cpp
 namespace huxerui {
@@ -726,11 +747,11 @@ The public files are:
 
 - `include/huxerui/event.h` for BackEvent and ViewEvents::BackRequested.
 - `include/huxerui/modifier.h` for the general NodeExtension Back capability.
-- `include/huxerui/navigation.h` for page stacks, destination selectors, drawers, and their Theme styles.
+- `include/huxerui/navigation.h` for top app bars, page stacks, destination selectors, drawers, and their Theme styles.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
 `src/navigation.cpp` owns controller state, entry resolution, NavigationStack layout, retained page modifiers, and page motion.
-`src/navigation_ui.cpp` owns NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
+`src/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
 Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Android, or Web.
@@ -754,6 +775,7 @@ Shared navigation work requires focused Runtime tests for:
 - Deterministic operation serialization.
 - Empty factories and exception categories.
 
+TopAppBar tests verify Start and Center title geometry, excess-action constraints, action behavior, Heading semantics, required configuration, and built-in Theme styles.
 Destination selection and drawer tests additionally verify icon requirements, disabled keyboard traversal, dynamic compact and expanded Pane composition, responsive inline fallback, controlled modal state, gesture and Back ordering, exit-time focus confinement, and built-in Theme styles.
 
 Transition and incremental-rendering tests verify:
@@ -790,13 +812,14 @@ Future URL integration requires browser tests for initial deep links, Push, Repl
 
 ## Delivery sequence
 
-The initial factory-driven stack delivers NavigationStack, NavigationController, retained entries, serialized programmatic transitions, Theme motion, generic Back routing, predictive Back on Android API 34, Commit-only fallback paths, and a dedicated navigation example.
+The initial navigation surface delivers TopAppBar, NavigationStack, NavigationController, retained entries, serialized programmatic transitions, Theme motion, generic Back routing, predictive Back on Android API 34, Commit-only fallback paths, and a dedicated navigation example.
 
 The controlled path, saveable state, Web URL bridge, iOS interactive gesture, split navigation, and shared-element transitions remain later milestones built on the same resolved-entry engine.
 
 ## Invariants
 
 - NavigationStack is an application-tree container, not a Layer or root service.
+- TopAppBar actions remain ordinary Views and never imply navigation, menu, or automatic overflow policy.
 - A page is an ordinary View factory with an independent keyed RecomposeScope.
 - NavigationController resolves the nearest scoped stack and does not own Runtime or mounted nodes.
 - The stack scope is the only strong owner of controller state.

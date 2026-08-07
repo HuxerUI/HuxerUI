@@ -48,6 +48,25 @@ struct NavigationStyle {
   bool operator==(const NavigationStyle&) const = default;
 };
 
+enum class TopAppBarTitleAlignment {
+  Start,
+  Center,
+};
+
+struct TopAppBarStyle {
+  Color background = Color::White();
+  TextStyle title_style{Font::System(20.0F).WithWeight(FontWeight::Bold), Color::Rgb(31, 35, 40)};
+  float height = 48.0F;
+  float horizontal_padding = 8.0F;
+  float title_inset = 16.0F;
+  float title_spacing = 4.0F;
+  float action_spacing = 0.0F;
+
+  static TopAppBarStyle Default();
+
+  bool operator==(const TopAppBarStyle&) const = default;
+};
+
 struct NavigationBarStyle {
   Color background = Color::Transparent();
   TextStyle label_style{Font::System(12.0F), Color::Rgb(87, 96, 106)};
@@ -119,6 +138,31 @@ struct DrawerStyle {
   static DrawerStyle Default();
 
   bool operator==(const DrawerStyle&) const = default;
+};
+
+class TopAppBar final : public Layout<TopAppBar> {
+public:
+  explicit TopAppBar(
+      StringVariant title,
+      std::optional<View> leading = std::nullopt,
+      std::vector<View> actions = {}
+  );
+  TopAppBar(StringVariant title, std::optional<View> leading, std::initializer_list<View> actions)
+      : TopAppBar(std::move(title), std::move(leading), std::vector<View>(actions)) {}
+
+  TopAppBar TitleAlignment(TopAppBarTitleAlignment alignment) &&;
+
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+
+private:
+  struct Construction;
+
+  explicit TopAppBar(Construction construction);
+  static Construction Build(StringVariant title, std::optional<View> leading, std::vector<View> actions);
+  void UpdateConfiguration();
+
+  TopAppBarStyle style_;
+  TopAppBarTitleAlignment title_alignment_ = TopAppBarTitleAlignment::Start;
 };
 
 class NavigationItem final {

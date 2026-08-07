@@ -184,6 +184,33 @@ The semantic label of an icon-only item is required but not drawn. Left and Righ
 
 `TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content; those responsibilities belong to a future navigation container rather than this selection control.
 
+## TopAppBar
+
+TopAppBar presents a required title with optional leading content and trailing action Views:
+
+```cpp
+return TopAppBar(
+    "Library",
+    IconButton(images::menu, "Open navigation").OnClick(OpenNavigation),
+    {
+        IconButton(images::search, "Search").OnClick(OpenSearch),
+        IconButton(images::more, "More actions").OnClick(OpenActions),
+    }
+);
+```
+
+The title is a StringVariant owned by TopAppBar, while leading and action slots remain ordinary Views that own their events, enabled state, focus, semantics, and visual customization.
+TopAppBar does not synthesize Back, drawer, or overflow actions and does not depend on NavigationController.
+Use `TitleAlignment(TopAppBarTitleAlignment::Center)` for a center-aligned small bar.
+
+TopAppBar keeps leading and actions vertically centered, constrains the title to the remaining single-line width, and clips action content to the bar when a caller supplies more than the available width.
+Applications should normally expose no more than three direct actions and place secondary operations in an explicit Menu anchored to the final IconButton.
+Automatic overflow would require a structured command model and is not inferred from arbitrary action Views.
+
+TopAppBarStyle owns the container background, title style, fixed content height, edge padding, title inset, and slot spacing.
+Material uses a 64-unit surface container and Flat uses a denser 48-unit surface; neither theme adds a static shadow.
+Slot Views retain their own component styles, so an application may explicitly color a leading IconButton when its design differs from the ordinary action color.
+
 ## NavigationBar and NavigationPane
 
 NavigationBar and NavigationPane are controlled destination selectors.

@@ -1,6 +1,7 @@
 #include <huxerui/huxerui.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 using namespace huxerui;
@@ -51,6 +52,20 @@ VectorAsset SettingsIcon() {
     builder.FillPath(Path::RoundedRect({5.0F, 3.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
     builder.FillPath(Path::RoundedRect({12.0F, 8.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
     builder.FillPath(Path::RoundedRect({7.0F, 13.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
+  });
+  return icon;
+}
+
+VectorAsset MenuIcon() {
+  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
+    for (float y : {5.0F, 10.0F, 15.0F}) {
+      builder.StrokePath(
+          Path{}.MoveTo({2.0F, y}).LineTo({18.0F, y}),
+          Color::Black(),
+          2.0F,
+          StrokeCap::Round
+      );
+    }
   });
   return icon;
 }
@@ -167,25 +182,27 @@ View NavigationDemo() {
     };
   };
 
+  std::optional<View> leading;
+  if (viewport_class == ViewportClass::Compact) {
+    leading = IconButton(MenuIcon(), "Open navigation")
+                  .OnClick([start_open, end_open] {
+                    end_open = false;
+                    start_open = true;
+                  });
+  }
+  std::vector<View> actions;
+  if (viewport_class != ViewportClass::Expanded) {
+    actions.push_back(IconButton(SettingsIcon(), "Open tools").OnClick([start_open, end_open, viewport_class] {
+      if (viewport_class == ViewportClass::Compact) {
+        start_open = false;
+      }
+      end_open = true;
+    }));
+  }
+
   return DrawerLayout {
     Column {
-      Row {
-        Button("Menu")
-            .With(Enabled(viewport_class == ViewportClass::Compact))
-            .OnClick([start_open, end_open] {
-              end_open = false;
-              start_open = true;
-            }),
-        Spacer(),
-        Button("Tools")
-            .With(Enabled(viewport_class != ViewportClass::Expanded))
-            .OnClick([start_open, end_open, viewport_class] {
-              if (viewport_class == ViewportClass::Compact) {
-                start_open = false;
-              }
-              end_open = true;
-            }),
-      }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
+      TopAppBar("Navigation", std::move(leading), std::move(actions)),
       DestinationContent(destination.Get()).With(Grow()),
       NavigationBar(destinations(), destination).OnChanged([destination](std::size_t index) {
         destination = index;

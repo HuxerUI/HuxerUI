@@ -498,6 +498,7 @@ The implemented component defaults are:
 | Image | Decorative by default; Image role only with a label |
 | Button | Button role, label, enabled state, and Activate |
 | IconButton | Button role, required semantic label, enabled state, and Activate |
+| TopAppBar | The required title is one Heading; leading and action semantics remain siblings |
 | Chip | Button role, selected state where applicable, and Activate |
 | Checkbox | Checkbox role, label, checked state, and Activate |
 | RadioButton | RadioButton role, label, checked state, and Activate |
@@ -509,7 +510,7 @@ The implemented component defaults are:
 Icon-only item constructors continue to require their existing semantic label.
 Material, Flat, and third-party visual themes do not change component semantics.
 
-Composite controls, scrolling, virtualization, selection, navigation, presentation surfaces, and live-region defaults remain deferred.
+Remaining composite controls, scrolling, virtualization, selection, destination navigation, presentation surfaces, and live-region defaults remain deferred.
 Their future implementations must use the same owner/virtual-child and retained action-routing contracts rather than adding component-specific Runtime branches.
 
 ## Platform mapping
@@ -620,7 +621,7 @@ Unavailable platforms and tools remain explicitly unverified.
 
 - Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, basic action routing, NodeExtension virtual children, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
 - Deferred: derive modal isolation and layer visibility from Runtime-owned presentation state; add clip-aware geometry, scrolling, navigation, live-region, collection, and virtualized-item resolution with focused tests.
-- Deferred: complete defaults and actions for composite controls, TextField editing, scrolling, selection, presentation, navigation, and virtualization.
+- Deferred: complete defaults and actions for remaining composite controls, TextField editing, scrolling, selection, presentation, destination navigation, and virtualization.
 - Deferred: extend the native adapter sequence from macOS to iOS, Android, Windows, Linux, and Web.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 
