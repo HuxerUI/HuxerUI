@@ -14,6 +14,7 @@ function(huxerui_platform_configure)
 
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_adapter.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"
             PARENT_SCOPE
@@ -34,7 +35,9 @@ function(huxerui_platform_configure)
             dxgi
             imm32
             ole32
+            oleaut32
             psapi
+            uiautomationcore
             user32
             windowscodecs
             PARENT_SCOPE

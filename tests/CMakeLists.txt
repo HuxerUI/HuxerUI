@@ -44,6 +44,7 @@ endif ()
 
 if (WIN32)
     target_sources(huxerui_tests PRIVATE
+            platform/windows_accessibility.cpp
             platform/windows_damage.cpp
             platform/windows_renderer.cpp
     )

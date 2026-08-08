@@ -12,8 +12,9 @@
 | Web preview | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events |
 
 State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
-The shared Runtime publishes an immutable `SemanticFrame` with initial built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
-macOS has the first native AppKit accessibility bridge; Android, iOS, Windows, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
+The shared Runtime publishes an immutable `SemanticFrame` with built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
+macOS maps that frame through AppKit accessibility, and Windows exposes it as a UI Automation fragment tree with role-specific control patterns and events.
+Android, iOS, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
 
 ## Runtime and PlatformAdapter
 

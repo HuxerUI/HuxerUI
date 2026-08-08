@@ -26,6 +26,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
+#include "win32_accessibility.h"
 #include "win32_internal.h"
 #include "win32_renderer.h"
 #include "win32_text_input.h"
@@ -233,6 +234,7 @@ class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
 public:
   int Run(huxerui::Runtime& runtime, const AppOptions& options) {
     runtime_ = &runtime;
+    accessibility_.SetRuntime(runtime_);
     text_input_.SetRuntime(runtime_);
     win32_api_.ConfigureProcessDpiAwareness();
 
@@ -529,13 +531,16 @@ private:
       throw std::runtime_error("HuxerUI could not create its Windows application window");
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
+    accessibility_.SetDpiScale(DpiScale());
   }
 
   void Cleanup() noexcept {
     text_input_.Reset();
     committed_frame_ = nullptr;
     if (window_ != nullptr) {
-      DestroyWindow(window_);
+      if (!DestroyWindow(window_)) {
+        accessibility_.Reset();
+      }
       window_ = nullptr;
     }
     renderer_.Discard();
@@ -603,6 +608,7 @@ private:
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
+    accessibility_.Commit(commit.semantic_frame);
     committed_frame_ = &commit.render_frame;
     static_cast<void>(InvalidateDamage(committed_frame_->damage));
     if (commit.next_frame_deadline.has_value()) {
@@ -681,11 +687,13 @@ private:
     switch (message) {
     case WM_CREATE:
       dpi_ = static_cast<float>(win32_api_.WindowDpi(window));
+      accessibility_.SetDpiScale(DpiScale());
       text_input_.SetWindow(window);
       text_input_.SetDpiScale(DpiScale());
       RequestFrameAt(Now());
       return 0;
     case WM_DESTROY:
+      accessibility_.Reset();
       window_ = nullptr;
       text_input_.SetWindow(nullptr);
       committed_frame_ = nullptr;
@@ -700,6 +708,7 @@ private:
       return 0;
     case WM_DPICHANGED: {
       dpi_ = static_cast<float>(HIWORD(w_param));
+      accessibility_.SetDpiScale(DpiScale());
       text_input_.SetDpiScale(DpiScale());
       renderer_.DpiChanged(window_, dpi_);
       const auto* suggested = reinterpret_cast<const RECT*>(l_param);
@@ -724,6 +733,13 @@ private:
       renderer_.ResetDeviceResources();
       RequestFrameAt(Now());
       return 0;
+    case WM_GETOBJECT:
+      if (static_cast<LONG>(l_param) == UiaRootObjectId) {
+        return accessibility_.HandleGetObject(w_param, l_param);
+      }
+      break;
+    case Win32Accessibility::action_message:
+      return accessibility_.HandleActionMessage(l_param);
     case WM_PAINT: {
       frame_state_.BeginPaint();
       if (committed_frame_ == nullptr || (frame_state_.FrameBuildPending() && !frame_state_.PaintPending())) {
@@ -862,6 +878,7 @@ private:
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
       adapter = static_cast<Win32PlatformAdapter*>(create->lpCreateParams);
       adapter->window_ = window;
+      adapter->accessibility_.SetWindow(window);
       adapter->text_input_.SetWindow(window);
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(adapter));
     }
@@ -892,6 +909,7 @@ private:
   bool pointer_down_ = false;
   bool com_initialized_ = false;
   Point last_pointer_position_;
+  Win32Accessibility accessibility_;
   Win32TextInput text_input_;
   std::exception_ptr failure_;
   std::optional<double> timer_deadline_;

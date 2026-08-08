@@ -588,7 +588,7 @@ It does not create a Toast role, focus target, action, or announcement service.
 Each adapter will retain the newest `SemanticFrame` and cache native objects by SemanticNodeId.
 Native objects never retain MountedNode or NodeExtension pointers.
 
-Only the initial macOS bridge is implemented.
+The macOS and Windows bridges are implemented.
 The remaining platform subsections define the intended adapter boundary, not current support.
 
 ### Android
@@ -619,9 +619,15 @@ AppKit calls and Runtime actions remain on the main thread.
 
 The HWND exposes a UI Automation fragment root with cached providers keyed by SemanticNodeId.
 Providers supply only the control patterns supported by committed role, state, and actions.
+Each provider freezes its COM interface set when created; a changed pattern shape replaces the cached provider while preserving the semantic RuntimeId.
+The initial mapping includes Invoke, Toggle, Value, RangeValue, Selection, SelectionItem, ExpandCollapse, ScrollItem, and Scroll.
+It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
 
 UI Automation may query off-thread.
 Providers answer read-only queries from a retained immutable `SemanticFrame` and marshal actions to the HWND thread before calling Runtime.
+Provider queries retain the owning frame while using a node pointer and never copy or retain mounted Runtime objects.
+Secure fields advertise password state but reject Value reads instead of exposing either their contents or an ambiguous empty value.
+TextField currently exposes Value rather than TextPattern because the semantic frame does not yet publish the native text-range geometry required for a correct `ITextRangeProvider` implementation.
 
 ### Linux
 
@@ -693,6 +699,7 @@ The shared-core completion adds focused coverage in this order:
 - Dialog and BottomSheet modal isolation and dismissal, Menu collections and submenu expansion, Toast live-region lifecycle, and exiting layers.
 - VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
 
+Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
 Manual validation uses the native screen readers and accessibility inspectors available on each platform.
 Unavailable platforms and tools remain explicitly unverified.
@@ -707,13 +714,13 @@ The shared work is delivered in bounded stages so each contract is validated bef
 - Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
-Windows UI Automation is the next adapter milestone, followed by Android, iOS, Linux, and Web mappings according to platform readiness.
+Windows UI Automation now consumes that contract; Android, iOS, Linux, and Web mappings follow according to platform readiness.
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
 - In progress: complete presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
-- Deferred: extend the native adapter sequence from macOS to iOS, Android, Windows, Linux, and Web.
+- Deferred: extend the native adapter sequence to iOS, Android, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.
