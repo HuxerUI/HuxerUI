@@ -551,6 +551,7 @@ The delivery-status section distinguishes implemented defaults from defaults com
 | Checkbox | Checkbox role, label, checked state, and Activate |
 | RadioButton | RadioButton role, label, checked state, and Activate |
 | Switch | Switch role, label, checked state, and Activate |
+| SegmentedButton | Horizontal collection containing labeled, checked, selected RadioButton items and Activate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
 | TextField | TextField or author-overridden SearchField role, value, UTF-16 selection, editing actions, and secure redaction |
 | Tabs | TabList collection containing labeled, selected, enabled Tab items and Activate |
@@ -585,19 +586,34 @@ It does not create a Toast role, focus target, action, or announcement service.
 
 ## Platform mapping
 
-Each adapter will retain the newest `SemanticFrame` and cache native objects by SemanticNodeId.
+Each adapter retains the newest `SemanticFrame`; adapters with retained native accessibility objects cache them by SemanticNodeId.
 Native objects never retain MountedNode or NodeExtension pointers.
 
-The macOS and Windows bridges are implemented.
+The Android, macOS, and Windows bridges are implemented.
 The remaining platform subsections define the intended adapter boundary, not current support.
 
 ### Android
 
 `HuxerUIView` exposes virtual descendants through `AccessibilityNodeProvider`.
-Adapter-local integer IDs map to SemanticNodeIds and are not reused for unrelated content during the host View lifetime.
+The shared semantic root maps to `AccessibilityNodeProvider.HOST_VIEW_ID`, while every non-root SemanticNodeId is converted exactly to a positive 32-bit virtual View ID.
+The native encoder rejects an identity above `jint` maximum instead of truncating it, and Android actions convert the virtual View ID directly back to SemanticNodeId for validation against the newest Runtime frame.
+This removes a second identity allocator, bidirectional maps, reuse policy, and retained mapping growth from the ordinary node path.
+Custom semantic action IDs remain a separate 64-bit namespace and receive stable provider-local Android action IDs for the host View lifetime.
 
-Roles, states, collections, text, geometry, and actions map to `AccessibilityNodeInfo` and `performAction` on the Android UI thread.
-Accessibility focus stays provider-owned; native input-focus requests call Runtime Focus.
+The native frame commit returns a versioned binary semantic snapshot only when the SemanticFrame revision changes.
+`HuxerUIAccessibilityProvider` decodes that snapshot into immutable Java-owned nodes, answers hierarchy, text search, focus, geometry, state, collection, range, and action queries without JNI, and calls native code only to perform an action.
+The synthetic root contributes its children to the host View rather than appearing as another virtual descendant.
+Bounds remain logical and View-local in the shared frame; the provider converts them to parent-relative pixels and applies the complete View-to-global matrix for screen bounds.
+
+Roles map to the closest Android widget class, while checked, selected, expanded, editable, secure, range, collection, heading, live-region, invalid, and scrolling state use the corresponding AccessibilityNodeInfo contracts available on the current API level.
+Collections containing RadioButton children map to Android single-selection collections without adding a platform role to the shared semantic model.
+Secure fields never publish text or selection.
+Activate, Focus, SetText, SetSelection, SetValue, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and Custom actions return through `Runtime::PerformSemanticAction()` on the Android UI thread.
+Accessibility focus and explore-by-touch hover stay provider-owned; native input-focus requests call Runtime Focus and remain distinct from TalkBack focus.
+
+Committed-frame diffs emit subtree, focus, selection, text, text-selection, scroll, state, dialog, and live-region events.
+The provider retains the newest frame even while accessibility is disabled so enabling TalkBack does not require rebuilding shared semantics.
+Detaching the HuxerUIView clears provider focus, hover, custom-action, and snapshot state together with the native session.
 
 ### iOS
 
@@ -699,6 +715,7 @@ The shared-core completion adds focused coverage in this order:
 - Dialog and BottomSheet modal isolation and dismissal, Menu collections and submenu expansion, Toast live-region lifecycle, and exiting layers.
 - VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
 
+Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.
 Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
 Manual validation uses the native screen readers and accessibility inspectors available on each platform.
@@ -714,13 +731,13 @@ The shared work is delivered in bounded stages so each contract is validated bef
 - Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
-Windows UI Automation now consumes that contract; Android, iOS, Linux, and Web mappings follow according to platform readiness.
+Android AccessibilityNodeProvider and Windows UI Automation now consume that contract; iOS, Linux, and Web mappings follow according to platform readiness.
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
 - In progress: complete presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
-- Deferred: extend the native adapter sequence to iOS, Android, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
+- Deferred: extend the native adapter sequence to iOS, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.

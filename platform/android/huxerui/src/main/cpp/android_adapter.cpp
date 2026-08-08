@@ -17,7 +17,9 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "android_accessibility.h"
 #include "android_renderer.h"
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
@@ -76,6 +78,39 @@ enum class AndroidTextInputOperation : jint {
   DeleteSurroundingCodePoints,
   SetComposingRegion,
 };
+
+std::optional<SemanticActionKind> ToSemanticAction(jint action) {
+  switch (static_cast<AndroidSemanticAction>(action)) {
+  case AndroidSemanticAction::Activate:
+    return SemanticActionKind::Activate;
+  case AndroidSemanticAction::Focus:
+    return SemanticActionKind::Focus;
+  case AndroidSemanticAction::SetText:
+    return SemanticActionKind::SetText;
+  case AndroidSemanticAction::SetSelection:
+    return SemanticActionKind::SetSelection;
+  case AndroidSemanticAction::SetValue:
+    return SemanticActionKind::SetValue;
+  case AndroidSemanticAction::Increment:
+    return SemanticActionKind::Increment;
+  case AndroidSemanticAction::Decrement:
+    return SemanticActionKind::Decrement;
+  case AndroidSemanticAction::Scroll:
+    return SemanticActionKind::Scroll;
+  case AndroidSemanticAction::ShowOnScreen:
+    return SemanticActionKind::ShowOnScreen;
+  case AndroidSemanticAction::Expand:
+    return SemanticActionKind::Expand;
+  case AndroidSemanticAction::Collapse:
+    return SemanticActionKind::Collapse;
+  case AndroidSemanticAction::Dismiss:
+    return SemanticActionKind::Dismiss;
+  case AndroidSemanticAction::Custom:
+    return SemanticActionKind::Custom;
+  }
+  return std::nullopt;
+}
+
 jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
   auto* bytes = environment->NewByteArray(static_cast<jsize>(text.size()));
   if (bytes == nullptr || text.empty()) {
@@ -84,6 +119,19 @@ jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
   environment
       ->SetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
   return bytes;
+}
+
+jbyteArray ToByteArray(JNIEnv* environment, const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() > static_cast<std::size_t>(std::numeric_limits<jsize>::max())) {
+    throw std::overflow_error("HuxerUI Android byte array is too large");
+  }
+  auto* result = environment->NewByteArray(static_cast<jsize>(bytes.size()));
+  if (result == nullptr || bytes.empty()) {
+    return result;
+  }
+  environment
+      ->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()), reinterpret_cast<const jbyte*>(bytes.data()));
+  return result;
 }
 
 std::string FromByteArray(JNIEnv* environment, jbyteArray bytes) {
@@ -803,10 +851,17 @@ public:
     platform_.Draw(environment, canvas);
   }
 
-  void CommitFrame() {
+  std::optional<std::vector<std::uint8_t>> CommitFrame() {
     if (platform_.BeginFrameCommit()) {
-      platform_.CommitFrame(runtime_.BuildFrame());
+      const FrameCommit& commit = runtime_.BuildFrame();
+      platform_.CommitFrame(commit);
+      if (commit.semantic_frame && last_semantic_revision_ != commit.semantic_frame->revision) {
+        std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame(*commit.semantic_frame);
+        last_semantic_revision_ = commit.semantic_frame->revision;
+        return encoded;
+      }
     }
+    return std::nullopt;
   }
 
   void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y) {
@@ -942,9 +997,48 @@ public:
            runtime_.PerformTextEditingAction(action);
   }
 
+  bool PerformSemanticAction(jint node_id, jint action_kind, std::string text, jlong argument0, jlong argument1,
+                             jdouble number, jfloat x, jfloat y, jlong custom_id) {
+    const std::optional<SemanticActionKind> semantic_action = ToSemanticAction(action_kind);
+    if (node_id <= 0 || !semantic_action.has_value()) {
+      return false;
+    }
+    SemanticAction action;
+    action.kind = *semantic_action;
+    switch (action.kind) {
+    case SemanticActionKind::SetText:
+      action.value = std::move(text);
+      break;
+    case SemanticActionKind::SetSelection:
+      action.value = TextRange{static_cast<TextOffset>(argument0), static_cast<TextOffset>(argument1)};
+      break;
+    case SemanticActionKind::SetValue:
+      action.value = static_cast<double>(number);
+      break;
+    case SemanticActionKind::Scroll:
+      action.value = Point{x, y};
+      break;
+    case SemanticActionKind::Custom:
+      action.value = static_cast<std::uint64_t>(custom_id);
+      break;
+    case SemanticActionKind::Activate:
+    case SemanticActionKind::Focus:
+    case SemanticActionKind::Increment:
+    case SemanticActionKind::Decrement:
+    case SemanticActionKind::ShowOnScreen:
+    case SemanticActionKind::Expand:
+    case SemanticActionKind::Collapse:
+    case SemanticActionKind::Dismiss:
+      action.value = std::monostate{};
+      break;
+    }
+    return runtime_.PerformSemanticAction(static_cast<SemanticNodeId>(node_id), action);
+  }
+
 private:
   AndroidViewPlatformAdapter platform_;
   Runtime runtime_;
+  std::optional<std::uint64_t> last_semantic_revision_;
 };
 
 AndroidSession* Session(jlong handle) {
@@ -997,14 +1091,37 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateResou
   }
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jbyteArray JNICALL
 Java_org_huxerui_HuxerUIView_nativeCommitFrame(JNIEnv* environment, jclass, jlong handle) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->CommitFrame();
+      const std::optional<std::vector<std::uint8_t>> semantics = session->CommitFrame();
+      return semantics.has_value() ? huxerui::detail::ToByteArray(environment, *semantics) : nullptr;
     }
+    return nullptr;
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativePerformSemanticAction(
+    JNIEnv* environment, jclass, jlong handle, jint node_id, jint action_kind, jbyteArray text, jlong argument0,
+    jlong argument1, jdouble number, jfloat x, jfloat y, jlong custom_id
+) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    if (session == nullptr) {
+      return JNI_FALSE;
+    }
+    const bool handled = session->PerformSemanticAction(
+        node_id, action_kind, huxerui::detail::FromByteArray(environment, text), argument0, argument1, number, x, y,
+        custom_id
+    );
+    return handled ? JNI_TRUE : JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
   }
 }
 

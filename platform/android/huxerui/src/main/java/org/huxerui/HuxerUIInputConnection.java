@@ -360,8 +360,7 @@ final class HuxerUIInputConnection extends BaseInputConnection {
     }
 
     private boolean updateCursorAnchorMatrix() {
-        candidateCursorAnchorMatrix.reset();
-        view.transformMatrixToGlobal(candidateCursorAnchorMatrix);
+        view.transformToScreen(candidateCursorAnchorMatrix);
         if (hasCursorAnchorMatrix && candidateCursorAnchorMatrix.equals(cursorAnchorMatrix)) {
             return false;
         }

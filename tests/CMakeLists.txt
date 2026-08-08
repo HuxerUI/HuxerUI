@@ -17,6 +17,8 @@ add_executable(huxerui_tests
         unit/text_input.cpp
         unit/validation.cpp
         unit/vector.cpp
+        platform/android_accessibility.cpp
+        "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp/android_accessibility.cpp"
         platform/android_text_input.cpp
         platform/web_text.cpp
         runtime/composition.cpp

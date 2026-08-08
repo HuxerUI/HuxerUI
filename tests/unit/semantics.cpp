@@ -9,11 +9,13 @@ namespace {
 int semantic_button_clicks = 0;
 int semantic_icon_button_clicks = 0;
 int semantic_lifecycle_clicks = 0;
+int semantic_segmented_button_changes = 0;
 int virtual_semantic_activations = 0;
 State<float> semantic_slider_value;
 State<bool> semantic_alternate_content;
 State<bool> semantic_alternate_label;
 State<bool> semantic_virtual_visible;
+State<std::size_t> semantic_segmented_button_selection;
 State<std::size_t> semantic_tabs_selection;
 State<std::size_t> semantic_navigation_selection;
 State<bool> semantic_navigation_expanded;
@@ -189,6 +191,29 @@ View SemanticTabsApp() {
              selected
   )
       .OnChanged([selected](std::size_t index) mutable { selected = index; });
+}
+
+View SemanticSegmentedButtonApp() {
+  auto selected = UseState<std::size_t>(0);
+  semantic_segmented_button_selection = selected;
+  return SegmentedButton(
+             std::vector<SegmentedButtonItem>{
+                 SegmentedButtonItem("Day"),
+                 SegmentedButtonItem("Week"),
+                 SegmentedButtonItem::IconOnly(SemanticActionIcon(), "Month"),
+             },
+             selected
+  )
+      .OnChanged([selected](std::size_t index) mutable {
+        ++semantic_segmented_button_changes;
+        selected = index;
+      });
+}
+
+View DisabledSemanticSegmentedButtonApp() {
+  return SegmentedButton({"Day", "Week"}, 0)
+      .OnChanged([](std::size_t) { ++semantic_segmented_button_changes; })
+      .With(Enabled{false});
 }
 
 View SemanticNavigationBarApp() {
@@ -405,6 +430,73 @@ TEST_CASE("TabsPublishAStableAccessibleSelectionGroup") {
   REQUIRE(updated_activity.id == activity_id);
   REQUIRE(updated_overview.selected == false);
   REQUIRE(updated_activity.selected == true);
+}
+
+TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
+  semantic_segmented_button_changes = 0;
+  TestPlatform platform;
+  Runtime runtime(SemanticSegmentedButtonApp, platform);
+  runtime.SetViewport({320.0F, 80.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& day = FindSemanticNode(*before, "Day");
+  const SemanticNode& week = FindSemanticNode(*before, "Week");
+  const SemanticNode& month = FindSemanticNode(*before, "Month");
+  REQUIRE(day.parent.has_value());
+  REQUIRE(day.parent == week.parent);
+  REQUIRE(week.parent == month.parent);
+  const auto group = std::ranges::find(before->nodes, *day.parent, &SemanticNode::id);
+  REQUIRE(group != before->nodes.end());
+  REQUIRE((group->collection == SemanticCollection{.item_count = 3, .row_count = 1, .column_count = 3}));
+  REQUIRE(group->children.size() == 3);
+  REQUIRE((group->actions & SemanticActionMask(SemanticActionKind::Focus)) != 0);
+
+  REQUIRE(day.role == SemanticRole::RadioButton);
+  REQUIRE(day.checked == SemanticCheckedState::Checked);
+  REQUIRE(day.selected == true);
+  REQUIRE((day.collection_item == SemanticCollectionItem{.index = 0, .row_index = 0, .column_index = 0}));
+  REQUIRE(week.role == SemanticRole::RadioButton);
+  REQUIRE(week.checked == SemanticCheckedState::Unchecked);
+  REQUIRE(week.selected == false);
+  REQUIRE((week.collection_item == SemanticCollectionItem{.index = 1, .row_index = 0, .column_index = 1}));
+  REQUIRE((month.collection_item == SemanticCollectionItem{.index = 2, .row_index = 0, .column_index = 2}));
+  REQUIRE(SemanticLabelCount(*before, "Month") == 1);
+  REQUIRE(day.bounds.width > 0.0F);
+  REQUIRE(week.bounds.width > 0.0F);
+  REQUIRE(month.bounds.width > 0.0F);
+  REQUIRE(day.bounds.x + day.bounds.width <= week.bounds.x);
+  REQUIRE(week.bounds.x + week.bounds.width <= month.bounds.x);
+  REQUIRE((week.actions & SemanticActionMask(SemanticActionKind::Activate)) != 0);
+
+  const SemanticNodeId day_id = day.id;
+  const SemanticNodeId week_id = week.id;
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(day.id, {SemanticActionKind::Activate, std::monostate{}}));
+  REQUIRE(semantic_segmented_button_changes == 0);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(week.id, {SemanticActionKind::Activate, std::monostate{}}));
+  REQUIRE(semantic_segmented_button_changes == 1);
+  REQUIRE(semantic_segmented_button_selection.Get() == 1);
+
+  const std::shared_ptr<const SemanticFrame> after = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& updated_day = FindSemanticNode(*after, "Day");
+  const SemanticNode& updated_week = FindSemanticNode(*after, "Week");
+  REQUIRE(updated_day.id == day_id);
+  REQUIRE(updated_week.id == week_id);
+  REQUIRE(updated_day.checked == SemanticCheckedState::Unchecked);
+  REQUIRE(updated_day.selected == false);
+  REQUIRE(updated_week.checked == SemanticCheckedState::Checked);
+  REQUIRE(updated_week.selected == true);
+
+  TestPlatform disabled_platform;
+  Runtime disabled(DisabledSemanticSegmentedButtonApp, disabled_platform);
+  disabled.SetViewport({240.0F, 80.0F});
+  const std::shared_ptr<const SemanticFrame> disabled_frame = disabled.BuildCommit().semantic_frame;
+  const SemanticNode& disabled_week = FindSemanticNode(*disabled_frame, "Week");
+  REQUIRE_FALSE(disabled_week.enabled);
+  REQUIRE(disabled_week.actions == 0);
+  REQUIRE_FALSE(
+      disabled.NativeRuntime().PerformSemanticAction(disabled_week.id, {SemanticActionKind::Activate, std::monostate{}})
+  );
+  REQUIRE(semantic_segmented_button_changes == 1);
 }
 
 TEST_CASE("NavigationSelectorsPublishRealAccessibleItems") {

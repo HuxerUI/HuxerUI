@@ -14,7 +14,7 @@
 State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
 The shared Runtime publishes an immutable `SemanticFrame` with built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
 macOS maps that frame through AppKit accessibility, and Windows exposes it as a UI Automation fragment tree with role-specific control patterns and events.
-Android, iOS, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
+Android exposes the shared frame through virtual `AccessibilityNodeInfo` descendants, while iOS, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
 
 ## Runtime and PlatformAdapter
 
@@ -77,6 +77,8 @@ The application native library is named `huxerui_app`. Loading it registers the 
 `HuxerUIActivity` owns a lifecycle-bound Back callback and forwards Back to the shared Runtime. Applications using this full-screen Activity set `android:enableOnBackInvokedCallback="true"` on their manifest `application` element, as the demo module does. Android 14 and later forward predictive Back start, progress, cancel, and commit phases; Android 13 forwards Commit; older versions use `onBackPressed()` for the same Commit path. When Runtime does not consume Commit, the Activity calls its overridable `onUnhandledBack()` fallback, which finishes the Activity with transition by default. An embedded integration owns registration itself, may call `HuxerUIView.handleBack()`, and continues its native fallback only when that method returns `false`.
 
 Coordinates remain density independent. The Android integration maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
+
+`HuxerUIView` also exposes the committed shared semantics as an Android virtual accessibility hierarchy. TalkBack queries stay in Java, accessibility focus and touch exploration remain provider-owned, and supported actions return to the shared Runtime on the UI thread.
 Rounded-rectangle shadows use hardware shadow layers on API 28 and later, with density-aware cached alpha masks on older supported versions.
 Arbitrary Paths use the same native Canvas, and Path shadows use hardware layers on API 28 and later with a bounded software mask fallback on older supported versions.
 Neither path disables hardware acceleration for the complete HuxerUIView.

@@ -25,8 +25,10 @@ import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
@@ -99,6 +101,8 @@ public final class HuxerUIView extends View {
     };
     private final Matrix transform = new Matrix();
     private final float[] transformValues = new float[9];
+    private final int[] screenLocation = new int[2];
+    private final HuxerUIAccessibilityProvider accessibilityProvider;
     private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
     private final Runnable frameCallback = new Runnable() {
@@ -107,7 +111,10 @@ public final class HuxerUIView extends View {
             frameScheduled = false;
             frameTime = 0L;
             if (nativeHandle != 0L) {
-                nativeCommitFrame(nativeHandle);
+                byte[] semantics = nativeCommitFrame(nativeHandle);
+                if (semantics != null) {
+                    accessibilityProvider.commitFrame(semantics);
+                }
             }
         }
     };
@@ -136,6 +143,7 @@ public final class HuxerUIView extends View {
 
     public HuxerUIView(Context context, AttributeSet attributes, int defaultStyleAttribute) {
         super(context, attributes, defaultStyleAttribute);
+        accessibilityProvider = new HuxerUIAccessibilityProvider(this);
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -176,6 +184,7 @@ public final class HuxerUIView extends View {
             nativeDestroy(nativeHandle);
             nativeHandle = 0L;
         }
+        accessibilityProvider.reset();
         super.onDetachedFromWindow();
     }
 
@@ -254,6 +263,16 @@ public final class HuxerUIView extends View {
             }
         }
         return true;
+    }
+
+    @Override
+    public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        return accessibilityProvider;
+    }
+
+    @Override
+    public boolean dispatchHoverEvent(MotionEvent event) {
+        return accessibilityProvider.dispatchHoverEvent(event) || super.dispatchHoverEvent(event);
     }
 
     @Override
@@ -505,6 +524,48 @@ public final class HuxerUIView extends View {
     private void sendPointer(MotionEvent event, int index, int type) {
         nativePointer(nativeHandle, type, pointerDeviceKind(event, index), event.getPointerId(index),
                 event.getX(index) / density, event.getY(index) / density);
+    }
+
+    float density() {
+        return density;
+    }
+
+    void transformToScreen(Matrix result) {
+        result.reset();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            transformMatrixToGlobal(result);
+            return;
+        }
+
+        // Older APIs expose only per-View matrices, so compose the same root-to-leaf order without retaining parents.
+        transformToScreenBeforeQ(this, result);
+    }
+
+    private void transformToScreenBeforeQ(View view, Matrix result) {
+        ViewParent parent = view.getParent();
+        if (!(parent instanceof View)) {
+            view.getLocationOnScreen(screenLocation);
+            result.setTranslate(screenLocation[0], screenLocation[1]);
+            return;
+        }
+
+        View parentView = (View) parent;
+        transformToScreenBeforeQ(parentView, result);
+        result.preTranslate(-parentView.getScrollX(), -parentView.getScrollY());
+        result.preTranslate(view.getLeft(), view.getTop());
+        if (!view.getMatrix().isIdentity()) {
+            result.preConcat(view.getMatrix());
+        }
+    }
+
+    boolean performSemanticAction(int nodeId, int actionKind, String text, long argument0, long argument1,
+            double number, float x, float y, long customId) {
+        if (nativeHandle == 0L) {
+            return false;
+        }
+        byte[] encodedText = text == null ? null : text.getBytes(StandardCharsets.UTF_8);
+        return nativePerformSemanticAction(nativeHandle, nodeId, actionKind, encodedText, argument0, argument1, number,
+                x, y, customId);
     }
 
     private int pointerDeviceKind(MotionEvent event, int index) {
@@ -1109,7 +1170,10 @@ public final class HuxerUIView extends View {
 
     private static native void nativeUpdateResourceConfiguration(long handle, byte[] languageTag, float displayScale);
 
-    private static native void nativeCommitFrame(long handle);
+    private static native byte[] nativeCommitFrame(long handle);
+
+    private static native boolean nativePerformSemanticAction(long handle, int nodeId, int actionKind, byte[] text,
+            long argument0, long argument1, double number, float x, float y, long customId);
 
     private static native void nativeDraw(long handle, Canvas canvas);
 
