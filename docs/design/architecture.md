@@ -855,7 +855,7 @@ layers_dirty      -> reconcile ordered LayerStack entries
 dirty scope       -> recompose only that mounted scope
 ```
 
-Attaching, updating, or dismissing a LayerEntry must not execute the application root factory. Each entry owns an independent `RecomposeScope`. Application composition may attach an entry that is included later in the same frame. Mutations after the layer snapshot schedule another frame instead of recursively composing layers.
+Attaching, updating, or dismissing a LayerEntry must not execute the application root factory. Each entry owns an independent `RecomposeScope`. Application composition may attach an entry that is included later in the same frame. Mutations after the layer snapshot schedule another frame instead of recursively composing layers. The mounted Layer entry records the id, exit participation, and semantic modal-group identity from that snapshot, so geometry and semantics in one FrameCommit never mix the mounted tree with newer controller state.
 
 Concrete presentation policy remains outside Runtime. Typed per-window services build entries on the common controller:
 

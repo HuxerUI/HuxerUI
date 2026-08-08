@@ -26,6 +26,7 @@ add_executable(huxerui_tests
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
         runtime/presentation.cpp
+        runtime/presentation_semantics.cpp
         runtime/render_scene.cpp
         runtime/resources.cpp
         runtime/scrolling.cpp

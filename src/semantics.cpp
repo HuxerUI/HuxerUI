@@ -395,12 +395,23 @@ void Runtime::BuildSemantics() {
   });
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> routes;
 
+  const auto layer_snapshot = [](const detail::MountedNode& node) {
+    return node.LayoutValue<detail::LayerEntrySnapshotValue>();
+  };
+  const auto layer_is_exiting = [&layer_snapshot](const detail::MountedNode& node) {
+    const detail::LayerEntrySnapshot* snapshot = layer_snapshot(node);
+    return snapshot != nullptr && snapshot->exiting;
+  };
+
   using NodeIds = std::vector<SemanticNodeId>;
   const auto visit = [&](auto&& self,
                          detail::MountedNode& mounted,
                          SemanticNodeId parent,
                          Rect visible_bounds,
                          bool has_scroll_ancestor) -> NodeIds {
+    if (layer_is_exiting(mounted)) {
+      return {};
+    }
     detail::SemanticPatch resolved = mounted.component_semantics;
     struct ExtensionContribution {
       std::size_t index = 0;
@@ -596,7 +607,80 @@ void Runtime::BuildSemantics() {
   };
 
   if (state_->mounted_root_ && !viewport.IsEmpty()) {
-    next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false);
+    // An exiting modal still blocks input until removal, but accessibility advances to the next active focus region.
+    const auto semantic_focus_trap = [&](auto&& self, detail::MountedNode& node) -> detail::MountedNode* {
+      if (!node.enabled || layer_is_exiting(node)) {
+        return nullptr;
+      }
+      for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
+        if (detail::MountedNode* trap = self(self, **child)) {
+          return trap;
+        }
+      }
+      return node.trap_focus ? &node : nullptr;
+    };
+    detail::MountedNode* focus_trap = semantic_focus_trap(semantic_focus_trap, *state_->mounted_root_);
+    if (focus_trap == nullptr) {
+      next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false);
+    } else {
+      const auto contains = [](auto&& self, const detail::MountedNode& root, std::uint64_t identity) -> bool {
+        if (root.identity == identity) {
+          return true;
+        }
+        return std::ranges::any_of(root.children, [&](const auto& child) {
+          return child && self(self, *child, identity);
+        });
+      };
+      detail::MountedNode* layer_stack = nullptr;
+      detail::MountedNode* active_layer = nullptr;
+      for (const std::unique_ptr<detail::MountedNode>& root_child : state_->mounted_root_->children) {
+        if (!root_child) {
+          continue;
+        }
+        const auto found = std::ranges::find_if(root_child->children, [&](const auto& candidate) {
+          return candidate && candidate->template LayoutValue<detail::LayerEntrySnapshotValue>() != nullptr;
+        });
+        if (found == root_child->children.end()) {
+          continue;
+        }
+        layer_stack = root_child.get();
+        const auto active = std::ranges::find_if(root_child->children, [&](const auto& candidate) {
+          return candidate && contains(contains, *candidate, focus_trap->identity);
+        });
+        if (active != root_child->children.end()) {
+          active_layer = active->get();
+        }
+        break;
+      }
+
+      NodeIds children;
+      if (active_layer == nullptr) {
+        children = visit(visit, *focus_trap, next.root, viewport, false);
+      }
+      if (layer_stack != nullptr) {
+        const detail::LayerEntrySnapshot* active_snapshot =
+            active_layer == nullptr ? nullptr : layer_snapshot(*active_layer);
+        const std::shared_ptr<const detail::SemanticModalGroupToken> active_group =
+            active_snapshot == nullptr ? nullptr : active_snapshot->semantic_modal_group;
+        bool reached_active = active_layer == nullptr;
+        for (const std::unique_ptr<detail::MountedNode>& candidate : layer_stack->children) {
+          if (!candidate) {
+            continue;
+          }
+          reached_active = reached_active || candidate.get() == active_layer;
+          const detail::LayerEntrySnapshot* candidate_snapshot = layer_snapshot(*candidate);
+          // Parent menus precede the active submenu in paint order, so their shared group admits them explicitly.
+          const bool shares_group =
+              active_group && candidate_snapshot != nullptr && candidate_snapshot->semantic_modal_group == active_group;
+          if (!reached_active && !shares_group) {
+            continue;
+          }
+          NodeIds layer_children = visit(visit, *candidate, next.root, viewport, false);
+          children.insert(children.end(), layer_children.begin(), layer_children.end());
+        }
+      }
+      next.nodes.front().children = std::move(children);
+    }
   }
 
   bool changed = !state_->frame_commit_.semantic_frame || state_->frame_commit_.semantic_frame->root != next.root ||

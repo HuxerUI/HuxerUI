@@ -16,6 +16,7 @@ class Environment;
 
 namespace detail {
 struct LayerAnchorState;
+struct SemanticModalGroupToken;
 struct LayerTransitionState;
 class BottomSheetService;
 class DebugOverlayInstaller;
@@ -96,6 +97,10 @@ public:
   bool Dismiss(LayerId id) const;
 
 private:
+  struct DismissRequestResult {
+    bool handled = false;
+    bool dismissed = false;
+  };
   struct State;
 
   LayerId AttachCaptured(
@@ -103,10 +108,16 @@ private:
       ViewFactory content,
       std::shared_ptr<const Environment> environment,
       detail::LayerPlacement placement,
-      std::shared_ptr<detail::LayerTransitionState> transition = {}
+      std::shared_ptr<detail::LayerTransitionState> transition = {},
+      std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {}
   ) const;
   bool UpdateCaptured(
-      LayerId id, LayerOptions options, ViewFactory content, std::shared_ptr<const Environment> environment
+      LayerId id,
+      LayerOptions options,
+      ViewFactory content,
+      std::shared_ptr<const Environment> environment,
+      detail::LayerPlacement placement,
+      std::shared_ptr<detail::LayerTransitionState> transition
   ) const;
   bool UpdateEntry(
       LayerId id,
@@ -115,9 +126,10 @@ private:
       std::optional<std::shared_ptr<const Environment>> environment
   ) const;
   bool UpdatePlacement(LayerId id, detail::LayerPlacement placement) const;
-  bool UpdateTransition(LayerId id, std::shared_ptr<detail::LayerTransitionState> transition) const;
   std::optional<LayerOptions> EntryOptions(LayerId id) const;
   std::shared_ptr<detail::LayerTransitionState> Transition(LayerId id) const;
+  DismissRequestResult RequestDismiss(LayerId id) const;
+  void InvalidateAllEntries() const;
   void BindTransitionCompletion(LayerId id, const std::shared_ptr<detail::LayerTransitionState>& transition) const;
 
   explicit LayerController(Runtime& runtime);

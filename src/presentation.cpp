@@ -62,6 +62,13 @@ private:
   std::shared_ptr<LayerTransitionState> ReconcileTransition(
       LayerId id, const std::optional<PresentationMotion>& motion, bool reduced_motion
   );
+  ViewFactory PresentedContent(
+      ViewFactory content,
+      const DialogStyle& style,
+      std::shared_ptr<LayerTransitionState> transition,
+      std::shared_ptr<LayerId> id,
+      bool dismissible
+  ) const;
   static View StandardContent(
       const StringVariant& title,
       const StringVariant& message,
@@ -168,6 +175,40 @@ DebugMetricsSnapshot DebugMetricsState::Sample(double timestamp) noexcept {
 } // namespace detail
 
 namespace {
+
+struct DismissAction {
+  std::function<bool()> request;
+
+  static const detail::ModifierDescriptor& Descriptor();
+};
+
+class DismissActionExtension final : public NodeExtension {
+public:
+  DismissActionExtension(MountedNode& node, const DismissAction& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const DismissAction& modifier) {
+    static_cast<void>(node);
+    request_ = modifier.request;
+  }
+
+  void BuildSemantics(SemanticBuilder& builder) const override {
+    builder.SetOwner({});
+    builder.AddAction(0, SemanticActionKind::Dismiss);
+  }
+
+  bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
+    return local_id == 0 && action.kind == SemanticActionKind::Dismiss && request_ && request_();
+  }
+
+private:
+  std::function<bool()> request_;
+};
+
+const detail::ModifierDescriptor& DismissAction::Descriptor() {
+  return detail::ModifierDescriptorFor<DismissAction, DismissActionExtension>();
+}
 
 struct ToastLifetime {
   std::weak_ptr<detail::ToastService> service;
@@ -633,22 +674,38 @@ TransformOrigin VerticalMotionOrigin(VerticalPlacement placement) noexcept {
   return {0.5F, 0.5F};
 }
 
+Semantics DialogOwnerSemantics() {
+  Semantics semantics;
+  semantics.role = SemanticRole::Dialog;
+  return semantics;
+}
+
 ViewFactory AnimatedDialogContent(
-    ViewFactory content, const DialogStyle& style, std::shared_ptr<detail::LayerTransitionState> transition
+    ViewFactory content,
+    const DialogStyle& style,
+    std::shared_ptr<detail::LayerTransitionState> transition,
+    std::function<bool()> request_dismiss
 ) {
-  return [content = std::move(content), style, transition = std::move(transition)]() -> View {
+  return [content = std::move(content),
+          style,
+          transition = std::move(transition),
+          request_dismiss = std::move(request_dismiss)]() -> View {
     View result = content();
-    if (!transition || !style.motion.has_value()) {
-      return result;
-    }
-    return Stack {std::move(result)}.With(
-        PresentationContentMotion{
+    if (transition && style.motion.has_value()) {
+      result = Stack {std::move(result)}.With(
+          PresentationContentMotion{
             .state = transition,
             .motion = *style.motion,
             .slide_direction = VerticalSlideDirection(style.placement),
             .origin = VerticalMotionOrigin(style.placement),
-        }
-    );
+          }
+      );
+    }
+    result = std::move(result).With(detail::BuiltInSemantics{DialogOwnerSemantics()});
+    if (request_dismiss) {
+      result = std::move(result).With(DismissAction{request_dismiss});
+    }
+    return result;
   };
 }
 
@@ -656,9 +713,14 @@ ViewFactory BottomSheetContent(
     ViewFactory content,
     const BottomSheetStyle& style,
     std::shared_ptr<detail::LayerTransitionState> transition,
-    std::shared_ptr<BottomSheetDragState> drag
+    std::shared_ptr<BottomSheetDragState> drag,
+    std::function<bool()> request_dismiss
 ) {
-  return [content = std::move(content), style, transition = std::move(transition), drag = std::move(drag)] {
+  return [content = std::move(content),
+          style,
+          transition = std::move(transition),
+          drag = std::move(drag),
+          request_dismiss = std::move(request_dismiss)] {
     std::vector<View> children;
     if (ShowsBottomSheetDragHandle(style)) {
       Frame handle_frame;
@@ -681,7 +743,7 @@ ViewFactory BottomSheetContent(
       );
     }
     children.push_back(content());
-    return Column {std::move(children)}.With(
+    View result = Column {std::move(children)}.With(
         CrossAlign{CrossAxisAlignment::Stretch},
         Background{style.background},
         CornerRadius{style.corner_radii},
@@ -698,8 +760,13 @@ ViewFactory BottomSheetContent(
             .slide_direction = {0.0F, 1.0F},
             .origin = TransformOrigin{0.5F, 1.0F},
             .slide_by_content_extent = true,
-        }
+        },
+        detail::BuiltInSemantics{DialogOwnerSemantics()}
     );
+    if (request_dismiss) {
+      result = std::move(result).With(DismissAction{request_dismiss});
+    }
+    return result;
   };
 }
 
@@ -1190,6 +1257,10 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
     return layers.Dismiss(id);
   }
 
+  bool RequestDismissActive() {
+    return active_layer.has_value() && layers.RequestDismiss(*active_layer).handled;
+  }
+
   void SetDismissHandler(LayerId id, std::function<bool(LayerId)> handler) {
     if (active_layer != id) {
       throw std::logic_error("HuxerUI presentation dismissal handler requires the active layer");
@@ -1206,7 +1277,8 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
       Point offset,
       LayerOptions options,
       std::shared_ptr<const Environment> environment,
-      std::shared_ptr<LayerTransitionState> transition = {}
+      std::shared_ptr<LayerTransitionState> transition = {},
+      std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group = {}
   ) {
     ValidateAnchoredOptions(gap, viewport_margin, offset, point);
     const Rect anchor_bounds = point.has_value() ? Rect{point->x, point->y, 0.0F, 0.0F} : RequireBounds();
@@ -1220,7 +1292,8 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
         std::move(content),
         std::move(environment),
         placement,
-        std::move(transition)
+        std::move(transition),
+        std::move(semantic_modal_group)
     );
     *id = attached;
     Bind(attached, std::move(placement), !point.has_value());
@@ -1229,8 +1302,11 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
 
   LayerController layers;
   std::optional<Rect> bounds;
+  // This identifies the layer currently owned by the anchor. It clears when dismissal begins even though the
+  // LayerController may retain the same entry until its exit motion completes.
   std::optional<LayerId> active_layer;
   LayerPlacement active_placement;
+  // Menu installs a chain-aware command here; ordinary Popup dismissal continues directly to LayerController.
   std::function<bool(LayerId)> dismiss_handler;
   bool mounted = false;
   bool follows_anchor = false;
@@ -1266,8 +1342,83 @@ struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
     });
   }
 
+  [[nodiscard]] bool IsExpanded(std::size_t depth, const std::shared_ptr<LayerAnchorState>& anchor) const {
+    if (levels.size() <= depth + 1) {
+      return false;
+    }
+    return levels[depth + 1].anchor.lock() == anchor;
+  }
+
+  // Layer semantics compare this token without depending on MenuChainState or its operational menu state.
+  std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group = std::make_shared<SemanticModalGroupToken>();
+  // Levels contains operationally open menus only. DismissFrom removes them before their retained Layer entries finish
+  // exit motion, which lets submenu ownership and expansion state settle immediately.
   std::vector<Level> levels;
 };
+
+struct MenuExpansionAction {
+  std::weak_ptr<MenuChainState> chain;
+  std::weak_ptr<LayerAnchorState> submenu_anchor;
+  std::size_t depth = 0;
+  std::function<void()> expand;
+
+  static const ModifierDescriptor& Descriptor();
+};
+
+class MenuExpansionActionExtension final : public NodeExtension {
+public:
+  MenuExpansionActionExtension(huxerui::MountedNode& node, const MenuExpansionAction& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(huxerui::MountedNode& node, const MenuExpansionAction& modifier) {
+    static_cast<void>(node);
+    chain_ = modifier.chain;
+    submenu_anchor_ = modifier.submenu_anchor;
+    depth_ = modifier.depth;
+    expand_ = modifier.expand;
+  }
+
+  void BuildSemantics(SemanticBuilder& builder) const override {
+    const std::shared_ptr<MenuChainState> chain = chain_.lock();
+    const std::shared_ptr<LayerAnchorState> anchor = submenu_anchor_.lock();
+    const bool expanded = chain && anchor && chain->IsExpanded(depth_, anchor);
+    Semantics semantics;
+    semantics.expanded = expanded;
+    builder.SetOwner(std::move(semantics));
+    builder.AddAction(0, expanded ? SemanticActionKind::Collapse : SemanticActionKind::Expand);
+  }
+
+  bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
+    if (local_id != 0) {
+      return false;
+    }
+    const std::shared_ptr<MenuChainState> chain = chain_.lock();
+    const std::shared_ptr<LayerAnchorState> anchor = submenu_anchor_.lock();
+    if (!chain || !anchor) {
+      return false;
+    }
+    const bool expanded = chain->IsExpanded(depth_, anchor);
+    if (action.kind == SemanticActionKind::Expand && !expanded && expand_) {
+      expand_();
+      return true;
+    }
+    if (action.kind == SemanticActionKind::Collapse && expanded) {
+      return chain->DismissFrom(depth_ + 1);
+    }
+    return false;
+  }
+
+private:
+  std::weak_ptr<MenuChainState> chain_;
+  std::weak_ptr<LayerAnchorState> submenu_anchor_;
+  std::size_t depth_ = 0;
+  std::function<void()> expand_;
+};
+
+const ModifierDescriptor& MenuExpansionAction::Descriptor() {
+  return ModifierDescriptorFor<MenuExpansionAction, MenuExpansionActionExtension>();
+}
 
 class BottomSheetService {
 public:
@@ -1337,7 +1488,11 @@ private:
   );
   static void ValidateEntries(const std::vector<MenuEntry>& entries);
   static View ItemView(
-      MenuItem item, const MenuStyle& style, const std::shared_ptr<MenuChainState>& chain, std::size_t depth
+      MenuItem item,
+      const MenuStyle& style,
+      const std::shared_ptr<MenuChainState>& chain,
+      std::size_t depth,
+      std::size_t index
   );
   static View SeparatorView(const MenuStyle& style);
   static View Surface(
@@ -1345,11 +1500,33 @@ private:
       MenuStyle style,
       std::optional<float> width,
       const std::shared_ptr<MenuChainState>& chain,
-      std::size_t depth
+      std::size_t depth,
+      std::function<bool()> request_dismiss
   );
 
   LayerController layers_;
 };
+
+Semantics MenuContainerSemantics(std::size_t item_count) {
+  Semantics semantics;
+  semantics.role = SemanticRole::Menu;
+  semantics.collection.emplace();
+  semantics.collection->item_count = item_count;
+  return semantics;
+}
+
+Semantics MenuEntrySemantics(const std::string& label, const std::optional<bool>& checked, std::size_t index) {
+  Semantics semantics;
+  semantics.role = SemanticRole::MenuItem;
+  semantics.label = label;
+  if (checked.has_value()) {
+    semantics.checked = *checked ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
+  }
+  semantics.collection_item.emplace();
+  semantics.collection_item->index = index;
+  semantics.descendants = SemanticDescendantPolicy::Exclude;
+  return semantics;
+}
 
 void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
   if (entries.empty()) {
@@ -1389,7 +1566,11 @@ void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
 }
 
 View MenuService::ItemView(
-    MenuItem item, const MenuStyle& style, const std::shared_ptr<MenuChainState>& chain, std::size_t depth
+    MenuItem item,
+    const MenuStyle& style,
+    const std::shared_ptr<MenuChainState>& chain,
+    std::size_t depth,
+    std::size_t index
 ) {
   Frame item_frame;
   item_frame.min_height = style.minimum_item_height;
@@ -1398,7 +1579,7 @@ View MenuService::ItemView(
   icon_frame.height = style.icon_size;
 
   std::vector<View> content;
-  if (item.checked_) {
+  if (item.checked_.value_or(false)) {
     content.push_back(Text("\xE2\x9C\x93").With(icon_frame, Foreground{style.foreground}));
   }
   if (const auto* resource = std::get_if<ImageResource>(&item.icon_)) {
@@ -1411,15 +1592,35 @@ View MenuService::ItemView(
   if (label.empty()) {
     throw std::invalid_argument("HuxerUI menu item label must not be empty");
   }
-  content.push_back(Text(std::move(label)).With(Foreground{style.foreground}));
+  content.push_back(Text(label).With(Foreground{style.foreground}));
+
+  const detail::BuiltInSemantics item_semantics{MenuEntrySemantics(label, item.checked_, index)};
 
   if (std::holds_alternative<std::vector<MenuEntry>>(item.destination_)) {
     auto submenu = UseMenu();
     std::vector<MenuEntry> entries = std::get<std::vector<MenuEntry>>(std::move(item.destination_));
     Frame arrow_frame;
     arrow_frame.width = style.icon_size;
+    std::function<void()> expand = [submenu, entries, chain, depth] {
+      MenuOptions options;
+      options.placement = {
+          .side = AnchorSide::Right,
+          .alignment = AnchorAlignment::Start,
+      };
+      options.gap = 2.0F;
+      submenu.service_->ShowLevel(
+          submenu.anchor_,
+          std::nullopt,
+          entries,
+          std::move(options),
+          submenu.environment_,
+          chain,
+          depth + 1,
+          true
+      );
+    };
     return MenuItemLayout{
-        Row{std::move(content)}.With(Spacing{style.item_content_spacing}, CrossAlign{CrossAxisAlignment::Center}),
+        Row {std::move(content)}.With(Spacing{style.item_content_spacing}, CrossAlign{CrossAxisAlignment::Center}),
         Text("\xE2\x80\xBA").With(arrow_frame, Foreground{style.foreground}),
     }
         .With(
@@ -1429,26 +1630,16 @@ View MenuService::ItemView(
             Spacing{style.item_content_spacing},
             Enabled{item.enabled_},
             Indication{style.item_indication},
-            Focusable{}
+            Focusable{},
+            item_semantics,
+            MenuExpansionAction{
+                .chain = chain,
+                .submenu_anchor = submenu.anchor_,
+                .depth = depth,
+                .expand = expand,
+            }
         )
-        .OnClick([submenu, entries = std::move(entries), chain, depth] {
-          MenuOptions options;
-          options.placement = {
-              .side = AnchorSide::Right,
-              .alignment = AnchorAlignment::Start,
-          };
-          options.gap = 2.0F;
-          submenu.service_->ShowLevel(
-              submenu.anchor_,
-              std::nullopt,
-              entries,
-              std::move(options),
-              submenu.environment_,
-              chain,
-              depth + 1,
-              true
-          );
-        });
+        .OnClick(std::move(expand));
   }
 
   std::function<void()> action = std::get<std::function<void()>>(std::move(item.destination_));
@@ -1460,7 +1651,8 @@ View MenuService::ItemView(
           CrossAlign{CrossAxisAlignment::Center},
           Enabled{item.enabled_},
           Indication{style.item_indication},
-          Focusable{}
+          Focusable{},
+          item_semantics
       )
       .OnClick([chain, action = std::move(action)] {
         chain->DismissFrom(0);
@@ -1481,9 +1673,14 @@ View MenuService::Surface(
     MenuStyle style,
     std::optional<float> width,
     const std::shared_ptr<MenuChainState>& chain,
-    std::size_t depth
+    std::size_t depth,
+    std::function<bool()> request_dismiss
 ) {
   std::vector<View> children;
+  const std::size_t item_count = static_cast<std::size_t>(std::ranges::count_if(entries, [](const MenuEntry& entry) {
+    return std::holds_alternative<MenuItem>(entry.value_);
+  }));
+  std::size_t item_index = 0;
   bool has_item = false;
   bool pending_section = false;
   for (MenuEntry& entry : entries) {
@@ -1497,7 +1694,7 @@ View MenuService::Surface(
     }
     has_item = true;
     pending_section = false;
-    children.push_back(ItemView(std::get<MenuItem>(std::move(entry.value_)), style, chain, depth));
+    children.push_back(ItemView(std::get<MenuItem>(std::move(entry.value_)), style, chain, depth, item_index++));
   }
 
   Frame surface_frame;
@@ -1506,15 +1703,20 @@ View MenuService::Surface(
   } else {
     surface_frame.min_width = style.minimum_width;
   }
-  return Column {std::move(children)}.With(
+  View result = Column {std::move(children)}.With(
       surface_frame,
       Padding{style.content_padding},
       CrossAlign{CrossAxisAlignment::Stretch},
       Background{style.background},
       CornerRadius{style.corner_radius},
       ClipChildren{},
-      style.shadow
+      style.shadow,
+      detail::BuiltInSemantics{MenuContainerSemantics(item_count)}
   );
+  if (request_dismiss) {
+    result = std::move(result).With(DismissAction{std::move(request_dismiss)});
+  }
+  return result;
 }
 
 View DialogService::StandardContent(
@@ -1568,6 +1770,8 @@ View DialogService::StandardContent(
 
     Frame action_frame;
     action_frame.min_height = style.minimum_action_height;
+    Semantics action_semantics;
+    action_semantics.role = SemanticRole::Button;
     View action_view = Text(std::move(label))
                            .Style(text_style)
                            .With(
@@ -1576,7 +1780,8 @@ View DialogService::StandardContent(
                                Background{background},
                                CornerRadius{style.action_corner_radius},
                                Indication{indication},
-                               Focusable{}
+                               Focusable{},
+                               detail::BuiltInSemantics{std::move(action_semantics)}
                            )
                            .OnClick([layers, id, on_click = std::move(on_click)] {
                              layers.Dismiss(id);
@@ -1860,6 +2065,8 @@ LayerId detail::ToastService::Show(
         Frame surface_frame;
         surface_frame.min_height = style.minimum_height;
         surface_frame.max_width = style.maximum_width;
+        Semantics toast_semantics;
+        toast_semantics.live_region = SemanticLiveRegion::Polite;
         View result = Stack {
           Text(std::move(resolved_message))
               .Style(style.text_style)
@@ -1873,7 +2080,8 @@ LayerId detail::ToastService::Show(
                       service,
                       *id,
                       options.duration,
-                  }
+                  },
+                  detail::BuiltInSemantics{std::move(toast_semantics)}
               ),
         }.With(Padding{style.viewport_padding});
         if (!transition || !style.motion.has_value()) {
@@ -1971,7 +2179,6 @@ std::shared_ptr<detail::LayerTransitionState> detail::DialogService::ReconcileTr
     LayerId id, const std::optional<PresentationMotion>& motion, bool reduced_motion
 ) {
   if (!motion.has_value()) {
-    static_cast<void>(layers_.UpdateTransition(id, {}));
     return {};
   }
   std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
@@ -1980,8 +2187,21 @@ std::shared_ptr<detail::LayerTransitionState> detail::DialogService::ReconcileTr
     return transition;
   }
   transition = PresentationTransition(motion, reduced_motion, false);
-  static_cast<void>(layers_.UpdateTransition(id, transition));
   return transition;
+}
+
+ViewFactory detail::DialogService::PresentedContent(
+    ViewFactory content,
+    const DialogStyle& style,
+    std::shared_ptr<LayerTransitionState> transition,
+    std::shared_ptr<LayerId> id,
+    bool dismissible
+) const {
+  std::function<bool()> request_dismiss;
+  if (dismissible) {
+    request_dismiss = [layers = layers_, id = std::move(id)] { return layers.RequestDismiss(*id).handled; };
+  }
+  return AnimatedDialogContent(std::move(content), style, std::move(transition), std::move(request_dismiss));
 }
 
 LayerId detail::DialogService::Show(
@@ -2007,9 +2227,10 @@ LayerId detail::DialogService::Show(
       PresentationTransition(style.motion, theme.motion.reduced_motion);
   auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
+  const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
   const LayerId attached = layers_.AttachCaptured(
       std::move(layer_options),
-      AnimatedDialogContent(
+      PresentedContent(
           [title = std::move(title),
            message = std::move(message),
            positive = std::move(positive),
@@ -2032,7 +2253,9 @@ LayerId detail::DialogService::Show(
             );
           },
           style,
-          transition
+          transition,
+          id,
+          dismissible
       ),
       std::move(environment),
       DialogLayerPlacement(style),
@@ -2053,14 +2276,18 @@ LayerId detail::DialogService::Show(
   ValidateDialogStyle(style);
   const std::shared_ptr<detail::LayerTransitionState> transition =
       PresentationTransition(style.motion, theme.motion.reduced_motion);
+  auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
-  return layers_.AttachCaptured(
+  const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
+  const LayerId attached = layers_.AttachCaptured(
       std::move(layer_options),
-      AnimatedDialogContent(std::move(content), style, transition),
+      PresentedContent(std::move(content), style, transition, id, dismissible),
       std::move(environment),
       DialogLayerPlacement(style),
       transition
   );
+  *id = attached;
+  return attached;
 }
 
 LayerId detail::DialogService::Show(
@@ -2091,16 +2318,16 @@ bool detail::DialogService::Update(LayerId id, ViewFactory content, std::shared_
     return false;
   }
   layer_options->barrier_color = style.scrim;
-  if (!layers_.UpdatePlacement(id, DialogLayerPlacement(style))) {
-    return false;
-  }
   const std::shared_ptr<detail::LayerTransitionState> transition =
       ReconcileTransition(id, style.motion, theme.motion.reduced_motion);
+  const bool dismissible = layer_options->cancel_policy == LayerCancelPolicy::Dismiss;
   return layers_.UpdateCaptured(
       id,
       std::move(*layer_options),
-      AnimatedDialogContent(std::move(content), style, transition),
-      std::move(environment)
+      PresentedContent(std::move(content), style, transition, std::make_shared<LayerId>(id), dismissible),
+      std::move(environment),
+      DialogLayerPlacement(style),
+      transition
   );
 }
 
@@ -2111,16 +2338,16 @@ bool detail::DialogService::Update(
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
   LayerOptions layer_options = DialogLayerOptions(options, style.scrim);
-  if (!layers_.UpdatePlacement(id, DialogLayerPlacement(style))) {
-    return false;
-  }
   const std::shared_ptr<detail::LayerTransitionState> transition =
       ReconcileTransition(id, style.motion, theme.motion.reduced_motion);
+  const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
   return layers_.UpdateCaptured(
       id,
       std::move(layer_options),
-      AnimatedDialogContent(std::move(content), style, transition),
-      std::move(environment)
+      PresentedContent(std::move(content), style, transition, std::make_shared<LayerId>(id), dismissible),
+      std::move(environment),
+      DialogLayerPlacement(style),
+      transition
   );
 }
 
@@ -2169,12 +2396,16 @@ LayerId detail::BottomSheetService::Show(
   ValidateBottomSheetStyle(style);
   const std::shared_ptr<detail::LayerTransitionState> transition =
       BottomSheetTransition(style, theme.motion.reduced_motion);
+  const bool dismissible = options.dismiss_on_cancel || ShowsBottomSheetDragHandle(style);
+  auto id_value = std::make_shared<LayerId>(0);
+  std::function<bool()> request_dismiss;
+  if (dismissible) {
+    request_dismiss = [layers = layers_, id_value] { return layers.RequestDismiss(*id_value).handled; };
+  }
   std::shared_ptr<BottomSheetDragState> drag;
-  std::function<void()> on_drag_dismiss_request;
   if (ShowsBottomSheetDragHandle(style)) {
     drag = std::make_shared<BottomSheetDragState>();
     drag->settle = style.enter;
-    on_drag_dismiss_request = options.on_dismiss_request;
   }
   LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
@@ -2183,20 +2414,14 @@ LayerId detail::BottomSheetService::Show(
   placement.maximum_cross_axis_extent = style.maximum_width;
   const LayerId id = layers_.AttachCaptured(
       std::move(layer_options),
-      BottomSheetContent(std::move(content), style, transition, drag),
+      BottomSheetContent(std::move(content), style, transition, drag, std::move(request_dismiss)),
       std::move(environment),
       std::move(placement),
       transition
   );
+  *id_value = id;
   if (drag) {
-    drag->dismiss = [layers = layers_, id, on_drag_dismiss_request] {
-      if (on_drag_dismiss_request) {
-        on_drag_dismiss_request();
-        const std::shared_ptr<detail::LayerTransitionState> current = layers.Transition(id);
-        return !current || !current->target_visible;
-      }
-      return layers.Dismiss(id);
-    };
+    drag->dismiss = [layers = layers_, id] { return layers.RequestDismiss(id).dismissed; };
   }
   return id;
 }
@@ -2371,6 +2596,7 @@ LayerId detail::MenuService::ShowLevel(
   const float viewport_margin = options.viewport_margin;
   const Point offset = options.offset;
   const std::optional<float> width = options.width;
+  const bool dismissible = options.dismiss_on_cancel;
   const std::shared_ptr<detail::LayerTransitionState> transition =
       PresentationTransition(style.motion, theme.motion.reduced_motion);
   if (submenu) {
@@ -2378,21 +2604,36 @@ LayerId detail::MenuService::ShowLevel(
   }
   const LayerId attached = anchor->AttachLayer(
       point,
-      [entries = std::move(entries), style, width, chain, depth, preferred_placement, transition]() -> View {
-        View result = Stack {
-          Surface(entries, style, width, chain, depth),
-        };
-        if (!transition || !style.motion.has_value()) {
-          return result;
+      [entries = std::move(entries),
+       style,
+       width,
+       chain,
+       depth,
+       preferred_placement,
+       transition,
+       dismissible,
+       anchor = std::weak_ptr<LayerAnchorState>(anchor)]() -> View {
+        std::function<bool()> request_dismiss;
+        if (dismissible) {
+          request_dismiss = [anchor] {
+            const std::shared_ptr<LayerAnchorState> locked = anchor.lock();
+            return locked && locked->RequestDismissActive();
+          };
         }
-        return std::move(result).With(
-            PresentationContentMotion{
+        View result = Stack {
+          Surface(entries, style, width, chain, depth, std::move(request_dismiss)),
+        };
+        if (transition && style.motion.has_value()) {
+          result = std::move(result).With(
+              PresentationContentMotion{
                 .state = transition,
                 .motion = *style.motion,
                 .slide_direction = AnchorMotionDirection(preferred_placement.side),
                 .origin = AnchorMotionOrigin(preferred_placement),
-            }
-        );
+              }
+          );
+        }
+        return result;
       },
       preferred_placement,
       gap,
@@ -2400,7 +2641,8 @@ LayerId detail::MenuService::ShowLevel(
       offset,
       MenuLayerOptions(std::move(options), submenu),
       std::move(environment),
-      transition
+      transition,
+      chain->semantic_modal_group
   );
   chain->Register(depth, anchor, attached);
   return attached;

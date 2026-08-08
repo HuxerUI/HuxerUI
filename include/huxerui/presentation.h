@@ -511,7 +511,7 @@ private:
   Icon icon_;
   Destination destination_;
   bool enabled_ = true;
-  bool checked_ = false;
+  std::optional<bool> checked_;
 
   friend class MenuEntry;
   friend class detail::MenuService;

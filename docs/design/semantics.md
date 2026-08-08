@@ -493,6 +493,22 @@ Semantic modal isolation derives from the same topmost retained Layer focus trap
 Application content and lower layers outside that trap are excluded from accessible navigation, while higher notification and system layers may remain available for live announcements.
 There is no author-settable modal boolean that can contradict Runtime behavior.
 
+Presentation content declares semantics on its real visual root rather than the viewport-sized Layer entry.
+Dialog and BottomSheet surfaces therefore publish their own bounds, while the barrier remains a visual and pointer concern.
+When a focus trap belongs to a menu chain, the chain's active layers share one implementation-only modal-group identity so the parent Menu and its open submenus remain in the same semantic modal region.
+The identity is a fieldless, strongly typed `SemanticModalGroupToken`; it carries no role, action, callback, menu state, or general Layer metadata.
+
+Layer dismissal has one internal request path.
+Outside presses, Back or Cancel, and semantic Dismiss actions ask the LayerController to dismiss an entry; the controller invokes `on_dismiss_request` when present and otherwise performs the dismissal itself.
+`Dismiss()` remains the unconditional command used after controlled state has accepted the request.
+A role never implies this behavior: a presentation surface advertises Dismiss only when its existing policy allows that request and a retained action route is attached.
+
+An exiting Layer may remain in the render tree until its exit motion completes, but its content immediately stops receiving input, owning focus, and contributing semantics.
+A modal interaction barrier remains until removal so pointer and keyboard input cannot fall through the still-visible presentation, while semantic modal isolation advances to the next active region immediately.
+This keeps paint lifetime independent from content interaction and accessibility lifetime without exposing the application through a fading modal.
+Runtime resolves this policy from the Layer metadata committed on the mounted entry rather than re-reading newer LayerController state during semantic construction.
+If exit completion mutates the controller while a frame is building, the retained node therefore keeps the semantics of the snapshot that produced it until the next LayerStack reconciliation.
+
 ## Text editing and secure values
 
 TextField contributes its role, label, nonsecure value, placeholder, validation state, read-only state, multiline state, secure state, Runtime input focus, and nonsecure UTF-16 selection.
@@ -554,6 +570,18 @@ Material, Flat, and third-party visual themes do not change component semantics.
 Popup keeps the semantics of its supplied content because the presentation mechanism does not imply a shared role.
 Virtual containers publish only realized retained items and never materialize every View for accessibility; scrolling advances the realized semantic window.
 Future component defaults use the same owner/real-child and retained action-routing contracts rather than adding component-specific Runtime branches.
+
+Dialog and BottomSheet attach their default role to the presented surface instead of the Layer barrier.
+Standard dialog actions are real Button semantic nodes, while custom content keeps its descendants and may override component defaults with the ordinary `Semantics` modifier.
+Dialog Dismiss follows `dismiss_on_cancel`; BottomSheet also exposes Dismiss when its themed drag handle provides an existing dismissal path.
+
+Menu separators are decorative and do not count as collection items.
+Each real item node owns its label, zero-based collection index, enabled state, optional checked state, and optional submenu expansion state, and excludes its decorative icon, checkmark, label Text, and arrow descendants.
+Not calling `Checked()` means that checked state is unsupported, while `Checked(false)` and `Checked(true)` publish Unchecked and Checked respectively.
+Submenu items advertise Expand or Collapse through a retained action extension that uses the existing MenuChainState and anchored-layer path.
+
+Toast applies `SemanticLiveRegion::Polite` directly to its message Text.
+It does not create a Toast role, focus target, action, or announcement service.
 
 ## Platform mapping
 
@@ -675,7 +703,7 @@ The shared work is delivered in bounded stages so each contract is validated bef
 
 - Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
 - Completed: scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
-- Presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
+- Completed: presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
 - Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.

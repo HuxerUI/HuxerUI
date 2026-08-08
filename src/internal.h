@@ -196,13 +196,23 @@ struct LayerPlacementValue {
   using Value = std::shared_ptr<LayerPlacement>;
 };
 
-struct LayerEntryIdValue {
-  // LayerStack retains entries by id and skips unchanged content factories by revision.
-  using Value = LayerId;
+// This fieldless token provides only a strongly typed shared identity; Layer semantics must not attach state to it.
+struct SemanticModalGroupToken final {};
+
+struct LayerEntrySnapshot {
+  // This metadata describes the controller declaration used for the mounted child in one FrameCommit. Later controller
+  // mutations belong to the next frame and must not change semantics or geometry decisions for this mounted snapshot.
+  LayerId id = 0;
+  std::uint64_t revision = 0;
+  bool exiting = false;
+  std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
+
+  bool operator==(const LayerEntrySnapshot&) const = default;
 };
 
-struct LayerEntryRevisionValue {
-  using Value = std::uint64_t;
+struct LayerEntrySnapshotValue {
+  // LayerStack retains entries by id and skips unchanged content factories by revision.
+  using Value = LayerEntrySnapshot;
 };
 
 struct LayerEntry {
@@ -212,6 +222,8 @@ struct LayerEntry {
   LayerOptions options;
   ViewFactory content;
   std::shared_ptr<const Environment> environment;
+  // Active menu layers share this token so one logical menu chain remains one semantic modal region.
+  std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
   std::shared_ptr<LayerTransitionState> transition;

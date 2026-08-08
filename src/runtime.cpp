@@ -189,7 +189,11 @@ MountedNode* FindLayerEntryNode(MountedNode& root, LayerId id) {
     return nullptr;
   }
   const auto found = std::ranges::find_if(layer_stack->children, [id](const auto& child) {
-    return child && child->template LayoutValueOr<LayerEntryIdValue>(0) == id;
+    if (!child) {
+      return false;
+    }
+    const auto* snapshot = child->template LayoutValue<LayerEntrySnapshotValue>();
+    return snapshot != nullptr && snapshot->id == id;
   });
   return found == layer_stack->children.end() ? nullptr : found->get();
 }
@@ -798,11 +802,8 @@ void Runtime::SetViewport(Size viewport) {
   if (viewport_class != state_->viewport_class_) {
     state_->viewport_class_ = viewport_class;
     state_->root_environment_->Set(detail::ViewportEnvironment{viewport_class});
-    for (LayerEntry& entry : state_->layer_controller_.state_->entries) {
-      ++entry.revision;
-    }
     InvalidateRoot();
-    InvalidateLayers();
+    state_->layer_controller_.InvalidateAllEntries();
     return;
   }
   RequestFrame();
@@ -873,11 +874,8 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   state_->app_resources_->UpdateConfiguration(configuration);
   // Mutate the shared root so environments already captured by layers observe the new system locale.
   state_->root_environment_->Set(configuration.locale);
-  for (LayerEntry& entry : state_->layer_controller_.state_->entries) {
-    ++entry.revision;
-  }
   InvalidateRoot();
-  InvalidateLayers();
+  state_->layer_controller_.InvalidateAllEntries();
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
@@ -964,7 +962,9 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   PrepareExtensionGeometry(*state_->mounted_root_);
   // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
   // presentation does not retain geometry from its parent's previous placement.
-  const std::size_t maximum_geometry_layout_passes = state_->layer_controller_.state_->entries.size() + 1;
+  const detail::MountedNode* const committed_layer_stack = FindLayerStack(*state_->mounted_root_);
+  const std::size_t maximum_geometry_layout_passes =
+      (committed_layer_stack == nullptr ? 0 : committed_layer_stack->children.size()) + 1;
   std::size_t geometry_layout_passes = 0;
   while (state_->mounted_root_->measure_dirty && geometry_layout_passes < maximum_geometry_layout_passes) {
     ++geometry_layout_passes;
@@ -1203,12 +1203,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
       if (found->options.cancel_policy == LayerCancelPolicy::Consume) {
         return true;
       }
-      const std::function<void()> dismiss = found->options.on_dismiss_request;
-      if (dismiss) {
-        dismiss();
-      } else {
-        state_->layer_controller_.Dismiss(found->id);
-      }
+      static_cast<void>(state_->layer_controller_.RequestDismiss(found->id).handled);
       return true;
     }
     case detail::BackTargetKind::Event: {
@@ -1276,7 +1271,8 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
   } else {
     const LayerEntry* topmost = nullptr;
     for (const LayerEntry& entry : state_->layer_controller_.state_->entries) {
-      if (entry.options.cancel_policy != LayerCancelPolicy::PassThrough &&
+      const bool exiting = entry.transition && !entry.transition->target_visible;
+      if (!exiting && entry.options.cancel_policy != LayerCancelPolicy::PassThrough &&
           (topmost == nullptr || LayerPaintsAbove(entry, *topmost))) {
         topmost = &entry;
       }
@@ -1782,25 +1778,24 @@ void Runtime::ComposeLayers() {
 
       View layer = LayerEntryLayout{std::move(content)}
                        .LayoutValue<LayerPlacementValue>(entry.placement)
-                       .LayoutValue<LayerEntryIdValue>(entry.id)
-                       .LayoutValue<LayerEntryRevisionValue>(entry.revision);
+                       .LayoutValue<LayerEntrySnapshotValue>(LayerEntrySnapshot{
+                           .id = entry.id,
+                           .revision = entry.revision,
+                           .exiting = exiting,
+                           .semantic_modal_group = entry.semantic_modal_group,
+                       });
+      // An exiting modal keeps its focus barrier until removal so input cannot fall through while its content fades.
       layer.spec_->trap_focus = entry.options.trap_focus;
       if (barrier) {
-        layer =
-            std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,
-                                                          id = entry.id,
-                                                          dismiss = entry.options.dismiss_on_outside_press && !exiting,
-                                                          on_dismiss_request =
-                                                              entry.options.on_dismiss_request](const PointerEvent&) {
-              if (!dismiss) {
-                return;
-              }
-              if (on_dismiss_request) {
-                on_dismiss_request();
-              } else {
-                controller.Dismiss(id);
-              }
-            });
+        layer = std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,
+                                                              id = entry.id,
+                                                              dismiss = entry.options.dismiss_on_outside_press &&
+                                                                        !exiting](const PointerEvent&) {
+          if (!dismiss) {
+            return;
+          }
+          static_cast<void>(controller.RequestDismiss(id).handled);
+        });
         if (entry.options.barrier_color.has_value()) {
           layer = std::move(layer).With(Background{*entry.options.barrier_color});
         }
@@ -2033,28 +2028,17 @@ bool Runtime::ReconcileChildren(
 bool Runtime::ReconcileLayerChildren(
     std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
 ) {
-  const auto declaration_value = [](const View& view, std::type_index key) -> const std::any* {
+  const auto declaration_snapshot = [](const View& view) {
     if (!view.spec_) {
-      return nullptr;
-    }
-    const auto found = view.spec_->layout_values.find(key);
-    return found == view.spec_->layout_values.end() ? nullptr : &found->second.value;
-  };
-  const auto declaration_id = [&declaration_value](const View& view) {
-    const std::any* value = declaration_value(view, typeid(LayerEntryIdValue));
-    const auto* id = value ? std::any_cast<LayerId>(value) : nullptr;
-    if (!id) {
       throw std::logic_error("HuxerUI LayerStack child is missing its entry identity");
     }
-    return *id;
-  };
-  const auto declaration_revision = [&declaration_value](const View& view) {
-    const std::any* value = declaration_value(view, typeid(LayerEntryRevisionValue));
-    const auto* revision = value ? std::any_cast<std::uint64_t>(value) : nullptr;
-    if (!revision) {
-      throw std::logic_error("HuxerUI LayerStack child is missing its declaration revision");
+    const auto found = view.spec_->layout_values.find(typeid(LayerEntrySnapshotValue));
+    const auto* snapshot =
+        found == view.spec_->layout_values.end() ? nullptr : std::any_cast<LayerEntrySnapshot>(&found->second.value);
+    if (!snapshot) {
+      throw std::logic_error("HuxerUI LayerStack child is missing its entry identity");
     }
-    return *revision;
+    return *snapshot;
   };
 
   std::vector<std::unique_ptr<detail::MountedNode>> next;
@@ -2067,11 +2051,11 @@ bool Runtime::ReconcileLayerChildren(
 
   try {
     for (const View& incoming : incoming_children) {
-      const LayerId id = declaration_id(incoming);
-      const std::uint64_t revision = declaration_revision(incoming);
+      const LayerEntrySnapshot incoming_snapshot = declaration_snapshot(incoming);
       std::optional<std::size_t> origin;
       for (std::size_t index = 0; index < previous.size(); ++index) {
-        if (previous[index] && previous[index]->LayoutValueOr<LayerEntryIdValue>(0) == id) {
+        const auto* snapshot = previous[index] ? previous[index]->LayoutValue<LayerEntrySnapshotValue>() : nullptr;
+        if (snapshot != nullptr && snapshot->id == incoming_snapshot.id) {
           origin = index;
           break;
         }
@@ -2082,7 +2066,7 @@ bool Runtime::ReconcileLayerChildren(
         layout_changed = Reconcile(candidate, incoming.spec_) || layout_changed;
         next.push_back(std::move(candidate));
         structure_changed = true;
-      } else if (previous[*origin]->LayoutValueOr<LayerEntryRevisionValue>(0) == revision) {
+      } else if (previous[*origin]->LayoutValue<LayerEntrySnapshotValue>()->revision == incoming_snapshot.revision) {
         layout_changed = *origin != next.size() || layout_changed;
         structure_changed = *origin != next.size() || structure_changed;
         next.push_back(std::move(previous[*origin]));
