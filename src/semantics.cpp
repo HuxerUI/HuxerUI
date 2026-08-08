@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "internal.h"
+#include "text_input_internal.h"
 
 namespace huxerui::detail {
 
@@ -57,6 +58,9 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
   if (semantics.range.has_value()) {
     ValidateRange(*semantics.range);
   }
+  if (semantics.text_selection.has_value() && !semantics.text_selection->IsValid()) {
+    throw std::invalid_argument("HuxerUI semantic text selection must be a normalized nonnegative range");
+  }
   if (semantics.collection_item.has_value()) {
     ValidateCollectionItem(*semantics.collection_item);
   }
@@ -81,6 +85,7 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
       .invalid = semantics.invalid,
       .heading_level = semantics.heading_level,
       .range = semantics.range,
+      .text_selection = semantics.text_selection,
       .collection = semantics.collection,
       .collection_item = semantics.collection_item,
       .live_region = semantics.live_region,
@@ -107,6 +112,7 @@ void ApplySemantics(SemanticPatch& target, const SemanticPatch& source) {
   ApplyOptional(target.invalid, source.invalid);
   ApplyOptional(target.heading_level, source.heading_level);
   ApplyOptional(target.range, source.range);
+  ApplyOptional(target.text_selection, source.text_selection);
   ApplyOptional(target.collection, source.collection);
   ApplyOptional(target.collection_item, source.collection_item);
   ApplyOptional(target.live_region, source.live_region);
@@ -154,7 +160,8 @@ bool HasMeaning(
          semantics.checked.has_value() || semantics.selected.has_value() || semantics.expanded.has_value() ||
          semantics.busy.has_value() || semantics.read_only.has_value() || semantics.required.has_value() ||
          semantics.invalid.has_value() || semantics.heading_level.has_value() || semantics.range.has_value() ||
-         semantics.collection.has_value() || semantics.collection_item.has_value() ||
+         semantics.text_selection.has_value() || semantics.collection.has_value() ||
+         semantics.collection_item.has_value() ||
          semantics.live_region.value_or(SemanticLiveRegion::None) != SemanticLiveRegion::None || actions != 0 ||
          has_virtual_children;
 }
@@ -187,6 +194,7 @@ SemanticNode MakeSemanticNode(
       .invalid = semantics.invalid,
       .heading_level = semantics.heading_level,
       .range = semantics.range,
+      .text_selection = semantics.text_selection,
       .collection = semantics.collection,
       .collection_item = semantics.collection_item,
       .live_region = semantics.live_region.value_or(SemanticLiveRegion::None),
@@ -348,6 +356,7 @@ void Runtime::BuildSemantics() {
     std::vector<ExtensionContribution> contributions;
     contributions.reserve(mounted.extensions.size());
     std::optional<TextInputConfiguration> text_input_configuration;
+    std::optional<TextInputState> text_input_state;
     bool owner_extension_declared = false;
     bool has_virtual_children = false;
     std::uint64_t owner_extension_actions = 0;
@@ -364,6 +373,7 @@ void Runtime::BuildSemantics() {
       entry.extension->BuildSemantics(builder);
       if (std::shared_ptr<TextInputClient> client = entry.extension->GetTextInputClient()) {
         text_input_configuration = client->Configuration();
+        text_input_state = client->State();
       }
       for (const detail::SemanticBuilderItem& item : contribution.state.items) {
         if (item.local_id == 0) {
@@ -394,6 +404,14 @@ void Runtime::BuildSemantics() {
     if (!mounted.enabled) {
       actions = 0;
     }
+    if (text_input_configuration.has_value()) {
+      if (text_input_configuration->read_only) {
+        actions &= ~SemanticActionMask(SemanticActionKind::SetText);
+      }
+      if (text_input_configuration->secure) {
+        actions &= ~SemanticActionMask(SemanticActionKind::SetSelection);
+      }
+    }
 
     const bool emit_owner = HasMeaning(
         resolved,
@@ -422,6 +440,9 @@ void Runtime::BuildSemantics() {
         owner.read_only = text_input_configuration->read_only;
         if (text_input_configuration->secure) {
           owner.value.clear();
+          owner.text_selection.reset();
+        } else if (text_input_state.has_value()) {
+          owner.text_selection = text_input_state->selection.Range();
         }
       }
       owner_index = next.nodes.size();
@@ -539,8 +560,24 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
   }
   if (extension_route.has_value()) {
     NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_route->extension);
-    if (extension == nullptr || !extension->OnSemanticAction(extension_route->local_id, action)) {
+    if (extension == nullptr) {
       return false;
+    }
+    const bool text_action =
+        action.kind == SemanticActionKind::SetText || action.kind == SemanticActionKind::SetSelection;
+    const std::shared_ptr<TextInputClient> text_client = text_action ? extension->GetTextInputClient() : nullptr;
+    const std::optional<TextInputState> previous = text_client ? std::optional{text_client->State()} : std::nullopt;
+    if (!extension->OnSemanticAction(extension_route->local_id, action)) {
+      return false;
+    }
+    if (text_client) {
+      const TextInputState current = text_client->State();
+      if (!detail::IsValidTextInputState(current, previous->session_id) ||
+          !detail::IsValidTextInputStateTransition(*previous, current)) {
+        throw std::logic_error("HuxerUI text input client returned invalid state after a semantic action");
+      }
+      InvalidateTextInputStateChange(owner->identity, *previous, current);
+      RefreshTextInputSession();
     }
     RequestFrame();
     return true;

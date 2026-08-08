@@ -1,6 +1,6 @@
 # Semantics and Accessibility Design
 
-Status: implemented foundation with deferred component and platform coverage
+Status: implemented foundation with staged shared-core completion and deferred platform coverage
 
 This document defines the implemented platform-neutral semantics foundation and records deferred component and platform coverage explicitly.
 
@@ -156,6 +156,18 @@ struct SemanticCollectionItem {
 };
 ```
 
+Text editing reuses the existing UTF-16 range contract, while scrolling reuses the existing controller metrics instead of introducing accessibility-only value types:
+
+```cpp
+struct ScrollMetrics {
+  Axis axis = Axis::Vertical;
+  float offset = 0.0F;
+  float maximum_offset = 0.0F;
+  float viewport_extent = 0.0F;
+  float content_extent = 0.0F;
+};
+```
+
 Ranges require finite values, `minimum <= maximum`, a current value inside the range, and a positive step when present.
 Collection spans must be positive.
 Collection and collection-item indices are zero-based; adapters convert them when a native API presents one-based positions.
@@ -184,6 +196,8 @@ struct Semantics {
   std::optional<bool> invalid;
   std::optional<unsigned int> heading_level;
   std::optional<SemanticRange> range;
+  std::optional<TextRange> text_selection;
+  std::optional<ScrollMetrics> scroll;
   std::optional<SemanticCollection> collection;
   std::optional<SemanticCollectionItem> collection_item;
   std::optional<SemanticLiveRegion> live_region;
@@ -201,7 +215,7 @@ There is no separate replace modifier, exclusion type, traversal-order type, or 
 `Preserve` is the default and retains ordinary semantic descendants.
 Automatic descendant merging is intentionally absent until HuxerUI has concrete conflict and action-routing rules; a component that represents one semantic unit declares its complete label and excludes decorative descendants explicitly.
 
-Runtime-derived enabled state, input focus, multiline editing, and secure editing are resolved from mounted behavior rather than application overrides.
+Runtime-derived enabled state, input focus, multiline editing, secure editing, actual editable selection, scroll metrics, clipping, and modal visibility are resolved from mounted behavior rather than application overrides.
 
 ## Resolution
 
@@ -369,6 +383,8 @@ struct SemanticNode {
   std::optional<bool> invalid;
   std::optional<unsigned int> heading_level;
   std::optional<SemanticRange> range;
+  std::optional<TextRange> text_selection;
+  std::optional<ScrollMetrics> scroll;
   std::optional<SemanticCollection> collection;
   std::optional<SemanticCollectionItem> collection_item;
   SemanticLiveRegion live_region = SemanticLiveRegion::None;
@@ -376,6 +392,7 @@ struct SemanticNode {
   bool focused = false;
   bool multiline = false;
   bool secure = false;
+  bool offscreen = false;
   std::uint64_t actions = 0;
   std::vector<std::pair<std::uint64_t, std::string>> custom_actions;
   Rect bounds;
@@ -453,14 +470,16 @@ Activate reuses the existing activation or typed Click path.
 Focus reuses Runtime input focus.
 An extension may advertise any other standard or custom action only when its `OnSemanticAction` implementation can handle it.
 The current Slider extension implements SetValue, Increment, and Decrement through its existing controlled change event.
-Built-in TextField editing, scrolling, ShowOnScreen, expand, collapse, and dismiss routes remain deferred.
+TextField editing routes through its retained extension, while scrolling and ShowOnScreen use generic mounted scrolling capability.
+Expand, Collapse, and Dismiss remain extension-owned because the retained component or presentation service owns the corresponding state transition.
 
 ## Geometry
 
 Node geometry uses host-view logical coordinates after final layout offsets and presentation transforms.
 Non-axis-aligned geometry is represented by a conservative axis-aligned bounds rectangle.
-The current frame publishes full node bounds and honors explicit `hidden` and descendant exclusion.
-Ancestor clip intersection, navigation and layer visibility, semantic hit testing, and offscreen ShowOnScreen behavior remain deferred and therefore are not represented by a partial `visible_bounds` field.
+The frame publishes full node bounds and an `offscreen` result derived from the host viewport, ancestor scroll viewports, and rectangular `ClipChildren` intersections.
+Partially clipped nodes retain their full stable bounds; the public snapshot does not add a second `visible_bounds` rectangle without a demonstrated native requirement.
+ShowOnScreen uses retained Runtime geometry rather than reconstructing a target from the public snapshot.
 
 ## Focus
 
@@ -470,19 +489,29 @@ The Focus action follows the same focus path used by keyboard and pointer input 
 Platform accessibility focus remains native state.
 Moving VoiceOver, TalkBack, Narrator, or another screen reader to a semantic node does not emit `ViewEvents::FocusChanged`, alter keyboard traversal, or start text input.
 
-Semantic modal isolation remains deferred.
-It must eventually derive from the retained Layer and focus-trap state rather than an author-settable boolean that could contradict Runtime behavior.
+Semantic modal isolation derives from the same topmost retained Layer focus trap used by keyboard and pointer focus.
+Application content and lower layers outside that trap are excluded from accessible navigation, while higher notification and system layers may remain available for live announcements.
+There is no author-settable modal boolean that can contradict Runtime behavior.
 
 ## Text editing and secure values
 
-TextField currently contributes its role, label, nonsecure value, placeholder, validation state, read-only state, multiline state, secure state, and Runtime input focus.
-Semantic selection and editing actions remain deferred and will use the existing UTF-16 `TextRange` and TextInputClient contracts.
+TextField contributes its role, label, nonsecure value, placeholder, validation state, read-only state, multiline state, secure state, Runtime input focus, and nonsecure UTF-16 selection.
+An editable TextField advertises SetText, and a nonsecure TextField advertises SetSelection even when it is read-only.
+The retained TextField extension handles both actions through the existing reducer, validation, length limit, history, and controlled change event rather than adding another editing protocol.
 
-An ordinary TextField may publish its committed value and selection for native accessibility editing.
+SetText replaces the complete value atomically, clears composition, and leaves the caret at the new UTF-16 end.
+SetSelection accepts a normalized TextRange and resolves it to a downstream TextSelection after validating text boundaries.
+An invalid UTF-8 value, out-of-range offset, surrogate split, disabled field, or unsupported secure operation returns false without partial mutation.
+
+Runtime observes TextInputClient state before and after a semantic edit and applies the same state validation, invalidation, and active-session synchronization rules used by native command batches.
+Content revisions invalidate layout, paint, semantics, and active native input state; selection-only revisions invalidate foreground paint, semantics, and active native input state without requiring a new input session.
+
+An ordinary TextField publishes its committed value and normalized selection for native accessibility editing.
 Composition details remain in the existing bounded TextInputClient query path.
 
 A secure TextField frame never contains TextField-owned plaintext, selected text, surrounding text, composition text, clipboard content, or plaintext-derived state descriptions.
-Runtime commits protected state without a value or protected length.
+Runtime commits protected state without a value, selection, or protected length.
+An editable secure field may accept SetText, but it does not advertise SetSelection.
 Copy and Cut remain unavailable through the existing editing policy.
 
 Application-authored labels, hints, errors, and identifiers are trusted metadata and must not copy the protected value.
@@ -492,7 +521,8 @@ The complete editing and security contract remains in [Text Input and TextField 
 
 ## Components and virtualization
 
-The implemented component defaults are:
+The shared component contract is listed below.
+The delivery-status section distinguishes implemented defaults from defaults completed by the staged work in this document.
 
 | Component | Semantic output |
 |---|---|
@@ -506,17 +536,24 @@ The implemented component defaults are:
 | RadioButton | RadioButton role, label, checked state, and Activate |
 | Switch | Switch role, label, checked state, and Activate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
-| TextField | TextField or author-overridden SearchField role and basic field metadata |
+| TextField | TextField or author-overridden SearchField role, value, UTF-16 selection, editing actions, and secure redaction |
 | Tabs | TabList collection containing labeled, selected, enabled Tab items and Activate |
 | NavigationBar | Navigation collection containing labeled, selected, enabled Button items and Activate |
 | NavigationPane | The same Navigation collection in compact and expanded visual modes |
+| ScrollView | ScrollView role, current ScrollMetrics, Scroll, and descendant ShowOnScreen |
+| Dialog and BottomSheet | Dialog role, modal isolation, descendants, and Dismiss when allowed |
+| Menu | Menu collection containing labeled, checked, expanded, enabled MenuItem nodes |
+| Toast | Non-focusable polite live region containing its message |
+| VirtualList | List collection with total count and realized ListItem indices |
+| VirtualGrid | Grid collection with total count and realized GridCell positions and spans |
 | Canvas | No inferred semantics; explicit owner semantics or virtual children |
 
 Icon-only item constructors continue to require their existing semantic label.
 Material, Flat, and third-party visual themes do not change component semantics.
 
-Remaining composite controls, scrolling, virtualization, selection, presentation surfaces, and live-region defaults remain deferred.
-Their future implementations must use the same owner/virtual-child and retained action-routing contracts rather than adding component-specific Runtime branches.
+Popup keeps the semantics of its supplied content because the presentation mechanism does not imply a shared role.
+Virtual containers publish only realized retained items and never materialize every View for accessibility; scrolling advances the realized semantic window.
+Future component defaults use the same owner/real-child and retained action-routing contracts rather than adding component-specific Runtime branches.
 
 ## Platform mapping
 
@@ -585,7 +622,9 @@ Recomposition marks semantics dirty when declarations, events, enabled state, ch
 Layout, scrolling, presentation transforms, focus, and text editing are reflected when the next semantic frame is built.
 
 `InvalidateSemantics()` requests a frame for retained semantic state without implying paint or layout invalidation.
-An extension changing paint and semantics requests both explicitly.
+Runtime owns TextInputClient mutation finalization so semantic editing cannot bypass layout, foreground paint, active native input, or semantic invalidation.
+Scroll offset changes update scroll metrics, offscreen state, and realized virtual items in the same committed frame.
+An extension changing unrelated paint and semantics requests both explicitly.
 
 Runtime builds semantics after final presentation geometry and text-input session refresh and before returning `FrameCommit`.
 It does not call native accessibility APIs while building.
@@ -619,15 +658,33 @@ Current shared tests cover:
 - Slider range actions, invalid payload rejection, shared value validation, and secure TextField redaction.
 - Tabs, NavigationBar, and NavigationPane hierarchy, selection, disabled items, activation, identity stability, and compact or expanded visual modes.
 
+The shared-core completion adds focused coverage in this order:
+
+- TextField value, UTF-16 selection, SetText, SetSelection, secure and read-only policy, controlled replacement, active input synchronization, and stale actions.
+- Scroll metrics, nested Scroll, ShowOnScreen, clipping, transforms, and offscreen changes.
+- Dialog and BottomSheet modal isolation and dismissal, Menu collections and submenu expansion, Toast live-region lifecycle, and exiting layers.
+- VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
+
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
 Manual validation uses the native screen readers and accessibility inspectors available on each platform.
 Unavailable platforms and tools remain explicitly unverified.
 
-## Delivery status and sequence
+## Shared-core completion sequence
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
-- Deferred: derive modal isolation and layer visibility from Runtime-owned presentation state; add clip-aware geometry, scrolling, navigation, live-region, collection, and virtualized-item resolution with focused tests.
-- Deferred: complete defaults and actions for remaining composite controls, TextField editing, scrolling, selection, presentation, and virtualization.
+The shared work is delivered in bounded stages so each contract is validated before native adapters depend on it:
+
+- Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
+- Scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
+- Presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
+- Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
+
+After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
+Windows UI Automation is the next adapter milestone, followed by Android, iOS, Linux, and Web mappings according to platform readiness.
+
+## Delivery status
+
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
+- In progress: complete scrolling and visibility, presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
 - Deferred: extend the native adapter sequence from macOS to iOS, Android, Windows, Linux, and Web.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 
@@ -640,6 +697,10 @@ Each native adapter is validated on its platform; unavailable platforms remain u
 - `SemanticFrame` is immutable, owning, pointer-free with respect to mounted state, and safe to retain.
 - Role does not create an action; every advertised action has a valid Runtime route.
 - Runtime hard state and secure-data policy override declarations.
+- Secure semantic frames never expose TextField-owned plaintext, selection, composition, or protected length.
+- Semantic text editing uses the existing retained client and controlled change path rather than a second editor state.
+- Scroll and ShowOnScreen use existing mounted scrolling capability rather than component branches.
+- Modal accessibility derives from retained Layer focus trapping, and virtual collection semantics never force eager View materialization.
 - One MountedNode may own stable flat virtual semantic children without fake Views.
 - Semantic identity is Runtime-local and never reused for unrelated content.
 - Input focus, text-input ownership, and native accessibility focus remain distinct.

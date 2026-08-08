@@ -17,6 +17,8 @@ State<bool> semantic_virtual_visible;
 State<std::size_t> semantic_tabs_selection;
 State<std::size_t> semantic_navigation_selection;
 State<bool> semantic_navigation_expanded;
+State<TextEditingValue> semantic_text_field_value;
+State<TextEditingValue> semantic_secure_text_field_value;
 
 static_assert(!std::is_copy_constructible_v<SemanticBuilder>);
 static_assert(!std::is_move_constructible_v<SemanticBuilder>);
@@ -97,9 +99,35 @@ View SemanticOverrideApp() {
 }
 
 View SecureSemanticTextFieldApp() {
-  return TextField(TextEditingValue::FromText("secret"))
+  auto value = UseState(TextEditingValue::FromText("secret"));
+  semantic_secure_text_field_value = value;
+  return TextField(value)
       .Label("Password")
-      .InputConfiguration({.secure = true});
+      .InputConfiguration({.secure = true})
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; });
+}
+
+View EditableSemanticTextFieldApp() {
+  auto value = UseState(
+      TextEditingValue::FromText(
+          "a\xF0\x9F\x98\x80"
+          "b"
+      )
+  );
+  semantic_text_field_value = value;
+  return TextField(value)
+      .Label("Editor")
+      .MaxLength(4)
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; });
+}
+
+View ReadOnlySemanticTextFieldApp() {
+  auto value = UseState(TextEditingValue::FromText("readonly"));
+  semantic_text_field_value = value;
+  return TextField(value)
+      .Label("Read only")
+      .InputConfiguration({.read_only = true})
+      .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; });
 }
 
 View VirtualSemanticApp() {
@@ -436,10 +464,78 @@ TEST_CASE("SecureTextFieldDoesNotPublishItsValue") {
   Runtime runtime(SecureSemanticTextFieldApp, platform);
   runtime.SetViewport({320.0F, 120.0F});
 
-  const SemanticNode& field = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Password");
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& field = FindSemanticNode(*before, "Password");
   REQUIRE(field.role == SemanticRole::TextField);
   REQUIRE(field.secure);
   REQUIRE(field.value.empty());
+  REQUIRE_FALSE(field.text_selection.has_value());
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) != 0);
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) == 0);
+
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetText, std::string("changed")}
+  ));
+  REQUIRE(semantic_secure_text_field_value.Get().text == "changed");
+  const SemanticNode& changed = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Password");
+  REQUIRE(changed.value.empty());
+  REQUIRE_FALSE(changed.text_selection.has_value());
+}
+
+TEST_CASE("TextFieldPublishesUtf16SelectionAndRoutesAccessibleEditing") {
+  TestPlatform platform;
+  Runtime runtime(EditableSemanticTextFieldApp, platform);
+  runtime.SetViewport({320.0F, 120.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& field = FindSemanticNode(*before, "Editor");
+  REQUIRE(
+      field.value == "a\xF0\x9F\x98\x80"
+                     "b"
+  );
+  REQUIRE(field.text_selection == TextRange{4, 4});
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) != 0);
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) != 0);
+
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetSelection, TextRange{1, 3}}
+  ));
+  REQUIRE(semantic_text_field_value.Get().selection.Range() == TextRange{1, 3});
+  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetSelection, TextRange{2, 3}}
+  ));
+
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetText, std::string("longer")}
+  ));
+  REQUIRE(semantic_text_field_value.Get() == TextEditingValue::FromText("long"));
+  const SemanticNode& changed = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Editor");
+  REQUIRE(changed.value == "long");
+  REQUIRE(changed.text_selection == TextRange{4, 4});
+}
+
+TEST_CASE("ReadOnlyTextFieldAllowsSelectionButRejectsAccessibleReplacement") {
+  TestPlatform platform;
+  Runtime runtime(ReadOnlySemanticTextFieldApp, platform);
+  runtime.SetViewport({320.0F, 120.0F});
+
+  const SemanticNode& field = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Read only");
+  REQUIRE(field.read_only == true);
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) == 0);
+  REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) != 0);
+  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetText, std::string("changed")}
+  ));
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field.id,
+      {SemanticActionKind::SetSelection, TextRange{0, 4}}
+  ));
+  REQUIRE(semantic_text_field_value.Get().selection.Range() == TextRange{0, 4});
 }
 
 TEST_CASE("SemanticBuilderPublishesStableVirtualChildrenAndRoutesActions") {
@@ -546,6 +642,10 @@ TEST_CASE("SemanticsModifierRejectsInvalidSharedValues") {
   );
   REQUIRE_THROWS_AS(
       Canvas([](PaintContext&, Size) {}).With(Semantics{.range = SemanticRange{1.0, 0.0, 0.5}}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Canvas([](PaintContext&, Size) {}).With(Semantics{.text_selection = TextRange{2, 1}}),
       std::invalid_argument
   );
 }

@@ -34,6 +34,7 @@ struct SemanticPatch {
   std::optional<bool> invalid;
   std::optional<unsigned int> heading_level;
   std::optional<SemanticRange> range;
+  std::optional<TextRange> text_selection;
   std::optional<SemanticCollection> collection;
   std::optional<SemanticCollectionItem> collection_item;
   std::optional<SemanticLiveRegion> live_region;

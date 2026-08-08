@@ -364,8 +364,10 @@ Terminal soft-keyboard dismissal remains a platform responsibility. It does not 
 
 Secure entry uses the same state and command protocol. The retained `TextEditingValue` contains the real text, while TextField builds a separate single-line mask layout and draws one bullet per grapheme. Copy and Cut are disabled. Platform adapters prevent native surrounding-text and extracted-text queries from returning the value while preserving the internal context needed for command routing and composition. Secure and multiline configurations are mutually exclusive.
 
-The shared `SemanticFrame` follows the same privacy boundary; the current TextField contribution publishes basic metadata and secure redaction, while complete selection and editing-action exposure remains follow-up work.
-An ordinary TextField may publish its committed value, UTF-16 selection, label, placeholder, validation state, focus, and supported editing actions so native accessibility can edit and announce it.
+The shared `SemanticFrame` follows the same privacy boundary.
+An ordinary TextField publishes its committed value, normalized UTF-16 selection, label, placeholder, validation state, focus, and supported SetText and SetSelection actions so native accessibility can edit and announce it.
+These actions enter the retained TextField reducer and the same Runtime invalidation and active-session synchronization path as platform text input; they do not create a second editor protocol.
+A read-only field omits SetText but retains SetSelection, while a secure field may expose SetText but omits SetSelection.
 A secure TextField semantic frame never contains TextField-owned plaintext, selected text, surrounding text, composition text, clipboard content, or a plaintext-derived state description; Copy and Cut remain unavailable through the existing editing policy.
 Application-authored labels, hints, errors, and identifiers remain trusted metadata and must not copy the protected value.
 The semantic frame carries protected state without a value or protected grapheme count.

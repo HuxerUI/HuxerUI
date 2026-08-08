@@ -416,6 +416,10 @@ TextField icons are decorative and do not create separate pointer, keyboard, or 
 Their independent leading and trailing sizes, spacing, and state colors come from `TextFieldStyle`.
 Vector icons follow the enabled, focused, error, and disabled TextField colors, while raster assets preserve their encoded colors.
 
+An ordinary TextField publishes its committed value and normalized UTF-16 selection to the semantic frame.
+Accessibility SetText and SetSelection actions use the same controlled `OnChanged` flow, reducer, limits, layout invalidation, and active native-input synchronization as other edits.
+A read-only field keeps selection available but rejects replacement, while a secure field exposes neither its value nor selection and never advertises SetSelection.
+
 Single-line and multiline fields use the same component:
 
 ```cpp

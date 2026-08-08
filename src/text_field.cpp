@@ -341,6 +341,65 @@ public:
       semantics.error = validation_.message;
     }
     builder.SetOwner(std::move(semantics));
+    if (!configuration_.read_only) {
+      builder.AddAction(0, SemanticActionKind::SetText);
+    }
+    if (!configuration_.secure) {
+      builder.AddAction(0, SemanticActionKind::SetSelection);
+    }
+  }
+
+  bool PerformSemanticAction(const SemanticAction& action) {
+    if (action.kind == SemanticActionKind::SetSelection) {
+      if (configuration_.secure) {
+        return false;
+      }
+      const auto* range = std::get_if<TextRange>(&action.value);
+      if (range == nullptr) {
+        return false;
+      }
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::SetSelection;
+      command.selection_after = TextSelection{range->start, range->end, TextAffinity::Downstream};
+      return ApplyCommands({command}).result_code == TextInputResultCode::Ok;
+    }
+    if (action.kind != SemanticActionKind::SetText || configuration_.read_only) {
+      return false;
+    }
+    const auto* text = std::get_if<std::string>(&action.value);
+    if (text == nullptr) {
+      return false;
+    }
+    const std::optional<TextOffset> inserted_length = detail::Utf16Length(*text);
+    if (!inserted_length.has_value()) {
+      return false;
+    }
+
+    std::vector<TextInputCommand> commands;
+    detail::TextFieldEditingState replacement_state = editing_;
+    if (editing_.value.composition.has_value()) {
+      TextInputCommand cancel;
+      cancel.kind = TextInputCommandKind::CancelComposition;
+      commands.push_back(cancel);
+      const detail::TextInputReductionResult cancelled = detail::ReduceTextInputCommands(editing_, commands);
+      if (cancelled.status != detail::TextInputReductionStatus::Accepted) {
+        return false;
+      }
+      replacement_state = cancelled.state;
+    }
+    const std::optional<TextOffset> replaced_length = detail::Utf16Length(replacement_state.value.text);
+    if (!replaced_length.has_value()) {
+      return false;
+    }
+
+    TextInputCommand commit;
+    commit.kind = TextInputCommandKind::CommitText;
+    commit.coordinate_space = TextInputCoordinateSpace::Text;
+    commit.target = TextRange{0, *replaced_length};
+    commit.text = *text;
+    commit.selection_after = TextSelection{*inserted_length, *inserted_length, TextAffinity::Downstream};
+    commands.push_back(std::move(commit));
+    return ApplyCommands(commands).result_code == TextInputResultCode::Ok;
   }
 
   void Update(detail::MountedNode& node, const detail::TextFieldModifier& modifier) {
@@ -2217,6 +2276,10 @@ public:
 
   void BuildSemantics(SemanticBuilder& builder) const override {
     client_->BuildSemantics(builder);
+  }
+
+  bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
+    return local_id == 0 && client_->PerformSemanticAction(action);
   }
 
   PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {

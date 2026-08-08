@@ -1317,6 +1317,48 @@ TEST_CASE("TestTextFieldPointerSelectionPrecedesPlatformStart") {
   REQUIRE(text_field_value.Get().selection == TextSelection{3, 3});
 }
 
+TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{TextFieldApp, platform};
+  runtime.SetViewport({200.0F, 80.0F});
+  const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+  const auto field = std::ranges::find(frame->nodes, SemanticRole::TextField, &SemanticNode::role);
+  REQUIRE(field != frame->nodes.end());
+
+  Pointer(runtime, PointerEventType::Down, 34.0F);
+  text_input.updated_states.clear();
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field->id,
+      {SemanticActionKind::SetSelection, TextRange{0, 1}}
+  ));
+
+  REQUIRE(text_field_value.Get().selection == TextSelection{0, 1});
+  REQUIRE(text_input.updated_states.size() == 1);
+  REQUIRE(text_input.updated_states.back().selection == TextSelection{0, 1});
+
+  TextInputCommand composition;
+  composition.kind = TextInputCommandKind::BeginComposition;
+  composition.target = TextRange{0, 1};
+  TextInputCommand update;
+  update.kind = TextInputCommandKind::UpdateComposition;
+  update.text = "x";
+  update.selection_after = TextSelection{1, 1};
+  REQUIRE(runtime.HandleTextInputCommands({1, {composition, update}}).result_code == TextInputResultCode::Ok);
+  REQUIRE(text_field_value.Get().composition == TextRange{0, 1});
+
+  text_input.restarted_sessions.clear();
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      field->id,
+      {SemanticActionKind::SetText, std::string("reset")}
+  ));
+  REQUIRE(text_field_value.Get() == TextEditingValue::FromText("reset"));
+  REQUIRE(text_input.restarted_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE_FALSE(text_input.restarted_states.back().composition.has_value());
+}
+
 TEST_CASE("TestTextFieldPresentationMovementUpdatesImeGeometryWithoutLayout") {
   ResetTextFieldState();
   TextFieldPlatformInput text_input;
