@@ -14,6 +14,8 @@
 
 namespace huxerui::detail {
 
+struct ModifierDescriptor;
+
 struct SemanticPatch {
   std::optional<SemanticRole> role;
   std::optional<std::string> label;
@@ -38,6 +40,14 @@ struct SemanticPatch {
   std::optional<SemanticDescendantPolicy> descendants;
   std::optional<bool> hidden;
   bool operator==(const SemanticPatch&) const = default;
+};
+
+struct BuiltInSemantics {
+  Semantics value;
+
+  static const ModifierDescriptor& Descriptor();
+
+  bool operator==(const BuiltInSemantics&) const = default;
 };
 
 SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const Environment> environment);

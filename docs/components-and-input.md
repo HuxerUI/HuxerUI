@@ -182,6 +182,10 @@ Tabs(
 
 The semantic label of an icon-only item is required but not drawn. Left and Right move with wrapping, Home and End move to the first and last enabled item, and every keyboard path skips disabled items. More tabs than the available width scroll horizontally, and a newly selected item is revealed automatically.
 
+Tabs publishes one TabList collection whose real retained item nodes expose the Tab role, accessible label, zero-based collection index, selected state, enabled state, and Activate action.
+The visual label and icon do not create duplicate semantic descendants.
+Selection changes preserve semantic item identity while updating the controlled selected state.
+
 `TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content; those responsibilities belong to a future navigation container rather than this selection control.
 
 ## TopAppBar
@@ -246,6 +250,10 @@ NavigationPane(items, selected, true)
 NavigationItem accepts ImageResource, ImageAsset, or VectorAsset icons, supports a selected icon, and can be disabled.
 Arrow keys move along the control's axis, Home and End select an edge item, and disabled items are skipped.
 NavigationBarStyle and NavigationPaneStyle keep geometry, selection indication, colors, and motion in Theme.
+
+Both controls publish one Navigation collection containing Button items with accessible labels, zero-based collection indices, selected state, enabled state, and Activate actions.
+Compact and expanded NavigationPane presentations retain the same semantic structure and item identity.
+Internal icons, indicators, and visible labels are excluded from item descendants because each item already provides its complete accessible name.
 
 ## DrawerLayout
 

@@ -158,6 +158,7 @@ struct SemanticCollectionItem {
 
 Ranges require finite values, `minimum <= maximum`, a current value inside the range, and a positive step when present.
 Collection spans must be positive.
+Collection and collection-item indices are zero-based; adapters convert them when a native API presents one-based positions.
 Unknown counts remain absent instead of using sentinel values.
 
 ### Semantics modifier
@@ -248,7 +249,8 @@ The builder rejects duplicate extension-local child IDs, invalid child geometry,
 ## NodeExtension contribution
 
 Most MountedNodes contribute at most one semantic node, but a self-drawn composite control may contribute flat virtual children.
-SegmentedButton, Tabs, NavigationBar, NavigationPane, and a custom Canvas chart need this capability without fake mounted Views.
+A custom Canvas chart uses this capability when its meaningful items do not already exist as mounted Views.
+Composite controls such as Tabs, NavigationBar, and NavigationPane instead publish semantics on their real retained item nodes so identity, geometry, enabled state, and activation continue to have one owner.
 
 `NodeExtension` gains one contribution method, one action method, and one invalidation operation:
 
@@ -505,12 +507,15 @@ The implemented component defaults are:
 | Switch | Switch role, label, checked state, and Activate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
 | TextField | TextField or author-overridden SearchField role and basic field metadata |
+| Tabs | TabList collection containing labeled, selected, enabled Tab items and Activate |
+| NavigationBar | Navigation collection containing labeled, selected, enabled Button items and Activate |
+| NavigationPane | The same Navigation collection in compact and expanded visual modes |
 | Canvas | No inferred semantics; explicit owner semantics or virtual children |
 
 Icon-only item constructors continue to require their existing semantic label.
 Material, Flat, and third-party visual themes do not change component semantics.
 
-Remaining composite controls, scrolling, virtualization, selection, destination navigation, presentation surfaces, and live-region defaults remain deferred.
+Remaining composite controls, scrolling, virtualization, selection, presentation surfaces, and live-region defaults remain deferred.
 Their future implementations must use the same owner/virtual-child and retained action-routing contracts rather than adding component-specific Runtime branches.
 
 ## Platform mapping
@@ -539,7 +544,7 @@ Runtime actions run on the main thread, while the existing `UITextInput` object 
 
 ### macOS
 
-The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
+The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
 It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
 The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
 AppKit calls and Runtime actions remain on the main thread.
@@ -612,6 +617,7 @@ Current shared tests cover:
 - Compatible updates, replacement, unmount through replacement, identity stability, revision changes, focus, and stale action rejection.
 - Virtual child identity, action routing, extension replacement, stale-route rejection, and identity retirement.
 - Slider range actions, invalid payload rejection, shared value validation, and secure TextField redaction.
+- Tabs, NavigationBar, and NavigationPane hierarchy, selection, disabled items, activation, identity stability, and compact or expanded visual modes.
 
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
 Manual validation uses the native screen readers and accessibility inspectors available on each platform.
@@ -619,9 +625,9 @@ Unavailable platforms and tools remain explicitly unverified.
 
 ## Delivery status and sequence
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, basic action routing, NodeExtension virtual children, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
 - Deferred: derive modal isolation and layer visibility from Runtime-owned presentation state; add clip-aware geometry, scrolling, navigation, live-region, collection, and virtualized-item resolution with focused tests.
-- Deferred: complete defaults and actions for remaining composite controls, TextField editing, scrolling, selection, presentation, destination navigation, and virtualization.
+- Deferred: complete defaults and actions for remaining composite controls, TextField editing, scrolling, selection, presentation, and virtualization.
 - Deferred: extend the native adapter sequence from macOS to iOS, Android, Windows, Linux, and Web.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 

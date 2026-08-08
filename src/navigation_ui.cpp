@@ -360,6 +360,25 @@ View ApplyNavigationInteraction(View item, std::optional<IndicationSpec> indicat
   return item;
 }
 
+Semantics NavigationContainerSemantics(std::size_t item_count) {
+  Semantics semantics;
+  semantics.role = SemanticRole::Navigation;
+  semantics.collection.emplace();
+  semantics.collection->item_count = item_count;
+  return semantics;
+}
+
+Semantics NavigationItemSemantics(const std::string& label, std::size_t index, bool selected) {
+  Semantics semantics;
+  semantics.role = SemanticRole::Button;
+  semantics.label = label;
+  semantics.selected = selected;
+  semantics.collection_item.emplace();
+  semantics.collection_item->index = index;
+  semantics.descendants = SemanticDescendantPolicy::Exclude;
+  return semantics;
+}
+
 View BuildBarItem(
     const detail::ResolvedNavigationItem& item,
     const NavigationBarStyle& style,
@@ -394,7 +413,8 @@ View BuildBarItem(
                         Spacing(std::max(0.0F, style.icon_spacing)),
                         MainAlign(MainAxisAlignment::Center),
                         CrossAlign(CrossAxisAlignment::Center),
-                        Grow()
+                        Grow(),
+                        detail::BuiltInSemantics{NavigationItemSemantics(item.label, index, selected)}
                     )
                     .OnClick([events, index, selected] {
                       if (!selected) {
@@ -460,7 +480,8 @@ View BuildPaneItem(
   }.With(
       Frame{.height = std::max(0.0F, style.item_height)},
       CornerRadius{CornerRadii{indicator_corner_radius}},
-      Align(expanded ? HorizontalAlignment::Stretch : HorizontalAlignment::Center, VerticalAlignment::Center)
+      Align(expanded ? HorizontalAlignment::Stretch : HorizontalAlignment::Center, VerticalAlignment::Center),
+      detail::BuiltInSemantics{NavigationItemSemantics(item.label, index, selected)}
   ).OnClick([events, index, selected] {
     if (!selected) {
       events.Emit<NavigationEvents::Changed>(index);
@@ -505,6 +526,7 @@ NavigationBarFactory(std::shared_ptr<const detail::ResolvedNavigationItems> item
             Background(style.background),
             CrossAlign(CrossAxisAlignment::Stretch),
             Focusable{},
+            detail::BuiltInSemantics{NavigationContainerSemantics(items->values.size())},
             NavigationSelectionBehavior{
                 selected_index,
                 EnabledItems(*items),
@@ -540,6 +562,7 @@ std::function<View()> NavigationPaneFactory(
                            Background(style.background),
                            CrossAlign(CrossAxisAlignment::Stretch),
                            Focusable{},
+                           detail::BuiltInSemantics{NavigationContainerSemantics(items->values.size())},
                            NavigationSelectionBehavior{
                                selected_index,
                                EnabledItems(*items),

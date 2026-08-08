@@ -14,6 +14,9 @@ State<float> semantic_slider_value;
 State<bool> semantic_alternate_content;
 State<bool> semantic_alternate_label;
 State<bool> semantic_virtual_visible;
+State<std::size_t> semantic_tabs_selection;
+State<std::size_t> semantic_navigation_selection;
+State<bool> semantic_navigation_expanded;
 
 static_assert(!std::is_copy_constructible_v<SemanticBuilder>);
 static_assert(!std::is_move_constructible_v<SemanticBuilder>);
@@ -146,6 +149,47 @@ View SemanticCompatibleUpdateApp() {
   return Canvas([](PaintContext&, Size) {}).With(Semantics{.label = alternate.Get() ? "After" : "Before"});
 }
 
+View SemanticTabsApp() {
+  auto selected = UseState<std::size_t>(0);
+  semantic_tabs_selection = selected;
+  return Tabs(
+             std::vector<TabItem>{
+                 TabItem("Overview"),
+                 TabItem::IconOnly(SemanticActionIcon(), "Activity"),
+                 std::move(TabItem("Disabled")).Enabled(false),
+             },
+             selected
+  )
+      .OnChanged([selected](std::size_t index) mutable { selected = index; });
+}
+
+View SemanticNavigationBarApp() {
+  auto selected = UseState<std::size_t>(0);
+  semantic_navigation_selection = selected;
+  return huxerui::NavigationBar(
+             {
+                 huxerui::NavigationItem(SemanticActionIcon(), "Home"),
+                 huxerui::NavigationItem(SemanticActionIcon(), "Library"),
+                 std::move(huxerui::NavigationItem(SemanticActionIcon(), "Disabled")).Enabled(false),
+             },
+             selected
+  )
+      .OnChanged([selected](std::size_t index) mutable { selected = index; });
+}
+
+View SemanticNavigationPaneApp() {
+  auto expanded = UseState(false);
+  semantic_navigation_expanded = expanded;
+  return huxerui::NavigationPane(
+      {
+          huxerui::NavigationItem(SemanticActionIcon(), "Home"),
+          huxerui::NavigationItem(SemanticActionIcon(), "Library"),
+      },
+      0,
+      expanded.Get()
+  );
+}
+
 const SemanticNode& FindSemanticNode(const SemanticFrame& frame, std::string_view label) {
   const auto found = std::ranges::find(frame.nodes, label, &SemanticNode::label);
   REQUIRE(found != frame.nodes.end());
@@ -155,6 +199,28 @@ const SemanticNode& FindSemanticNode(const SemanticFrame& frame, std::string_vie
 const SemanticNode* FindSemanticNodeOrNull(const SemanticFrame& frame, std::string_view label) {
   const auto found = std::ranges::find(frame.nodes, label, &SemanticNode::label);
   return found == frame.nodes.end() ? nullptr : &*found;
+}
+
+const SemanticNode& FindSemanticRole(const SemanticFrame& frame, SemanticRole role) {
+  const auto found = std::ranges::find(frame.nodes, role, &SemanticNode::role);
+  REQUIRE(found != frame.nodes.end());
+  return *found;
+}
+
+std::size_t SemanticLabelCount(const SemanticFrame& frame, std::string_view label) {
+  return static_cast<std::size_t>(std::ranges::count(frame.nodes, label, &SemanticNode::label));
+}
+
+SemanticCollection ItemCollection(std::size_t item_count) {
+  SemanticCollection collection;
+  collection.item_count = item_count;
+  return collection;
+}
+
+SemanticCollectionItem CollectionItem(std::size_t index) {
+  SemanticCollectionItem item;
+  item.index = index;
+  return item;
 }
 
 } // namespace
@@ -222,6 +288,117 @@ TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
   REQUIRE(updated_slider != updated->nodes.end());
   REQUIRE(updated_slider->range.has_value());
   REQUIRE(updated_slider->range->current == 7.5);
+}
+
+TEST_CASE("TabsPublishAStableAccessibleSelectionGroup") {
+  TestPlatform platform;
+  Runtime runtime(SemanticTabsApp, platform);
+  runtime.SetViewport({320.0F, 120.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& tab_list = FindSemanticRole(*before, SemanticRole::TabList);
+  REQUIRE(tab_list.collection == ItemCollection(3));
+  REQUIRE(tab_list.children.size() == 3);
+  REQUIRE((tab_list.actions & SemanticActionMask(SemanticActionKind::Focus)) != 0);
+
+  const SemanticNode& overview = FindSemanticNode(*before, "Overview");
+  const SemanticNode& activity = FindSemanticNode(*before, "Activity");
+  const SemanticNode& disabled = FindSemanticNode(*before, "Disabled");
+  REQUIRE(overview.role == SemanticRole::Tab);
+  REQUIRE(overview.selected == true);
+  REQUIRE(overview.collection_item == CollectionItem(0));
+  REQUIRE(activity.role == SemanticRole::Tab);
+  REQUIRE(activity.selected == false);
+  REQUIRE(activity.collection_item == CollectionItem(1));
+  REQUIRE(SemanticLabelCount(*before, "Activity") == 1);
+  REQUIRE_FALSE(disabled.enabled);
+  REQUIRE(disabled.actions == 0);
+  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+      disabled.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+
+  const SemanticNodeId overview_id = overview.id;
+  const SemanticNodeId activity_id = activity.id;
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      activity.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE(semantic_tabs_selection.Get() == 1);
+
+  const std::shared_ptr<const SemanticFrame> after = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& updated_overview = FindSemanticNode(*after, "Overview");
+  const SemanticNode& updated_activity = FindSemanticNode(*after, "Activity");
+  REQUIRE(updated_overview.id == overview_id);
+  REQUIRE(updated_activity.id == activity_id);
+  REQUIRE(updated_overview.selected == false);
+  REQUIRE(updated_activity.selected == true);
+}
+
+TEST_CASE("NavigationSelectorsPublishRealAccessibleItems") {
+  TestPlatform platform;
+  Runtime runtime(SemanticNavigationBarApp, platform);
+  runtime.SetViewport({360.0F, 120.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& navigation = FindSemanticRole(*before, SemanticRole::Navigation);
+  REQUIRE(navigation.collection == ItemCollection(3));
+  REQUIRE(navigation.children.size() == 3);
+  REQUIRE((navigation.actions & SemanticActionMask(SemanticActionKind::Focus)) != 0);
+
+  const SemanticNode& home = FindSemanticNode(*before, "Home");
+  const SemanticNode& library = FindSemanticNode(*before, "Library");
+  const SemanticNode& disabled = FindSemanticNode(*before, "Disabled");
+  REQUIRE(home.role == SemanticRole::Button);
+  REQUIRE(home.selected == true);
+  REQUIRE(home.collection_item == CollectionItem(0));
+  REQUIRE(library.role == SemanticRole::Button);
+  REQUIRE(library.selected == false);
+  REQUIRE(library.collection_item == CollectionItem(1));
+  REQUIRE(SemanticLabelCount(*before, "Home") == 1);
+  REQUIRE(SemanticLabelCount(*before, "Library") == 1);
+  REQUIRE_FALSE(disabled.enabled);
+  REQUIRE(disabled.actions == 0);
+
+  const SemanticNodeId home_id = home.id;
+  const SemanticNodeId library_id = library.id;
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      library.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE(semantic_navigation_selection.Get() == 1);
+
+  const std::shared_ptr<const SemanticFrame> after = runtime.BuildCommit().semantic_frame;
+  REQUIRE(FindSemanticNode(*after, "Home").id == home_id);
+  REQUIRE(FindSemanticNode(*after, "Library").id == library_id);
+  REQUIRE(FindSemanticNode(*after, "Home").selected == false);
+  REQUIRE(FindSemanticNode(*after, "Library").selected == true);
+}
+
+TEST_CASE("NavigationPaneKeepsItsSemanticsAcrossVisualModes") {
+  TestPlatform platform;
+  Runtime runtime(SemanticNavigationPaneApp, platform);
+  runtime.SetViewport({320.0F, 180.0F});
+
+  const std::shared_ptr<const SemanticFrame> compact = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& compact_navigation = FindSemanticRole(*compact, SemanticRole::Navigation);
+  const SemanticNode& compact_home = FindSemanticNode(*compact, "Home");
+  const SemanticNode& compact_library = FindSemanticNode(*compact, "Library");
+  REQUIRE(compact_navigation.collection == ItemCollection(2));
+  REQUIRE(compact_navigation.children.size() == 2);
+  REQUIRE(SemanticLabelCount(*compact, "Home") == 1);
+  REQUIRE(SemanticLabelCount(*compact, "Library") == 1);
+
+  const SemanticNodeId navigation_id = compact_navigation.id;
+  const SemanticNodeId home_id = compact_home.id;
+  const SemanticNodeId library_id = compact_library.id;
+  semantic_navigation_expanded = true;
+  const std::shared_ptr<const SemanticFrame> expanded = runtime.BuildCommit().semantic_frame;
+  REQUIRE(FindSemanticRole(*expanded, SemanticRole::Navigation).id == navigation_id);
+  REQUIRE(FindSemanticNode(*expanded, "Home").id == home_id);
+  REQUIRE(FindSemanticNode(*expanded, "Library").id == library_id);
+  REQUIRE(SemanticLabelCount(*expanded, "Home") == 1);
+  REQUIRE(SemanticLabelCount(*expanded, "Library") == 1);
 }
 
 TEST_CASE("SemanticsModifierPublishesCustomMeaning") {

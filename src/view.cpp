@@ -780,14 +780,16 @@ struct TabsLayoutPolicy {
 
 class TabLabel final : public View {
 public:
-  TabLabel(const ResolvedTabItem& item, const TabsStyle& style, bool selected) : View(MakeSpec(item, style)) {
+  TabLabel(const ResolvedTabItem& item, const TabsStyle& style, bool selected, std::size_t index)
+      : View(MakeSpec(item, style, selected, index)) {
     TextStyle text_style = style.label_style;
     text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
     SetTextStyle(std::move(text_style));
   }
 
 private:
-  static std::shared_ptr<detail::ViewSpec> MakeSpec(const ResolvedTabItem& item, const TabsStyle& style) {
+  static std::shared_ptr<detail::ViewSpec>
+  MakeSpec(const ResolvedTabItem& item, const TabsStyle& style, bool selected, std::size_t index) {
     auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
     spec->text = item.label;
     Size icon_size;
@@ -814,6 +816,11 @@ private:
         .wrap = TextWrap::NoWrap,
     };
     spec->properties.indication_override = style.indication;
+    spec->component_semantics.role = SemanticRole::Tab;
+    spec->component_semantics.label = item.label;
+    spec->component_semantics.selected = selected;
+    spec->component_semantics.collection_item.emplace();
+    spec->component_semantics.collection_item->index = index;
     return spec;
   }
 };
@@ -1058,6 +1065,9 @@ private:
   ) {
     auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<TabsLayoutPolicy>(), std::move(items));
     spec->focusable = true;
+    spec->component_semantics.role = SemanticRole::TabList;
+    spec->component_semantics.collection.emplace();
+    spec->component_semantics.collection->item_count = spec->children.size();
     spec->properties.background = style.background;
     spec->layout_values.insert_or_assign(typeid(TabsExpandItems), detail::MakeErasedLayoutValue(style.expand_items));
     spec->retained_modifiers.push_back(
@@ -2246,7 +2256,7 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
       const bool enabled = items[index].enabled;
       enabled_items.push_back(enabled);
       labels.push_back(
-          std::move(TabLabel(items[index], style, index == selected_index))
+          std::move(TabLabel(items[index], style, index == selected_index, index))
               .OnClick([events, index, selected_index] {
                 if (index != selected_index) {
                   events.Emit<TabsEvents::Changed>(index);

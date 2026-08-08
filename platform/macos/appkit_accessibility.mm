@@ -304,6 +304,12 @@ bool MacAccessibility::PerformAction(SemanticNodeId id, SemanticAction action) {
   return node != nullptr && node->enabled;
 }
 
+- (BOOL)isAccessibilitySelected {
+  const huxerui::SemanticNode* node =
+      huxeruiAccessibility == nullptr ? nullptr : huxeruiAccessibility->NodeForId(huxeruiNodeId);
+  return node != nullptr && node->selected.value_or(false);
+}
+
 - (BOOL)isAccessibilityFocused {
   const huxerui::SemanticNode* node =
       huxeruiAccessibility == nullptr ? nullptr : huxeruiAccessibility->NodeForId(huxeruiNodeId);

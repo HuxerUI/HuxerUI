@@ -92,6 +92,16 @@ NavigationBar and compact NavigationPane items require icons, while an expanded 
 Keyboard traversal lives in one retained selection behavior shared by the two controls and skips disabled destinations.
 Geometry, colors, indication, and selection motion remain separate NavigationBarStyle and NavigationPaneStyle Theme values because the two surfaces follow different visual specifications.
 
+Tabs publishes a TabList collection with one real Tab semantic node per retained item.
+NavigationBar and NavigationPane publish a Navigation collection whose real retained item surfaces are Button semantic nodes.
+Each item carries its resolved accessible label, zero-based collection index, selected state, and inherited enabled state; its existing Click binding remains the only Activate route.
+Disabled items remain discoverable without actions, and compact or expanded Pane presentation does not change semantic structure or identity.
+Decorative item descendants are excluded after the item surface supplies its complete label.
+
+The retained selection behaviors continue to own keyboard movement and reveal requests only.
+They do not construct virtual semantic children, copy item geometry, or add a second action path.
+Virtual semantic children remain reserved for meaningful entities, such as self-drawn Canvas data points, that do not already have mounted Views.
+
 DrawerLayout accepts main content plus optional strongly typed StartDrawer and EndDrawer children.
 The strong child types make ownership and logical edge explicit without a slot enum, runtime child inspection, or a parallel builder protocol.
 Start and End are semantic edges rather than physical Left and Right; layout direction can resolve them later without changing the API.
@@ -776,7 +786,8 @@ Shared navigation work requires focused Runtime tests for:
 - Empty factories and exception categories.
 
 TopAppBar tests verify Start and Center title geometry, excess-action constraints, action behavior, Heading semantics, required configuration, and built-in Theme styles.
-Destination selection and drawer tests additionally verify icon requirements, disabled keyboard traversal, dynamic compact and expanded Pane composition, responsive inline fallback, controlled modal state, gesture and Back ordering, exit-time focus confinement, and built-in Theme styles.
+Destination selection tests verify collection hierarchy, accessible labels, selected and disabled states, semantic activation, identity stability, icon requirements, disabled keyboard traversal, and dynamic compact or expanded Pane composition.
+Drawer tests verify responsive inline fallback, controlled modal state, gesture and Back ordering, exit-time focus confinement, and built-in Theme styles.
 
 Transition and incremental-rendering tests verify:
 

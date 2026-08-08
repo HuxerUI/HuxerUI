@@ -114,6 +114,21 @@ void ApplySemantics(SemanticPatch& target, const SemanticPatch& source) {
   ApplyOptional(target.hidden, source.hidden);
 }
 
+const ModifierDescriptor& BuiltInSemantics::Descriptor() {
+  static const ModifierDescriptor descriptor{
+      [](ViewSpec& spec, const void* value) {
+        const auto& semantics = static_cast<const BuiltInSemantics*>(value)->value;
+        ApplySemantics(spec.component_semantics, ResolveSemantics(semantics, spec.environment));
+      },
+      nullptr,
+      nullptr,
+      false,
+      ErasedEqualsFor<BuiltInSemantics>(),
+      nullptr,
+  };
+  return descriptor;
+}
+
 } // namespace huxerui::detail
 
 namespace huxerui {
