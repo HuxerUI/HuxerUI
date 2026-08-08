@@ -218,6 +218,50 @@ View SemanticNavigationPaneApp() {
   );
 }
 
+View SemanticVerticalScrollApp() {
+  return ScrollView {
+    Column {
+      Text("First").With(Frame{100.0F, 40.0F}),
+      Text("Second").With(Frame{100.0F, 40.0F}),
+      Text("Third").With(Frame{100.0F, 40.0F}),
+    },
+  };
+}
+
+View SemanticHorizontalScrollApp() {
+  return ScrollView {
+    Row {
+      Text("Left").With(Frame{60.0F, 40.0F}),
+      Text("Center").With(Frame{60.0F, 40.0F}),
+      Text("Right").With(Frame{60.0F, 40.0F}),
+    },
+  }.ScrollAxis(Axis::Horizontal);
+}
+
+View SemanticNestedScrollApp() {
+  return ScrollView {
+    Column {
+      Text("Outer start").With(Frame{100.0F, 40.0F}),
+      ScrollView {
+        Column {
+          Text("Inner first").With(Frame{100.0F, 40.0F}),
+          Text("Inner second").With(Frame{100.0F, 40.0F}),
+          Text("Inner third").With(Frame{100.0F, 40.0F}),
+        },
+      }.With(Frame{100.0F, 60.0F}),
+      Text("Outer end").With(Frame{100.0F, 40.0F}),
+    },
+  };
+}
+
+View SemanticClippedTransformApp() {
+  return Column {
+    Stack {
+      Text("Clipped").With(Frame{80.0F, 20.0F}, Offset{Point{0.0F, 50.0F}}),
+    }.With(Frame{100.0F, 40.0F}, ClipChildren{}),
+  };
+}
+
 const SemanticNode& FindSemanticNode(const SemanticFrame& frame, std::string_view label) {
   const auto found = std::ranges::find(frame.nodes, label, &SemanticNode::label);
   REQUIRE(found != frame.nodes.end());
@@ -427,6 +471,101 @@ TEST_CASE("NavigationPaneKeepsItsSemanticsAcrossVisualModes") {
   REQUIRE(FindSemanticNode(*expanded, "Library").id == library_id);
   REQUIRE(SemanticLabelCount(*expanded, "Home") == 1);
   REQUIRE(SemanticLabelCount(*expanded, "Library") == 1);
+}
+
+TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
+  TestPlatform platform;
+  Runtime runtime(SemanticVerticalScrollApp, platform);
+  runtime.SetViewport({100.0F, 60.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& scroll = FindSemanticRole(*before, SemanticRole::ScrollView);
+  const ScrollMetrics expected_metrics{
+      .axis = Axis::Vertical,
+      .offset = 0.0F,
+      .maximum_offset = 60.0F,
+      .viewport_extent = 60.0F,
+      .content_extent = 120.0F,
+  };
+  REQUIRE(scroll.scroll == expected_metrics);
+  REQUIRE((scroll.actions & SemanticActionMask(SemanticActionKind::Scroll)) != 0);
+
+  const SemanticNode& first = FindSemanticNode(*before, "First");
+  const SemanticNode& third = FindSemanticNode(*before, "Third");
+  REQUIRE_FALSE(first.offscreen);
+  REQUIRE(third.offscreen);
+  REQUIRE((third.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) != 0);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      third.id,
+      {SemanticActionKind::ShowOnScreen, std::monostate{}}
+  ));
+
+  const std::shared_ptr<const SemanticFrame> revealed = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& revealed_scroll = FindSemanticRole(*revealed, SemanticRole::ScrollView);
+  REQUIRE(revealed_scroll.scroll->offset == 60.0F);
+  REQUIRE_FALSE(FindSemanticNode(*revealed, "Third").offscreen);
+  REQUIRE(FindSemanticNode(*revealed, "First").offscreen);
+
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      revealed_scroll.id,
+      {SemanticActionKind::Scroll, Point{0.0F, -20.0F}}
+  ));
+  const SemanticNode& scrolled = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView);
+  REQUIRE(scrolled.scroll->offset == 40.0F);
+  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+      scrolled.id,
+      {SemanticActionKind::Scroll, Point{20.0F, 0.0F}}
+  ));
+}
+
+TEST_CASE("HorizontalScrollViewUsesHorizontalSemanticDeltas") {
+  TestPlatform platform;
+  Runtime runtime(SemanticHorizontalScrollApp, platform);
+  runtime.SetViewport({100.0F, 40.0F});
+
+  const SemanticNode& scroll = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView);
+  REQUIRE(scroll.scroll->axis == Axis::Horizontal);
+  REQUIRE(scroll.scroll->maximum_offset == 80.0F);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      scroll.id,
+      {SemanticActionKind::Scroll, Point{45.0F, 0.0F}}
+  ));
+  REQUIRE(FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView).scroll->offset == 45.0F);
+}
+
+TEST_CASE("ShowOnScreenRevealsContentThroughNestedScrollContainers") {
+  TestPlatform platform;
+  Runtime runtime(SemanticNestedScrollApp, platform);
+  runtime.SetViewport({100.0F, 80.0F});
+
+  const SemanticNode& target = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Inner third");
+  REQUIRE(target.offscreen);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      target.id,
+      {SemanticActionKind::ShowOnScreen, std::monostate{}}
+  ));
+
+  const std::shared_ptr<const SemanticFrame> revealed = runtime.BuildCommit().semantic_frame;
+  std::vector<float> offsets;
+  for (const SemanticNode& node : revealed->nodes) {
+    if (node.role == SemanticRole::ScrollView) {
+      REQUIRE(node.scroll.has_value());
+      offsets.push_back(node.scroll->offset);
+    }
+  }
+  REQUIRE(offsets == std::vector<float>{20.0F, 60.0F});
+  REQUIRE_FALSE(FindSemanticNode(*revealed, "Inner third").offscreen);
+}
+
+TEST_CASE("SemanticOffscreenStateHonorsPresentationTransformsAndClipping") {
+  TestPlatform platform;
+  Runtime runtime(SemanticClippedTransformApp, platform);
+  runtime.SetViewport({100.0F, 80.0F});
+
+  const SemanticNode& clipped = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Clipped");
+  REQUIRE(clipped.bounds == Rect{0.0F, 50.0F, 80.0F, 20.0F});
+  REQUIRE(clipped.offscreen);
+  REQUIRE((clipped.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) == 0);
 }
 
 TEST_CASE("SemanticsModifierPublishesCustomMeaning") {
@@ -646,6 +785,11 @@ TEST_CASE("SemanticsModifierRejectsInvalidSharedValues") {
   );
   REQUIRE_THROWS_AS(
       Canvas([](PaintContext&, Size) {}).With(Semantics{.text_selection = TextRange{2, 1}}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Canvas([](PaintContext&, Size) {})
+          .With(Semantics{.scroll = ScrollMetrics{.offset = 2.0F, .maximum_offset = 1.0F}}),
       std::invalid_argument
   );
 }

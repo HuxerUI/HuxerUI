@@ -674,7 +674,7 @@ Unavailable platforms and tools remain explicitly unverified.
 The shared work is delivered in bounded stages so each contract is validated before native adapters depend on it:
 
 - Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
-- Scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
+- Completed: scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
 - Presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
 - Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
 
@@ -683,8 +683,8 @@ Windows UI Automation is the next adapter milestone, followed by Android, iOS, L
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
-- In progress: complete scrolling and visibility, presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, and the initial macOS AppKit bridge in `appkit_accessibility.mm` are implemented.
+- In progress: complete presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
 - Deferred: extend the native adapter sequence from macOS to iOS, Android, Windows, Linux, and Web.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 

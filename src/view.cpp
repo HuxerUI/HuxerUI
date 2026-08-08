@@ -2296,6 +2296,12 @@ std::shared_ptr<detail::ViewSpec> MakeContainerSpec(detail::NodeKind kind, std::
   return spec;
 }
 
+std::shared_ptr<detail::ViewSpec> MakeScrollViewSpec(View content) {
+  auto spec = MakeContainerSpec(detail::NodeKind::ScrollView, std::vector<View>{std::move(content)});
+  spec->component_semantics.role = SemanticRole::ScrollView;
+  return spec;
+}
+
 } // namespace
 
 const detail::ModifierDescriptor& Padding::Descriptor() {
@@ -2859,10 +2865,7 @@ Scope::Scope(std::function<View()> factory) : View(detail::MakeScopeSpec(std::mo
 
 Spacer::Spacer() : View(MakeSpacerSpec()) {}
 
-ScrollView::ScrollView(View content)
-    : detail::TypedView<ScrollView>(
-          MakeContainerSpec(detail::NodeKind::ScrollView, std::vector<View>{std::move(content)})
-      ) {}
+ScrollView::ScrollView(View content) : detail::TypedView<ScrollView>(MakeScrollViewSpec(std::move(content))) {}
 
 ScrollView ScrollView::ScrollAxis(Axis axis) && {
   SetLayoutValue(typeid(detail::ScrollAxisBinding), axis);

@@ -41,6 +41,15 @@ void ValidateCollectionItem(const SemanticCollectionItem& item) {
   }
 }
 
+void ValidateScrollMetrics(const ScrollMetrics& metrics) {
+  if (!std::isfinite(metrics.offset) || !std::isfinite(metrics.maximum_offset) ||
+      !std::isfinite(metrics.viewport_extent) || !std::isfinite(metrics.content_extent) || metrics.offset < 0.0F ||
+      metrics.maximum_offset < 0.0F || metrics.offset > metrics.maximum_offset || metrics.viewport_extent < 0.0F ||
+      metrics.content_extent < 0.0F) {
+    throw std::invalid_argument("HuxerUI semantic scroll metrics must be finite, nonnegative, and contain the offset");
+  }
+}
+
 SemanticBuilderItem& RequireItem(SemanticBuilderState& state, std::uint64_t local_id) {
   const auto found = std::ranges::find(state.items, local_id, &SemanticBuilderItem::local_id);
   if (found == state.items.end()) {
@@ -60,6 +69,9 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
   }
   if (semantics.text_selection.has_value() && !semantics.text_selection->IsValid()) {
     throw std::invalid_argument("HuxerUI semantic text selection must be a normalized nonnegative range");
+  }
+  if (semantics.scroll.has_value()) {
+    ValidateScrollMetrics(*semantics.scroll);
   }
   if (semantics.collection_item.has_value()) {
     ValidateCollectionItem(*semantics.collection_item);
@@ -86,6 +98,7 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
       .heading_level = semantics.heading_level,
       .range = semantics.range,
       .text_selection = semantics.text_selection,
+      .scroll = semantics.scroll,
       .collection = semantics.collection,
       .collection_item = semantics.collection_item,
       .live_region = semantics.live_region,
@@ -113,6 +126,7 @@ void ApplySemantics(SemanticPatch& target, const SemanticPatch& source) {
   ApplyOptional(target.heading_level, source.heading_level);
   ApplyOptional(target.range, source.range);
   ApplyOptional(target.text_selection, source.text_selection);
+  ApplyOptional(target.scroll, source.scroll);
   ApplyOptional(target.collection, source.collection);
   ApplyOptional(target.collection_item, source.collection_item);
   ApplyOptional(target.live_region, source.live_region);
@@ -160,10 +174,42 @@ bool HasMeaning(
          semantics.checked.has_value() || semantics.selected.has_value() || semantics.expanded.has_value() ||
          semantics.busy.has_value() || semantics.read_only.has_value() || semantics.required.has_value() ||
          semantics.invalid.has_value() || semantics.heading_level.has_value() || semantics.range.has_value() ||
-         semantics.text_selection.has_value() || semantics.collection.has_value() ||
+         semantics.text_selection.has_value() || semantics.scroll.has_value() || semantics.collection.has_value() ||
          semantics.collection_item.has_value() ||
          semantics.live_region.value_or(SemanticLiveRegion::None) != SemanticLiveRegion::None || actions != 0 ||
          has_virtual_children;
+}
+
+bool SupportsSemanticScroll(SemanticRole role) noexcept {
+  return role == SemanticRole::ScrollView || role == SemanticRole::List || role == SemanticRole::Grid;
+}
+
+ScrollMetrics MountedScrollMetrics(const detail::MountedNode& node) {
+  const Axis axis = detail::ScrollAxis(node);
+  const bool vertical = axis == Axis::Vertical;
+  const Rect viewport = detail::ScrollViewport(node);
+  const float viewport_extent = vertical ? viewport.height : viewport.width;
+  const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
+  const float offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
+  return {
+      .axis = axis,
+      .offset = offset,
+      .maximum_offset = std::max(0.0F, content_extent - viewport_extent),
+      .viewport_extent = viewport_extent,
+      .content_extent = content_extent,
+  };
+}
+
+Rect DescendantSemanticClip(const detail::MountedNode& node, Rect inherited) {
+  if (node.properties.clip_children) {
+    inherited = inherited.Intersection(detail::TransformBounds(node.presentation.resolved_transform, node.bounds));
+  }
+  if (node.scroll_state) {
+    inherited = inherited.Intersection(
+        detail::TransformBounds(node.presentation.resolved_transform, detail::ScrollViewport(node))
+    );
+  }
+  return inherited;
 }
 
 SemanticNode MakeSemanticNode(
@@ -172,7 +218,8 @@ SemanticNode MakeSemanticNode(
     const detail::SemanticPatch& semantics,
     bool enabled,
     bool focused,
-    Rect bounds
+    Rect bounds,
+    bool offscreen
 ) {
   return {
       .id = id,
@@ -195,11 +242,13 @@ SemanticNode MakeSemanticNode(
       .heading_level = semantics.heading_level,
       .range = semantics.range,
       .text_selection = semantics.text_selection,
+      .scroll = semantics.scroll,
       .collection = semantics.collection,
       .collection_item = semantics.collection_item,
       .live_region = semantics.live_region.value_or(SemanticLiveRegion::None),
       .enabled = enabled,
       .focused = focused,
+      .offscreen = offscreen,
       .bounds = bounds,
   };
 }
@@ -347,7 +396,11 @@ void Runtime::BuildSemantics() {
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> routes;
 
   using NodeIds = std::vector<SemanticNodeId>;
-  const auto visit = [&](auto&& self, detail::MountedNode& mounted, SemanticNodeId parent) -> NodeIds {
+  const auto visit = [&](auto&& self,
+                         detail::MountedNode& mounted,
+                         SemanticNodeId parent,
+                         Rect visible_bounds,
+                         bool has_scroll_ancestor) -> NodeIds {
     detail::SemanticPatch resolved = mounted.component_semantics;
     struct ExtensionContribution {
       std::size_t index = 0;
@@ -394,12 +447,26 @@ void Runtime::BuildSemantics() {
       return {};
     }
 
+    const std::optional<ScrollMetrics> actual_scroll =
+        mounted.scroll_state ? std::optional{MountedScrollMetrics(mounted)} : std::nullopt;
+    const bool publishes_scroll =
+        actual_scroll.has_value() && SupportsSemanticScroll(resolved.role.value_or(SemanticRole::Generic));
+    if (publishes_scroll) {
+      resolved.scroll = actual_scroll;
+    }
+
     std::uint64_t actions = owner_extension_actions;
     if (mounted.enabled && (mounted.activation || detail::HasEventBinding<ViewEvents::Click>(mounted.event_bindings))) {
       actions |= SemanticActionMask(SemanticActionKind::Activate);
     }
     if (mounted.enabled && mounted.focusable) {
       actions |= SemanticActionMask(SemanticActionKind::Focus);
+    }
+    if (mounted.enabled && publishes_scroll && actual_scroll->maximum_offset > 0.0F) {
+      actions |= SemanticActionMask(SemanticActionKind::Scroll);
+    }
+    if (mounted.enabled && has_scroll_ancestor) {
+      actions |= SemanticActionMask(SemanticActionKind::ShowOnScreen);
     }
     if (!mounted.enabled) {
       actions = 0;
@@ -431,8 +498,16 @@ void Runtime::BuildSemantics() {
     const SemanticNodeId child_parent = emit_owner ? owner_id : parent;
     std::size_t owner_index = 0;
     if (emit_owner) {
-      SemanticNode owner =
-          MakeSemanticNode(owner_id, parent, resolved, mounted.enabled, mounted.focused, mounted.PresentationBounds());
+      const Rect owner_bounds = mounted.PresentationBounds();
+      SemanticNode owner = MakeSemanticNode(
+          owner_id,
+          parent,
+          resolved,
+          mounted.enabled,
+          mounted.focused,
+          owner_bounds,
+          !owner_bounds.Intersects(visible_bounds)
+      );
       owner.actions = actions;
       if (text_input_configuration.has_value()) {
         owner.multiline = text_input_configuration->multiline;
@@ -451,9 +526,13 @@ void Runtime::BuildSemantics() {
     }
 
     std::vector<SemanticNodeId> children;
+    const Rect descendant_visible_bounds = DescendantSemanticClip(mounted, visible_bounds);
+    const bool descendants_have_scroll =
+        has_scroll_ancestor || (actual_scroll.has_value() && actual_scroll->maximum_offset > 0.0F);
     if (resolved.descendants.value_or(SemanticDescendantPolicy::Preserve) != SemanticDescendantPolicy::Exclude) {
       for (const std::unique_ptr<detail::MountedNode>& child : mounted.children) {
-        std::vector<SemanticNodeId> child_ids = self(self, *child, child_parent);
+        std::vector<SemanticNodeId> child_ids =
+            self(self, *child, child_parent, descendant_visible_bounds, descendants_have_scroll);
         children.insert(children.end(), child_ids.begin(), child_ids.end());
       }
     }
@@ -484,13 +563,15 @@ void Runtime::BuildSemantics() {
           id = state_->next_semantic_identity_++;
         }
         const Rect local_bounds = item.local_bounds.value_or(mounted.bounds);
+        const Rect child_bounds = detail::TransformBounds(mounted.presentation.resolved_transform, local_bounds);
         SemanticNode child = MakeSemanticNode(
             id,
             child_parent,
             item.semantics,
             mounted.enabled,
             false,
-            detail::TransformBounds(mounted.presentation.resolved_transform, local_bounds)
+            child_bounds,
+            !child_bounds.Intersects(descendant_visible_bounds)
         );
         child.actions = mounted.enabled ? item.actions : 0;
         child.custom_actions = item.custom_actions;
@@ -515,7 +596,7 @@ void Runtime::BuildSemantics() {
   };
 
   if (state_->mounted_root_ && !viewport.IsEmpty()) {
-    next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root);
+    next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false);
   }
 
   bool changed = !state_->frame_commit_.semantic_frame || state_->frame_commit_.semantic_frame->root != next.root ||
@@ -581,6 +662,45 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
     }
     RequestFrame();
     return true;
+  }
+  if (action.kind == SemanticActionKind::Scroll) {
+    if (!owner->scroll_state) {
+      return false;
+    }
+    const Point delta = std::get<Point>(action.value);
+    const float axis_delta = detail::ScrollAxis(*owner) == Axis::Vertical ? delta.y : delta.x;
+    if (!detail::CanScrollNode(*owner, axis_delta)) {
+      return false;
+    }
+    owner->scroll_state->motion.Stop();
+    if (detail::ScrollNodeBy(*owner, axis_delta) == 0.0F) {
+      return false;
+    }
+    NotifyScrollActivity(*owner, ScrollActivitySource::External);
+    return true;
+  }
+  if (action.kind == SemanticActionKind::ShowOnScreen) {
+    Rect target;
+    bool scrolled = false;
+    const auto reveal = [&](auto&& self, detail::MountedNode& current) -> bool {
+      if (current.identity == owner->identity) {
+        target = current.PresentationBounds();
+        return true;
+      }
+      for (const std::unique_ptr<detail::MountedNode>& child : current.children) {
+        if (!self(self, *child)) {
+          continue;
+        }
+        if (current.scroll_state && detail::ScrollNodeRectIntoView(current, target)) {
+          current.scroll_state->motion.Stop();
+          NotifyScrollActivity(current, ScrollActivitySource::External);
+          scrolled = true;
+        }
+        return true;
+      }
+      return false;
+    };
+    return reveal(reveal, *state_->mounted_root_) && (scrolled || !node->offscreen);
   }
   if (action.kind == SemanticActionKind::Activate) {
     ActivateNode(*owner);

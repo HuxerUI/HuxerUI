@@ -98,6 +98,10 @@ ScrollView {
 
 Nested containers consume movement from the innermost compatible container outward. Touch dragging crosses a threshold before taking over from a Click target, and unconsumed movement or inertial velocity can continue through a same-axis ancestor.
 
+`ScrollView` also publishes its axis, current offset, maximum offset, viewport extent, and content extent through the committed semantic tree.
+Accessibility adapters can scroll it along the declared axis and request that a retained descendant be revealed through every nested scroll ancestor.
+Semantic bounds remain the descendant's full transformed bounds, while the separate offscreen state reflects the viewport and ancestor clipping.
+
 ## ScrollController
 
 Create a stable controller when code needs to observe or change scroll position:

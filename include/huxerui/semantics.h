@@ -10,6 +10,7 @@
 
 #include <huxerui/geometry.h>
 #include <huxerui/resource.h>
+#include <huxerui/scroll.h>
 #include <huxerui/text_input.h>
 
 namespace huxerui {
@@ -115,6 +116,7 @@ struct Semantics {
   std::optional<unsigned int> heading_level;
   std::optional<SemanticRange> range;
   std::optional<TextRange> text_selection;
+  std::optional<ScrollMetrics> scroll;
   std::optional<SemanticCollection> collection;
   std::optional<SemanticCollectionItem> collection_item;
   std::optional<SemanticLiveRegion> live_region;
@@ -174,6 +176,7 @@ struct SemanticNode {
   std::optional<unsigned int> heading_level;
   std::optional<SemanticRange> range;
   std::optional<TextRange> text_selection;
+  std::optional<ScrollMetrics> scroll;
   std::optional<SemanticCollection> collection;
   std::optional<SemanticCollectionItem> collection_item;
   SemanticLiveRegion live_region = SemanticLiveRegion::None;
@@ -181,6 +184,7 @@ struct SemanticNode {
   bool focused = false;
   bool multiline = false;
   bool secure = false;
+  bool offscreen = false;
   std::uint64_t actions = 0;
   std::vector<std::pair<std::uint64_t, std::string>> custom_actions;
   Rect bounds;

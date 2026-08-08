@@ -16,6 +16,7 @@ enum class ScrollAlignment {
 };
 
 struct ScrollMetrics {
+  Axis axis = Axis::Vertical;
   float offset = 0.0F;
   float maximum_offset = 0.0F;
   float viewport_extent = 0.0F;

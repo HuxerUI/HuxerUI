@@ -240,6 +240,7 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   REQUIRE(root->scroll_state->axis == Axis::Horizontal);
   REQUIRE(root->scroll_state->content_width == 180.0F);
   REQUIRE(root->scroll_state->content_height == 40.0F);
+  REQUIRE(horizontal_view_scroll.Metrics().axis == Axis::Horizontal);
   REQUIRE(horizontal_view_scroll.ViewportExtent() == 100.0F);
   REQUIRE(horizontal_view_scroll.ContentExtent() == 180.0F);
   REQUIRE(horizontal_view_scroll.MaxOffset() == 80.0F);
@@ -413,7 +414,14 @@ TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
   runtime.BuildFrame();
   auto* scroll = runtime.RootNode()->children[1].get();
   REQUIRE(scroll->scroll_state->content_height - scroll->measured_size.height == 30.0F);
-  REQUIRE((scoped_grow_scroll.Metrics() == ScrollMetrics{0.0F, 30.0F, 60.0F, 90.0F}));
+  const ScrollMetrics initial_metrics{
+      .axis = Axis::Vertical,
+      .offset = 0.0F,
+      .maximum_offset = 30.0F,
+      .viewport_extent = 60.0F,
+      .content_extent = 90.0F,
+  };
+  REQUIRE(scoped_grow_scroll.Metrics() == initial_metrics);
 
   runtime.HandleScrollEvent({{50.0F, 60.0F}, 0.0F, 20.0F});
   runtime.BuildFrame();
@@ -428,7 +436,14 @@ TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
   scoped_scroll_content_height = 10.0F;
   runtime.BuildFrame();
   REQUIRE(scroll->scroll_state->offset_y == 0.0F);
-  REQUIRE((scoped_grow_scroll.Metrics() == ScrollMetrics{0.0F, 0.0F, 60.0F, 30.0F}));
+  const ScrollMetrics clamped_metrics{
+      .axis = Axis::Vertical,
+      .offset = 0.0F,
+      .maximum_offset = 0.0F,
+      .viewport_extent = 60.0F,
+      .content_extent = 30.0F,
+  };
+  REQUIRE(scoped_grow_scroll.Metrics() == clamped_metrics);
 }
 
 } // namespace huxerui::test

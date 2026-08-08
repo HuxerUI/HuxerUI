@@ -16,7 +16,7 @@ struct ScrollControllerAccess {
 };
 
 ScrollControllerState::ScrollControllerState(float initial_offset)
-    : metrics(std::make_shared<StateCell<ScrollMetrics>>(ScrollMetrics{initial_offset, 0.0F, 0.0F, 0.0F})),
+    : metrics(std::make_shared<StateCell<ScrollMetrics>>(ScrollMetrics{.offset = initial_offset})),
       pending_offset(initial_offset) {}
 
 ScrollConnection::ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerState> state)
@@ -102,10 +102,11 @@ void ScrollConnection::PublishMetrics() {
     return;
   }
   ScrollMetrics next{
-      CurrentOffset(),
-      std::max(0.0F, ContentExtent() - ViewportExtent()),
-      ViewportExtent(),
-      ContentExtent(),
+      .axis = ScrollAxis(*node_),
+      .offset = CurrentOffset(),
+      .maximum_offset = std::max(0.0F, ContentExtent() - ViewportExtent()),
+      .viewport_extent = ViewportExtent(),
+      .content_extent = ContentExtent(),
   };
   if (state_->metrics->value == next) {
     return;
