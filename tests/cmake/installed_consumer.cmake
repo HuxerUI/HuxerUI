@@ -1,14 +1,23 @@
-foreach (required_variable IN ITEMS BUILD_DIRECTORY BUILD_CONFIG WORK_DIRECTORY INSTALL_BINDIR CLI_SUFFIX PLATFORM_ID)
+foreach (required_variable IN ITEMS
+        BUILD_DIRECTORY BUILD_CONFIG WORK_DIRECTORY INSTALL_BINDIR CLI_SUFFIX PLATFORM_ID HOST_GENERATOR
+)
     if (NOT DEFINED ${required_variable})
         message(FATAL_ERROR "${required_variable} is required")
     endif ()
 endforeach ()
 
+get_filename_component(CMAKE_BIN_DIRECTORY "${CMAKE_COMMAND}" DIRECTORY)
+if (WIN32)
+    set(ENV{PATH} "${CMAKE_BIN_DIRECTORY};$ENV{PATH}")
+else ()
+    set(ENV{PATH} "${CMAKE_BIN_DIRECTORY}:$ENV{PATH}")
+endif ()
+
 string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef TEST_NONCE)
-set(TEST_ROOT "${WORK_DIRECTORY}/huxerui-installed-consumer-${TEST_NONCE}")
+set(TEST_ROOT "${WORK_DIRECTORY}/hux-${TEST_NONCE}")
 set(SDK_ROOT "${TEST_ROOT}/sdk")
-set(PROJECT_PARENT "${TEST_ROOT}/project")
-set(PROJECT_ROOT "${PROJECT_PARENT}/installed_consumer")
+set(PROJECT_PARENT "${TEST_ROOT}")
+set(PROJECT_ROOT "${PROJECT_PARENT}/app")
 file(MAKE_DIRECTORY "${PROJECT_PARENT}")
 
 set(INSTALL_COMMAND
@@ -34,7 +43,7 @@ if (NOT BUILD_PROFILE)
 endif ()
 execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_SDK_ROOT
-                "${HUXERUI_CLI}" create installed_consumer --platform "${PLATFORM_ID}"
+                "${HUXERUI_CLI}" create app --platform "${PLATFORM_ID}"
         WORKING_DIRECTORY "${PROJECT_PARENT}"
         RESULT_VARIABLE CREATE_RESULT
         OUTPUT_VARIABLE CREATE_OUTPUT
@@ -63,7 +72,9 @@ file(WRITE "${PROJECT_ROOT}/src/extra.cpp" "int AdditionalSource() {\n  return 4
 
 execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_SDK_ROOT
-                "${HUXERUI_CLI}" build "${PLATFORM_ID}" --profile "${BUILD_PROFILE}"
+                "${HUXERUI_CLI}" build "${PLATFORM_ID}"
+                --profile "${BUILD_PROFILE}"
+                --generator "${HOST_GENERATOR}"
         WORKING_DIRECTORY "${PROJECT_ROOT}"
         RESULT_VARIABLE BUILD_RESULT
         OUTPUT_VARIABLE BUILD_OUTPUT

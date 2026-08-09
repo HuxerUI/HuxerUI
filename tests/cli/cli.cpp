@@ -317,7 +317,8 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::create_directories(project);
   std::ofstream(project / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.20)\nproject(sample)\n";
-  std::filesystem::create_directories(project / "platform/ios/sample.xcodeproj");
+  const std::filesystem::path xcode_project = project / "platform" / "ios" / "sample.xcodeproj";
+  std::filesystem::create_directories(xcode_project);
   const std::filesystem::path build = project / ".huxerui/build/ios-simulator/debug";
   const huxerui::cli::PlatformCommandContext context{
       project,
@@ -336,7 +337,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
       build_commands[0].arguments ==
       std::vector<std::string>{
           "-project",
-          (project / "platform/ios/sample.xcodeproj").string(),
+          xcode_project.string(),
           "-scheme",
           "sample",
           "-configuration",
@@ -364,7 +365,9 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
 
   REQUIRE(run_commands.size() == 2);
   REQUIRE(run_commands[0].executable == "xcrun");
-  REQUIRE(run_commands[0].arguments == std::vector<std::string>{"simctl", "install", "booted", bundle.string()});
+  REQUIRE(
+      run_commands[0].arguments == std::vector<std::string>{"simctl", "install", "booted", bundle.generic_string()}
+  );
   REQUIRE(run_commands[1].executable == "xcrun");
   REQUIRE(run_commands[1].arguments == std::vector<std::string>{"simctl", "launch", "booted", "com.example.sample"});
 
@@ -390,7 +393,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
       physical_build_commands[0].arguments ==
       std::vector<std::string>{
           "-project",
-          (project / "platform/ios/sample.xcodeproj").string(),
+          xcode_project.string(),
           "-scheme",
           "sample",
           "-configuration",
@@ -428,7 +431,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           "app",
           "--device",
           physical_context.device->id,
-          physical_bundle.string(),
+          physical_bundle.generic_string(),
       }
   );
   REQUIRE(
@@ -453,7 +456,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
       std::vector<std::string>{
           "-a",
           "Xcode",
-          (project / "platform/ios/sample.xcodeproj").string(),
+          xcode_project.string(),
       }
   );
 }

@@ -239,6 +239,7 @@ if (TARGET huxerui_cli AND (WIN32 OR APPLE))
                     "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
                     "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
                     "-DPLATFORM_ID=${HUXERUI_INSTALLED_CONSUMER_PLATFORM}"
+                    "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/installed_consumer.cmake"
     )
 endif ()

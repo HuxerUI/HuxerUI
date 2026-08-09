@@ -175,7 +175,7 @@ bool IsIosPhysicalDevice(const PlatformCommandContext& context) {
 }
 
 std::filesystem::path IosProjectPath(const PlatformCommandContext& context) {
-  std::vector<std::filesystem::path> projects = IosProjects(context.project_root / "platform/ios");
+  std::vector<std::filesystem::path> projects = IosProjects(context.project_root / "platform" / "ios");
   if (projects.size() != 1) {
     throw std::runtime_error(projects.empty() ? "iOS Xcode project is missing" : "multiple iOS Xcode projects found");
   }
