@@ -514,27 +514,35 @@ std::function<View()>
 NavigationBarFactory(std::shared_ptr<const detail::ResolvedNavigationItems> items, std::size_t selected_index) {
   return [items = std::move(items), selected_index] {
     const NavigationBarStyle style = ResolveNavigationStyle<NavigationBarStyle>();
+    SystemBarsAppearance system_bars = UseEnvironment<SystemBarsAppearance>();
+    system_bars.navigation_bar_background = style.background;
     const EventEmitter events = UseEvents();
     std::vector<View> children;
     children.reserve(items->values.size());
     for (std::size_t index = 0; index < items->values.size(); ++index) {
       children.push_back(BuildBarItem(items->values[index], style, index == selected_index, index, events));
     }
-    return Row(std::move(children))
-        .With(
-            Frame{.height = std::max(0.0F, style.height)},
-            Background(style.background),
-            CrossAlign(CrossAxisAlignment::Stretch),
-            Focusable{},
-            detail::BuiltInSemantics{NavigationContainerSemantics(items->values.size())},
-            NavigationSelectionBehavior{
-                selected_index,
-                EnabledItems(*items),
-                Axis::Horizontal,
-                ScrollController{},
-                events,
-            }
-        );
+    View items_view = Row(std::move(children))
+                          .With(
+                              Frame{.height = std::max(0.0F, style.height)},
+                              CrossAlign(CrossAxisAlignment::Stretch),
+                              Focusable{},
+                              detail::BuiltInSemantics{NavigationContainerSemantics(items->values.size())},
+                              NavigationSelectionBehavior{
+                                  selected_index,
+                                  EnabledItems(*items),
+                                  Axis::Horizontal,
+                                  ScrollController{},
+                                  events,
+                              }
+                          );
+    return Stack {
+        std::move(items_view),
+    }.With(
+        Background(style.background),
+        SafeAreaPadding{.top = false},
+        system_bars
+    );
   };
 }
 
@@ -1089,7 +1097,9 @@ TopAppBar::TopAppBar(StringVariant title, std::optional<View> leading, std::vect
 
 TopAppBar::TopAppBar(Construction construction)
     : Layout<TopAppBar>(std::move(construction.children)), style_(std::move(construction.style)) {
-  ApplyModifiers(Background(style_.background), ClipChildren{});
+  SystemBarsAppearance system_bars = UseEnvironment<SystemBarsAppearance>();
+  system_bars.status_bar_background = style_.background;
+  ApplyModifiers(Background(style_.background), SafeAreaPadding{.bottom = false}, system_bars, ClipChildren{});
   UpdateConfiguration();
 }
 
@@ -1239,6 +1249,7 @@ StartDrawer::StartDrawer(View content)
   ApplyModifiers(
       Frame{.width = std::max(0.0F, style_.preferred_width)},
       Background(style_.background),
+      SafeAreaPadding{.right = false},
       ClipChildren{}
   );
 }
@@ -1261,6 +1272,7 @@ EndDrawer::EndDrawer(View content)
   ApplyModifiers(
       Frame{.width = std::max(0.0F, style_.preferred_width)},
       Background(style_.background),
+      SafeAreaPadding{.left = false},
       ClipChildren{}
   );
 }

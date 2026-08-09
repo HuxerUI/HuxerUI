@@ -11,7 +11,7 @@ struct SelectionAreaModifier {
 };
 
 Size MeasureSelectionArea(
-    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints
+    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints, EdgeInsets safe_area
 );
 
 } // namespace huxerui::detail

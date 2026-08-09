@@ -220,9 +220,8 @@ public:
 
   void Resize(Size viewport) {
     if (runtime_ != nullptr) {
-      runtime_->SetViewport({
-          std::max(0.0F, viewport.width),
-          std::max(0.0F, viewport.height),
+      runtime_->SetWindowMetrics({
+          .viewport = {std::max(0.0F, viewport.width), std::max(0.0F, viewport.height)},
       });
     }
   }

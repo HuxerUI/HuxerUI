@@ -258,8 +258,8 @@ public:
             platform
         ) {}
 
-  void SetViewport(Size viewport) {
-    runtime_.SetViewport(viewport);
+  void SetWindowMetrics(huxerui::WindowMetrics metrics) {
+    runtime_.SetWindowMetrics(metrics);
   }
 
   void UpdateResourceConfiguration(huxerui::ResourceConfiguration configuration) {
@@ -530,6 +530,13 @@ public:
     return current_time;
   }
 
+  void SetSystemBarsContentBrightness(
+      huxerui::SystemBarContentBrightness status_bar, huxerui::SystemBarContentBrightness navigation_bar
+  ) override {
+    ++system_bars_updates;
+    system_bar_brightness = std::pair{status_bar, navigation_bar};
+  }
+
   void AdvanceTime(double seconds) {
     current_time += seconds;
   }
@@ -615,6 +622,9 @@ public:
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
+  int system_bars_updates = 0;
+  std::optional<std::pair<huxerui::SystemBarContentBrightness, huxerui::SystemBarContentBrightness>>
+      system_bar_brightness;
   std::optional<huxerui::ProcessMetrics> process_metrics;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;

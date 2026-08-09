@@ -38,6 +38,9 @@ struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 class AppResources;
+struct WindowBackplaneState;
+
+bool IsValidSystemBarsAppearance(const SystemBarsAppearance& appearance) noexcept;
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -162,6 +165,12 @@ enum class LayerAnchorAlignment : std::uint8_t {
   End,
 };
 
+enum class LayerSafeAreaPolicy : std::uint8_t {
+  Constrain,
+  ExtendBottom,
+  Ignore,
+};
+
 struct LayerTransitionState {
   // LayerEntry owns this while retained modifiers observe it. The completion callback holds the controller weakly and
   // removes the entry only after the exit value settles.
@@ -183,6 +192,7 @@ struct LayerPlacement {
   float gap = 0.0F;
   float viewport_margin = 0.0F;
   Point offset;
+  LayerSafeAreaPolicy safe_area_policy = LayerSafeAreaPolicy::Constrain;
 
   // BottomCenter uses these fields for surfaces that fill compact viewports but retain a desktop width limit.
   bool fill_cross_axis = false;
@@ -402,7 +412,11 @@ struct LabelLayoutCache {
 using ViewKey = std::variant<std::int64_t, std::uint64_t, std::string>;
 
 struct ViewProperties {
+  // Declarative padding is copied unchanged from ViewSpec into MountedNode; dynamic safe-area insets are never folded
+  // back into this value.
   EdgeInsets padding;
+  // This declaration selects which inherited safe-area edges measurement adds to the node's resolved padding.
+  std::optional<SafeAreaPadding> safe_area_padding;
   Frame frame;
   std::optional<Color> background;
   std::optional<Color> disabled_background;
@@ -427,20 +441,23 @@ struct ViewProperties {
   Color focus_ring = Color::Rgb(31, 111, 235);
   float focus_ring_width = 2.0F;
   float disabled_opacity = 0.42F;
+  // Runtime resolves this declaration against final window-edge geometry after layout and presentation transforms.
+  std::optional<SystemBarsAppearance> system_bars_appearance;
 
   bool operator==(const ViewProperties&) const = default;
 
   // Reconciliation compares the inputs consumed by layout, content paint, and foreground paint independently.
   // New property fields must participate in every projection whose stage reads them.
   [[nodiscard]] bool LayoutEquals(const ViewProperties& other) const {
-    return padding == other.padding && frame == other.frame && text_style.font == other.text_style.font &&
-           text_layout_options == other.text_layout_options && spacing == other.spacing && grow == other.grow &&
-           main_axis_alignment == other.main_axis_alignment && cross_axis_alignment == other.cross_axis_alignment &&
-           horizontal_alignment == other.horizontal_alignment && vertical_alignment == other.vertical_alignment;
+    return padding == other.padding && safe_area_padding == other.safe_area_padding && frame == other.frame &&
+           text_style.font == other.text_style.font && text_layout_options == other.text_layout_options &&
+           spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
+           cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
+           vertical_alignment == other.vertical_alignment;
   }
 
   [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
-    return padding == other.padding && background == other.background &&
+    return padding == other.padding && safe_area_padding == other.safe_area_padding && background == other.background &&
            disabled_background == other.disabled_background && border == other.border &&
            disabled_border == other.disabled_border && border_width == other.border_width && shadow == other.shadow &&
            text_style == other.text_style && text_layout_options == other.text_layout_options &&
@@ -633,7 +650,12 @@ struct MountedNode final : public huxerui::MountedNode {
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
   std::shared_ptr<RecomposeScope> recompose_scope;
+  // Constraints and the incoming unconsumed safe area jointly identify a reusable measurement result.
   std::optional<Constraints> measured_constraints;
+  std::optional<EdgeInsets> measured_safe_area;
+  // Measurement derives this from properties.padding plus the safe-area edges consumed by this node. Layout and paint
+  // use the resolved value while the declarative properties remain stable across window-inset changes.
+  EdgeInsets resolved_padding;
   Size measured_size;
   // Bounds stay at the node-local origin; layout_offset places the node in its parent's local coordinates.
   Rect bounds;
@@ -670,10 +692,10 @@ struct MountedNode final : public huxerui::MountedNode {
 
   [[nodiscard]] Rect ContentBounds() const noexcept {
     return {
-        bounds.x + properties.padding.left,
-        bounds.y + properties.padding.top,
-        std::max(0.0F, bounds.width - properties.padding.Horizontal()),
-        std::max(0.0F, bounds.height - properties.padding.Vertical()),
+        bounds.x + resolved_padding.left,
+        bounds.y + resolved_padding.top,
+        std::max(0.0F, bounds.width - resolved_padding.Horizontal()),
+        std::max(0.0F, bounds.height - resolved_padding.Vertical()),
     };
   }
 
@@ -1081,15 +1103,18 @@ struct Runtime::State {
       PlatformAdapter* platform,
       std::shared_ptr<detail::RecomposeScope> root_scope,
       LayerController layer_controller,
-      ViewportBreakpoints viewport_breakpoints
+      ViewportBreakpoints viewport_breakpoints,
+      WindowContentMode window_content_mode
   )
       : root_factory_(root_factory), platform_(platform), viewport_breakpoints_(viewport_breakpoints),
-        root_scope_(std::move(root_scope)), layer_controller_(std::move(layer_controller)) {}
+        window_content_mode_(window_content_mode), root_scope_(std::move(root_scope)),
+        layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
   PlatformAdapter* platform_;
-  Size viewport_;
+  WindowMetrics window_metrics_;
   ViewportBreakpoints viewport_breakpoints_;
+  WindowContentMode window_content_mode_ = WindowContentMode::SafeArea;
   ViewportClass viewport_class_ = ViewportClass::Compact;
   std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
@@ -1098,6 +1123,8 @@ struct Runtime::State {
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
+  std::shared_ptr<detail::WindowBackplaneState> window_backplane_;
+  std::optional<std::pair<SystemBarContentBrightness, SystemBarContentBrightness>> system_bar_brightness_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
@@ -1144,7 +1171,8 @@ struct RuntimeAccess {
   }
 };
 
-Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime);
+Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime,
+                 EdgeInsets safe_area = {});
 void LayoutNode(MountedNode& node, Point offset);
 float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept;
 Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;

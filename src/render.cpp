@@ -381,8 +381,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                    ? Rect{
                                          0.0F,
                                          0.0F,
-                                         std::max(0.0F, bounds.width - node.properties.padding.Horizontal()),
-                                         std::max(0.0F, bounds.height - node.properties.padding.Vertical()),
+                                         std::max(0.0F, bounds.width - node.resolved_padding.Horizontal()),
+                                         std::max(0.0F, bounds.height - node.resolved_padding.Vertical()),
                                      }
                                    : bounds;
     PaintContext content{render_node.content, canvas_bounds};
@@ -451,7 +451,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);
     } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
-      const Point content_origin{node.properties.padding.left, node.properties.padding.top};
+      const Point content_origin{node.resolved_padding.left, node.resolved_padding.top};
       if (content_origin != Point{}) {
         content.PushTransform(TranslationTransform(content_origin));
       }

@@ -566,9 +566,9 @@ private:
     RECT client{};
     GetClientRect(window_, &client);
     const float scale = DpiScale();
-    runtime_->SetViewport({
-        static_cast<float>(client.right - client.left) / scale,
-        static_cast<float>(client.bottom - client.top) / scale,
+    runtime_->SetWindowMetrics({
+        .viewport = {static_cast<float>(client.right - client.left) / scale,
+                     static_cast<float>(client.bottom - client.top) / scale},
     });
   }
 

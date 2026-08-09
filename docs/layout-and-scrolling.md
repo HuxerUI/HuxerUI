@@ -74,6 +74,27 @@ HUXERUI_APP(
 
 Changing width within one class only runs measurement and layout. Crossing a boundary updates the root Environment and recomposes the application root and window layers so captured themed presentation sees the same class. HuxerUI intentionally does not publish continuously changing viewport dimensions through Environment; exact dimensions remain layout constraints and platform geometry.
 
+## Window insets
+
+`WindowContentMode::SafeArea` is the default and constrains the application root without requiring an explicit wrapper.
+`WindowContentMode::EdgeToEdge` gives the application the complete viewport so edge-aware components can draw behind system bars.
+
+`SafeAreaPadding` consumes selected edges from the remaining layout-time safe area and adds them to ordinary padding:
+
+```cpp
+return Canvas(DrawScene).With(
+    Padding(8.0F),
+    SafeAreaPadding{
+        .bottom = false,
+    }
+);
+```
+
+The background covers both forms of padding, while child content is inset.
+Consumed edges become zero for descendants, so nested structural components do not apply the same inset twice.
+Custom `Layout` policies can inspect the unconsumed value through `LayoutContext::SafeAreaInsets()` without making exact window geometry an Environment dependency.
+See [Window Insets and System Bars Design](design/window-insets.md) for root modes, system-bar appearance, presentation layers, and native mappings.
+
 ## ScrollView
 
 `ScrollView` mounts its complete content and scrolls vertically by default:

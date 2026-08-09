@@ -14,6 +14,7 @@
 #include <huxerui/indication.h>
 #include <huxerui/text.h>
 #include <huxerui/view.h>
+#include <huxerui/window.h>
 
 namespace huxerui {
 

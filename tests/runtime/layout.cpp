@@ -339,7 +339,7 @@ View ScopedCachedLayoutApp() {
 TEST_CASE("TestMainAndCrossAxisAlignment") {
   TestPlatform platform;
   Runtime runtime{AxisAlignmentApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -362,7 +362,7 @@ TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {
 
   TestPlatform platform;
   Runtime runtime{ImageLayoutApp, platform};
-  runtime.SetViewport({200.0F, 200.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto image = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
@@ -383,7 +383,7 @@ TEST_CASE("TestVectorImageUsesImageLayoutAndSharedPathPainting") {
   });
   TestPlatform platform;
   Runtime runtime{VectorImageLayoutApp, platform};
-  runtime.SetViewport({200.0F, 200.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto fill = std::ranges::find_if(scene.Commands(), [](const PaintCommand& command) {
@@ -417,7 +417,7 @@ TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {
     layout_test_image_horizontal_alignment = horizontal;
     layout_test_image_vertical_alignment = vertical;
     Runtime runtime{ImageLayoutApp, platform};
-    runtime.SetViewport({200.0F, 200.0F});
+    runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
     const FlattenedScene& scene = runtime.BuildFrame();
     const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
       return std::holds_alternative<DrawImageCommand>(value);
@@ -457,7 +457,7 @@ TEST_CASE("TestImagePaintOnlyChangesReuseMeasuredLayout") {
   layout_test_image_frame = {100.0F, 100.0F};
   TestPlatform platform;
   Runtime runtime{ImageLayoutApp, platform};
-  runtime.SetViewport({200.0F, 200.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   runtime.BuildFrame();
 
   const detail::MountedNode* image = runtime.RootNode()->children.front().get();
@@ -482,7 +482,7 @@ TEST_CASE("TestImagePaintOnlyChangesReuseMeasuredLayout") {
 TEST_CASE("TestSpacerAndGrowLayout") {
   TestPlatform platform;
   Runtime runtime{SpacerLayoutApp, platform};
-  runtime.SetViewport({200.0F, 60.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -495,7 +495,7 @@ TEST_CASE("TestSpacerAndGrowLayout") {
   REQUIRE(root->children[2]->layout_offset.y == 20.0F);
 
   Runtime grow_runtime{GrowLayoutApp, platform};
-  grow_runtime.SetViewport({300.0F, 40.0F});
+  grow_runtime.SetWindowMetrics({.viewport = {300.0F, 40.0F}});
   grow_runtime.BuildFrame();
 
   root = grow_runtime.RootNode();
@@ -507,7 +507,7 @@ TEST_CASE("TestSpacerAndGrowLayout") {
 TEST_CASE("TestStackAndStretchAlignment") {
   TestPlatform platform;
   Runtime stack_runtime{StackAlignmentApp, platform};
-  stack_runtime.SetViewport({100.0F, 80.0F});
+  stack_runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   stack_runtime.BuildFrame();
 
   const auto* root = stack_runtime.RootNode();
@@ -516,7 +516,7 @@ TEST_CASE("TestStackAndStretchAlignment") {
   REQUIRE(root->children[0]->layout_offset.y == 35.0F);
 
   Runtime stretch_runtime{StretchLayoutApp, platform};
-  stretch_runtime.SetViewport({120.0F, 80.0F});
+  stretch_runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
   stretch_runtime.BuildFrame();
 
   root = stretch_runtime.RootNode();
@@ -526,7 +526,7 @@ TEST_CASE("TestStackAndStretchAlignment") {
 TEST_CASE("TestWrappedTextMeasurement") {
   TestPlatform platform;
   Runtime runtime{WrappedTextApp, platform};
-  runtime.SetViewport({40.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {40.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -538,7 +538,7 @@ TEST_CASE("TestWrappedTextMeasurement") {
 TEST_CASE("TestAdaptiveFrameConstraints") {
   TestPlatform platform;
   Runtime runtime{AdaptiveFrameApp, platform};
-  runtime.SetViewport({120.0F, 400.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 400.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -563,7 +563,7 @@ TEST_CASE("TestAdaptiveFrameConstraints") {
 TEST_CASE("TestFrameConstraintsRespectParentAndBoundContainers") {
   TestPlatform platform;
   Runtime constrained{ParentConstrainedFrameApp, platform};
-  constrained.SetViewport({80.0F, 60.0F});
+  constrained.SetWindowMetrics({.viewport = {80.0F, 60.0F}});
   constrained.BuildFrame();
 
   const auto* root = constrained.RootNode();
@@ -572,7 +572,7 @@ TEST_CASE("TestFrameConstraintsRespectParentAndBoundContainers") {
   REQUIRE(root->measured_size.height == 60.0F);
 
   Runtime containers{BoundedContainerFrameApp, platform};
-  containers.SetViewport({120.0F, 200.0F});
+  containers.SetWindowMetrics({.viewport = {120.0F, 200.0F}});
   containers.BuildFrame();
 
   root = containers.RootNode();
@@ -590,7 +590,7 @@ TEST_CASE("TestFrameConstraintValidation") {
 TEST_CASE("TestFlowWrapsAndAlignsChildrenWithinLines") {
   TestPlatform platform;
   Runtime runtime{FlowWrapApp, platform};
-  runtime.SetViewport({120.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -610,7 +610,7 @@ TEST_CASE("TestFlowWrapsAndAlignsChildrenWithinLines") {
 TEST_CASE("TestFlowAppliesMainAlignmentPerLine") {
   TestPlatform platform;
   Runtime runtime{FlowAlignmentApp, platform};
-  runtime.SetViewport({120.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -623,7 +623,7 @@ TEST_CASE("TestFlowAppliesMainAlignmentPerLine") {
 TEST_CASE("TestFlowDistributesGrowWithinEachLine") {
   TestPlatform platform;
   Runtime runtime{FlowGrowApp, platform};
-  runtime.SetViewport({120.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -641,7 +641,7 @@ TEST_CASE("TestFlowDistributesGrowWithinEachLine") {
 TEST_CASE("TestFlowKeepsIntrinsicGrowSizesWithUnboundedWidth") {
   TestPlatform platform;
   Runtime runtime{UnboundedFlowApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -656,7 +656,7 @@ TEST_CASE("TestFlowKeepsIntrinsicGrowSizesWithUnboundedWidth") {
 TEST_CASE("TestForEachFlattensChildren") {
   TestPlatform platform;
   Runtime runtime{ForEachLayoutApp, platform};
-  runtime.SetViewport({200.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 160.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -677,7 +677,7 @@ TEST_CASE("TestForEachFlattensChildren") {
 TEST_CASE("TestForEachKeyedIdentity") {
   TestPlatform platform;
   Runtime runtime{ForEachIdentityApp, platform};
-  runtime.SetViewport({320.0F, 320.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 320.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -713,7 +713,7 @@ TEST_CASE("TestReactiveStateApis") {
 
   TestPlatform platform;
   Runtime runtime{ReactiveStateApiApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -735,7 +735,7 @@ TEST_CASE("TestReactiveStateApis") {
 TEST_CASE("TestLayoutReusesUnchangedMeasurements") {
   TestPlatform platform;
   Runtime runtime{CachedLayoutApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -765,7 +765,7 @@ TEST_CASE("TestLayoutReusesUnchangedMeasurements") {
   REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
   REQUIRE(root->children[1]->layout_revision == stable_layout_revision);
 
-  runtime.SetViewport({240.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
 
   root = runtime.RootNode();
@@ -775,7 +775,7 @@ TEST_CASE("TestLayoutReusesUnchangedMeasurements") {
 TEST_CASE("TestScopedLayoutInvalidationPropagatesToAncestors") {
   TestPlatform platform;
   Runtime runtime{ScopedCachedLayoutApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -801,7 +801,7 @@ TEST_CASE("TestScopedLayoutInvalidationPropagatesToAncestors") {
 TEST_CASE("TestNonComparableLayoutValueInvalidatesConservatively") {
   TestPlatform platform;
   Runtime runtime{OpaqueLayoutValueApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -818,7 +818,7 @@ TEST_CASE("TestNonComparableLayoutValueInvalidatesConservatively") {
 TEST_CASE("TestCustomLayoutProtocol") {
   TestPlatform platform;
   Runtime runtime{CustomLayoutApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -841,7 +841,7 @@ TEST_CASE("TestCustomLayoutProtocol") {
 TEST_CASE("TestLayoutTypeParticipatesInIdentity") {
   TestPlatform platform;
   Runtime runtime{LayoutIdentityApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();

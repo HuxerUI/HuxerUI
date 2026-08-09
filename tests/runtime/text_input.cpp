@@ -328,7 +328,7 @@ TEST_CASE("TestTextInputSessionFollowsFocus") {
 
   {
     Runtime runtime{TwoTextClientsApp, platform};
-    runtime.SetViewport({200.0F, 100.0F});
+    runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
     runtime.BuildFrame();
 
     FocusNext(runtime);
@@ -356,7 +356,7 @@ TEST_CASE("TestExitingDialogStopsAndCanRestoreTextInput") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{DialogTextInputApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
   REQUIRE(text_input_dialog.has_value());
 
@@ -392,7 +392,7 @@ TEST_CASE("TestTextInputSessionSurvivesRecompositionAndSynchronizesState") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{TwoTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
   REQUIRE(first_text_client->geometry_queries == 1);
@@ -428,7 +428,7 @@ TEST_CASE("TestTextInputActionValidatesSessionConfigurationAndClientHandling") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{TwoTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
 
@@ -456,7 +456,7 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{TwoTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
 
@@ -502,7 +502,7 @@ TEST_CASE("TestTextInputRejectsContentChangesWithoutStateRevision") {
   ResetTextInputProbes();
   TestPlatform platform;
   Runtime runtime{TwoTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
 
@@ -515,7 +515,7 @@ TEST_CASE("TestTextInputRejectsInvalidGeometry") {
   first_text_client->invalid_geometry = true;
   TestPlatform platform;
   Runtime runtime{TwoTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(FocusNext(runtime), std::logic_error);
@@ -530,7 +530,7 @@ TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{PointerTextClientApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(
@@ -553,7 +553,7 @@ TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {
   platform.platform_text_input = &text_input;
 
   Runtime replacement{ReplaceTextClientApp, platform};
-  replacement.SetViewport({200.0F, 100.0F});
+  replacement.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   replacement.BuildFrame();
   FocusNext(replacement);
 
@@ -569,7 +569,7 @@ TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {
   TestPlatform removal_platform;
   removal_platform.platform_text_input = &removal_text_input;
   Runtime removal{RemoveTextClientApp, removal_platform};
-  removal.SetViewport({200.0F, 100.0F});
+  removal.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   removal.BuildFrame();
   FocusNext(removal);
 
@@ -588,7 +588,7 @@ TEST_CASE("TestTextInputClientHandlesKeysBeforeGenericEvents") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{TextKeyClientApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
 
@@ -612,7 +612,7 @@ TEST_CASE("TestReadOnlyTextInputConfigurationDoesNotOpenKeyboard") {
   platform.platform_text_input = &text_input;
 
   Runtime runtime{TextKeyClientApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
 
@@ -635,7 +635,7 @@ TEST_CASE("TestFocusableNodeRejectsMultipleTextInputClients") {
   ResetTextInputProbes();
   TestPlatform platform;
   Runtime runtime{MultipleTextClientsApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(FocusNext(runtime), std::logic_error);

@@ -83,6 +83,13 @@ public final class HuxerUIView extends View {
     private static final int PATH_CLOSE = 4;
     private static final int IMAGE_CACHE_BUDGET = 64 * 1024 * 1024;
 
+    static final int SYSTEM_BAR_CONTENT_LIGHT = 1;
+    static final int SYSTEM_BAR_CONTENT_DARK = 2;
+
+    interface SystemBarsController {
+        void setContentBrightness(int statusBar, int navigationBar);
+    }
+
     private static final float SCROLL_STEP = 48.0F;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -125,6 +132,11 @@ public final class HuxerUIView extends View {
     private HuxerUIInputConnection inputConnection;
     private HuxerUIShadowRenderer shadowRenderer;
     private int imeInsetBottom;
+    private int safeInsetLeft;
+    private int safeInsetTop;
+    private int safeInsetRight;
+    private int safeInsetBottom;
+    private SystemBarsController systemBarsController;
 
     private boolean updateTextInputGeometry() {
         if (inputConnection != null) {
@@ -150,6 +162,10 @@ public final class HuxerUIView extends View {
         setClickable(true);
     }
 
+    void setSystemBarsController(SystemBarsController controller) {
+        systemBarsController = controller;
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -158,6 +174,7 @@ public final class HuxerUIView extends View {
             nativeHandle = nativeCreate(this);
             resizeNativeState(getWidth(), getHeight());
         }
+        requestApplyInsets();
     }
 
     @Override
@@ -222,9 +239,27 @@ public final class HuxerUIView extends View {
     @Override
     public WindowInsets onApplyWindowInsets(WindowInsets insets) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.graphics.Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
+            android.graphics.Insets displayCutout = insets.getInsets(WindowInsets.Type.displayCutout());
+            safeInsetLeft = Math.max(systemBars.left, displayCutout.left);
+            safeInsetTop = Math.max(systemBars.top, displayCutout.top);
+            safeInsetRight = Math.max(systemBars.right, displayCutout.right);
+            safeInsetBottom = Math.max(systemBars.bottom, displayCutout.bottom);
             imeInsetBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
-            resizeNativeState(getWidth(), getHeight());
+        } else {
+            safeInsetLeft = insets.getStableInsetLeft();
+            safeInsetTop = insets.getStableInsetTop();
+            safeInsetRight = insets.getStableInsetRight();
+            safeInsetBottom = insets.getStableInsetBottom();
+            imeInsetBottom = Math.max(0, insets.getSystemWindowInsetBottom() - safeInsetBottom);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && insets.getDisplayCutout() != null) {
+                safeInsetLeft = Math.max(safeInsetLeft, insets.getDisplayCutout().getSafeInsetLeft());
+                safeInsetTop = Math.max(safeInsetTop, insets.getDisplayCutout().getSafeInsetTop());
+                safeInsetRight = Math.max(safeInsetRight, insets.getDisplayCutout().getSafeInsetRight());
+                safeInsetBottom = Math.max(safeInsetBottom, insets.getDisplayCutout().getSafeInsetBottom());
+            }
         }
+        resizeNativeState(getWidth(), getHeight());
         return super.onApplyWindowInsets(insets);
     }
 
@@ -518,7 +553,15 @@ public final class HuxerUIView extends View {
             return;
         }
         int usableHeight = Math.max(0, height - imeInsetBottom);
-        nativeResize(nativeHandle, width / density, usableHeight / density);
+        int bottomInset = imeInsetBottom > 0 ? 0 : safeInsetBottom;
+        nativeResize(nativeHandle, width / density, usableHeight / density, safeInsetLeft / density,
+                safeInsetTop / density, safeInsetRight / density, bottomInset / density);
+    }
+
+    private void setSystemBarsContentBrightness(int statusBar, int navigationBar) {
+        if (systemBarsController != null) {
+            systemBarsController.setContentBrightness(statusBar, navigationBar);
+        }
     }
 
     private void sendPointer(MotionEvent event, int index, int type) {
@@ -1166,7 +1209,8 @@ public final class HuxerUIView extends View {
 
     private static native void nativeDestroy(long handle);
 
-    private static native void nativeResize(long handle, float width, float height);
+    private static native void nativeResize(
+            long handle, float width, float height, float safeLeft, float safeTop, float safeRight, float safeBottom);
 
     private static native void nativeUpdateResourceConfiguration(long handle, byte[] languageTag, float displayScale);
 

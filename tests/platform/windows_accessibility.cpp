@@ -48,7 +48,7 @@ std::wstring PropertyString(IRawElementProviderSimple& provider, PROPERTYID prop
 TEST_CASE("Windows accessibility maps semantic properties and stable fragments") {
   TestPlatform platform;
   Runtime runtime(WindowsAccessibilityApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   REQUIRE(frame);
 
@@ -93,7 +93,7 @@ TEST_CASE("Windows accessibility patterns route actions through Runtime") {
   accessibility_clicks = 0;
   TestPlatform platform;
   Runtime runtime(WindowsAccessibilityApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   REQUIRE(frame);
 

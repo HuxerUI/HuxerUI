@@ -214,7 +214,7 @@ TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   TestPlatform platform;
   platform.platform_resources = &resources;
   Runtime runtime{LocalizedResourceApp, platform};
-  runtime.SetViewport({200.0F, 60.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "你好，Ada");
   resources.configuration.locale = Locale::FromLanguageTag("en-US");
@@ -275,7 +275,7 @@ TEST_CASE("TextAndControlsResolveStringResourcesDirectly") {
   TestPlatform platform;
   platform.platform_resources = &resources;
   Runtime runtime{DirectLocalizedResourceApp, platform};
-  runtime.SetViewport({200.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 160.0F}});
 
   const FlattenedScene& scene = runtime.BuildFrame();
   REQUIRE(ContainsText(scene, "Localized title"));
@@ -319,7 +319,7 @@ TEST_CASE("MenuItemsResolveStringAndImageResources") {
   TestPlatform platform;
   platform.platform_resources = &resources;
   Runtime runtime{ResourceMenuApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
 
@@ -360,7 +360,7 @@ TEST_CASE("PresentedStringVariantsRefreshWhenTheResourceConfigurationChanges") {
   TestPlatform platform;
   platform.platform_resources = &resources;
   Runtime runtime{ResourceMenuApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
 
@@ -392,11 +392,11 @@ TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {
   platform.platform_resources = &resources;
 
   Runtime missing{MissingResourceArgumentsApp, platform};
-  missing.SetViewport({200.0F, 60.0F});
+  missing.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   REQUIRE_THROWS_AS(missing.BuildFrame(), std::invalid_argument);
 
   Runtime extra{ExtraResourceArgumentsApp, platform};
-  extra.SetViewport({200.0F, 60.0F});
+  extra.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   REQUIRE_THROWS_AS(extra.BuildFrame(), std::invalid_argument);
 }
 

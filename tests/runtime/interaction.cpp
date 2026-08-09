@@ -172,7 +172,7 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
 
   TestPlatform platform;
   Runtime runtime{PointerInputApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(
@@ -301,7 +301,7 @@ TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {
 
   TestPlatform platform;
   Runtime runtime{ExtensionPointerTargetApp, platform};
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
   ClickAt(runtime, {50.0F, 20.0F}, 122);
@@ -314,7 +314,7 @@ TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {
 
   TestPlatform platform;
   Runtime runtime{PointerInputApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   ClickAt(runtime, {50.0F, 20.0F}, 12);
@@ -345,7 +345,7 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
 
   TestPlatform platform;
   Runtime runtime{DragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(
@@ -438,7 +438,7 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
 TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
   TestPlatform platform;
   Runtime runtime{DragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(
@@ -507,7 +507,7 @@ TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
 TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   TestPlatform platform;
   Runtime touch{DragScrollApp, platform};
-  touch.SetViewport({100.0F, 100.0F});
+  touch.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   touch.BuildFrame();
   REQUIRE(drag_scroll.ScrollTo(drag_scroll.MaxOffset() - 5.0F));
   touch.BuildFrame();
@@ -544,7 +544,7 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
 
   TestPlatform mouse_platform;
   Runtime mouse{DragScrollApp, mouse_platform};
-  mouse.SetViewport({100.0F, 100.0F});
+  mouse.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   mouse.BuildFrame();
   mouse.HandlePointerEvent(
       PointerEvent{
@@ -579,7 +579,7 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
 
   TestPlatform horizontal_platform;
   Runtime horizontal{HorizontalDragScrollApp, horizontal_platform};
-  horizontal.SetViewport({100.0F, 40.0F});
+  horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   horizontal.BuildFrame();
   horizontal.HandlePointerEvent(
       PointerEvent{
@@ -619,7 +619,7 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
   };
   TestPlatform platform;
   Runtime runtime{ConfiguredDragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent(
       PointerEvent{
@@ -670,7 +670,7 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
 TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
   TestPlatform platform;
   Runtime runtime{HorizontalDragScrollApp, platform};
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(
@@ -712,7 +712,7 @@ TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
 TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   TestPlatform platform;
   Runtime runtime{NestedDragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   REQUIRE(nested_inner_scroll.ScrollTo(130.0F));
@@ -751,7 +751,7 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
 TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
   TestPlatform platform;
   Runtime runtime{NestedDragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   REQUIRE(nested_inner_scroll.ScrollTo(130.0F));
@@ -783,7 +783,7 @@ TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
 TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
   TestPlatform platform;
   Runtime runtime{NestedDragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   REQUIRE(nested_inner_scroll.ScrollTo(120.0F));
@@ -833,7 +833,7 @@ TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
 TEST_CASE("TestApplyOnlyModifiersDoNotReplaceNodeExtensions") {
   TestPlatform platform;
   Runtime runtime{ModifierReconciliationApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -859,7 +859,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 
   TestPlatform platform;
   Runtime vertical{DragScrollApp, platform};
-  vertical.SetViewport({100.0F, 100.0F});
+  vertical.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& vertical_display = vertical.BuildFrame();
 
   const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
@@ -921,7 +921,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(std::abs(moved_vertical_bar->thumb.y - 33.0F) < 0.01F);
 
   Runtime horizontal{HorizontalDragScrollApp, platform};
-  horizontal.SetViewport({100.0F, 40.0F});
+  horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& horizontal_display = horizontal.BuildFrame();
   const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
   REQUIRE(horizontal_bar.has_value());
@@ -957,7 +957,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(std::abs(horizontal_drag_scroll.Offset() - 1671.4286F) < 0.01F);
 
   Runtime short_content{ShortScrollBarApp, platform};
-  short_content.SetViewport({100.0F, 100.0F});
+  short_content.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   short_content.BuildFrame();
   REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode()));
 
@@ -977,7 +977,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(invalid_style_rejected);
 
   Runtime themed{ThemedScrollBarApp, platform};
-  themed.SetViewport({100.0F, 100.0F});
+  themed.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   themed.BuildFrame();
   const auto* themed_root = themed.RootNode();
   REQUIRE(themed_root != nullptr);
@@ -989,7 +989,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(themed_bar->style.corner_radius == 4.5F);
 
   Runtime dark{FlatDarkScrollBarApp, platform};
-  dark.SetViewport({100.0F, 100.0F});
+  dark.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   dark.BuildFrame();
   const auto* dark_root = dark.RootNode();
   REQUIRE(dark_root != nullptr);
@@ -1017,7 +1017,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
 
   TestPlatform platform;
   Runtime runtime{DragScrollApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
   REQUIRE(geometry.has_value());

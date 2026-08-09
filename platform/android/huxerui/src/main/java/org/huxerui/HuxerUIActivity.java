@@ -1,8 +1,12 @@
 package org.huxerui;
 
 import android.app.Activity;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowInsetsController;
 import android.window.BackEvent;
 import android.window.OnBackAnimationCallback;
 import android.window.OnBackInvokedCallback;
@@ -19,8 +23,11 @@ public class HuxerUIActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        configureEdgeToEdgeWindow();
         contentView = new HuxerUIView(this);
+        contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
         setContentView(contentView);
+        setSystemBarsContentBrightness(HuxerUIView.SYSTEM_BAR_CONTENT_DARK, HuxerUIView.SYSTEM_BAR_CONTENT_DARK);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             backCallback = Api34.registerBackCallback(this);
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -50,6 +57,9 @@ public class HuxerUIActivity extends Activity {
             }
             backCallback = null;
         }
+        if (contentView != null) {
+            contentView.setSystemBarsController(null);
+        }
         contentView = null;
         super.onDestroy();
     }
@@ -57,6 +67,86 @@ public class HuxerUIActivity extends Activity {
     private void dispatchBack() {
         if (contentView == null || !contentView.handleBack()) {
             onUnhandledBack();
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void configureEdgeToEdgeWindow() {
+        Window window = getWindow();
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Api30.configureEdgeToEdge(window);
+        } else {
+            window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Api29.disableContrastEnforcement(window);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void setSystemBarsContentBrightness(int statusBar, int navigationBar) {
+        Window window = getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Api30.setContentBrightness(window, statusBar, navigationBar);
+            return;
+        }
+        View decorView = window.getDecorView();
+        int visibility = decorView.getSystemUiVisibility();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (statusBar == HuxerUIView.SYSTEM_BAR_CONTENT_DARK) {
+                visibility |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            } else {
+                visibility &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (navigationBar == HuxerUIView.SYSTEM_BAR_CONTENT_DARK) {
+                visibility |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            } else {
+                visibility &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+        }
+        decorView.setSystemUiVisibility(visibility);
+    }
+
+    private static final class Api29 {
+        private Api29() {}
+
+        static void disableContrastEnforcement(Window window) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+    }
+
+    private static final class Api30 {
+        private Api30() {}
+
+        static void configureEdgeToEdge(Window window) {
+            window.setDecorFitsSystemWindows(false);
+        }
+
+        static void setContentBrightness(Window window, int statusBar, int navigationBar) {
+            View decorView = window.peekDecorView();
+            if (decorView == null) {
+                return;
+            }
+            WindowInsetsController controller = decorView.getWindowInsetsController();
+            if (controller == null) {
+                return;
+            }
+            int appearance = 0;
+            if (statusBar == HuxerUIView.SYSTEM_BAR_CONTENT_DARK) {
+                appearance |= WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+            }
+            if (navigationBar == HuxerUIView.SYSTEM_BAR_CONTENT_DARK) {
+                appearance |= WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            }
+            controller.setSystemBarsAppearance(appearance,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                            | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
         }
     }
 

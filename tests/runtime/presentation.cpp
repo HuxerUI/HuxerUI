@@ -880,7 +880,7 @@ TEST_CASE("TestNestedEnvironment") {
 
   TestPlatform platform;
   Runtime runtime{EnvironmentApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   REQUIRE(observed_environment_values.size() == 3);
@@ -892,7 +892,7 @@ TEST_CASE("TestNestedEnvironment") {
 TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   TestPlatform platform;
   Runtime runtime{ThemeApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   REQUIRE(observed_theme_color.red == Color::Rgb(40, 100, 220).red);
@@ -947,7 +947,7 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
 TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   TestPlatform platform;
   Runtime runtime{FlatDarkThemeApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
@@ -1001,7 +1001,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
 
   TestPlatform platform;
   Runtime runtime{FlatThemeInteractionApp, platform};
-  runtime.SetViewport({200.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "flat interaction");
   REQUIRE(button != nullptr);
@@ -1203,7 +1203,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   TestPlatform platform;
   Runtime runtime{MaterialThemeApp, platform};
-  runtime.SetViewport({240.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "material button");
   REQUIRE(button != nullptr);
@@ -1291,7 +1291,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   });
 
   Runtime dark_runtime{MaterialDarkThemeApp, platform};
-  dark_runtime.SetViewport({240.0F, 80.0F});
+  dark_runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const FlattenedScene& dark_display = dark_runtime.BuildFrame();
   const DrawTextCommand* dark_button = FindText(dark_display, "material dark button");
   REQUIRE(dark_button != nullptr);
@@ -1300,7 +1300,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(dark_background->color.red == dark.colors.primary.red);
 
   Runtime toggle_runtime{MaterialToggleApp, platform};
-  toggle_runtime.SetViewport({200.0F, 64.0F});
+  toggle_runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   toggle_runtime.BuildFrame();
   const detail::MountedNode* toggle_root = toggle_runtime.RootNode();
   REQUIRE(toggle_root != nullptr);
@@ -1318,7 +1318,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
   TestPlatform platform;
   Runtime runtime{MaterialControlledSwitchApp, platform};
-  runtime.SetViewport({80.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {80.0F, 64.0F}});
   runtime.BuildFrame();
 
   const auto* switch_node = FindMountedKind(*runtime.RootNode(), detail::NodeKind::Switch);
@@ -1347,7 +1347,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
 
   TestPlatform platform;
   Runtime runtime{MaterialLabeledToggleApp, platform};
-  runtime.SetViewport({560.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {560.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1421,7 +1421,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
 TEST_CASE("TestLabeledToggleGeometryUsesContentBounds") {
   TestPlatform platform;
   Runtime runtime{MaterialPaddedLabeledToggleApp, platform};
-  runtime.SetViewport({200.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1459,7 +1459,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
 
   TestPlatform platform;
   Runtime runtime{ToggleApp, platform};
-  runtime.SetViewport({160.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1624,7 +1624,7 @@ TEST_CASE("TestActionSelectableAndDisabledChips") {
 
   TestPlatform platform;
   Runtime runtime{ChipApp, platform};
-  runtime.SetViewport({360.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1694,7 +1694,7 @@ TEST_CASE("TestActionSelectableAndDisabledChips") {
 TEST_CASE("TestMaterialChipGeometryAndColors") {
   TestPlatform platform;
   Runtime runtime{MaterialChipApp, platform};
-  runtime.SetViewport({260.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {260.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const ChipStyle style = ThemeDefinitionValue<ChipStyle>(MaterialThemeDefinition());
@@ -1723,7 +1723,7 @@ TEST_CASE("TestMaterialChipGeometryAndColors") {
 TEST_CASE("TestHorizontalAndVerticalDividerGeometry") {
   TestPlatform platform;
   Runtime runtime{DividerApp, platform};
-  runtime.SetViewport({120.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1753,7 +1753,7 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
 
   TestPlatform platform;
   Runtime runtime{SegmentedButtonApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -1876,7 +1876,7 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
 
   TestPlatform platform;
   Runtime runtime{MaterialSegmentedButtonApp, platform};
-  runtime.SetViewport({320.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const SegmentedButtonStyle style = ThemeDefinitionValue<SegmentedButtonStyle>(MaterialThemeDefinition());
@@ -1935,7 +1935,7 @@ TEST_CASE("TestTabsSelectionOverflowAndKeyboard") {
 
   TestPlatform platform;
   Runtime runtime{TabsApp, platform};
-  runtime.SetViewport({320.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -2013,7 +2013,7 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
 
   TestPlatform platform;
   Runtime runtime{MaterialTabsApp, platform};
-  runtime.SetViewport({360.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const TabsStyle style = ThemeDefinitionValue<TabsStyle>(MaterialThemeDefinition());
@@ -2063,7 +2063,7 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
 
   TestPlatform overflow_platform;
   Runtime overflow{MaterialTabsApp, overflow_platform};
-  overflow.SetViewport({160.0F, 80.0F});
+  overflow.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   const std::vector<DrawRectCommand> overflow_rectangles = DrawRectangles(overflow.BuildFrame());
   REQUIRE_FALSE(std::ranges::any_of(overflow_rectangles, [&style](const DrawRectCommand& rectangle) {
     return rectangle.color == style.divider_color && rectangle.rect.height == style.divider_height;
@@ -2084,7 +2084,7 @@ TEST_CASE("TestChipAndSegmentedButtonIconContent") {
 
   TestPlatform platform;
   Runtime runtime{MaterialIconControlsApp, platform};
-  runtime.SetViewport({420.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {420.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -2129,7 +2129,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
 
   TestPlatform platform;
   Runtime runtime{MaterialIconButtonApp, platform};
-  runtime.SetViewport({120.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -2168,7 +2168,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
 
   TestPlatform flat_platform;
   Runtime flat_runtime{FlatIconButtonApp, flat_platform};
-  flat_runtime.SetViewport({64.0F, 64.0F});
+  flat_runtime.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   flat_runtime.BuildFrame();
   const auto* flat_root = flat_runtime.RootNode();
   REQUIRE(flat_root != nullptr);
@@ -2187,7 +2187,7 @@ TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {
   radio_changes = 0;
   TestPlatform platform;
   Runtime runtime{DisabledRadioButtonApp, platform};
-  runtime.SetViewport({64.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   runtime.BuildFrame();
   const auto* radio = runtime.RootNode();
   REQUIRE(radio != nullptr);
@@ -2211,7 +2211,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
 
   TestPlatform platform;
   Runtime determinate{DeterminateProgressCircleApp, platform};
-  determinate.SetViewport({64.0F, 64.0F});
+  determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const FlattenedScene& initial = determinate.BuildFrame();
   const auto initial_arcs = arcs(initial);
   REQUIRE(initial_arcs.size() == 2);
@@ -2236,18 +2236,18 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE(determinate.RootNode()->children[0]->identity == identity);
 
   Runtime empty{EmptyProgressCircleApp, platform};
-  empty.SetViewport({64.0F, 64.0F});
+  empty.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   REQUIRE(arcs(empty.BuildFrame()).size() == 1);
 
   Runtime full{FullProgressCircleApp, platform};
-  full.SetViewport({64.0F, 64.0F});
+  full.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto full_arcs = arcs(full.BuildFrame());
   REQUIRE(full_arcs.size() == 2);
   REQUIRE(std::abs(full_arcs[1].sweep_angle - pi * 2.0F) < 0.001F);
 
   TestPlatform animated_platform;
   Runtime animated{IndeterminateProgressCircleApp, animated_platform};
-  animated.SetViewport({64.0F, 64.0F});
+  animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int requests_before = animated_platform.requested_frames;
   const auto animated_initial = arcs(animated.BuildFrame());
   REQUIRE(animated_initial.size() == 2);
@@ -2262,7 +2262,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
 
   TestPlatform reduced_platform;
   Runtime reduced{ReducedMotionProgressCircleApp, reduced_platform};
-  reduced.SetViewport({64.0F, 64.0F});
+  reduced.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
   const auto reduced_arcs = arcs(reduced.BuildFrame());
   REQUIRE(reduced_arcs.size() == 2);
@@ -2285,7 +2285,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
 
   TestPlatform determinate_platform;
   Runtime determinate{MaterialDeterminateProgressCircleApp, determinate_platform};
-  determinate.SetViewport({64.0F, 64.0F});
+  determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto determinate_arcs = arcs(determinate.BuildFrame());
   REQUIRE(determinate_arcs.size() == 2);
   const DrawArcCommand& track = determinate_arcs[0];
@@ -2300,7 +2300,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
 
   TestPlatform animated_platform;
   Runtime animated{MaterialIndeterminateProgressCircleApp, animated_platform};
-  animated.SetViewport({64.0F, 64.0F});
+  animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto initial = arcs(animated.BuildFrame());
   REQUIRE(initial.size() == 1);
   REQUIRE(initial[0].color == style.indicator_color);
@@ -2319,7 +2319,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 
   TestPlatform platform;
   Runtime determinate{DeterminateProgressBarApp, platform};
-  determinate.SetViewport({200.0F, 20.0F});
+  determinate.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const auto initial_rectangles = DrawRectangles(determinate.BuildFrame());
   REQUIRE(initial_rectangles.size() == 2);
   REQUIRE(initial_rectangles[0].rect.width == style.width);
@@ -2343,18 +2343,18 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   REQUIRE(determinate.RootNode()->children[0]->identity == identity);
 
   Runtime empty{EmptyProgressBarApp, platform};
-  empty.SetViewport({200.0F, 20.0F});
+  empty.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   REQUIRE(DrawRectangles(empty.BuildFrame()).size() == 1);
 
   Runtime full{FullProgressBarApp, platform};
-  full.SetViewport({200.0F, 20.0F});
+  full.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const auto full_rectangles = DrawRectangles(full.BuildFrame());
   REQUIRE(full_rectangles.size() == 2);
   REQUIRE(full_rectangles[1].rect.width == style.width);
 
   TestPlatform animated_platform;
   Runtime animated{IndeterminateProgressBarApp, animated_platform};
-  animated.SetViewport({200.0F, 20.0F});
+  animated.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int requests_before = animated_platform.requested_frames;
   const auto animated_initial = DrawRectangles(animated.BuildFrame());
   REQUIRE(animated_initial.size() == 2);
@@ -2395,7 +2395,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 
   TestPlatform reduced_platform;
   Runtime reduced{ReducedMotionProgressBarApp, reduced_platform};
-  reduced.SetViewport({200.0F, 20.0F});
+  reduced.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
   const auto reduced_rectangles = DrawRectangles(reduced.BuildFrame());
   REQUIRE(reduced_rectangles.size() == 2);
@@ -2407,7 +2407,7 @@ TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
   const ProgressBarStyle style = ProgressBarStyle::Default();
   TestPlatform platform;
   Runtime runtime{AdjustableProgressBarApp, platform};
-  runtime.SetViewport({200.0F, 20.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   runtime.BuildFrame();
 
   platform.AdvanceTime(style.animation_duration * 0.25);
@@ -2433,7 +2433,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform determinate_platform;
   Runtime determinate{MaterialDeterminateProgressBarApp, determinate_platform};
-  determinate.SetViewport({280.0F, 20.0F});
+  determinate.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const FlattenedScene& determinate_scene = determinate.BuildFrame();
   const detail::MountedNode* progress_node = FindMountedKind(*determinate.RootNode(), detail::NodeKind::ProgressBar);
   REQUIRE(progress_node != nullptr);
@@ -2464,7 +2464,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform animated_platform;
   Runtime animated{MaterialIndeterminateProgressBarApp, animated_platform};
-  animated.SetViewport({280.0F, 20.0F});
+  animated.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   animated.BuildFrame();
   animated_platform.AdvanceTime(style.animation_duration * 0.6);
   const FlattenedScene& animated_scene = animated.BuildFrame();
@@ -2476,7 +2476,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform reduced_platform;
   Runtime reduced{ReducedMotionMaterialProgressBarApp, reduced_platform};
-  reduced.SetViewport({280.0F, 20.0F});
+  reduced.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const int requests_before = reduced_platform.requested_frames;
   const FlattenedScene& reduced_scene = reduced.BuildFrame();
   REQUIRE(std::ranges::count_if(reduced_scene.Commands(), [&](const PaintCommand& command) {
@@ -2493,7 +2493,7 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
 
   TestPlatform platform;
   Runtime runtime{SliderApp, platform};
-  runtime.SetViewport({200.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -2616,7 +2616,7 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   const SliderStyle style = ThemeDefinitionValue<SliderStyle>(definition);
   TestPlatform platform;
   Runtime runtime{MaterialSliderApp, platform};
-  runtime.SetViewport({200.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const huxerui::DrawRectCommand* thumb = nullptr;
@@ -2665,7 +2665,7 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
   slider_changes = 0;
   TestPlatform platform;
   Runtime runtime{DisabledSliderApp, platform};
-  runtime.SetViewport({200.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
   const auto* slider = FindMountedKind(*runtime.RootNode(), huxerui::detail::NodeKind::Slider);
@@ -2701,7 +2701,7 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
 TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
   TestPlatform platform;
   Runtime runtime{FlatSliderFocusApp, platform};
-  runtime.SetViewport({200.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
   const FlattenedScene& focused = runtime.BuildFrame();
@@ -2723,7 +2723,7 @@ TEST_CASE("TestSliderRejectsInvalidConfiguration") {
 TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
   TestPlatform platform;
   Runtime runtime{ThemedIndicationApp, platform};
-  runtime.SetViewport({200.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
   const Color hover = Color::Rgb(20, 80, 160, 0.2F);
@@ -2786,7 +2786,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
 
   TestPlatform platform;
   Runtime overlay{DisabledHitTestApp, platform};
-  overlay.SetViewport({200.0F, 80.0F});
+  overlay.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = overlay.BuildFrame();
   const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
   REQUIRE(disabled != nullptr);
@@ -2809,7 +2809,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   REQUIRE(underlying_clicks == 0);
 
   Runtime subtree{DisabledSubtreeApp, platform};
-  subtree.SetViewport({200.0F, 80.0F});
+  subtree.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& subtree_display = subtree.BuildFrame();
   const auto* subtree_root = subtree.RootNode();
   REQUIRE(subtree_root != nullptr);
@@ -2837,7 +2837,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
 TEST_CASE("TestDisabledButtonStyleChangeInvalidatesContentPaint") {
   TestPlatform platform;
   Runtime runtime{DisabledButtonStyleUpdateApp, platform};
-  runtime.SetViewport({180.0F, 64.0F});
+  runtime.SetWindowMetrics({.viewport = {180.0F, 64.0F}});
 
   const Color initial = Color::Rgb(30, 80, 170);
   REQUIRE(FindRectWithColor(runtime.BuildFrame(), initial) != nullptr);
@@ -2859,7 +2859,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
 
   TestPlatform platform;
   Runtime runtime{FocusApp, platform};
-  runtime.SetViewport({240.0F, 180.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   runtime.BuildFrame();
 
   runtime.HandleKeyEvent(KeyEvent{
@@ -2946,7 +2946,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
 
   TestPlatform platform;
   Runtime runtime{FocusApp, platform};
-  runtime.SetViewport({240.0F, 180.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* first = FindText(initial, "first");
   REQUIRE(first != nullptr);
@@ -3004,7 +3004,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
 
   TestPlatform platform;
   Runtime runtime{FocusDialogApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   runtime.HandleKeyEvent(KeyEvent{
@@ -3082,7 +3082,7 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
 
   TestPlatform platform;
   Runtime runtime{RootHookApp, platform, std::move(options)};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(observed_root_service_value == 42);
   REQUIRE(ContainsText(initial, "application"));
@@ -3167,7 +3167,7 @@ TEST_CASE("TestViewportClassRecomposesExistingLayersAcrossBreakpoints") {
 
   TestPlatform platform;
   Runtime runtime{RootHookApp, platform, std::move(options)};
-  runtime.SetViewport({480.0F, 600.0F});
+  runtime.SetWindowMetrics({.viewport = {480.0F, 600.0F}});
   runtime.BuildFrame();
 
   installed_root_service->layers->Attach({}, [] {
@@ -3179,11 +3179,11 @@ TEST_CASE("TestViewportClassRecomposesExistingLayersAcrossBreakpoints") {
   REQUIRE(layer_viewport_compositions == 1);
   REQUIRE(observed_layer_viewport_class == ViewportClass::Compact);
 
-  runtime.SetViewport({560.0F, 600.0F});
+  runtime.SetWindowMetrics({.viewport = {560.0F, 600.0F}});
   runtime.BuildFrame();
   REQUIRE(layer_viewport_compositions == 1);
 
-  runtime.SetViewport({600.0F, 600.0F});
+  runtime.SetWindowMetrics({.viewport = {600.0F, 600.0F}});
   runtime.BuildFrame();
   REQUIRE(layer_viewport_compositions == 2);
   REQUIRE(observed_layer_viewport_class == ViewportClass::Medium);
@@ -3196,7 +3196,7 @@ TEST_CASE("TestToastAndDialogPresentation") {
 
   TestPlatform platform;
   Runtime runtime{PresentationThemeApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE(saved_toast.has_value());
   REQUIRE(saved_dialogs.has_value());
@@ -3286,7 +3286,7 @@ TEST_CASE("TestToastRejectsAnEmptyLiteralBeforeAttachingALayer") {
 
   TestPlatform platform;
   Runtime runtime{PresentationApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(saved_toast->Show(""), std::invalid_argument);
@@ -3298,7 +3298,7 @@ TEST_CASE("TestToastRetainsItsLayerUntilExitMotionCompletes") {
 
   TestPlatform platform;
   Runtime runtime{MaterialPresentationApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   const LayerId toast = saved_toast->Show("animated toast", ToastOptions{10.0});
@@ -3317,7 +3317,7 @@ TEST_CASE("TestCommandDialogUpdateRefreshesCapturedEnvironmentAndBarrier") {
 
   TestPlatform platform;
   Runtime runtime{DialogUpdateEnvironmentApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const LayerId dialog = saved_dialogs->Show(
@@ -3348,7 +3348,7 @@ TEST_CASE("TestStandardDialogUsesDefaultLabelsAndTwoActions") {
 
   TestPlatform platform;
   Runtime runtime{PresentationThemeApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", {}, [] {
@@ -3388,7 +3388,7 @@ TEST_CASE("TestStandardDialogKeepsNaturalWidthAndRejectsEmptyLiteralContent") {
 
   TestPlatform platform;
   Runtime runtime{MaterialPresentationApp, platform};
-  runtime.SetViewport({800.0F, 480.0F});
+  runtime.SetWindowMetrics({.viewport = {800.0F, 480.0F}});
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(saved_dialogs->Show("", "Message"), std::invalid_argument);
@@ -3408,7 +3408,7 @@ TEST_CASE("TestMaterialDialogActionUsesThemeRipple") {
 
   TestPlatform platform;
   Runtime runtime{MaterialPresentationApp, platform};
-  runtime.SetViewport({640.0F, 360.0F});
+  runtime.SetWindowMetrics({.viewport = {640.0F, 360.0F}});
   runtime.BuildFrame();
 
   saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", "Save");
@@ -3452,7 +3452,7 @@ TEST_CASE("TestPresentationThemeControlsDialogLayoutAndVerticalPlacement") {
 
   TestPlatform platform;
   Runtime runtime{ThemedPresentationPolicyApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const LayerId toast_id = saved_toast->Show("top toast", ToastOptions{10.0});
@@ -3492,7 +3492,7 @@ TEST_CASE("TestDialogRetainsExitPresentationWithoutRetainingInput") {
 
   TestPlatform platform;
   Runtime runtime{PresentationThemeApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const LayerId dialog =
@@ -3526,7 +3526,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
 
   TestPlatform platform;
   Runtime runtime{FlatDarkPresentationApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
@@ -3551,7 +3551,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
 TEST_CASE("TestDeclarativeDialogModifier") {
   TestPlatform platform;
   Runtime runtime{DeclarativeDialogApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   declarative_dialog_visible = true;
@@ -3591,7 +3591,7 @@ TEST_CASE("TestDeclarativeDialogModifier") {
 TEST_CASE("TestDeclarativeDialogMotionStyleUpdatesWithoutReentering") {
   TestPlatform platform;
   Runtime runtime{DeclarativeDialogMotionApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   declarative_dialog_visible = true;
@@ -3626,7 +3626,7 @@ TEST_CASE("TestDeclarativeDialogMotionStyleUpdatesWithoutReentering") {
 TEST_CASE("TestDeclarativeDialogCanRemoveMotionWhileReentering") {
   TestPlatform platform;
   Runtime runtime{DeclarativeDialogMotionApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   declarative_dialog_motion_enabled = true;
@@ -3647,7 +3647,7 @@ TEST_CASE("TestDeclarativeDialogCanRemoveMotionWhileReentering") {
 TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
   TestPlatform platform;
   Runtime runtime{AnimationApp, platform};
-  runtime.SetViewport({240.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
 
   animation_target = true;
@@ -3683,7 +3683,7 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
 TEST_CASE("TestAnimatedScaleAndRotationModifiers") {
   TestPlatform platform;
   Runtime runtime{TransformAnimationApp, platform};
-  runtime.SetViewport({240.0F, 200.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 200.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -3729,7 +3729,7 @@ TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
 
   TestPlatform platform;
   Runtime runtime{TransformedHitTestApp, platform};
-  runtime.SetViewport({200.0F, 200.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -3750,7 +3750,7 @@ TEST_CASE("TestClickIndicationUsesPointerObservation") {
   indication_clicks = 0;
   TestPlatform platform;
   Runtime runtime{IndicationApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent(PointerEvent{
@@ -3781,7 +3781,7 @@ TEST_CASE("TestClickIndicationUsesPointerObservation") {
 TEST_CASE("TestModifierPresentationGeometry") {
   TestPlatform platform;
   Runtime runtime{PresentedIndicationApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -3824,7 +3824,7 @@ TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
   indication_clicks = 0;
   TestPlatform platform;
   Runtime runtime{ExplicitIndicationApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -3839,7 +3839,7 @@ TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
 TEST_CASE("TestNodeExtensionFrameSubtreeCache") {
   TestPlatform platform;
   Runtime runtime{NodeExtensionPruningApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();

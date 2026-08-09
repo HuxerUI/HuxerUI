@@ -9,6 +9,11 @@
 
 namespace huxerui::detail {
 
+struct WindowBackplaneState {
+  EdgeInsets safe_area;
+  SystemBarsAppearance appearance = SystemBarsAppearance::Default();
+};
+
 namespace {
 
 int LayerLevelRank(LayerLevel level) noexcept {
@@ -74,6 +79,27 @@ public:
     }));
     return result;
   }
+};
+
+class ApplicationContentLayout final : public huxerui::Layout<ApplicationContentLayout> {
+public:
+  using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+    LayoutResult result;
+    if (node.ChildCount() > 1) {
+      throw std::logic_error("HuxerUI application content container must not contain multiple roots");
+    }
+    if (node.ChildCount() == 1) {
+      static_cast<void>(context.Measure(node.ChildAt(0), constraints));
+      result.Place(node.ChildAt(0), {});
+    }
+    return result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
+  }
+};
+
+struct WindowBackplaneValue {
+  using Value = bool;
 };
 
 class LayerStackLayout final : public huxerui::Layout<LayerStackLayout> {
@@ -169,18 +195,130 @@ bool IsLayerStack(const MountedNode& node) {
   return node.layout_descriptor != nullptr && node.layout_descriptor->type == typeid(LayerStackLayout);
 }
 
+Color CompositeOver(Color foreground, Color background) noexcept {
+  const float foreground_alpha = std::clamp(foreground.alpha, 0.0F, 1.0F);
+  const float background_alpha = std::clamp(background.alpha, 0.0F, 1.0F);
+  const float alpha = foreground_alpha + background_alpha * (1.0F - foreground_alpha);
+  if (alpha <= 0.0F) {
+    return Color::Transparent();
+  }
+  return {
+      (foreground.red * foreground_alpha + background.red * background_alpha * (1.0F - foreground_alpha)) / alpha,
+      (foreground.green * foreground_alpha + background.green * background_alpha * (1.0F - foreground_alpha)) / alpha,
+      (foreground.blue * foreground_alpha + background.blue * background_alpha * (1.0F - foreground_alpha)) / alpha,
+      alpha,
+  };
+}
+
+float LinearColorChannel(float value) noexcept {
+  value = std::clamp(value, 0.0F, 1.0F);
+  return value <= 0.04045F ? value / 12.92F : std::pow((value + 0.055F) / 1.055F, 2.4F);
+}
+
+SystemBarContentBrightness ResolveBrightness(SystemBarContentBrightness configured, Color background) noexcept {
+  if (configured != SystemBarContentBrightness::Automatic) {
+    return configured;
+  }
+  const float luminance = 0.2126F * LinearColorChannel(background.red) +
+                          0.7152F * LinearColorChannel(background.green) +
+                          0.0722F * LinearColorChannel(background.blue);
+  return luminance > 0.45F ? SystemBarContentBrightness::Dark : SystemBarContentBrightness::Light;
+}
+
+const SystemBarsAppearance* FindSystemBarsAppearance(const MountedNode& node) {
+  const std::any* value = FindEnvironmentValue(node.environment, typeid(SystemBarsAppearance));
+  if (!value) {
+    return nullptr;
+  }
+  const auto* appearance = std::any_cast<SystemBarsAppearance>(value);
+  if (!appearance) {
+    throw std::logic_error("HuxerUI system bars appearance environment value has an invalid type");
+  }
+  return appearance;
+}
+
+const SystemBarsAppearance* FindApplicationSystemBarsFallback(const MountedNode& node) {
+  if (const SystemBarsAppearance* appearance = FindSystemBarsAppearance(node)) {
+    return appearance;
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      if (const SystemBarsAppearance* appearance = FindApplicationSystemBarsFallback(*child)) {
+        return appearance;
+      }
+    }
+  }
+  return nullptr;
+}
+
+struct SystemBarCandidates {
+  std::optional<SystemBarsAppearance> status;
+  std::optional<SystemBarsAppearance> navigation;
+};
+
+void CollectSystemBarCandidates(
+    const MountedNode& node, float status_boundary, float navigation_boundary, SystemBarCandidates& candidates
+) {
+  if (node.presentation.resolved_opacity > 0.001F && node.properties.system_bars_appearance.has_value()) {
+    const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
+    const SystemBarsAppearance& appearance = *node.properties.system_bars_appearance;
+    if (appearance.status_bar_background.alpha > 0.0F && bounds.y <= status_boundary + 0.5F &&
+        bounds.y + bounds.height > status_boundary) {
+      candidates.status = appearance;
+    }
+    if (appearance.navigation_bar_background.alpha > 0.0F && bounds.y < navigation_boundary &&
+        bounds.y + bounds.height >= navigation_boundary - 0.5F) {
+      candidates.navigation = appearance;
+    }
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      CollectSystemBarCandidates(*child, status_boundary, navigation_boundary, candidates);
+    }
+  }
+}
+
+void ValidateWindowMetrics(const WindowMetrics& metrics) {
+  const bool viewport_valid = std::isfinite(metrics.viewport.width) && metrics.viewport.width >= 0.0F &&
+                              std::isfinite(metrics.viewport.height) && metrics.viewport.height >= 0.0F;
+  const bool safe_area_valid = std::isfinite(metrics.safe_area.top) && metrics.safe_area.top >= 0.0F &&
+                               std::isfinite(metrics.safe_area.right) && metrics.safe_area.right >= 0.0F &&
+                               std::isfinite(metrics.safe_area.bottom) && metrics.safe_area.bottom >= 0.0F &&
+                               std::isfinite(metrics.safe_area.left) && metrics.safe_area.left >= 0.0F;
+  if (!viewport_valid || !safe_area_valid) {
+    throw std::invalid_argument("HuxerUI window metrics must contain finite, non-negative values");
+  }
+}
+
+bool IsWindowBackplane(const MountedNode& node) {
+  return node.LayoutValueOr<WindowBackplaneValue>(false);
+}
+
+bool IsApplicationContent(const MountedNode& node) {
+  return node.layout_descriptor != nullptr && node.layout_descriptor->type == typeid(ApplicationContentLayout);
+}
+
 MountedNode* FindLayerStack(MountedNode& root) {
   const auto found =
       std::ranges::find_if(root.children, [](const auto& child) { return child && IsLayerStack(*child); });
   return found == root.children.end() ? nullptr : found->get();
 }
 
-MountedNode* FindApplicationRoot(MountedNode& root) {
-  MountedNode* layer_stack = FindLayerStack(root);
-  const auto found = std::ranges::find_if(root.children, [layer_stack](const auto& child) {
-    return child && child.get() != layer_stack;
-  });
+MountedNode* FindWindowBackplane(MountedNode& root) {
+  const auto found =
+      std::ranges::find_if(root.children, [](const auto& child) { return child && IsWindowBackplane(*child); });
   return found == root.children.end() ? nullptr : found->get();
+}
+
+MountedNode* FindApplicationContent(MountedNode& root) {
+  const auto found =
+      std::ranges::find_if(root.children, [](const auto& child) { return child && IsApplicationContent(*child); });
+  return found == root.children.end() ? nullptr : found->get();
+}
+
+MountedNode* FindApplicationRoot(MountedNode& root) {
+  MountedNode* content = FindApplicationContent(root);
+  return content == nullptr || content->children.empty() ? nullptr : content->children.front().get();
 }
 
 MountedNode* FindLayerEntryNode(MountedNode& root, LayerId id) {
@@ -267,16 +405,21 @@ public:
       };
       break;
     case LayerPlacementKind::Anchored: {
-      // Anchors use final presentation coordinates; LayerEntryLayout itself shares the host-view coordinate space.
+      // Layer anchors are captured in host-view coordinates. Safe-area padding establishes this layout's local
+      // coordinate space, so subtract only the padding that LayoutNode adds back after placement.
       child_size = context.Measure(child, inset_constraints);
       LayerAnchorSide side = placement.preferred_side;
-      const float anchor_right = placement.anchor.x + placement.anchor.width;
-      const float anchor_bottom = placement.anchor.y + placement.anchor.height;
+      Rect anchor = placement.anchor;
+      const EdgeInsets layer_padding = static_cast<detail::MountedNode&>(node).resolved_padding;
+      anchor.x -= layer_padding.left;
+      anchor.y -= layer_padding.top;
+      const float anchor_right = anchor.x + anchor.width;
+      const float anchor_bottom = anchor.y + anchor.height;
       const float gap = std::max(0.0F, placement.gap);
       const float below = viewport_height - vertical_margin - anchor_bottom - gap;
-      const float above = placement.anchor.y - vertical_margin - gap;
+      const float above = anchor.y - vertical_margin - gap;
       const float right = viewport_width - horizontal_margin - anchor_right - gap;
-      const float left = placement.anchor.x - horizontal_margin - gap;
+      const float left = anchor.x - horizontal_margin - gap;
       if (side == LayerAnchorSide::Below && child_size.height > below && above > below) {
         side = LayerAnchorSide::Above;
       } else if (side == LayerAnchorSide::Above && child_size.height > above && below > above) {
@@ -292,22 +435,22 @@ public:
         child_offset.y = anchor_bottom + gap;
         break;
       case LayerAnchorSide::Above:
-        child_offset.y = placement.anchor.y - child_size.height - gap;
+        child_offset.y = anchor.y - child_size.height - gap;
         break;
       case LayerAnchorSide::Right:
         child_offset.x = anchor_right + gap;
         break;
       case LayerAnchorSide::Left:
-        child_offset.x = placement.anchor.x - child_size.width - gap;
+        child_offset.x = anchor.x - child_size.width - gap;
         break;
       }
       if (side == LayerAnchorSide::Below || side == LayerAnchorSide::Above) {
         switch (placement.alignment) {
         case LayerAnchorAlignment::Start:
-          child_offset.x = placement.anchor.x;
+          child_offset.x = anchor.x;
           break;
         case LayerAnchorAlignment::Center:
-          child_offset.x = placement.anchor.x + (placement.anchor.width - child_size.width) * 0.5F;
+          child_offset.x = anchor.x + (anchor.width - child_size.width) * 0.5F;
           break;
         case LayerAnchorAlignment::End:
           child_offset.x = anchor_right - child_size.width;
@@ -316,10 +459,10 @@ public:
       } else {
         switch (placement.alignment) {
         case LayerAnchorAlignment::Start:
-          child_offset.y = placement.anchor.y;
+          child_offset.y = anchor.y;
           break;
         case LayerAnchorAlignment::Center:
-          child_offset.y = placement.anchor.y + (placement.anchor.height - child_size.height) * 0.5F;
+          child_offset.y = anchor.y + (anchor.height - child_size.height) * 0.5F;
           break;
         case LayerAnchorAlignment::End:
           child_offset.y = anchor_bottom - child_size.height;
@@ -745,13 +888,19 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
     throw std::invalid_argument("HuxerUI root factory must not be null");
   }
   ValidateViewportBreakpoints(definition.options.viewport_breakpoints);
+  if (definition.options.window_content_mode != WindowContentMode::SafeArea &&
+      definition.options.window_content_mode != WindowContentMode::EdgeToEdge) {
+    throw std::invalid_argument("HuxerUI window content mode is invalid");
+  }
   state_ = std::make_unique<State>(
       definition.root_factory,
       &platform,
       std::make_shared<RecomposeScope>(*this, 1),
       LayerController(*this),
-      definition.options.viewport_breakpoints
+      definition.options.viewport_breakpoints,
+      definition.options.window_content_mode
   );
+  state_->window_backplane_ = std::make_shared<WindowBackplaneState>();
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
   RootContext
@@ -790,15 +939,23 @@ Runtime::~Runtime() {
   state_->root_services_.clear();
 }
 
-void Runtime::SetViewport(Size viewport) {
-  if (state_->viewport_ == viewport) {
+void Runtime::SetWindowMetrics(WindowMetrics metrics) {
+  ValidateWindowMetrics(metrics);
+  if (state_->window_metrics_ == metrics) {
     return;
   }
-  state_->viewport_ = viewport;
+  state_->window_metrics_ = metrics;
+  state_->window_backplane_->safe_area = metrics.safe_area;
+  if (state_->mounted_root_) {
+    state_->mounted_root_->measure_dirty = true;
+    if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
+      backplane->content_paint_dirty = true;
+    }
+  }
   if (state_->text_selection_overlay_.state.visible) {
     state_->text_selection_overlay_.state.paint_dirty = true;
   }
-  const ViewportClass viewport_class = ResolveViewportClass(viewport.width, state_->viewport_breakpoints_);
+  const ViewportClass viewport_class = ResolveViewportClass(metrics.viewport.width, state_->viewport_breakpoints_);
   if (viewport_class != state_->viewport_class_) {
     state_->viewport_class_ = viewport_class;
     state_->root_environment_->Set(detail::ViewportEnvironment{viewport_class});
@@ -888,7 +1045,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     debug_metrics->RecordCommit(
         std::max(0.0, state_->platform_->Now() - build_started_at),
         state_->frame_commit_.render_frame.damage,
-        state_->viewport_
+        state_->window_metrics_.viewport
     );
   };
   if (!std::isfinite(frame.timestamp)) {
@@ -911,7 +1068,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     RecomposeDirtyScopes(*state_->mounted_root_);
   }
 
-  if (!state_->mounted_root_ || state_->viewport_.width <= 0.0F || state_->viewport_.height <= 0.0F) {
+  if (!state_->mounted_root_ || state_->window_metrics_.viewport.width <= 0.0F ||
+      state_->window_metrics_.viewport.height <= 0.0F) {
     RefreshInteractionTree();
     RefreshTextInputSession();
     BuildSemantics();
@@ -933,13 +1091,13 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     needs_frame = state_->scroll_motion_active_;
   }
   const Constraints constraints{
-      state_->viewport_.width,
-      state_->viewport_.width,
-      state_->viewport_.height,
-      state_->viewport_.height,
+      state_->window_metrics_.viewport.width,
+      state_->window_metrics_.viewport.width,
+      state_->window_metrics_.viewport.height,
+      state_->window_metrics_.viewport.height,
   };
   PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
-  MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+  MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
   LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
   RefreshInteractionTree();
 
@@ -952,7 +1110,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
   if (BringTextInputIntoView()) {
     if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
-      MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+      MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
     }
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
@@ -969,7 +1127,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   while (state_->mounted_root_->measure_dirty && geometry_layout_passes < maximum_geometry_layout_passes) {
     ++geometry_layout_passes;
     PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
-    MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this);
+    MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
     PrepareExtensionGeometry(*state_->mounted_root_);
@@ -985,6 +1143,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   AdvanceTextSelectionOverlay(frame);
   PaintTextSelectionOverlay();
+  ResolveWindowAppearance();
   UpdateRenderScene(
       *state_->mounted_root_,
       state_->mounted_root_->bounds,
@@ -993,7 +1152,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   state_->frame_commit_.render_frame.scene.root = &state_->mounted_root_->render_node;
   state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
       state_->frame_commit_.render_frame.scene.root,
-      state_->viewport_,
+      state_->window_metrics_.viewport,
       state_->committed_scene_snapshot_,
       state_->committed_viewport_,
       state_->has_committed_scene_snapshot_
@@ -1669,11 +1828,101 @@ bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   return layout_changed;
 }
 
+void Runtime::EnsureRootStructure() {
+  if (state_->mounted_root_) {
+    if (!FindWindowBackplane(*state_->mounted_root_) || !FindApplicationContent(*state_->mounted_root_) ||
+        !FindLayerStack(*state_->mounted_root_)) {
+      throw std::logic_error("HuxerUI RuntimeRoot has an invalid child structure");
+    }
+    return;
+  }
+
+  View root = RuntimeRootLayout{};
+  state_->mounted_root_ = Mount(root.spec_);
+  View backplane = Canvas([state = state_->window_backplane_](PaintContext& context, Size size) {
+                     const float top = std::min(std::max(0.0F, state->safe_area.top), size.height);
+                     const float bottom =
+                         std::min(std::max(0.0F, state->safe_area.bottom), std::max(0.0F, size.height - top));
+                     if (top > 0.0F) {
+                       context.DrawRect({0.0F, 0.0F, size.width, top}, state->appearance.status_bar_background);
+                     }
+                     if (bottom > 0.0F) {
+                       context.DrawRect(
+                           {0.0F, size.height - bottom, size.width, bottom},
+                           state->appearance.navigation_bar_background
+                       );
+                     }
+                   }).LayoutValue<WindowBackplaneValue>(true);
+  View application = ApplicationContentLayout{};
+  if (state_->window_content_mode_ == WindowContentMode::SafeArea) {
+    application = std::move(application).With(SafeAreaPadding{});
+  }
+  View layers = LayerStackLayout{};
+  state_->mounted_root_->children.push_back(Mount(backplane.spec_));
+  state_->mounted_root_->children.push_back(Mount(application.spec_));
+  state_->mounted_root_->children.push_back(Mount(layers.spec_));
+}
+
+void Runtime::ResolveWindowAppearance() {
+  if (!state_->mounted_root_) {
+    return;
+  }
+  const detail::MountedNode* application = FindApplicationRoot(*state_->mounted_root_);
+  const SystemBarsAppearance* theme_appearance =
+      application == nullptr ? nullptr : FindApplicationSystemBarsFallback(*application);
+  const SystemBarsAppearance fallback =
+      theme_appearance == nullptr ? SystemBarsAppearance::Default() : *theme_appearance;
+  if (!IsValidSystemBarsAppearance(fallback)) {
+    throw std::invalid_argument("HuxerUI system bars appearance is invalid");
+  }
+
+  const WindowMetrics& metrics = state_->window_metrics_;
+  const float status_boundary =
+      state_->window_content_mode_ == WindowContentMode::SafeArea ? metrics.safe_area.top : 0.0F;
+  const float navigation_boundary = state_->window_content_mode_ == WindowContentMode::SafeArea
+                                        ? metrics.viewport.height - metrics.safe_area.bottom
+                                        : metrics.viewport.height;
+  SystemBarCandidates candidates;
+  CollectSystemBarCandidates(*state_->mounted_root_, status_boundary, navigation_boundary, candidates);
+
+  SystemBarsAppearance resolved = fallback;
+  if (candidates.status.has_value()) {
+    if (!IsValidSystemBarsAppearance(*candidates.status)) {
+      throw std::invalid_argument("HuxerUI system bars appearance is invalid");
+    }
+    resolved.status_bar_background = candidates.status->status_bar_background;
+    resolved.status_bar_content = candidates.status->status_bar_content;
+  }
+  if (candidates.navigation.has_value()) {
+    if (!IsValidSystemBarsAppearance(*candidates.navigation)) {
+      throw std::invalid_argument("HuxerUI system bars appearance is invalid");
+    }
+    resolved.navigation_bar_background = candidates.navigation->navigation_bar_background;
+    resolved.navigation_bar_content = candidates.navigation->navigation_bar_content;
+  }
+
+  const Color status_background = CompositeOver(resolved.status_bar_background, fallback.status_bar_background);
+  const Color navigation_background =
+      CompositeOver(resolved.navigation_bar_background, fallback.navigation_bar_background);
+  const auto brightness = std::pair{
+      ResolveBrightness(resolved.status_bar_content, status_background),
+      ResolveBrightness(resolved.navigation_bar_content, navigation_background),
+  };
+  if (state_->system_bar_brightness_ != brightness) {
+    state_->system_bar_brightness_ = brightness;
+    state_->platform_->SetSystemBarsContentBrightness(brightness.first, brightness.second);
+  }
+  if (state_->window_backplane_->appearance != resolved) {
+    state_->window_backplane_->appearance = resolved;
+    if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
+      backplane->content_paint_dirty = true;
+    }
+  }
+}
+
 void Runtime::ComposeApplication() {
   state_->application_dirty_ = false;
   bool scope_composing = false;
-  std::unique_ptr<detail::MountedNode> layer_stack;
-  std::vector<std::unique_ptr<detail::MountedNode>> application_nodes;
 
   try {
     state_->root_scope_->BeginComposition();
@@ -1688,39 +1937,18 @@ void Runtime::ComposeApplication() {
 
     state_->root_scope_->EndComposition();
     scope_composing = false;
-    if (!state_->mounted_root_) {
-      View root = RuntimeRootLayout{};
-      state_->mounted_root_ = Mount(root.spec_);
-      View stack = LayerStackLayout{};
-      state_->mounted_root_->children.push_back(Mount(stack.spec_));
-    }
-
-    auto previous = std::move(state_->mounted_root_->children);
-    for (auto& child : previous) {
-      if (child && IsLayerStack(*child)) {
-        layer_stack = std::move(child);
-      } else if (child) {
-        application_nodes.push_back(std::move(child));
-      }
-    }
-    if (!layer_stack) {
-      View stack = LayerStackLayout{};
-      layer_stack = Mount(stack.spec_);
+    EnsureRootStructure();
+    detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
+    if (!application_content) {
+      throw std::logic_error("HuxerUI RuntimeRoot is missing its application content container");
     }
 
     std::vector<View> application_children;
     if (application) {
       application_children.push_back(std::move(application));
     }
-    const bool application_layout_changed = ReconcileChildren(application_nodes, application_children);
-    auto& children = state_->mounted_root_->children;
-    children.clear();
-    children.reserve(application_nodes.size() + 1);
-    for (auto& node : application_nodes) {
-      children.push_back(std::move(node));
-    }
-    children.push_back(std::move(layer_stack));
-    if (application_layout_changed) {
+    if (ReconcileChildren(application_content->children, application_children)) {
+      application_content->measure_dirty = true;
       state_->mounted_root_->measure_dirty = true;
     }
   } catch (...) {
@@ -1729,14 +1957,6 @@ void Runtime::ComposeApplication() {
     } else {
       state_->root_scope_->Invalidate();
     }
-    if (state_->mounted_root_ && layer_stack) {
-      auto& children = state_->mounted_root_->children;
-      children.clear();
-      for (auto& node : application_nodes) {
-        children.push_back(std::move(node));
-      }
-      children.push_back(std::move(layer_stack));
-    }
     InvalidateRoot();
     throw;
   }
@@ -1744,12 +1964,7 @@ void Runtime::ComposeApplication() {
 
 void Runtime::ComposeLayers() {
   state_->layers_dirty_ = false;
-  if (!state_->mounted_root_) {
-    View root = RuntimeRootLayout{};
-    state_->mounted_root_ = Mount(root.spec_);
-    View stack = LayerStackLayout{};
-    state_->mounted_root_->children.push_back(Mount(stack.spec_));
-  }
+  EnsureRootStructure();
   detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
   if (!layer_stack) {
     throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
@@ -1784,6 +1999,11 @@ void Runtime::ComposeLayers() {
                            .exiting = exiting,
                            .semantic_modal_group = entry.semantic_modal_group,
                        });
+      if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::Constrain) {
+        layer = std::move(layer).With(SafeAreaPadding{});
+      } else if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::ExtendBottom) {
+        layer = std::move(layer).With(SafeAreaPadding{.bottom = false});
+      }
       // An exiting modal keeps its focus barrier until removal so input cannot fall through while its content fades.
       layer.spec_->trap_focus = entry.options.trap_focus;
       if (barrier) {

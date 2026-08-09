@@ -21,6 +21,7 @@
 #include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
+#include <huxerui/window.h>
 
 namespace huxerui {
 
@@ -36,6 +37,8 @@ struct AppOptions {
   float width = 520.0F;
   float height = 360.0F;
   ViewportBreakpoints viewport_breakpoints;
+  // Root geometry remains stable for one Runtime; pages may still override SystemBarsAppearance independently.
+  WindowContentMode window_content_mode = WindowContentMode::SafeArea;
 #if defined(NDEBUG)
   bool show_debug_overlay = false;
 #else
@@ -82,6 +85,13 @@ public:
   virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
     return std::nullopt;
   }
+  // Embedded adapters without native-window authority may leave this optional capability as a no-op.
+  virtual void SetSystemBarsContentBrightness(
+      SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
+  ) {
+    static_cast<void>(status_bar);
+    static_cast<void>(navigation_bar);
+  }
 };
 
 namespace detail {
@@ -107,7 +117,7 @@ public:
   Runtime(Runtime&&) = delete;
   Runtime& operator=(Runtime&&) = delete;
 
-  void SetViewport(Size viewport);
+  void SetWindowMetrics(WindowMetrics metrics);
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
   const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
@@ -191,6 +201,8 @@ private:
   void InvalidateLayerPlacement(LayerId id);
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
+  void EnsureRootStructure();
+  void ResolveWindowAppearance();
   void ComposeApplication();
   void ComposeLayers();
   bool ComposeScope(detail::MountedNode& mounted);

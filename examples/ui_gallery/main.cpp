@@ -471,5 +471,6 @@ HUXERUI_APP(
         .width = 1200.0F,
         .height = 760.0F,
         .viewport_breakpoints = ViewportBreakpoints{720.0F, 1040.0F},
+        .window_content_mode = WindowContentMode::EdgeToEdge,
     }
 )

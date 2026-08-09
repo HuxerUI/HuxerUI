@@ -106,10 +106,11 @@ public:
     }
   }
 
-  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints) {
+  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Runtime& runtime,
+               const Constraints& constraints, EdgeInsets safe_area) {
     Size size;
     if (!node.children.empty()) {
-      size = detail::MeasureNode(*node.children.front(), constraints, platform, runtime);
+      size = detail::MeasureNode(*node.children.front(), constraints, platform, runtime, safe_area);
     }
     Rebuild(node, platform);
     return constraints.Constrain(size);
@@ -227,7 +228,7 @@ private:
         ++total_length_;
       }
       const TextOffset length = detail::Utf16Length(text->text).value_or(0);
-      const float width = std::max(0.0F, text->measured_size.width - text->properties.padding.Horizontal());
+      const float width = std::max(0.0F, text->measured_size.width - text->resolved_padding.Horizontal());
       entries_.push_back({
           text->identity,
           total_length_,
@@ -372,9 +373,9 @@ const ModifierDescriptor& SelectionAreaModifier::Descriptor() {
 }
 
 Size MeasureSelectionArea(
-    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints
+    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints, EdgeInsets safe_area
 ) {
-  return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints);
+  return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints, safe_area);
 }
 
 } // namespace detail

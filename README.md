@@ -129,6 +129,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and native adapter contracts |
 | [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and native accessibility mapping |
 | [Navigation Design](docs/design/navigation.md) | Page stacks, scoped controllers, transitions, Back routing, and future URL paths |
+| [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and NativeView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |

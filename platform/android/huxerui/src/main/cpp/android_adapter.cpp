@@ -255,13 +255,15 @@ public:
     resource_scale_ = environment->GetMethodID(view_class, "resourceScale", "()F");
     process_pss_bytes_ = environment->GetMethodID(view_class, "processPssBytes", "()J");
     read_resource_ = environment->GetMethodID(view_class, "readResource", "([B)[B");
+    set_system_bars_content_brightness_ =
+        environment->GetMethodID(view_class, "setSystemBarsContentBrightness", "(II)V");
 
     if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || font_metrics_ == nullptr ||
         measure_text_ == nullptr || measure_text_run_ == nullptr || create_text_layout_ == nullptr ||
         start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
         stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
         write_clipboard_text_ == nullptr || resource_locale_ == nullptr || resource_scale_ == nullptr ||
-        process_pss_bytes_ == nullptr || read_resource_ == nullptr) {
+        process_pss_bytes_ == nullptr || read_resource_ == nullptr || set_system_bars_content_brightness_ == nullptr) {
       environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
@@ -318,6 +320,17 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetSystemBarsContentBrightness(
+      SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
+  ) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return;
+    }
+    environment->CallVoidMethod(view_, set_system_bars_content_brightness_, static_cast<jint>(status_bar),
+                                static_cast<jint>(navigation_bar));
   }
 
 private:
@@ -827,6 +840,7 @@ private:
   jmethodID resource_scale_ = nullptr;
   jmethodID process_pss_bytes_ = nullptr;
   jmethodID read_resource_ = nullptr;
+  jmethodID set_system_bars_content_brightness_ = nullptr;
   PlatformFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
 };
@@ -836,10 +850,15 @@ public:
   AndroidSession(JNIEnv* environment, jobject view, AppDefinition definition)
       : platform_(environment, view), runtime_(std::move(definition), platform_) {}
 
-  void Resize(float width, float height) {
-    runtime_.SetViewport({
-        std::max(0.0F, width),
-        std::max(0.0F, height),
+  void Resize(float width, float height, float safe_left, float safe_top, float safe_right, float safe_bottom) {
+    runtime_.SetWindowMetrics({
+        .viewport = {std::max(0.0F, width), std::max(0.0F, height)},
+        .safe_area = {
+            .top = std::max(0.0F, safe_top),
+            .right = std::max(0.0F, safe_right),
+            .bottom = std::max(0.0F, safe_bottom),
+            .left = std::max(0.0F, safe_left),
+        },
     });
   }
 
@@ -1068,11 +1087,13 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeDestroy(JNI
   delete huxerui::detail::Session(handle);
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_HuxerUIView_nativeResize(JNIEnv* environment, jclass, jlong handle, jfloat width, jfloat height) {
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeResize(
+    JNIEnv* environment, jclass, jlong handle, jfloat width, jfloat height, jfloat safe_left, jfloat safe_top,
+    jfloat safe_right, jfloat safe_bottom
+) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->Resize(width, height);
+      session->Resize(width, height, safe_left, safe_top, safe_right, safe_bottom);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

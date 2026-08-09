@@ -145,7 +145,7 @@ TEST_CASE("Generated scopes run in Runtime") {
       },
       platform,
   };
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "3");
   REQUIRE(generated_compositions == 1);

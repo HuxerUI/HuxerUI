@@ -238,7 +238,7 @@ TEST_CASE("TestLayerMutationsDoNotRecomposeApplicationRoot") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
   REQUIRE(layer_app_compositions == 1);
 
@@ -261,7 +261,7 @@ TEST_CASE("PresentationFactoriesBindTypedArguments") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform, std::move(options)};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   REQUIRE(raw_layers.has_value());
@@ -299,7 +299,7 @@ TEST_CASE("TestPopupAndMenuHandlesReplaceTheirActiveEntries") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   const LayerId first_popup = layer_popup->ShowAt({80.0F, 40.0F}, [] { return Text("first popup"); });
@@ -327,7 +327,7 @@ TEST_CASE("TestLayerStackIdentityDoesNotCollideWithViewKeys") {
 
   TestPlatform platform;
   Runtime runtime{LayerKeyCollisionApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(ContainsText(initial, "keyed application"));
 
@@ -345,7 +345,7 @@ TEST_CASE("TestLayerConfigurationValidation") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform, std::move(options)};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   REQUIRE(raw_layers.has_value());
@@ -378,7 +378,7 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   const float infinity = std::numeric_limits<float>::infinity();
@@ -415,7 +415,7 @@ TEST_CASE("TestPresentationStylesRejectInvalidShadowsBeforeAttachingLayers") {
     layer_menu.reset();
     TestPlatform platform;
     Runtime runtime{InvalidMenuShadowApp, platform};
-    runtime.SetViewport({200.0F, 120.0F});
+    runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
     runtime.BuildFrame();
     REQUIRE_THROWS_AS(layer_menu->Show(TestMenu("menu")), std::invalid_argument);
   }
@@ -424,7 +424,7 @@ TEST_CASE("TestPresentationStylesRejectInvalidShadowsBeforeAttachingLayers") {
     layer_bottom_sheet.reset();
     TestPlatform platform;
     Runtime runtime{InvalidBottomSheetShadowApp, platform};
-    runtime.SetViewport({200.0F, 120.0F});
+    runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
     runtime.BuildFrame();
     REQUIRE_THROWS_AS(layer_bottom_sheet->Show([] { return Text("sheet"); }), std::invalid_argument);
   }
@@ -435,7 +435,7 @@ TEST_CASE("TestAnchoredPresentationClampsOversizedViewportMargin") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({10.0F, 10.0F});
+  runtime.SetWindowMetrics({.viewport = {10.0F, 10.0F}});
   runtime.BuildFrame();
 
   layer_popup->ShowAt(
@@ -451,7 +451,7 @@ TEST_CASE("TestAnchoredPresentationAlignsAndOffsetsFromAnchor") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   constexpr Color popup_color = Color::Rgb(190, 70, 40);
@@ -474,13 +474,37 @@ TEST_CASE("TestAnchoredPresentationAlignsAndOffsetsFromAnchor") {
   REQUIRE(layer_popup->Dismiss(popup));
 }
 
+TEST_CASE("TestAnchoredPresentationKeepsHostCoordinatesInsideSafeArea") {
+  layer_popup.reset();
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform};
+  runtime.SetWindowMetrics({
+      .viewport = {200.0F, 120.0F},
+      .safe_area = {.top = 20.0F, .right = 10.0F, .bottom = 10.0F, .left = 10.0F},
+  });
+  runtime.BuildFrame();
+
+  constexpr Color popup_color = Color::Rgb(180, 80, 30);
+  layer_popup->Show(
+      [popup_color] { return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color}); },
+      PopupOptions{
+          .placement = AnchorPlacement{.side = AnchorSide::Below, .alignment = AnchorAlignment::End},
+          .offset = {5.0F, 3.0F},
+      }
+  );
+  const std::optional<Rect> bounds = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  REQUIRE(bounds.has_value());
+  REQUIRE(*bounds == Rect{75.0F, 57.0F, 20.0F, 10.0F});
+}
+
 TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
   layer_menu.reset();
   popup_focus_clicks = 0;
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   layer_menu->Show({
@@ -537,7 +561,7 @@ TEST_CASE("TestSubmenuLeavesItsParentInteractiveAndOutsideDismissesTheCascade") 
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto show_menu = [] {
@@ -591,7 +615,7 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   layer_menu->Show({
@@ -615,7 +639,7 @@ TEST_CASE("TestMenuSeparatorPolicyComesFromTheme") {
 
   TestPlatform platform;
   Runtime runtime{MaterialLayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   layer_menu->Show({
@@ -639,7 +663,7 @@ TEST_CASE("TestMenuSectionMarksThemedSeparatorBoundaries") {
 
   TestPlatform platform;
   Runtime runtime{SectionMenuLayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   layer_menu->Show({
@@ -661,7 +685,7 @@ TEST_CASE("TestThemedMenuMotionRetainsTheLayerThroughExit") {
 
   TestPlatform platform;
   Runtime runtime{AnimatedMenuLayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const LayerId menu = layer_menu->Show({MenuItem("Animated item", [] {})});
@@ -681,7 +705,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   layer_menu.reset();
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(16, 16));
@@ -745,7 +769,7 @@ TEST_CASE("TestBottomSheetPlacementContextAndBackDismissal") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   constexpr Color sheet_color = Color::Rgb(30, 110, 190);
@@ -778,7 +802,7 @@ TEST_CASE("TestBottomSheetFillsCompactViewportsAndHonorsItsDesktopWidthLimit") {
 
   TestPlatform platform;
   Runtime runtime{BottomSheetWidthApp, platform};
-  runtime.SetViewport({800.0F, 480.0F});
+  runtime.SetWindowMetrics({.viewport = {800.0F, 480.0F}});
   runtime.BuildFrame();
 
   layer_bottom_sheet->Show([] { return Text("limited sheet").With(huxerui::Frame{.height = 80.0F}); });
@@ -794,7 +818,7 @@ TEST_CASE("TestMaterialBottomSheetPlacesItsDragHandleWithVerticalPadding") {
   layer_bottom_sheet.reset();
   TestPlatform platform;
   Runtime runtime{MaterialLayerApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   constexpr Color content_color = Color::Rgb(16, 96, 176);
@@ -821,7 +845,7 @@ TEST_CASE("TestMaterialBottomSheetDragHandleMovesSettlesCancelsAndDismisses") {
   layer_bottom_sheet.reset();
   TestPlatform platform;
   Runtime runtime{MaterialLayerApp, platform};
-  runtime.SetViewport({240.0F, 180.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   runtime.BuildFrame();
 
   constexpr Color content_color = Color::Rgb(18, 100, 180);
@@ -913,7 +937,7 @@ TEST_CASE("TestBottomSheetDragUsesDismissRequestCallback") {
   layer_bottom_sheet.reset();
   TestPlatform platform;
   Runtime runtime{MaterialLayerApp, platform};
-  runtime.SetViewport({240.0F, 180.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   runtime.BuildFrame();
 
   int dismiss_requests = 0;
@@ -961,7 +985,7 @@ TEST_CASE("TestCapturedReducedMotionSettlesBothLayerAndPresentationMotionImmedia
 
   TestPlatform platform;
   Runtime runtime{ReducedMotionLayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   layer_dialogs->Show([] { return Text("reduced dialog"); });
@@ -977,7 +1001,7 @@ TEST_CASE("TestBackStopsAtTopmostConsumingLayer") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   const LayerId lower = layer_dialogs->Show([] { return Text("dismissible dialog"); });
@@ -1016,7 +1040,7 @@ TEST_CASE("TestBackPassesThroughNotificationLayers") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   layer_dialogs->Show([] { return Text("dialog below toast"); });
@@ -1032,7 +1056,7 @@ TEST_CASE("TestBackPassesThroughNotificationLayers") {
 TEST_CASE("TestDeclarativeDialogUpdatesCapturedEnvironment") {
   TestPlatform platform;
   Runtime runtime{LayerEnvironmentApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "dialog environment 1"));
@@ -1048,7 +1072,7 @@ TEST_CASE("TestPopupContextAndMenuActionDismissTheirOwnLayers") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   const LayerId popup = layer_popup->Show([](PopupContext context) {
@@ -1075,7 +1099,7 @@ TEST_CASE("TestAnchoredPopupTracksPresentationBounds") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   constexpr Color popup_color = Color::Rgb(180, 60, 90);
@@ -1099,7 +1123,7 @@ TEST_CASE("TestAnchoredPresentationDismissesWhenAnchorUnmounts") {
 
   TestPlatform platform;
   Runtime runtime{RemovableAnchorApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   const LayerId popup = layer_popup->Show([] { return Text("attached popup"); });
@@ -1116,7 +1140,7 @@ TEST_CASE("TestNestedAnchorsSettleInOneFrame") {
 
   TestPlatform platform;
   Runtime runtime{NestedAnchorApp, platform};
-  runtime.SetViewport({400.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {400.0F, 240.0F}});
   runtime.BuildFrame();
 
   layer_popup->Show(NestedAnchorContent);
@@ -1138,7 +1162,7 @@ TEST_CASE("TestMenuTrapsFocusAndDismissesOnBack") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   layer_menu->Show({
@@ -1161,7 +1185,7 @@ TEST_CASE("TestPointerFocusDoesNotEscapeTrappedLayer") {
 
   TestPlatform platform;
   Runtime runtime{FocusTrapApp, platform};
-  runtime.SetViewport({240.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
   layer_popup->ShowAt(
@@ -1190,7 +1214,7 @@ TEST_CASE("TestNestedLayerFocusRestoresAcrossRemovedLowerLayer") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
   runtime.HandleKeyEvent({KeyEventType::Down, Key::Tab});
 
@@ -1218,7 +1242,7 @@ TEST_CASE("TestExitingLayerCancelsInputUntilRemoval") {
 
   TestPlatform platform;
   Runtime runtime{LayerApp, platform};
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
   const LayerId dialog = layer_dialogs->Show(ExitingLayerInputContent);
@@ -1262,7 +1286,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
       .processor_count = 4,
   };
   Runtime runtime{DebugOverlayApp, platform, std::move(options)};
-  runtime.SetViewport({360.0F, 260.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 260.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(ContainsText(initial, "DEBUG"));
   REQUIRE(!ContainsText(initial, "HuxerUI Performance"));
@@ -1398,7 +1422,7 @@ TEST_CASE("TestBottomSheetDoesNotUseDialogStyleScrim") {
 
   TestPlatform platform;
   Runtime runtime{BottomSheetThemeApp, platform};
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
   layer_bottom_sheet->Show([] { return Text("sheet").With(huxerui::Frame{80.0F, 30.0F}); });
@@ -1414,7 +1438,7 @@ TEST_CASE("TestBottomSheetDoesNotUseDialogStyleScrim") {
 TEST_CASE("TestRuntimeDestructionDoesNotScheduleLayerFrames") {
   TestPlatform platform;
   auto runtime = std::make_unique<Runtime>(DestructionApp, platform);
-  runtime->SetViewport({200.0F, 120.0F});
+  runtime->SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime->BuildFrame();
   const int requested_frames = platform.requested_frames;
 

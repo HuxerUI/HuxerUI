@@ -836,9 +836,8 @@ private:
       return;
     }
     const float scale = DpiScale();
-    runtime_->SetViewport({
-        static_cast<float>(width_) / scale,
-        static_cast<float>(height_) / scale,
+    runtime_->SetWindowMetrics({
+        .viewport = {static_cast<float>(width_) / scale, static_cast<float>(height_) / scale},
     });
   }
 

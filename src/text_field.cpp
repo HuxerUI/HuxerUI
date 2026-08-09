@@ -562,7 +562,7 @@ public:
       }
     }
     const float minimum_editor_height =
-        std::max(0.0F, variant_style_.minimum_height - node.properties.padding.Vertical());
+        std::max(0.0F, variant_style_.minimum_height - node.resolved_padding.Vertical());
     editor_height = std::max(editor_height, minimum_editor_height);
     return constraints.Constrain({
         content_width,
@@ -1364,14 +1364,15 @@ private:
 
   Rect EditorInnerRect(const detail::MountedNode& node) const {
     const Rect frame = EditorFrame(node);
-    const float top_padding = std::max(0.0F, node.properties.padding.top - FloatingLabelTopInset());
+    const EdgeInsets padding = node.resolved_padding;
+    const float top_padding = std::max(0.0F, padding.top - FloatingLabelTopInset());
     const float bottom_padding = UsesTextFieldIndicator(variant_) && floating_label_layout_
-                                     ? std::max(0.0F, node.properties.padding.bottom * 0.5F)
-                                     : node.properties.padding.bottom;
+                                     ? std::max(0.0F, padding.bottom * 0.5F)
+                                     : padding.bottom;
     return {
-        frame.x + node.properties.padding.left,
+        frame.x + padding.left,
         frame.y + top_padding,
-        std::max(0.0F, frame.width - node.properties.padding.Horizontal()),
+        std::max(0.0F, frame.width - padding.Horizontal()),
         std::max(0.0F, frame.height - top_padding - bottom_padding),
     };
   }
@@ -1423,7 +1424,7 @@ private:
     const Rect content = EditorContentRect(node);
     const Rect frame = EditorFrame(node);
     const Size size = floating_label_layout_->Measure();
-    const float y = UsesTextFieldIndicator(variant_) ? frame.y + std::max(0.0F, node.properties.padding.top * 0.5F)
+    const float y = UsesTextFieldIndicator(variant_) ? frame.y + std::max(0.0F, node.resolved_padding.top * 0.5F)
                                                      : frame.y - size.height * 0.5F;
     return {
         content.x,
@@ -1986,7 +1987,7 @@ private:
       const Rect floating_label = FloatingLabelBounds(node);
       float floating_y = floating_label.y + floating_label.height + 2.0F;
       if (!configuration_.multiline) {
-        floating_y = frame.y + frame.height - std::max(0.0F, node.properties.padding.bottom * 0.5F) - size.height;
+        floating_y = frame.y + frame.height - std::max(0.0F, node.resolved_padding.bottom * 0.5F) - size.height;
       }
       y += (std::max(y, floating_y) - y) * std::clamp(label_progress_.Value(), 0.0F, 1.0F);
     }

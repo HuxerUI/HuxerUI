@@ -35,7 +35,10 @@ class IosPlatformAdapter;
 }
 @end
 
-@interface HuxerUIIOSViewController : UIViewController
+@interface HuxerUIIOSViewController : UIViewController {
+  UIStatusBarStyle _huxerUIStatusBarStyle;
+}
+- (void)setHuxerUIStatusBarStyle:(UIStatusBarStyle)style;
 @end
 
 @interface HuxerUIIOSFrameScheduler : NSObject
@@ -263,12 +266,11 @@ public:
     view_->huxeruiRuntime = runtime_;
     view_->huxeruiAdapter = this;
     [view_controller_.view addSubview:view_];
-    UILayoutGuide* safe_area = view_controller_.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-      [view_.leadingAnchor constraintEqualToAnchor:safe_area.leadingAnchor],
-      [view_.trailingAnchor constraintEqualToAnchor:safe_area.trailingAnchor],
-      [view_.topAnchor constraintEqualToAnchor:safe_area.topAnchor],
-      [view_.bottomAnchor constraintEqualToAnchor:safe_area.bottomAnchor],
+      [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
+      [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
+      [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
+      [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
     ]];
 
     window_.rootViewController = view_controller_;
@@ -330,6 +332,18 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetSystemBarsContentBrightness(
+      SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
+  ) override {
+    static_cast<void>(navigation_bar);
+    if (view_controller_ == nil) {
+      return;
+    }
+    const UIStatusBarStyle style =
+        status_bar == SystemBarContentBrightness::Light ? UIStatusBarStyleLightContent : UIStatusBarStyleDarkContent;
+    [view_controller_ setHuxerUIStatusBarStyle:style];
   }
 
   void Resize(CGSize size) {
@@ -495,10 +509,22 @@ private:
     }
     float width = std::max(0.0F, static_cast<float>(viewport_size_.width));
     float height = std::max(0.0F, static_cast<float>(viewport_size_.height));
+    bool keyboard_occludes_bottom = false;
     if (keyboard_frame_.has_value() && !CGRectIsEmpty(*keyboard_frame_)) {
-      height = std::min(height, std::max(0.0F, static_cast<float>(CGRectGetMinY(*keyboard_frame_))));
+      const float keyboard_top = std::max(0.0F, static_cast<float>(CGRectGetMinY(*keyboard_frame_)));
+      keyboard_occludes_bottom = keyboard_top < height;
+      height = std::min(height, keyboard_top);
     }
-    runtime_->SetViewport({width, height});
+    const UIEdgeInsets safe_area = view_ == nil ? UIEdgeInsetsZero : view_.safeAreaInsets;
+    runtime_->SetWindowMetrics({
+        .viewport = {width, height},
+        .safe_area = {
+            .top = std::max(0.0F, static_cast<float>(safe_area.top)),
+            .right = std::max(0.0F, static_cast<float>(safe_area.right)),
+            .bottom = keyboard_occludes_bottom ? 0.0F : std::max(0.0F, static_cast<float>(safe_area.bottom)),
+            .left = std::max(0.0F, static_cast<float>(safe_area.left)),
+        },
+    });
   }
 
   void ScheduleFrame(double deadline) {
@@ -606,6 +632,13 @@ int RunPlatformApp(AppDefinition definition) {
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->Resize(self.bounds.size);
     huxeruiAdapter->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)safeAreaInsetsDidChange {
+  [super safeAreaInsetsDidChange];
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->Resize(self.bounds.size);
   }
 }
 
@@ -727,8 +760,28 @@ int RunPlatformApp(AppDefinition definition) {
 
 @implementation HuxerUIIOSViewController
 
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _huxerUIStatusBarStyle = UIStatusBarStyleDarkContent;
+  }
+  return self;
+}
+
 - (BOOL)prefersStatusBarHidden {
   return NO;
+}
+
+- (UIStatusBarStyle)preferredStatusBarStyle {
+  return _huxerUIStatusBarStyle;
+}
+
+- (void)setHuxerUIStatusBarStyle:(UIStatusBarStyle)style {
+  if (_huxerUIStatusBarStyle == style) {
+    return;
+  }
+  _huxerUIStatusBarStyle = style;
+  [self setNeedsStatusBarAppearanceUpdate];
 }
 
 @end

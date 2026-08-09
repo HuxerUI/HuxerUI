@@ -36,6 +36,7 @@ add_executable(huxerui_tests
         runtime/text_field.cpp
         runtime/text_input.cpp
         runtime/virtual_layout.cpp
+        runtime/window.cpp
 )
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -113,6 +114,7 @@ set(HUXERUI_PUBLIC_HEADERS
         vector.h
         view.h
         virtual_layout.h
+        window.h
 )
 
 set(HUXERUI_HEADER_TEST_SOURCES)

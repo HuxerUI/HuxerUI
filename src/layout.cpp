@@ -13,8 +13,8 @@
 namespace huxerui::detail {
 
 struct LayoutContextAccess {
-  static LayoutContext Create(void* state, LayoutContext::MeasureFunction measure) {
-    return LayoutContext{state, measure};
+  static LayoutContext Create(void* state, LayoutContext::MeasureFunction measure, EdgeInsets safe_area) {
+    return LayoutContext{state, measure, safe_area};
   }
 };
 
@@ -82,10 +82,10 @@ Rect ScrollViewport(const MountedNode& node) noexcept {
     return *node.scroll_state->viewport_override;
   }
   return {
-      node.properties.padding.left,
-      node.properties.padding.top,
-      std::max(0.0F, node.measured_size.width - node.properties.padding.Horizontal()),
-      std::max(0.0F, node.measured_size.height - node.properties.padding.Vertical()),
+      node.resolved_padding.left,
+      node.resolved_padding.top,
+      std::max(0.0F, node.measured_size.width - node.resolved_padding.Horizontal()),
+      std::max(0.0F, node.measured_size.height - node.resolved_padding.Vertical()),
   };
 }
 
@@ -94,6 +94,7 @@ namespace {
 struct LayoutContextState {
   PlatformAdapter* platform;
   Runtime* runtime;
+  EdgeInsets safe_area;
 };
 
 struct VirtualLayoutContextState {
@@ -153,7 +154,7 @@ Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, Layout
   if (node.children.empty()) {
     return constraints.Constrain({});
   }
-  return MeasureNode(*node.children.front(), constraints, *state.platform, *state.runtime);
+  return MeasureNode(*node.children.front(), constraints, *state.platform, *state.runtime, state.safe_area);
 }
 
 Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, LayoutContextState& state) {
@@ -181,7 +182,8 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Layou
                 constraints.min_height,
                 constraints.max_height,
             };
-  const Size child_size = MeasureNode(*node.children.front(), child_constraints, *state.platform, *state.runtime);
+  const Size child_size =
+      MeasureNode(*node.children.front(), child_constraints, *state.platform, *state.runtime, state.safe_area);
   node.scroll_state->content_width = child_size.width;
   node.scroll_state->content_height = child_size.height;
   return constraints.Constrain(child_size);
@@ -240,7 +242,8 @@ namespace {
 
 Size MeasureLayoutChild(void* state, huxerui::MountedNode& child, Constraints constraints) {
   auto& layout_state = *static_cast<LayoutContextState*>(state);
-  return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.platform, *layout_state.runtime);
+  return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.platform, *layout_state.runtime,
+                     layout_state.safe_area);
 }
 
 std::size_t VirtualItemCount(void* state) {
@@ -257,7 +260,8 @@ huxerui::MountedNode& ObtainVirtualItem(void* state, std::size_t index) {
 
 Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints constraints) {
   auto& layout_state = *static_cast<VirtualLayoutContextState*>(state)->layout_state;
-  return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime);
+  return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime,
+                     layout_state.safe_area);
 }
 
 Size MeasureLabelContent(
@@ -300,14 +304,46 @@ void ClampScrollOffsetAndCompleteController(MountedNode& node) {
 
 } // namespace
 
-Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime) {
+Size MeasureNode(
+    MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime, EdgeInsets safe_area
+) {
   // An invalidated ancestor may revisit a clean child. The child's cached result remains valid only for the exact
   // parent constraints under which it was measured.
-  if (!node.measure_dirty && node.measured_constraints.has_value() && *node.measured_constraints == constraints) {
+  if (!node.measure_dirty && node.measured_constraints.has_value() && *node.measured_constraints == constraints &&
+      node.measured_safe_area.has_value() && *node.measured_safe_area == safe_area) {
     return node.measured_size;
   }
 
-  LayoutContextState layout_state{&platform, &runtime};
+  const EdgeInsets inherited_safe_area = safe_area;
+  EdgeInsets consumed_safe_area;
+  if (node.properties.safe_area_padding.has_value()) {
+    const SafeAreaPadding& edges = *node.properties.safe_area_padding;
+    consumed_safe_area = {
+        edges.top ? safe_area.top : 0.0F,
+        edges.right ? safe_area.right : 0.0F,
+        edges.bottom ? safe_area.bottom : 0.0F,
+        edges.left ? safe_area.left : 0.0F,
+    };
+    if (edges.top) {
+      safe_area.top = 0.0F;
+    }
+    if (edges.right) {
+      safe_area.right = 0.0F;
+    }
+    if (edges.bottom) {
+      safe_area.bottom = 0.0F;
+    }
+    if (edges.left) {
+      safe_area.left = 0.0F;
+    }
+  }
+  node.resolved_padding = {
+      node.properties.padding.top + consumed_safe_area.top,
+      node.properties.padding.right + consumed_safe_area.right,
+      node.properties.padding.bottom + consumed_safe_area.bottom,
+      node.properties.padding.left + consumed_safe_area.left,
+  };
+  LayoutContextState layout_state{&platform, &runtime, safe_area};
   if (node.kind == NodeKind::ScrollView) {
     node.scroll_state->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   }
@@ -315,7 +351,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     PrepareScrollController(node, runtime);
   }
   const Constraints resolved_constraints = ResolveConstraints(node.properties, constraints);
-  const Constraints content_constraints = resolved_constraints.Deflate(node.properties.padding);
+  const Constraints content_constraints = resolved_constraints.Deflate(node.resolved_padding);
   Size content_size;
 
   switch (node.kind) {
@@ -442,7 +478,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     if (node.layout_descriptor == nullptr || node.layout_descriptor->measure == nullptr) {
       throw std::logic_error("HuxerUI layout node has no measure function");
     }
-    LayoutContext context = LayoutContextAccess::Create(&layout_state, MeasureLayoutChild);
+    LayoutContext context = LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area);
     LayoutResult result = node.layout_descriptor->measure(context, node, content_constraints);
     content_size = content_constraints.Constrain(result.MeasuredSize());
     node.layout_placements = result.Placements();
@@ -452,7 +488,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     content_size = MeasureScopeChild(node, content_constraints, layout_state);
     break;
   case NodeKind::SelectionArea:
-    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints);
+    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints, safe_area);
     break;
   case NodeKind::ScrollView:
     content_size = MeasureScrollChild(node, content_constraints, layout_state);
@@ -507,14 +543,15 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
   }
 
   const Size measured{
-      content_size.width + node.properties.padding.Horizontal(),
-      content_size.height + node.properties.padding.Vertical(),
+      content_size.width + node.resolved_padding.Horizontal(),
+      content_size.height + node.resolved_padding.Vertical(),
   };
   node.measured_size = resolved_constraints.Constrain(measured);
   if (IsScrollContainer(node) && node.kind != NodeKind::ScrollView && node.kind != NodeKind::TextField) {
     ClampScrollOffsetAndCompleteController(node);
   }
   node.measured_constraints = constraints;
+  node.measured_safe_area = inherited_safe_area;
   node.measure_dirty = false;
   node.layout_dirty = true;
   ++node.measure_revision;
@@ -549,8 +586,8 @@ void LayoutNode(MountedNode& node, Point offset) {
   }
 
   const Point content_origin{
-      node.properties.padding.left,
-      node.properties.padding.top,
+      node.resolved_padding.left,
+      node.resolved_padding.top,
   };
   switch (node.kind) {
   case NodeKind::Layout:

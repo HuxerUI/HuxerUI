@@ -155,7 +155,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
 
   TestPlatform platform;
   Runtime runtime{ScrollViewApp, platform};
-  runtime.SetViewport({100.0F, 60.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -223,7 +223,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_y == 60.0F);
 
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_y == 20.0F);
@@ -232,7 +232,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
 TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   TestPlatform platform;
   Runtime runtime{HorizontalScrollViewApp, platform};
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -270,7 +270,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
 
   TestPlatform platform;
   Runtime runtime{ControlledVirtualListApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.BuildFrame();
 
@@ -314,7 +314,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
 TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   TestPlatform platform;
   Runtime runtime{ScrollControllerExampleApp, platform};
-  runtime.SetViewport({640.0F, 560.0F});
+  runtime.SetWindowMetrics({.viewport = {640.0F, 560.0F}});
   const int frames_before_build = platform.requested_frames;
   runtime.BuildFrame();
 
@@ -358,7 +358,7 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
 TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
   TestPlatform platform;
   Runtime runtime{ControlledVirtualGridApp, platform};
-  runtime.SetViewport({90.0F, 48.0F});
+  runtime.SetWindowMetrics({.viewport = {90.0F, 48.0F}});
   runtime.BuildFrame();
 
   REQUIRE(controlled_grid_scroll.IsConnected());
@@ -388,7 +388,7 @@ TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
 TEST_CASE("TestScrollControllerControlsScrollView") {
   TestPlatform platform;
   Runtime runtime{ControlledScrollViewApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -410,7 +410,7 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
 TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
   TestPlatform platform;
   Runtime runtime{ScopedScrollViewApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   auto* scroll = runtime.RootNode()->children[1].get();
   REQUIRE(scroll->scroll_state->content_height - scroll->measured_size.height == 30.0F);

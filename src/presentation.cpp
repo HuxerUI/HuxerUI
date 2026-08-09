@@ -746,6 +746,7 @@ ViewFactory BottomSheetContent(
     View result = Column {std::move(children)}.With(
         CrossAlign{CrossAxisAlignment::Stretch},
         Background{style.background},
+        SafeAreaPadding{.top = false, .right = false, .left = false},
         CornerRadius{style.corner_radii},
         ClipChildren{},
         style.shadow,
@@ -944,6 +945,7 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
+    const EdgeInsets safe_area = context.SafeAreaInsets();
     for (MountedNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose));
     }
@@ -954,8 +956,14 @@ public:
       result.Place(
           panel,
           {
-              std::min(16.0F, std::max(0.0F, constraints.max_width - panel.LayoutSize().width)),
-              std::min(16.0F, std::max(0.0F, constraints.max_height - panel.LayoutSize().height)),
+              std::min(
+                  safe_area.left + 16.0F,
+                  std::max(safe_area.left, constraints.max_width - safe_area.right - panel.LayoutSize().width)
+              ),
+              std::min(
+                  safe_area.top + 16.0F,
+                  std::max(safe_area.top, constraints.max_height - safe_area.bottom - panel.LayoutSize().height)
+              ),
           }
       );
     }
@@ -1880,6 +1888,7 @@ public:
   static void Install(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {
     LayerPlacement placement;
     placement.kind = LayerPlacementKind::Fill;
+    placement.safe_area_policy = LayerSafeAreaPolicy::Ignore;
     root.Layers().AttachCaptured(
         LayerOptions{
             .level = LayerLevel::System,
@@ -2410,6 +2419,7 @@ LayerId detail::BottomSheetService::Show(
   LayerOptions layer_options = BottomSheetLayerOptions(std::move(options), style.scrim);
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::BottomCenter;
+  placement.safe_area_policy = detail::LayerSafeAreaPolicy::ExtendBottom;
   placement.fill_cross_axis = true;
   placement.maximum_cross_axis_extent = style.maximum_width;
   const LayerId id = layers_.AttachCaptured(

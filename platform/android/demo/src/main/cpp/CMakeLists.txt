@@ -4,7 +4,7 @@ project(huxerui_android_demo LANGUAGES CXX)
 if (NOT HUXERUI_ROOT_DIR)
     message(FATAL_ERROR "HUXERUI_ROOT_DIR is required")
 endif ()
-find_package(huxerui REQUIRED CONFIG)
+find_package(HuxerUI REQUIRED CONFIG)
 
 set(HUXERUI_PROJECT_DIR "${HUXERUI_ROOT_DIR}")
 include("${HUXERUI_ROOT_DIR}/cmake/HuxerUITargets.cmake")

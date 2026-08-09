@@ -605,7 +605,7 @@ public:
     configuration.display_scale = display_scale;
     resources_.SetConfiguration(configuration);
     if (runtime_ != nullptr) {
-      runtime_->SetViewport(viewport_);
+      runtime_->SetWindowMetrics({.viewport = viewport_});
       runtime_->UpdateResourceConfiguration(configuration);
     }
   }

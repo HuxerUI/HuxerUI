@@ -243,7 +243,7 @@ TEST_CASE("NavigationStackPushPopRetainsPages") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "Root page"));
   REQUIRE(navigation.has_value());
@@ -281,7 +281,7 @@ TEST_CASE("NavigationStackPredictiveBackCanCancelAndCommit") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push(DetailPage);
   SettleNavigation(platform, runtime);
@@ -314,7 +314,7 @@ TEST_CASE("NavigationStackSerializesDeferredPredictiveBackWithProgrammaticOperat
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   navigation->Push(DetailPage);
@@ -342,7 +342,7 @@ TEST_CASE("NavigationStackHonorsReducedMotion") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(ReducedMotionNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   REQUIRE(navigation.has_value());
@@ -358,7 +358,7 @@ TEST_CASE("NavigationMotionEntersWideViewportWithoutDelayingMovement") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({2000.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {2000.0F, 240.0F}});
   runtime.BuildFrame();
 
   REQUIRE(navigation.has_value());
@@ -372,7 +372,7 @@ TEST_CASE("NavigationMotionEntersWideViewportWithoutDelayingMovement") {
   REQUIRE(moving_detail->x > 0.0F);
 
   const float normalized_position = moving_detail->x / 2000.0F;
-  runtime.SetViewport({1000.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {1000.0F, 240.0F}});
   const std::optional<Rect> resized_detail = FindPresentedTextRect(runtime.BuildFrame(), "Detail page");
   REQUIRE(resized_detail.has_value());
   REQUIRE(resized_detail->x / 1000.0F == Catch::Approx(normalized_position).margin(0.001F));
@@ -382,7 +382,7 @@ TEST_CASE("NavigationAnimationReusesPageLayoutAndPaint") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   navigation->Push(DetailPage);
@@ -414,7 +414,7 @@ TEST_CASE("NavigationStackFillsBoundedLooseConstraints") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(BoundedNavigationApp, platform);
-  runtime.SetViewport({240.0F, 160.0F});
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
 
   const DrawRectCommand* background = FindRectWithColor(runtime.BuildFrame(), navigation_bounds_color);
   REQUIRE(background != nullptr);
@@ -425,7 +425,7 @@ TEST_CASE("NavigationStackGivesRepeatedFactoriesIndependentIdentity") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(RepeatedNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   navigation->Push(RepeatedPage);
@@ -445,7 +445,7 @@ TEST_CASE("BackRequestedPrecedesNavigationPop") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push(InterceptingPage);
   SettleNavigation(platform, runtime);
@@ -463,7 +463,7 @@ TEST_CASE("NavigationStackReplaceAndQueuedOperationsUseLogicalDepth") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   navigation->Replace(DetailPage);
@@ -485,7 +485,7 @@ TEST_CASE("NestedNavigationConsumesBackAtTheDeepestStack") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(NestedNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   REQUIRE(outer_navigation.has_value());
@@ -517,7 +517,7 @@ TEST_CASE("PassThroughLayerContentDoesNotInterceptApplicationBack") {
   options.root_hooks.push_back([](RootContext& root) { navigation_layers = root.Layers(); });
   TestPlatform platform;
   Runtime runtime(NavigationApp, platform, std::move(options));
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(navigation.has_value());
   REQUIRE(navigation_layers.has_value());
@@ -539,7 +539,7 @@ TEST_CASE("NavigationDeactivatesPointerInputWhenAPageIsCovered") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(InteractiveNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Down, 91, {20.0F, 20.0F}});
 
@@ -554,7 +554,7 @@ TEST_CASE("NavigationDeactivatesFocusAndTextInputWhenAPageIsCovered") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
   Runtime runtime(NavigationTextInputApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Down, 92, {20.0F, 20.0F}});
   REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
@@ -568,7 +568,7 @@ TEST_CASE("NavigationDeactivatesFocusAndTextInputWhenAPageIsCovered") {
 TEST_CASE("UseNavigationRequiresAnEnclosingStack") {
   TestPlatform platform;
   Runtime runtime(MissingNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
 }
 
@@ -594,7 +594,7 @@ TEST_CASE("NavigationControllerValidatesFactoriesAndDisconnects") {
   {
     TestPlatform platform;
     Runtime runtime(NavigationApp, platform);
-    runtime.SetViewport({320.0F, 240.0F});
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     runtime.BuildFrame();
     retained = *navigation;
     REQUIRE_THROWS_AS(retained.Push({}), std::invalid_argument);
@@ -612,7 +612,7 @@ TEST_CASE("NavigationFactoriesBindTypedArguments") {
   ResetNavigationTestState();
   TestPlatform platform;
   Runtime runtime(ParameterizedNavigationApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(ContainsText(runtime.BuildFrame(), "Parameterized root 17"));
 
   REQUIRE(navigation.has_value());

@@ -116,7 +116,7 @@ TEST_CASE("TestSelectionAreaSelectsAndCopiesAcrossTextNodes") {
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
   Runtime runtime{SelectionAreaApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   Pointer(runtime, PointerEventType::Down, 10.0F, 10.0F);
@@ -139,7 +139,7 @@ TEST_CASE("TestSelectionAreaHandlesSelectAllShortcut") {
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
   Runtime runtime{SelectionAreaApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   Pointer(runtime, PointerEventType::Down, 10.0F, 10.0F);
@@ -168,7 +168,7 @@ TEST_CASE("TestSelectionAreaDoubleClickSelectsWord") {
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
   Runtime runtime{SelectionAreaApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent({
@@ -187,7 +187,7 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
   Runtime runtime{PresentedSelectionAreaApp, platform};
-  runtime.SetViewport({160.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent({
@@ -212,7 +212,7 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
 TEST_CASE("TestSelectionAreaRetainsForegroundPaintAcrossCleanFrames") {
   TestPlatform platform;
   Runtime runtime{SelectionAreaApp, platform};
-  runtime.SetViewport({160.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
   Pointer(runtime, PointerEventType::Down, 10.0F, 10.0F);
@@ -232,7 +232,7 @@ TEST_CASE("TestTextSelectionCapabilityDoesNotDependOnBuiltInNodeKinds") {
   custom_selection_requested = false;
   TestPlatform platform;
   Runtime runtime{CustomSelectionApp, platform};
-  runtime.SetViewport({160.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
   runtime.HandlePointerEvent({
@@ -251,7 +251,7 @@ TEST_CASE("TestTextRemainsNonSelectableOutsideSelectionArea") {
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
   Runtime runtime{PlainTextApp, platform};
-  runtime.SetViewport({160.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
   Pointer(runtime, PointerEventType::Down, 10.0F, 10.0F);

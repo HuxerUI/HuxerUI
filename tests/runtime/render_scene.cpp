@@ -307,7 +307,7 @@ bool DamageContains(const DamageRegion& damage, Rect bounds) {
 TEST_CASE("RuntimePublishesStableRenderSceneNodes") {
   TestPlatform platform;
   Runtime runtime{RenderSceneApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
   REQUIRE(first_frame.scene.root != nullptr);
@@ -355,7 +355,7 @@ TEST_CASE("ClipChildrenPublishesARoundedClipAndRestrictsDescendantHitTesting") {
   clipped_child_clicks = 0;
   TestPlatform platform;
   Runtime runtime{ClipChildrenApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   REQUIRE(frame.scene.root != nullptr);
@@ -386,7 +386,7 @@ TEST_CASE("ClipChildrenPublishesARoundedClipAndRestrictsDescendantHitTesting") {
 TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
   TestPlatform platform;
   Runtime runtime{AsymmetricClipChildrenApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   REQUIRE(frame.scene.root != nullptr);
@@ -404,7 +404,7 @@ TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {
   overflowing_child_clicks = 0;
   TestPlatform platform;
   Runtime runtime{OverflowChildHitTestApp, platform};
-  runtime.SetViewport({140.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {140.0F, 100.0F}});
 
   runtime.BuildRenderFrame();
   ClickAt(runtime, {100.0F, 40.0F}, 1);
@@ -419,7 +419,7 @@ TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {
 TEST_CASE("ScrollViewRetainsContainerAndContentClips") {
   TestPlatform platform;
   Runtime runtime{ClippedScrollViewApp, platform};
-  runtime.SetViewport({100.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   REQUIRE(frame.scene.root != nullptr);
@@ -440,7 +440,7 @@ TEST_CASE("ScrollViewRetainsContainerAndContentClips") {
 TEST_CASE("RenderSceneRerecordsOnlyChangedDeclarativePaint") {
   TestPlatform platform;
   Runtime runtime{PaintReuseApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
   REQUIRE(first_frame.scene.root != nullptr);
@@ -478,7 +478,7 @@ TEST_CASE("RenderSceneRerecordsOnlyChangedDeclarativePaint") {
 TEST_CASE("PresentationAnimationReusesPaintSequences") {
   TestPlatform platform;
   Runtime runtime{PresentationReuseApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
   presentation_reuse_moved = true;
@@ -510,7 +510,7 @@ TEST_CASE("FrameCommitSeparatesRuntimeWorkFromPlatformScheduling") {
   TestPlatform platform;
   platform.current_time = 12.5;
   Runtime runtime{PresentationReuseApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildCommit();
 
   const int requests_before_invalidation = platform.requested_frames;
@@ -527,7 +527,7 @@ TEST_CASE("FrameCommitSeparatesRuntimeWorkFromPlatformScheduling") {
 TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {
   TestPlatform platform;
   Runtime runtime{FramePaintInvalidationApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const FrameCommit& commit = runtime.BuildCommit();
 
@@ -537,7 +537,7 @@ TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
   TestPlatform platform;
   Runtime runtime{RetainedOpacityApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
   retained_opacity_faded = true;
@@ -574,7 +574,7 @@ TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
 TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
   TestPlatform platform;
   Runtime runtime{RetainedScrollApp, platform};
-  runtime.SetViewport({100.0F, 60.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   runtime.BuildRenderFrame();
 
   const auto* scroll_view = runtime.RootNode();
@@ -612,10 +612,10 @@ TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
 TEST_CASE("ViewportChangesProduceFullDamage") {
   TestPlatform platform;
   Runtime runtime{RenderSceneApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const RenderFrame& resized = runtime.BuildRenderFrame();
   REQUIRE(resized.damage.full);
   REQUIRE(resized.damage.rects.size() == 1);
@@ -624,9 +624,9 @@ TEST_CASE("ViewportChangesProduceFullDamage") {
   REQUIRE(resized.damage.rects[0].width == 200.0F);
   REQUIRE(resized.damage.rects[0].height == 120.0F);
 
-  runtime.SetViewport({});
+  runtime.SetWindowMetrics({.viewport = {}});
   REQUIRE(runtime.BuildRenderFrame().scene.root == nullptr);
-  runtime.SetViewport({200.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const RenderFrame& restored = runtime.BuildRenderFrame();
   REQUIRE(restored.damage.full);
   REQUIRE(restored.damage.rects.size() == 1);
@@ -635,7 +635,7 @@ TEST_CASE("ViewportChangesProduceFullDamage") {
 TEST_CASE("RemovedAndInsertedNodesDamageTheirCommittedBounds") {
   TestPlatform platform;
   Runtime runtime{RemovalDamageApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
   REQUIRE(first_frame.scene.root != nullptr);
@@ -657,7 +657,7 @@ TEST_CASE("RemovedAndInsertedNodesDamageTheirCommittedBounds") {
 TEST_CASE("ReorderedRenderChildrenDamageTheirSharedBounds") {
   TestPlatform platform;
   Runtime runtime{ChildOrderDamageApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
   const auto* mounted_root = runtime.RootNode();
@@ -679,7 +679,7 @@ TEST_CASE("ReorderedRenderChildrenDamageTheirSharedBounds") {
 TEST_CASE("ClipChangesDamageOldAndNewClippedSubtreeBounds") {
   TestPlatform platform;
   Runtime runtime{ClipDamageApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
   clip_damage_expanded = true;
@@ -691,7 +691,7 @@ TEST_CASE("ClipChangesDamageOldAndNewClippedSubtreeBounds") {
 TEST_CASE("OffscreenParentsRemainVisibleWhenAnOverflowingChildIsVisible") {
   TestPlatform platform;
   Runtime runtime{OverflowingChildApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   REQUIRE(frame.scene.root != nullptr);
@@ -711,7 +711,7 @@ TEST_CASE("OffscreenParentsRemainVisibleWhenAnOverflowingChildIsVisible") {
 TEST_CASE("OffscreenClipsKeepOverflowingChildrenInvisible") {
   TestPlatform platform;
   Runtime runtime{ClippedOverflowingChildApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   REQUIRE(frame.scene.root != nullptr);
@@ -731,7 +731,7 @@ TEST_CASE("OffscreenClipsKeepOverflowingChildrenInvisible") {
 TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheViewport") {
   TestPlatform platform;
   Runtime runtime{OverflowingPaintApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
   const auto* mounted = runtime.RootNode();
@@ -755,7 +755,7 @@ TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheV
 TEST_CASE("ShadowsPaintBehindContentAndInvalidateTheirOverflow") {
   TestPlatform platform;
   Runtime runtime{ShadowApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
   const auto* mounted_root = runtime.RootNode();
@@ -786,7 +786,7 @@ TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
   canvas_paint_count = 0;
   TestPlatform platform;
   Runtime runtime{CanvasApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
   const auto* mounted_root = runtime.RootNode();
@@ -822,7 +822,7 @@ TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
 TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {
   TestPlatform platform;
   Runtime runtime{ClippedOverflowingPaintApp, platform};
-  runtime.SetViewport({160.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
   const auto* scroll_view = runtime.RootNode();

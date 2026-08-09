@@ -34,7 +34,10 @@ Runtime runtime{
     platform,
 };
 
-runtime.SetViewport({width, height});
+runtime.SetWindowMetrics({
+    .viewport = {width, height},
+    .safe_area = safe_area,
+});
 const FrameCommit& commit = runtime.BuildFrame();
 renderer.Render(commit.render_frame);
 if (commit.next_frame_deadline.has_value()) {
@@ -43,6 +46,8 @@ if (commit.next_frame_deadline.has_value()) {
 ```
 
 Platform adapters translate density, native coordinate systems, key events, pointer events, IME commands, clipboard operations, packaged resource reads, and renderer conventions.
+Full-window mobile adapters submit viewport and safe-area geometry atomically through `Runtime::SetWindowMetrics()` and apply the light or dark system-bar foreground resolved by Runtime.
+Desktop client areas submit zero insets.
 PlatformAdapter also implements the shared `TextMeasurer` service, resolving platform-neutral Font and TextStyle values through the native text stack.
 They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
 `SemanticFrame` is a second committed Runtime output beside RenderFrame, not data reconstructed by a renderer or inferred from concrete components in a platform adapter.

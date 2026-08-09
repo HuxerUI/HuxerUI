@@ -367,7 +367,7 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
   semantic_icon_button_clicks = 0;
   TestPlatform platform;
   Runtime runtime(SemanticBasicsApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const FrameCommit& first = runtime.BuildCommit();
   REQUIRE(first.semantic_frame);
@@ -402,7 +402,7 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
 TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
   TestPlatform platform;
   Runtime runtime(SemanticBasicsApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   runtime.BuildCommit();
   const auto slider_node = std::ranges::find_if(runtime.LastCommit().semantic_frame->nodes, [](const SemanticNode& node) {
@@ -430,7 +430,7 @@ TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
 TEST_CASE("TabsPublishAStableAccessibleSelectionGroup") {
   TestPlatform platform;
   Runtime runtime(SemanticTabsApp, platform);
-  runtime.SetViewport({320.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& tab_list = FindSemanticRole(*before, SemanticRole::TabList);
@@ -476,7 +476,7 @@ TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
   semantic_segmented_button_changes = 0;
   TestPlatform platform;
   Runtime runtime(SemanticSegmentedButtonApp, platform);
-  runtime.SetViewport({320.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 80.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& day = FindSemanticNode(*before, "Day");
@@ -528,7 +528,7 @@ TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
 
   TestPlatform disabled_platform;
   Runtime disabled(DisabledSemanticSegmentedButtonApp, disabled_platform);
-  disabled.SetViewport({240.0F, 80.0F});
+  disabled.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const std::shared_ptr<const SemanticFrame> disabled_frame = disabled.BuildCommit().semantic_frame;
   const SemanticNode& disabled_week = FindSemanticNode(*disabled_frame, "Week");
   REQUIRE_FALSE(disabled_week.enabled);
@@ -542,7 +542,7 @@ TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
 TEST_CASE("NavigationSelectorsPublishRealAccessibleItems") {
   TestPlatform platform;
   Runtime runtime(SemanticNavigationBarApp, platform);
-  runtime.SetViewport({360.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 120.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& navigation = FindSemanticRole(*before, SemanticRole::Navigation);
@@ -582,7 +582,7 @@ TEST_CASE("NavigationSelectorsPublishRealAccessibleItems") {
 TEST_CASE("NavigationPaneKeepsItsSemanticsAcrossVisualModes") {
   TestPlatform platform;
   Runtime runtime(SemanticNavigationPaneApp, platform);
-  runtime.SetViewport({320.0F, 180.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 180.0F}});
 
   const std::shared_ptr<const SemanticFrame> compact = runtime.BuildCommit().semantic_frame;
   const SemanticNode& compact_navigation = FindSemanticRole(*compact, SemanticRole::Navigation);
@@ -608,7 +608,7 @@ TEST_CASE("NavigationPaneKeepsItsSemanticsAcrossVisualModes") {
 TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
   TestPlatform platform;
   Runtime runtime(SemanticVerticalScrollApp, platform);
-  runtime.SetViewport({100.0F, 60.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& scroll = FindSemanticRole(*before, SemanticRole::ScrollView);
@@ -653,7 +653,7 @@ TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
 TEST_CASE("HorizontalScrollViewUsesHorizontalSemanticDeltas") {
   TestPlatform platform;
   Runtime runtime(SemanticHorizontalScrollApp, platform);
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   const SemanticNode& scroll = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView);
   REQUIRE(scroll.scroll->axis == Axis::Horizontal);
@@ -670,7 +670,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
   semantic_virtual_list_factory_calls = 0;
   TestPlatform platform;
   Runtime runtime(SemanticVirtualListApp, platform);
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& list = FindSemanticRole(*before, SemanticRole::List);
@@ -717,7 +717,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
 TEST_CASE("HorizontalVirtualListPublishesOneSemanticRow") {
   TestPlatform platform;
   Runtime runtime(SemanticHorizontalVirtualListApp, platform);
-  runtime.SetViewport({60.0F, 30.0F});
+  runtime.SetWindowMetrics({.viewport = {60.0F, 30.0F}});
 
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const SemanticNode& list = FindSemanticRole(*frame, SemanticRole::List);
@@ -732,7 +732,7 @@ TEST_CASE("HorizontalVirtualListPublishesOneSemanticRow") {
 TEST_CASE("VirtualGridPublishesResolvedCellsAndKeepsRealizedIdentityAcrossReflow") {
   TestPlatform platform;
   Runtime runtime(SemanticVirtualGridApp, platform);
-  runtime.SetViewport({90.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {90.0F, 40.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& grid = FindSemanticRole(*before, SemanticRole::Grid);
@@ -759,7 +759,7 @@ TEST_CASE("VirtualGridPublishesResolvedCellsAndKeepsRealizedIdentityAcrossReflow
   };
   REQUIRE(fourth.collection_item == fourth_position);
 
-  runtime.SetViewport({60.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {60.0F, 40.0F}});
   const std::shared_ptr<const SemanticFrame> reflowed = runtime.BuildCommit().semantic_frame;
   const SemanticNode& resized_grid = FindSemanticRole(*reflowed, SemanticRole::Grid);
   REQUIRE((resized_grid.collection == SemanticCollection{.item_count = 8, .row_count = 5, .column_count = 2}));
@@ -771,7 +771,7 @@ TEST_CASE("VirtualGridPublishesResolvedCellsAndKeepsRealizedIdentityAcrossReflow
 TEST_CASE("EmptyVirtualListStillPublishesItsCollection") {
   TestPlatform platform;
   Runtime runtime(SemanticEmptyVirtualListApp, platform);
-  runtime.SetViewport({100.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   const SemanticNode& list = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::List);
   REQUIRE((list.collection == SemanticCollection{.item_count = 0, .row_count = 0, .column_count = 1}));
@@ -781,7 +781,7 @@ TEST_CASE("EmptyVirtualListStillPublishesItsCollection") {
 TEST_CASE("ShowOnScreenRevealsContentThroughNestedScrollContainers") {
   TestPlatform platform;
   Runtime runtime(SemanticNestedScrollApp, platform);
-  runtime.SetViewport({100.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
 
   const SemanticNode& target = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Inner third");
   REQUIRE(target.offscreen);
@@ -805,7 +805,7 @@ TEST_CASE("ShowOnScreenRevealsContentThroughNestedScrollContainers") {
 TEST_CASE("SemanticOffscreenStateHonorsPresentationTransformsAndClipping") {
   TestPlatform platform;
   Runtime runtime(SemanticClippedTransformApp, platform);
-  runtime.SetViewport({100.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
 
   const SemanticNode& clipped = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Clipped");
   REQUIRE(clipped.bounds == Rect{0.0F, 50.0F, 80.0F, 20.0F});
@@ -816,7 +816,7 @@ TEST_CASE("SemanticOffscreenStateHonorsPresentationTransformsAndClipping") {
 TEST_CASE("SemanticsModifierPublishesCustomMeaning") {
   TestPlatform platform;
   Runtime runtime(SemanticOverrideApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const SemanticNode& image = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Revenue chart");
   REQUIRE(image.role == SemanticRole::Image);
@@ -826,7 +826,7 @@ TEST_CASE("SemanticsModifierPublishesCustomMeaning") {
 TEST_CASE("ExplicitEmptySemanticsPublishesGenericOwner") {
   TestPlatform platform;
   Runtime runtime(EmptySemanticApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   REQUIRE(frame->nodes.size() == 2);
@@ -836,7 +836,7 @@ TEST_CASE("ExplicitEmptySemanticsPublishesGenericOwner") {
 TEST_CASE("AuthorSemanticsOverrideExtensionAndPreserveComponentMeaning") {
   TestPlatform platform;
   Runtime runtime(SemanticPrecedenceApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const SemanticNode& button = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Author");
   REQUIRE(button.role == SemanticRole::Button);
@@ -846,7 +846,7 @@ TEST_CASE("AuthorSemanticsOverrideExtensionAndPreserveComponentMeaning") {
 TEST_CASE("SecureTextFieldDoesNotPublishItsValue") {
   TestPlatform platform;
   Runtime runtime(SecureSemanticTextFieldApp, platform);
-  runtime.SetViewport({320.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& field = FindSemanticNode(*before, "Password");
@@ -870,7 +870,7 @@ TEST_CASE("SecureTextFieldDoesNotPublishItsValue") {
 TEST_CASE("TextFieldPublishesUtf16SelectionAndRoutesAccessibleEditing") {
   TestPlatform platform;
   Runtime runtime(EditableSemanticTextFieldApp, platform);
-  runtime.SetViewport({320.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNode& field = FindSemanticNode(*before, "Editor");
@@ -905,7 +905,7 @@ TEST_CASE("TextFieldPublishesUtf16SelectionAndRoutesAccessibleEditing") {
 TEST_CASE("ReadOnlyTextFieldAllowsSelectionButRejectsAccessibleReplacement") {
   TestPlatform platform;
   Runtime runtime(ReadOnlySemanticTextFieldApp, platform);
-  runtime.SetViewport({320.0F, 120.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
   const SemanticNode& field = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Read only");
   REQUIRE(field.read_only == true);
@@ -926,7 +926,7 @@ TEST_CASE("SemanticBuilderPublishesStableVirtualChildrenAndRoutesActions") {
   virtual_semantic_activations = 0;
   TestPlatform platform;
   Runtime runtime(VirtualSemanticApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const std::shared_ptr<const SemanticFrame> first = runtime.BuildCommit().semantic_frame;
   const SemanticNode& child = FindSemanticNode(*first, "April");
@@ -947,7 +947,7 @@ TEST_CASE("ReplacingSemanticExtensionInvalidatesVirtualIdentityAndActionRoute") 
   virtual_semantic_activations = 0;
   TestPlatform platform;
   Runtime runtime(VirtualSemanticLifecycleApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const SemanticNodeId first_id = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "April").id;
   semantic_virtual_visible = false;
@@ -972,7 +972,7 @@ TEST_CASE("SemanticLifecycleHonorsVisibilityExclusionDisabledStateAndStaleAction
   semantic_lifecycle_clicks = 0;
   TestPlatform platform;
   Runtime runtime(SemanticLifecycleApp, platform);
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const std::shared_ptr<const SemanticFrame> first = runtime.BuildCommit().semantic_frame;
   const SemanticNode& primary = FindSemanticNode(*first, "Primary");
@@ -1008,7 +1008,7 @@ TEST_CASE("SemanticLifecycleHonorsVisibilityExclusionDisabledStateAndStaleAction
 TEST_CASE("CompatibleSemanticUpdatesPreserveIdentityAndAdvanceRevision") {
   TestPlatform platform;
   Runtime runtime(SemanticCompatibleUpdateApp, platform);
-  runtime.SetViewport({120.0F, 80.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
 
   const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
   const SemanticNodeId id = FindSemanticNode(*before, "Before").id;

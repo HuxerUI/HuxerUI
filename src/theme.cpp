@@ -227,6 +227,12 @@ DrawerStyle FlatDrawerStyle(const ThemeSpec& theme) {
 
 ThemeDefinition FlatDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
+  definition.Set(
+      SystemBarsAppearance{
+          .status_bar_background = theme.colors.surface,
+          .navigation_bar_background = theme.colors.surface,
+      }
+  );
   definition.Set(FlatToastStyle(theme));
   definition.Set(FlatDialogStyle(theme));
   definition.Set(FlatBottomSheetStyle(theme));
@@ -786,6 +792,12 @@ DrawerStyle MaterialDrawerStyle(const ThemeSpec& theme) {
 
 ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   ThemeDefinition definition{theme};
+  definition.Set(
+      SystemBarsAppearance{
+          .status_bar_background = theme.colors.surface,
+          .navigation_bar_background = theme.colors.surface_container,
+      }
+  );
   definition.Set(MaterialButtonStyle(theme));
   definition.Set(MaterialIconButtonStyle(theme));
   definition.Set(MaterialChipStyle(theme));

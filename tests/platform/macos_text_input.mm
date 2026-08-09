@@ -49,7 +49,7 @@ TEST_CASE("TestMacTextInputClientMapsCompositionAndCommands") {
     auto input = std::make_unique<detail::MacTextInput>(runtime->NativeRuntime(), view);
     platform.platform_text_input = input.get();
 
-    runtime->SetViewport({200.0F, 80.0F});
+    runtime->SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime->BuildFrame();
     ClickAt(*runtime, {20.0F, 20.0F});
     REQUIRE(input->IsActive());
@@ -105,7 +105,7 @@ TEST_CASE("TestMacTextInputClientPreservesWordEditingSelectors") {
     auto input = std::make_unique<detail::MacTextInput>(runtime->NativeRuntime(), view);
     platform.platform_text_input = input.get();
 
-    runtime->SetViewport({200.0F, 80.0F});
+    runtime->SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime->BuildFrame();
     ClickAt(*runtime, {20.0F, 20.0F});
 
@@ -135,7 +135,7 @@ TEST_CASE("TestMacTextInputRoutesHistoryShortcutsBeforeInterpretation") {
     auto input = std::make_unique<detail::MacTextInput>(runtime->NativeRuntime(), view);
     platform.platform_text_input = input.get();
 
-    runtime->SetViewport({200.0F, 80.0F});
+    runtime->SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime->BuildFrame();
     ClickAt(*runtime, {20.0F, 20.0F});
 
@@ -184,7 +184,7 @@ TEST_CASE("TestMacSecureTextInputDoesNotExposeAttributedText") {
     auto input = std::make_unique<detail::MacTextInput>(runtime->NativeRuntime(), view);
     platform.platform_text_input = input.get();
 
-    runtime->SetViewport({200.0F, 80.0F});
+    runtime->SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime->BuildFrame();
     ClickAt(*runtime, {20.0F, 20.0F});
 
@@ -210,7 +210,7 @@ TEST_CASE("TestMacTextInputNextSelectorUsesRuntimeFocusAction") {
     auto input = std::make_unique<detail::MacTextInput>(runtime->NativeRuntime(), view);
     platform.platform_text_input = input.get();
 
-    runtime->SetViewport({200.0F, 100.0F});
+    runtime->SetWindowMetrics({.viewport = {200.0F, 100.0F}});
     runtime->BuildFrame();
     ClickAt(*runtime, {20.0F, 20.0F});
 

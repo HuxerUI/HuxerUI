@@ -77,8 +77,8 @@ An arbitrary View cannot be converted reliably into a MenuItem because it may re
 Applications keep their direct action list intentionally small and use the existing Menu service for secondary actions.
 A future automatic overflow feature requires a reusable structured command model shared by toolbars, menus, and shortcuts rather than a TopAppBar-only item type.
 
-TopAppBar owns neither status-bar nor safe-area padding.
-Those insets require one shared window geometry contract and must not be duplicated when a native host already constrains the application viewport.
+The [Window Insets and System Bars Design](window-insets.md) gives Runtime one full-window geometry contract.
+TopAppBar consumes its top and horizontal insets when they remain available in edge-to-edge content and contributes its themed background to the status region without duplicating native inset handling.
 Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing behavior remain deferred until shared nested-scroll coordination exists.
 
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.

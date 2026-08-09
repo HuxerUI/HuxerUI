@@ -63,7 +63,7 @@ TEST_CASE("Dialog semantics isolate the application and honor dismiss requests")
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
   semantic_dialog->Show(
@@ -99,7 +99,7 @@ TEST_CASE("Exiting dialogs immediately leave input and semantic participation") 
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
   semantic_dialog->Show([] { return Text("exiting dialog"); });
@@ -129,7 +129,7 @@ TEST_CASE("Dialog semantics follow the existing cancellation policy") {
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
   semantic_dialog->Show(
@@ -149,7 +149,7 @@ TEST_CASE("Standard dialog actions remain real semantic buttons") {
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
   semantic_dialog->Show("Save changes?", "The document has unsaved changes.", "Save");
@@ -164,7 +164,7 @@ TEST_CASE("Bottom sheets and toasts publish presentation semantics") {
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({360.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
   const LayerId sheet_id = semantic_bottom_sheet->Show([] { return Text("sheet body"); });
@@ -190,7 +190,7 @@ TEST_CASE("Menu semantics describe items and keep an expanded submenu in one mod
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
-  runtime.SetViewport({480.0F, 320.0F});
+  runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   runtime.BuildFrame();
 
   semantic_menu->Show({

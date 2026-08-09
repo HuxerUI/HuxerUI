@@ -27,3 +27,4 @@
 #include <huxerui/vector.h>
 #include <huxerui/view.h>
 #include <huxerui/virtual_layout.h>
+#include <huxerui/window.h>

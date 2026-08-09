@@ -385,7 +385,7 @@ View RecoveringModifierApp() {
 TEST_CASE("TestUseStateAndStateUpdate") {
   TestPlatform platform;
   Runtime runtime{CounterApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(FirstText(initial) == "1");
@@ -421,25 +421,25 @@ TEST_CASE("TestViewportClassRecomposesOnlyAcrossConfiguredBreakpoints") {
       },
   };
 
-  runtime.SetViewport({320.0F, 600.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 600.0F}});
   runtime.BuildFrame();
   REQUIRE(viewport_compositions == 1);
   REQUIRE(observed_viewport_class == ViewportClass::Compact);
 
-  runtime.SetViewport({480.0F, 720.0F});
+  runtime.SetWindowMetrics({.viewport = {480.0F, 720.0F}});
   runtime.BuildFrame();
   REQUIRE(viewport_compositions == 1);
 
-  runtime.SetViewport({500.0F, 720.0F});
+  runtime.SetWindowMetrics({.viewport = {500.0F, 720.0F}});
   runtime.BuildFrame();
   REQUIRE(viewport_compositions == 2);
   REQUIRE(observed_viewport_class == ViewportClass::Medium);
 
-  runtime.SetViewport({899.0F, 800.0F});
+  runtime.SetWindowMetrics({.viewport = {899.0F, 800.0F}});
   runtime.BuildFrame();
   REQUIRE(viewport_compositions == 2);
 
-  runtime.SetViewport({900.0F, 800.0F});
+  runtime.SetWindowMetrics({.viewport = {900.0F, 800.0F}});
   runtime.BuildFrame();
   REQUIRE(viewport_compositions == 3);
   REQUIRE(observed_viewport_class == ViewportClass::Expanded);
@@ -462,7 +462,7 @@ TEST_CASE("TestRootCompositionRecoversAfterException") {
 
   TestPlatform platform;
   Runtime runtime{RecoveringRootApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -487,7 +487,7 @@ TEST_CASE("TestChildReconciliationRecoversAfterException") {
 
   TestPlatform platform;
   Runtime runtime{RecoveringChildApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -525,7 +525,7 @@ TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
 
   TestPlatform platform;
   Runtime runtime{RecoveringModifierApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -554,7 +554,7 @@ TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
 TEST_CASE("TestLayoutAndHitTest") {
   TestPlatform platform;
   Runtime runtime{CounterApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -569,7 +569,7 @@ TEST_CASE("TestLayoutAndHitTest") {
 TEST_CASE("TestViewCopyOnWrite") {
   TestPlatform platform;
   Runtime runtime{CopyOnWriteApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -582,7 +582,7 @@ TEST_CASE("TestViewCopyOnWrite") {
 TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
   TestPlatform platform;
   Runtime runtime{TextStyleApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -602,7 +602,7 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   TestPlatform platform;
   {
     Runtime runtime{ModifierApp, platform};
-    runtime.SetViewport({320.0F, 240.0F});
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     runtime.BuildFrame();
 
     const auto* root = runtime.RootNode();
@@ -643,7 +643,7 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   REQUIRE(extension_destroys == 1);
 
   Runtime copy_runtime{ModifierCopyOnWriteApp, platform};
-  copy_runtime.SetViewport({320.0F, 240.0F});
+  copy_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   copy_runtime.BuildFrame();
   const auto* copy_root = copy_runtime.RootNode();
   REQUIRE(copy_root != nullptr);
@@ -656,7 +656,7 @@ TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
 
   TestPlatform platform;
   Runtime runtime{OpaqueModifierApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(opaque_extension_updates == 0);
 
@@ -668,7 +668,7 @@ TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
 TEST_CASE("TestScopeStateIsolation") {
   TestPlatform platform;
   Runtime runtime{ScopedCountersApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -688,7 +688,7 @@ TEST_CASE("TestScopeStateIsolation") {
 TEST_CASE("TestStatePassedIntoScope") {
   TestPlatform platform;
   Runtime runtime{SharedStateApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -705,7 +705,7 @@ TEST_CASE("TestStatePassedIntoScope") {
 TEST_CASE("TestKeyedScopeIdentity") {
   TestPlatform platform;
   Runtime runtime{KeyedScopesApp, platform};
-  runtime.SetViewport({320.0F, 320.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 320.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -729,7 +729,7 @@ TEST_CASE("TestKeyedScopeIdentity") {
 TEST_CASE("TestDuplicateSiblingKeys") {
   TestPlatform platform;
   Runtime runtime{DuplicateKeyApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   bool rejected = false;
   try {
@@ -743,7 +743,7 @@ TEST_CASE("TestDuplicateSiblingKeys") {
 TEST_CASE("TestRepeatedUseStateCallSite") {
   TestPlatform platform;
   Runtime runtime{RepeatedUseStateApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -769,7 +769,7 @@ TEST_CASE("TestLocalScopeRecomposition") {
 
   TestPlatform platform;
   Runtime runtime{LocalRecompositionApp, platform};
-  runtime.SetViewport({320.0F, 320.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 320.0F}});
   runtime.BuildFrame();
 
   REQUIRE(local_root_compositions == 1);
@@ -798,7 +798,7 @@ TEST_CASE("TestScopeReceivesUpdatedProps") {
 
   TestPlatform platform;
   Runtime runtime{PropUpdateApp, platform};
-  runtime.SetViewport({320.0F, 240.0F});
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -821,7 +821,7 @@ TEST_CASE("TestTypedScopeEvents") {
 
   TestPlatform platform;
   Runtime runtime{EventApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
@@ -853,7 +853,7 @@ TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
   observed_text_measurer = nullptr;
   TestPlatform platform;
   Runtime runtime{TextMeasurerApp, platform};
-  runtime.SetViewport({120.0F, 40.0F});
+  runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   runtime.BuildFrame();
 
   REQUIRE(observed_text_measurer == &platform);
@@ -862,7 +862,7 @@ TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
 TEST_CASE("ViewFactoriesBindTypedArgumentsAcrossCompositionWrappers") {
   TestPlatform platform;
   Runtime runtime{ParameterizedFactoryApp, platform};
-  runtime.SetViewport({200.0F, 100.0F});
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "bound 42"));
 }

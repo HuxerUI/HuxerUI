@@ -614,7 +614,7 @@ Environment carries:
 
 Theme and services reuse Environment rather than introducing parallel tree propagation systems.
 
-The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetViewport()` updates that value and invalidates the application root and layers only when the resolved class changes. Width and height do not become raw Environment values: measurement receives exact `Constraints`, and repeated resizing inside one class remains an incremental layout operation rather than a composition dependency.
+The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetWindowMetrics()` updates that value and invalidates the application root and layers only when the resolved viewport class changes. Exact viewport and safe-area dimensions do not become raw Environment values: measurement receives them through `Constraints` and the layout-time safe-area context, while repeated changes inside one class remain incremental layout work rather than composition dependencies.
 
 ## Theme
 
@@ -788,16 +788,23 @@ Theme switching initially updates values directly. Per-frame animated Theme inte
 
 ### LayerStack ownership and ordering
 
-`RuntimeRoot` keeps the application root view directly and one internal `LayerStack`; it does not introduce an application host, slot, scope wrapper, or portal abstraction:
+`RuntimeRoot` keeps three fixed internal children so full-window paint, application-safe layout, and presentation invalidation remain independent.
+The application content boundary contains at most the one composed application root and is not a public host, slot, scope, or portal abstraction:
 
 ```text
 RuntimeRoot
-|-- application root view
+|-- window system-bar backplane
+|-- application content boundary
+|   `-- application root view
 `-- LayerStack
     |-- Presentation entries
     |-- Notification entries
     `-- System entries
 ```
+
+The backplane and LayerStack always use the complete viewport.
+The application content boundary consumes all safe-area edges in the default `SafeArea` mode and leaves them available to application layouts in `EdgeToEdge` mode.
+See [Window Insets and System Bars Design](window-insets.md) for the exact propagation and appearance contract.
 
 Layer ordering describes broad drawing levels rather than concrete presentation components:
 

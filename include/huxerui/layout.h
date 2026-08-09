@@ -271,13 +271,20 @@ public:
     return measure_(state_, child, constraints);
   }
 
+  [[nodiscard]] EdgeInsets SafeAreaInsets() const noexcept {
+    // Layouts see only the edges that ancestor SafeAreaPadding modifiers have not consumed.
+    return safe_area_;
+  }
+
 private:
   using MeasureFunction = Size (*)(void*, MountedNode&, Constraints);
 
-  LayoutContext(void* state, MeasureFunction measure) : state_(state), measure_(measure) {}
+  LayoutContext(void* state, MeasureFunction measure, EdgeInsets safe_area)
+      : state_(state), measure_(measure), safe_area_(safe_area) {}
 
   void* state_;
   MeasureFunction measure_;
+  EdgeInsets safe_area_;
 
   friend struct detail::LayoutContextAccess;
 };
