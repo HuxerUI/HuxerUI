@@ -249,10 +249,16 @@ Host tools in `tools/prebuilt/<host>/<architecture>` run on the development host
 
 Place tests by ownership under `tests/unit`, `tests/runtime`, `tests/platform`, or `tests/codegen`. Tests verify public outcomes and invariants rather than private steps. Cover mount, compatible recomposition, replacement, unmount, keyed movement, Cancel and disabled input paths, deterministic animation time, and exception categories where relevant.
 
+Use the project's existing configured build directory and native host toolchain. Do not let a generic command silently select another compiler, generator, ABI, or binary format.
+
+Validate the current host by default. Build another platform only when the change affects that platform's adapter, build configuration, packaged artifact, or shared boundary requiring platform verification, or when the owner requests it.
+
+Treat a confirmed host-specific test limitation as unavailable validation rather than a product regression. Report the limitation and run the closest valid target instead of repeatedly invoking an incompatible toolchain or assertion.
+
 Validation depth is proportional to the affected contract:
 
 - Documentation: current API names, links, snippets, fences, and formatting.
-- Public header or shared API: header checks, common tests, affected examples, and every supported platform build available locally.
+- Public header or shared API: header checks, common tests, affected examples, the current-host build, and affected platform builds when required by the boundary above.
 - Component or Runtime: focused tests, full common tests, and affected platform integration.
 - Layout or virtualization: geometry, constraints, state restoration, and common tests.
 - Modifier or NodeExtension: reconciliation, scheduling, input, paint order, and animation.

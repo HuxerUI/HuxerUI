@@ -3,11 +3,13 @@
 #include <cstddef>
 #include <optional>
 #include <typeindex>
+#include <utility>
 #include <vector>
 
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
 #include <huxerui/scroll.h>
+#include <huxerui/semantics.h>
 
 namespace huxerui {
 
@@ -52,6 +54,7 @@ struct VirtualViewport {
 
 namespace detail {
 struct VirtualLayoutContextAccess;
+struct VirtualLayoutResultAccess;
 }
 
 class VirtualLayoutContext {
@@ -97,10 +100,26 @@ public:
   struct Placement {
     MountedNode* item;
     Point offset;
+    std::optional<SemanticCollectionItem> collection_item;
   };
 
   VirtualLayoutResult& Place(MountedNode& item, Point offset) {
-    placements_.push_back({&item, offset});
+    placements_.push_back({&item, offset, std::nullopt});
+    return *this;
+  }
+
+  // Collection metadata follows the same realized placement commit, so Runtime never materializes semantic-only items.
+  VirtualLayoutResult& Place(MountedNode& item, Point offset, SemanticCollectionItem collection_item) {
+    placements_.push_back({&item, offset, std::move(collection_item)});
+    return *this;
+  }
+
+  VirtualLayoutResult& SetCollectionSemantics(
+      SemanticRole role, SemanticRole item_role, SemanticCollection collection
+  ) noexcept {
+    collection_role_ = role;
+    collection_item_role_ = item_role;
+    collection_ = std::move(collection);
     return *this;
   }
 
@@ -150,6 +169,11 @@ private:
   Axis axis_ = Axis::Vertical;
   std::optional<float> scroll_offset_;
   std::vector<Placement> placements_;
+  SemanticRole collection_role_ = SemanticRole::Generic;
+  SemanticRole collection_item_role_ = SemanticRole::Generic;
+  std::optional<SemanticCollection> collection_;
+
+  friend struct detail::VirtualLayoutResultAccess;
 };
 
 namespace detail {

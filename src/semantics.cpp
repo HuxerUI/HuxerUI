@@ -403,16 +403,36 @@ void Runtime::BuildSemantics() {
     return snapshot != nullptr && snapshot->exiting;
   };
 
+  struct VirtualItemSemanticContext {
+    SemanticRole role = SemanticRole::Generic;
+    SemanticCollectionItem collection_item;
+  };
+
   using NodeIds = std::vector<SemanticNodeId>;
   const auto visit = [&](auto&& self,
                          detail::MountedNode& mounted,
                          SemanticNodeId parent,
                          Rect visible_bounds,
-                         bool has_scroll_ancestor) -> NodeIds {
+                         bool has_scroll_ancestor,
+                         const VirtualItemSemanticContext* virtual_item) -> NodeIds {
     if (layer_is_exiting(mounted)) {
       return {};
     }
     detail::SemanticPatch resolved = mounted.component_semantics;
+    // Virtual collection facts enrich the real item root; an existing component role remains authoritative.
+    if (mounted.virtual_state && mounted.virtual_state->collection_semantics.has_value()) {
+      const detail::VirtualCollectionSemantics& collection = *mounted.virtual_state->collection_semantics;
+      if (!resolved.role.has_value()) {
+        resolved.role = collection.role;
+      }
+      resolved.collection = collection.collection;
+    }
+    if (virtual_item != nullptr) {
+      if (!resolved.role.has_value()) {
+        resolved.role = virtual_item->role;
+      }
+      resolved.collection_item = virtual_item->collection_item;
+    }
     struct ExtensionContribution {
       std::size_t index = 0;
       detail::SemanticBuilderState state;
@@ -541,9 +561,32 @@ void Runtime::BuildSemantics() {
     const bool descendants_have_scroll =
         has_scroll_ancestor || (actual_scroll.has_value() && actual_scroll->maximum_offset > 0.0F);
     if (resolved.descendants.value_or(SemanticDescendantPolicy::Preserve) != SemanticDescendantPolicy::Exclude) {
-      for (const std::unique_ptr<detail::MountedNode>& child : mounted.children) {
-        std::vector<SemanticNodeId> child_ids =
-            self(self, *child, child_parent, descendant_visible_bounds, descendants_have_scroll);
+      if (mounted.virtual_state && mounted.virtual_state->realized_placements.size() != mounted.children.size()) {
+        throw std::logic_error("HuxerUI virtual semantic placements must match realized children");
+      }
+      for (std::size_t index = 0; index < mounted.children.size(); ++index) {
+        const std::unique_ptr<detail::MountedNode>& child = mounted.children[index];
+        std::optional<VirtualItemSemanticContext> item_context;
+        if (mounted.virtual_state && mounted.virtual_state->collection_semantics.has_value()) {
+          const VirtualLayoutResult::Placement& placement = mounted.virtual_state->realized_placements[index];
+          if (placement.item != child.get()) {
+            throw std::logic_error("HuxerUI virtual semantic placement does not match its realized child");
+          }
+          if (placement.collection_item.has_value()) {
+            item_context = VirtualItemSemanticContext{
+                mounted.virtual_state->collection_semantics->item_role,
+                *placement.collection_item,
+            };
+          }
+        }
+        std::vector<SemanticNodeId> child_ids = self(
+            self,
+            *child,
+            child_parent,
+            descendant_visible_bounds,
+            descendants_have_scroll,
+            item_context ? &*item_context : nullptr
+        );
         children.insert(children.end(), child_ids.begin(), child_ids.end());
       }
     }
@@ -621,7 +664,7 @@ void Runtime::BuildSemantics() {
     };
     detail::MountedNode* focus_trap = semantic_focus_trap(semantic_focus_trap, *state_->mounted_root_);
     if (focus_trap == nullptr) {
-      next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false);
+      next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false, nullptr);
     } else {
       const auto contains = [](auto&& self, const detail::MountedNode& root, std::uint64_t identity) -> bool {
         if (root.identity == identity) {
@@ -655,7 +698,7 @@ void Runtime::BuildSemantics() {
 
       NodeIds children;
       if (active_layer == nullptr) {
-        children = visit(visit, *focus_trap, next.root, viewport, false);
+        children = visit(visit, *focus_trap, next.root, viewport, false, nullptr);
       }
       if (layer_stack != nullptr) {
         const detail::LayerEntrySnapshot* active_snapshot =
@@ -675,7 +718,7 @@ void Runtime::BuildSemantics() {
           if (!reached_active && !shares_group) {
             continue;
           }
-          NodeIds layer_children = visit(visit, *candidate, next.root, viewport, false);
+          NodeIds layer_children = visit(visit, *candidate, next.root, viewport, false, nullptr);
           children.insert(children.end(), layer_children.begin(), layer_children.end());
         }
       }

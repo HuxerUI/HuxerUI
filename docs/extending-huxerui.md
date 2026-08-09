@@ -54,6 +54,39 @@ public:
 
 The runtime owns item reconciliation, duplicate-key checks, saved state, clipping, input routing, scrolling, and cleanup. A custom virtual layout owns its visible-range calculation and placement algorithm. It can opt in to `ScrollController::ScrollToItem()` by implementing the same static `ScrollOffsetForItem()` contract as `VirtualList` and `VirtualGrid`.
 
+A virtual layout that represents an accessible collection submits the collection and its default roles with the same result that commits placement:
+
+```cpp
+VirtualLayoutResult result;
+result.SetCollectionSemantics(
+    SemanticRole::Grid,
+    SemanticRole::GridCell,
+    SemanticCollection{
+        .item_count = context.ItemCount(),
+        .row_count = row_count,
+        .column_count = column_count,
+    }
+);
+```
+
+Its realized placements include the logical collection position:
+
+```cpp
+result.Place(
+    item,
+    offset,
+    SemanticCollectionItem{
+        .index = index,
+        .row_index = row,
+        .column_index = column,
+        .column_span = span,
+    }
+);
+```
+
+The ordinary two-argument `Place()` remains appropriate for non-collection layouts and decorative realized items.
+Runtime attaches this metadata to the real mounted item root, preserves any existing component role, and never materializes an accessibility-only item.
+
 ## Custom modifiers
 
 A property modifier applies a value directly to `ViewSpec`. A retained modifier pairs a small declarative value with a persistent `NodeExtension`:

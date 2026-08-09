@@ -117,6 +117,15 @@ public:
     );
 
     VirtualLayoutResult result;
+    result.SetCollectionSemantics(
+        SemanticRole::Grid,
+        SemanticRole::GridCell,
+        SemanticCollection{
+            .item_count = context.ItemCount(),
+            .row_count = cache.row_count,
+            .column_count = columns,
+        }
+    );
     for (std::size_t index = 0; index < cache.cells.size(); ++index) {
       const GridCell& cell = cache.cells[index];
       if (cell.row < first_row || cell.row >= last_row) {
@@ -136,6 +145,12 @@ public:
           {
               static_cast<float>(cell.column) * cell_width,
               static_cast<float>(cell.row) * row_height,
+          },
+          SemanticCollectionItem{
+              .index = index,
+              .row_index = cell.row,
+              .column_index = cell.column,
+              .column_span = cell.span,
           }
       );
     }
@@ -198,6 +213,45 @@ private:
     std::size_t anchor_index = 0;
     float anchor_delta = 0.0F;
   };
+};
+
+class OrphanSemanticItemLayout final : public VirtualLayout<OrphanSemanticItemLayout> {
+public:
+  using VirtualLayout::VirtualLayout;
+
+  static VirtualLayoutResult
+  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
+    MountedNode& item = context.Item(0);
+    const Size item_size = context.Measure(item, constraints.Loose());
+    VirtualLayoutResult result;
+    result.Place(item, {}, SemanticCollectionItem{.index = 0});
+    static_cast<void>(node);
+    return result.SetSize(constraints.Constrain(item_size)).SetContentSize(item_size);
+  }
+};
+
+class OutOfBoundsSemanticItemLayout final : public VirtualLayout<OutOfBoundsSemanticItemLayout> {
+public:
+  using VirtualLayout::VirtualLayout;
+
+  static VirtualLayoutResult
+  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
+    MountedNode& item = context.Item(0);
+    const Size item_size = context.Measure(item, constraints.Loose());
+    VirtualLayoutResult result;
+    result.SetCollectionSemantics(
+        SemanticRole::List,
+        SemanticRole::ListItem,
+        SemanticCollection{
+            .item_count = 1,
+            .row_count = 1,
+            .column_count = 1,
+        }
+    );
+    result.Place(item, {}, SemanticCollectionItem{.index = 1, .row_index = 0, .column_index = 0});
+    static_cast<void>(node);
+    return result.SetSize(constraints.Constrain(item_size)).SetContentSize(item_size);
+  }
 };
 
 View StatefulListRow(int index) {
@@ -344,6 +398,14 @@ View CustomVirtualGridApp() {
   )
       .With(huxerui::Padding{0.0F})
       .Spans(std::move(spans));
+}
+
+View OrphanSemanticItemApp() {
+  return OrphanSemanticItemLayout(std::size_t{1}, [](std::size_t) { return Text("Item"); });
+}
+
+View OutOfBoundsSemanticItemApp() {
+  return OutOfBoundsSemanticItemLayout(std::size_t{1}, [](std::size_t) { return Text("Item"); });
 }
 
 View BuiltInVirtualGridApp() {
@@ -923,7 +985,28 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   TestPlatform platform;
   Runtime runtime{CustomVirtualGridApp, platform};
   runtime.SetViewport({90.0F, 40.0F});
-  runtime.BuildFrame();
+  const FrameCommit& initial_commit = runtime.BuildCommit();
+
+  const auto semantic_grid =
+      std::ranges::find(initial_commit.semantic_frame->nodes, SemanticRole::Grid, &SemanticNode::role);
+  REQUIRE(semantic_grid != initial_commit.semantic_frame->nodes.end());
+  REQUIRE((semantic_grid->collection ==
+           SemanticCollection{.item_count = 200, .row_count = 86, .column_count = 3}));
+  REQUIRE_FALSE(semantic_grid->children.empty());
+  const auto first_semantic_item = std::ranges::find(
+      initial_commit.semantic_frame->nodes,
+      semantic_grid->children.front(),
+      &SemanticNode::id
+  );
+  REQUIRE(first_semantic_item != initial_commit.semantic_frame->nodes.end());
+  REQUIRE(first_semantic_item->role == SemanticRole::GridCell);
+  const SemanticCollectionItem first_semantic_position{
+      .index = 0,
+      .row_index = 0,
+      .column_index = 0,
+      .column_span = 2,
+  };
+  REQUIRE(first_semantic_item->collection_item == first_semantic_position);
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
@@ -1001,6 +1084,22 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   REQUIRE(root->children[restored_position]->bounds.width == 60.0F);
   REQUIRE(root->children[restored_position]->children[0]->text == "0:4");
   REQUIRE(virtual_grid_factory_calls < 200);
+}
+
+TEST_CASE("VirtualCollectionResultRejectsItemMetadataWithoutCollection") {
+  TestPlatform platform;
+  Runtime runtime{OrphanSemanticItemApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+
+  REQUIRE_THROWS_AS(runtime.BuildCommit(), std::logic_error);
+}
+
+TEST_CASE("VirtualCollectionResultRejectsItemMetadataOutsideCollectionBounds") {
+  TestPlatform platform;
+  Runtime runtime{OutOfBoundsSemanticItemApp, platform};
+  runtime.SetViewport({100.0F, 40.0F});
+
+  REQUIRE_THROWS_AS(runtime.BuildCommit(), std::logic_error);
 }
 
 TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {

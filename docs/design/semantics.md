@@ -336,7 +336,9 @@ Runtime allocates nonzero IDs monotonically and never reuses an ID for another s
 The primary ID follows a compatible MountedNode.
 A virtual child identity combines the mounted owner with its stable local ID.
 
-A virtualized item that is fully evicted is removed; returning content may receive a new semantic ID unless its retained virtual-item state preserves the identity.
+A virtualized item that is fully evicted retires its semantic node and invalidates its action routes.
+VirtualList and VirtualGrid can restore application state slots from their saved item-state cache, but the cache does not preserve mounted or semantic identity.
+An item keeps its identity while its real MountedNode remains realized, including keyed movement and layout changes; returning after full eviction receives a new semantic ID.
 
 `SemanticNodeId` is not an application key, automation identifier, native object ID, or process-global handle.
 The optional author `identifier` is mapped to native automation identifiers.
@@ -561,8 +563,8 @@ The delivery-status section distinguishes implemented defaults from defaults com
 | Dialog and BottomSheet | Dialog role, modal isolation, descendants, and Dismiss when allowed |
 | Menu | Menu collection containing labeled, checked, expanded, enabled MenuItem nodes |
 | Toast | Non-focusable polite live region containing its message |
-| VirtualList | List collection with total count and realized ListItem indices |
-| VirtualGrid | Grid collection with total count and realized GridCell positions and spans |
+| VirtualList | List collection with total count and realized item indices; a transparent item root defaults to ListItem |
+| VirtualGrid | Grid collection with total count and realized item positions and spans; a transparent item root defaults to GridCell |
 | Canvas | No inferred semantics; explicit owner semantics or virtual children |
 
 Icon-only item constructors continue to require their existing semantic label.
@@ -570,7 +572,49 @@ Material, Flat, and third-party visual themes do not change component semantics.
 
 Popup keeps the semantics of its supplied content because the presentation mechanism does not imply a shared role.
 Virtual containers publish only realized retained items and never materialize every View for accessibility; scrolling advances the realized semantic window.
+Cached items outside the viewport remain published with `offscreen = true` and reuse the existing ShowOnScreen action while they remain mounted.
+An item root that already owns a meaningful role such as Button or Checkbox keeps that role and receives collection-item metadata; Runtime supplies ListItem or GridCell only when the item root has no component role.
 Future component defaults use the same owner/real-child and retained action-routing contracts rather than adding component-specific Runtime branches.
+
+### Virtual collection layout contract
+
+Collection dimensions and item positions are layout facts.
+VirtualList and VirtualGrid therefore publish them through the same `VirtualLayoutResult` that atomically commits realization and placement rather than through a second semantic layout pass:
+
+```cpp
+result.SetCollectionSemantics(
+    SemanticRole::Grid,
+    SemanticRole::GridCell,
+    SemanticCollection{
+        .item_count = item_count,
+        .row_count = row_count,
+        .column_count = column_count,
+    }
+);
+
+result.Place(
+    item,
+    offset,
+    SemanticCollectionItem{
+        .index = index,
+        .row_index = row,
+        .column_index = column,
+        .row_span = 1,
+        .column_span = span,
+    }
+);
+```
+
+The two-argument `Place(item, offset)` remains the ordinary non-collection or decorative-item path.
+A custom VirtualLayout can opt into the same collection contract without adding a component-specific Runtime branch.
+
+Runtime retains the collection declaration and realized item metadata with the committed virtual placements.
+During semantic construction it applies the collection role and item role as component defaults, attaches structural collection metadata to the corresponding direct item root, and then applies extension and author semantics with their ordinary precedence.
+This creates no wrapper View, fake MountedNode, accessibility-only item cache, or platform-specific collection model.
+
+A vertical VirtualList publishes one column and one row per source item; a horizontal VirtualList publishes one row and one column per source item.
+VirtualGrid reuses its existing row plan, resolved column count, and column spans.
+The collection's item count describes the complete logical source, while the semantic tree contains only the current viewport and cache realization.
 
 Dialog and BottomSheet attach their default role to the presented surface instead of the Layer barrier.
 Standard dialog actions are real Button semantic nodes, while custom content keeps its descendants and may override component defaults with the ordinary `Semantics` modifier.
@@ -728,15 +772,14 @@ The shared work is delivered in bounded stages so each contract is validated bef
 - Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
 - Completed: scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
 - Completed: presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
-- Collection semantics derive VirtualList and VirtualGrid metadata from existing realized item state without eagerly composing offscreen content.
+- Completed: collection semantics derive VirtualList and VirtualGrid metadata from the committed VirtualLayoutResult without eagerly composing unrealized content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
 Android AccessibilityNodeProvider and Windows UI Automation now consume that contract; iOS, Linux, and Web mappings follow according to platform readiness.
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, basic action routing, NodeExtension virtual children, destination-selection semantics, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
-- In progress: complete presentation, live-region, and virtual collection semantics through the staged shared-core sequence.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
 - Deferred: extend the native adapter sequence to iOS, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 

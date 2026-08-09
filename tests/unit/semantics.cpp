@@ -10,6 +10,8 @@ int semantic_button_clicks = 0;
 int semantic_icon_button_clicks = 0;
 int semantic_lifecycle_clicks = 0;
 int semantic_segmented_button_changes = 0;
+int semantic_virtual_list_clicks = 0;
+int semantic_virtual_list_factory_calls = 0;
 int virtual_semantic_activations = 0;
 State<float> semantic_slider_value;
 State<bool> semantic_alternate_content;
@@ -261,6 +263,44 @@ View SemanticHorizontalScrollApp() {
       Text("Right").With(Frame{60.0F, 40.0F}),
     },
   }.ScrollAxis(Axis::Horizontal);
+}
+
+View SemanticVirtualListApp() {
+  return VirtualList(100, [](std::size_t index) {
+    ++semantic_virtual_list_factory_calls;
+    return Button("Item " + std::to_string(index)).OnClick([index] {
+      semantic_virtual_list_clicks += static_cast<int>(index + 1);
+    });
+  })
+      .ItemExtent(20.0F)
+      .CacheExtent(40.0F);
+}
+
+View SemanticHorizontalVirtualListApp() {
+  return VirtualList(5, [](std::size_t index) { return Text("Horizontal " + std::to_string(index)); })
+      .ScrollAxis(Axis::Horizontal)
+      .ItemExtent(30.0F)
+      .CacheExtent(0.0F);
+}
+
+View SemanticVirtualGridApp() {
+  return VirtualGrid(8, [](std::size_t index) {
+    std::string label = "Cell " + std::to_string(index);
+    return Column {
+      Text(label),
+    }.With(Semantics{
+        .label = std::move(label),
+        .descendants = SemanticDescendantPolicy::Exclude,
+    });
+  })
+      .Columns(GridColumns::Adaptive(30.0F))
+      .RowExtent(20.0F)
+      .CacheExtent(0.0F)
+      .ItemSpans({2, 1, 1, 2});
+}
+
+View SemanticEmptyVirtualListApp() {
+  return VirtualList(0, [](std::size_t) { return Text("Unrealized"); }).ItemExtent(20.0F);
 }
 
 View SemanticNestedScrollApp() {
@@ -623,6 +663,119 @@ TEST_CASE("HorizontalScrollViewUsesHorizontalSemanticDeltas") {
       {SemanticActionKind::Scroll, Point{45.0F, 0.0F}}
   ));
   REQUIRE(FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView).scroll->offset == 45.0F);
+}
+
+TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions") {
+  semantic_virtual_list_clicks = 0;
+  semantic_virtual_list_factory_calls = 0;
+  TestPlatform platform;
+  Runtime runtime(SemanticVirtualListApp, platform);
+  runtime.SetViewport({100.0F, 40.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& list = FindSemanticRole(*before, SemanticRole::List);
+  REQUIRE((list.collection == SemanticCollection{.item_count = 100, .row_count = 100, .column_count = 1}));
+  REQUIRE(list.scroll.has_value());
+  REQUIRE(list.scroll->axis == Axis::Vertical);
+  REQUIRE(list.children.size() < 100);
+  REQUIRE(semantic_virtual_list_factory_calls == static_cast<int>(list.children.size()));
+
+  const SemanticNode& first = FindSemanticNode(*before, "Item 0");
+  REQUIRE(first.parent == list.id);
+  REQUIRE(first.role == SemanticRole::Button);
+  REQUIRE((first.collection_item ==
+           SemanticCollectionItem{.index = 0, .row_index = 0, .column_index = 0}));
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      first.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE(semantic_virtual_list_clicks == 1);
+
+  const SemanticNode& cached = FindSemanticNode(*before, "Item 3");
+  REQUIRE(cached.offscreen);
+  REQUIRE((cached.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) != 0);
+  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+      cached.id,
+      {SemanticActionKind::ShowOnScreen, std::monostate{}}
+  ));
+  const std::shared_ptr<const SemanticFrame> revealed = runtime.BuildCommit().semantic_frame;
+  REQUIRE_FALSE(FindSemanticNode(*revealed, "Item 3").offscreen);
+
+  runtime.HandleScrollEvent(ScrollEvent{{50.0F, 20.0F}, 0.0F, 1000.0F});
+  runtime.BuildCommit();
+  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+      first.id,
+      {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE(semantic_virtual_list_factory_calls < 100);
+
+  runtime.HandleScrollEvent(ScrollEvent{{50.0F, 20.0F}, 0.0F, -1000.0F});
+  const SemanticNode& returned = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Item 0");
+  REQUIRE(returned.id != first.id);
+}
+
+TEST_CASE("HorizontalVirtualListPublishesOneSemanticRow") {
+  TestPlatform platform;
+  Runtime runtime(SemanticHorizontalVirtualListApp, platform);
+  runtime.SetViewport({60.0F, 30.0F});
+
+  const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& list = FindSemanticRole(*frame, SemanticRole::List);
+  REQUIRE((list.collection == SemanticCollection{.item_count = 5, .row_count = 1, .column_count = 5}));
+  REQUIRE(list.scroll->axis == Axis::Horizontal);
+  const SemanticNode& third = FindSemanticNode(*frame, "Horizontal 2");
+  REQUIRE(third.role == SemanticRole::Text);
+  REQUIRE((third.collection_item ==
+           SemanticCollectionItem{.index = 2, .row_index = 0, .column_index = 2}));
+}
+
+TEST_CASE("VirtualGridPublishesResolvedCellsAndKeepsRealizedIdentityAcrossReflow") {
+  TestPlatform platform;
+  Runtime runtime(SemanticVirtualGridApp, platform);
+  runtime.SetViewport({90.0F, 40.0F});
+
+  const std::shared_ptr<const SemanticFrame> before = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& grid = FindSemanticRole(*before, SemanticRole::Grid);
+  REQUIRE((grid.collection == SemanticCollection{.item_count = 8, .row_count = 4, .column_count = 3}));
+  REQUIRE(grid.children.size() < 8);
+
+  const SemanticNode& first = FindSemanticNode(*before, "Cell 0");
+  const SemanticNodeId first_id = first.id;
+  REQUIRE(first.parent == grid.id);
+  REQUIRE(first.role == SemanticRole::GridCell);
+  const SemanticCollectionItem first_position{
+      .index = 0,
+      .row_index = 0,
+      .column_index = 0,
+      .column_span = 2,
+  };
+  REQUIRE(first.collection_item == first_position);
+  const SemanticNode& fourth = FindSemanticNode(*before, "Cell 3");
+  const SemanticCollectionItem fourth_position{
+      .index = 3,
+      .row_index = 1,
+      .column_index = 1,
+      .column_span = 2,
+  };
+  REQUIRE(fourth.collection_item == fourth_position);
+
+  runtime.SetViewport({60.0F, 40.0F});
+  const std::shared_ptr<const SemanticFrame> reflowed = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& resized_grid = FindSemanticRole(*reflowed, SemanticRole::Grid);
+  REQUIRE((resized_grid.collection == SemanticCollection{.item_count = 8, .row_count = 5, .column_count = 2}));
+  const SemanticNode& resized_first = FindSemanticNode(*reflowed, "Cell 0");
+  REQUIRE(resized_first.id == first_id);
+  REQUIRE(resized_first.collection_item->column_span == 2);
+}
+
+TEST_CASE("EmptyVirtualListStillPublishesItsCollection") {
+  TestPlatform platform;
+  Runtime runtime(SemanticEmptyVirtualListApp, platform);
+  runtime.SetViewport({100.0F, 40.0F});
+
+  const SemanticNode& list = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::List);
+  REQUIRE((list.collection == SemanticCollection{.item_count = 0, .row_count = 0, .column_count = 1}));
+  REQUIRE(list.children.empty());
 }
 
 TEST_CASE("ShowOnScreenRevealsContentThroughNestedScrollContainers") {

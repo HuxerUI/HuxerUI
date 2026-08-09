@@ -175,6 +175,10 @@ VirtualList(items, ItemRow)
 
 When an item leaves the cache, its mounted tree is released while its local state slots remain available. Stable keys restore state across eviction and reordering; unkeyed items use their index.
 
+VirtualList publishes the complete logical item count and the collection position of each realized item to the shared accessibility tree.
+A vertical list maps items to rows and a horizontal list maps them to columns.
+The item root keeps an existing semantic role such as Button; a semantically transparent root defaults to ListItem.
+
 ## VirtualGrid
 
 `VirtualGrid` provides fixed or adaptive columns:
@@ -197,6 +201,10 @@ VirtualGrid(items, ItemCard)
     .Columns(GridColumns::Adaptive(160.0F))
     .ItemSpans(spans);
 ```
+
+VirtualGrid publishes its resolved row and column counts together with each realized item's logical index, cell position, and column span.
+Adaptive column changes therefore update visual and accessibility geometry from the same row plan.
+A semantically transparent item root defaults to GridCell without replacing an existing component role.
 
 ## Custom layouts
 

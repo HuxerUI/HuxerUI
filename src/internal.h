@@ -549,11 +549,20 @@ struct VirtualItemStateCache {
   std::unordered_map<std::size_t, VirtualItemState> indexed;
 };
 
+struct VirtualCollectionSemantics {
+  SemanticRole role = SemanticRole::Generic;
+  SemanticRole item_role = SemanticRole::Generic;
+  SemanticCollection collection;
+
+  bool operator==(const VirtualCollectionSemantics&) const = default;
+};
+
 struct VirtualNodeState {
   VirtualItemSource source;
   std::unordered_map<std::size_t, View> item_declarations;
   std::vector<std::size_t> realized_indices;
   std::vector<VirtualLayoutResult::Placement> realized_placements;
+  std::optional<VirtualCollectionSemantics> collection_semantics;
   std::unique_ptr<VirtualItemStateCache> item_state_cache;
   bool source_dirty = true;
   bool viewport_dirty = true;

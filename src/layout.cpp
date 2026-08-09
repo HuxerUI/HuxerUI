@@ -30,6 +30,42 @@ struct VirtualLayoutContextAccess {
   }
 };
 
+struct VirtualLayoutResultAccess {
+  static std::optional<VirtualCollectionSemantics> CollectionSemantics(const VirtualLayoutResult& result) {
+    if (!result.collection_.has_value()) {
+      if (std::ranges::any_of(result.placements_, [](const VirtualLayoutResult::Placement& placement) {
+            return placement.collection_item.has_value();
+          })) {
+        throw std::logic_error("HuxerUI virtual collection item metadata requires collection semantics");
+      }
+      return std::nullopt;
+    }
+
+    for (const VirtualLayoutResult::Placement& placement : result.placements_) {
+      if (!placement.collection_item.has_value()) {
+        continue;
+      }
+      const SemanticCollectionItem& item = *placement.collection_item;
+      if (item.row_span == 0 || item.column_span == 0 ||
+          (item.index.has_value() && result.collection_->item_count.has_value() &&
+           *item.index >= *result.collection_->item_count) ||
+          (item.row_index.has_value() && result.collection_->row_count.has_value() &&
+           (*item.row_index >= *result.collection_->row_count ||
+            item.row_span > *result.collection_->row_count - *item.row_index)) ||
+          (item.column_index.has_value() && result.collection_->column_count.has_value() &&
+           (*item.column_index >= *result.collection_->column_count ||
+            item.column_span > *result.collection_->column_count - *item.column_index))) {
+        throw std::logic_error("HuxerUI virtual collection item metadata is outside its collection bounds");
+      }
+    }
+    return VirtualCollectionSemantics{
+        result.collection_role_,
+        result.collection_item_role_,
+        *result.collection_,
+    };
+  }
+};
+
 bool IsScrollContainer(const MountedNode& node) noexcept {
   return static_cast<bool>(node.scroll_state);
 }
@@ -449,8 +485,11 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
         MeasureVirtualItem
     );
     VirtualLayoutResult result = node.virtual_layout_descriptor->measure(context, node, content_constraints);
+    std::optional<VirtualCollectionSemantics> collection_semantics =
+        VirtualLayoutResultAccess::CollectionSemantics(result);
     session.CommitRealization(result.Placements());
     node.virtual_state->realized_placements = result.Placements();
+    node.virtual_state->collection_semantics = std::move(collection_semantics);
     node.scroll_state->axis = result.ScrollAxis();
     node.scroll_state->content_width = result.ContentSize().width;
     node.scroll_state->content_height = result.ContentSize().height;
@@ -1110,6 +1149,10 @@ public:
     return row_count_;
   }
 
+  [[nodiscard]] std::size_t ColumnCount() const noexcept {
+    return columns_;
+  }
+
   [[nodiscard]] const VirtualGridCell& Cell(std::size_t index) const {
     return cells_[index];
   }
@@ -1665,14 +1708,31 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
   result.SetAxis(axis)
       .SetSize(measured_size)
       .SetContentSize(MakeAxisSize(content_extent, measured_cross, vertical))
-      .SetScrollOffset(scroll_offset);
+      .SetScrollOffset(scroll_offset)
+      .SetCollectionSemantics(
+          SemanticRole::List,
+          SemanticRole::ListItem,
+          SemanticCollection{
+              .item_count = item_count,
+              .row_count = vertical ? item_count : std::size_t{1},
+              .column_count = vertical ? std::size_t{1} : item_count,
+          }
+      );
 
   for (std::size_t index = range.first; index < range.second; ++index) {
     MountedNode& item = context.Item(index);
     const Size item_size = item.LayoutSize();
     const float cross = CrossOffset(measured_cross, LayoutCrossSize(item_size, vertical), node.CrossAlignment());
     const float main = metrics.Offset(index);
-    result.Place(item, vertical ? Point{cross, main} : Point{main, cross});
+    result.Place(
+        item,
+        vertical ? Point{cross, main} : Point{main, cross},
+        SemanticCollectionItem{
+            .index = index,
+            .row_index = vertical ? index : std::size_t{0},
+            .column_index = vertical ? std::size_t{0} : index,
+        }
+    );
   }
   return result;
 }
@@ -1815,7 +1875,16 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
   result.SetAxis(Axis::Vertical)
       .SetSize(measured_size)
       .SetContentSize({measured_size.width, content_height})
-      .SetScrollOffset(scroll_offset);
+      .SetScrollOffset(scroll_offset)
+      .SetCollectionSemantics(
+          SemanticRole::Grid,
+          SemanticRole::GridCell,
+          SemanticCollection{
+              .item_count = item_count,
+              .row_count = metrics.RowCount(),
+              .column_count = metrics.ColumnCount(),
+          }
+      );
   for (std::size_t row = rows.first; row < rows.second; ++row) {
     const float y = metrics.Offset(row);
     for (std::size_t index = metrics.FirstItem(row); index < metrics.EndItem(row); ++index) {
@@ -1826,6 +1895,12 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
           {
               static_cast<float>(cell.column) * (track_width + column_spacing),
               y,
+          },
+          SemanticCollectionItem{
+              .index = index,
+              .row_index = cell.row,
+              .column_index = cell.column,
+              .column_span = cell.span,
           }
       );
     }
