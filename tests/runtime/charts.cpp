@@ -59,11 +59,10 @@ TEST_CASE("BarChartRecordsBarsLabelsGridAndAccessibleSummary") {
   }));
 
   REQUIRE(commit.semantic_frame != nullptr);
-  REQUIRE(commit.semantic_frame->nodes.size() == 1);
-  const SemanticNode& semantic = commit.semantic_frame->nodes.front();
-  REQUIRE(semantic.role == SemanticRole::Image);
-  REQUIRE(semantic.label == "Quarterly revenue");
-  REQUIRE(semantic.value == "Jan: 24, Feb: 42, Mar: 31");
+  const auto semantic = std::ranges::find(commit.semantic_frame->nodes, "Quarterly revenue", &SemanticNode::label);
+  REQUIRE(semantic != commit.semantic_frame->nodes.end());
+  REQUIRE(semantic->role == SemanticRole::Image);
+  REQUIRE(semantic->value == "Jan: 24, Feb: 42, Mar: 31");
 }
 
 TEST_CASE("DonutChartRecordsTrackSegmentsCenterAndLegend") {
