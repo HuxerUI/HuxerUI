@@ -35,6 +35,7 @@ add_executable(huxerui_tests
         runtime/selection_area.cpp
         runtime/text_field.cpp
         runtime/text_input.cpp
+        runtime/tooltip.cpp
         runtime/virtual_layout.cpp
         runtime/window.cpp
 )

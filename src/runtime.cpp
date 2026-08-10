@@ -746,27 +746,30 @@ ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& i
   return changes;
 }
 
-std::optional<NodeExtensionHandle> HitTestExtension(const std::vector<MountedNode*>& route, Point position) {
+std::vector<NodeExtensionHandle> HitTestHoverExtensions(const std::vector<MountedNode*>& route, Point position) {
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    if (!(*node)->enabled) {
+    MountedNode& current = **node;
+    const auto local_position = current.presentation.resolved_transform.Inverse(position);
+    if (!local_position.has_value()) {
       continue;
     }
-    for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
-      const auto local_position = (*node)->presentation.resolved_transform.Inverse(position);
-      if (!local_position.has_value()) {
-        continue;
-      }
-      NodeExtensionEntry& entry = (*node)->extensions[index - 1];
-      if (entry.extension && entry.extension->HoverHitTest(**node, *local_position)) {
-        return NodeExtensionHandle{
-            (*node)->identity,
-            index - 1,
+    std::vector<NodeExtensionHandle> matches;
+    for (std::size_t index = 0; index < current.extensions.size(); ++index) {
+      NodeExtensionEntry& entry = current.extensions[index];
+      if (entry.extension && (current.enabled || entry.extension->HoverWhenDisabled()) &&
+          entry.extension->HoverHitTest(current, *local_position)) {
+        matches.push_back(NodeExtensionHandle{
+            current.identity,
+            index,
             entry.descriptor,
-        };
+        });
       }
     }
+    if (!matches.empty()) {
+      return matches;
+    }
   }
-  return std::nullopt;
+  return {};
 }
 
 void DispatchScrollActivity(MountedNode& node) {
@@ -992,7 +995,7 @@ Runtime::~Runtime() {
   } catch (...) {
   }
   state_->pointer_sessions_.clear();
-  state_->hovered_extension_.reset();
+  state_->hovered_extensions_.clear();
   state_->layer_controller_.Disconnect();
   state_->window_service_->Disconnect();
   state_->mounted_root_.reset();
@@ -1281,31 +1284,41 @@ const detail::MountedNode* Runtime::RootNode() const noexcept {
   return FindApplicationRoot(*state_->mounted_root_);
 }
 
-void Runtime::UpdateHoveredExtension(Point position) {
+void Runtime::UpdateHoveredExtensions(Point position) {
   std::vector<detail::MountedNode*> route;
-  std::optional<NodeExtensionHandle> next_hovered;
+  std::vector<NodeExtensionHandle> next_hovered;
   if (state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, position, route)) {
-    next_hovered = HitTestExtension(route, position);
+    next_hovered = HitTestHoverExtensions(route, position);
   }
 
-  if (state_->hovered_extension_ == next_hovered) {
+  if (state_->hovered_extensions_ == next_hovered) {
     return;
   }
-  if (state_->hovered_extension_.has_value() && state_->mounted_root_) {
-    if (NodeExtension* previous = FindExtension(*state_->mounted_root_, *state_->hovered_extension_)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, state_->hovered_extension_->node_identity)) {
-        previous->OnHoverChanged(*node, false);
+  if (state_->mounted_root_) {
+    for (const detail::NodeExtensionHandle& previous : state_->hovered_extensions_) {
+      if (std::ranges::find(next_hovered, previous) != next_hovered.end()) {
+        continue;
+      }
+      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, previous)) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, previous.node_identity)) {
+          extension->OnHoverChanged(*node, false);
+        }
       }
     }
   }
-  state_->hovered_extension_ = next_hovered;
-  if (state_->hovered_extension_.has_value() && state_->mounted_root_) {
-    if (NodeExtension* next = FindExtension(*state_->mounted_root_, *state_->hovered_extension_)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, state_->hovered_extension_->node_identity)) {
-        next->OnHoverChanged(*node, true);
+  if (state_->mounted_root_) {
+    for (const detail::NodeExtensionHandle& next : next_hovered) {
+      if (std::ranges::find(state_->hovered_extensions_, next) != state_->hovered_extensions_.end()) {
+        continue;
+      }
+      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, next)) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, next.node_identity)) {
+          extension->OnHoverChanged(*node, true);
+        }
       }
     }
   }
+  state_->hovered_extensions_ = std::move(next_hovered);
   RequestFrame();
 }
 
@@ -1314,7 +1327,7 @@ void Runtime::RefreshInteractionTree() {
     state_->focused_node_identity_.reset();
     state_->focus_visible_ = false;
     state_->keyboard_activation_identity_.reset();
-    state_->hovered_extension_.reset();
+    state_->hovered_extensions_.clear();
     return;
   }
 
@@ -1392,17 +1405,15 @@ void Runtime::RefreshInteractionTree() {
     }
   }
 
-  if (state_->hovered_extension_.has_value()) {
-    detail::MountedNode* hovered = FindNode(*state_->mounted_root_, state_->hovered_extension_->node_identity);
-    if (!hovered || !hovered->enabled) {
-      if (hovered) {
-        if (NodeExtension* extension = FindExtension(*state_->mounted_root_, *state_->hovered_extension_)) {
-          extension->OnHoverChanged(*hovered, false);
-        }
-      }
-      state_->hovered_extension_.reset();
+  std::erase_if(state_->hovered_extensions_, [this](const detail::NodeExtensionHandle& hovered) {
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity);
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered);
+    const bool remove = !node || !extension || (!node->enabled && !extension->HoverWhenDisabled());
+    if (remove && node && extension) {
+      extension->OnHoverChanged(*node, false);
     }
-  }
+    return remove;
+  });
 
   ResolveFocusedFlags(*state_->mounted_root_, state_->focused_node_identity_, state_->focus_visible_);
 }
@@ -1868,16 +1879,17 @@ void Runtime::DeactivateLayerInput(LayerId id) {
     TrackTouchTextSelectionGesture(cancellation);
   }
 
-  if (state_->hovered_extension_.has_value() &&
-      ContainsNodeIdentity(*layer, state_->hovered_extension_->node_identity)) {
-    const detail::NodeExtensionHandle hovered = *state_->hovered_extension_;
+  std::erase_if(state_->hovered_extensions_, [this, layer](const detail::NodeExtensionHandle& hovered) {
+    if (!ContainsNodeIdentity(*layer, hovered.node_identity)) {
+      return false;
+    }
     if (NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered)) {
       if (detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity)) {
         extension->OnHoverChanged(*node, false);
       }
     }
-    state_->hovered_extension_.reset();
-  }
+    return true;
+  });
 
   const bool text_input_belongs_to_layer =
       state_->text_input_session_.has_value() &&

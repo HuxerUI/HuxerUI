@@ -152,8 +152,9 @@ private:
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);
+  void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
   void ReleaseScrollGesture(detail::PointerSession& session);
-  void DispatchExtensionObservers(detail::PointerSession& session, const PointerEvent& event, bool clear);
+  bool DispatchExtensionObservers(detail::PointerSession& session, const PointerEvent& event, bool clear);
   [[nodiscard]] std::optional<std::size_t>
   FindScrollCandidate(const detail::PointerSession& session, Axis axis, float delta);
   std::vector<detail::MountedNode*> ApplyDragScroll(detail::PointerSession& session, float delta);
@@ -163,7 +164,7 @@ private:
   void HandlePointerUp(const PointerEvent& event);
   bool CommitPendingTouchFocus(detail::PointerSession& session, Point position, bool record_tap = false);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
-  void UpdateHoveredExtension(Point position);
+  void UpdateHoveredExtensions(Point position);
   void RefreshInteractionTree();
   bool HandleFocusedTextInputKey(const KeyEvent& event);
   detail::MountedNode* ActiveFocusTrapRoot();

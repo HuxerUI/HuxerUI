@@ -1143,7 +1143,7 @@ struct Runtime::State {
   SemanticNodeId semantic_root_identity_ = 0;
   std::uint64_t semantic_revision_ = 0;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
-  std::optional<detail::NodeExtensionHandle> hovered_extension_;
+  std::vector<detail::NodeExtensionHandle> hovered_extensions_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;

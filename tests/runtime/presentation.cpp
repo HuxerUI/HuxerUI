@@ -981,6 +981,13 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   REQUIRE(toast_style.background.red == light.colors.inverse_surface.red);
   REQUIRE_FALSE(toast_style.motion.has_value());
 
+  const TooltipStyle tooltip_style = ThemeDefinitionValue<TooltipStyle>(definition);
+  REQUIRE(tooltip_style.background.red == light.colors.inverse_surface.red);
+  REQUIRE(tooltip_style.background.alpha == light.colors.inverse_surface.alpha * 0.94F);
+  REQUIRE(tooltip_style.text_style.foreground == light.colors.inverse_on_surface);
+  REQUIRE(tooltip_style.maximum_width == 320.0F);
+  REQUIRE(tooltip_style.shadow.blur_radius == light.elevation.low);
+
   const DialogStyle dialog_style = ThemeDefinitionValue<DialogStyle>(definition);
   REQUIRE(dialog_style.background.red == light.colors.surface.red);
   REQUIRE(dialog_style.motion.has_value());
@@ -1158,6 +1165,12 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
+
+  const huxerui::TooltipStyle tooltip_style = ThemeDefinitionValue<huxerui::TooltipStyle>(definition);
+  REQUIRE(tooltip_style.background == light.colors.inverse_surface);
+  REQUIRE(tooltip_style.text_style.foreground == light.colors.inverse_on_surface);
+  REQUIRE(tooltip_style.maximum_width == 200.0F);
+  REQUIRE(tooltip_style.shadow == Shadow{});
 
   const huxerui::DialogStyle dialog_style = ThemeDefinitionValue<huxerui::DialogStyle>(definition);
   REQUIRE(dialog_style.scrim.alpha == light.colors.scrim.alpha);

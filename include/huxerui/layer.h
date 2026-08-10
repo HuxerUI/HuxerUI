@@ -24,6 +24,7 @@ class DialogService;
 class MenuService;
 class PopupService;
 class ToastService;
+class TooltipService;
 struct LayerPlacement;
 } // namespace detail
 
@@ -144,6 +145,7 @@ private:
   friend class detail::MenuService;
   friend class detail::PopupService;
   friend class detail::ToastService;
+  friend class detail::TooltipService;
   friend struct detail::LayerAnchorState;
 };
 

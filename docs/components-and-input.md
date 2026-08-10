@@ -88,6 +88,26 @@ Material uses a 24-unit icon inside a 48-unit interaction target with a 40-unit 
 Vector icons follow the style foreground, while raster assets preserve their encoded colors and use the Theme's disabled opacity.
 IconButton is intentionally not selectable; use a controlled component such as Chip when the action has persistent selected state.
 
+## Tooltip
+
+Tooltip is a retained modifier because it describes supplementary information for an existing target rather than introducing a layout component:
+
+```cpp
+IconButton(app_resources::images::search, "Search")
+    .OnClick(OpenSearch)
+    .With(Tooltip("Search"));
+```
+
+It appears after the active Theme's hover delay, immediately for keyboard-visible focus, or after a touch long press.
+Moving from the target onto the tooltip surface keeps it visible, while leaving both regions uses the short exit delay.
+A recognized long press cancels the target activation and keeps the tooltip visible for the Theme's touch duration.
+Escape or Back dismisses the active tooltip, and only one tooltip is presented in a window at a time.
+Disabled targets still expose their tooltip through pointer hover but do not become focusable or accept touch input.
+
+The message contributes a semantic hint to the target, while the visual tooltip surface is hidden from accessibility to avoid duplicate announcements.
+`TooltipStyle` owns its surface, text, geometry, placement, and timing, and can be overridden as an ordinary typed Theme value.
+Tooltip deliberately accepts plain `StringVariant` content only; use Popup when an anchored surface needs rich or interactive content.
+
 ## Chip
 
 Chip has action and selectable forms. An action Chip emits Click:

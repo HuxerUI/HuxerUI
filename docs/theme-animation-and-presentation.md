@@ -58,7 +58,7 @@ Runtime paints the status and navigation backplane with those colors and derives
 An adjoining `TopAppBar` contributes its background to the status region, while an adjoining `NavigationBar` contributes its background to the navigation region.
 Full-window custom content can apply `SystemBarsAppearance` directly as a modifier without issuing platform-specific calls.
 
-The Material theme maps stable Material 3 roles rather than copying a private token table into each control. Its color scheme includes surface-container levels, `on_surface_variant`, `outline`, and `secondary_container`; typography and shape schemes expose the roles used by the built-in controls and presentation surfaces. Material controls then resolve their own geometry and state treatment: Buttons use a 40-unit container, IconButton uses a 24-unit icon inside a 48-unit interaction target with a 40-unit circular state layer, Chip uses a 32-unit outlined or selected tonal container, SegmentedButton joins equal-width 40-unit segments with a selected tonal container, Divider uses a one-unit line derived from the outline role, Checkbox, RadioButton, and Switch retain a 48-unit interaction target around their smaller visuals, and TextField defaults to the 56-unit Filled treatment, provides the Material Outlined treatment, and retains a Standard alternative for explicit cross-theme use. TopAppBar uses a 64-unit surface container, while Flat maps the same component to a denser 48-unit surface; neither theme adds a static shadow, and action Views retain their own component styles. TextField owns its floating labels, decorative icons, and hover, focus, error, and disabled colors. Determinate ProgressCircle uses a round-capped separated track, while its indeterminate form uses the trackless six-second pulsing-arc motion. ProgressBar uses a separated track, stop indicator, and two-segment emphasized motion. Slider owns its split-track gap, narrow stateful handle, ticks, stop indicator, and component-specific disabled colors. Flat controls keep their denser geometry and simpler progress sweep while using the same public components and typed styles. A control disabled directly uses its component state colors. A disabled container instead applies one group-opacity boundary, so descendants retain their normal colors and are not dimmed twice.
+The Material theme maps stable Material 3 roles rather than copying a private token table into each control. Its color scheme includes surface-container levels, `on_surface_variant`, `outline`, and `secondary_container`; typography and shape schemes expose the roles used by the built-in controls and presentation surfaces. Material controls then resolve their own geometry and state treatment: Buttons use a 40-unit container, IconButton uses a 24-unit icon inside a 48-unit interaction target with a 40-unit circular state layer, Chip uses a 32-unit outlined or selected tonal container, SegmentedButton joins equal-width 40-unit segments with a selected tonal container, Divider uses a one-unit line derived from the outline role, Checkbox, RadioButton, and Switch retain a 48-unit interaction target around their smaller visuals, and TextField defaults to the 56-unit Filled treatment, provides the Material Outlined treatment, and retains a Standard alternative for explicit cross-theme use. TopAppBar uses a 64-unit surface container, while Flat maps the same component to a denser 48-unit surface; neither theme adds a static shadow, and action Views retain their own component styles. Tooltip uses an inverse-color compact surface with Material and Flat geometry supplied by their respective `TooltipStyle`. TextField owns its floating labels, decorative icons, and hover, focus, error, and disabled colors. Determinate ProgressCircle uses a round-capped separated track, while its indeterminate form uses the trackless six-second pulsing-arc motion. ProgressBar uses a separated track, stop indicator, and two-segment emphasized motion. Slider owns its split-track gap, narrow stateful handle, ticks, stop indicator, and component-specific disabled colors. Flat controls keep their denser geometry and simpler progress sweep while using the same public components and typed styles. A control disabled directly uses its component state colors. A disabled container instead applies one group-opacity boundary, so descendants retain their normal colors and are not dimmed twice.
 
 Built-in Theme elevation shadows use a zero two-dimensional offset. Elevation controls their falloff through blur radius, while the shadow color controls opacity. An explicit `Shadow` modifier remains available when custom content needs a directional drop shadow.
 
@@ -102,6 +102,22 @@ Presentation transforms do not change measured size or parent layout. They trans
 Animation state is retained by the mounted node extension. Compatible recomposition retargets from the current presentation value rather than restarting from the previous declaration. Reduced-motion themes resolve animations immediately where appropriate.
 
 Dialog, BottomSheet, Menu, and Toast use the same retained Layer transition machinery when their active style enables motion. Dialog resolves fade, scale, or slide policy from `DialogStyle`, while BottomSheet fades the modal barrier and translates its sheet from the bottom edge. Dismissal disables content input immediately and removes the retained layer only after its exit animation completes.
+
+## Tooltip
+
+Tooltip attaches to its target as a retained modifier:
+
+```cpp
+IconButton(images::search, "Search")
+    .OnClick(OpenSearch)
+    .With(Tooltip("Search"));
+```
+
+The modifier retains trigger state and the target's final presentation bounds.
+Its built-in per-window service presents one anchored Notification layer through the shared LayerController, preserving the target's Environment without adding a public handle or controller.
+Hover and keyboard-visible focus show the surface according to `TooltipStyle`; touch long press suppresses the target click and uses a bounded visibility duration.
+The surface remains open while hovered, does not trap focus, and contributes no duplicate semantic node.
+Tooltip dismissal is immediate rather than participating in the general Layer transition machinery.
 
 ## Toast
 
@@ -253,9 +269,9 @@ Menu surfaces use the widest item's natural width plus optional themed content p
 
 Each Popup or Menu handle owns at most one active entry, so calling `Show()` or `ShowAt()` again replaces its previous entry. `PopupContext` can dismiss arbitrary popup content directly; Menu actions dismiss automatically and do not expose layer identity to the item model.
 
-All typed handles capture the current Environment when obtained and can be retained by event callbacks. Dialog, BottomSheet, Popup, and Menu share one internal LayerController and LayerStack; their separate `UseXxx()` names express user-facing semantics rather than separate runtimes or rendering paths.
+All typed handles capture the current Environment when obtained and can be retained by event callbacks. Dialog, BottomSheet, Popup, and Menu share one internal LayerController and LayerStack; their separate `UseXxx()` names express user-facing semantics rather than separate runtimes or rendering paths. Tooltip uses the same stack through its retained target modifier and built-in service rather than exposing another handle.
 
-The API does not add `UsePresentation()`, expose a public generic Modal mode, or require temporary presentation to be declared as ordinary application content. Toast, Dialog, BottomSheet, Popup, and Menu are window-level entries mounted outside the application root while retaining caller Environment values.
+The API does not add `UsePresentation()`, expose a public generic Modal mode, or require temporary presentation to be declared as ordinary application content. Toast, Tooltip, Dialog, BottomSheet, Popup, and Menu are window-level entries mounted outside the application root while retaining caller Environment values.
 
 ## Debug overlay
 

@@ -230,6 +230,7 @@ public:
     Observe,
     Handled,
     Capture,
+    CancelTarget,
   };
 
   virtual ~NodeExtension() = default;
@@ -250,6 +251,8 @@ public:
   virtual bool HoverHitTest(
       MountedNode& node,
       Point position) const;
+
+  virtual bool HoverWhenDisabled() const noexcept;
 
   virtual void OnHoverChanged(MountedNode& node, bool hovered);
   virtual void OnFocusChanged(MountedNode& node, bool focused);
@@ -275,6 +278,10 @@ protected:
 During `Paint()`, extensions append node-local PaintCommands through `PaintContext`. Runtime stores the resulting foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene. Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants. `PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds. Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.
 
 An extension whose `HitTest()` returns true keeps its node on the topmost pointer route and prevents lower visual branches from receiving that pointer. Runtime may query `HitTest()` while constructing the route and again before dispatch, so implementations keep it deterministic and free of side effects.
+
+Every matching hover extension on the deepest hit node receives `OnHoverChanged()` rather than competing for one exclusive hover slot.
+`HoverWhenDisabled()` opts a hover-only affordance into disabled targets without enabling focus, touch, Click, or other pointer behavior.
+An extension that returned `Observe` on pointer down continues receiving the pointer sequence without owning it; returning `CancelTarget` after recognizing a competing gesture sends PointerCancel to the active target and suppresses its activation.
 
 Clean content and foreground PaintSequences remain attached to their stable RenderNode. An extension calls `InvalidatePaint()` after changing paint-visible retained state; the operation invalidates only its owner's foreground sequence and schedules a frame when called outside frame construction.
 During frame construction, the current recording pass consumes that invalidation and `FrameResult` remains the only extension-controlled source of follow-up scheduling.
@@ -661,6 +668,7 @@ SwitchStyle
 ProgressCircleStyle
 ProgressBarStyle
 SliderStyle
+TooltipStyle
 DialogStyle
 BottomSheetStyle
 MenuStyle
@@ -868,13 +876,14 @@ Concrete presentation policy remains outside Runtime. Typed per-window services 
 
 ```text
 UseToast()       -> Notification, pass-through, timed bottom placement
+Tooltip          -> Notification, anchored modifier-owned plain text
 UseDialog()      -> Presentation, modal barrier, theme-controlled vertical placement
 UseBottomSheet() -> Presentation, modal barrier, bottom content
 UsePopup()       -> Presentation, anchored arbitrary content
 UseMenu()        -> Presentation, anchored menu semantics and focus
 ```
 
-These typed handles are the primary public interaction model. Having several discoverable `UseXxx()` functions does not create several layer systems; each service shares LayerController, ordering, Environment capture, focus, input, and invalidation. The design does not add a generic `UsePresentation()`, public `UseModal()`, `UseLayers()`, or declarative portal solely to reduce the number of typed entry points.
+These typed handles are the primary public interaction model for command-oriented presentation. Tooltip uses the same LayerController through a retained target modifier and private per-window service because it is target-owned behavior rather than an imperative action. Having several discoverable `UseXxx()` functions does not create several layer systems; each service shares LayerController, ordering, Environment capture, focus, input, and invalidation. The design does not add a generic `UsePresentation()`, public `UseModal()`, `UseLayers()`, or declarative portal solely to reduce the number of typed entry points.
 
 `UseXxx()` captures the current Environment while composing and returns a lightweight handle that can be retained by an event callback. Showing content later uses that captured Theme, Locale, resources, and third-party values. Services installed through RootHook use the root Environment unless their typed handle captures a narrower one.
 
@@ -978,7 +987,7 @@ Duplicate service types are rejected rather than silently replaced.
 
 Root hooks run once in declaration order. Runtime owns the provided services and attached entries. On window destruction, Runtime removes content and layers before destroying services in reverse registration order. A service uses its destructor to release external subscriptions.
 
-HuxerUI installs its built-in Toast, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use their typed `UseXxx()` handles directly; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
+HuxerUI installs its built-in Toast, Tooltip, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
 RootHook does not provide:
 
@@ -990,7 +999,7 @@ RootHook does not provide:
 
 ## Theme-driven presentation policy
 
-Status: implemented for standard Dialog and theme-owned Dialog, BottomSheet, Menu, and Toast presentation policy
+Status: implemented for standard Dialog and theme-owned Tooltip, Dialog, BottomSheet, Menu, and Toast presentation policy
 
 The shared LayerStack foundation owns presentation lifetime, ordering, focus, barriers, Cancel routing, outside-press handling, Environment capture, and removal. It must not also define a single visual structure for every Theme.
 
@@ -1000,6 +1009,7 @@ Presentation is divided into three contracts:
 semantic request
     Dialog title, message, and actions
     Menu items, sections, and submenus
+    Tooltip message and target bounds
     Toast message
         -> theme presentation policy
     structure, surface, geometry, placement, and motion

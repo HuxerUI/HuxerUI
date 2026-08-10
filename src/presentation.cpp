@@ -14,6 +14,7 @@
 #include <huxerui/window.h>
 
 #include "internal.h"
+#include "tooltip_internal.h"
 
 namespace huxerui {
 
@@ -1981,6 +1982,7 @@ void InstallBuiltinPresentation(RootContext& root) {
   root.Provide(std::make_shared<BottomSheetService>(root.Layers()));
   root.Provide(std::make_shared<PopupService>(root.Layers()));
   root.Provide(std::make_shared<MenuService>(root.Layers()));
+  InstallTooltip(root);
 }
 
 void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {

@@ -131,7 +131,7 @@ Custom editable or selectable components expose `TextInputClient`, `TextSelectio
 
 A root hook installs per-window services without replacing application content. Services can use `LayerController` for presentation above the application tree and are consumed through typed `UseService<Service>()`.
 
-Built-in Toast, Dialog, BottomSheet, Popup, and Menu services install automatically and their typed handles capture the current Environment. A third-party service using `LayerController` directly receives the root Environment unless its own typed handle explicitly captures and provides narrower values needed by deferred content.
+Built-in Toast, Tooltip, Dialog, BottomSheet, Popup, and Menu services install automatically. Command-oriented typed handles capture the current Environment, while Tooltip captures it through its retained target modifier. A third-party service using `LayerController` directly receives the root Environment unless its own typed handle or modifier explicitly captures and provides narrower values needed by deferred content.
 
 ## Platform adapters
 
@@ -144,4 +144,3 @@ Detailed contracts are documented in:
 - [Architecture Design](design/architecture.md)
 - [Scope Code Generation Design](design/scope-codegen.md)
 - [SDK, CLI, and Module Design](design/sdk-cli.md)
-

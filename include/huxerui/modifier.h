@@ -42,6 +42,8 @@ public:
     Observe,
     Handled,
     Capture,
+    // An observing extension may suppress the active target after it recognizes a competing gesture.
+    CancelTarget,
   };
 
   virtual ~NodeExtension() = default;
@@ -76,6 +78,11 @@ public:
   [[nodiscard]] virtual bool HoverHitTest(MountedNode& node, Point position) const {
     static_cast<void>(node);
     static_cast<void>(position);
+    return false;
+  }
+
+  // Hover-only affordances can opt into disabled targets without enabling other input.
+  [[nodiscard]] virtual bool HoverWhenDisabled() const noexcept {
     return false;
   }
 

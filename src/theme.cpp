@@ -60,6 +60,27 @@ ToastStyle FlatToastStyle(const ThemeSpec& theme) {
   };
 }
 
+TooltipStyle FlatTooltipStyle(const ThemeSpec& theme) {
+  Color background = theme.colors.inverse_surface;
+  background.alpha *= 0.94F;
+  return {
+      .background = background,
+      .text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.inverse_on_surface},
+      .padding = EdgeInsets::Symmetric(theme.spacing.small, theme.spacing.extra_small),
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.18F), {}, theme.elevation.low, 0.0F},
+      .corner_radius = theme.shapes.extra_small,
+      .minimum_height = 24.0F,
+      .maximum_width = 320.0F,
+      .placement = AnchorPlacement{AnchorSide::Above, AnchorAlignment::Center},
+      .gap = theme.spacing.extra_small,
+      .viewport_margin = theme.spacing.small,
+      .hover_delay = 0.5,
+      .exit_delay = 0.1,
+      .long_press_delay = 0.5,
+      .touch_show_duration = 1.5,
+  };
+}
+
 DialogStyle FlatDialogStyle(const ThemeSpec& theme) {
   Color separator = theme.colors.on_surface;
   separator.alpha *= 0.12F;
@@ -234,6 +255,7 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
       }
   );
   definition.Set(FlatToastStyle(theme));
+  definition.Set(FlatTooltipStyle(theme));
   definition.Set(FlatDialogStyle(theme));
   definition.Set(FlatBottomSheetStyle(theme));
   definition.Set(FlatMenuStyle(theme));
@@ -621,6 +643,25 @@ ToastStyle MaterialToastStyle(const ThemeSpec& theme) {
   };
 }
 
+TooltipStyle MaterialTooltipStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.inverse_surface,
+      .text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.inverse_on_surface},
+      .padding = EdgeInsets::Symmetric(8.0F, 4.0F),
+      .shadow = {},
+      .corner_radius = theme.shapes.extra_small,
+      .minimum_height = 24.0F,
+      .maximum_width = 200.0F,
+      .placement = AnchorPlacement{AnchorSide::Above, AnchorAlignment::Center},
+      .gap = 4.0F,
+      .viewport_margin = 8.0F,
+      .hover_delay = 0.5,
+      .exit_delay = 0.1,
+      .long_press_delay = 0.5,
+      .touch_show_duration = 1.5,
+  };
+}
+
 DialogStyle MaterialDialogStyle(const ThemeSpec& theme) {
   return {
       .scrim = theme.colors.scrim,
@@ -813,6 +854,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialSliderStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
   definition.Set(MaterialToastStyle(theme));
+  definition.Set(MaterialTooltipStyle(theme));
   definition.Set(MaterialDialogStyle(theme));
   definition.Set(MaterialBottomSheetStyle(theme));
   definition.Set(MaterialMenuStyle(theme));
@@ -1287,6 +1329,10 @@ SliderStyle SliderStyle::Default() {
 
 ToastStyle ToastStyle::Default() {
   return FlatToastStyle(FlatLightThemeSpec());
+}
+
+TooltipStyle TooltipStyle::Default() {
+  return FlatTooltipStyle(FlatLightThemeSpec());
 }
 
 DialogStyle DialogStyle::Default() {

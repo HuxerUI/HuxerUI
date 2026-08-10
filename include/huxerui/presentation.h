@@ -369,6 +369,27 @@ struct AnchorPlacement {
   bool operator==(const AnchorPlacement&) const = default;
 };
 
+struct TooltipStyle {
+  Color background = Color::Rgb(31, 35, 40, 0.94F);
+  TextStyle text_style{Font::System(13.0F), Color::White()};
+  EdgeInsets padding = EdgeInsets::Symmetric(8.0F, 4.0F);
+  Shadow shadow{Color::Rgb(0, 0, 0, 0.18F), {}, 6.0F, 0.0F};
+  float corner_radius = 4.0F;
+  float minimum_height = 24.0F;
+  float maximum_width = 320.0F;
+  AnchorPlacement placement{AnchorSide::Above, AnchorAlignment::Center};
+  float gap = 4.0F;
+  float viewport_margin = 8.0F;
+  double hover_delay = 0.5;
+  double exit_delay = 0.1;
+  double long_press_delay = 0.5;
+  double touch_show_duration = 1.5;
+
+  static TooltipStyle Default();
+
+  bool operator==(const TooltipStyle&) const = default;
+};
+
 struct PopupOptions {
   AnchorPlacement placement;
   float gap = 4.0F;
@@ -561,6 +582,16 @@ struct Dialog {
   std::function<void()> on_dismiss_request;
 
   static const detail::ModifierDescriptor& Descriptor();
+};
+
+struct Tooltip {
+  explicit Tooltip(StringVariant message);
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+  StringVariant message;
+
+  bool operator==(const Tooltip&) const = default;
 };
 
 } // namespace huxerui

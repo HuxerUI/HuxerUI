@@ -97,6 +97,21 @@ void Runtime::ActivateNode(detail::MountedNode& node) {
   }
 }
 
+void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& event) {
+  if (session.target_identity.has_value()) {
+    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.target_identity)) {
+      PointerEvent cancel = event;
+      cancel.type = PointerEventType::Cancel;
+      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancel);
+    }
+    session.target_identity.reset();
+  }
+  session.focus_pending = false;
+  session.pending_focus_identity.reset();
+  session.scroll_chain.clear();
+  RequestFrame();
+}
+
 void Runtime::ReleaseScrollGesture(PointerSession& session) {
   if (!session.active_scroll_node.has_value()) {
     return;
@@ -107,17 +122,21 @@ void Runtime::ReleaseScrollGesture(PointerSession& session) {
   session.active_scroll_node.reset();
 }
 
-void Runtime::DispatchExtensionObservers(PointerSession& session, const PointerEvent& event, bool clear) {
+bool Runtime::DispatchExtensionObservers(PointerSession& session, const PointerEvent& event, bool clear) {
+  bool cancel_target = false;
   for (const NodeExtensionHandle& observer : session.extension_observers) {
     NodeExtension* extension = FindExtension(*state_->mounted_root_, observer);
     detail::MountedNode* node = FindNode(*state_->mounted_root_, observer.node_identity);
     if (extension && node) {
-      extension->OnPointer(*node, LocalPointerEvent(*node, event));
+      cancel_target = extension->OnPointer(*node, LocalPointerEvent(*node, event)) ==
+                          NodeExtension::PointerResult::CancelTarget ||
+                      cancel_target;
     }
   }
   if (clear) {
     session.extension_observers.clear();
   }
+  return cancel_target;
 }
 
 std::optional<std::size_t> Runtime::FindScrollCandidate(const PointerSession& session, Axis axis, float delta) {
@@ -344,7 +363,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured == state_->pointer_sessions_.end()) {
     if (SupportsHover(event.device_kind)) {
-      UpdateHoveredExtension(event.position);
+      UpdateHoveredExtensions(event.position);
     }
     if (detail::MountedNode* target = HitTestPointer(*state_->mounted_root_, event.position);
         target && target->enabled) {
@@ -354,7 +373,10 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   }
 
   PointerSession& session = captured->second;
-  DispatchExtensionObservers(session, event, false);
+  const bool cancel_target = DispatchExtensionObservers(session, event, false);
+  if (cancel_target) {
+    CancelPointerTarget(session, event);
+  }
   if (session.extension_capture.has_value()) {
     const NodeExtensionHandle extension_capture = *session.extension_capture;
     NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture);
@@ -453,14 +475,15 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
 }
 
 void Runtime::HandlePointerCancel(const PointerEvent& event) {
-  if (SupportsHover(event.device_kind) && state_->hovered_extension_.has_value()) {
-    const NodeExtensionHandle hovered = *state_->hovered_extension_;
-    if (NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity)) {
-        extension->OnHoverChanged(*node, false);
+  if (SupportsHover(event.device_kind) && !state_->hovered_extensions_.empty()) {
+    for (const NodeExtensionHandle& hovered : state_->hovered_extensions_) {
+      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered)) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity)) {
+          extension->OnHoverChanged(*node, false);
+        }
       }
     }
-    state_->hovered_extension_.reset();
+    state_->hovered_extensions_.clear();
     RequestFrame();
   }
 
@@ -496,12 +519,12 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
     }
     if (SupportsHover(event.device_kind)) {
-      UpdateHoveredExtension(event.position);
+      UpdateHoveredExtensions(event.position);
     }
     return;
   }
 
-  DispatchExtensionObservers(captured->second, event, true);
+  const bool cancel_target = DispatchExtensionObservers(captured->second, event, true);
   if (captured->second.extension_capture.has_value()) {
     const NodeExtensionHandle extension_capture = *captured->second.extension_capture;
     if (NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture)) {
@@ -513,12 +536,15 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     ReleaseScrollGesture(captured->second);
     state_->pointer_sessions_.erase(captured);
     if (SupportsHover(event.device_kind)) {
-      UpdateHoveredExtension(event.position);
+      UpdateHoveredExtensions(event.position);
     }
     RequestFrame();
     return;
   }
 
+  if (cancel_target) {
+    CancelPointerTarget(captured->second, event);
+  }
   const std::optional<std::uint64_t> identity = captured->second.target_identity;
   const bool was_dragging = captured->second.drag_axis.has_value();
   const std::optional<std::uint64_t> momentum_identity = captured->second.active_scroll_node;
@@ -539,7 +565,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     }
   }
   if (SupportsHover(event.device_kind)) {
-    UpdateHoveredExtension(event.position);
+    UpdateHoveredExtensions(event.position);
   }
   if (was_dragging || !identity.has_value()) {
     return;

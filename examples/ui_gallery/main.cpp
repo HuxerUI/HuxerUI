@@ -164,8 +164,10 @@ View ControlsDemo() {
         Flow {
           Button("Button").OnClick([] {}),
           Button("Disabled").With(Enabled(false)).OnClick([] {}),
-          IconButton(LinkIcon(), "Open link").OnClick([] {}),
-          IconButton(LockIcon(), "Disabled secure action").OnClick([] {}).With(Enabled(false)),
+          IconButton(LinkIcon(), "Open link").OnClick([] {}).With(Tooltip("Open link")),
+          IconButton(LockIcon(), "Disabled secure action")
+              .OnClick([] {})
+              .With(Enabled(false), Tooltip("Secure actions are unavailable")),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
         Flow {
           Chip(ListIcon(), "Action").OnClick([] {}),
@@ -391,16 +393,21 @@ View GalleryMain(
                   .OnClick([start_open, end_open] {
                     end_open = false;
                     start_open = true;
-                  });
+                  })
+                  .With(Tooltip("Open navigation"));
   }
   std::vector<View> actions;
   if (viewport_class != ViewportClass::Expanded) {
-    actions.push_back(IconButton(TuneIcon(), "Open tools").OnClick([start_open, end_open, viewport_class] {
-      if (viewport_class == ViewportClass::Compact) {
-        start_open = false;
-      }
-      end_open = true;
-    }));
+    actions.push_back(
+        IconButton(TuneIcon(), "Open tools")
+            .OnClick([start_open, end_open, viewport_class] {
+              if (viewport_class == ViewportClass::Compact) {
+                start_open = false;
+              }
+              end_open = true;
+            })
+            .With(Tooltip("Open tools"))
+    );
   }
 
   return Column {

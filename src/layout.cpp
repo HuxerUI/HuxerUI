@@ -222,6 +222,13 @@ bool ExtensionHandlesPointer(MountedNode& node, Point position) {
   });
 }
 
+bool ExtensionHandlesHover(MountedNode& node, Point position) {
+  return std::any_of(node.extensions.begin(), node.extensions.end(), [&](const NodeExtensionEntry& entry) {
+    return entry.extension && (node.enabled || entry.extension->HoverWhenDisabled()) &&
+           entry.extension->HoverHitTest(node, position);
+  });
+}
+
 bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
   if (!node.pointer_events_enabled) {
     return false;
@@ -247,8 +254,8 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   }
 
   if (within_node &&
-      (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) || IsScrollContainer(node) ||
-       node.focusable)) {
+      (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) ||
+       ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.focusable)) {
     return true;
   }
   route.pop_back();
