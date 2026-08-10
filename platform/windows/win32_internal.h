@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <huxerui/render_scene.h>
+#include <huxerui/window.h>
 
 namespace huxerui::detail {
 
@@ -47,6 +48,28 @@ struct Win32DamageRegion {
   bool full = false;
   std::vector<RECT> rects;
 };
+
+inline RECT InsetWin32MaximizedClientRect(RECT proposed_window, LONG horizontal_inset, LONG vertical_inset) noexcept {
+  const LONG resolved_horizontal_inset = std::max(0L, horizontal_inset);
+  const LONG resolved_vertical_inset = std::max(0L, vertical_inset);
+  proposed_window.left += resolved_horizontal_inset;
+  proposed_window.top += resolved_vertical_inset;
+  proposed_window.right -= resolved_horizontal_inset;
+  proposed_window.bottom -= resolved_vertical_inset;
+  return proposed_window;
+}
+
+inline float ResolveWin32CaptionButtonWidth(float system_width) noexcept {
+  constexpr float modern_caption_button_width = 46.0F;
+  return std::max(modern_caption_button_width, system_width);
+}
+
+inline WindowTitleBarMetrics ConstrainWin32TitleBarMetrics(WindowTitleBarMetrics metrics, Size viewport) noexcept {
+  metrics.height = std::clamp(metrics.height, 0.0F, std::max(0.0F, viewport.height));
+  metrics.left_inset = std::clamp(metrics.left_inset, 0.0F, std::max(0.0F, viewport.width));
+  metrics.right_inset = std::clamp(metrics.right_inset, 0.0F, std::max(0.0F, viewport.width - metrics.left_inset));
+  return metrics;
+}
 
 inline Win32DamageRegion ResolveWin32Damage(const DamageRegion& damage, float scale, const RECT& client) noexcept {
   Win32DamageRegion result;

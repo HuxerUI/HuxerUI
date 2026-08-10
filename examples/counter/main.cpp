@@ -24,8 +24,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Counter",
-        .width = 520.0F,
-        .height = 360.0F,
+        .window = {
+            .title = "HuxerUI Counter",
+            .initial_size = {520.0F, 360.0F},
+        },
     }
 )

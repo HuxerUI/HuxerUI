@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -33,12 +32,8 @@ class TextLayout;
 } // namespace detail
 
 struct AppOptions {
-  std::string title = "HuxerUI";
-  float width = 520.0F;
-  float height = 360.0F;
+  WindowOptions window;
   ViewportBreakpoints viewport_breakpoints;
-  // Root geometry remains stable for one Runtime; pages may still override SystemBarsAppearance independently.
-  WindowContentMode window_content_mode = WindowContentMode::SafeArea;
 #if defined(NDEBUG)
   bool show_debug_overlay = false;
 #else
@@ -85,6 +80,10 @@ public:
   virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
     return std::nullopt;
   }
+  // Embedded adapters without native-window authority may ignore desktop window commands.
+  virtual void RequestWindowCommand(WindowCommand command) {
+    static_cast<void>(command);
+  }
   // Embedded adapters without native-window authority may leave this optional capability as a no-op.
   virtual void SetSystemBarsContentBrightness(
       SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
@@ -118,6 +117,8 @@ public:
   Runtime& operator=(Runtime&&) = delete;
 
   void SetWindowMetrics(WindowMetrics metrics);
+  // Native non-client hit testing queries the geometry represented by the currently mounted tree.
+  [[nodiscard]] bool IsWindowDragRegion(Point position) const;
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
   const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
@@ -202,7 +203,8 @@ private:
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
   void EnsureRootStructure();
-  void ResolveWindowAppearance();
+  void ReconcileWindowControls();
+  void CommitWindowAppearance();
   void ComposeApplication();
   void ComposeLayers();
   bool ComposeScope(detail::MountedNode& mounted);

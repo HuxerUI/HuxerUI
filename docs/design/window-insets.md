@@ -103,7 +103,7 @@ A Theme supplies the complete fallback for its subtree, while a modifier declare
 ```cpp
 struct AppOptions {
   // Existing fields...
-  WindowContentMode window_content_mode = WindowContentMode::SafeArea;
+  WindowOptions window;
 };
 ```
 

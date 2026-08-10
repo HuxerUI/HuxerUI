@@ -38,9 +38,10 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "Counter",
-        .width = 480.0F,
-        .height = 320.0F,
+        .window = {
+            .title = "Counter",
+            .initial_size = {480.0F, 320.0F},
+        },
     }
 )
 ```

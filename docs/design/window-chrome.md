@@ -1,0 +1,372 @@
+# Window Chrome Design
+
+Status: shared contract and Windows Custom mode implemented; macOS and Linux Custom modes remain deferred
+
+This document defines desktop window-chrome ownership, application-defined title-bar content, standard window controls, drag hit testing, and platform fallback behavior.
+It complements the mobile-oriented [Window Insets and System Bars Design](window-insets.md) without changing safe-area semantics.
+
+## Goals
+
+- Keep a complete platform-owned title bar when an application wants native window chrome.
+- Let an application fully define title-bar content and background without inheriting a partially native visual surface.
+- Preserve platform-appropriate standard window controls in Custom mode.
+- Keep native window metadata available to task switching, window management, system menus, and accessibility.
+- Reuse mounted layout and pointer geometry for drag and native hit testing.
+- Provide convenient per-window commands without exposing platform window objects.
+- Keep one ownership model across Windows, macOS, and future Linux client-side decorations.
+
+## Non-goals
+
+The initial Custom implementation does not provide:
+
+- Runtime switching between System and Custom chrome.
+- Application interception of native close requests beyond existing platform behavior.
+- Application replacement or removal of the standard macOS traffic lights.
+- A second generic window-property or platform-handle abstraction.
+- Linux server-side title-bar embedding.
+- A Wayland backend.
+- Mobile title-bar behavior; mobile system bars remain part of the window-insets contract.
+
+## Ownership model
+
+The native window title, application title-bar content, and standard window controls are separate concerns.
+
+`AppOptions::window.title` remains native window metadata.
+The platform uses it for the taskbar, application switcher, window manager, system menu, and accessibility even when no HuxerUI Text displays it.
+
+`WindowTitleBar` is application-defined content.
+It may contain a document tab strip, menu, search field, toolbar, status content, a conventional title, or no visible title.
+
+Only two public chrome modes exist:
+
+```cpp
+enum class WindowChromeMode {
+  System,
+  Custom,
+};
+```
+
+`System` leaves the title-bar surface, standard controls, dragging, and non-client behavior to the platform.
+The native client area begins below the system title bar, and `WindowTitleBar` behaves as an ordinary application bar if the application still declares one.
+
+`Custom` transfers title-bar content and background to the application while the framework preserves or supplies standard window controls according to platform convention.
+This does not require every platform to render those controls through HuxerUI:
+
+- Windows uses HuxerUI-provided caption controls because native DWM controls cannot be embedded into a fully client-rendered surface with reliable edge alignment.
+- macOS keeps the native AppKit traffic lights and reserves their actual bounds for application content.
+- Linux client-side decoration support may use HuxerUI controls when the window manager does not provide controls over client content.
+
+The public contract describes responsibility and behavior rather than requiring identical rendering mechanisms.
+Applications own their title-bar content; the framework owns the standard window affordances.
+
+There is no Extended or Integrated mode.
+A mode that combines application-owned background with platform-owned Windows caption rendering creates ambiguous composition and geometry ownership, and cannot guarantee a visually continuous restored-window edge.
+
+## Public contract
+
+The window contract remains in `<huxerui/window.h>`.
+
+```cpp
+enum class WindowChromeMode {
+  System,
+  Custom,
+};
+
+struct WindowTitleBarMetrics {
+  float height = 0.0F;
+  float left_inset = 0.0F;
+  float right_inset = 0.0F;
+  bool maximized = false;
+
+  bool operator==(const WindowTitleBarMetrics&) const = default;
+};
+
+struct WindowCaptionLabels {
+  StringVariant minimize = "Minimize";
+  StringVariant toggle_maximize = "Maximize or restore";
+  StringVariant close = "Close";
+};
+
+struct WindowMetrics {
+  Size viewport;
+  EdgeInsets safe_area;
+  std::optional<WindowTitleBarMetrics> title_bar;
+
+  bool operator==(const WindowMetrics&) const = default;
+};
+```
+
+`AppOptions` groups native-window startup configuration under `WindowOptions`:
+
+```cpp
+struct WindowOptions {
+  std::string title = "HuxerUI";
+  Size initial_size = {520.0F, 360.0F};
+  WindowContentMode content_mode = WindowContentMode::SafeArea;
+  WindowChromeMode chrome_mode = WindowChromeMode::System;
+  float title_bar_height = 40.0F;
+  WindowCaptionLabels caption_labels;
+};
+
+struct AppOptions {
+  WindowOptions window;
+  // Application-wide fields...
+};
+```
+
+`WindowOptions::title_bar_height` is the application's preferred logical height for Custom chrome.
+It drives both `WindowTitleBar` layout and framework caption-control geometry, so applications do not configure those heights independently.
+Platforms preserve a larger native minimum when their standard controls require one.
+
+`WindowMetrics::title_bar` is the resolved platform geometry available to application layout.
+It is present only when application content occupies desktop title-bar space.
+
+`height` is the minimum logical title-bar extent.
+`left_inset` and `right_inset` reserve physical regions occupied by framework- or platform-managed standard controls.
+They deliberately do not use leading and trailing terminology because the adapter has already resolved native control placement and layout direction.
+`maximized` is the platform-resolved placement state used by framework controls to select maximize or restore visuals.
+
+`WindowOptions::caption_labels` makes framework-rendered accessibility labels configurable and resource-aware without
+exposing native window objects.
+The chrome mode, preferred height, and label sources remain stable for one Runtime, while resolved localized labels
+refresh with the Runtime resource configuration.
+
+Runtime validates that title-bar values are finite, non-negative, and fit within the submitted viewport.
+Platform adapters normalize transient native values before calling `SetWindowMetrics()`.
+
+If a desktop adapter cannot implement Custom chrome correctly, it resolves the request to System and submits no title-bar metrics.
+It does not expose a third public mode or approximate native control geometry.
+Framework control nodes remain structurally stable but become disabled, semantically hidden, zero-sized, and paint-empty while control geometry is absent.
+
+## WindowTitleBar
+
+`WindowTitleBar` is a horizontal Layout with ordinary child Views:
+
+```cpp
+WindowTitleBar {
+  MainMenu(),
+  EditorTabs().With(Grow(1.0F)),
+  SearchField(...),
+  IconButton(Icons::settings, ...),
+}.With(
+    Spacing(6.0F),
+    Padding(8.0F),
+    Background(theme.colors.surface)
+);
+```
+
+It does not synthesize an icon, visible title, Back action, or application toolbar action.
+Its children retain their own interaction, focus, semantics, and styling.
+
+In Custom mode, framework-managed standard controls occupy the resolved title-bar insets.
+On Windows and client-decorated Linux this includes framework-rendered minimize, maximize or restore, and close controls.
+On macOS it includes native traffic lights positioned by AppKit.
+Applications do not place duplicate standard controls in the normal path.
+
+The layout follows Row sizing and placement with these additions:
+
+- It fills bounded horizontal space.
+- Its measured height is at least the resolved title-bar height.
+- Children are measured inside the resolved left and right control insets.
+- Children are centered vertically in the resolved height.
+- Its background covers the complete title-bar bounds, including control insets.
+- Ordinary Padding and Spacing remain application-controlled and apply inside the platform reservation.
+
+When `WindowMetrics::title_bar` is absent, the component remains visible as an ordinary horizontal top bar with its natural child height.
+This keeps shared application content usable when Custom mode falls back to System or when the same UI runs on mobile or Web.
+
+The component has no dedicated Style type.
+Background, height, padding, spacing, opacity, shadow, and child alignment already belong to generic View properties.
+Framework-managed controls derive their contrasting glyph color from the composited generic background on the
+frontmost intersecting `WindowDragRegion` and its ancestors.
+`WindowTitleBar` participates through the marker it already applies rather than through a Runtime component check.
+When no intersecting drag region is present, the resolved window backplane is the fallback.
+This keeps the control appearance aligned with the surface actually painted beneath it without adding title-bar-only visual properties to View.
+
+## Window commands
+
+`UseWindow()` returns a lightweight handle bound to the current Runtime window, following the established root-service handle pattern used by presentation APIs.
+It does not expose `HWND`, `NSWindow`, X11 handles, or another PlatformAdapter.
+
+The initial command surface is:
+
+```cpp
+auto window = UseWindow();
+
+window.Minimize();
+window.Maximize();
+window.Restore();
+window.ToggleMaximize();
+window.Close();
+```
+
+Commands request native window operations rather than mutating shared Runtime state directly.
+`Close()` follows the same native close-request path as a standard caption control.
+
+Framework caption controls use this same command boundary and do not call platform implementation helpers directly.
+Observable placement, full-screen control, and capability queries should be added only when an application-facing use case requires them; they are not prerequisites for the initial commands.
+
+## Drag regions
+
+The public marker remains:
+
+```cpp
+struct WindowDragRegion {
+  static const detail::ModifierDescriptor& Descriptor();
+};
+```
+
+`WindowTitleBar` applies this marker to itself.
+Applications may mark another mounted region explicitly.
+
+The native adapter queries committed geometry through:
+
+```cpp
+bool Runtime::IsWindowDragRegion(Point position) const;
+```
+
+The query is read-only and uses the mounted tree represented by the currently committed frame.
+It follows presentation transforms, child transforms, clipping, scrolling, layer order, and pointer-event policy.
+
+Hit testing visits frontmost descendants before their marked ancestor.
+An ordinary pointer target, focusable control, scroll container, or NodeExtension hit wins over a draggable ancestor.
+This makes Button, IconButton, TextField, Tabs, selection, and custom pointer content interactive without separate exclusion rectangles.
+Disabled controls still reserve their client area.
+
+If no interactive descendant wins, the closest marked region is draggable.
+When title-bar metrics are absent, Runtime returns false so a fallback toolbar does not unexpectedly move a system-decorated window.
+
+The marker is a View property rather than a NodeExtension.
+It has no retained state, lifecycle, paint output, or event dispatch, and Runtime does not branch on the concrete `WindowTitleBar` type.
+
+## Layout and invalidation
+
+Title-bar metrics are exact window geometry and therefore do not enter Environment.
+The internal layout traversal carries them beside constraints and the remaining safe-area value.
+`WindowTitleBar` consumes them for application layout, while framework-owned controls use the same committed geometry for placement and hit testing.
+Custom Layout implementations that genuinely coordinate with desktop chrome can read the frame-local value through `LayoutContext::TitleBarMetrics()`.
+
+`SetWindowMetrics()` updates viewport, safe area, and title-bar metrics atomically.
+A changed title-bar height or inset invalidates layout without recomposing the application tree.
+Unchanged metrics schedule no work.
+
+Title-bar metrics are distinct from safe-area insets.
+Desktop Custom mode normally reports a zero safe area while still reporting title-bar metrics.
+`TopAppBar` remains an application navigation component and never becomes a desktop title bar implicitly.
+
+## Windows mapping
+
+Windows Custom mode makes the complete restored window a client-rendered surface while retaining the native styles required for taskbar behavior, resizing, system commands, and snap integration.
+The adapter does not ask DWM to paint caption visuals over the client scene.
+
+HuxerUI supplies the minimize, maximize or restore, and close visuals in the framework window-control layer.
+Their geometry is DPI-aware, reaches the visible top and side edges, and is submitted as resolved right title-bar inset.
+The resolved control height uses the larger of the DPI-aware system caption-button height and
+`AppOptions::window.title_bar_height`.
+Control width uses the larger of the DPI-aware system metric and the modern 46-DIP interaction width.
+The controls expose button semantics and native window actions through the same Runtime interaction path as other HuxerUI controls.
+The adapter submits the current maximized state with the geometry so the middle control changes between maximize and restore visuals without application recomposition.
+
+Native hit testing follows this order:
+
+- Resolve framework caption-control bounds, including `HTMAXBUTTON` behavior required for Windows 11 Snap Layout.
+- Resolve the remaining resize edges and corners.
+- Convert the remaining screen point to client logical coordinates and query `Runtime::IsWindowDragRegion()`.
+- Return `HTCAPTION` for an application drag region and `HTCLIENT` otherwise.
+
+The maximize region still reports `HTMAXBUTTON` so Windows can expose Snap Layout.
+Its non-client hover and press messages are bridged into the same Runtime pointer path used by the other framework controls, while HuxerUI remains the single owner of their visual and click state.
+
+The adapter preserves native double-click maximize, `Alt+Space`, the system menu, taskbar commands, DPI transitions, and maximized work-area bounds.
+The application does not emulate window movement by accumulating pointer deltas.
+
+Windows 10 and later use this Custom path.
+The Windows 7 compatibility build uses the same HuxerUI controls with its existing sequential swap-chain fallback; Windows 11 Snap Layout is naturally unavailable there.
+
+## macOS mapping
+
+macOS Custom mode retains a titled, closable, miniaturizable, and resizable `NSWindow`, enables the full-size content-view style, hides the native title text, and makes the title-bar background transparent.
+The standard AppKit traffic lights remain installed, native, and accessible.
+
+The adapter derives title-bar height and the left content inset from the actual standard window-button frames converted into HuxerUI view coordinates.
+It refreshes those metrics when the window frame, screen, backing scale, toolbar configuration, or full-screen state changes.
+
+Drag initiation remains an AppKit window operation selected by `Runtime::IsWindowDragRegion()`.
+HuxerUI does not move the window by accumulating pointer deltas and does not duplicate traffic-light actions through `UseWindow()`.
+
+Removing or replacing traffic lights is outside the initial Custom contract.
+It can be considered later as an explicit advanced policy rather than changing the platform default.
+
+macOS implementation and validation require a macOS host and remain deferred.
+
+## Linux mapping
+
+The current Linux backend uses X11 with window-manager decorations.
+X11 does not provide one portable contract for embedding client content into a server-decorated title bar while preserving its buttons.
+
+Until client-side decorations are implemented, Linux resolves Custom to System, submits no title-bar metrics, and renders `WindowTitleBar` as an ordinary client-area bar.
+
+Future X11 Custom support removes server decorations, renders framework standard controls, delegates movement and resizing through `_NET_WM_MOVERESIZE`, and uses window-manager protocols for maximize, minimize, and close.
+
+A future Wayland backend negotiates decorations through `xdg-decoration`.
+Client-side movement and resize use `xdg_toplevel` requests with the seat and serial from the initiating pointer event; they never depend on global pointer coordinates.
+
+## Other platforms
+
+Android, iOS, Web, and future OHOS adapters submit no desktop title-bar metrics.
+They ignore the requested desktop chrome mode and preserve `WindowTitleBar` as ordinary application content.
+System bars and safe-area behavior continue to follow the separate window-insets contract.
+
+Embedded native host views also submit no title-bar metrics because their containing native window owns chrome.
+
+## Accessibility and system behavior
+
+Framework-rendered caption controls expose configurable button names, native actions, and button automation roles.
+The maximize control uses a stable toggle action and label while its visual changes with the platform-resolved maximized state.
+
+Platform completion also audits:
+
+- Native resize cursors and edge hit targets.
+- Window activation and deactivation visuals.
+- Double-click maximize or restore where the platform defines it.
+- Keyboard and system-menu window commands.
+- High-contrast, reduced-motion, and accessibility settings where applicable.
+
+Activation visuals, high-contrast integration, and exhaustive keyboard and system-menu validation remain follow-up Windows work.
+
+## Implementation status
+
+The shared API exposes only `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
+The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
+
+Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
+macOS and Linux currently resolve Custom according to their platform sections until their dedicated implementations are completed.
+
+## Testing
+
+Shared tests cover:
+
+- WindowChromeMode and WindowTitleBarMetrics validation.
+- System fallback and resolved Custom layout.
+- Left and right standard-control inset placement.
+- Ordinary Padding, Spacing, and resolved native height.
+- Metric updates without application recomposition.
+- Interactive descendants taking precedence over drag ancestors.
+- No drag result when title-bar metrics are absent.
+- `UseWindow()` commands reaching the native close and placement boundary.
+- Caption controls collapsing when resolved metrics disappear.
+- Caption glyph invalidation when the composited title-bar background changes.
+- Configurable caption-control accessibility labels.
+
+Windows tests isolate caption-button minimum width, narrow-client metric normalization, and maximized work-area bounds.
+Manual Windows validation currently covers restored and maximized geometry, resizing, dragging, interactive title-bar controls, and caption hover and click behavior.
+High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still require dedicated validation before release.
+
+macOS Custom implementation and tests remain deferred until work can be performed on a macOS host.
+Linux Custom decorations remain deferred; the current adapter continues to use system decorations.
+
+## Delivery order
+
+The shared contract and Windows Custom implementation form the first delivery.
+The macOS implementation follows on a macOS host and retains native traffic lights.
+Linux Custom decorations and Wayland remain later platform work under the same two-mode contract.

@@ -165,7 +165,7 @@ View App() {
   });
 }
 
-HUXERUI_APP(App, {.title = "@PROJECT_NAME@"})
+HUXERUI_APP(App, {.window = {.title = "@PROJECT_NAME@"}})
 )TEMPLATE")},
       {"assets/strings/default.properties", context.Render("app_name = \"@PROJECT_NAME@\"\n")},
   };

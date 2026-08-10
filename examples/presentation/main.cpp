@@ -116,8 +116,9 @@ View PresentationRoot() {
 HUXERUI_APP(
     PresentationRoot,
     {
-        .title = "HuxerUI Presentation",
-        .width = 720.0F,
-        .height = 560.0F,
+        .window = {
+            .title = "HuxerUI Presentation",
+            .initial_size = {720.0F, 560.0F},
+        },
     }
 )

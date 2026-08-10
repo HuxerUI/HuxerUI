@@ -37,8 +37,15 @@ namespace {
 
 constexpr wchar_t kWindowClassName[] = L"HuxerUI.Win32.Window";
 constexpr UINT kRenderMessage = WM_APP + 1;
+constexpr UINT kWindowCommandMessage = WM_APP + 3;
 constexpr UINT_PTR kFrameTimer = 1;
 constexpr float kDipsPerInch = 96.0F;
+
+enum class MouseTrackingArea {
+  None,
+  Client,
+  NonClient,
+};
 
 double FileTimeSeconds(const FILETIME& time) noexcept {
   ULARGE_INTEGER value{};
@@ -62,6 +69,8 @@ public:
     get_dpi_for_window_ = reinterpret_cast<GetDpiForWindowFunction>(GetProcAddress(user32, "GetDpiForWindow"));
     adjust_window_rect_for_dpi_ =
         reinterpret_cast<AdjustWindowRectExForDpiFunction>(GetProcAddress(user32, "AdjustWindowRectExForDpi"));
+    get_system_metrics_for_dpi_ =
+        reinterpret_cast<GetSystemMetricsForDpiFunction>(GetProcAddress(user32, "GetSystemMetricsForDpi"));
 #endif
   }
 
@@ -111,12 +120,25 @@ public:
 #endif
   }
 
+  int SystemMetricForDpi(int index, UINT dpi) const noexcept {
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+    if (get_system_metrics_for_dpi_ != nullptr) {
+      return get_system_metrics_for_dpi_(index, dpi);
+    }
+    const int value = GetSystemMetrics(index);
+    return static_cast<int>(std::lround(static_cast<double>(value) * dpi / LegacySystemDpi()));
+#else
+    return GetSystemMetricsForDpi(index, dpi);
+#endif
+  }
+
 private:
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
   using SetProcessDpiAwarenessContextFunction = BOOL(WINAPI*)(HANDLE);
   using GetDpiForSystemFunction = UINT(WINAPI*)();
   using GetDpiForWindowFunction = UINT(WINAPI*)(HWND);
   using AdjustWindowRectExForDpiFunction = BOOL(WINAPI*)(RECT*, DWORD, BOOL, DWORD, UINT);
+  using GetSystemMetricsForDpiFunction = int(WINAPI*)(int, UINT);
 
   static UINT LegacySystemDpi() noexcept {
     HDC context = GetDC(nullptr);
@@ -132,6 +154,7 @@ private:
   GetDpiForSystemFunction get_dpi_for_system_ = nullptr;
   GetDpiForWindowFunction get_dpi_for_window_ = nullptr;
   AdjustWindowRectExForDpiFunction adjust_window_rect_for_dpi_ = nullptr;
+  GetSystemMetricsForDpiFunction get_system_metrics_for_dpi_ = nullptr;
 #endif
 };
 Key TranslateKey(WPARAM virtual_key) {
@@ -232,7 +255,7 @@ class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
-  int Run(huxerui::Runtime& runtime, const AppOptions& options) {
+  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     accessibility_.SetRuntime(runtime_);
     text_input_.SetRuntime(runtime_);
@@ -250,6 +273,8 @@ public:
       runtime_->UpdateResourceConfiguration(Configuration());
 
       ShowWindow(window_, SW_SHOW);
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
       UpdateWindow(window_);
 
       MSG message{};
@@ -377,6 +402,13 @@ public:
     };
   }
 
+  void RequestWindowCommand(WindowCommand command) override {
+    if (window_ == nullptr) {
+      return;
+    }
+    PostMessageW(window_, kWindowCommandMessage, static_cast<WPARAM>(command), 0);
+  }
+
   ResourceConfiguration Configuration() const override {
     wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
     Locale locale = Locale::Default();
@@ -498,17 +530,19 @@ private:
     }
   }
 
-  void CreateApplicationWindow(const AppOptions& options) {
+  void CreateApplicationWindow(const WindowOptions& options) {
     dpi_ = static_cast<float>(win32_api_.SystemDpi());
     const float scale = DpiScale();
+    custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
+    custom_title_bar_height_ = options.title_bar_height;
     RECT frame{
         0,
         0,
-        std::max(1L, static_cast<LONG>(std::lround(options.width * scale))),
-        std::max(1L, static_cast<LONG>(std::lround(options.height * scale))),
+        std::max(1L, static_cast<LONG>(std::lround(options.initial_size.width * scale))),
+        std::max(1L, static_cast<LONG>(std::lround(options.initial_size.height * scale))),
     };
     const DWORD style = WS_OVERLAPPEDWINDOW;
-    if (!win32_api_.AdjustWindowRectForDpi(&frame, style, FALSE, 0, static_cast<UINT>(dpi_))) {
+    if (!custom_chrome_ && !win32_api_.AdjustWindowRectForDpi(&frame, style, FALSE, 0, static_cast<UINT>(dpi_))) {
       throw std::runtime_error("HuxerUI could not calculate the Windows window size");
     }
 
@@ -529,6 +563,20 @@ private:
     );
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
+    }
+    if (custom_chrome_) {
+      first_nc_calc_ = false;
+      if (!SetWindowPos(
+              window_,
+              nullptr,
+              0,
+              0,
+              0,
+              0,
+              SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+          )) {
+        throw std::runtime_error("HuxerUI could not apply its custom Windows frame");
+      }
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
@@ -559,6 +607,34 @@ private:
     return std::max(dpi_, 1.0F) / kDipsPerInch;
   }
 
+  int SystemMetric(int index) const noexcept {
+    return win32_api_.SystemMetricForDpi(index, static_cast<UINT>(std::max(dpi_, 1.0F)));
+  }
+
+  int ResizeBorderX() const noexcept {
+    return std::max(1, SystemMetric(SM_CXSIZEFRAME) + SystemMetric(SM_CXPADDEDBORDER));
+  }
+
+  int ResizeBorderY() const noexcept {
+    return std::max(1, SystemMetric(SM_CYSIZEFRAME) + SystemMetric(SM_CXPADDEDBORDER));
+  }
+
+  std::optional<WindowTitleBarMetrics> QueryTitleBarMetrics(Size viewport) const noexcept {
+    if (!custom_chrome_) {
+      return std::nullopt;
+    }
+    const float scale = DpiScale();
+    const float button_width = ResolveWin32CaptionButtonWidth(static_cast<float>(SystemMetric(SM_CXSIZE)) / scale);
+    return ConstrainWin32TitleBarMetrics(
+        WindowTitleBarMetrics{
+            .height = std::max(custom_title_bar_height_, static_cast<float>(SystemMetric(SM_CYSIZE)) / scale),
+            .right_inset = button_width * 3.0F,
+            .maximized = IsZoomed(window_) != FALSE,
+        },
+        viewport
+    );
+  }
+
   void UpdateRuntimeViewport() {
     if (runtime_ == nullptr || window_ == nullptr) {
       return;
@@ -566,9 +642,13 @@ private:
     RECT client{};
     GetClientRect(window_, &client);
     const float scale = DpiScale();
+    const Size viewport{
+        static_cast<float>(client.right - client.left) / scale,
+        static_cast<float>(client.bottom - client.top) / scale,
+    };
     runtime_->SetWindowMetrics({
-        .viewport = {static_cast<float>(client.right - client.left) / scale,
-                     static_cast<float>(client.bottom - client.top) / scale},
+        .viewport = viewport,
+        .title_bar = QueryTitleBarMetrics(viewport),
     });
   }
 
@@ -638,6 +718,73 @@ private:
     };
   }
 
+  LRESULT ResizeHitTest(LPARAM position) const noexcept {
+    if (window_ == nullptr || IsZoomed(window_)) {
+      return HTCLIENT;
+    }
+    RECT bounds{};
+    if (!GetWindowRect(window_, &bounds)) {
+      return HTCLIENT;
+    }
+    const LONG x = GET_X_LPARAM(position);
+    const LONG y = GET_Y_LPARAM(position);
+    const bool left = x < bounds.left + ResizeBorderX();
+    const bool right = x >= bounds.right - ResizeBorderX();
+    const bool top = y < bounds.top + ResizeBorderY();
+    const bool bottom = y >= bounds.bottom - ResizeBorderY();
+    if (top && left) {
+      return HTTOPLEFT;
+    }
+    if (top && right) {
+      return HTTOPRIGHT;
+    }
+    if (bottom && left) {
+      return HTBOTTOMLEFT;
+    }
+    if (bottom && right) {
+      return HTBOTTOMRIGHT;
+    }
+    if (left) {
+      return HTLEFT;
+    }
+    if (right) {
+      return HTRIGHT;
+    }
+    if (top) {
+      return HTTOP;
+    }
+    if (bottom) {
+      return HTBOTTOM;
+    }
+    return HTCLIENT;
+  }
+
+  std::optional<LRESULT> CaptionControlHitTest(LPARAM position) const noexcept {
+    RECT client{};
+    if (!GetClientRect(window_, &client)) {
+      return std::nullopt;
+    }
+    const float scale = DpiScale();
+    const Size viewport{
+        static_cast<float>(client.right - client.left) / scale,
+        static_cast<float>(client.bottom - client.top) / scale,
+    };
+    const std::optional<WindowTitleBarMetrics> metrics = QueryTitleBarMetrics(viewport);
+    if (!metrics.has_value()) {
+      return std::nullopt;
+    }
+    const Point point = ScreenPoint(position);
+    const float client_width = viewport.width;
+    const float button_width = metrics->right_inset / 3.0F;
+    const float controls_left = client_width - metrics->right_inset;
+    if (point.y < 0.0F || point.y >= metrics->height || point.x < controls_left || point.x >= client_width) {
+      return std::nullopt;
+    }
+    const float maximize_left = controls_left + button_width;
+    const float maximize_right = maximize_left + button_width;
+    return point.x >= maximize_left && point.x < maximize_right ? HTMAXBUTTON : HTCLIENT;
+  }
+
   void SendPointer(PointerEventType type, Point position, std::uint32_t click_count = 1) {
     last_pointer_position_ = position;
     runtime_->HandlePointerEvent({
@@ -660,17 +807,46 @@ private:
     }
   }
 
-  void TrackMouse() {
-    if (mouse_tracking_) {
+  void TrackMouse(MouseTrackingArea area) {
+    if (mouse_tracking_area_ == area) {
       return;
+    }
+    if (mouse_tracking_area_ != MouseTrackingArea::None) {
+      TRACKMOUSEEVENT cancellation{
+          sizeof(TRACKMOUSEEVENT),
+          static_cast<DWORD>(TME_CANCEL | (mouse_tracking_area_ == MouseTrackingArea::NonClient ? TME_NONCLIENT : 0U)),
+          window_,
+          HOVER_DEFAULT,
+      };
+      static_cast<void>(TrackMouseEvent(&cancellation));
     }
     TRACKMOUSEEVENT tracking{
         sizeof(TRACKMOUSEEVENT),
-        TME_LEAVE,
+        static_cast<DWORD>(TME_LEAVE | (area == MouseTrackingArea::NonClient ? TME_NONCLIENT : 0U)),
         window_,
         HOVER_DEFAULT,
     };
-    mouse_tracking_ = TrackMouseEvent(&tracking) != FALSE;
+    mouse_tracking_area_ = TrackMouseEvent(&tracking) != FALSE ? area : MouseTrackingArea::None;
+  }
+
+  void ExecuteWindowCommand(WindowCommand command) {
+    switch (command) {
+    case WindowCommand::Minimize:
+      ShowWindow(window_, SW_MINIMIZE);
+      break;
+    case WindowCommand::Maximize:
+      ShowWindow(window_, SW_MAXIMIZE);
+      break;
+    case WindowCommand::Restore:
+      ShowWindow(window_, SW_RESTORE);
+      break;
+    case WindowCommand::ToggleMaximize:
+      ShowWindow(window_, IsZoomed(window_) ? SW_RESTORE : SW_MAXIMIZE);
+      break;
+    case WindowCommand::Close:
+      PostMessageW(window_, WM_CLOSE, 0, 0);
+      break;
+    }
   }
 
   void SendKey(KeyEventType type, WPARAM virtual_key, LPARAM key_data) {
@@ -684,13 +860,41 @@ private:
   }
 
   LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
+    if (custom_chrome_ && message == WM_NCCALCSIZE) {
+      // User32 must observe the first captioned-window calculation before the client takes ownership of the frame.
+      if (first_nc_calc_) {
+        first_nc_calc_ = false;
+        return DefWindowProcW(window, message, w_param, l_param);
+      }
+      if (IsZoomed(window)) {
+        RECT* client = w_param == FALSE ? reinterpret_cast<RECT*>(l_param)
+                                        : &reinterpret_cast<NCCALCSIZE_PARAMS*>(l_param)->rgrc[0];
+        *client = InsetWin32MaximizedClientRect(*client, ResizeBorderX(), ResizeBorderY());
+      }
+      return 0;
+    }
     switch (message) {
+    case WM_NCHITTEST:
+      if (custom_chrome_) {
+        if (const std::optional<LRESULT> caption_control = CaptionControlHitTest(l_param)) {
+          return *caption_control;
+        }
+        const LRESULT resize = ResizeHitTest(l_param);
+        if (resize != HTCLIENT) {
+          return resize;
+        }
+        const Point position = ScreenPoint(l_param);
+        return runtime_ != nullptr && runtime_->IsWindowDragRegion(position) ? HTCAPTION : HTCLIENT;
+      }
+      break;
     case WM_CREATE:
       dpi_ = static_cast<float>(win32_api_.WindowDpi(window));
       accessibility_.SetDpiScale(DpiScale());
       text_input_.SetWindow(window);
       text_input_.SetDpiScale(DpiScale());
-      RequestFrameAt(Now());
+      return 0;
+    case WM_CANCELMODE:
+      CancelPointer();
       return 0;
     case WM_DESTROY:
       accessibility_.Reset();
@@ -703,6 +907,9 @@ private:
       return 1;
     case WM_SIZE:
       renderer_.Resize(window_, dpi_);
+      if (w_param == SIZE_MINIMIZED) {
+        return 0;
+      }
       UpdateRuntimeViewport();
       RequestFrameAt(Now());
       return 0;
@@ -726,6 +933,13 @@ private:
       RequestFrameAt(Now());
       return 0;
     }
+    case WM_THEMECHANGED:
+      if (custom_chrome_) {
+        UpdateRuntimeViewport();
+        RequestFrameAt(Now());
+        return 0;
+      }
+      break;
     case WM_SETTINGCHANGE:
       runtime_->UpdateResourceConfiguration(Configuration());
       return 0;
@@ -764,6 +978,9 @@ private:
         CommitFrameAndInvalidate();
       }
       return 0;
+    case kWindowCommandMessage:
+      ExecuteWindowCommand(static_cast<WindowCommand>(w_param));
+      return 0;
     case WM_TIMER:
       if (w_param == kFrameTimer) {
         KillTimer(window, kFrameTimer);
@@ -788,7 +1005,7 @@ private:
       SendPointer(PointerEventType::Down, ClientPoint(l_param), 2);
       return 0;
     case WM_MOUSEMOVE:
-      TrackMouse();
+      TrackMouse(MouseTrackingArea::Client);
       SendPointer(PointerEventType::Move, ClientPoint(l_param));
       return 0;
     case WM_LBUTTONUP:
@@ -799,19 +1016,49 @@ private:
       }
       return 0;
     case WM_MOUSELEAVE:
-      mouse_tracking_ = false;
+      mouse_tracking_area_ = MouseTrackingArea::None;
       if (!pointer_down_) {
         SendPointer(PointerEventType::Cancel, last_pointer_position_);
       }
       return 0;
+    case WM_NCMOUSEMOVE:
+      if (custom_chrome_) {
+        TrackMouse(MouseTrackingArea::NonClient);
+        SendPointer(PointerEventType::Move, ScreenPoint(l_param));
+      }
+      return DefWindowProcW(window, message, w_param, l_param);
+    case WM_NCMOUSELEAVE:
+      if (mouse_tracking_area_ == MouseTrackingArea::NonClient) {
+        mouse_tracking_area_ = MouseTrackingArea::None;
+        if (!pointer_down_) {
+          SendPointer(PointerEventType::Cancel, last_pointer_position_);
+        }
+      }
+      return DefWindowProcW(window, message, w_param, l_param);
+    case WM_NCLBUTTONDOWN:
+      if (custom_chrome_ && w_param == HTMAXBUTTON) {
+        SetFocus(window);
+        SetCapture(window);
+        pointer_down_ = true;
+        SendPointer(PointerEventType::Down, ScreenPoint(l_param));
+        return 0;
+      }
+      break;
+    case WM_NCLBUTTONUP:
+      if (custom_chrome_ && w_param == HTMAXBUTTON && pointer_down_) {
+        SendPointer(PointerEventType::Up, ScreenPoint(l_param));
+        pointer_down_ = false;
+        if (GetCapture() == window) {
+          ReleaseCapture();
+        }
+        return 0;
+      }
+      break;
     case WM_CAPTURECHANGED:
       if (pointer_down_ && reinterpret_cast<HWND>(l_param) != window) {
         SendPointer(PointerEventType::Cancel, last_pointer_position_);
         pointer_down_ = false;
       }
-      return 0;
-    case WM_CANCELMODE:
-      CancelPointer();
       return 0;
     case WM_MOUSEWHEEL: {
       const float delta =
@@ -902,10 +1149,13 @@ private:
   ATOM class_atom_ = 0;
   HWND window_ = nullptr;
   float dpi_ = kDipsPerInch;
+  bool custom_chrome_ = false;
+  float custom_title_bar_height_ = 0.0F;
+  bool first_nc_calc_ = true;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
   PlatformFrameState frame_state_;
-  bool mouse_tracking_ = false;
+  MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   bool pointer_down_ = false;
   bool com_initialized_ = false;
   Point last_pointer_position_;
@@ -919,7 +1169,7 @@ private:
 };
 
 int RunPlatformApp(AppDefinition definition) {
-  AppOptions options = definition.options;
+  WindowOptions options = definition.options.window;
   Win32PlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
   return platform.Run(runtime, options);

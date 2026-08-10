@@ -106,11 +106,17 @@ public:
     }
   }
 
-  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Runtime& runtime,
-               const Constraints& constraints, EdgeInsets safe_area) {
+  Size Measure(
+      detail::MountedNode& node,
+      PlatformAdapter& platform,
+      Runtime& runtime,
+      const Constraints& constraints,
+      EdgeInsets safe_area,
+      const WindowTitleBarMetrics* title_bar_metrics
+  ) {
     Size size;
     if (!node.children.empty()) {
-      size = detail::MeasureNode(*node.children.front(), constraints, platform, runtime, safe_area);
+      size = detail::MeasureNode(*node.children.front(), constraints, platform, runtime, safe_area, title_bar_metrics);
     }
     Rebuild(node, platform);
     return constraints.Constrain(size);
@@ -373,9 +379,14 @@ const ModifierDescriptor& SelectionAreaModifier::Descriptor() {
 }
 
 Size MeasureSelectionArea(
-    MountedNode& node, PlatformAdapter& platform, Runtime& runtime, const Constraints& constraints, EdgeInsets safe_area
+    MountedNode& node,
+    PlatformAdapter& platform,
+    Runtime& runtime,
+    const Constraints& constraints,
+    EdgeInsets safe_area,
+    const WindowTitleBarMetrics* title_bar_metrics
 ) {
-  return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints, safe_area);
+  return FindSelectionAreaExtension(node).Measure(node, platform, runtime, constraints, safe_area, title_bar_metrics);
 }
 
 } // namespace detail

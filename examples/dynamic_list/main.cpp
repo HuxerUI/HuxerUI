@@ -93,8 +93,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Dynamic List",
-        .width = 720.0F,
-        .height = 620.0F,
+        .window = {
+            .title = "HuxerUI Dynamic List",
+            .initial_size = {720.0F, 620.0F},
+        },
     }
 )

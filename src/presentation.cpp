@@ -11,6 +11,7 @@
 #include <huxerui/animation.h>
 #include <huxerui/root.h>
 #include <huxerui/theme.h>
+#include <huxerui/window.h>
 
 #include "internal.h"
 
@@ -946,6 +947,8 @@ public:
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
     const EdgeInsets safe_area = context.SafeAreaInsets();
+    const WindowTitleBarMetrics* title_bar = context.TitleBarMetrics();
+    const float overlay_top = std::max(safe_area.top, title_bar == nullptr ? 0.0F : title_bar->height);
     for (MountedNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose));
     }
@@ -961,8 +964,8 @@ public:
                   std::max(safe_area.left, constraints.max_width - safe_area.right - panel.LayoutSize().width)
               ),
               std::min(
-                  safe_area.top + 16.0F,
-                  std::max(safe_area.top, constraints.max_height - safe_area.bottom - panel.LayoutSize().height)
+                  overlay_top + 16.0F,
+                  std::max(overlay_top, constraints.max_height - safe_area.bottom - panel.LayoutSize().height)
               ),
           }
       );
@@ -974,7 +977,7 @@ public:
           ribbon,
           {
               constraints.max_width - corner_inset - ribbon.LayoutSize().width * 0.5F,
-              corner_inset - ribbon.LayoutSize().height * 0.5F,
+              overlay_top + corner_inset - ribbon.LayoutSize().height * 0.5F,
           }
       );
     }
@@ -1909,7 +1912,7 @@ public:
             children.push_back(Spacer());
           }
           children.push_back(DebugRibbon(expanded, snapshot));
-          return DebugOverlayLayout{std::move(children)};
+          return DebugOverlayLayout {std::move(children)};
         },
         {},
         std::move(placement)

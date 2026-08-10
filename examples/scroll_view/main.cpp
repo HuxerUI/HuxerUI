@@ -156,8 +156,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Scroll View",
-        .width = 640.0F,
-        .height = 560.0F,
+        .window = {
+            .title = "HuxerUI Scroll View",
+            .initial_size = {640.0F, 560.0F},
+        },
     }
 )

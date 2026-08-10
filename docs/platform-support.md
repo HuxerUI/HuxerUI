@@ -29,7 +29,7 @@ NativeAdapter platform;
 Runtime runtime{
     {
         .root_factory = App,
-        .options = {.title = "HuxerUI"},
+        .options = {.window = {.title = "HuxerUI"}},
     },
     platform,
 };
@@ -125,6 +125,8 @@ The repository-owned `platform/ios/example_runner/HuxerUIExamples.xcodeproj` pro
 
 The Windows backend targets Windows 10 and later by default.
 It owns the Win32 window, uses DirectWrite for text layout, and renders shared PaintCommands through a Direct2D device context backed by D3D11 and a DXGI swap chain.
+Custom window chrome keeps system window styles and commands while making the complete restored window a normal HuxerUI client surface.
+HuxerUI draws standard caption controls, and the adapter maps resize, drag, and maximize-button geometry back to native non-client hit testing, including Windows 11 Snap Layout.
 Partial Runtime damage updates a retained scene bitmap before the affected pixels are presented.
 Direct2D Shadow effects consume cached rounded-rectangle masks while color, opacity, and offset remain draw-time properties.
 Canvas Paths map to Direct2D path geometry for fill, stroke, geometric clipping, and blurred shadow masks.
@@ -133,6 +135,7 @@ Debug process metrics use process times, working-set counters, and the native lo
 
 `HUXERUI_WINDOWS_7_COMPAT=ON` builds an opt-in binary for Windows 7 SP1 with Platform Update or later.
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.
+Custom window chrome uses the same HuxerUI controls with the compatibility renderer; Windows 11 Snap Layout is naturally unavailable there.
 Windows 7 without Platform Update is not supported.
 
 ## Linux

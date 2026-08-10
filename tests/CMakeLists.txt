@@ -50,6 +50,7 @@ if (WIN32)
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
             platform/windows_renderer.cpp
+            platform/windows_window_chrome.cpp
     )
     target_compile_definitions(huxerui_tests PRIVATE
             NOMINMAX

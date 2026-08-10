@@ -61,8 +61,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Tabs",
-        .width = 640.0F,
-        .height = 480.0F,
+        .window = {
+            .title = "HuxerUI Tabs",
+            .initial_size = {640.0F, 480.0F},
+        },
     }
 )

@@ -144,7 +144,7 @@ class LinuxPlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
-  int Run(huxerui::Runtime& runtime, const AppOptions& options) {
+  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     text_input_.SetRuntime(runtime_);
 
@@ -323,10 +323,10 @@ private:
     }
   }
 
-  void CreateApplicationWindow(const AppOptions& options) {
+  void CreateApplicationWindow(const WindowOptions& options) {
     const float scale = DpiScale();
-    width_ = std::max(1, static_cast<int>(std::lround(options.width * scale)));
-    height_ = std::max(1, static_cast<int>(std::lround(options.height * scale)));
+    width_ = std::max(1, static_cast<int>(std::lround(options.initial_size.width * scale)));
+    height_ = std::max(1, static_cast<int>(std::lround(options.initial_size.height * scale)));
 
     const int screen = DefaultScreen(display_);
     const Window root = DefaultRootWindow(display_);
@@ -1034,7 +1034,7 @@ private:
 };
 
 int RunPlatformApp(AppDefinition definition) {
-  AppOptions options = std::move(definition.options);
+  WindowOptions options = definition.options.window;
   LinuxPlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
   return platform.Run(runtime, options);

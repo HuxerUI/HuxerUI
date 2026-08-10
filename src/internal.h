@@ -38,9 +38,8 @@ struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 class AppResources;
-struct WindowBackplaneState;
-
-bool IsValidSystemBarsAppearance(const SystemBarsAppearance& appearance) noexcept;
+struct WindowState;
+class WindowService;
 
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
@@ -417,6 +416,8 @@ struct ViewProperties {
   EdgeInsets padding;
   // This declaration selects which inherited safe-area edges measurement adds to the node's resolved padding.
   std::optional<SafeAreaPadding> safe_area_padding;
+  // This marker participates only in native window hit testing and has no layout, paint, or retained lifecycle state.
+  bool window_drag_region = false;
   Frame frame;
   std::optional<Color> background;
   std::optional<Color> disabled_background;
@@ -650,9 +651,10 @@ struct MountedNode final : public huxerui::MountedNode {
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
   std::shared_ptr<RecomposeScope> recompose_scope;
-  // Constraints and the incoming unconsumed safe area jointly identify a reusable measurement result.
+  // Constraints, unconsumed safe area, and native title-bar geometry jointly identify a reusable measurement result.
   std::optional<Constraints> measured_constraints;
   std::optional<EdgeInsets> measured_safe_area;
+  std::optional<WindowTitleBarMetrics> measured_title_bar;
   // Measurement derives this from properties.padding plus the safe-area edges consumed by this node. Layout and paint
   // use the resolved value while the declarative properties remain stable across window-inset changes.
   EdgeInsets resolved_padding;
@@ -1104,17 +1106,15 @@ struct Runtime::State {
       std::shared_ptr<detail::RecomposeScope> root_scope,
       LayerController layer_controller,
       ViewportBreakpoints viewport_breakpoints,
-      WindowContentMode window_content_mode
+      std::shared_ptr<detail::WindowState> window
   )
       : root_factory_(root_factory), platform_(platform), viewport_breakpoints_(viewport_breakpoints),
-        window_content_mode_(window_content_mode), root_scope_(std::move(root_scope)),
-        layer_controller_(std::move(layer_controller)) {}
+        window_(std::move(window)), root_scope_(std::move(root_scope)), layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
   PlatformAdapter* platform_;
-  WindowMetrics window_metrics_;
   ViewportBreakpoints viewport_breakpoints_;
-  WindowContentMode window_content_mode_ = WindowContentMode::SafeArea;
+  std::shared_ptr<detail::WindowState> window_;
   ViewportClass viewport_class_ = ViewportClass::Compact;
   std::shared_ptr<detail::RecomposeScope> root_scope_;
   LayerController layer_controller_;
@@ -1123,8 +1123,7 @@ struct Runtime::State {
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
-  std::shared_ptr<detail::WindowBackplaneState> window_backplane_;
-  std::optional<std::pair<SystemBarContentBrightness, SystemBarContentBrightness>> system_bar_brightness_;
+  std::shared_ptr<detail::WindowService> window_service_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
@@ -1171,8 +1170,14 @@ struct RuntimeAccess {
   }
 };
 
-Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime,
-                 EdgeInsets safe_area = {});
+Size MeasureNode(
+    MountedNode& node,
+    const Constraints& constraints,
+    PlatformAdapter& platform,
+    Runtime& runtime,
+    EdgeInsets safe_area = {},
+    const WindowTitleBarMetrics* title_bar_metrics = nullptr
+);
 void LayoutNode(MountedNode& node, Point offset);
 float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept;
 Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
@@ -1189,6 +1194,7 @@ DamageRegion ComputeDamageRegion(
 );
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
+bool HitTestWindowDragRegion(MountedNode& node, Point position);
 std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);
 bool IsScrollContainer(const MountedNode& node) noexcept;
 Axis ScrollAxis(const MountedNode& node) noexcept;

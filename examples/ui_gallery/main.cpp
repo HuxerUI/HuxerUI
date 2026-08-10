@@ -467,10 +467,11 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI UI Gallery",
-        .width = 1200.0F,
-        .height = 760.0F,
+        .window = {
+            .title = "HuxerUI UI Gallery",
+            .initial_size = {1200.0F, 760.0F},
+            .content_mode = WindowContentMode::EdgeToEdge,
+        },
         .viewport_breakpoints = ViewportBreakpoints{720.0F, 1040.0F},
-        .window_content_mode = WindowContentMode::EdgeToEdge,
     }
 )

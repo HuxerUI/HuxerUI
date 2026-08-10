@@ -1,5 +1,6 @@
 #include "internal.h"
 #include "indication_internal.h"
+#include "window_internal.h"
 
 #include <algorithm>
 #include <any>
@@ -300,8 +301,8 @@ void Runtime::PaintTextSelectionOverlay() {
   const Rect viewport{
       0.0F,
       0.0F,
-      state_->window_metrics_.viewport.width,
-      state_->window_metrics_.viewport.height,
+      state_->window_->metrics.viewport.width,
+      state_->window_->metrics.viewport.height,
   };
   PaintContext context{render_node.content, viewport};
   PaintContext foreground{render_node.foreground, viewport};
@@ -478,7 +479,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const float font_size = theme.typography.label_large;
   const TextStyle toolbar_text_style{Font::System(font_size), menu_style.foreground};
   constexpr float viewport_padding = 8.0F;
-  const EdgeInsets safe_area = state_->window_metrics_.safe_area;
+  const EdgeInsets safe_area = state_->window_->metrics.safe_area;
   const float minimum_toolbar_x = safe_area.left + viewport_padding;
   const float minimum_toolbar_y = safe_area.top + viewport_padding;
   float toolbar_width = 0.0F;
@@ -505,7 +506,7 @@ void Runtime::PaintTextSelectionOverlay() {
   }
   const float maximum_width = std::max(
       0.0F,
-      state_->window_metrics_.viewport.width - safe_area.Horizontal() - viewport_padding * 2.0F
+      state_->window_->metrics.viewport.width - safe_area.Horizontal() - viewport_padding * 2.0F
   );
   if (toolbar_width > maximum_width && toolbar_width > 0.0F) {
     const float scale = maximum_width / toolbar_width;
@@ -522,7 +523,7 @@ void Runtime::PaintTextSelectionOverlay() {
       minimum_toolbar_x,
       std::max(
           minimum_toolbar_x,
-          state_->window_metrics_.viewport.width - safe_area.right - viewport_padding - toolbar_width
+          state_->window_->metrics.viewport.width - safe_area.right - viewport_padding - toolbar_width
       )
   );
   const float selection_top = std::min(start.y, end.y);
@@ -530,7 +531,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const float maximum_toolbar_y =
       std::max(
           minimum_toolbar_y,
-          state_->window_metrics_.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
+          state_->window_->metrics.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
       );
   const float above_y = std::clamp(selection_top - toolbar_height - 10.0F, minimum_toolbar_y, maximum_toolbar_y);
   const float handle_extent = overlay.show_handles ? handle_radius * 2.0F : 0.0F;

@@ -38,8 +38,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Virtual Grid",
-        .width = 760.0F,
-        .height = 600.0F,
+        .window = {
+            .title = "HuxerUI Virtual Grid",
+            .initial_size = {760.0F, 600.0F},
+        },
     }
 )

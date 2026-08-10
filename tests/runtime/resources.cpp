@@ -126,6 +126,10 @@ View DirectLocalizedResourceApp() {
   };
 }
 
+View LocalizedWindowControlsApp() {
+  return Spacer();
+}
+
 View MissingResourceArgumentsApp() {
   return Text(UseString(StringResource("test", "strings/greeting")));
 }
@@ -372,6 +376,52 @@ TEST_CASE("PresentedStringVariantsRefreshWhenTheResourceConfigurationChanges") {
   const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(!ContainsText(updated, "Chinese item"));
   REQUIRE(ContainsText(updated, "English item"));
+}
+
+TEST_CASE("WindowCaptionLabelsRefreshWhenTheResourceConfigurationChanges") {
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/minimize_window",
+              .mime_type = "text/plain",
+              .value = "Minimize window",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/minimize_window",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Minimize localized window",
+          },
+      })
+  );
+
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels.minimize = StringResource("test", "strings/minimize_window");
+  Runtime runtime{LocalizedWindowControlsApp, platform, options};
+  runtime.SetWindowMetrics({
+      .viewport = {300.0F, 100.0F},
+      .title_bar = WindowTitleBarMetrics{.height = 40.0F, .right_inset = 138.0F},
+  });
+
+  const auto contains_label = [](const FrameCommit& frame, std::string_view label) {
+    return frame.semantic_frame != nullptr &&
+           std::ranges::any_of(frame.semantic_frame->nodes, [label](const SemanticNode& node) {
+             return node.label == label;
+           });
+  };
+  REQUIRE(contains_label(runtime.BuildCommit(), "Minimize localized window"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  REQUIRE(contains_label(runtime.BuildCommit(), "Minimize window"));
 }
 
 TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {

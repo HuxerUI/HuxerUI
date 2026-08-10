@@ -150,7 +150,7 @@ namespace huxerui::detail {
 
 class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
-  int Run(huxerui::Runtime& runtime, const AppOptions& options) {
+  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     @autoreleasepool {
       runtime_ = &runtime;
       NSApplication* application = [NSApplication sharedApplication];
@@ -160,7 +160,7 @@ public:
       delegate_->huxeruiAdapter = this;
       application.delegate = delegate_;
 
-      const NSRect frame = NSMakeRect(0.0, 0.0, options.width, options.height);
+      const NSRect frame = NSMakeRect(0.0, 0.0, options.initial_size.width, options.initial_size.height);
       const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                       NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
       window_ = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
@@ -470,7 +470,7 @@ private:
 };
 
 int RunPlatformApp(AppDefinition definition) {
-  AppOptions options = definition.options;
+  WindowOptions options = definition.options.window;
   MacPlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
   return platform.Run(runtime, options);

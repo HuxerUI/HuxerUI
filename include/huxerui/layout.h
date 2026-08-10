@@ -14,6 +14,8 @@
 
 namespace huxerui {
 
+struct WindowTitleBarMetrics;
+
 enum class MainAxisAlignment {
   Start,
   Center,
@@ -276,15 +278,23 @@ public:
     return safe_area_;
   }
 
+  [[nodiscard]] const WindowTitleBarMetrics* TitleBarMetrics() const noexcept {
+    // Native title-bar geometry is frame-local layout input, not inherited application state.
+    return title_bar_metrics_;
+  }
+
 private:
   using MeasureFunction = Size (*)(void*, MountedNode&, Constraints);
 
-  LayoutContext(void* state, MeasureFunction measure, EdgeInsets safe_area)
-      : state_(state), measure_(measure), safe_area_(safe_area) {}
+  LayoutContext(
+      void* state, MeasureFunction measure, EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics
+  )
+      : state_(state), measure_(measure), safe_area_(safe_area), title_bar_metrics_(title_bar_metrics) {}
 
   void* state_;
   MeasureFunction measure_;
   EdgeInsets safe_area_;
+  const WindowTitleBarMetrics* title_bar_metrics_;
 
   friend struct detail::LayoutContextAccess;
 };

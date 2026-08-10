@@ -1,6 +1,7 @@
 #include "internal.h"
 #include "resource_internal.h"
 #include "text_input_internal.h"
+#include "window_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,11 +9,6 @@
 #include <stdexcept>
 
 namespace huxerui::detail {
-
-struct WindowBackplaneState {
-  EdgeInsets safe_area;
-  SystemBarsAppearance appearance = SystemBarsAppearance::Default();
-};
 
 namespace {
 
@@ -225,6 +221,40 @@ SystemBarContentBrightness ResolveBrightness(SystemBarContentBrightness configur
   return luminance > 0.45F ? SystemBarContentBrightness::Dark : SystemBarContentBrightness::Light;
 }
 
+Color ResolveCaptionForeground(Color background) noexcept {
+  return ResolveBrightness(SystemBarContentBrightness::Automatic, background) == SystemBarContentBrightness::Dark
+             ? Color::Rgb(32, 32, 32)
+             : Color::Rgb(245, 245, 245);
+}
+
+void CollectWindowDragRegionBackground(
+    const MountedNode& node, Color inherited_background, float title_bar_height, std::optional<Color>& candidate
+) {
+  const Color background = node.properties.background.has_value()
+                               ? CompositeOver(*node.properties.background, inherited_background)
+                               : inherited_background;
+  if (node.properties.window_drag_region && node.presentation.resolved_opacity > 0.001F) {
+    const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
+    if (bounds.y < title_bar_height && bounds.y + bounds.height > 0.0F) {
+      candidate = background;
+    }
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      CollectWindowDragRegionBackground(*child, background, title_bar_height, candidate);
+    }
+  }
+}
+
+void MarkContentPaintDirtyTree(MountedNode& node) {
+  node.content_paint_dirty = true;
+  for (auto& child : node.children) {
+    if (child) {
+      MarkContentPaintDirtyTree(*child);
+    }
+  }
+}
+
 const SystemBarsAppearance* FindSystemBarsAppearance(const MountedNode& node) {
   const std::any* value = FindEnvironmentValue(node.environment, typeid(SystemBarsAppearance));
   if (!value) {
@@ -285,9 +315,22 @@ void ValidateWindowMetrics(const WindowMetrics& metrics) {
                                std::isfinite(metrics.safe_area.right) && metrics.safe_area.right >= 0.0F &&
                                std::isfinite(metrics.safe_area.bottom) && metrics.safe_area.bottom >= 0.0F &&
                                std::isfinite(metrics.safe_area.left) && metrics.safe_area.left >= 0.0F;
-  if (!viewport_valid || !safe_area_valid) {
+  bool title_bar_valid = true;
+  if (metrics.title_bar.has_value()) {
+    const WindowTitleBarMetrics& title_bar = *metrics.title_bar;
+    title_bar_valid =
+        std::isfinite(title_bar.height) && title_bar.height >= 0.0F && title_bar.height <= metrics.viewport.height &&
+        std::isfinite(title_bar.left_inset) && title_bar.left_inset >= 0.0F && std::isfinite(title_bar.right_inset) &&
+        title_bar.right_inset >= 0.0F && title_bar.left_inset + title_bar.right_inset <= metrics.viewport.width;
+  }
+  if (!viewport_valid || !safe_area_valid || !title_bar_valid) {
     throw std::invalid_argument("HuxerUI window metrics must contain finite, non-negative values");
   }
+}
+
+bool HasWindowControlGeometry(const WindowMetrics& metrics) noexcept {
+  return metrics.title_bar.has_value() && metrics.title_bar->height > 0.0F &&
+         metrics.title_bar->right_inset > 0.0F;
 }
 
 bool IsWindowBackplane(const MountedNode& node) {
@@ -313,6 +356,12 @@ MountedNode* FindWindowBackplane(MountedNode& root) {
 MountedNode* FindApplicationContent(MountedNode& root) {
   const auto found =
       std::ranges::find_if(root.children, [](const auto& child) { return child && IsApplicationContent(*child); });
+  return found == root.children.end() ? nullptr : found->get();
+}
+
+MountedNode* FindWindowControls(MountedNode& root) {
+  const auto found =
+      std::ranges::find_if(root.children, [](const auto& child) { return child && IsWindowControlsNode(*child); });
   return found == root.children.end() ? nullptr : found->get();
 }
 
@@ -888,19 +937,31 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
     throw std::invalid_argument("HuxerUI root factory must not be null");
   }
   ValidateViewportBreakpoints(definition.options.viewport_breakpoints);
-  if (definition.options.window_content_mode != WindowContentMode::SafeArea &&
-      definition.options.window_content_mode != WindowContentMode::EdgeToEdge) {
+  const WindowOptions& window_options = definition.options.window;
+  if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
+      !std::isfinite(window_options.initial_size.height) || window_options.initial_size.height <= 0.0F) {
+    throw std::invalid_argument("HuxerUI initial window size must be finite and positive");
+  }
+  if (window_options.content_mode != WindowContentMode::SafeArea &&
+      window_options.content_mode != WindowContentMode::EdgeToEdge) {
     throw std::invalid_argument("HuxerUI window content mode is invalid");
   }
+  if (window_options.chrome_mode != WindowChromeMode::System &&
+      window_options.chrome_mode != WindowChromeMode::Custom) {
+    throw std::invalid_argument("HuxerUI window chrome mode is invalid");
+  }
+  if (!std::isfinite(window_options.title_bar_height) || window_options.title_bar_height <= 0.0F) {
+    throw std::invalid_argument("HuxerUI window title-bar height must be finite and positive");
+  }
+  auto window = std::make_shared<WindowState>(window_options);
   state_ = std::make_unique<State>(
       definition.root_factory,
       &platform,
       std::make_shared<RecomposeScope>(*this, 1),
       LayerController(*this),
       definition.options.viewport_breakpoints,
-      definition.options.window_content_mode
+      std::move(window)
   );
-  state_->window_backplane_ = std::make_shared<WindowBackplaneState>();
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
   RootContext
@@ -910,6 +971,8 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   state_->root_environment_->Set(resource_configuration.locale);
   root.Provide(state_->app_resources_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
+  state_->window_service_ = std::make_shared<WindowService>(platform);
+  root.Provide(state_->window_service_);
   InstallBuiltinPresentation(root);
   for (RootHook& hook : definition.options.root_hooks) {
     if (!hook) {
@@ -931,6 +994,7 @@ Runtime::~Runtime() {
   state_->pointer_sessions_.clear();
   state_->hovered_extension_.reset();
   state_->layer_controller_.Disconnect();
+  state_->window_service_->Disconnect();
   state_->mounted_root_.reset();
   state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
@@ -941,15 +1005,28 @@ Runtime::~Runtime() {
 
 void Runtime::SetWindowMetrics(WindowMetrics metrics) {
   ValidateWindowMetrics(metrics);
-  if (state_->window_metrics_ == metrics) {
+  if (state_->window_->metrics == metrics) {
     return;
   }
-  state_->window_metrics_ = metrics;
-  state_->window_backplane_->safe_area = metrics.safe_area;
+  const bool window_controls_visibility_changed =
+      HasWindowControlGeometry(state_->window_->metrics) != HasWindowControlGeometry(metrics);
+  const bool previous_maximized =
+      state_->window_->metrics.title_bar.has_value() && state_->window_->metrics.title_bar->maximized;
+  const bool maximized = metrics.title_bar.has_value() && metrics.title_bar->maximized;
+  const bool maximize_state_changed = previous_maximized != maximized;
+  state_->window_->metrics = metrics;
   if (state_->mounted_root_) {
     state_->mounted_root_->measure_dirty = true;
+    if (window_controls_visibility_changed && state_->window_->chrome_mode == WindowChromeMode::Custom) {
+      ReconcileWindowControls();
+    }
     if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
       backplane->content_paint_dirty = true;
+    }
+    if (maximize_state_changed) {
+      if (detail::MountedNode* controls = FindWindowControls(*state_->mounted_root_)) {
+        MarkContentPaintDirtyTree(*controls);
+      }
     }
   }
   if (state_->text_selection_overlay_.state.visible) {
@@ -964,6 +1041,11 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
     return;
   }
   RequestFrame();
+}
+
+bool Runtime::IsWindowDragRegion(Point position) const {
+  return state_->window_->metrics.title_bar.has_value() && state_->mounted_root_ &&
+         detail::HitTestWindowDragRegion(*state_->mounted_root_, position);
 }
 
 // Requests raised while a frame is being built are retained for its FrameCommit instead of re-entering the platform
@@ -1031,6 +1113,7 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   state_->app_resources_->UpdateConfiguration(configuration);
   // Mutate the shared root so environments already captured by layers observe the new system locale.
   state_->root_environment_->Set(configuration.locale);
+  ReconcileWindowControls();
   InvalidateRoot();
   state_->layer_controller_.InvalidateAllEntries();
 }
@@ -1045,7 +1128,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     debug_metrics->RecordCommit(
         std::max(0.0, state_->platform_->Now() - build_started_at),
         state_->frame_commit_.render_frame.damage,
-        state_->window_metrics_.viewport
+        state_->window_->metrics.viewport
     );
   };
   if (!std::isfinite(frame.timestamp)) {
@@ -1068,8 +1151,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     RecomposeDirtyScopes(*state_->mounted_root_);
   }
 
-  if (!state_->mounted_root_ || state_->window_metrics_.viewport.width <= 0.0F ||
-      state_->window_metrics_.viewport.height <= 0.0F) {
+  if (!state_->mounted_root_ || state_->window_->metrics.viewport.width <= 0.0F ||
+      state_->window_->metrics.viewport.height <= 0.0F) {
     RefreshInteractionTree();
     RefreshTextInputSession();
     BuildSemantics();
@@ -1091,13 +1174,20 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     needs_frame = state_->scroll_motion_active_;
   }
   const Constraints constraints{
-      state_->window_metrics_.viewport.width,
-      state_->window_metrics_.viewport.width,
-      state_->window_metrics_.viewport.height,
-      state_->window_metrics_.viewport.height,
+      state_->window_->metrics.viewport.width,
+      state_->window_->metrics.viewport.width,
+      state_->window_->metrics.viewport.height,
+      state_->window_->metrics.viewport.height,
   };
   PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
-  MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
+  MeasureNode(
+      *state_->mounted_root_,
+      constraints,
+      *state_->platform_,
+      *this,
+      state_->window_->metrics.safe_area,
+      state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
+  );
   LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
   RefreshInteractionTree();
 
@@ -1110,7 +1200,14 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
   if (BringTextInputIntoView()) {
     if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
-      MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
+      MeasureNode(
+          *state_->mounted_root_,
+          constraints,
+          *state_->platform_,
+          *this,
+          state_->window_->metrics.safe_area,
+          state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
+      );
     }
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
@@ -1127,7 +1224,14 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   while (state_->mounted_root_->measure_dirty && geometry_layout_passes < maximum_geometry_layout_passes) {
     ++geometry_layout_passes;
     PropagateVirtualLayoutInvalidation(*state_->mounted_root_);
-    MeasureNode(*state_->mounted_root_, constraints, *state_->platform_, *this, state_->window_metrics_.safe_area);
+    MeasureNode(
+        *state_->mounted_root_,
+        constraints,
+        *state_->platform_,
+        *this,
+        state_->window_->metrics.safe_area,
+        state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
+    );
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
     PrepareExtensionGeometry(*state_->mounted_root_);
@@ -1143,7 +1247,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   AdvanceTextSelectionOverlay(frame);
   PaintTextSelectionOverlay();
-  ResolveWindowAppearance();
+  CommitWindowAppearance();
   UpdateRenderScene(
       *state_->mounted_root_,
       state_->mounted_root_->bounds,
@@ -1152,7 +1256,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   state_->frame_commit_.render_frame.scene.root = &state_->mounted_root_->render_node;
   state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
       state_->frame_commit_.render_frame.scene.root,
-      state_->window_metrics_.viewport,
+      state_->window_->metrics.viewport,
       state_->committed_scene_snapshot_,
       state_->committed_viewport_,
       state_->has_committed_scene_snapshot_
@@ -1831,7 +1935,8 @@ bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
 void Runtime::EnsureRootStructure() {
   if (state_->mounted_root_) {
     if (!FindWindowBackplane(*state_->mounted_root_) || !FindApplicationContent(*state_->mounted_root_) ||
-        !FindLayerStack(*state_->mounted_root_)) {
+        !FindLayerStack(*state_->mounted_root_) ||
+        (state_->window_->chrome_mode == WindowChromeMode::Custom && !FindWindowControls(*state_->mounted_root_))) {
       throw std::logic_error("HuxerUI RuntimeRoot has an invalid child structure");
     }
     return;
@@ -1839,31 +1944,59 @@ void Runtime::EnsureRootStructure() {
 
   View root = RuntimeRootLayout{};
   state_->mounted_root_ = Mount(root.spec_);
-  View backplane = Canvas([state = state_->window_backplane_](PaintContext& context, Size size) {
-                     const float top = std::min(std::max(0.0F, state->safe_area.top), size.height);
+  View backplane = Canvas([window = state_->window_](PaintContext& context, Size size) {
+                     const float top = std::min(std::max(0.0F, window->metrics.safe_area.top), size.height);
                      const float bottom =
-                         std::min(std::max(0.0F, state->safe_area.bottom), std::max(0.0F, size.height - top));
+                         std::min(std::max(0.0F, window->metrics.safe_area.bottom), std::max(0.0F, size.height - top));
                      if (top > 0.0F) {
-                       context.DrawRect({0.0F, 0.0F, size.width, top}, state->appearance.status_bar_background);
+                       context.DrawRect({0.0F, 0.0F, size.width, top}, window->appearance.status_bar_background);
                      }
                      if (bottom > 0.0F) {
                        context.DrawRect(
                            {0.0F, size.height - bottom, size.width, bottom},
-                           state->appearance.navigation_bar_background
+                           window->appearance.navigation_bar_background
                        );
                      }
                    }).LayoutValue<WindowBackplaneValue>(true);
   View application = ApplicationContentLayout{};
-  if (state_->window_content_mode_ == WindowContentMode::SafeArea) {
+  if (state_->window_->content_mode == WindowContentMode::SafeArea) {
     application = std::move(application).With(SafeAreaPadding{});
   }
   View layers = LayerStackLayout{};
   state_->mounted_root_->children.push_back(Mount(backplane.spec_));
   state_->mounted_root_->children.push_back(Mount(application.spec_));
   state_->mounted_root_->children.push_back(Mount(layers.spec_));
+  if (state_->window_->chrome_mode == WindowChromeMode::Custom) {
+    View controls = MakeWindowControls(
+        state_->window_service_,
+        state_->window_,
+        state_->root_environment_,
+        HasWindowControlGeometry(state_->window_->metrics)
+    );
+    state_->mounted_root_->children.push_back(Mount(controls.spec_));
+  }
 }
 
-void Runtime::ResolveWindowAppearance() {
+void Runtime::ReconcileWindowControls() {
+  if (!state_->mounted_root_ || state_->window_->chrome_mode != WindowChromeMode::Custom) {
+    return;
+  }
+  const auto found = std::ranges::find_if(state_->mounted_root_->children, [](const auto& child) {
+    return child && IsWindowControlsNode(*child);
+  });
+  if (found == state_->mounted_root_->children.end()) {
+    return;
+  }
+  View controls = MakeWindowControls(
+      state_->window_service_,
+      state_->window_,
+      state_->root_environment_,
+      HasWindowControlGeometry(state_->window_->metrics)
+  );
+  Reconcile(*found, controls.spec_);
+}
+
+void Runtime::CommitWindowAppearance() {
   if (!state_->mounted_root_) {
     return;
   }
@@ -1876,10 +2009,10 @@ void Runtime::ResolveWindowAppearance() {
     throw std::invalid_argument("HuxerUI system bars appearance is invalid");
   }
 
-  const WindowMetrics& metrics = state_->window_metrics_;
+  const WindowMetrics& metrics = state_->window_->metrics;
   const float status_boundary =
-      state_->window_content_mode_ == WindowContentMode::SafeArea ? metrics.safe_area.top : 0.0F;
-  const float navigation_boundary = state_->window_content_mode_ == WindowContentMode::SafeArea
+      state_->window_->content_mode == WindowContentMode::SafeArea ? metrics.safe_area.top : 0.0F;
+  const float navigation_boundary = state_->window_->content_mode == WindowContentMode::SafeArea
                                         ? metrics.viewport.height - metrics.safe_area.bottom
                                         : metrics.viewport.height;
   SystemBarCandidates candidates;
@@ -1908,14 +2041,28 @@ void Runtime::ResolveWindowAppearance() {
       ResolveBrightness(resolved.status_bar_content, status_background),
       ResolveBrightness(resolved.navigation_bar_content, navigation_background),
   };
-  if (state_->system_bar_brightness_ != brightness) {
-    state_->system_bar_brightness_ = brightness;
+  if (state_->window_->committed_system_bar_brightness != brightness) {
+    state_->window_->committed_system_bar_brightness = brightness;
     state_->platform_->SetSystemBarsContentBrightness(brightness.first, brightness.second);
   }
-  if (state_->window_backplane_->appearance != resolved) {
-    state_->window_backplane_->appearance = resolved;
+  std::optional<Color> title_bar_background;
+  if (application != nullptr && metrics.title_bar.has_value()) {
+    CollectWindowDragRegionBackground(*application, status_background, metrics.title_bar->height, title_bar_background);
+  }
+  const Color caption_background = title_bar_background.value_or(status_background);
+  const Color caption_foreground = ResolveCaptionForeground(caption_background);
+  const bool appearance_changed = state_->window_->appearance != resolved;
+  const bool caption_foreground_changed = state_->window_->caption_foreground != caption_foreground;
+  if (appearance_changed) {
+    state_->window_->appearance = resolved;
     if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
       backplane->content_paint_dirty = true;
+    }
+  }
+  if (caption_foreground_changed) {
+    state_->window_->caption_foreground = caption_foreground;
+    if (detail::MountedNode* controls = FindWindowControls(*state_->mounted_root_)) {
+      MarkContentPaintDirtyTree(*controls);
     }
   }
 }

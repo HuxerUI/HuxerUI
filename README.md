@@ -47,9 +47,10 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "Counter",
-        .width = 480.0F,
-        .height = 320.0F,
+        .window = {
+            .title = "Counter",
+            .initial_size = {480.0F, 320.0F},
+        },
     }
 )
 ```
@@ -130,6 +131,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and native accessibility mapping |
 | [Navigation Design](docs/design/navigation.md) | Page stacks, scoped controllers, transitions, Back routing, and future URL paths |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
+| [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and NativeView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |
@@ -153,6 +155,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
+| `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
 | `platform/android/demo` | Android platform integration and application packaging |
 
 ## Architecture

@@ -57,8 +57,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Virtual List",
-        .width = 640.0F,
-        .height = 560.0F,
+        .window = {
+            .title = "HuxerUI Virtual List",
+            .initial_size = {640.0F, 560.0F},
+        },
     }
 )

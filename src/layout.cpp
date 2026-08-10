@@ -13,8 +13,13 @@
 namespace huxerui::detail {
 
 struct LayoutContextAccess {
-  static LayoutContext Create(void* state, LayoutContext::MeasureFunction measure, EdgeInsets safe_area) {
-    return LayoutContext{state, measure, safe_area};
+  static LayoutContext Create(
+      void* state,
+      LayoutContext::MeasureFunction measure,
+      EdgeInsets safe_area,
+      const WindowTitleBarMetrics* title_bar_metrics
+  ) {
+    return LayoutContext{state, measure, safe_area, title_bar_metrics};
   }
 };
 
@@ -95,6 +100,7 @@ struct LayoutContextState {
   PlatformAdapter* platform;
   Runtime* runtime;
   EdgeInsets safe_area;
+  const WindowTitleBarMetrics* title_bar_metrics;
 };
 
 struct VirtualLayoutContextState {
@@ -154,7 +160,14 @@ Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, Layout
   if (node.children.empty()) {
     return constraints.Constrain({});
   }
-  return MeasureNode(*node.children.front(), constraints, *state.platform, *state.runtime, state.safe_area);
+  return MeasureNode(
+      *node.children.front(),
+      constraints,
+      *state.platform,
+      *state.runtime,
+      state.safe_area,
+      state.title_bar_metrics
+  );
 }
 
 Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, LayoutContextState& state) {
@@ -182,8 +195,14 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Layou
                 constraints.min_height,
                 constraints.max_height,
             };
-  const Size child_size =
-      MeasureNode(*node.children.front(), child_constraints, *state.platform, *state.runtime, state.safe_area);
+  const Size child_size = MeasureNode(
+      *node.children.front(),
+      child_constraints,
+      *state.platform,
+      *state.runtime,
+      state.safe_area,
+      state.title_bar_metrics
+  );
   node.scroll_state->content_width = child_size.width;
   node.scroll_state->content_height = child_size.height;
   return constraints.Constrain(child_size);
@@ -236,14 +255,59 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   return false;
 }
 
+enum class WindowHitTarget {
+  None,
+  Client,
+  Drag,
+};
+
+WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
+  if (!node.pointer_events_enabled) {
+    return WindowHitTarget::None;
+  }
+  const auto local_position = node.presentation.resolved_transform.Inverse(position);
+  if (!local_position.has_value()) {
+    return WindowHitTarget::None;
+  }
+
+  const bool within_node = node.bounds.Contains(*local_position);
+  const Rect content = node.ContentBounds();
+  const bool within_scroll_viewport = !IsScrollContainer(node) || content.Contains(*local_position);
+  const bool within_child_clip =
+      !node.properties.clip_children || RoundedRectContains(node.bounds, node.properties.corner_radii, *local_position);
+  if (within_scroll_viewport && within_child_clip) {
+    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
+      const WindowHitTarget target = HitTestWindowTarget(**child, position);
+      if (target != WindowHitTarget::None) {
+        return target;
+      }
+    }
+  }
+
+  if (!within_node) {
+    return WindowHitTarget::None;
+  }
+  if (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) || IsScrollContainer(node) ||
+      node.focusable) {
+    return WindowHitTarget::Client;
+  }
+  return node.properties.window_drag_region ? WindowHitTarget::Drag : WindowHitTarget::None;
+}
+
 } // namespace
 
 namespace {
 
 Size MeasureLayoutChild(void* state, huxerui::MountedNode& child, Constraints constraints) {
   auto& layout_state = *static_cast<LayoutContextState*>(state);
-  return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.platform, *layout_state.runtime,
-                     layout_state.safe_area);
+  return MeasureNode(
+      static_cast<MountedNode&>(child),
+      constraints,
+      *layout_state.platform,
+      *layout_state.runtime,
+      layout_state.safe_area,
+      layout_state.title_bar_metrics
+  );
 }
 
 std::size_t VirtualItemCount(void* state) {
@@ -260,8 +324,14 @@ huxerui::MountedNode& ObtainVirtualItem(void* state, std::size_t index) {
 
 Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints constraints) {
   auto& layout_state = *static_cast<VirtualLayoutContextState*>(state)->layout_state;
-  return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime,
-                     layout_state.safe_area);
+  return MeasureNode(
+      static_cast<MountedNode&>(item),
+      constraints,
+      *layout_state.platform,
+      *layout_state.runtime,
+      layout_state.safe_area,
+      layout_state.title_bar_metrics
+  );
 }
 
 Size MeasureLabelContent(
@@ -305,12 +375,20 @@ void ClampScrollOffsetAndCompleteController(MountedNode& node) {
 } // namespace
 
 Size MeasureNode(
-    MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime, EdgeInsets safe_area
+    MountedNode& node,
+    const Constraints& constraints,
+    PlatformAdapter& platform,
+    Runtime& runtime,
+    EdgeInsets safe_area,
+    const WindowTitleBarMetrics* title_bar_metrics
 ) {
   // An invalidated ancestor may revisit a clean child. The child's cached result remains valid only for the exact
   // parent constraints under which it was measured.
+  const std::optional<WindowTitleBarMetrics> inherited_title_bar =
+      title_bar_metrics == nullptr ? std::nullopt : std::optional<WindowTitleBarMetrics>{*title_bar_metrics};
   if (!node.measure_dirty && node.measured_constraints.has_value() && *node.measured_constraints == constraints &&
-      node.measured_safe_area.has_value() && *node.measured_safe_area == safe_area) {
+      node.measured_safe_area.has_value() && *node.measured_safe_area == safe_area &&
+      node.measured_title_bar == inherited_title_bar) {
     return node.measured_size;
   }
 
@@ -343,7 +421,7 @@ Size MeasureNode(
       node.properties.padding.bottom + consumed_safe_area.bottom,
       node.properties.padding.left + consumed_safe_area.left,
   };
-  LayoutContextState layout_state{&platform, &runtime, safe_area};
+  LayoutContextState layout_state{&platform, &runtime, safe_area, title_bar_metrics};
   if (node.kind == NodeKind::ScrollView) {
     node.scroll_state->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   }
@@ -478,7 +556,8 @@ Size MeasureNode(
     if (node.layout_descriptor == nullptr || node.layout_descriptor->measure == nullptr) {
       throw std::logic_error("HuxerUI layout node has no measure function");
     }
-    LayoutContext context = LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area);
+    LayoutContext context =
+        LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
     LayoutResult result = node.layout_descriptor->measure(context, node, content_constraints);
     content_size = content_constraints.Constrain(result.MeasuredSize());
     node.layout_placements = result.Placements();
@@ -488,7 +567,7 @@ Size MeasureNode(
     content_size = MeasureScopeChild(node, content_constraints, layout_state);
     break;
   case NodeKind::SelectionArea:
-    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints, safe_area);
+    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints, safe_area, title_bar_metrics);
     break;
   case NodeKind::ScrollView:
     content_size = MeasureScrollChild(node, content_constraints, layout_state);
@@ -552,6 +631,7 @@ Size MeasureNode(
   }
   node.measured_constraints = constraints;
   node.measured_safe_area = inherited_safe_area;
+  node.measured_title_bar = inherited_title_bar;
   node.measure_dirty = false;
   node.layout_dirty = true;
   ++node.measure_revision;
@@ -665,6 +745,10 @@ MountedNode* HitTestPointer(MountedNode& node, Point position) {
     return HandlesPointer(*candidate);
   });
   return target == route.rend() ? nullptr : *target;
+}
+
+bool HitTestWindowDragRegion(MountedNode& node, Point position) {
+  return HitTestWindowTarget(node, position) == WindowHitTarget::Drag;
 }
 
 std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node) {
@@ -1962,6 +2046,42 @@ LayoutResult Column::Measure(LayoutContext& context, MountedNode& node, Constrai
 
 LayoutResult Row::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
   return MeasureAxisLayout(context, node, constraints, false);
+}
+
+LayoutResult WindowTitleBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  const WindowTitleBarMetrics* metrics = context.TitleBarMetrics();
+  const auto& internal_node = static_cast<const detail::MountedNode&>(node);
+  const float requested_left = metrics == nullptr ? 0.0F : metrics->left_inset;
+  const float requested_right = metrics == nullptr ? 0.0F : metrics->right_inset;
+  const float maximum_width = constraints.max_width;
+  const float left = std::isfinite(maximum_width) ? std::min(requested_left, maximum_width) : requested_left;
+  const float right =
+      std::isfinite(maximum_width) ? std::min(requested_right, std::max(0.0F, maximum_width - left)) : requested_right;
+  const float reserved_width = left + right;
+
+  Constraints content_constraints{
+      std::max(0.0F, constraints.min_width - reserved_width),
+      std::isfinite(maximum_width) ? std::max(0.0F, maximum_width - reserved_width) : maximum_width,
+      std::max(
+          constraints.min_height,
+          metrics == nullptr ? 0.0F : std::max(0.0F, metrics->height - internal_node.resolved_padding.Vertical())
+      ),
+      constraints.max_height,
+  };
+  if (content_constraints.min_height > content_constraints.max_height) {
+    content_constraints.min_height = content_constraints.max_height;
+  }
+  if (std::isfinite(content_constraints.max_width)) {
+    content_constraints.min_width = content_constraints.max_width;
+  }
+
+  const LayoutResult content = MeasureAxisLayout(context, node, content_constraints, false);
+  LayoutResult result;
+  for (const LayoutResult::Placement& placement : content.Placements()) {
+    result.Place(*placement.child, {placement.offset.x + left, placement.offset.y});
+  }
+  result.SetSize(constraints.Constrain({content.MeasuredSize().width + reserved_width, content.MeasuredSize().height}));
+  return result;
 }
 
 LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {

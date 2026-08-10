@@ -677,9 +677,12 @@ public:
   }
 
   bool Initialize(std::string_view selector) {
-    const AppOptions& options = RegisteredAppDefinition().options;
+    const WindowOptions& options = RegisteredAppDefinition().options.window;
     const std::string selector_copy{selector};
-    if (!InstallWebSession(session_id_, selector_copy.c_str(), options.width, options.height, options.title.c_str())) {
+    if (!InstallWebSession(
+            session_id_, selector_copy.c_str(), options.initial_size.width, options.initial_size.height,
+            options.title.c_str()
+        )) {
       return false;
     }
     platform_.Ready();

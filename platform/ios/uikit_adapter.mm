@@ -236,8 +236,7 @@ namespace huxerui::detail {
 
 class IosPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
-  int Run(Runtime& runtime, const AppOptions& options) {
-    static_cast<void>(options);
+  int Run(Runtime& runtime) {
     if (active_adapter_ != nullptr) {
       throw std::logic_error("HuxerUI iOS application is already running");
     }
@@ -600,10 +599,9 @@ private:
 };
 
 int RunPlatformApp(AppDefinition definition) {
-  AppOptions options = definition.options;
   IosPlatformAdapter platform;
   Runtime runtime{std::move(definition), platform};
-  return platform.Run(runtime, options);
+  return platform.Run(runtime);
 }
 
 } // namespace huxerui::detail

@@ -73,8 +73,9 @@ View App() {
 HUXERUI_APP(
     App,
     {
-        .title = "HuxerUI Environment",
-        .width = 620.0F,
-        .height = 700.0F,
+        .window = {
+            .title = "HuxerUI Environment",
+            .initial_size = {620.0F, 700.0F},
+        },
     }
 )

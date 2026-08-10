@@ -9,6 +9,7 @@
 
 #include "internal.h"
 #include "text_input_internal.h"
+#include "window_internal.h"
 
 namespace huxerui::detail {
 
@@ -385,8 +386,8 @@ void Runtime::BuildSemantics() {
   const Rect viewport{
       0.0F,
       0.0F,
-      std::max(0.0F, state_->window_metrics_.viewport.width),
-      std::max(0.0F, state_->window_metrics_.viewport.height),
+      std::max(0.0F, state_->window_->metrics.viewport.width),
+      std::max(0.0F, state_->window_->metrics.viewport.height),
   };
   next.nodes.push_back({
       .id = next.root,

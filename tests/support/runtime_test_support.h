@@ -162,6 +162,7 @@ using huxerui::UseState;
 using huxerui::UseTheme;
 using huxerui::UseToast;
 using huxerui::UseViewportClass;
+using huxerui::UseWindow;
 using huxerui::VerticalAlignment;
 using huxerui::View;
 using huxerui::ViewEvents;
@@ -172,6 +173,10 @@ using huxerui::VirtualLayout;
 using huxerui::VirtualLayoutContext;
 using huxerui::VirtualLayoutResult;
 using huxerui::VirtualList;
+using huxerui::WindowChromeMode;
+using huxerui::WindowCommand;
+using huxerui::WindowHandle;
+using huxerui::WindowTitleBar;
 
 template <huxerui::EnvironmentValue Value> Value ThemeDefinitionValue(const ThemeDefinition& definition) {
   Environment environment;
@@ -260,6 +265,10 @@ public:
 
   void SetWindowMetrics(huxerui::WindowMetrics metrics) {
     runtime_.SetWindowMetrics(metrics);
+  }
+
+  bool IsWindowDragRegion(Point position) const {
+    return runtime_.IsWindowDragRegion(position);
   }
 
   void UpdateResourceConfiguration(huxerui::ResourceConfiguration configuration) {
@@ -619,6 +628,10 @@ public:
     return process_metrics;
   }
 
+  void RequestWindowCommand(huxerui::WindowCommand command) override {
+    window_commands.push_back(command);
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
@@ -626,6 +639,7 @@ public:
   std::optional<std::pair<huxerui::SystemBarContentBrightness, huxerui::SystemBarContentBrightness>>
       system_bar_brightness;
   std::optional<huxerui::ProcessMetrics> process_metrics;
+  std::vector<huxerui::WindowCommand> window_commands;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;
