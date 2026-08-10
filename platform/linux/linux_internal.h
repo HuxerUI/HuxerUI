@@ -13,16 +13,147 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <vector>
 
 #include <huxerui/render_scene.h>
+#include <huxerui/window.h>
 
 namespace huxerui::detail {
+
+// Framework-rendered caption buttons match the modern 46-DIP interaction width used on Windows.
+inline constexpr float kLinuxCaptionButtonWidth = 46.0F;
+// Resize hit-test border when the window manager reports no frame extents.
+inline constexpr float kLinuxResizeBorderDips = 6.0F;
+// Minimum logical title-bar height so framework caption controls remain usable.
+inline constexpr float kLinuxMinTitleBarHeight = 32.0F;
+
+// Mirrors the EWMH _NET_WM_MOVERESIZE direction constants; Move requests window movement.
+enum class LinuxResizeDirection : long {
+  None = -1,
+  TopLeft = 0,
+  Top = 1,
+  TopRight = 2,
+  Right = 3,
+  BottomRight = 4,
+  Bottom = 5,
+  BottomLeft = 6,
+  Left = 7,
+  Move = 8,
+};
+
+struct LinuxFrameExtents {
+  long left = 0;
+  long right = 0;
+  long top = 0;
+  long bottom = 0;
+};
 
 struct LinuxDamageRegion {
   bool full = false;
   std::vector<XRectangle> rects;
 };
+
+inline WindowTitleBarMetrics ResolveLinuxTitleBarMetrics(
+    float preferred_height, Size viewport, bool maximized
+) noexcept {
+  const float width = std::isfinite(viewport.width) ? std::max(0.0F, viewport.width) : 0.0F;
+  const float viewport_height = std::isfinite(viewport.height) ? std::max(0.0F, viewport.height) : 0.0F;
+  const float preferred = std::isfinite(preferred_height) ? std::max(0.0F, preferred_height) : 0.0F;
+  return {
+      .height = std::min(viewport_height, std::max(preferred, kLinuxMinTitleBarHeight)),
+      .left_inset = 0.0F,
+      .right_inset = std::min(width, 3.0F * kLinuxCaptionButtonWidth),
+      .maximized = maximized,
+  };
+}
+
+inline LinuxResizeDirection ResolveLinuxResizeDirection(
+    Point point, float border, Size viewport, bool maximized, std::optional<Rect> caption_bounds = std::nullopt
+) noexcept {
+  if (maximized || !std::isfinite(border) || border <= 0.0F) {
+    return LinuxResizeDirection::None;
+  }
+  const float width = std::isfinite(viewport.width) ? std::max(0.0F, viewport.width) : 0.0F;
+  const float height = std::isfinite(viewport.height) ? std::max(0.0F, viewport.height) : 0.0F;
+  if (width <= 0.0F || height <= 0.0F) {
+    return LinuxResizeDirection::None;
+  }
+  const float x = std::clamp(point.x, 0.0F, width);
+  const float y = std::clamp(point.y, 0.0F, height);
+  if (caption_bounds.has_value() &&
+      x >= caption_bounds->x && x <= caption_bounds->x + caption_bounds->width &&
+      y >= caption_bounds->y && y <= caption_bounds->y + caption_bounds->height) {
+    return LinuxResizeDirection::None;
+  }
+  const bool left = x <= border;
+  const bool right = x >= width - border;
+  const bool top = y <= border;
+  const bool bottom = y >= height - border;
+  if (top && left) {
+    return LinuxResizeDirection::TopLeft;
+  }
+  if (top && right) {
+    return LinuxResizeDirection::TopRight;
+  }
+  if (bottom && left) {
+    return LinuxResizeDirection::BottomLeft;
+  }
+  if (bottom && right) {
+    return LinuxResizeDirection::BottomRight;
+  }
+  if (left) {
+    return LinuxResizeDirection::Left;
+  }
+  if (right) {
+    return LinuxResizeDirection::Right;
+  }
+  if (top) {
+    return LinuxResizeDirection::Top;
+  }
+  if (bottom) {
+    return LinuxResizeDirection::Bottom;
+  }
+  return LinuxResizeDirection::None;
+}
+
+inline bool LinuxMaximizedFromAtoms(const std::vector<Atom>& states, Atom max_h, Atom max_v) noexcept {
+  bool has_horizontal = false;
+  bool has_vertical = false;
+  for (const Atom atom : states) {
+    has_horizontal = has_horizontal || atom == max_h;
+    has_vertical = has_vertical || atom == max_v;
+    if (has_horizontal && has_vertical) {
+      return true;
+    }
+  }
+  return has_horizontal && has_vertical;
+}
+
+inline LinuxFrameExtents LinuxReadFrameExtents(const long* values, int count) noexcept {
+  LinuxFrameExtents extents{};
+  if (values != nullptr && count > 0) {
+    extents.left = values[0];
+    if (count > 1) {
+      extents.right = values[1];
+    }
+    if (count > 2) {
+      extents.top = values[2];
+    }
+    if (count > 3) {
+      extents.bottom = values[3];
+    }
+  }
+  return extents;
+}
+
+inline float LinuxResizeBorderDips(const LinuxFrameExtents& extents, float scale, float fallback) noexcept {
+  const long max_extent = std::max(extents.left, extents.right);
+  if (max_extent <= 0 || !std::isfinite(scale) || scale <= 0.0F) {
+    return fallback;
+  }
+  return static_cast<float>(max_extent) / scale;
+}
 
 inline LinuxDamageRegion ResolveLinuxDamage(const DamageRegion& damage, float scale, int width, int height) noexcept {
   LinuxDamageRegion result;
