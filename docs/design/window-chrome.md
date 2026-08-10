@@ -1,6 +1,6 @@
 # Window Chrome Design
 
-Status: shared contract and Windows Custom mode implemented; macOS and Linux Custom modes remain deferred
+Status: shared contract plus Windows and macOS Custom modes implemented; Linux Custom mode remains deferred
 
 This document defines desktop window-chrome ownership, application-defined title-bar content, standard window controls, drag hit testing, and platform fallback behavior.
 It complements the mobile-oriented [Window Insets and System Bars Design](window-insets.md) without changing safe-area semantics.
@@ -288,16 +288,20 @@ The Windows 7 compatibility build uses the same HuxerUI controls with its existi
 macOS Custom mode retains a titled, closable, miniaturizable, and resizable `NSWindow`, enables the full-size content-view style, hides the native title text, and makes the title-bar background transparent.
 The standard AppKit traffic lights remain installed, native, and accessible.
 
-The adapter derives title-bar height and the left content inset from the actual standard window-button frames converted into HuxerUI view coordinates.
-It refreshes those metrics when the window frame, screen, backing scale, toolbar configuration, or full-screen state changes.
+The adapter resolves title-bar height from the application preference and AppKit's unobscured content layout, then vertically centers the native traffic-light group without changing its size, horizontal placement, or spacing.
+It derives the left content inset from the resulting standard window-button frames converted into HuxerUI view coordinates.
+It refreshes those metrics when the window frame, screen, backing scale, or full-screen state changes.
+View-size changes synchronously commit the pending Runtime frame before AppKit presents the expanded bounds, while `drawRect:` remains a presentation-only callback.
 
 Drag initiation remains an AppKit window operation selected by `Runtime::IsWindowDragRegion()`.
-HuxerUI does not move the window by accumulating pointer deltas and does not duplicate traffic-light actions through `UseWindow()`.
+HuxerUI passes the original mouse-down event to `performWindowDragWithEvent:` and does not move the window by accumulating pointer deltas.
+Traffic-light clicks remain native and do not round-trip through Runtime.
+Application-invoked `UseWindow()` commands map directly to AppKit minimize, zoom or restore, and close operations; maximize means the macOS zoomed state rather than full screen.
 
 Removing or replacing traffic lights is outside the initial Custom contract.
 It can be considered later as an explicit advanced policy rather than changing the platform default.
 
-macOS implementation and validation require a macOS host and remain deferred.
+System mode retains the ordinary AppKit title bar and submits no title-bar metrics.
 
 ## Linux mapping
 
@@ -340,7 +344,8 @@ The shared API exposes only `WindowChromeMode::System`, `WindowChromeMode::Custo
 The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
-macOS and Linux currently resolve Custom according to their platform sections until their dedicated implementations are completed.
+macOS Custom mode uses full-size AppKit content, native traffic lights, converted left-side control geometry, native dragging, and native window commands.
+Linux continues to resolve Custom according to its platform section until client-side decorations are implemented.
 
 ## Testing
 
@@ -362,11 +367,12 @@ Windows tests isolate caption-button minimum width, narrow-client metric normali
 Manual Windows validation currently covers restored and maximized geometry, resizing, dragging, interactive title-bar controls, and caption hover and click behavior.
 High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still require dedicated validation before release.
 
-macOS Custom implementation and tests remain deferred until work can be performed on a macOS host.
+macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
+Manual macOS validation remains required for native window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
 Linux Custom decorations remain deferred; the current adapter continues to use system decorations.
 
 ## Delivery order
 
 The shared contract and Windows Custom implementation form the first delivery.
-The macOS implementation follows on a macOS host and retains native traffic lights.
+The macOS implementation forms the second delivery and retains native traffic lights.
 Linux Custom decorations and Wayland remain later platform work under the same two-mode contract.

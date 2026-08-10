@@ -92,7 +92,8 @@ Debug process metrics use `getrusage`, `Debug.getPss()`, and the online processo
 
 ## macOS
 
-The macOS backend creates an AppKit window and View, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries. Scheduled callbacks commit Runtime work before AppKit invalidation, while `drawRect:` only presents the committed scene.
+The macOS backend creates an AppKit window and View, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for native selection, composition, and geometry queries. Scheduled callbacks and native view-size changes commit Runtime work before AppKit invalidation, while `drawRect:` only presents the committed scene.
+Custom window chrome extends the AppKit content view through a transparent title bar while preserving native traffic lights, accessibility, resizing, and window metadata. The adapter centers the native traffic lights within the resolved title-bar height, converts their actual bounds into shared metrics, and delegates marked drag regions and window commands back to AppKit.
 Core Graphics resolves retained shadow commands with native blurred path shadows.
 Canvas Paths map directly to Core Graphics fill, stroke, clip, and shadow operations.
 Packaged resources are read from the application bundle, locale and backing-scale changes proactively update the Runtime resource configuration, and ImageIO-backed decoded images remain renderer-owned.

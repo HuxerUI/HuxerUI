@@ -42,6 +42,7 @@ add_executable(huxerui_tests
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
             platform/macos_text_input.mm
+            platform/macos_window_chrome.cpp
     )
 endif ()
 

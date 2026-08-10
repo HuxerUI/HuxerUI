@@ -22,6 +22,7 @@
 #include "appkit_accessibility.h"
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
+#include "appkit_window_chrome.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
@@ -161,12 +162,25 @@ public:
       application.delegate = delegate_;
 
       const NSRect frame = NSMakeRect(0.0, 0.0, options.initial_size.width, options.initial_size.height);
-      const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                      NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+      custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
+      custom_title_bar_height_ = options.title_bar_height;
+      NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
+                                NSWindowStyleMaskResizable;
+      if (custom_chrome_) {
+        style |= NSWindowStyleMaskFullSizeContentView;
+      }
       window_ = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;
       window_.delegate = delegate_;
+      if (custom_chrome_) {
+        window_.titleVisibility = NSWindowTitleHidden;
+        window_.titlebarAppearsTransparent = YES;
+        window_.movableByWindowBackground = NO;
+        if (@available(macOS 11.0, *)) {
+          window_.titlebarSeparatorStyle = NSTitlebarSeparatorStyleNone;
+        }
+      }
 
       view_ = [[HuxerUIView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = &runtime;
@@ -186,7 +200,7 @@ public:
 
       [application finishLaunching];
       [application activateIgnoringOtherApps:YES];
-      Resize({
+      UpdateWindowMetrics({
           static_cast<float>(view_.bounds.size.width),
           static_cast<float>(view_.bounds.size.height),
       });
@@ -218,12 +232,63 @@ public:
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
   }
 
-  void Resize(Size viewport) {
+  void RequestWindowCommand(WindowCommand command) override {
+    if (window_ == nil) {
+      return;
+    }
+    switch (command) {
+    case WindowCommand::Minimize:
+      [window_ miniaturize:nil];
+      break;
+    case WindowCommand::Maximize:
+      if (![window_ isZoomed]) {
+        [window_ zoom:nil];
+      }
+      break;
+    case WindowCommand::Restore:
+      if ([window_ isZoomed]) {
+        [window_ zoom:nil];
+      }
+      break;
+    case WindowCommand::ToggleMaximize:
+      [window_ zoom:nil];
+      break;
+    case WindowCommand::Close:
+      [window_ performClose:nil];
+      break;
+    }
+  }
+
+  bool BeginWindowDrag(NSEvent* event) {
+    if (!custom_chrome_ || runtime_ == nullptr || view_ == nil || window_ == nil || event == nil) {
+      return false;
+    }
+    const NSPoint point = [view_ convertPoint:event.locationInWindow fromView:nil];
+    if (!runtime_->IsWindowDragRegion({static_cast<float>(point.x), static_cast<float>(point.y)})) {
+      return false;
+    }
+    [window_ performWindowDragWithEvent:event];
+    return true;
+  }
+
+  void UpdateWindowMetrics(Size viewport) {
     if (runtime_ != nullptr) {
+      const Size constrained_viewport{
+          std::max(0.0F, viewport.width),
+          std::max(0.0F, viewport.height),
+      };
       runtime_->SetWindowMetrics({
-          .viewport = {std::max(0.0F, viewport.width), std::max(0.0F, viewport.height)},
+          .viewport = constrained_viewport,
+          .title_bar = UpdateTitleBarLayout(constrained_viewport),
       });
     }
+  }
+
+  void WindowGeometryChanged() {
+    if (view_ != nil) {
+      UpdateWindowMetrics({static_cast<float>(view_.bounds.size.width), static_cast<float>(view_.bounds.size.height)});
+    }
+    InvalidateTextInputGeometry();
   }
 
   void CommitFrameAndInvalidate() {
@@ -397,6 +462,86 @@ public:
   }
 
 private:
+  float NativeTitleBarHeight(Size viewport) const noexcept {
+    if (window_ == nil || view_ == nil) {
+      return 0.0F;
+    }
+    const NSRect content_layout = [view_ convertRect:window_.contentLayoutRect fromView:nil];
+    const float height = static_cast<float>(NSMinY(content_layout));
+    return std::isfinite(height) ? std::clamp(height, 0.0F, viewport.height) : 0.0F;
+  }
+
+  std::optional<Rect> NativeTitleBarControlBounds() const noexcept {
+    if (window_ == nil || view_ == nil) {
+      return std::nullopt;
+    }
+    NSRect bounds = NSZeroRect;
+    bool has_bounds = false;
+    const NSWindowButton button_types[] = {
+        NSWindowCloseButton,
+        NSWindowMiniaturizeButton,
+        NSWindowZoomButton,
+    };
+    for (NSWindowButton button_type : button_types) {
+      NSButton* button = [window_ standardWindowButton:button_type];
+      if (button == nil || button.superview == nil || [button isHiddenOrHasHiddenAncestor]) {
+        continue;
+      }
+      const NSRect converted = [view_ convertRect:button.bounds fromView:button];
+      bounds = has_bounds ? NSUnionRect(bounds, converted) : converted;
+      has_bounds = true;
+    }
+    if (!has_bounds) {
+      return std::nullopt;
+    }
+    return Rect{
+        static_cast<float>(bounds.origin.x),
+        static_cast<float>(bounds.origin.y),
+        static_cast<float>(bounds.size.width),
+        static_cast<float>(bounds.size.height),
+    };
+  }
+
+  void AlignNativeTitleBarControls(const Rect& control_bounds, float title_bar_height) {
+    const float target_y = ResolveMacTitleBarControlOriginY(title_bar_height, control_bounds.height);
+    const float delta_y = target_y - control_bounds.y;
+    if (std::abs(delta_y) <= 0.01F) {
+      return;
+    }
+    const NSWindowButton button_types[] = {
+        NSWindowCloseButton,
+        NSWindowMiniaturizeButton,
+        NSWindowZoomButton,
+    };
+    for (NSWindowButton button_type : button_types) {
+      NSButton* button = [window_ standardWindowButton:button_type];
+      if (button == nil || button.superview == nil || [button isHiddenOrHasHiddenAncestor]) {
+        continue;
+      }
+      NSPoint origin = [view_ convertPoint:button.frame.origin fromView:button.superview];
+      origin.y += static_cast<CGFloat>(delta_y);
+      [button setFrameOrigin:[button.superview convertPoint:origin fromView:view_]];
+    }
+  }
+
+  std::optional<WindowTitleBarMetrics> UpdateTitleBarLayout(Size viewport) noexcept {
+    if (!custom_chrome_) {
+      return std::nullopt;
+    }
+    const std::optional<Rect> native_controls = NativeTitleBarControlBounds();
+    const WindowTitleBarMetrics metrics = ResolveMacTitleBarMetrics(
+        custom_title_bar_height_,
+        NativeTitleBarHeight(viewport),
+        viewport,
+        native_controls,
+        window_ != nil && [window_ isZoomed]
+    );
+    if (native_controls.has_value()) {
+      AlignNativeTitleBarControls(*native_controls, metrics.height);
+    }
+    return metrics;
+  }
+
   void ScheduleFrame(double deadline) {
     if (frame_scheduler_ == nil) {
       return;
@@ -458,6 +603,8 @@ private:
 
   AppKitRenderer renderer_;
   Runtime* runtime_ = nullptr;
+  bool custom_chrome_ = false;
+  float custom_title_bar_height_ = 0.0F;
   __strong NSWindow* window_ = nil;
   __strong HuxerUIView* view_ = nil;
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
@@ -499,11 +646,8 @@ int RunPlatformApp(AppDefinition definition) {
 - (void)setFrameSize:(NSSize)newSize {
   [super setFrameSize:newSize];
   if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->Resize({
-        static_cast<float>(newSize.width),
-        static_cast<float>(newSize.height),
-    });
-    huxeruiAdapter->InvalidateTextInputGeometry();
+    huxeruiAdapter->WindowGeometryChanged();
+    huxeruiAdapter->CommitFrameAndInvalidate();
   }
 }
 
@@ -524,14 +668,14 @@ int RunPlatformApp(AppDefinition definition) {
 - (void)viewDidMoveToWindow {
   [super viewDidMoveToWindow];
   if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->InvalidateTextInputGeometry();
+    huxeruiAdapter->WindowGeometryChanged();
   }
 }
 
 - (void)viewDidMoveToSuperview {
   [super viewDidMoveToSuperview];
   if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->InvalidateTextInputGeometry();
+    huxeruiAdapter->WindowGeometryChanged();
   }
 }
 
@@ -540,7 +684,7 @@ int RunPlatformApp(AppDefinition definition) {
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->UpdateResourceConfiguration();
     huxeruiAdapter->InvalidateNativeSurface();
-    huxeruiAdapter->InvalidateTextInputGeometry();
+    huxeruiAdapter->WindowGeometryChanged();
   }
 }
 
@@ -631,6 +775,9 @@ int RunPlatformApp(AppDefinition definition) {
 }
 
 - (void)mouseDown:(NSEvent*)event {
+  if (huxeruiAdapter != nullptr && huxeruiAdapter->BeginWindowDrag(event)) {
+    return;
+  }
   [self.window makeFirstResponder:self];
   [self sendPointerEvent:event type:huxerui::PointerEventType::Down];
 }
@@ -746,6 +893,35 @@ int RunPlatformApp(AppDefinition definition) {
   static_cast<void>(notification);
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)windowDidResize:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->WindowGeometryChanged();
+  }
+}
+
+- (void)windowDidChangeScreen:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateResourceConfiguration();
+    huxeruiAdapter->WindowGeometryChanged();
+  }
+}
+
+- (void)windowDidEnterFullScreen:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->WindowGeometryChanged();
+  }
+}
+
+- (void)windowDidExitFullScreen:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->WindowGeometryChanged();
   }
 }
 
