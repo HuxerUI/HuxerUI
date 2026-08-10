@@ -376,6 +376,34 @@ Pointer and touch input update the value while dragging. Arrow keys adjust by `S
 
 `SliderStyle` controls the split track, enabled and disabled colors, thumb dimensions, track gap, discrete tick and stop indicators, focus-ring policy, and interaction animation. Layout modifiers can override the component dimensions. Flat Theme retains a compact track, conventional thumb, and node focus ring. Material Theme uses its taller track, narrow handle, component-specific disabled colors, and handle-width focus treatment without drawing a focus ring around the complete slider bounds.
 
+## BarChart and DonutChart
+
+BarChart and DonutChart are data-driven Canvas components that share ChartDataPoint:
+
+```cpp
+BarChart({
+    {"Jan", 24.0F},
+    {"Feb", 42.0F, Color::Rgb(5, 150, 105)},
+    {"Mar", 31.0F},
+}).With(Frame{.height = 240.0F});
+
+DonutChart(
+    {
+        {"Desktop", 60.0F},
+        {"Mobile", 30.0F},
+        {"Tablet", 10.0F},
+    },
+    DonutChartOptions{
+        .center_label = "Sessions",
+        .accessibility_label = "Traffic sources",
+    }
+).With(Frame{.height = 260.0F});
+```
+
+Each data point requires a non-empty label and a finite non-negative value. Its optional color overrides the theme-aware default palette. BarChart supports an explicit maximum, grid density, bar width, corner radius, and value-label visibility. DonutChart supports inner radius, segment gap, center label, and responsive legend configuration. A DonutChart total must be positive.
+
+Both components publish Image semantics with the configured accessibility label and a complete label-value summary. They have no intrinsic size, matching Canvas; use Frame, Grow, or bounded parent constraints. Data remains controlled by the application, and recomposition with new data rerecords only the chart's PaintSequence.
+
 ## Image
 
 Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:

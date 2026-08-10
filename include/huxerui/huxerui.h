@@ -2,6 +2,7 @@
 
 #include <huxerui/animation.h>
 #include <huxerui/app.h>
+#include <huxerui/charts.h>
 #include <huxerui/clipboard.h>
 #include <huxerui/color.h>
 #include <huxerui/environment.h>

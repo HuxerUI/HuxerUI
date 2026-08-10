@@ -22,6 +22,7 @@ add_executable(huxerui_tests
         platform/android_text_input.cpp
         platform/web_text.cpp
         runtime/composition.cpp
+        runtime/charts.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
         runtime/layout.cpp
@@ -91,6 +92,7 @@ add_test(NAME HuxerUITests COMMAND huxerui_tests)
 set(HUXERUI_PUBLIC_HEADERS
         animation.h
         app.h
+        charts.h
         clipboard.h
         color.h
         environment.h
