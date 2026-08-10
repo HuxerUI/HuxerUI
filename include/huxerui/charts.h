@@ -24,6 +24,7 @@ struct BarChartOptions {
   float bar_width_fraction = 0.62F;
   float corner_radius = 6.0F;
   bool show_values = true;
+  bool show_hover_info = true;
   std::string accessibility_label = "Bar chart";
 
   bool operator==(const BarChartOptions&) const = default;
@@ -33,6 +34,7 @@ struct DonutChartOptions {
   float inner_radius_fraction = 0.62F;
   float segment_gap_degrees = 2.0F;
   bool show_legend = true;
+  bool show_hover_info = true;
   std::string center_label = "Total";
   std::string accessibility_label = "Donut chart";
 

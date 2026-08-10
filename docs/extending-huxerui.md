@@ -119,7 +119,7 @@ The framework detects `Glow::Extension`, performs type erasure, and reconciles c
 An equality-comparable modifier skips `Update()` when its declarative value and relevant node inputs are unchanged.
 `Update()` refreshes changed declarative configuration without discarding retained animation or gesture state.
 
-`NodeExtension` can receive frame, resolved-geometry, scroll, pointer, hover, focus, key, and paint callbacks. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
+`NodeExtension` can receive frame, resolved-geometry, scroll, pointer, hover, focus, key, and paint callbacks. `HoverHitTest()` selects hover-aware extensions and `OnHoverChanged()` reports entry and exit. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
 `PrepareGeometry()` runs after final presentation transforms are resolved and reports whether changed geometry requires foreground rerecording.
 After retained visual state changes, an extension calls the protected `InvalidatePaint()` operation so Runtime rerecords its foreground PaintSequence.
 Invalidation outside frame construction requests a frame, while invalidation from `OnFrame()` is consumed by the current frame and follow-up scheduling remains the responsibility of `FrameResult`.

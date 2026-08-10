@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <ranges>
+#include <string_view>
 #include <variant>
 
 namespace huxerui::test {
@@ -34,6 +35,17 @@ View DonutChartApp() {
              DonutChartOptions{.accessibility_label = "Traffic sources"}
   )
       .With(Frame{420.0F, 260.0F});
+}
+
+void MoveMouse(Runtime& runtime, Point position) {
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, position, PointerDeviceKind::Mouse});
+}
+
+bool HasForegroundText(const detail::MountedNode& node, std::string_view expected) {
+  return std::ranges::any_of(node.render_node.foreground.Commands(), [expected](const PaintCommand& command) {
+    const auto* text = std::get_if<DrawTextCommand>(&command);
+    return text != nullptr && text->text == expected;
+  });
 }
 
 } // namespace
@@ -90,6 +102,40 @@ TEST_CASE("DonutChartRecordsTrackSegmentsCenterAndLegend") {
     const auto* text = std::get_if<DrawTextCommand>(&command);
     return text != nullptr && text->text == "Mobile";
   }));
+}
+
+TEST_CASE("ChartsUpdateHoverHighlightAndInformationWithoutRecomposition") {
+  TestPlatform platform;
+  Runtime bar_runtime{BarChartApp, platform};
+  bar_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  bar_runtime.BuildRenderFrame();
+
+  MoveMouse(bar_runtime, {170.0F, 120.0F});
+  bar_runtime.BuildRenderFrame();
+  const detail::MountedNode* bar_chart = bar_runtime.RootNode();
+  REQUIRE(bar_chart != nullptr);
+  REQUIRE(HasForegroundText(*bar_chart, "Feb"));
+  REQUIRE(HasForegroundText(*bar_chart, "42  ·  43.3%"));
+
+  MoveMouse(bar_runtime, {400.0F, 300.0F});
+  bar_runtime.BuildRenderFrame();
+  REQUIRE(bar_chart->render_node.foreground.Commands().empty());
+
+  Runtime donut_runtime{DonutChartApp, platform};
+  donut_runtime.SetWindowMetrics({.viewport = {420.0F, 260.0F}});
+  donut_runtime.BuildRenderFrame();
+
+  MoveMouse(donut_runtime, {202.0F, 130.0F});
+  donut_runtime.BuildRenderFrame();
+  const detail::MountedNode* donut_chart = donut_runtime.RootNode();
+  REQUIRE(donut_chart != nullptr);
+  REQUIRE(HasForegroundText(*donut_chart, "Desktop"));
+  REQUIRE(HasForegroundText(*donut_chart, "60  ·  60%"));
+
+  MoveMouse(donut_runtime, {300.0F, 130.0F});
+  donut_runtime.BuildRenderFrame();
+  REQUIRE(HasForegroundText(*donut_chart, "Mobile"));
+  REQUIRE(HasForegroundText(*donut_chart, "30  ·  30%"));
 }
 
 TEST_CASE("ChartsRejectInvalidDataAndOptionsBeforeComposition") {

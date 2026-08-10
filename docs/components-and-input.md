@@ -402,6 +402,8 @@ DonutChart(
 
 Each data point requires a non-empty label and a finite non-negative value. Its optional color overrides the theme-aware default palette. BarChart supports an explicit maximum, grid density, bar width, corner radius, and value-label visibility. DonutChart supports inner radius, segment gap, center label, and responsive legend configuration. A DonutChart total must be positive.
 
+Mouse and pen hover highlight the active bar, donut segment, or legend row and show a compact label, value, and percentage card. Hover state is retained in a NodeExtension, so moving between data points rerecords only the chart foreground instead of recomposing or repainting the base Canvas. Set `show_hover_info` to false in either options type when the chart is purely decorative.
+
 Both components publish Image semantics with the configured accessibility label and a complete label-value summary. They have no intrinsic size, matching Canvas; use Frame, Grow, or bounded parent constraints. Data remains controlled by the application, and recomposition with new data rerecords only the chart's PaintSequence.
 
 ## Image

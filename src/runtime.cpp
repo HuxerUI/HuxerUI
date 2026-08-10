@@ -138,7 +138,7 @@ public:
     completion_sent_ = false;
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
     if (!state_) {
       return {};
     }
@@ -1291,10 +1291,8 @@ void Runtime::UpdateHoveredExtensions(Point position) {
     next_hovered = HitTestHoverExtensions(route, position);
   }
 
-  if (state_->hovered_extensions_ == next_hovered) {
-    return;
-  }
-  if (state_->mounted_root_) {
+  const bool hover_set_changed = state_->hovered_extensions_ != next_hovered;
+  if (hover_set_changed && state_->mounted_root_) {
     for (const detail::NodeExtensionHandle& previous : state_->hovered_extensions_) {
       if (std::ranges::find(next_hovered, previous) != next_hovered.end()) {
         continue;
@@ -1306,7 +1304,7 @@ void Runtime::UpdateHoveredExtensions(Point position) {
       }
     }
   }
-  if (state_->mounted_root_) {
+  if (hover_set_changed && state_->mounted_root_) {
     for (const detail::NodeExtensionHandle& next : next_hovered) {
       if (std::ranges::find(state_->hovered_extensions_, next) != state_->hovered_extensions_.end()) {
         continue;
@@ -1319,7 +1317,24 @@ void Runtime::UpdateHoveredExtensions(Point position) {
     }
   }
   state_->hovered_extensions_ = std::move(next_hovered);
-  RequestFrame();
+  if (state_->mounted_root_) {
+    for (const detail::NodeExtensionHandle& hovered : state_->hovered_extensions_) {
+      NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered);
+      detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity);
+      if (!extension || !node) {
+        continue;
+      }
+      const std::optional<Point> local_position = node->presentation.resolved_transform.Inverse(position);
+      if (local_position.has_value()) {
+        if (auto* hover_move = dynamic_cast<detail::HoverMoveExtension*>(extension)) {
+          hover_move->OnHoverMoved(*node, *local_position);
+        }
+      }
+    }
+  }
+  if (hover_set_changed) {
+    RequestFrame();
+  }
 }
 
 void Runtime::RefreshInteractionTree() {
