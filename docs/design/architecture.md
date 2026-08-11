@@ -1076,7 +1076,7 @@ Both overloads construct the same internal standard Dialog request. They do not 
 
 `Show(title, message)` creates one default positive action whose only behavior is dismissal. Supplying a positive label and callback adds application behavior to that same action. The two-action overload requires both labels so it cannot be ambiguous with the compact form.
 
-An empty positive label falls back to `OK`, while an empty negative label in the two-action overload falls back to `Cancel`. Migrating these framework-owned strings into the built-in resource bundle remains part of framework localization rather than introducing a temporary public label Environment value. Explicit `StringResource` inputs resolve through the same resource context as other deferred presentation content.
+An empty positive label resolves `dialog_ok` from the built-in `huxerui` resource namespace, while an empty negative label in the two-action overload resolves `dialog_cancel`. Direct Runtime integrations provide the merged resource package required by ordinary StringResource values. Explicit `StringResource` inputs resolve through the same resource context as other deferred presentation content.
 
 The two-action form remains compact:
 
@@ -1090,7 +1090,7 @@ dialog.Show(
 );
 ```
 
-`StringVariant` is the shared deferred display-string representation for Dialog, Toast, and Menu. It owns direct text or a `StringResource` plus positional arguments. Ordinary Text, Button, TextField placeholder, and Validation construction keep direct strings or explicit `UseString` resolution, so immediate component declarations do not pay for a deferred wrapper.
+`StringVariant` is the shared deferred display-string representation for component, validation, semantics, and presentation APIs that accept either direct text or a `StringResource` plus positional arguments. `UseString` is the single composition-time resolution operation for both StringResource and StringVariant; Runtime and components do not introduce parallel resolver APIs.
 
 `DialogStyle` is the complete standard Dialog presentation policy. It covers the modal scrim, default placement, viewport margins, enter and exit motion, surface appearance and width constraints, content padding and alignment, title and message styles, action direction and alignment, positive and negative action appearance and indication, and action separator policy.
 

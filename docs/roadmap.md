@@ -10,7 +10,7 @@ Runtime foundation work:
 Framework capability work:
 
 - Composition-scoped effects with post-commit setup and cleanup semantics
-- Framework string migration, plural messages, and inherited Locale text shaping
+- Plural messages and inherited Locale text shaping for ordinary text content
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
 - Shape and path-based clipping modifiers
 - Event capture, bubbling, and explicit pointer capture

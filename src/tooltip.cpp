@@ -164,7 +164,7 @@ LayerPlacement TooltipPlacement(Rect anchor, const TooltipStyle& style) {
 
 ViewFactory TooltipContent(std::weak_ptr<TooltipTargetState> target, StringVariant message, TooltipStyle style) {
   return [target = std::move(target), message = std::move(message), style = std::move(style)] {
-    std::string resolved_message = detail::ResolveStringVariant(message);
+    std::string resolved_message = UseString(message);
     if (resolved_message.empty()) {
       throw std::invalid_argument("HuxerUI tooltip message must not be empty");
     }

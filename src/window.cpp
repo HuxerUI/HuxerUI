@@ -7,6 +7,7 @@
 
 #include <huxerui/modifier.h>
 
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "window_internal.h"
 
@@ -48,18 +49,24 @@ public:
 
 namespace {
 
-const StringVariant& WindowCommandLabel(const WindowCaptionLabels& labels, WindowCommand command) noexcept {
+StringVariant WindowCommandLabel(const WindowCaptionLabels& labels, WindowCommand command, bool maximized) {
   switch (command) {
   case WindowCommand::Minimize:
-    return labels.minimize;
+    return detail::IsEmptyStringVariantLiteral(labels.minimize) ? StringVariant(strings::window_minimize)
+                                                                : labels.minimize;
   case WindowCommand::Maximize:
+    return strings::window_maximize;
   case WindowCommand::Restore:
+    return strings::window_restore;
   case WindowCommand::ToggleMaximize:
-    return labels.toggle_maximize;
+    if (!detail::IsEmptyStringVariantLiteral(labels.toggle_maximize)) {
+      return labels.toggle_maximize;
+    }
+    return maximized ? StringVariant(strings::window_restore) : StringVariant(strings::window_maximize);
   case WindowCommand::Close:
-    return labels.close;
+    return detail::IsEmptyStringVariantLiteral(labels.close) ? StringVariant(strings::window_close) : labels.close;
   }
-  return labels.toggle_maximize;
+  return {};
 }
 
 View WindowControl(
@@ -68,6 +75,7 @@ View WindowControl(
     const std::shared_ptr<WindowState>& window,
     const WindowCaptionLabels& labels
 ) {
+  const bool maximized = window->metrics.title_bar.has_value() && window->metrics.title_bar->maximized;
   View glyph = Canvas([command, window](PaintContext& context, Size size) {
     if (size.width <= 0.0F || size.height <= 0.0F) {
       return;
@@ -115,7 +123,7 @@ View WindowControl(
           .color = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.16F),
           .hover_color = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.08F),
       }},
-      Semantics{.role = SemanticRole::Button, .label = WindowCommandLabel(labels, command)}
+      Semantics{.role = SemanticRole::Button, .label = WindowCommandLabel(labels, command, maximized)}
   );
   interaction_surface = std::move(interaction_surface).OnClick([service, command] { service->Request(command); });
   return Stack {

@@ -93,6 +93,9 @@ install(DIRECTORY "${HUXERUI_PUBLIC_HEADER_DIR}"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
+install(DIRECTORY "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/resources"
+)
 
 include(CMakePackageConfigHelpers)
 set(HUXERUI_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/HuxerUI")
@@ -118,6 +121,7 @@ install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIAndroidPlan.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUITargets.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )

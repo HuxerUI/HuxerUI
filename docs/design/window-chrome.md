@@ -82,9 +82,9 @@ struct WindowTitleBarMetrics {
 };
 
 struct WindowCaptionLabels {
-  StringVariant minimize = "Minimize";
-  StringVariant toggle_maximize = "Maximize or restore";
-  StringVariant close = "Close";
+  StringVariant minimize;
+  StringVariant toggle_maximize;
+  StringVariant close;
 };
 
 struct WindowMetrics {
@@ -128,6 +128,7 @@ They deliberately do not use leading and trailing terminology because the adapte
 
 `WindowOptions::caption_labels` makes framework-rendered accessibility labels configurable and resource-aware without
 exposing native window objects.
+Empty fields resolve `window_minimize`, `window_maximize` or `window_restore` according to platform state, and `window_close` from the built-in `huxerui` resource domain; a non-empty `toggle_maximize` continues to override both maximize and restore states.
 The chrome mode, preferred height, and label sources remain stable for one Runtime, while resolved localized labels
 refresh with the Runtime resource configuration.
 

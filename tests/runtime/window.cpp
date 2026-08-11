@@ -297,6 +297,7 @@ TEST_CASE("CustomWindowChromeProvidesStandardCaptionControls") {
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
   Runtime runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
@@ -316,6 +317,7 @@ TEST_CASE("CustomWindowChromeCollapsesControlsWhenNativeMetricsDisappear") {
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
   Runtime runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
@@ -343,6 +345,7 @@ TEST_CASE("CustomWindowChromeRerecordsCaptionGlyphsWhenTitleBarBackgroundChanges
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
   Runtime runtime(MutableTitleBarBackgroundApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
@@ -368,6 +371,7 @@ TEST_CASE("CustomWindowChromeUpdatesTheMaximizeGlyphFromPlatformState") {
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
   Runtime runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
@@ -439,6 +443,7 @@ TEST_CASE("CustomWindowChromePaintsStateLayerBehindCaptionGlyph") {
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
+  options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
   Runtime runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},

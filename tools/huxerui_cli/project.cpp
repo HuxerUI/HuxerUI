@@ -134,7 +134,7 @@ huxerui_add_app(@TARGET_NAME@
         SOURCES
             ${APP_SOURCE_FILES}
         RESOURCES
-            assets
+            resources
         RESOURCE_NAMESPACE
             app
         BUNDLE_NAME
@@ -167,7 +167,7 @@ View App() {
 
 HUXERUI_APP(App, {.window = {.title = "@PROJECT_NAME@"}})
 )TEMPLATE")},
-      {"assets/strings/default.properties", context.Render("app_name = \"@PROJECT_NAME@\"\n")},
+      {"resources/strings/default.properties", context.Render("app_name = \"@PROJECT_NAME@\"\n")},
   };
 }
 
@@ -261,8 +261,8 @@ void CreateProject(
   std::filesystem::create_directories(temporary);
   const std::vector<GeneratedFile> common_files = CommonProjectFiles(context);
   WriteFiles(temporary, common_files);
-  std::filesystem::create_directories(temporary / "assets/images");
-  std::filesystem::create_directories(temporary / "assets/raw");
+  std::filesystem::create_directories(temporary / "resources/images");
+  std::filesystem::create_directories(temporary / "resources/raw");
   for (const PlatformDriver* platform : platforms) {
     const std::vector<GeneratedFile> files = platform->CreateShell(context);
     WriteFiles(temporary / "platform" / platform->Id(), files);

@@ -6,8 +6,10 @@ endif ()
 
 include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
+file(TO_CMAKE_PATH "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE)
 add_executable(huxerui_tests
         tests_main.cpp
+        support/builtin_resources.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
@@ -76,6 +78,10 @@ target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/platform/windows"
         "${HUXERUI_PROJECT_DIR}/platform/web"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+
+target_compile_definitions(huxerui_tests PRIVATE
+        HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE="${HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE}"
 )
 
 target_link_libraries(huxerui_tests PRIVATE
@@ -197,6 +203,14 @@ target_link_libraries(huxerui_resource_codegen_tests PRIVATE
 )
 
 add_test(NAME HuxerUIResourceCodegenTests COMMAND huxerui_resource_codegen_tests)
+
+add_test(NAME HuxerUIResourceMergeTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/resource_merge.cmake"
+)
 
 add_test(NAME HuxerUIAndroidPlanTests
         COMMAND "${CMAKE_COMMAND}"

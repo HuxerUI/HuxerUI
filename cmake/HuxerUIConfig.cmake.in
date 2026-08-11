@@ -1,6 +1,9 @@
 @PACKAGE_INIT@
 
 set(HUXERUI_HOST_TOOL_ROOT "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/tools")
+set_and_check(HUXERUI_BUILTIN_RESOURCE_PACKAGE
+        "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/resources"
+)
 
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIImportedTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUITargets.cmake")

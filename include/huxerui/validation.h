@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cctype>
 #include <cstddef>
 #include <functional>
-#include <string>
 #include <string_view>
 #include <utility>
+
+#include <huxerui/resource.h>
 
 namespace huxerui {
 
@@ -18,7 +18,7 @@ enum class ValidationStatus {
 
 struct ValidationResult {
   ValidationStatus status = ValidationStatus::None;
-  std::string message;
+  StringVariant message;
 
   static ValidationResult None() {
     return {};
@@ -31,14 +31,14 @@ struct ValidationResult {
     };
   }
 
-  static ValidationResult Invalid(std::string message) {
+  static ValidationResult Invalid(StringVariant message) {
     return {
         ValidationStatus::Invalid,
         std::move(message),
     };
   }
 
-  static ValidationResult Pending(std::string message = {}) {
+  static ValidationResult Pending(StringVariant message = {}) {
     return {
         ValidationStatus::Pending,
         std::move(message),
@@ -54,44 +54,24 @@ struct ValidationResult {
 
 class Required {
 public:
-  explicit Required(std::string message = "This field is required") : message_(std::move(message)) {}
+  Required();
+  explicit Required(StringVariant message);
 
-  ValidationResult operator()(std::string_view value) const {
-    for (const char character : value) {
-      if (std::isspace(static_cast<unsigned char>(character)) == 0) {
-        return ValidationResult::Valid();
-      }
-    }
-    return ValidationResult::Invalid(message_);
-  }
+  ValidationResult operator()(std::string_view value) const;
 
 private:
-  std::string message_;
+  StringVariant message_;
 };
 
 class EmailAddress {
 public:
-  explicit EmailAddress(std::string message = "Enter a valid email address") : message_(std::move(message)) {}
+  EmailAddress();
+  explicit EmailAddress(StringVariant message);
 
-  ValidationResult operator()(std::string_view value) const {
-    if (value.empty()) {
-      return ValidationResult::Valid();
-    }
-    const std::size_t separator = value.find('@');
-    if (separator == 0 || separator == std::string_view::npos || separator + 1 == value.size() ||
-        value.find('@', separator + 1) != std::string_view::npos) {
-      return ValidationResult::Invalid(message_);
-    }
-    for (const char character : value) {
-      if (std::isspace(static_cast<unsigned char>(character)) != 0) {
-        return ValidationResult::Invalid(message_);
-      }
-    }
-    return ValidationResult::Valid();
-  }
+  ValidationResult operator()(std::string_view value) const;
 
 private:
-  std::string message_;
+  StringVariant message_;
 };
 
 template <class... Rules> ValidationResult Validate(std::string_view value, Rules&&... rules) {

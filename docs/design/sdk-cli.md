@@ -15,6 +15,7 @@ The current implementation provides:
 
 Android binary distribution, `package` and `clean` commands, module integration, NativeView, iOS device distribution, OHOS, and Linux remain proposed.
 The current Android and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives and export automation are not implemented.
+Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 
 ## Decisions
 
@@ -66,10 +67,10 @@ hello_huxer/
   .gitignore
   CMakeLists.txt
   src/main.cpp
-  assets/
+  resources/
     images/
-    raw/
     strings/default.properties
+    raw/
   platform/
     android/
       .gitignore
@@ -154,7 +155,7 @@ huxerui_add_app(hello_huxer
         SOURCES
             ${APP_SOURCE_FILES}
         RESOURCES
-            assets
+            resources
         RESOURCE_NAMESPACE
             app
 )
@@ -169,9 +170,16 @@ huxerui_add_app(hello_huxer
 - Applies bundle metadata supplied by the application.
 - Emits the minimal application artifact plan consumed by CLI launch commands.
 
-Advanced consumers may still create targets directly and call `huxerui_enable_codegen` and `huxerui_add_resources`.
+Advanced consumers may still create targets directly and call `huxerui_enable_codegen` and `huxerui_add_resources`, but manually created targets do not implicitly register the framework resource package.
+Application executables use `huxerui_add_app` so built-in resources are always the first merge input.
+`huxerui_add_resources` may be called repeatedly for one target.
+CMake retains call order, and the final resource build lets later matching variants override earlier variants while keeping nonmatching variants.
+For application targets, the precompiled framework package and all registered roots are merged through outputs attached directly to the target, without auxiliary resource targets.
+Each call supplies a root and a `NAMESPACE` value that is both the resource domain and exact generated C++ namespace; only its generated header adds `_resources`.
+`huxerui_add_app` registers the framework package first and then the compact `RESOURCES resources` application root.
+An application that needs to replace selected framework defaults adds a later root with `NAMESPACE huxerui`; no bundle metadata is required.
 
-The installed package contains public headers, platform libraries, CMake helpers, the CLI, and host code generators.
+The installed package contains public headers, platform libraries, the precompiled framework resource package, CMake helpers, the CLI, and host code generators.
 Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and always run on the development host, independently of the target architecture.
 
 ## Generated integration
@@ -217,7 +225,7 @@ huxerui platform add macos
 
 Creation writes the common CMake project and complete minimal shells for the selected platforms.
 The generated project recursively collects C++ sources under `src`, so adding a source file does not require a platform-specific CMake edit.
-It also creates the `assets/images`, `assets/raw`, and `assets/strings` resource categories.
+The template creates `resources/images`, `resources/raw`, and `resources/strings` directly, without an additional domain directory.
 It uses a temporary tree and publishes the project only after every file succeeds.
 `platform add` similarly refuses to overwrite an existing platform directory and rolls back directories created by a failed multi-platform operation.
 
@@ -346,6 +354,10 @@ It is not a runtime plugin and does not require a universal public `Module` base
 huxerui-camera/
   CMakeLists.txt
   include/huxerui_camera/
+  resources/
+    images/
+    strings/
+    raw/
   src/
   platform/
     android/
@@ -362,6 +374,9 @@ target_link_libraries(my_app PRIVATE HuxerUI::camera)
 
 Installed modules use `find_package`, and Git modules use `FetchContent` with an immutable revision.
 There is no second dependency list in a HuxerUI manifest.
+Module resource directories are ordinary ordered target resource roots.
+Their CMake `NAMESPACE` selects the domain, and applications may add a later root with the same namespace to replace selected variants.
+The final package is one merged binary index and payload set rather than a runtime collection of module bundles.
 
 A future module integration pipeline is:
 
@@ -423,7 +438,7 @@ Platform work must additionally validate every affected native toolchain availab
 - One shared Runtime implementation.
 - One `PlatformAdapter` boundary per application surface.
 - Public identity remains `huxerui`, `<huxerui/huxerui.h>`, and `HuxerUI::huxerui`.
-- CMake owns common C++ and resource targets.
+- CMake owns common C++ targets and resource generation.
 - Native shells own platform lifecycle, platform-only configuration, signing, and packaging.
 - Native shells are source-controlled and built directly.
 - Generated integration files are reproducible projections, not generated projects.

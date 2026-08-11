@@ -1215,6 +1215,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   );
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{MaterialThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
@@ -1359,6 +1360,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
   labeled_switch_changes = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{MaterialLabeledToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {560.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -1433,6 +1435,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
 
 TEST_CASE("TestLabeledToggleGeometryUsesContentBounds") {
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{MaterialPaddedLabeledToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -1471,6 +1474,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   switch_changes = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{ToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
@@ -1513,7 +1517,8 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   const FlattenedScene& checked_display = runtime.BuildFrame();
   REQUIRE(checkbox_changes == 1);
   REQUIRE(checkbox_checked.Get());
-  REQUIRE(FindText(checked_display, "✓") != nullptr);
+  REQUIRE(FindText(checked_display, "✓") == nullptr);
+  REQUIRE(FindPresentedStrokePathRect(checked_display, CheckboxStyle::Default().checkmark).has_value());
   REQUIRE(runtime.RootNode()->children[0]->identity == checkbox_identity);
 
   switch_node = runtime.RootNode()->children[1].get();
@@ -3364,7 +3369,7 @@ TEST_CASE("TestStandardDialogUsesDefaultLabelsAndTwoActions") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", {}, [] {
+  saved_dialogs->Show("Save changes?", "The current document has unsaved changes.", "OK", [] {
     ++positive_dialog_clicks;
   });
   runtime.BuildFrame();
@@ -3404,10 +3409,10 @@ TEST_CASE("TestStandardDialogKeepsNaturalWidthAndRejectsEmptyLiteralContent") {
   runtime.SetWindowMetrics({.viewport = {800.0F, 480.0F}});
   runtime.BuildFrame();
 
-  REQUIRE_THROWS_AS(saved_dialogs->Show("", "Message"), std::invalid_argument);
-  REQUIRE_THROWS_AS(saved_dialogs->Show("Title", ""), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_dialogs->Show("", "Message", "OK"), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_dialogs->Show("Title", "", "OK"), std::invalid_argument);
 
-  saved_dialogs->Show("Short", "Message");
+  saved_dialogs->Show("Short", "Message", "OK");
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   const DialogStyle style = ThemeDefinitionValue<DialogStyle>(MaterialThemeDefinition());

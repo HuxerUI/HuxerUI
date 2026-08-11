@@ -88,6 +88,66 @@ function(huxerui_configure_public_target target_name)
     endif ()
 endfunction()
 
+function(_huxerui_configure_builtin_resources target_name)
+    set(HUXERUI_BUILTIN_RESOURCE_OUTPUT
+            "${PROJECT_BINARY_DIR}/huxerui-builtin-resources"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/package"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_HEADER
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include/huxerui_builtin_resources.h"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_INDEX
+            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/huxerui/resources.bin"
+    )
+    file(GLOB_RECURSE HUXERUI_BUILTIN_RESOURCE_INPUTS
+            CONFIGURE_DEPENDS
+            LIST_DIRECTORIES FALSE
+            "${HUXERUI_PROJECT_DIR}/resources/*"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_PLAN
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/resource-plan-$<CONFIG>.txt"
+    )
+    file(GENERATE
+            OUTPUT "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
+            CONTENT "inputs=${HUXERUI_BUILTIN_RESOURCE_INPUTS}\n"
+    )
+    huxerui_resolve_host_tool("hapt" HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND)
+    add_custom_command(
+            OUTPUT
+                    "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+                    "${HUXERUI_BUILTIN_RESOURCE_INDEX}"
+            COMMAND "${HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND}"
+                    --root "${HUXERUI_PROJECT_DIR}/resources"
+                    --output "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}"
+                    --namespace huxerui
+                    --header-name huxerui_builtin_resources.h
+            DEPENDS
+                    ${HUXERUI_BUILTIN_RESOURCE_INPUTS}
+                    "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
+                    "${HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND}"
+            COMMENT "Generating HuxerUI built-in resources"
+            VERBATIM
+    )
+    set_source_files_properties(
+            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+            PROPERTIES
+                    GENERATED TRUE
+                    HEADER_FILE_ONLY TRUE
+    )
+    target_sources(${target_name} PRIVATE
+            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+    )
+    target_include_directories(${target_name} PRIVATE
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE
+            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+            PARENT_SCOPE
+    )
+endfunction()
+
 function(huxerui_configure_targets)
     if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
         message(FATAL_ERROR "At least one HuxerUI library target must be enabled")
@@ -114,6 +174,7 @@ function(huxerui_configure_targets)
         )
         set_target_properties(huxerui_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
         huxerui_configure_compile_target(huxerui_core_objects)
+        _huxerui_configure_builtin_resources(huxerui_core_objects)
         set(HUXERUI_LIBRARY_SOURCE_FILES $<TARGET_OBJECTS:huxerui_core_objects>)
     endif ()
 
@@ -132,6 +193,7 @@ function(huxerui_configure_targets)
         if (IOS)
             set_target_properties(${HUXERUI_STATIC_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
             huxerui_configure_compile_target(${HUXERUI_STATIC_LIB_NAME})
+            _huxerui_configure_builtin_resources(${HUXERUI_STATIC_LIB_NAME})
         endif ()
         huxerui_configure_public_target(${HUXERUI_STATIC_LIB_NAME})
         add_library(HuxerUI::huxerui_static ALIAS ${HUXERUI_STATIC_LIB_NAME})
@@ -144,6 +206,7 @@ function(huxerui_configure_targets)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_LIBRARIES ${HUXERUI_PLATFORM_LINK_LIBRARIES} PARENT_SCOPE)
     set(HUXERUI_PLATFORM_LINK_OPTIONS ${HUXERUI_PLATFORM_LINK_OPTIONS} PARENT_SCOPE)
+    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" PARENT_SCOPE)
 endfunction()
 
 function(huxerui_resolve_host_tool tool_name output_variable)
@@ -362,6 +425,189 @@ function(huxerui_enable_codegen target_name)
     )
 endfunction()
 
+function(_huxerui_configure_resources target_name)
+    get_property(HUXERUI_RESOURCE_PACKAGES
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCE_PACKAGES
+    )
+    get_property(HUXERUI_RESOURCE_ROOTS
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCE_ROOTS
+    )
+    get_property(HUXERUI_RESOURCE_NAMESPACES
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCE_NAMESPACES
+    )
+
+    set(HUXERUI_RESOURCE_PACKAGE_INDEXES)
+    foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGES)
+        list(APPEND HUXERUI_RESOURCE_PACKAGE_INDEXES
+                "${HUXERUI_RESOURCE_PACKAGE}/huxerui/resources.bin"
+        )
+    endforeach ()
+
+    set(HUXERUI_RESOURCE_INPUTS)
+    foreach (HUXERUI_RESOURCE_ROOT IN LISTS HUXERUI_RESOURCE_ROOTS)
+        file(GLOB_RECURSE HUXERUI_RESOURCE_ROOT_INPUTS
+                CONFIGURE_DEPENDS
+                LIST_DIRECTORIES FALSE
+                "${HUXERUI_RESOURCE_ROOT}/*"
+        )
+        list(APPEND HUXERUI_RESOURCE_INPUTS ${HUXERUI_RESOURCE_ROOT_INPUTS})
+    endforeach ()
+    list(SORT HUXERUI_RESOURCE_INPUTS)
+
+    get_target_property(HUXERUI_RESOURCE_TARGET_BINARY_DIR
+            ${target_name}
+            BINARY_DIR
+    )
+    set(HUXERUI_RESOURCE_OUTPUT
+            "${HUXERUI_RESOURCE_TARGET_BINARY_DIR}/huxerui-resources/${target_name}"
+    )
+    set(HUXERUI_RESOURCE_INDEX
+            "${HUXERUI_RESOURCE_OUTPUT}/package/huxerui/resources.bin"
+    )
+    set(HUXERUI_RESOURCE_PLAN
+            "${HUXERUI_RESOURCE_OUTPUT}/resource-plan-$<CONFIG>.txt"
+    )
+    set(HUXERUI_RESOURCE_DRIVER
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/HuxerUIResources.cmake"
+    )
+    string(CONCAT HUXERUI_RESOURCE_PLAN_CONTENT
+            "packages=${HUXERUI_RESOURCE_PACKAGES}\n"
+            "roots=${HUXERUI_RESOURCE_ROOTS}\n"
+            "namespaces=${HUXERUI_RESOURCE_NAMESPACES}\n"
+            "inputs=${HUXERUI_RESOURCE_INPUTS}\n"
+    )
+    file(GENERATE
+            OUTPUT "${HUXERUI_RESOURCE_PLAN}"
+            CONTENT "${HUXERUI_RESOURCE_PLAN_CONTENT}"
+    )
+    huxerui_resolve_host_tool("hapt" HUXERUI_RESOURCE_CODEGEN_COMMAND)
+    add_custom_command(
+            OUTPUT "${HUXERUI_RESOURCE_INDEX}"
+            COMMAND ${CMAKE_COMMAND}
+                    "-DHUXERUI_HAPT=${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+                    "-DHUXERUI_RESOURCE_PACKAGES=${HUXERUI_RESOURCE_PACKAGES}"
+                    "-DHUXERUI_RESOURCE_ROOTS=${HUXERUI_RESOURCE_ROOTS}"
+                    "-DHUXERUI_RESOURCE_NAMESPACES=${HUXERUI_RESOURCE_NAMESPACES}"
+                    "-DHUXERUI_RESOURCE_OUTPUT=${HUXERUI_RESOURCE_OUTPUT}"
+                    -P "${HUXERUI_RESOURCE_DRIVER}"
+            DEPENDS
+                    ${HUXERUI_RESOURCE_PACKAGE_INDEXES}
+                    ${HUXERUI_RESOURCE_INPUTS}
+                    "${HUXERUI_RESOURCE_PLAN}"
+                    "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+                    "${HUXERUI_RESOURCE_DRIVER}"
+            COMMENT "Generating HuxerUI resources for ${target_name}"
+            VERBATIM
+    )
+    target_include_directories(${target_name} PRIVATE
+            "${HUXERUI_RESOURCE_OUTPUT}/include"
+    )
+
+    set(HUXERUI_RESOURCE_TARGET_OUTPUT "${HUXERUI_RESOURCE_INDEX}")
+    set(HUXERUI_RESOURCE_STAGE_DIRECTORY)
+    # Gradle stages Android packages after all ABI builds; CMake stages desktop targets with one output package.
+    if (EMSCRIPTEN)
+        target_link_options(${target_name} PRIVATE
+                "SHELL:--preload-file \"${HUXERUI_RESOURCE_OUTPUT}/package@/\""
+        )
+        set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS
+                "${HUXERUI_RESOURCE_INDEX}"
+        )
+    elseif (APPLE AND NOT IOS)
+        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
+        )
+    elseif (WIN32)
+        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
+        )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
+        )
+    endif ()
+
+    if (HUXERUI_RESOURCE_STAGE_DIRECTORY)
+        set(HUXERUI_RESOURCE_STAGE_STAMP
+                "${HUXERUI_RESOURCE_OUTPUT}/stage-$<CONFIG>.stamp"
+        )
+        add_custom_command(
+                OUTPUT "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                COMMAND ${CMAKE_COMMAND} -E rm -f
+                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                COMMAND ${CMAKE_COMMAND} -E remove_directory
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${HUXERUI_RESOURCE_OUTPUT}/package"
+                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E touch
+                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
+                DEPENDS "${HUXERUI_RESOURCE_INDEX}"
+                COMMENT "Staging HuxerUI resources for ${target_name}"
+                VERBATIM
+        )
+        set(HUXERUI_RESOURCE_TARGET_OUTPUT
+                "${HUXERUI_RESOURCE_STAGE_STAMP}"
+        )
+    endif ()
+
+    set_source_files_properties(
+            "${HUXERUI_RESOURCE_TARGET_OUTPUT}"
+            PROPERTIES
+                    GENERATED TRUE
+                    HEADER_FILE_ONLY TRUE
+    )
+    target_sources(${target_name} PRIVATE
+            "${HUXERUI_RESOURCE_TARGET_OUTPUT}"
+    )
+endfunction()
+
+function(_huxerui_configure_scheduled_resources)
+    get_property(HUXERUI_RESOURCE_TARGETS
+            DIRECTORY
+            PROPERTY HUXERUI_RESOURCE_TARGETS
+    )
+    foreach (HUXERUI_RESOURCE_TARGET IN LISTS HUXERUI_RESOURCE_TARGETS)
+        _huxerui_configure_resources(${HUXERUI_RESOURCE_TARGET})
+    endforeach ()
+endfunction()
+
+function(_huxerui_schedule_resources target_name)
+    get_property(HUXERUI_RESOURCES_ALREADY_SCHEDULED
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCES_SCHEDULED
+    )
+    if (HUXERUI_RESOURCES_ALREADY_SCHEDULED)
+        return()
+    endif ()
+
+    get_target_property(HUXERUI_RESOURCE_TARGET_SOURCE_DIR ${target_name} SOURCE_DIR)
+    set_property(TARGET ${target_name} PROPERTY HUXERUI_RESOURCES_SCHEDULED TRUE)
+    set_property(DIRECTORY "${HUXERUI_RESOURCE_TARGET_SOURCE_DIR}" APPEND PROPERTY
+            HUXERUI_RESOURCE_TARGETS
+            "${target_name}"
+    )
+
+    get_property(HUXERUI_RESOURCE_CALLBACK_SCHEDULED
+            DIRECTORY "${HUXERUI_RESOURCE_TARGET_SOURCE_DIR}"
+            PROPERTY HUXERUI_RESOURCE_CALLBACK_SCHEDULED
+    )
+    if (NOT HUXERUI_RESOURCE_CALLBACK_SCHEDULED)
+        set_property(DIRECTORY "${HUXERUI_RESOURCE_TARGET_SOURCE_DIR}" PROPERTY
+                HUXERUI_RESOURCE_CALLBACK_SCHEDULED TRUE
+        )
+        cmake_language(DEFER
+                DIRECTORY "${HUXERUI_RESOURCE_TARGET_SOURCE_DIR}"
+                CALL _huxerui_configure_scheduled_resources
+        )
+    endif ()
+endfunction()
+
 function(huxerui_add_resources target_name)
     if (NOT TARGET ${target_name})
         message(FATAL_ERROR
@@ -386,21 +632,10 @@ function(huxerui_add_resources target_name)
         )
     endif ()
 
-    get_target_property(HUXERUI_RESOURCES_ALREADY_ENABLED
-            ${target_name}
-            HUXERUI_RESOURCES_ENABLED
-    )
-    if (HUXERUI_RESOURCES_ALREADY_ENABLED)
-        message(FATAL_ERROR
-                "huxerui_add_resources() may only be called once for ${target_name}"
-        )
-    endif ()
-    set_property(TARGET ${target_name} PROPERTY HUXERUI_RESOURCES_ENABLED TRUE)
-
-    get_filename_component(HUXERUI_RESOURCE_ROOT
+    file(REAL_PATH
             "${HUXERUI_RESOURCES_ROOT}"
-            ABSOLUTE
-            BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+            HUXERUI_RESOURCE_ROOT
+            BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     if (NOT IS_DIRECTORY "${HUXERUI_RESOURCE_ROOT}")
         message(FATAL_ERROR
@@ -408,115 +643,42 @@ function(huxerui_add_resources target_name)
         )
     endif ()
 
-    huxerui_resolve_host_tool("hapt" HUXERUI_RESOURCE_CODEGEN_COMMAND)
-    set(HUXERUI_RESOURCE_OUTPUT
-            "${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/${target_name}"
+    get_property(HUXERUI_RESOURCE_ROOTS
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCE_ROOTS
     )
-    set(HUXERUI_RESOURCE_STAMP
-            "${HUXERUI_RESOURCE_OUTPUT}/resources.stamp"
-    )
-    set(HUXERUI_RESOURCE_HEADER
-            "${HUXERUI_RESOURCE_OUTPUT}/include/${HUXERUI_RESOURCES_NAMESPACE}_resources.h"
-    )
-    set(HUXERUI_RESOURCE_INDEX
-            "${HUXERUI_RESOURCE_OUTPUT}/package/huxerui/resources.bin"
-    )
-    set(HUXERUI_RESOURCE_INPUT_STAMP
-            "${HUXERUI_RESOURCE_OUTPUT}/resource-inputs.stamp"
-    )
+    foreach (HUXERUI_EXISTING_RESOURCE_ROOT IN LISTS HUXERUI_RESOURCE_ROOTS)
+        set(HUXERUI_EXISTING_RESOURCE_ROOT_PATH
+                "${HUXERUI_EXISTING_RESOURCE_ROOT}"
+        )
+        cmake_path(IS_PREFIX
+                HUXERUI_EXISTING_RESOURCE_ROOT_PATH
+                "${HUXERUI_RESOURCE_ROOT}"
+                NORMALIZE
+                HUXERUI_EXISTING_RESOURCE_ROOT_IS_PREFIX
+        )
+        set(HUXERUI_RESOURCE_ROOT_PATH "${HUXERUI_RESOURCE_ROOT}")
+        cmake_path(IS_PREFIX
+                HUXERUI_RESOURCE_ROOT_PATH
+                "${HUXERUI_EXISTING_RESOURCE_ROOT}"
+                NORMALIZE
+                HUXERUI_RESOURCE_ROOT_IS_PREFIX
+        )
+        if (HUXERUI_EXISTING_RESOURCE_ROOT_IS_PREFIX
+                OR HUXERUI_RESOURCE_ROOT_IS_PREFIX)
+            message(FATAL_ERROR
+                    "huxerui_add_resources() ROOT overlaps a root already registered for ${target_name}: ${HUXERUI_RESOURCE_ROOT}"
+            )
+        endif ()
+    endforeach ()
 
-    file(GLOB_RECURSE HUXERUI_RESOURCE_INPUTS
-            CONFIGURE_DEPENDS
-            LIST_DIRECTORIES FALSE
-            "${HUXERUI_RESOURCE_ROOT}/*"
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_RESOURCE_ROOTS
+            "${HUXERUI_RESOURCE_ROOT}"
     )
-    list(SORT HUXERUI_RESOURCE_INPUTS)
-    string(REPLACE ";" "\n"
-            HUXERUI_RESOURCE_INPUT_LIST
-            "${HUXERUI_RESOURCE_INPUTS}"
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_RESOURCE_NAMESPACES
+            "${HUXERUI_RESOURCES_NAMESPACE}"
     )
-    file(MAKE_DIRECTORY "${HUXERUI_RESOURCE_OUTPUT}")
-    # The generated membership stamp makes resource additions and removals invalidate the custom command after CMake
-    # reconfigures the glob.
-    file(GENERATE
-            OUTPUT "${HUXERUI_RESOURCE_INPUT_STAMP}"
-            CONTENT "${HUXERUI_RESOURCE_INPUT_LIST}\n"
-    )
-    add_custom_command(
-            OUTPUT
-                    "${HUXERUI_RESOURCE_STAMP}"
-                    "${HUXERUI_RESOURCE_HEADER}"
-                    "${HUXERUI_RESOURCE_INDEX}"
-            COMMAND "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
-                    --root "${HUXERUI_RESOURCE_ROOT}"
-                    --output "${HUXERUI_RESOURCE_OUTPUT}"
-                    --namespace "${HUXERUI_RESOURCES_NAMESPACE}"
-            DEPENDS
-                    ${HUXERUI_RESOURCE_INPUTS}
-                    "${HUXERUI_RESOURCE_INPUT_STAMP}"
-                    "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
-            COMMENT "Generating HuxerUI resources for ${target_name}"
-            VERBATIM
-    )
-    add_custom_target(${target_name}_huxerui_resources
-            DEPENDS
-                    "${HUXERUI_RESOURCE_STAMP}"
-                    "${HUXERUI_RESOURCE_HEADER}"
-                    "${HUXERUI_RESOURCE_INDEX}"
-    )
-    add_dependencies(${target_name} ${target_name}_huxerui_resources)
-    target_include_directories(${target_name} PRIVATE
-            "${HUXERUI_RESOURCE_OUTPUT}/include"
-    )
-
-    set(HUXERUI_RESOURCE_STAGE_DIRECTORY)
-    # Gradle stages Android packages after all ABI builds; CMake stages desktop targets with one output package.
-    if (EMSCRIPTEN)
-        target_link_options(${target_name} PRIVATE
-                "SHELL:--preload-file \"${HUXERUI_RESOURCE_OUTPUT}/package@/\""
-        )
-        set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS
-                "${HUXERUI_RESOURCE_STAMP}"
-                "${HUXERUI_RESOURCE_INDEX}"
-        )
-    elseif (APPLE AND NOT IOS)
-        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
-                "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
-        )
-    elseif (WIN32)
-        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
-                "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
-        )
-    endif ()
-
-    if (HUXERUI_RESOURCE_STAGE_DIRECTORY)
-        set(HUXERUI_RESOURCE_STAGE_STAMP
-                "${HUXERUI_RESOURCE_OUTPUT}/stage-$<CONFIG>.stamp"
-        )
-        add_custom_command(
-                OUTPUT "${HUXERUI_RESOURCE_STAGE_STAMP}"
-                COMMAND ${CMAKE_COMMAND} -E rm -f
-                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
-                COMMAND ${CMAKE_COMMAND} -E remove_directory
-                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory
-                        "${HUXERUI_RESOURCE_OUTPUT}/package"
-                        "${HUXERUI_RESOURCE_STAGE_DIRECTORY}"
-                COMMAND ${CMAKE_COMMAND} -E touch
-                        "${HUXERUI_RESOURCE_STAGE_STAMP}"
-                DEPENDS
-                        "${HUXERUI_RESOURCE_STAMP}"
-                        "${HUXERUI_RESOURCE_INDEX}"
-                COMMENT "Staging HuxerUI resources for ${target_name}"
-                VERBATIM
-        )
-        add_custom_target(${target_name}_huxerui_resource_staging
-                DEPENDS "${HUXERUI_RESOURCE_STAGE_STAMP}"
-        )
-        add_dependencies(${target_name}
-                ${target_name}_huxerui_resource_staging
-        )
-    endif ()
+    _huxerui_schedule_resources(${target_name})
 endfunction()

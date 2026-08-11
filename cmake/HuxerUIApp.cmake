@@ -82,6 +82,11 @@ function(huxerui_add_app target_name)
     endif ()
 
     huxerui_enable_codegen(${target_name})
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_RESOURCE_PACKAGES
+            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+    )
+    _huxerui_schedule_resources(${target_name})
     if (HUXERUI_APP_RESOURCES)
         list(GET HUXERUI_APP_RESOURCES 0 HUXERUI_APP_RESOURCE_ROOT)
         huxerui_add_resources(${target_name}

@@ -25,7 +25,7 @@ std::optional<std::string> ResolveString(const std::optional<StringVariant>& val
   if (!value.has_value()) {
     return std::nullopt;
   }
-  return ResolveStringVariant(*value);
+  return UseString(*value);
 }
 
 void ValidateRange(const SemanticRange& range) {
@@ -367,7 +367,7 @@ void SemanticBuilder::AddCustomAction(std::uint64_t local_id, std::uint64_t acti
   }
   detail::Composer composer(nullptr, state_->environment);
   detail::Composer::Guard guard(composer);
-  std::string resolved = detail::ResolveStringVariant(std::move(label));
+  std::string resolved = UseString(std::move(label));
   if (resolved.empty() ||
       std::ranges::all_of(resolved, [](unsigned char character) { return std::isspace(character) != 0; })) {
     throw std::invalid_argument("HuxerUI custom semantic action label must not be empty");

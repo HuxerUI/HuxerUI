@@ -1,11 +1,11 @@
 # App Resources, Images, and Localization Design
 
-Status: initial implementation
+Status: initial implementation with ordered target resource merging
 
 This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, the resource generator and binary index, target staging, PlatformResources on Android, iOS, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android demo.
-Reusable installed-Android integration, module bundle merging, built-in framework string bundles, inherited Locale text shaping, localized image discovery, and future platform adapters remain planned.
+The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Android, iOS, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android demo.
+Reusable installed-Android integration, inherited Locale shaping for ordinary application text, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
 
@@ -34,7 +34,7 @@ Resource ownership follows the existing Runtime, Environment, PlatformAdapter, a
 | Resource tool and CMake | Validate source resources, generate typed keys and a versioned index, and stage target resources |
 | PlatformResources | Read immutable bytes from the installed platform package and report the current resource configuration |
 | AppResources | Resolve typed keys, locale fallback, density variants, and shared immutable assets |
-| Runtime | Own AppResources for one root, seed the resource Environment, and coordinate resource-configuration invalidation |
+| Runtime | Own AppResources for each runtime root, seed the resource Environment, and coordinate resource-configuration invalidation |
 | Image | Measure from intrinsic logical size and translate fit and alignment into raster or vector painting |
 | PaintContext | Record raster image commands or expand immutable vector paths with source geometry, tint, and opacity |
 | Platform renderer | Decode and cache raster images, then replay the common platform-neutral path and image commands |
@@ -71,25 +71,28 @@ The domains have stable ownership:
 - `app` belongs to the current application.
 - `huxerui` belongs to framework resources.
 - A module owns the domain declared by its module name.
-- Duplicate domain ownership is a build error.
-- Overriding a resource in another domain requires an explicit override declaration.
+- Multiple target resource roots may contribute to the same domain.
+- For one resource variant in one domain, a later target resource root overrides an earlier root.
 
 Resource keys compare by value and include enough readable identity for diagnostics.
 The package index uses mandatory content hashes to verify payloads, while native caches use a private stable identity carried by the resolved immutable ImageAsset rather than a ResourceId alone.
 
-The resource tool generates typed constants into the build directory:
+The CMake `NAMESPACE` value is both the resource domain and the exact generated C++ namespace.
+The default generated header name adds the `_resources` suffix, while single-root `hapt` generation may select another `.h` filename without changing the domain or C++ namespace.
+For `NAMESPACE app`, the tool generates `app_resources.h` into the build directory:
 
 ```cpp
-namespace app_resources::images {
+namespace app::images {
 inline const huxerui::ImageResource logo{"app", "images/logo"};
 }
 
-namespace app_resources::strings {
+namespace app::strings {
 inline const huxerui::StringResource save{"app", "strings/save"};
 }
 ```
 
 Generated resource headers are build products and are never edited or committed.
+There is no generated `app_resources` C++ namespace or compatibility alias.
 
 ## Runtime resource ownership
 
@@ -97,7 +100,7 @@ Each Runtime root automatically owns AppResources.
 Applications do not install it manually through AppOptions or a RootHook.
 
 The initial AppResources implementation owns the application index generated for its target.
-Framework and module bundle merging extends this owner without changing the public lookup API.
+Ordered resource merging extends this owner to one final target index without changing the public lookup API.
 Runtime publishes the service into the root Environment so captured Layer environments preserve the same resources and Locale as their source content.
 
 The public composition operations remain narrow:
@@ -109,47 +112,76 @@ RawAsset UseRawResource(RawResource resource);
 
 template <class... Arguments>
 std::string UseString(StringResource resource, Arguments&&... arguments);
+
+std::string UseString(const StringVariant& value);
+std::string UseString(StringVariant&& value);
 ```
 
 These operations read the current root service and Environment but do not allocate ordered UseState slots.
 There is no public mutable ResourceManager, global resource singleton, or second context system.
-Deferred presentation APIs use `StringVariant`, which stores direct text or a `StringResource` and its positional arguments until composition occurs in the captured Environment.
+Deferred display-string APIs use `StringVariant`, which stores direct text or a `StringResource` and its positional arguments until composition occurs in the captured Environment.
+The `UseString` overloads form its single resolution boundary; components do not use a parallel private resolver.
 Text also accepts a zero-argument StringResource directly and mirrors its existing Format surface for localized arguments:
 
 ```cpp
-Text(app_resources::strings::title);
-Text(app_resources::strings::title, TextRole::Title);
-Text::Format(app_resources::strings::file_count, user_name, file_count);
-Text::Format(TextRole::Label, app_resources::strings::file_count, user_name, file_count);
+Text(app::strings::title);
+Text(app::strings::title, TextRole::Title);
+Text::Format(app::strings::file_count, user_name, file_count);
+Text::Format(TextRole::Label, app::strings::file_count, user_name, file_count);
 ```
 
 The constructors keep the common static-string case compact.
 The named Format operation avoids a variadic constructor that could conflict with TextRole or future Text configuration.
-Button and TextField placeholder provide direct StringResource overloads. UseString remains the explicit operation for application logic and Validation that need the resolved UTF-8 value immediately. StringVariant retains direct text or a StringResource with positional arguments for Dialog, Toast, and Menu APIs that may be composed after the call returns.
+Button and TextField placeholder provide direct StringResource overloads.
+UseString remains the explicit operation for application logic that needs resolved UTF-8 immediately, while StringVariant lets component, validation, semantics, and presentation APIs retain direct text or a StringResource until their composition boundary.
 
 ## Build and package model
 
-Application resources are target-scoped CMake inputs:
+The recommended source root is named `resources` and contains resource kinds directly rather than another domain directory:
+
+```text
+resources/
+  images/
+  strings/
+    default.properties
+  raw/
+```
+
+Platform-native assets such as an Apple `Assets.xcassets` catalog remain in their native shell and are not HuxerUI resource roots.
+
+Application resources are target-scoped CMake inputs.
+The current implementation permits repeated calls for the same target and preserves their declaration order:
 
 ```cmake
 huxerui_add_resources(
     application_target
-    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/modules/editor/resources"
+    NAMESPACE "editor"
+)
+
+huxerui_add_resources(
+    application_target
+    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/resources"
     NAMESPACE "app"
 )
 ```
 
-`huxerui_add_app` may expose the same operation compactly:
+`huxerui_add_app` keeps a compact primary application root:
 
 ```cmake
 huxerui_add_app(application_target
     SOURCES src/main.cpp
-    RESOURCES assets
+    RESOURCES resources
     RESOURCE_NAMESPACE app
 )
 ```
 
-Both forms configure the same resource target and generated package.
+The application helper registers the precompiled built-in `huxerui` package before the primary application root.
+Advanced consumers that need more than one root omit the compact resource arguments and call `huxerui_add_resources` in the required order.
+Later roots override earlier roots only when they declare the same resource variant; all other variants coexist.
+This permits application roots to override selected `huxerui` or module resources without a separate override declaration.
+Each registered root must contain at least one supported resource and must not equal, contain, or be contained by another root registered for the same target.
+All roots configure one final resource package for the target.
 Native platform shells consume its generated staging projection and do not redeclare asset roots.
 
 Resource processing is distinct from C++ scope transformation.
@@ -160,7 +192,7 @@ The resource tool:
 - Discovers declared image, string, and raw resources.
 - Normalizes package-relative paths and rejects absolute paths, `..` traversal, control characters, quotes, and
   platform separators that cannot be represented consistently in generated C++ and native packages.
-- Validates domains, keys, locale tags, scales, referenced files, and overrides.
+- Validates domains, keys, locale tags, scales, referenced files, and final merged variants.
 - Reads image format and dimensions without performing a full pixel decode.
 - Verifies that scale variants have consistent intrinsic logical dimensions.
 - Parses and validates localized format templates.
@@ -170,10 +202,30 @@ The resource tool:
 - Emits dependency metadata so additions, removals, and content changes rebuild and restage the package.
 - Removes stale payloads from generated and staged output before publishing the current package.
 
+The framework source root is processed once as an ordinary resource package while HuxerUI itself is built, and that package is installed with the SDK.
+Each module or application root is likewise processed as an ordinary package when its application target is built.
+The `hapt merge` operation reads the precompiled framework package first and the target's packages in declaration order, then writes one final `resources.bin` plus only the payloads referenced by that final index.
+It does not introduce bundle metadata, base and overlay roles, or a runtime package stack; the existing binary index already contains the domain, key, kind, locale, scale, package path, content hash, and image metadata required for merging.
+CMake removes the per-root compilation workspace after a successful merge so the final package and generated headers are the only retained target resource output.
+CMake attaches generation and staging outputs directly to the application target; framework compilation, individual roots, merging, and platform staging do not create auxiliary resource targets.
+
+Variant identity is defined by resource kind:
+
+- Raw resources use domain and key.
+- String resources use domain, key, and locale.
+- Image resources use domain, key, locale, and scale.
+
+A later entry with the same variant identity replaces the earlier entry.
+Entries with different locales or scales remain independently addressable.
+After replacement, `hapt` validates the complete merged resource family, including kind consistency, localized argument schemas, raster and vector consistency, intrinsic logical dimensions, package paths, and content hashes.
+
+Generated headers are emitted from the final merged index and grouped by namespace so repeated roots with the same `NAMESPACE` produce one header instead of competing intermediate headers.
+Intermediate root headers are not placed on the application target's include path.
+
 Generated indexes and `PlatformResources` package paths use normalized UTF-8 with `/` separators.
 Native adapters convert that representation only at the platform filesystem boundary.
 
-The initial package keeps the index separate from resource payload files.
+The package keeps the index separate from resource payload files.
 Embedding or archive packing can be added later without changing ResourceId, ImageAsset, or StringResource.
 
 Target packaging maps the staging directory as follows:
@@ -184,7 +236,7 @@ Target packaging maps the staging directory as follows:
 - Windows copies it beside the executable under `<executable-name>.resources` so multiple applications can share one output directory without colliding.
 - iOS copies it into the application bundle's reserved HuxerUI resources directory.
 - OHOS includes it in the HAP rawfile payload.
-- Linux installs it under an application-specific `share` directory resolved from the installation prefix.
+- Linux copies it beside the executable under `<executable-name>.resources`.
 - Web preloads it into WASM-owned memory or a virtual filesystem before Runtime is created.
 
 Shared application code never uses Android `R` identifiers, `NSBundle` paths, or Win32 resource identifiers.
@@ -239,11 +291,13 @@ Display scale remains a platform property.
 
 The initial implementation supports localized string variants and image scale variants.
 
-Locale fallback removes progressively less-specific BCP-47 subtags before using the bundle default:
+Locale fallback removes trailing variants first.
+When a tag includes both script and region, the language-region catalog takes precedence over the language-script catalog before lookup falls back to the language and bundle default:
 
 ```text
-zh-Hans-CN
-zh-Hans
+zh-Hant-TW
+zh-TW
+zh-Hant
 zh
 default locale
 ```
@@ -348,7 +402,7 @@ const VectorAsset mark = VectorAsset::Create({24.0F, 24.0F}, [](VectorBuilder& v
 });
 ```
 
-Packaged SVG files remain ImageResource values and live under `assets/images` with raster images.
+Packaged SVG files remain ImageResource values and live under `resources/images` with raster images.
 The resource generator validates them and compiles supported geometry into the versioned `HUXV` payload.
 Runtime detects that payload signature when it first resolves the ImageResource; ResourceId does not encode the storage format and there is no public ImageKind.
 
@@ -540,7 +594,7 @@ Every renderer therefore uses its established path implementation instead of mai
 Canvas resolves an application resource during composition and captures the cheap ImageAsset value:
 
 ```cpp
-const ImageAsset logo = UseImage(app_resources::images::logo);
+const ImageAsset logo = UseImage(app::images::logo);
 
 return Canvas([logo](PaintContext& paint, Size size) {
   paint.DrawImage(logo, Rect{0.0F, 0.0F, size.width, size.height});
@@ -589,9 +643,8 @@ The OHOS renderer owns decoded platform image values and native cache release.
 
 ### Linux
 
-Linux resolves an installed application-specific resource root instead of relying on the current working directory.
-A conventional layout places the executable under `bin` and HuxerUI resources under an application-specific directory in `share`.
-AppImage, Flatpak, Snap, or another distribution changes only that root resolution.
+Linux resolves `<executable-name>.resources` beside the running executable instead of relying on the current working directory.
+AppImage, Flatpak, Snap, or another distribution may relocate the executable and its sidecar together without changing resource identity.
 The eventual Linux renderer chooses its own decoder and native cache without changing ImageAsset.
 
 ### Web
@@ -630,13 +683,13 @@ Applications may override it for any subtree with ProvideEnvironment.
 return ProvideEnvironment(
     Locale::FromLanguageTag("zh-Hans-CN"),
     [] {
-      return Text(app_resources::strings::save);
+      return Text(app::strings::save);
     }
 );
 ```
 
-The initial implementation publishes Locale for resource lookup.
-Propagating that inherited Locale into default Text, TextField, selection-overlay, and Canvas shaping options remains planned.
+The initial implementation publishes Locale for resource lookup, and the Runtime-owned selection overlay applies it to its localized toolbar text.
+Propagating that inherited Locale into otherwise-unspecified Text, TextField, and Canvas shaping options remains planned.
 When added, platform renderers will continue to receive resolved TextShapingOptions and will never read StringResource values.
 
 ## Localized strings and formatting
@@ -646,7 +699,7 @@ Catalogs live under `strings/` and use locale filenames:
 
 ```text
 strings/default.properties
-strings/zh-Hans.properties
+strings/zh-TW.properties
 strings/en-GB.properties
 ```
 
@@ -684,7 +737,7 @@ file_count = "共有 {1} 个文件，属于 {0}"
 The call site remains compact:
 
 ```cpp
-Text::Format(app_resources::strings::file_count, user_name, file_count);
+Text::Format(app::strings::file_count, user_name, file_count);
 ```
 
 Indexed arguments are preferred over anonymous `{}` placeholders because translations may reorder values.
@@ -734,19 +787,34 @@ Adding CLDR-backed plural, number, date, currency, or select instructions does n
 
 ## Framework strings
 
-Framework-owned user-visible labels move into the `huxerui` resource domain:
+The built-in catalog owns framework-rendered default text in the `huxerui` resource domain:
 
 ```text
-huxerui:strings/cut
-huxerui:strings/copy
-huxerui:strings/paste
-huxerui:strings/select_all
+huxerui:strings/dialog_ok
+huxerui:strings/dialog_cancel
+huxerui:strings/text_selection_cut
+huxerui:strings/text_selection_copy
+huxerui:strings/text_selection_paste
+huxerui:strings/text_selection_select_all
+huxerui:strings/window_minimize
+huxerui:strings/window_maximize
+huxerui:strings/window_restore
+huxerui:strings/window_close
+huxerui:strings/validation_required
+huxerui:strings/validation_email
 ```
 
-The framework bundle provides a default locale and supported translations.
-An application override is explicit and validated rather than achieved by claiming the framework domain.
+The framework bundle provides the default English catalog plus `ar`, `bn`, `cs`, `da`, `de`, `el`, `es`, `fa`, `fi`, `fil`, `fr`, `he`, `hi`, `hu`, `id`, `it`, `ja`, `ko`, `ms`, `nb`, `nl`, `no`, `pl`, `pt`, `pt-BR`, `pt-PT`, `ro`, `ru`, `sv`, `th`, `tr`, `uk`, `ur`, `vi`, `zh`, `zh-HK`, `zh-MO`, and `zh-TW` catalogs.
+Its precompiled package is the first merge input registered by `huxerui_add_app`, so a later application root may intentionally replace any matching `huxerui` variant by using `NAMESPACE huxerui`.
+The framework does not require a separate override manifest or public resource-bundle API.
 
-Once framework localization is implemented, current internal fallback labels move into the framework bundle without adding an ad hoc public label Environment value.
+`TextSelectionMenuLabels` and `WindowCaptionLabels` remain explicit local overrides; absent values resolve the generated framework keys like any other StringResource.
+Each empty `TextSelectionMenuLabels` field falls back independently, so an application may replace one action label without duplicating the other localized defaults.
+`ValidationResult` retains a StringVariant until TextField composition so built-in rules and application rules use the same deferred localization path.
+Direct Runtime integrations that render framework defaults provide the merged resource package just like applications using ordinary StringResource values; the Runtime does not special-case the `huxerui` domain or carry a duplicate fallback table.
+The framework package also provides `images/check` and `images/chevron_right` as tintable vectors for Checkbox and Menu.
+These fixed component glyphs resolve through the same generated resource keys as application images rather than relying on platform fonts or a duplicate code-defined shape.
+Simple stateful glyphs that are clearer as programmatic paths, such as window controls, are not migrated solely for uniformity.
 
 ## Invalidation and retained rendering
 
@@ -755,6 +823,7 @@ Resource reads participate in the existing dependency and invalidation model:
 - UseString, Text resource construction, Text resource formatting, UseImage, and UseVectorImage resolve from the Runtime-owned service during composition without allocating state slots.
 - An Image constructed from ImageResource resolves that key during composition and retains the resulting immutable raster or vector asset.
 - ResourceConfiguration changes currently invalidate the root composition so locale and density variants are selected consistently.
+- A visible selection overlay is repainted and remeasured when ResourceConfiguration changes because it is Runtime-owned rather than part of the application composition tree.
 - Reconciliation limits a changed image asset or intrinsic size to the affected node's measure, layout, and paint paths.
 - An unchanged image asset compares equal and preserves its recorded PaintSequence.
 - Presentation-only changes continue to reuse raster image commands, decoded bitmaps, and expanded vector paths.
@@ -766,7 +835,7 @@ A future development hot-reload implementation may publish content revisions thr
 
 The current resource tool rejects:
 
-- Duplicate resource variants and generated C++ identifier collisions.
+- Duplicate resource variants within one root and generated C++ identifier collisions.
 - Invalid resource namespaces, paths, locale tags, and image scales.
 - Image files whose metadata cannot be read.
 - Scale variants with inconsistent intrinsic logical dimensions.
@@ -801,11 +870,12 @@ The initial implementation has focused shared coverage for:
 - Intrinsic Image measurement and Contain geometry.
 - DrawImageCommand recording, bounds, source validation, and opacity validation.
 - Resource code generation, payload staging, and generated-identifier collision detection.
+- Ordered package input precedence, variant coexistence, repeated namespaces, stale payload removal, final-family validation, and payload-hash validation.
 
 Every renderer implements image decode, cropping, destination scaling, sampling, and bounded native caches.
 Windows common builds and tests plus Android compilation are required for this implementation; macOS must be built on macOS before release.
 
-Future platform and SDK work adds installed-package, module-merge, iOS archive export, OHOS, Linux, and Web release-packaging validation as those capabilities become available.
+Future platform and SDK work adds installed-package, ordered target integration, iOS archive export, OHOS, Linux, and Web release-packaging validation as those capabilities become available.
 
 ## Delivery sequence
 
@@ -817,14 +887,21 @@ The delivery sequence is:
 - Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Android, iOS, macOS, and Windows native decoders.
 - Add VectorAsset construction, compiled SVG resources, automatic ImageResource format detection, vector tint, and shared path replay.
 - Add StringResource formatting and locale fallback.
-- Add inherited Locale text shaping and migrate framework strings. This remains planned.
-- Integrate generated resource keys and module bundle merging into the SDK and CLI delivery sequence. This remains planned.
+- Extend `hapt` with exact namespace generation and ordered binary-index merging.
+- Permit repeated target resource roots in CMake and update generated CLI projects to use `resources/images`, `resources/strings`, and `resources/raw`.
+- Add the built-in `huxerui` resource package and migrate framework-rendered Dialog, selection-menu, validation, and window-caption defaults.
+- Migrate the framework-owned check and submenu-chevron vectors required by Checkbox and Menu.
+- Add inherited Locale text shaping. This remains planned.
 
 Each slice updates public headers, standalone-header checks, common tests, platform builds, packaging metadata, examples, and the relevant documentation together.
 
 ## Final design constraints
 
 - Resource keys are typed; a generic public Resource template is not introduced.
+- `NAMESPACE` is the exact resource domain and generated C++ namespace; `_resources` is a generated-header suffix only.
+- One target may declare multiple ordered resource roots, and later matching variants replace earlier variants.
+- Runtime consumes one final merged index rather than a stack of bundles or an override registry.
+- HuxerUI source resource roots use `resources/images`, `resources/strings`, and `resources/raw` directly.
 - Resource payload values are immutable and cheap to copy.
 - ImageAsset exposes encoded bytes but never native image objects or ambiguous decoded pixel data.
 - VectorAsset exposes immutable platform-neutral geometry without a public ImageKind or native path objects.

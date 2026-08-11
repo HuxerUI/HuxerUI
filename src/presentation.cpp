@@ -13,6 +13,7 @@
 #include <huxerui/theme.h>
 #include <huxerui/window.h>
 
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "tooltip_internal.h"
 
@@ -1592,7 +1593,7 @@ View MenuService::ItemView(
 
   std::vector<View> content;
   if (item.checked_.value_or(false)) {
-    content.push_back(Text("\xE2\x9C\x93").With(icon_frame, Foreground{style.foreground}));
+    content.push_back(Image(images::check).Fit(ImageFit::Contain).Tint(style.foreground).With(icon_frame));
   }
   if (const auto* resource = std::get_if<ImageResource>(&item.icon_)) {
     content.push_back(Image(*resource).Fit(ImageFit::Contain).With(icon_frame));
@@ -1600,7 +1601,7 @@ View MenuService::ItemView(
     content.push_back(Image(*asset).Fit(ImageFit::Contain).With(icon_frame));
   }
 
-  std::string label = detail::ResolveStringVariant(std::move(item.label_));
+  std::string label = UseString(std::move(item.label_));
   if (label.empty()) {
     throw std::invalid_argument("HuxerUI menu item label must not be empty");
   }
@@ -1633,7 +1634,7 @@ View MenuService::ItemView(
     };
     return MenuItemLayout{
         Row {std::move(content)}.With(Spacing{style.item_content_spacing}, CrossAlign{CrossAxisAlignment::Center}),
-        Text("\xE2\x80\xBA").With(arrow_frame, Foreground{style.foreground}),
+        Image(images::chevron_right).Fit(ImageFit::Contain).Tint(style.foreground).With(arrow_frame),
     }
         .With(
             submenu.Anchor(),
@@ -1742,17 +1743,17 @@ View DialogService::StandardContent(
     const LayerController& layers,
     LayerId id
 ) {
-  std::string resolved_title = detail::ResolveStringVariant(title);
-  std::string resolved_message = detail::ResolveStringVariant(message);
-  std::string resolved_positive = detail::ResolveStringVariant(positive);
+  std::string resolved_title = UseString(title);
+  std::string resolved_message = UseString(message);
+  std::string resolved_positive = UseString(positive);
   if (resolved_positive.empty()) {
-    resolved_positive = "OK";
+    resolved_positive = UseString(strings::dialog_ok);
   }
   std::optional<std::string> resolved_negative;
   if (negative.has_value()) {
-    resolved_negative = detail::ResolveStringVariant(*negative);
+    resolved_negative = UseString(*negative);
     if (resolved_negative->empty()) {
-      *resolved_negative = "Cancel";
+      *resolved_negative = UseString(strings::dialog_cancel);
     }
   }
   if (resolved_title.empty()) {
@@ -2072,7 +2073,7 @@ LayerId detail::ToastService::Show(
           .barrier_color = std::nullopt,
       },
       [service, id, message = std::move(message), options, style, transition]() -> View {
-        std::string resolved_message = detail::ResolveStringVariant(message);
+        std::string resolved_message = UseString(message);
         if (resolved_message.empty()) {
           throw std::invalid_argument("HuxerUI toast message must not be empty");
         }

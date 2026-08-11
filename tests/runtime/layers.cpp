@@ -503,6 +503,7 @@ TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
   popup_focus_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -560,6 +561,7 @@ TEST_CASE("TestSubmenuLeavesItsParentInteractiveAndOutsideDismissesTheCascade") 
   parent_menu_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -614,6 +616,7 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
   parent_menu_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -624,7 +627,8 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
   });
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "Checked"));
-  REQUIRE(ContainsText(shown, "\xE2\x9C\x93"));
+  REQUIRE_FALSE(ContainsText(shown, "\xE2\x9C\x93"));
+  REQUIRE(FindPresentedStrokePathRect(shown, MenuStyle::Default().foreground).has_value());
   const std::optional<Rect> disabled = FindPresentedTextRect(shown, "Disabled");
   REQUIRE(disabled.has_value());
 
@@ -704,6 +708,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
 
   layer_menu.reset();
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -746,7 +751,8 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   );
   const FlattenedScene& fixed_submenu = runtime.BuildFrame();
   const std::optional<Rect> submenu_label = FindPresentedTextRect(fixed_submenu, "Fixed submenu");
-  const std::optional<Rect> submenu_arrow = FindPresentedTextRect(fixed_submenu, "\xE2\x80\xBA");
+  const std::optional<Rect> submenu_arrow =
+      FindPresentedStrokePathRect(fixed_submenu, MenuStyle::Default().foreground);
   REQUIRE(submenu_label.has_value());
   REQUIRE(submenu_arrow.has_value());
   REQUIRE(submenu_arrow->x > fixed_surface->x + fixed_surface->width * 0.75F);
@@ -755,7 +761,8 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   const FlattenedScene& natural_submenu = runtime.BuildFrame();
   const std::optional<Rect> natural_submenu_surface =
       FindPresentedRectWithColor(natural_submenu, MenuStyle::Default().background);
-  const std::optional<Rect> natural_submenu_arrow = FindPresentedTextRect(natural_submenu, "\xE2\x80\xBA");
+  const std::optional<Rect> natural_submenu_arrow =
+      FindPresentedStrokePathRect(natural_submenu, MenuStyle::Default().foreground);
   REQUIRE(natural_submenu_surface.has_value());
   REQUIRE(natural_submenu_surface->width < 300.0F);
   REQUIRE(natural_submenu_arrow.has_value());

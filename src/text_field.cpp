@@ -2165,7 +2165,7 @@ private:
   std::size_t min_lines_ = 1;
   std::optional<std::size_t> max_lines_;
   std::optional<std::size_t> max_length_;
-  ValidationResult validation_;
+  detail::ResolvedValidationResult validation_;
   TextFieldStyle style_;
   TextFieldVariantStyle variant_style_;
   TextFieldVariant variant_ = TextFieldVariant::Standard;
@@ -2524,7 +2524,10 @@ void TextField::UpdateModifier() {
       line_limits_.Minimum(),
       line_limits_.Maximum(),
       max_length_,
-      validation_,
+      detail::ResolvedValidationResult{
+          .status = validation_.status,
+          .message = UseString(validation_.message),
+      },
   }));
 }
 

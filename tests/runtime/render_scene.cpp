@@ -306,6 +306,7 @@ bool DamageContains(const DamageRegion& damage, Rect bounds) {
 
 TEST_CASE("RuntimePublishesStableRenderSceneNodes") {
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{RenderSceneApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
@@ -536,6 +537,7 @@ TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {
 
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{RetainedOpacityApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
@@ -611,6 +613,7 @@ TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
 
 TEST_CASE("ViewportChangesProduceFullDamage") {
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{RenderSceneApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();

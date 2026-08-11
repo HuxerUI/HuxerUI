@@ -43,6 +43,17 @@ inline CornerRadii ResolveTextFieldCornerRadii(const TextFieldStyle& style, Text
   return {};
 }
 
+struct ResolvedValidationResult {
+  ValidationStatus status = ValidationStatus::None;
+  std::string message;
+
+  [[nodiscard]] bool IsInvalid() const noexcept {
+    return status == ValidationStatus::Invalid;
+  }
+
+  bool operator==(const ResolvedValidationResult&) const = default;
+};
+
 struct TextFieldModifier {
   static const ModifierDescriptor& Descriptor();
 
@@ -58,7 +69,7 @@ struct TextFieldModifier {
   std::size_t min_lines = 1;
   std::optional<std::size_t> max_lines;
   std::optional<std::size_t> max_length;
-  ValidationResult validation;
+  ResolvedValidationResult validation;
 
   bool operator==(const TextFieldModifier&) const = default;
   static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);

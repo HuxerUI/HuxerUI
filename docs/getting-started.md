@@ -66,7 +66,7 @@ The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` def
 Place packaged resources under one target-owned root:
 
 ```text
-assets/
+resources/
   images/logo.png
   images/logo@2x.png
   images/logo@3x.png
@@ -80,17 +80,19 @@ String catalogs are UTF-8 `.properties` files with `key = value` entries and ind
 Raster image scale suffixes must preserve the same intrinsic logical size; for example, 418-pixel, 836-pixel, and 1254-pixel square images form matching 1x, 2x, and 3x variants.
 SVG files are compiled into platform-neutral vector payloads and do not use density suffixes.
 
-Register the root after creating the target:
+Register additional roots after creating the application with `huxerui_add_app()`:
 
 ```cmake
 huxerui_add_resources(my_app
-        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/resources"
         NAMESPACE "app"
 )
 ```
 
 The generated `app_resources.h` contains typed ImageResource, RawResource, and StringResource constants.
-Desktop targets stage the generated package beside the executable or inside the application bundle.
+`huxerui_add_app()` also registers the installed `huxerui` resource package before application resources so framework defaults participate in the same final package and may be overridden by a later root in the `huxerui` namespace.
+Manually created targets do not receive that framework package implicitly.
+Windows and Linux stage the generated package beside the executable, while macOS places it inside the application bundle.
 Android CMake builds generate a resource package inside each ABI build directory.
 The Gradle integration waits for native builds, selects one package, and synchronizes it into a generated assets
 source so concurrent ABI builds never mutate the same directory.
@@ -98,11 +100,11 @@ source so concurrent ABI builds never mutate the same directory.
 ```cpp
 #include <app_resources.h>
 
-const ImageAsset logo = UseImage(app_resources::images::logo);
-const VectorAsset mark = UseVectorImage(app_resources::images::mark);
+const ImageAsset logo = UseImage(app::images::logo);
+const VectorAsset mark = UseVectorImage(app::images::mark);
 
 return Column {
-  Text::Format(app_resources::strings::welcome, "Ada"),
+  Text::Format(app::strings::welcome, "Ada"),
   Image(logo).Fit(ImageFit::Contain),
   Image(mark).Tint(Color::Rgb(132, 78, 255)),
 };
@@ -204,7 +206,7 @@ huxerui run windows
 huxerui run web
 ```
 
-`create` writes the common CMake application, `.gitignore`, `assets/images`, `assets/raw`, the default string catalog, and the selected platform shells.
+`create` writes the common CMake application, `.gitignore`, `resources/images`, `resources/raw`, the default string catalog, and the selected platform shells.
 The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`.
 `doctor` discovers the nearest project from a nested directory, validates each platform shell, and checks host tools without changing the project.
 `devices` lists runnable Android devices, paired physical iOS devices, and booted iOS Simulators without requiring a project.

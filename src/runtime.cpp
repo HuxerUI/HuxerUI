@@ -1020,16 +1020,12 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
   state_->window_->metrics = metrics;
   if (state_->mounted_root_) {
     state_->mounted_root_->measure_dirty = true;
-    if (window_controls_visibility_changed && state_->window_->chrome_mode == WindowChromeMode::Custom) {
+    if ((window_controls_visibility_changed || maximize_state_changed) &&
+        state_->window_->chrome_mode == WindowChromeMode::Custom) {
       ReconcileWindowControls();
     }
     if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
       backplane->content_paint_dirty = true;
-    }
-    if (maximize_state_changed) {
-      if (detail::MountedNode* controls = FindWindowControls(*state_->mounted_root_)) {
-        MarkContentPaintDirtyTree(*controls);
-      }
     }
   }
   if (state_->text_selection_overlay_.state.visible) {
@@ -1119,6 +1115,9 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   ReconcileWindowControls();
   InvalidateRoot();
   state_->layer_controller_.InvalidateAllEntries();
+  if (state_->text_selection_overlay_.state.visible) {
+    state_->text_selection_overlay_.state.paint_dirty = true;
+  }
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {

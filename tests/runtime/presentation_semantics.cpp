@@ -189,6 +189,7 @@ TEST_CASE("Bottom sheets and toasts publish presentation semantics") {
 TEST_CASE("Menu semantics describe items and keep an expanded submenu in one modal group") {
   ResetPresentationSemantics();
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   runtime.BuildFrame();

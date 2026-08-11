@@ -1057,6 +1057,7 @@ struct TextSelectionOverlayState {
   float toolbar_separator_thickness = 0.0F;
   bool toolbar_separators = false;
   TextStyle toolbar_text_style;
+  TextShapingOptions toolbar_text_shaping;
   std::vector<TextEditingAction> actions;
   std::vector<Rect> action_rects;
   std::vector<std::string> action_labels;

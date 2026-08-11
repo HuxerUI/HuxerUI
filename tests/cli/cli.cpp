@@ -69,8 +69,9 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   const std::filesystem::path project = temporary.Path() / "Sample-App";
   REQUIRE(std::filesystem::is_regular_file(project / "CMakeLists.txt"));
   REQUIRE(std::filesystem::is_regular_file(project / "src/main.cpp"));
-  REQUIRE(std::filesystem::is_directory(project / "assets/images"));
-  REQUIRE(std::filesystem::is_directory(project / "assets/raw"));
+  REQUIRE(std::filesystem::is_directory(project / "resources/images"));
+  REQUIRE(std::filesystem::is_directory(project / "resources/raw"));
+  REQUIRE(std::filesystem::is_regular_file(project / "resources/strings/default.properties"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/app.manifest"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/web/index.html.in"));
@@ -80,6 +81,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(cmake.find("huxerui_add_app(sample_app") != std::string::npos);
   REQUIRE(cmake.find("src/*.cpp") != std::string::npos);
   REQUIRE(cmake.find("SOURCES\n            ${APP_SOURCE_FILES}") != std::string::npos);
+  REQUIRE(cmake.find("RESOURCES\n            resources") != std::string::npos);
   REQUIRE(cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
   const std::string android_settings = Read(project / "platform/android/settings.gradle");
   const std::string android_app = Read(project / "platform/android/app/build.gradle");
@@ -89,6 +91,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(android_app.find("implementation project(\":HuxerUI\")") != std::string::npos);
   REQUIRE(android_app.find("huxeruiSdkRoot") == std::string::npos);
   REQUIRE(android_cmake.find("HUXERUI_APP_SOURCE_FILES") != std::string::npos);
+  REQUIRE(android_cmake.find("${HUXERUI_APP_ROOT}/resources") != std::string::npos);
   REQUIRE(android_cmake.find("src/main.cpp") == std::string::npos);
   REQUIRE(std::filesystem::is_regular_file(
       project / "platform/android/app/src/main/java/com/example/sample_app/MainActivity.java"

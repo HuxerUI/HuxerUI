@@ -19,12 +19,12 @@
 namespace huxerui {
 
 class StringVariant;
+std::string UseString(const StringVariant& value);
+std::string UseString(StringVariant&& value);
 
 namespace detail {
 class ResourceAccess;
 bool IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
-std::string ResolveStringVariant(const StringVariant& value);
-std::string ResolveStringVariant(StringVariant&& value);
 } // namespace detail
 
 class ResourceId {
@@ -82,8 +82,8 @@ private:
   std::vector<std::string> arguments_;
 
   friend bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
-  friend std::string detail::ResolveStringVariant(const StringVariant& value);
-  friend std::string detail::ResolveStringVariant(StringVariant&& value);
+  friend std::string UseString(const StringVariant& value);
+  friend std::string UseString(StringVariant&& value);
 };
 
 class RawResource final : public ResourceId {

@@ -37,7 +37,7 @@ return Row {
 };
 ```
 
-Checkbox, RadioButton, and Switch also retain their label-free constructors for custom composition. A labeled control owns its label, uses the Theme spacing between the visual control and text, and treats the complete control as one focusable and clickable target.
+Checkbox, RadioButton, and Switch also retain their label-free constructors for custom composition. A labeled control owns its label, uses the Theme spacing between the visual control and text, and treats the complete control as one focusable and clickable target. Checkbox paints its checked marker from the framework's tintable vector resource, so its geometry does not depend on the platform font.
 
 RadioButton represents one controlled choice rather than owning a group. Application state defines mutual exclusion, and activating an already selected RadioButton leaves the selection unchanged:
 
@@ -74,7 +74,7 @@ CustomControl()
 IconButton is the standard momentary action when the visible content is only an icon:
 
 ```cpp
-IconButton(app_resources::images::search, "Search").OnClick(OpenSearch);
+IconButton(app::images::search, "Search").OnClick(OpenSearch);
 
 IconButton(vector_icon, "Unavailable action")
     .OnClick(PerformAction)
@@ -93,7 +93,7 @@ IconButton is intentionally not selectable; use a controlled component such as C
 Tooltip is a retained modifier because it describes supplementary information for an existing target rather than introducing a layout component:
 
 ```cpp
-IconButton(app_resources::images::search, "Search")
+IconButton(app::images::search, "Search")
     .OnClick(OpenSearch)
     .With(Tooltip("Search"));
 ```
@@ -130,7 +130,7 @@ return Chip(selected ? "Selected" : "Selectable", selected)
 Chip also accepts a leading image resource or resolved image asset while retaining its required text label:
 
 ```cpp
-Chip(app_resources::images::filter, "Filters").OnClick(OpenFilters);
+Chip(app::images::filter, "Filters").OnClick(OpenFilters);
 
 Chip(vector_icon, "Selectable", selected)
     .OnChanged([selected](bool value) {
@@ -159,8 +159,8 @@ Use `SegmentedButtonItem` when a segment includes an icon or visually displays o
 SegmentedButton(
     {
         SegmentedButtonItem("List"),
-        SegmentedButtonItem(app_resources::images::grid, "Grid"),
-        SegmentedButtonItem::IconOnly(app_resources::images::map, "Map"),
+        SegmentedButtonItem(app::images::grid, "Grid"),
+        SegmentedButtonItem::IconOnly(app::images::map, "Map"),
     },
     mode
 ).OnChanged([mode](std::size_t index) {
@@ -190,8 +190,8 @@ Use `TabItem` for icons, icon-only presentation, or an individually disabled des
 ```cpp
 Tabs(
     {
-        TabItem(app_resources::images::home, "Home"),
-        TabItem::IconOnly(app_resources::images::search, "Search"),
+        TabItem(app::images::home, "Home"),
+        TabItem::IconOnly(app::images::search, "Search"),
         std::move(TabItem("Reports")).Enabled(false),
     },
     selected
@@ -381,7 +381,7 @@ Pointer and touch input update the value while dragging. Arrow keys adjust by `S
 Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:
 
 ```cpp
-Image(app_resources::images::logo)
+Image(app::images::logo)
     .Fit(ImageFit::Contain)
     .With(Frame{.width = 160.0F, .height = 120.0F});
 ```
@@ -487,7 +487,7 @@ return TextField(email)
     });
 ```
 
-Rules return valid, invalid, or pending results. Applications decide whether to validate on change, focus loss, or submission and can pass `ValidationResult::None()` before a field is touched.
+Rules return valid, invalid, or pending results. Validation messages are StringVariant values resolved when TextField is composed; `Required()` and `EmailAddress()` use localized framework resources, while passing a literal or StringResource overrides either default. Applications decide whether to validate on change, focus loss, or submission and can pass `ValidationResult::None()` before a field is touched.
 
 ## Submission actions
 

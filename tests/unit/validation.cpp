@@ -38,7 +38,7 @@ TEST_CASE("TestValidationResultRepresentsPendingState") {
 
   const ValidationResult result = ValidationResult::Pending("Checking");
   REQUIRE(result.status == ValidationStatus::Pending);
-  REQUIRE(result.message == "Checking");
+  REQUIRE(result == ValidationResult::Pending("Checking"));
   REQUIRE_FALSE(result.IsInvalid());
 }
 

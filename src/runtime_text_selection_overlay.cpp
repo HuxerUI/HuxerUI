@@ -1,5 +1,7 @@
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "indication_internal.h"
+#include "resource_internal.h"
 #include "window_internal.h"
 
 #include <algorithm>
@@ -22,14 +24,42 @@
 namespace huxerui {
 namespace {
 
-const TextSelectionMenuLabels& ResolveSelectionMenuLabels(const detail::MountedNode& node) {
-  if (const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(TextSelectionMenuLabels))) {
-    if (const auto* labels = std::any_cast<TextSelectionMenuLabels>(value)) {
-      return *labels;
+const Locale& ResolveSelectionLocale(const detail::MountedNode& node) {
+  if (const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(Locale))) {
+    if (const auto* locale = std::any_cast<Locale>(value)) {
+      return *locale;
     }
-    throw std::logic_error("HuxerUI text selection menu labels have an invalid environment value");
+    throw std::logic_error("HuxerUI text selection locale has an invalid environment value");
   }
-  static const TextSelectionMenuLabels labels = TextSelectionMenuLabels::Default();
+  static const Locale locale = Locale::Default();
+  return locale;
+}
+
+TextSelectionMenuLabels ResolveSelectionMenuLabels(
+    const detail::MountedNode& node,
+    const detail::AppResources& resources,
+    const Locale& locale
+) {
+  TextSelectionMenuLabels labels;
+  if (const std::any* value = detail::FindEnvironmentValue(node.environment, typeid(TextSelectionMenuLabels))) {
+    if (const auto* override_labels = std::any_cast<TextSelectionMenuLabels>(value)) {
+      labels = *override_labels;
+    } else {
+      throw std::logic_error("HuxerUI text selection menu labels have an invalid environment value");
+    }
+  }
+  if (labels.cut.empty()) {
+    labels.cut = resources.Resolve(strings::text_selection_cut, locale).value;
+  }
+  if (labels.copy.empty()) {
+    labels.copy = resources.Resolve(strings::text_selection_copy, locale).value;
+  }
+  if (labels.paste.empty()) {
+    labels.paste = resources.Resolve(strings::text_selection_paste, locale).value;
+  }
+  if (labels.select_all.empty()) {
+    labels.select_all = resources.Resolve(strings::text_selection_select_all, locale).value;
+  }
   return labels;
 }
 
@@ -341,7 +371,11 @@ void Runtime::PaintTextSelectionOverlay() {
             overlay.action_rects[index],
             overlay.action_labels[index],
             overlay.toolbar_text_style,
-            TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
+            TextLayoutOptions{
+                .shaping = overlay.toolbar_text_shaping,
+                .align = TextAlign::Center,
+                .wrap = TextWrap::NoWrap,
+            }
         );
       }
       if (overlay.toolbar_separators && index + 1 < overlay.action_rects.size()) {
@@ -456,7 +490,8 @@ void Runtime::PaintTextSelectionOverlay() {
 
   const ThemeSpec theme = detail::ResolveThemeSpec(focused->environment);
   const MenuStyle menu_style = ResolveSelectionMenuStyle(*focused);
-  const TextSelectionMenuLabels& labels = ResolveSelectionMenuLabels(*focused);
+  const Locale& locale = ResolveSelectionLocale(*focused);
+  const TextSelectionMenuLabels labels = ResolveSelectionMenuLabels(*focused, *state_->app_resources_, locale);
   if (overlay.actions != available_actions) {
     overlay.actions = std::move(available_actions);
     overlay.action_indications.clear();
@@ -478,6 +513,7 @@ void Runtime::PaintTextSelectionOverlay() {
 
   const float font_size = theme.typography.label_large;
   const TextStyle toolbar_text_style{Font::System(font_size), menu_style.foreground};
+  const TextShapingOptions toolbar_text_shaping{.locale = std::string(locale.LanguageTag())};
   constexpr float viewport_padding = 8.0F;
   const EdgeInsets safe_area = state_->window_->metrics.safe_area;
   const float minimum_toolbar_x = safe_area.left + viewport_padding;
@@ -496,7 +532,10 @@ void Runtime::PaintTextSelectionOverlay() {
                                     label,
                                     toolbar_text_style,
                                     std::numeric_limits<float>::infinity(),
-                                    TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                                    TextLayoutOptions{
+                                        .shaping = toolbar_text_shaping,
+                                        .wrap = TextWrap::NoWrap,
+                                    }
                                 )
                                 .size;
     const float width = label_size.width + menu_style.item_padding.Horizontal();
@@ -550,6 +589,7 @@ void Runtime::PaintTextSelectionOverlay() {
   overlay.toolbar_separators =
       menu_style.separator_mode == MenuSeparatorMode::BetweenItems && menu_style.separator_thickness > 0.0F;
   overlay.toolbar_text_style = toolbar_text_style;
+  overlay.toolbar_text_shaping = toolbar_text_shaping;
 
   overlay.action_rects.clear();
   float item_x = toolbar_x;

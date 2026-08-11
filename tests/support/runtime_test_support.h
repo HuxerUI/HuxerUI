@@ -19,6 +19,8 @@ namespace huxerui::test {
 
 class Runtime;
 
+PlatformResources* BuiltinTestResources();
+
 using huxerui::AnimateTo;
 using huxerui::Axis;
 using huxerui::BackEvent;
@@ -100,6 +102,7 @@ using huxerui::RenderNode;
 using huxerui::Rotation;
 using huxerui::Row;
 using huxerui::Scale;
+using huxerui::StrokePathCommand;
 using huxerui::ScrollAlignment;
 using huxerui::ScrollController;
 using huxerui::ScrollEvent;
@@ -774,6 +777,25 @@ inline std::optional<Rect> FindPresentedTextRect(const FlattenedScene& scene, st
     const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return detail::TransformBounds(transform_stack.back(), text->rect);
+    }
+  }
+  return std::nullopt;
+}
+
+inline std::optional<Rect> FindPresentedStrokePathRect(const FlattenedScene& scene, Color expected) {
+  std::vector<Transform2D> transform_stack{Transform2D{}};
+  for (const PaintCommand& command : scene.Commands()) {
+    if (const auto* transform = std::get_if<PushTransformCommand>(&command)) {
+      transform_stack.push_back(detail::ComposeTransform(transform_stack.back(), transform->transform));
+      continue;
+    }
+    if (std::holds_alternative<PopTransformCommand>(command)) {
+      transform_stack.pop_back();
+      continue;
+    }
+    const auto* path = std::get_if<StrokePathCommand>(&command);
+    if (path && path->color == expected) {
+      return detail::TransformBounds(transform_stack.back(), path->path.Bounds());
     }
   }
   return std::nullopt;

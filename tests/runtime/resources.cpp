@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -28,6 +29,7 @@ struct IndexEntry {
   std::uint32_t height = 0;
   std::uint64_t content_hash = 0;
   std::uint32_t argument_count = 0;
+  std::string domain = "test";
 };
 
 void AppendU32(std::vector<std::byte>& bytes, std::uint32_t value) {
@@ -63,7 +65,7 @@ RawAsset EncodeIndex(const std::vector<IndexEntry>& entries) {
   AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
   for (const IndexEntry& entry : entries) {
     bytes.push_back(static_cast<std::byte>(entry.kind));
-    AppendString(bytes, "test");
+    AppendString(bytes, entry.domain);
     AppendString(bytes, entry.key);
     AppendString(bytes, entry.path);
     AppendString(bytes, entry.mime_type);
@@ -106,7 +108,22 @@ public:
   std::unordered_map<std::string, RawAsset> assets;
 };
 
+class TestClipboard final : public PlatformClipboard {
+public:
+  std::optional<std::string> ReadText() override {
+    return text;
+  }
+
+  bool WriteText(std::string_view value) override {
+    text = std::string(value);
+    return true;
+  }
+
+  std::optional<std::string> text = "paste";
+};
+
 std::optional<MenuHandle> resource_menu;
+std::optional<DialogHandle> resource_dialog;
 
 View ResourceMenuApp() {
   auto menu = UseMenu();
@@ -114,8 +131,30 @@ View ResourceMenuApp() {
   return Button("resource menu").With(huxerui::Frame{120.0F, 36.0F}, menu.Anchor());
 }
 
+View FrameworkDialogResourceApp() {
+  resource_dialog = UseDialog();
+  return Spacer();
+}
+
+View FrameworkValidationResourceApp() {
+  return TextField(TextEditingValue::FromText(""))
+      .Validation(Validate("", Required()))
+      .With(huxerui::Frame{220.0F, 80.0F});
+}
+
+View FrameworkSelectionResourceApp() {
+  return TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F});
+}
+
+View PartialSelectionLabelsResourceApp() {
+  return ProvideEnvironment(TextSelectionMenuLabels{.copy = "Duplicate"}, [] {
+    return TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F});
+  });
+}
+
 View LocalizedResourceApp() {
-  return Text::Format(StringResource("test", "strings/greeting"), "Ada");
+  const StringVariant greeting = StringVariant::Format(StringResource("test", "strings/greeting"), "Ada");
+  return Text(UseString(greeting));
 }
 
 View DirectLocalizedResourceApp() {
@@ -193,6 +232,41 @@ TEST_CASE("AppResourcesResolveLocaleScaleAndRawPayloads") {
   REQUIRE(image.IntrinsicSize() == Size{20.0F, 10.0F});
 }
 
+TEST_CASE("AppResourcesPrefersRegionBeforeScriptDuringLocaleFallback") {
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/greeting",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Language",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/greeting",
+              .mime_type = "text/plain",
+              .locale = "zh-Hant",
+              .value = "Script",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/greeting",
+              .mime_type = "text/plain",
+              .locale = "zh-TW",
+              .value = "Region",
+          },
+      })
+  );
+
+  detail::AppResources service(&resources);
+  const StringResource greeting("test", "strings/greeting");
+  REQUIRE(service.Resolve(greeting, Locale::FromLanguageTag("zh-Hant-TW")).value == "Region");
+  REQUIRE(service.Resolve(greeting, Locale::FromLanguageTag("zh-Hant")).value == "Script");
+}
+
 TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   TestResources resources;
   resources.assets.emplace(
@@ -228,6 +302,195 @@ TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   runtime.UpdateResourceConfiguration(resources.configuration);
   REQUIRE(platform.requested_frames == requests_before_update + 1);
   REQUIRE(FirstText(runtime.BuildFrame()) == "Hello Ada");
+}
+
+TEST_CASE("DialogDefaultsResolveFrameworkResourcesAndTrackLocale") {
+  resource_dialog.reset();
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/dialog_ok",
+              .mime_type = "text/plain",
+              .value = "OK",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/dialog_ok",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "确定",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/dialog_cancel",
+              .mime_type = "text/plain",
+              .value = "Cancel",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/dialog_cancel",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "取消",
+              .domain = "huxerui",
+          },
+      })
+  );
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{FrameworkDialogResourceApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(resource_dialog.has_value());
+
+  resource_dialog->Show("Title", "Message", StringVariant{}, StringVariant{});
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "确定"));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "取消"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "OK"));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Cancel"));
+}
+
+TEST_CASE("ValidationDefaultsResolveFrameworkResourcesAndTrackLocale") {
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/validation_required",
+              .mime_type = "text/plain",
+              .value = "This field is required",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/validation_required",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "此字段为必填项",
+              .domain = "huxerui",
+          },
+      })
+  );
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{FrameworkValidationResourceApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
+
+  REQUIRE(ContainsText(runtime.BuildFrame(), "此字段为必填项"));
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "This field is required"));
+}
+
+TEST_CASE("TextSelectionLabelsResolveFrameworkResourcesAndTrackLocale") {
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_cut",
+              .mime_type = "text/plain",
+              .value = "Cut",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_cut",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "剪切",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_copy",
+              .mime_type = "text/plain",
+              .value = "Copy",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_copy",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "复制",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_paste",
+              .mime_type = "text/plain",
+              .value = "Paste",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_paste",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "粘贴",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_select_all",
+              .mime_type = "text/plain",
+              .value = "Select all",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/text_selection_select_all",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "全选",
+              .domain = "huxerui",
+          },
+      })
+  );
+  TestClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  platform.platform_resources = &resources;
+  Runtime runtime{FrameworkSelectionResourceApp, platform};
+  runtime.SetWindowMetrics({.viewport = {280.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 901, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.5);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "复制"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE_FALSE(ContainsText(updated, "复制"));
+  REQUIRE(ContainsText(updated, "Copy"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("zh-CN");
+  TestPlatform partial_platform;
+  partial_platform.platform_clipboard = &clipboard;
+  partial_platform.platform_resources = &resources;
+  Runtime partial_runtime{PartialSelectionLabelsResourceApp, partial_platform};
+  partial_runtime.SetWindowMetrics({.viewport = {280.0F, 120.0F}});
+  partial_runtime.BuildFrame();
+  partial_runtime.HandlePointerEvent({PointerEventType::Down, 902, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  partial_platform.AdvanceTime(0.5);
+  const FlattenedScene& partial = partial_runtime.BuildFrame();
+  REQUIRE(ContainsText(partial, "剪切"));
+  REQUIRE(ContainsText(partial, "Duplicate"));
 }
 
 TEST_CASE("TextAndControlsResolveStringResourcesDirectly") {
@@ -396,6 +659,51 @@ TEST_CASE("WindowCaptionLabelsRefreshWhenTheResourceConfigurationChanges") {
               .locale = "zh",
               .value = "Minimize localized window",
           },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_maximize",
+              .mime_type = "text/plain",
+              .value = "Maximize",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_maximize",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "最大化",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_restore",
+              .mime_type = "text/plain",
+              .value = "Restore",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_restore",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "还原",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_close",
+              .mime_type = "text/plain",
+              .value = "Close",
+              .domain = "huxerui",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/window_close",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "关闭",
+              .domain = "huxerui",
+          },
       })
   );
 
@@ -417,11 +725,23 @@ TEST_CASE("WindowCaptionLabelsRefreshWhenTheResourceConfigurationChanges") {
              return node.label == label;
            });
   };
-  REQUIRE(contains_label(runtime.BuildCommit(), "Minimize localized window"));
+  const FrameCommit& localized = runtime.BuildCommit();
+  REQUIRE(contains_label(localized, "Minimize localized window"));
+  REQUIRE(contains_label(localized, "最大化"));
+  REQUIRE(contains_label(localized, "关闭"));
+
+  runtime.SetWindowMetrics({
+      .viewport = {300.0F, 100.0F},
+      .title_bar = WindowTitleBarMetrics{.height = 40.0F, .right_inset = 138.0F, .maximized = true},
+  });
+  REQUIRE(contains_label(runtime.BuildCommit(), "还原"));
 
   resources.configuration.locale = Locale::FromLanguageTag("en-US");
   runtime.UpdateResourceConfiguration(resources.configuration);
-  REQUIRE(contains_label(runtime.BuildCommit(), "Minimize window"));
+  const FrameCommit& updated = runtime.BuildCommit();
+  REQUIRE(contains_label(updated, "Minimize window"));
+  REQUIRE(contains_label(updated, "Restore"));
+  REQUIRE(contains_label(updated, "Close"));
 }
 
 TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {
