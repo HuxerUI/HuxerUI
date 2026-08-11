@@ -18,6 +18,10 @@ std::optional<AppDefinition>& AppRegistration() {
 
 } // namespace
 
+PlatformAdapter::PlatformAdapter() : platform_modules_(new PlatformModules()) {}
+
+PlatformAdapter::~PlatformAdapter() = default;
+
 std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {

@@ -20,6 +20,7 @@
 #include <huxerui/app.h>
 
 #include "appkit_accessibility.h"
+#include "appkit_platform_view.h"
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
@@ -191,6 +192,7 @@ public:
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
       accessibility_ = std::make_unique<MacAccessibility>(runtime, view_);
+      platform_view_host_ = std::make_unique<AppKitPlatformViewHost>(renderer_, Modules(), runtime);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
@@ -214,6 +216,8 @@ public:
       frame_scheduler_ = nil;
       scheduled_frame_deadline_.reset();
       committed_frame_ = nullptr;
+      platform_view_host_->Shutdown();
+      platform_view_host_.reset();
       accessibility_.reset();
       runtime_ = nullptr;
     }
@@ -297,9 +301,15 @@ public:
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
+    const bool composition_changed = platform_view_host_->Commit(view_, commit.render_frame);
     committed_frame_ = &commit.render_frame;
     accessibility_->Commit(commit.semantic_frame);
-    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    if (composition_changed) {
+      [view_ setNeedsDisplay:YES];
+      frame_state_.MarkPaintPending();
+    } else {
+      static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    }
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
@@ -308,10 +318,17 @@ public:
 
   void DrawCommittedFrame(CGContextRef context, NSRect dirty_rect) {
     frame_state_.BeginPaint();
-    renderer_.Draw(context, NSRectToCGRect(dirty_rect), committed_frame_);
+    platform_view_host_->DrawBase(context, NSRectToCGRect(dirty_rect));
     if (const std::optional<double> deadline = frame_state_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
+  }
+
+  NSView* HitTestPlatformView(Point point) const {
+    if (runtime_ == nullptr || platform_view_host_ == nullptr) {
+      return nil;
+    }
+    return platform_view_host_->HitTest(point);
   }
 
   void InvalidateNativeSurface() {
@@ -611,6 +628,7 @@ private:
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
   std::unique_ptr<MacAccessibility> accessibility_;
+  std::unique_ptr<AppKitPlatformViewHost> platform_view_host_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
@@ -629,6 +647,23 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (BOOL)isFlipped {
   return YES;
+}
+
+- (NSView*)hitTest:(NSPoint)point {
+  const NSPoint local_point = self.superview == nil ? point : [self convertPoint:point fromView:self.superview];
+  if (!NSPointInRect(local_point, self.bounds)) {
+    return nil;
+  }
+  if (huxeruiAdapter != nullptr) {
+    NSView* platform_view = huxeruiAdapter->HitTestPlatformView({
+        static_cast<float>(local_point.x),
+        static_cast<float>(local_point.y),
+    });
+    if (platform_view != nil) {
+      return platform_view;
+    }
+  }
+  return self;
 }
 
 - (BOOL)acceptsFirstResponder {

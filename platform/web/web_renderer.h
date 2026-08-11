@@ -50,6 +50,7 @@ private:
   void RenderCommand(const PopClipCommand& command);
   void RenderCommand(const PushTransformCommand& command);
   void RenderCommand(const PopTransformCommand& command);
+  void RenderCommand(const PlacePlatformViewCommand& command);
 
   emscripten::val canvas_;
   emscripten::val context_;

@@ -56,6 +56,7 @@ enum class ImageFit {
 
 namespace detail {
 struct ViewSpec;
+struct PlatformEventDescriptor;
 struct SegmentedButtonItemAccess;
 struct TabItemAccess;
 class VirtualMeasureSession;
@@ -147,6 +148,7 @@ protected:
   }
 
   void SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler);
+  void AddPlatformEvent(detail::PlatformEventDescriptor descriptor);
   void SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue value);
   void AddDefaultIndication();
   void AddModifier(detail::ModifierSpec modifier);

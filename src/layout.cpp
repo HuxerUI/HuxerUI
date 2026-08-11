@@ -255,7 +255,8 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
 
   if (within_node &&
       (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) ||
-       ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.focusable)) {
+       ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.focusable ||
+       node.kind == NodeKind::PlatformView)) {
     return true;
   }
   route.pop_back();
@@ -556,6 +557,9 @@ Size MeasureNode(
     content_size.height *= scale;
     break;
   }
+  case NodeKind::PlatformView:
+    content_size = content_constraints.Constrain({});
+    break;
   case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;
@@ -730,6 +734,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::ProgressBar:
   case NodeKind::Slider:
   case NodeKind::Image:
+  case NodeKind::PlatformView:
   case NodeKind::Canvas:
   case NodeKind::Spacer:
     break;

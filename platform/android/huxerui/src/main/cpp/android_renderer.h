@@ -30,6 +30,7 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PopClipCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PushTransformCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PopTransformCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PlacePlatformViewCommand& command);
 
   jmethodID draw_rect_ = nullptr;
   jmethodID draw_text_ = nullptr;

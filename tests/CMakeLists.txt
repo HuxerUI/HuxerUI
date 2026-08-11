@@ -13,6 +13,7 @@ add_executable(huxerui_tests
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
+        unit/platform_payload.cpp
         unit/resource.cpp
         unit/semantics.cpp
         unit/text.cpp
@@ -29,6 +30,7 @@ add_executable(huxerui_tests
         runtime/layout.cpp
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
+        runtime/platform_view.cpp
         runtime/presentation.cpp
         runtime/presentation_semantics.cpp
         runtime/render_scene.cpp
@@ -44,6 +46,7 @@ add_executable(huxerui_tests
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
+            platform/macos_platform_view.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
     )
@@ -110,6 +113,8 @@ set(HUXERUI_PUBLIC_HEADERS
         modifier.h
         navigation.h
         paint.h
+        platform_module.h
+        platform_view.h
         presentation.h
         render_scene.h
         resource.h
@@ -125,12 +130,16 @@ set(HUXERUI_PUBLIC_HEADERS
         view.h
         virtual_layout.h
         window.h
+        macos/platform_view.h
 )
 
 set(HUXERUI_HEADER_TEST_SOURCES)
 foreach (HUXERUI_PUBLIC_HEADER IN LISTS HUXERUI_PUBLIC_HEADERS)
     string(REPLACE "." "_" HUXERUI_HEADER_TEST_NAME
             "${HUXERUI_PUBLIC_HEADER}"
+    )
+    string(REPLACE "/" "_" HUXERUI_HEADER_TEST_NAME
+            "${HUXERUI_HEADER_TEST_NAME}"
     )
     set(HUXERUI_HEADER_TEST_SOURCE
             "${CMAKE_CURRENT_BINARY_DIR}/header_compile/${HUXERUI_HEADER_TEST_NAME}.cpp"

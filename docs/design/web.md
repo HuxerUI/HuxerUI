@@ -173,15 +173,21 @@ The initial locale derives from `navigator.language` and is normalized through t
 
 DOM-backed PlatformView remains proposed, but its composition contract follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
-The WebPlatformAdapter consumes the shared internal CompositionPlan before drawing and retains compatible Canvas elements and DOM objects across frames.
+The WebPlatformAdapter will consume the shared internal `RenderComposition` before drawing and retain compatible Canvas elements and DOM objects across frames.
+
+Web factories register explicitly under the same stable UTF-8 type strings as native platforms.
+The JavaScript bridge maps `PlatformPayload` null, boolean, signed integer, double, UTF-8 string, bytes, list, and object values to null, boolean, `BigInt`, Number, string, `Uint8Array`, Array, and a prototype-free string-keyed object without JSON serialization.
+This preserves the integer and double distinction and never silently converts a 64-bit integer to an imprecise Number.
+Factory results and events return through the owning instance identity, are queued outside the initiating JavaScript call stack, and are decoded by the same module-owned method and Event Key codecs used on native platforms.
+Functions, DOM nodes, promises, and JavaScript object identity never enter `PlatformPayload`.
 
 A PlatformView-capable session owns one isolated CSS stacking context around the browser-supplied Canvas.
 The original Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and PlatformView elements become absolutely positioned ordered siblings in the same composition root.
-DOM child order represents CompositionPlan order; application z-index values do not participate in or escape that root.
+DOM child order represents `RenderComposition` order; application z-index values do not participate in or escape that root.
 Every Canvas slice shares the logical viewport, backing-store scale, clipping root, and resize transaction, while its renderer replays only the retained scene content assigned to that slice.
 A scene without PlatformViews keeps the current single-Canvas structure and does not allocate a wrapper surface per RenderNode.
 
-Composition-root and DOM hierarchy changes occur while applying a committed plan, never during Canvas command replay.
+Composition-root and DOM hierarchy changes occur while applying a committed `RenderComposition`, never during Canvas command replay.
 Disposal removes adapter-owned slices and PlatformViews, releases native listeners and accessibility bridges, and leaves no hidden interactive DOM objects behind.
 Moving or resizing a PlatformView updates its CSS geometry and old and new damage, while unchanged slices retain their Canvas and rendering caches.
 
@@ -207,7 +213,7 @@ It remains visually unobtrusive, participates in browser focus and assistive tec
 Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
 DOM-backed PlatformView is a separate future leaf-node capability.
-Its visual DOM element occupies the CompositionPlan position, while its semantic anchor occupies the corresponding SemanticFrame position and exposes the native accessible subtree without duplicating it in semantic DOM.
+Its visual DOM element occupies the `RenderComposition` position, while its semantic anchor occupies the corresponding SemanticFrame position and exposes the native accessible subtree without duplicating it in semantic DOM.
 It must not use the semantics overlay as a general visual DOM container.
 
 ## Threading

@@ -414,13 +414,15 @@ A platform adapter retains the shared pointer for as long as native queries may 
 A PlatformView contributes one semantic anchor at its mounted position rather than converting its native accessibility descendants into SemanticNodes.
 The PlatformView phase adds an optional Runtime-owned platform-view identity to anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
 The anchor carries the same stable PlatformView identity as `PlacePlatformViewCommand`, while its parent and sibling position come from ordinary semantic resolution.
-Visual CompositionPlan order and accessibility traversal are derived from the same committed mounted tree but remain distinct outputs: paint-only decoration does not become accessible merely because it occupies a later render slice.
+Visual `RenderComposition` order and accessibility traversal are derived from the same committed mounted tree but remain distinct outputs: paint-only decoration does not become accessible merely because it occupies a later render slice.
 
 The platform accessibility adapter resolves the anchor identity against the PlatformView instance from the same committed frame and exposes that native object's accessibility root at the anchor position.
 The anchor is a structural substitution point rather than an additional generic accessible object, so assistive technology encounters the native root once.
 It suppresses semantic descendants that would duplicate the native subtree, but HuxerUI semantic siblings before and after the anchor remain in their declared order.
 The bridge does not copy native labels, actions, selection, or editable content into shared Runtime state.
 Native accessibility queries and actions inside the subtree remain owned by the native object, while traversal into or out of the subtree returns through the HuxerUI anchor.
+PlatformPayload events notify typed application EventBindings and do not substitute for native accessibility queries or actions.
+Conversely, an accessibility action inside the native subtree is not mirrored as a platform-module event unless the native component independently emits that documented application event.
 
 Applying a new frame updates composition and semantic bridge references before issuing accessibility structure notifications.
 Replacement or removal first makes the anchor unavailable to new queries, then invalidates retained native accessibility wrappers, and only then destroys the native PlatformView.

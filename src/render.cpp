@@ -450,6 +450,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
       );
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);
+    } else if (node.kind == NodeKind::PlatformView) {
+      PlatformViewPaintAccess::Paint(node, content);
     } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
       const Point content_origin{node.resolved_padding.left, node.resolved_padding.top};
       if (content_origin != Point{}) {

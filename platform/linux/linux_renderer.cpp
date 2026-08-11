@@ -2348,6 +2348,10 @@ private:
     cairo_restore(cr_);
   }
 
+  void RenderCommand(const PlacePlatformViewCommand&) {
+    throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
+  }
+
   void
   DrawParagraph(const Rect& rect, std::string_view text, const TextStyle& style, const TextLayoutOptions& options) {
     if (text.empty()) {

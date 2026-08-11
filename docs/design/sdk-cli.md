@@ -14,7 +14,7 @@ The current implementation provides:
 - Android and iOS device discovery with deterministic device selection.
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, and ordered resource packages.
 
-Android binary distribution, `package` and `clean` commands, native module metadata projection, PlatformView, ExternalTexture, iOS device distribution, OHOS, and Linux remain proposed.
+Android binary distribution, `package` and `clean` commands, native module metadata projection, nonvisual platform-module interoperability, native PlatformView hosting outside macOS, ExternalTexture, iOS device distribution, OHOS, and Linux remain proposed. The shared `PlatformPayload`, low-level PlatformView leaf, placement command, visual registry and event route, `RenderComposition` derivation, and macOS NSView hosting are implemented.
 The current Android and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 
@@ -484,24 +484,33 @@ A future integration projection must reject a required permission whose platform
 
 Modules use three runtime integration forms:
 
-- Permission, Audio, Camera control, and similar nonvisual features install typed Root Services through RootHook.
-- WebView, map, document preview, and native SDK controls register PlatformView factories.
+- Permission, Audio, Camera control, and similar nonvisual features install typed Root Services backed by registered platform module instances.
+- WebView, map, document preview, and native SDK controls register PlatformView factories by stable string type.
 - Camera preview, video decode, and high-frequency visual streams register platform-owned ExternalTexture instances and return platform-neutral handles to shared code.
 
 One module may combine the forms.
 Camera normally provides a Camera service plus ExternalTexture preview, while Audio provides only a service and WebView provides a PlatformView factory.
 The application retrieves services through their typed `UseXxx()` helpers; there is no generic module-service lookup.
 
-PlatformView remains a real leaf View with Runtime-owned identity, reconciliation, measurement, layout, visibility, hit-testing boundary, focus, accessibility anchor, and lifecycle.
-Its retained PaintSequence records `PlacePlatformViewCommand`, and the platform adapter consumes the internal CompositionPlan derived from final RenderScene paint order.
-HuxerUI render slices and native PlatformViews therefore alternate in the same order as ordinary content, children, foreground painting, and LayerStack entries.
-There is no separate PlatformViewFrame, global PlatformView plane, generated z-order metadata, or application-selectable behind or above mode.
+PlatformView and nonvisual module instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
+PlatformPayload is the only dynamic cross-language representation and is restricted to null, scalar, bytes, list, and string-keyed object data.
+Concrete module headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
+Callbacks, arbitrary C++ objects, native handles, and media streams never enter the payload.
 
-The module's explicitly installed RootHook supplies its typed factories to the current window host together with any services the module owns.
-Factory registration identifies how to create and update the current platform's native object; it does not choose a composition strategy visible to application code.
-The platform adapter must preserve exact ordering, rectangular clipping, focus, input, and accessibility bridging through its native composition mechanism.
-A factory that cannot satisfy the contract on the current platform fails with a diagnostic naming the module, PlatformView type, platform, and missing composition capability.
-It cannot silently move the native object above or below the complete HuxerUI scene.
+Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
+The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during module installation.
+Registration does not use a generated header, hidden `HUXERUI_APP` rewriting, editable metadata bundle, or process-global static initializer.
+The module's documented Install function remains an ordinary RootHook selected explicitly by the application.
+
+`RootContext::Modules()` currently exposes the per-surface visual registry to explicit platform module installers.
+The nonvisual phase extends that capability to open a registered instance and provide its public typed service through `root.Provide()`.
+The service translates typed methods and events to Create, Call, Result, Event, and Dispose messages, owns pending requests and subscriptions, and closes its platform instance during reverse Root Service teardown.
+Applications never call `Modules()` or use string method names directly.
+
+The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, future nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
+SDK projection connects the module's explicitly installed RootHook to the current platform registrations and native dependencies without generating another runtime API or composition mode.
+A projected PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the native object to a global foreground or background plane.
+The future nonvisual projection exposes only module-owned typed Root Services, while PlatformPayload codecs and string method names remain behind those services.
 
 Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.
@@ -511,8 +520,8 @@ A module's platform service registers its producer with the current renderer, re
 Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
 Frame notifications advance a texture revision and request presentation without writing application State or executing a per-frame language bridge callback.
 
-Modules and platform shells provide these typed factories, registrars, and services without introducing Runtime subclasses or native types into shared public headers.
-Future native integration must report a missing current-platform implementation, duplicate PlatformView type, unsupported exact-composition capability, incompatible HuxerUI version, or missing permission policy as a configuration error with the owning module and application target in the diagnostic.
+Modules and platform shells provide these factories, registrations, payload codecs, and typed services without introducing Runtime subclasses or native types into shared public headers.
+Future native integration must report a missing current-platform implementation, duplicate registered type, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, incompatible HuxerUI version, or missing permission policy with the owning module and application target in the diagnostic.
 The implemented CMake integration already rejects invalid URL schemes, absent revisions, ambiguous origins, duplicate module use, and missing requested targets.
 
 ## Future commands and platforms

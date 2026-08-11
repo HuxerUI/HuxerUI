@@ -996,7 +996,11 @@ When input enters a native view:
 
 When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
-The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformAdapter remains authoritative for native focus transfer and event dispatch. This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
+Focus transfer resolves the PlatformView identity from the current committed `RenderComposition`; a delayed native focus notification for an obsolete identity is ignored.
+The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for native focus transfer and native input dispatch.
+These focus and IME lifecycle messages are internal adapter coordination rather than PlatformPayload module events.
+A module may emit a typed application event describing a native focus change, but that event neither starts nor ends a HuxerUI text-input session.
+This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
 

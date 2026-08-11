@@ -14,6 +14,7 @@
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/layer.h>
+#include <huxerui/platform_module.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/semantics.h>
@@ -61,7 +62,13 @@ struct ProcessMetrics {
 
 class PlatformAdapter : public TextMeasurer {
 public:
-  virtual ~PlatformAdapter() = default;
+  PlatformAdapter();
+  virtual ~PlatformAdapter();
+
+  PlatformAdapter(const PlatformAdapter&) = delete;
+  PlatformAdapter& operator=(const PlatformAdapter&) = delete;
+  PlatformAdapter(PlatformAdapter&&) = delete;
+  PlatformAdapter& operator=(PlatformAdapter&&) = delete;
 
   virtual void RequestFrameAt(double deadline) = 0;
   virtual double Now() const noexcept = 0;
@@ -91,6 +98,16 @@ public:
     static_cast<void>(status_bar);
     static_cast<void>(navigation_bar);
   }
+
+protected:
+  PlatformModules& Modules() noexcept {
+    return *platform_modules_;
+  }
+
+private:
+  std::unique_ptr<PlatformModules> platform_modules_;
+
+  friend class Runtime;
 };
 
 namespace detail {
@@ -149,6 +166,8 @@ private:
   void RequestFrame();
   void RequestFrameAfter(double delay_seconds);
   void NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source);
+  [[nodiscard]] std::optional<std::uint64_t> HitTestPlatformView(Point position) const;
+  bool DispatchPlatformViewEvent(std::uint64_t identity, std::string_view name, const PlatformPayload& payload);
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);

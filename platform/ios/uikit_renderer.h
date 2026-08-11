@@ -52,6 +52,7 @@ private:
   void RenderCommand(CGContextRef context, const PopClipCommand& command);
   void RenderCommand(CGContextRef context, const PushTransformCommand& command);
   void RenderCommand(CGContextRef context, const PopTransformCommand& command);
+  void RenderCommand(CGContextRef context, const PlacePlatformViewCommand& command);
 
   std::unique_ptr<State> state_;
 };

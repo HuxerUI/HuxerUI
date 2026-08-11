@@ -596,4 +596,17 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
   environment->CallVoidMethod(view, pop_transform_, canvas);
 }
 
+void AndroidRenderer::RenderCommand(
+    JNIEnv* environment, jobject view, jobject canvas, const PlacePlatformViewCommand& command
+) {
+  static_cast<void>(view);
+  static_cast<void>(canvas);
+  static_cast<void>(command);
+  jclass exception = environment->FindClass("java/lang/UnsupportedOperationException");
+  if (exception != nullptr) {
+    environment->ThrowNew(exception, "HuxerUI Android adapter does not support PlatformView composition yet");
+    environment->DeleteLocalRef(exception);
+  }
+}
+
 } // namespace huxerui::detail

@@ -25,6 +25,7 @@
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
 #include <huxerui/indication.h>
+#include <huxerui/platform_view.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
 #include <huxerui/view.h>
@@ -375,6 +376,7 @@ enum class NodeKind {
   ProgressBar,
   Slider,
   Image,
+  PlatformView,
   Canvas,
   Spacer,
   Scope,
@@ -501,6 +503,19 @@ struct ImageProperties {
   bool operator==(const ImageProperties&) const = default;
 };
 
+struct PlatformViewDeclaration {
+  std::string type;
+  PlatformPayload properties;
+  std::vector<PlatformEventDescriptor> events;
+};
+
+inline bool PlatformViewPropertiesEqual(
+    const std::shared_ptr<const PlatformViewDeclaration>& left,
+    const std::shared_ptr<const PlatformViewDeclaration>& right
+) {
+  return left == right || (left && right && left->type == right->type && left->properties == right->properties);
+}
+
 // ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
 // fields unrelated to that kind stay at their defaults and are ignored by the corresponding Runtime stages.
 struct ViewSpec {
@@ -517,6 +532,7 @@ struct ViewSpec {
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
   ImageProperties image_properties;
+  std::shared_ptr<const PlatformViewDeclaration> platform_view;
   const LayoutDescriptor* layout_descriptor = nullptr;
   const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   VirtualItemSource virtual_items;
@@ -643,6 +659,8 @@ struct MountedNode final : public huxerui::MountedNode {
   std::function<View()> scope_factory;
   CanvasPainter canvas_painter;
   ImageProperties image_properties;
+  std::shared_ptr<const PlatformViewDeclaration> platform_view;
+  std::uint64_t platform_view_properties_revision = 0;
   const LayoutDescriptor* layout_descriptor = nullptr;
   const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
@@ -775,6 +793,36 @@ protected:
     return layout_cache[key_value];
   }
 };
+
+struct PlatformViewPaintAccess {
+  static void Paint(const MountedNode& node, PaintContext& context);
+};
+
+struct RenderSlice {
+  std::optional<std::uint64_t> preceding_platform_view;
+  std::optional<std::uint64_t> following_platform_view;
+  std::size_t first_command = 0;
+  std::size_t command_count = 0;
+
+  bool operator==(const RenderSlice&) const = default;
+};
+
+struct PlatformViewPlacement {
+  const PlacePlatformViewCommand* command = nullptr;
+  Rect world_bounds;
+  std::optional<Rect> clip;
+  bool visible = false;
+
+  bool operator==(const PlatformViewPlacement&) const = default;
+};
+
+using RenderCompositionLayer = std::variant<RenderSlice, PlatformViewPlacement>;
+
+struct RenderComposition {
+  std::vector<RenderCompositionLayer> layers;
+};
+
+RenderComposition BuildRenderComposition(const RenderScene& scene);
 
 struct RenderNodeSnapshot {
   std::uint64_t content_revision = 0;
@@ -1168,6 +1216,16 @@ struct RuntimeAccess {
 
   static const MountedNode* RootNode(const Runtime& runtime) noexcept {
     return runtime.RootNode();
+  }
+
+  static std::optional<std::uint64_t> HitTestPlatformView(const Runtime& runtime, Point position) {
+    return runtime.HitTestPlatformView(position);
+  }
+
+  static bool DispatchPlatformViewEvent(
+      Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+  ) {
+    return runtime.DispatchPlatformViewEvent(identity, name, payload);
   }
 };
 

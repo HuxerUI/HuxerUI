@@ -1378,6 +1378,12 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const PopTransformComman
   CGContextRestoreGState(context);
 }
 
+void UIKitRenderer::RenderCommand(CGContextRef context, const PlacePlatformViewCommand& command) {
+  static_cast<void>(context);
+  static_cast<void>(command);
+  throw std::logic_error("HuxerUI iOS adapter does not support PlatformView composition yet");
+}
+
 void UIKitRenderer::Draw(CGContextRef context, CGRect dirty_rect, const RenderFrame* frame) {
   CGContextSaveGState(context);
   CGContextClipToRect(context, dirty_rect);

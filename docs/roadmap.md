@@ -21,8 +21,8 @@ SDK, native integration, and distribution work:
 
 - Signed HuxerUI Android releases on Maven Central
 - CLI package and native artifact collection
-- Typed platform modules with explicit application-installed RootHooks and native dependency projection
-- PlatformView lifecycle, reconciliation, PlacePlatformViewCommand scene slicing, exact host composition, focus, and accessibility bridging
+- Typed platform modules with explicit application-installed RootHooks, `PlatformPayload` calls, results, events, and native dependency projection
+- String-registered PlatformView lifecycle, reconciliation, `PlacePlatformViewCommand` scene slicing, exact host composition, focus, and accessibility bridging
 - Versioned SDK distribution and signing support
 - iOS archive export, distribution signing, embeddable UIView integration, and accessibility
 - OHOS backend
