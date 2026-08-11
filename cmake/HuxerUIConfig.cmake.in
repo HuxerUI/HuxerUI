@@ -8,5 +8,6 @@ set_and_check(HUXERUI_BUILTIN_RESOURCE_PACKAGE
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIImportedTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUITargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
 
 check_required_components(HuxerUI)

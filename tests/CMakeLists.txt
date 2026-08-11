@@ -213,6 +213,14 @@ add_test(NAME HuxerUIResourceMergeTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/resource_merge.cmake"
 )
 
+add_test(NAME HuxerUIModuleValidationTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/module_validation.cmake"
+)
+
 add_test(NAME HuxerUIAndroidPlanTests
         COMMAND "${CMAKE_COMMAND}"
                 "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
@@ -261,6 +269,32 @@ if (TARGET huxerui_cli AND (WIN32 OR APPLE))
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/installed_consumer.cmake"
     )
 endif ()
+
+add_executable(huxerui_module_tests
+        tests_main.cpp
+        runtime/modules.cpp
+)
+
+target_include_directories(huxerui_module_tests PRIVATE
+        "${HUXERUI_PROJECT_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+target_link_libraries(huxerui_module_tests PRIVATE
+        HuxerUI3p::Catch2
+        ${HUXERUI_TEST_LIBRARY}
+)
+huxerui_use_module(huxerui_module_tests
+        TARGET HuxerUI::test_module
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/modules/root_service"
+)
+huxerui_add_resources(huxerui_module_tests
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/modules/application_resources"
+        NAMESPACE huxerui_test_module
+)
+target_compile_definitions(huxerui_module_tests PRIVATE
+        "HUXERUI_MODULE_TEST_RESOURCE_PACKAGE=\"${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/huxerui_module_tests/package\""
+)
+add_test(NAME HuxerUIModuleTests COMMAND huxerui_module_tests)
 
 add_executable(huxerui_codegen_runtime_tests
         tests_main.cpp

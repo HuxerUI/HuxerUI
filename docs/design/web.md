@@ -11,11 +11,11 @@ This document defines the implemented HuxerUI Web preview and its target contrac
 - Produce an ES module and WebAssembly application that can be mounted into a browser-owned Canvas.
 - Preserve logical coordinates, retained PaintSequences, Runtime damage, controlled text editing, typed resources, and platform-owned native services.
 - Support mouse, touch, pen, wheel, keyboard, browser IME, high-density displays, resizing, and asynchronous image decoding.
-- Leave room for future accessibility, DOM-backed NativeView, worker rendering, and alternative renderers without exposing a second public UI surface.
+- Leave room for future accessibility, DOM-backed PlatformView, worker rendering, and alternative renderers without exposing a second public UI surface.
 
 ## Non-goals
 
-The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, PWA packaging, or DOM-backed NativeView.
+The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, PWA packaging, or DOM-backed PlatformView.
 
 The initial backend targets a Canvas-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
 
@@ -181,7 +181,7 @@ Semantic DOM is not a second visual renderer.
 It remains visually unobtrusive, participates in browser focus and assistive technology, forwards typed semantic actions to Runtime, maintains live regions and collection metadata, and follows committed order, visibility, transforms, and clipping where geometry is exposed.
 Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
-DOM-backed NativeView is a separate future leaf-node capability. It must follow the NativeView lifecycle, composition, clipping, focus, input, and accessibility contract rather than using the semantics overlay as a general DOM container.
+DOM-backed PlatformView is a separate future leaf-node capability. It must follow the PlatformView lifecycle, composition, clipping, focus, input, and accessibility contract rather than using the semantics overlay as a general DOM container.
 
 ## Threading
 
@@ -221,13 +221,13 @@ The second preview milestone added Pointer Events, wheel, keyboard, WebTextLayou
 
 The next milestone hardens disposal, failures, locale and display changes, browser integration tests, release-size settings, and SDK or CLI serving and packaging.
 
-The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, DOM-backed NativeView, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
+The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, DOM-backed PlatformView, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
 
 ## Invariants
 
 - Web adds a PlatformAdapter and renderer, not another Runtime or component implementation.
 - Ordinary Views render through RenderScene and Canvas rather than DOM.
-- DOM use is limited to browser services, text measurement, text input, semantics, and future NativeView.
+- DOM use is limited to browser services, text measurement, text input, semantics, and future PlatformView.
 - Runtime logical coordinates remain CSS-pixel coordinates; display scale is applied at the platform boundary.
 - Resources are ready and synchronously readable before Runtime starts.
 - Browser text input emits shared TextInputCommandBatch values and never owns authoritative TextField state.

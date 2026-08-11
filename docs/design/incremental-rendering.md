@@ -23,7 +23,7 @@ It intentionally removes the legacy absolute-frame and flat-DisplayList runtime 
 - Renderer-specific objects in shared Runtime state.
 - A general dependency graph in the first implementation.
 - GPU layer promotion, occlusion culling, or partial swap-chain submission in the first implementation.
-- Encoding future `NativeView` or external-surface behavior before its composition rules are defined.
+- Encoding future `PlatformView` or external-surface behavior before its composition rules are defined.
 
 ## Implemented foundation
 

@@ -24,8 +24,8 @@ The first implementation does not provide OCR, pixel-derived names, a DOM render
 
 It does not expose raw ARIA attributes, Android class names, Apple accessibility traits, UI Automation control types, or AT-SPI interface names.
 
-NativeView accessibility is a separate leaf-node integration.
-A NativeView supplies or bridges its native subtree and suppresses an equivalent HuxerUI semantic subtree for that leaf.
+PlatformView accessibility is a separate leaf-node integration.
+A PlatformView supplies or bridges its native subtree and suppresses an equivalent HuxerUI semantic subtree for that leaf.
 
 ## Ownership
 

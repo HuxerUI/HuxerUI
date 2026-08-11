@@ -8,6 +8,125 @@ function(_huxerui_escape_json input output)
     set(${output} "${value}" PARENT_SCOPE)
 endfunction()
 
+function(_huxerui_configure_ios_app_core target_name)
+    get_property(HUXERUI_IOS_APP_FRAMEWORK_TARGET
+            TARGET ${target_name}
+            PROPERTY HUXERUI_APP_FRAMEWORK_TARGET
+    )
+    get_property(HUXERUI_IOS_MODULE_TARGETS
+            TARGET ${target_name}
+            PROPERTY HUXERUI_MODULES
+    )
+    find_program(HUXERUI_IOS_LIBTOOL libtool REQUIRED)
+    set(HUXERUI_IOS_CORE_DIRECTORY
+            "${CMAKE_BINARY_DIR}/huxerui-ios/${target_name}"
+    )
+    set(HUXERUI_IOS_CORE_ARCHIVE
+            "${HUXERUI_IOS_CORE_DIRECTORY}/lib${target_name}_huxerui.a"
+    )
+    set(HUXERUI_IOS_LINK_OPTIONS_FILE
+            "${HUXERUI_IOS_CORE_DIRECTORY}/link.rsp"
+    )
+    get_target_property(HUXERUI_IOS_LINK_LIBRARIES
+            ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
+            INTERFACE_LINK_LIBRARIES
+    )
+    get_target_property(HUXERUI_IOS_LINK_OPTIONS
+            ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
+            INTERFACE_LINK_OPTIONS
+    )
+    if (NOT HUXERUI_IOS_LINK_LIBRARIES
+            OR HUXERUI_IOS_LINK_LIBRARIES MATCHES "-NOTFOUND$")
+        message(FATAL_ERROR
+                "huxerui_add_app() requires iOS platform link arguments"
+        )
+    endif ()
+    if (HUXERUI_IOS_LINK_OPTIONS MATCHES "-NOTFOUND$")
+        set(HUXERUI_IOS_LINK_OPTIONS)
+    endif ()
+    set(HUXERUI_IOS_LINK_OPTIONS_CONTENT
+            "-force_load\n\"${HUXERUI_IOS_CORE_ARCHIVE}\"\n"
+    )
+    foreach (HUXERUI_IOS_LINK_ARGUMENT IN LISTS
+            HUXERUI_IOS_LINK_LIBRARIES
+            HUXERUI_IOS_LINK_OPTIONS
+    )
+        string(APPEND HUXERUI_IOS_LINK_OPTIONS_CONTENT
+                "${HUXERUI_IOS_LINK_ARGUMENT}\n"
+        )
+    endforeach ()
+    file(MAKE_DIRECTORY "${HUXERUI_IOS_CORE_DIRECTORY}")
+    file(WRITE "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
+            "${HUXERUI_IOS_LINK_OPTIONS_CONTENT}"
+    )
+
+    set(HUXERUI_IOS_CORE_INPUTS
+            "$<TARGET_FILE:${target_name}>"
+            "$<TARGET_FILE:${HUXERUI_IOS_APP_FRAMEWORK_TARGET}>"
+    )
+    set(HUXERUI_IOS_CORE_DEPENDENCIES
+            ${target_name}
+            ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
+    )
+    foreach (HUXERUI_IOS_MODULE_TARGET IN LISTS HUXERUI_IOS_MODULE_TARGETS)
+        list(APPEND HUXERUI_IOS_CORE_INPUTS
+                "$<TARGET_FILE:${HUXERUI_IOS_MODULE_TARGET}>"
+        )
+        list(APPEND HUXERUI_IOS_CORE_DEPENDENCIES
+                ${HUXERUI_IOS_MODULE_TARGET}
+        )
+    endforeach ()
+
+    add_custom_command(
+            OUTPUT "${HUXERUI_IOS_CORE_ARCHIVE}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${HUXERUI_IOS_CORE_DIRECTORY}"
+            COMMAND "${HUXERUI_IOS_LIBTOOL}" -static
+                    -o "${HUXERUI_IOS_CORE_ARCHIVE}"
+                    ${HUXERUI_IOS_CORE_INPUTS}
+            DEPENDS ${HUXERUI_IOS_CORE_DEPENDENCIES}
+            COMMENT "Linking HuxerUI iOS application core ${target_name}"
+            VERBATIM
+    )
+    add_custom_target(${target_name}_huxerui_ios_core
+            DEPENDS "${HUXERUI_IOS_CORE_ARCHIVE}"
+    )
+endfunction()
+
+function(_huxerui_configure_scheduled_ios_app_cores)
+    get_property(HUXERUI_IOS_APP_TARGETS
+            DIRECTORY
+            PROPERTY HUXERUI_IOS_APP_TARGETS
+    )
+    foreach (HUXERUI_IOS_APP_TARGET IN LISTS HUXERUI_IOS_APP_TARGETS)
+        _huxerui_configure_ios_app_core(${HUXERUI_IOS_APP_TARGET})
+    endforeach ()
+endfunction()
+
+function(_huxerui_schedule_ios_app_core target_name)
+    get_target_property(HUXERUI_IOS_APP_SOURCE_DIRECTORY
+            ${target_name}
+            SOURCE_DIR
+    )
+    set_property(DIRECTORY "${HUXERUI_IOS_APP_SOURCE_DIRECTORY}" APPEND PROPERTY
+            HUXERUI_IOS_APP_TARGETS
+            "${target_name}"
+    )
+    get_property(HUXERUI_IOS_APP_CALLBACK_SCHEDULED
+            DIRECTORY "${HUXERUI_IOS_APP_SOURCE_DIRECTORY}"
+            PROPERTY HUXERUI_IOS_APP_CALLBACK_SCHEDULED
+    )
+    if (NOT HUXERUI_IOS_APP_CALLBACK_SCHEDULED)
+        set_property(DIRECTORY "${HUXERUI_IOS_APP_SOURCE_DIRECTORY}" PROPERTY
+                HUXERUI_IOS_APP_CALLBACK_SCHEDULED TRUE
+        )
+        cmake_language(DEFER
+                DIRECTORY "${HUXERUI_IOS_APP_SOURCE_DIRECTORY}"
+                CALL _huxerui_configure_scheduled_ios_app_cores
+        )
+    endif ()
+endfunction()
+
 function(huxerui_add_app target_name)
     cmake_parse_arguments(HUXERUI_APP
             ""
@@ -96,65 +215,11 @@ function(huxerui_add_app target_name)
     endif ()
 
     if (IOS)
-        find_program(HUXERUI_IOS_LIBTOOL libtool REQUIRED)
-        set(HUXERUI_IOS_CORE_DIRECTORY
-                "${CMAKE_BINARY_DIR}/huxerui-ios/${target_name}"
+        set_property(TARGET ${target_name} PROPERTY
+                HUXERUI_APP_FRAMEWORK_TARGET
+                "${HUXERUI_APP_FRAMEWORK_TARGET}"
         )
-        set(HUXERUI_IOS_CORE_ARCHIVE
-                "${HUXERUI_IOS_CORE_DIRECTORY}/lib${target_name}_huxerui.a"
-        )
-        set(HUXERUI_IOS_LINK_OPTIONS_FILE
-                "${HUXERUI_IOS_CORE_DIRECTORY}/link.rsp"
-        )
-        get_target_property(HUXERUI_IOS_LINK_LIBRARIES
-                ${HUXERUI_APP_FRAMEWORK_TARGET}
-                INTERFACE_LINK_LIBRARIES
-        )
-        get_target_property(HUXERUI_IOS_LINK_OPTIONS
-                ${HUXERUI_APP_FRAMEWORK_TARGET}
-                INTERFACE_LINK_OPTIONS
-        )
-        if (NOT HUXERUI_IOS_LINK_LIBRARIES
-                OR HUXERUI_IOS_LINK_LIBRARIES MATCHES "-NOTFOUND$")
-            message(FATAL_ERROR
-                    "huxerui_add_app() requires iOS platform link arguments"
-            )
-        endif ()
-        if (HUXERUI_IOS_LINK_OPTIONS MATCHES "-NOTFOUND$")
-            set(HUXERUI_IOS_LINK_OPTIONS)
-        endif ()
-        set(HUXERUI_IOS_LINK_OPTIONS_CONTENT
-                "-force_load\n\"${HUXERUI_IOS_CORE_ARCHIVE}\"\n"
-        )
-        foreach (HUXERUI_IOS_LINK_ARGUMENT IN LISTS
-                HUXERUI_IOS_LINK_LIBRARIES
-                HUXERUI_IOS_LINK_OPTIONS
-        )
-            string(APPEND HUXERUI_IOS_LINK_OPTIONS_CONTENT
-                    "${HUXERUI_IOS_LINK_ARGUMENT}\n"
-            )
-        endforeach ()
-        file(MAKE_DIRECTORY "${HUXERUI_IOS_CORE_DIRECTORY}")
-        file(WRITE "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
-                "${HUXERUI_IOS_LINK_OPTIONS_CONTENT}"
-        )
-        add_custom_command(
-                OUTPUT "${HUXERUI_IOS_CORE_ARCHIVE}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${HUXERUI_IOS_CORE_DIRECTORY}"
-                COMMAND "${HUXERUI_IOS_LIBTOOL}" -static
-                        -o "${HUXERUI_IOS_CORE_ARCHIVE}"
-                        "$<TARGET_FILE:${target_name}>"
-                        "$<TARGET_FILE:${HUXERUI_APP_FRAMEWORK_TARGET}>"
-                DEPENDS
-                        ${target_name}
-                        ${HUXERUI_APP_FRAMEWORK_TARGET}
-                COMMENT "Linking HuxerUI iOS application core ${target_name}"
-                VERBATIM
-        )
-        add_custom_target(${target_name}_huxerui_ios_core
-                DEPENDS "${HUXERUI_IOS_CORE_ARCHIVE}"
-        )
+        _huxerui_schedule_ios_app_core(${target_name})
         return()
     endif ()
 

@@ -57,6 +57,7 @@ set(HUXERUI_STATIC_LIB_NAME "${PROJECT_NAME}_static")
 include(cmake/HuxerUITargets.cmake)
 huxerui_configure_targets()
 include(cmake/HuxerUIApp.cmake)
+include(cmake/HuxerUIModules.cmake)
 
 if (HUXERUI_BUILD_CLI)
     add_subdirectory(tools/huxerui_cli)
@@ -121,6 +122,7 @@ install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIAndroidPlan.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIModules.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUITargets.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"

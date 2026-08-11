@@ -984,7 +984,7 @@ The first Windows implementation uses IMM32:
 
 TSF can replace or augment the adapter later without changing Runtime, TextInputClient, TextField, or SweetEditor integration.
 
-## NativeView focus
+## PlatformView focus
 
 An embedded native control and a HuxerUI TextInputClient cannot own the same host input session.
 
@@ -996,7 +996,7 @@ When input enters a native view:
 
 When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
-The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformAdapter remains authoritative for native focus transfer and event dispatch. This follows the NativeView ownership model in [`sdk-cli.md`](sdk-cli.md).
+The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformAdapter remains authoritative for native focus transfer and event dispatch. This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
 
@@ -1085,7 +1085,7 @@ Runtime tests use a fake `PlatformTextInput` and cover:
 - Restored modal focus receives a new session.
 - Stale commands and context queries are rejected.
 - Unmount, disable, and read-only transitions stop input.
-- NativeView focus closes the HuxerUI session.
+- PlatformView focus closes the HuxerUI session.
 - Pointer caret placement occurs before native state synchronization.
 - External value changes request update or restart as appropriate.
 - Key events do not duplicate committed text.
@@ -1188,6 +1188,6 @@ The implementation should preserve these constraints:
 - Authoritative controlled updates are not converted into inferred edits.
 - Text geometry is based on real layout data, not average character width.
 - TextField and SweetEditor share the input protocol without sharing their state models.
-- NativeView focus transfers IME ownership instead of creating two active clients.
+- PlatformView focus transfers IME ownership instead of creating two active clients.
 - Text input protocol types remain concentrated in `text_input.h`; TextField, its events, and its style follow the ownership of existing built-in controls.
 - TextField supports reliable single-line and multiline editing without becoming a document-editor abstraction.

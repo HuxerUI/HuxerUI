@@ -22,16 +22,16 @@ SDK, native integration, and distribution work:
 - Signed HuxerUI Android releases on Maven Central
 - CLI package and native artifact collection
 - Typed platform modules and generated static registration
-- NativeView lifecycle, reconciliation, host composition, focus, and accessibility
+- PlatformView lifecycle, reconciliation, host composition, focus, and accessibility
 - Versioned SDK distribution and signing support
 - iOS archive export, distribution signing, embeddable UIView integration, and accessibility
 - OHOS backend
 - Web semantics and accessibility, browser integration tests, release packaging, and mobile IME validation following the [Web Platform Design](design/web.md)
 
-The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and NativeView expansion.
+The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and PlatformView expansion.
 App resources and Image follow the ownership, packaging, caching, and localization constraints in [App Resources, Images, and Localization Design](design/resources.md).
 Page stacks, transition ownership, Back routing, and future URL-backed paths follow the [Navigation Design](design/navigation.md).
 Accessibility proceeds from shared semantic declarations and the immutable `SemanticFrame` through component defaults before platform-specific native adapters.
-SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before NativeView modules and versioned distribution.
+SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before PlatformView modules and versioned distribution.
 
 Detailed design constraints and delivery sequences live in [`docs/design`](design/).

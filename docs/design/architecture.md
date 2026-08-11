@@ -14,6 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
+- Compile-time module acquisition and ordered resource merging are implemented. Applications install module RootHooks explicitly. PlatformView hosting, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -358,6 +359,112 @@ The semantics pipeline is a parallel Runtime output rather than a RenderScene br
 After reconciliation and final presentation geometry, Runtime resolves component declarations, NodeExtension contributions, application overrides, focus, visibility, and secure-data policy into one immutable owning `SemanticFrame`.
 `FrameCommit` publishes a shared pointer to that frame beside `RenderFrame`, allowing native accessibility objects to retain committed data without retaining MountedNode pointers.
 The complete declaration, frame, action, identity, virtualization, security, and platform mapping contract is defined in [Semantics and Accessibility Design](semantics.md).
+
+## Platform content integration
+
+Status: proposed
+
+Native modules produce three different kinds of integration and do not route them through one generic runtime registry:
+
+| Requirement | Integration |
+| --- | --- |
+| Permission, Audio, Camera control, or another nonvisual capability | Strongly typed Root Service installed through RootHook |
+| WebView, map, document preview, or another native interactive hierarchy | PlatformView factory and a real leaf View |
+| Camera preview, video decode, or another high-frequency visual stream | ExternalTexture composed by the HuxerUI renderer |
+
+The categories may coexist in one module.
+A Camera module normally installs a Camera service and returns an ExternalTexture for preview, while a WebView module installs a PlatformView factory.
+No category introduces a Runtime subclass, a public Module base class, a string command channel, or native platform types in shared public headers.
+
+### PlatformView
+
+PlatformView is a real built-in leaf View rather than a modifier.
+Runtime owns its mounted identity, compatible reconciliation, measurement, final geometry, visibility, hit-testing boundary, focus participation, semantic anchor, and unmount timing.
+The platform adapter owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or future platform object.
+
+A module exposes a concrete component such as `WebView()` and internally constructs a low-level typed PlatformView declaration.
+Its type tag identifies the registered factory, while its copyable and equality-comparable properties carry controlled configuration.
+Runtime type-erases those values internally; applications do not exchange maps, codecs, integer factory identifiers, or native handles.
+Compatible recomposition updates the existing platform instance, while a changed type tag or incompatible key replaces it.
+
+`FrameCommit` gains an immutable `PlatformViewFrame` beside RenderFrame and SemanticFrame.
+Each entry contains the stable mounted identity, type identity, property revision, axis-aligned logical bounds, accumulated rectangular clip, visibility, focus state, and deterministic composition order.
+Platform adapters diff successive frames to create, update, position, show, hide, reorder, focus, and destroy native instances.
+An offscreen or temporarily hidden instance remains mounted and preserves native state; removal from the committed tree destroys it after input and accessibility references are detached.
+
+The initial compositor uses a native PlatformView plane between the ordinary application render surface and a HuxerUI overlay surface.
+LayerStack content and framework-owned overlays such as selection handles are therefore guaranteed to cover PlatformViews.
+Ordinary application siblings must not rely on arbitrary paint interleaving across a PlatformView; content that must cover one uses the LayerStack, while media that requires unrestricted HuxerUI composition uses ExternalTexture.
+Exact interleaving may later split RenderScene into additional compositor slices without changing PlatformView identity or module APIs.
+
+Initial PlatformView presentation supports translation, axis-aligned layout, rectangular clipping, visibility, and deterministic ordering among PlatformViews.
+Arbitrary rotation, path clipping, group opacity, backdrop filters, and offscreen effects are unsupported until every platform can preserve their semantics.
+The framework rejects unsupported declarations instead of approximating them silently.
+
+Native pointer, keyboard, IME, and internal gesture handling remain inside the native hierarchy when the PlatformView is the active hit target.
+The host routes HuxerUI overlay input first, then native content, then unhandled window input back to Runtime.
+Focus traversal treats the PlatformView as one HuxerUI leaf, and platform focus changes synchronize that leaf without exposing native responder objects.
+A focused native text editor owns its native text service; Runtime suspends any HuxerUI text-input session until focus returns.
+
+The semantic tree contains one PlatformView anchor at the mounted position.
+The native accessibility adapter attaches the platform object's native accessibility root beneath that anchor and excludes duplicate HuxerUI descendants.
+Removing or replacing the PlatformView invalidates the bridge before native destruction so retained accessibility references fail safely.
+
+### ExternalTexture
+
+ExternalTexture is a copyable platform-neutral value representing one live visual source registered with the current platform surface.
+It contains shared lifetime state, stable identity, fixed logical intrinsic size, and a monotonic frame revision, but no native texture, buffer, view, or device pointer.
+Application code cannot invent an identity; a platform module creates the value through its platform-specific texture registrar.
+An ExternalTexture belongs to one PlatformAdapter surface in the initial contract, and using it with another Runtime is an error.
+
+The existing Image component accepts ExternalTexture directly and reuses ImageFit, alignment, sampling, measurement, clipping, transform, and opacity behavior:
+
+```cpp
+View CameraView(const CameraSession& camera) {
+  return Image(camera.PreviewTexture())
+      .Fit(ImageFit::Cover);
+}
+```
+
+No separate TextureView or ExternalTextureView class is added.
+Tint remains vector-only and rejects ExternalTexture at the public configuration boundary.
+Camera orientation, mirror state, crop metadata, and color conversion belong to the producer and platform renderer; a logical intrinsic-size change is a controlled Camera state change rather than an asynchronous mutation hidden from layout.
+
+Painting records a distinct `DrawExternalTextureCommand` in PaintCommand.
+The command owns an ExternalTexture value plus source and destination rectangles, sampling, and opacity.
+It remains distinct from DrawImageCommand because immutable encoded images use decode caches while an external texture resolves live content by frame revision.
+Adding the command requires explicit handling in every renderer; a backend must not silently draw an empty rectangle.
+
+Frame production does not write application State, recompose a scope, or rerecord an otherwise clean PaintSequence.
+The platform registrar accepts frame notifications from the producer thread, atomically advances the texture revision, coalesces pending work, and marshals one frame request to the platform UI thread.
+Runtime records texture dependencies while publishing PaintSequences.
+On the next BuildFrame it compares committed texture revisions, damages every transformed visible destination that references a changed texture, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
+The same texture may appear in several nodes; each visible destination participates independently in damage.
+
+ExternalTexture uses a latest-wins mailbox rather than an unbounded frame queue.
+The capture or decoder thread never waits for Runtime, intermediate frames may be dropped, and a renderer acquires the newest frame available when processing damaged content.
+If no newer frame is ready during an unrelated redraw, the registrar retains the last successfully acquired frame.
+When no committed visible command references the texture, frame notifications do not continuously wake the UI and the platform registrar reports inactivity so the producer may throttle.
+
+Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
+Apple, Android, Windows, Linux, and Web module implementations register their producer with the corresponding renderer registry.
+The shared command contains only the opaque identity and immutable drawing data.
+Each backend chooses a native zero-copy path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
+The API promises no copy through shared Runtime; it does not claim universal zero-copy on the current CoreGraphics, Android Canvas, or Cairo backends.
+
+The platform registration and all retained PaintCommands share the texture lifetime.
+Unmount first removes committed drawing references and visibility callbacks, then registration teardown releases the producer surface, cached native frame, and synchronization objects.
+Runtime destruction releases RenderScene and platform-content frames before Root Services are destroyed in reverse registration order.
+
+ExternalTexture is visual content, not a native interaction or accessibility subtree.
+Image semantics apply unless the module supplies a more specific HuxerUI semantic declaration, and controls layered over a Camera preview remain ordinary HuxerUI nodes.
+
+### Platform capability services
+
+Nonvisual modules install strongly typed services through the existing RootHook and RootContext::Provide contract.
+An application composes handles such as `UsePermissions()`, `UseAudio()`, or `UseCamera()` from the current root Environment; there is no `UseModule()` lookup or generic capability map.
+Service destructors cancel callbacks, detach platform observers, and release their native resources.
+An application-wide native engine such as Audio may be shared behind several per-window service frontends while each Runtime retains only its own typed service value.
 
 ## Animation model
 
@@ -1243,6 +1350,8 @@ The current extension points are:
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and `LayerController` |
 | Typed presentation library | A service backed by the Runtime LayerStack |
+| Native interactive hierarchy | PlatformView factory and PlatformViewFrame |
+| Live camera or video content | ExternalTexture and DrawExternalTextureCommand |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
 The semantics extension keeps the same model: a reusable `Semantics` property modifier supplies author declarations, while a semantic-capable NodeExtension may contribute dynamic properties, stable virtual semantic children, and semantic-only action handling.
@@ -1262,6 +1371,8 @@ The architecture follows these rules:
 - Pointer interaction state is stored per pointer ID.
 - Explicit style values override Theme without mutating Theme.
 - A service belongs to one window root.
+- External texture frames invalidate visible destinations without recomposition or PaintSequence recording.
+- PlatformView updates diff committed identities and property revisions instead of recreating native instances every frame.
 
 Incremental layout and retained rendering are specified separately in [Incremental Layout and Rendering Design](incremental-rendering.md).
 The implemented pipeline coordinates mounted geometry, extension painting, Runtime frame output, and platform renderers under that contract.
@@ -1279,6 +1390,9 @@ The current design does not introduce:
 - `AppFeature` or `MountedRootFeature`.
 - `RootRegistration`.
 - A public parallel ServiceRegistry.
+- A public Module base class or runtime plugin registry.
+- A native-handle variant shared across platforms.
+- Per-frame pixel callbacks through Runtime.
 - Theme class inheritance.
 - Runtime checks for Material, flat, liquid, or third-party themes.
 - Process-global Toast or Dialog singletons.

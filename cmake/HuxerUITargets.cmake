@@ -517,9 +517,15 @@ function(_huxerui_configure_resources target_name)
                 "${HUXERUI_RESOURCE_INDEX}"
         )
     elseif (APPLE AND NOT IOS)
-        set(HUXERUI_RESOURCE_STAGE_DIRECTORY
-                "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
+        get_target_property(HUXERUI_RESOURCE_TARGET_IS_BUNDLE
+                ${target_name}
+                MACOSX_BUNDLE
         )
+        if (HUXERUI_RESOURCE_TARGET_IS_BUNDLE)
+            set(HUXERUI_RESOURCE_STAGE_DIRECTORY
+                    "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
+            )
+        endif ()
     elseif (WIN32)
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
@@ -679,6 +685,14 @@ function(huxerui_add_resources target_name)
     set_property(TARGET ${target_name} APPEND PROPERTY
             HUXERUI_RESOURCE_NAMESPACES
             "${HUXERUI_RESOURCES_NAMESPACE}"
+    )
+    get_target_property(HUXERUI_RESOURCE_TARGET_BINARY_DIR
+            ${target_name}
+            BINARY_DIR
+    )
+    set_property(TARGET ${target_name} PROPERTY
+            HUXERUI_RESOURCE_PACKAGE
+            "${HUXERUI_RESOURCE_TARGET_BINARY_DIR}/huxerui-resources/${target_name}/package"
     )
     _huxerui_schedule_resources(${target_name})
 endfunction()
