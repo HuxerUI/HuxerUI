@@ -387,28 +387,86 @@ Its type tag identifies the registered factory, while its copyable and equality-
 Runtime type-erases those values internally; applications do not exchange maps, codecs, integer factory identifiers, or native handles.
 Compatible recomposition updates the existing platform instance, while a changed type tag or incompatible key replaces it.
 
-`FrameCommit` gains an immutable `PlatformViewFrame` beside RenderFrame and SemanticFrame.
-Each entry contains the stable mounted identity, type identity, property revision, axis-aligned logical bounds, accumulated rectangular clip, visibility, focus state, and deterministic composition order.
-Platform adapters diff successive frames to create, update, position, show, hide, reorder, focus, and destroy native instances.
-An offscreen or temporarily hidden instance remains mounted and preserves native state; removal from the committed tree destroys it after input and accessibility references are detached.
+PlatformView measurement remains platform-neutral and never creates or synchronously measures a native object during shared layout.
+The low-level declaration carries a controlled logical preferred size, and ordinary constraints and size modifiers produce its final axis-aligned layout bounds.
+A concrete module may require dimensions, derive them from controlled application data, or update the preferred size through a typed module event followed by ordinary recomposition.
+Native intrinsic-content changes do not mutate mounted geometry behind Runtime or start an adapter-to-layout feedback loop.
 
-The initial compositor uses a native PlatformView plane between the ordinary application render surface and a HuxerUI overlay surface.
-LayerStack content and framework-owned overlays such as selection handles are therefore guaranteed to cover PlatformViews.
-Ordinary application siblings must not rely on arbitrary paint interleaving across a PlatformView; content that must cover one uses the LayerStack, while media that requires unrestricted HuxerUI composition uses ExternalTexture.
-Exact interleaving may later split RenderScene into additional compositor slices without changing PlatformView identity or module APIs.
+PlatformView follows final RenderScene paint order rather than a separate native plane or a component-tree depth number.
+Content, children, foreground painting, sibling order, and LayerStack entries therefore determine native composition in exactly the same order as ordinary HuxerUI drawing.
+Registration does not select a behind, above, overlay, or texture composition mode, and applications do not move content into LayerStack merely to cover a PlatformView.
+
+The PlatformView leaf records one `PlacePlatformViewCommand` in its retained PaintSequence.
+The immutable command carries the stable mounted identity, type identity, immutable controlled properties and their revision, and the local axis-aligned destination rectangle.
+It carries no native handle and performs no raster drawing.
+Only the built-in PlatformView leaf records it; Canvas and public PaintContext do not expose an operation for placing an arbitrary native identity.
+One mounted identity contributes exactly one placement to a committed scene, and a duplicate identity is a framework invariant failure rather than an ordering convention.
+The surrounding RenderNode supplies the accumulated transform, clip, visibility, and paint position in the same way it does for every other PaintCommand.
+
+`FrameCommit` remains a `RenderFrame` and `SemanticFrame`; it does not gain a parallel `PlatformViewFrame`.
+Before raster presentation, a shared internal plan builder traverses the committed RenderScene for the platform adapter and derives an immutable `CompositionPlan`.
+The shared builder owns ordering and state-boundary semantics so platform renderers do not independently reinterpret command order.
+The plan is an ordered sequence of HuxerUI render slices and resolved PlatformView placements:
+
+```text
+HuxerUI slice
+PlatformView placement
+HuxerUI slice
+PlatformView placement
+HuxerUI slice
+```
+
+Encountering `PlacePlatformViewCommand` flushes preceding HuxerUI drawing into the current slice, resolves the PlatformView's world bounds and rectangular clip, emits its placement, and begins a following slice with the correct inherited scene state.
+Consecutive drawing remains in one slice, adjacent PlatformViews do not create empty slices, and a scene without PlatformViews retains the existing single-surface path.
+CompositionPlan is a platform-adapter implementation detail rather than a second public rendering tree or application-visible layer API.
+
+Each nonempty slice has stable retained identity derived from its surrounding PlatformView boundaries and scene role.
+Adapters reuse compatible slice surfaces across frames, diff PlatformView identity and property revisions, and mutate the native hierarchy only while applying a committed plan on the platform UI thread.
+Native objects are never inserted, reordered, or removed from `drawRect:`, `onDraw`, `dispatchDraw`, a paint callback, or renderer command replay.
+A changed plan creates, updates, positions, clips, shows, hides, reorders, or destroys only the affected native instances and slice surfaces.
+Moving or removing an item damages its previous and current visible bounds without rerecording unrelated clean PaintSequences.
+An offscreen or temporarily hidden PlatformView remains mounted and preserves native state; committed removal detaches input and accessibility references before native destruction.
+
+The adapter creates a native instance when its identity first enters a committed plan and applies controlled properties before making it visible.
+A property revision updates the compatible instance, while bounds-only changes update placement without replaying an unchanged property payload.
+Replacement prepares the new instance before retiring the old one, and a failed create or update leaves the previous committed plan intact.
+Runtime shutdown detaches input, focus, and accessibility bridges, destroys PlatformViews and slice surfaces, and only then releases module Root Services in their existing reverse installation order.
 
 Initial PlatformView presentation supports translation, axis-aligned layout, rectangular clipping, visibility, and deterministic ordering among PlatformViews.
-Arbitrary rotation, path clipping, group opacity, backdrop filters, and offscreen effects are unsupported until every platform can preserve their semantics.
+Arbitrary rotation, path clipping, group opacity spanning a PlatformView, backdrop filters, and offscreen effects are unsupported until every platform can preserve their semantics.
 The framework rejects unsupported declarations instead of approximating them silently.
+Exact z-order does not imply support for an otherwise unsupported visual effect.
 
 Native pointer, keyboard, IME, and internal gesture handling remain inside the native hierarchy when the PlatformView is the active hit target.
-The host routes HuxerUI overlay input first, then native content, then unhandled window input back to Runtime.
+Runtime hit testing and the committed CompositionPlan use the same front-to-back order, so visually higher HuxerUI content wins before a covered PlatformView receives native input.
+Native slice hosts remain hit-test transparent outside HuxerUI interactive regions instead of blocking the complete PlatformView rectangle below them.
+Once the PlatformView wins hit testing, its native hierarchy owns pointer sequences and gestures until completion or cancellation; the host does not duplicate those events into Runtime.
 Focus traversal treats the PlatformView as one HuxerUI leaf, and platform focus changes synchronize that leaf without exposing native responder objects.
 A focused native text editor owns its native text service; Runtime suspends any HuxerUI text-input session until focus returns.
 
 The semantic tree contains one PlatformView anchor at the mounted position.
-The native accessibility adapter attaches the platform object's native accessibility root beneath that anchor and excludes duplicate HuxerUI descendants.
+The native accessibility adapter attaches the platform object's native accessibility root beneath that anchor, preserves its position among HuxerUI semantic siblings, and excludes duplicate HuxerUI descendants.
 Removing or replacing the PlatformView invalidates the bridge before native destruction so retained accessibility references fail safely.
+
+Platform adapters preserve the same contract through platform-specific composition machinery:
+
+| Platform | Composition strategy |
+| --- | --- |
+| Android | The host becomes a ViewGroup and alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child. A `SurfaceView`, protected surface, or topmost surface is accepted only when its system composition path preserves the declared order. |
+| iOS | Transparent HuxerUI slice views or layers and native UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
+| macOS | Transparent HuxerUI slice views or layers and native NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
+| Windows | HuxerUI slices and native child HWNDs require an ordered child-window or DirectComposition strategy rather than one swap chain around all child windows. A foreign HWND or Windows 7 compatibility path that cannot preserve the order is unsupported. |
+| Linux/X11 | The adapter uses ordered child windows with suitable ARGB composition or redirects native child content through XComposite. A server without the required composition capability cannot host that PlatformView. |
+| Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
+
+These strategies are conformance requirements, not application-selectable composition modes.
+A factory whose native object cannot preserve exact ordering on the current platform fails with a diagnostic naming the PlatformView type and missing capability.
+It must not silently flatten the declaration into a global foreground or background plane, capture an interactive native hierarchy as stale pixels, or discard covering HuxerUI content.
+Modules may choose a different native implementation internally, while high-frequency visual content without native interaction remains an ExternalTexture.
+
+Shared plan tests cover content-child-foreground order, adjacent PlatformViews, nested rectangular clips, visibility, stable slice reuse, property-only updates, keyed movement, insertion, removal, replacement, and unsupported presentation effects.
+Each available platform adds an integration fixture with HuxerUI content below and above one native control, verifies frontmost pointer ownership, native focus and IME transfer, accessibility traversal through the anchor, retained native state across recomposition and temporary hiding, and deterministic teardown.
+Surface-specific tests cover Android `SurfaceView`, Windows child HWND, X11 child-window composition, and Web DOM stacking only where the host reports the required capability.
 
 ### ExternalTexture
 
@@ -1350,7 +1408,7 @@ The current extension points are:
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and `LayerController` |
 | Typed presentation library | A service backed by the Runtime LayerStack |
-| Native interactive hierarchy | PlatformView factory and PlatformViewFrame |
+| Native interactive hierarchy | PlatformView factory, PlacePlatformViewCommand, and internal CompositionPlan |
 | Live camera or video content | ExternalTexture and DrawExternalTextureCommand |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
@@ -1373,6 +1431,7 @@ The architecture follows these rules:
 - A service belongs to one window root.
 - External texture frames invalidate visible destinations without recomposition or PaintSequence recording.
 - PlatformView updates diff committed identities and property revisions instead of recreating native instances every frame.
+- PlatformView composition reuses compatible HuxerUI slice surfaces and does not split a scene that contains no PlatformViews.
 
 Incremental layout and retained rendering are specified separately in [Incremental Layout and Rendering Design](incremental-rendering.md).
 The implemented pipeline coordinates mounted geometry, extension painting, Runtime frame output, and platform renderers under that contract.

@@ -493,8 +493,18 @@ Camera normally provides a Camera service plus ExternalTexture preview, while Au
 The application retrieves services through their typed `UseXxx()` helpers; there is no generic module-service lookup.
 
 PlatformView remains a real leaf View with Runtime-owned identity, reconciliation, measurement, layout, visibility, hit-testing boundary, focus, accessibility anchor, and lifecycle.
-The platform adapter owns the actual native hierarchy and diffs committed PlatformViewFrame entries.
-LayerStack and framework overlays remain above the PlatformView plane; media requiring arbitrary HuxerUI paint interleaving uses ExternalTexture instead.
+Its retained PaintSequence records `PlacePlatformViewCommand`, and the platform adapter consumes the internal CompositionPlan derived from final RenderScene paint order.
+HuxerUI render slices and native PlatformViews therefore alternate in the same order as ordinary content, children, foreground painting, and LayerStack entries.
+There is no separate PlatformViewFrame, global PlatformView plane, generated z-order metadata, or application-selectable behind or above mode.
+
+The module's explicitly installed RootHook supplies its typed factories to the current window host together with any services the module owns.
+Factory registration identifies how to create and update the current platform's native object; it does not choose a composition strategy visible to application code.
+The platform adapter must preserve exact ordering, rectangular clipping, focus, input, and accessibility bridging through its native composition mechanism.
+A factory that cannot satisfy the contract on the current platform fails with a diagnostic naming the module, PlatformView type, platform, and missing composition capability.
+It cannot silently move the native object above or below the complete HuxerUI scene.
+
+Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
+Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.
 
 ExternalTexture is instance registration rather than a factory registry.
 A module's platform service registers its producer with the current renderer, receives a platform-neutral ExternalTexture value, and exposes that value to shared code.
@@ -502,7 +512,7 @@ Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera 
 Frame notifications advance a texture revision and request presentation without writing application State or executing a per-frame language bridge callback.
 
 Modules and platform shells provide these typed factories, registrars, and services without introducing Runtime subclasses or native types into shared public headers.
-Future native integration must report a missing current-platform implementation, duplicate PlatformView type, incompatible HuxerUI version, or missing permission policy as a configuration error with the owning module and application target in the diagnostic.
+Future native integration must report a missing current-platform implementation, duplicate PlatformView type, unsupported exact-composition capability, incompatible HuxerUI version, or missing permission policy as a configuration error with the owning module and application target in the diagnostic.
 The implemented CMake integration already rejects invalid URL schemes, absent revisions, ambiguous origins, duplicate module use, and missing requested targets.
 
 ## Future commands and platforms

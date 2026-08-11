@@ -169,6 +169,31 @@ Browser URLs are not ResourceIds. Network code fetches bytes asynchronously, con
 
 The initial locale derives from `navigator.language` and is normalized through the existing Locale model. Dynamic browser-language updates are not implemented in the preview; display-scale updates use `Runtime::UpdateResourceConfiguration()`.
 
+## PlatformView composition
+
+DOM-backed PlatformView remains proposed, but its composition contract follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
+`PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
+The WebPlatformAdapter consumes the shared internal CompositionPlan before drawing and retains compatible Canvas elements and DOM objects across frames.
+
+A PlatformView-capable session owns one isolated CSS stacking context around the browser-supplied Canvas.
+The original Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and PlatformView elements become absolutely positioned ordered siblings in the same composition root.
+DOM child order represents CompositionPlan order; application z-index values do not participate in or escape that root.
+Every Canvas slice shares the logical viewport, backing-store scale, clipping root, and resize transaction, while its renderer replays only the retained scene content assigned to that slice.
+A scene without PlatformViews keeps the current single-Canvas structure and does not allocate a wrapper surface per RenderNode.
+
+Composition-root and DOM hierarchy changes occur while applying a committed plan, never during Canvas command replay.
+Disposal removes adapter-owned slices and PlatformViews, releases native listeners and accessibility bridges, and leaves no hidden interactive DOM objects behind.
+Moving or resizing a PlatformView updates its CSS geometry and old and new damage, while unchanged slices retain their Canvas and rendering caches.
+
+The composition root observes pointer events during capture and asks Runtime for the topmost committed HuxerUI or PlatformView hit target.
+When HuxerUI wins, the adapter prevents native activation and routes the pointer sequence to Runtime.
+When a PlatformView wins, its DOM subtree receives the ordinary browser event and owns browser pointer capture, focus, selection, and editing until the sequence ends.
+Transparent Canvas slices never become full-viewport input blockers merely because they are visually above a PlatformView.
+
+The first Web contract supports axis-aligned CSS bounds, translation, rectangular overflow clipping, visibility, and sibling ordering.
+CSS transforms, filters, blend modes, or stacking contexts created inside a PlatformView cannot alter ordering outside its assigned placement.
+An element that requires top-layer presentation, a separate browsing context with incompatible policy, or another mechanism that cannot remain in the composition root is rejected rather than moved above the complete HuxerUI scene.
+
 ## Accessibility and semantics
 
 Canvas pixels alone do not provide the browser accessibility tree required by interactive applications. Stable Web support therefore depends on mapping the implemented platform-neutral semantics foundation into the browser.
@@ -181,7 +206,9 @@ Semantic DOM is not a second visual renderer.
 It remains visually unobtrusive, participates in browser focus and assistive technology, forwards typed semantic actions to Runtime, maintains live regions and collection metadata, and follows committed order, visibility, transforms, and clipping where geometry is exposed.
 Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
-DOM-backed PlatformView is a separate future leaf-node capability. It must follow the PlatformView lifecycle, composition, clipping, focus, input, and accessibility contract rather than using the semantics overlay as a general DOM container.
+DOM-backed PlatformView is a separate future leaf-node capability.
+Its visual DOM element occupies the CompositionPlan position, while its semantic anchor occupies the corresponding SemanticFrame position and exposes the native accessible subtree without duplicating it in semantic DOM.
+It must not use the semantics overlay as a general visual DOM container.
 
 ## Threading
 
@@ -228,6 +255,7 @@ The backend remains a technical preview until the semantics tree and accessible 
 - Web adds a PlatformAdapter and renderer, not another Runtime or component implementation.
 - Ordinary Views render through RenderScene and Canvas rather than DOM.
 - DOM use is limited to browser services, text measurement, text input, semantics, and future PlatformView.
+- Future PlatformViews and Canvas slices share one isolated composition root and follow RenderScene paint order.
 - Runtime logical coordinates remain CSS-pixel coordinates; display scale is applied at the platform boundary.
 - Resources are ready and synchronously readable before Runtime starts.
 - Browser text input emits shared TextInputCommandBatch values and never owns authoritative TextField state.
