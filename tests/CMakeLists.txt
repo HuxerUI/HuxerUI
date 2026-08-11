@@ -67,6 +67,7 @@ if (UNIX AND NOT APPLE)
             platform/linux_damage.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp
+            platform/linux_window_chrome.cpp
     )
 endif ()
 
