@@ -18,6 +18,24 @@ std::optional<AppDefinition>& AppRegistration() {
 
 } // namespace
 
+PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
+    : platform_modules_(new PlatformModules(*this, std::move(dispatch_to_ui_thread))) {}
+
+PlatformAdapter::~PlatformAdapter() = default;
+
+PlatformModuleFactory::Instance PlatformAdapter::CreatePlatformModule(
+    std::string_view type, const PlatformPayload& options, PlatformEventSink events
+) {
+  const PlatformModuleFactory* factory = FindPlatformModuleRegistration<PlatformModuleFactory>(type);
+  if (factory == nullptr) {
+    throw std::logic_error("HuxerUI platform module registration has an incompatible type");
+  }
+  if (!factory->create) {
+    throw std::logic_error("HuxerUI platform module factory must provide create");
+  }
+  return factory->create(options, std::move(events));
+}
+
 std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {

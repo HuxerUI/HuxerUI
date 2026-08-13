@@ -444,7 +444,7 @@ huxerui_add_app(@TARGET_NAME@
         SOURCES
             ${HUXERUI_APP_SOURCE_FILES}
         RESOURCES
-            "${HUXERUI_APP_ROOT}/assets"
+            "${HUXERUI_APP_ROOT}/resources"
         RESOURCE_NAMESPACE
             app
 )

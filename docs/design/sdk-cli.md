@@ -12,9 +12,11 @@ The current implementation provides:
 - Source-controlled Android, iOS, Windows, macOS, and Web shell templates.
 - Source-SDK Android and Web integration, source- or installed-SDK iOS integration, and installed-SDK Windows and macOS builds.
 - Android and iOS device discovery with deterministic device selection.
+- Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, and ordered resource packages.
 
-Android binary distribution, `package` and `clean` commands, module integration, NativeView, iOS device distribution, OHOS, and Linux remain proposed.
+Android binary distribution, `package` and `clean` commands, native module metadata projection, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, and Android, iOS, and macOS nonvisual timer reference integrations are implemented.
 The current Android and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives and export automation are not implemented.
+Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 
 ## Decisions
 
@@ -66,10 +68,10 @@ hello_huxer/
   .gitignore
   CMakeLists.txt
   src/main.cpp
-  assets/
+  resources/
     images/
-    raw/
     strings/default.properties
+    raw/
   platform/
     android/
       .gitignore
@@ -154,7 +156,7 @@ huxerui_add_app(hello_huxer
         SOURCES
             ${APP_SOURCE_FILES}
         RESOURCES
-            assets
+            resources
         RESOURCE_NAMESPACE
             app
 )
@@ -169,9 +171,16 @@ huxerui_add_app(hello_huxer
 - Applies bundle metadata supplied by the application.
 - Emits the minimal application artifact plan consumed by CLI launch commands.
 
-Advanced consumers may still create targets directly and call `huxerui_enable_codegen` and `huxerui_add_resources`.
+Advanced consumers may still create targets directly and call `huxerui_enable_codegen` and `huxerui_add_resources`, but manually created targets do not implicitly register the framework resource package.
+Application executables use `huxerui_add_app` so built-in resources are always the first merge input.
+`huxerui_add_resources` may be called repeatedly for one target.
+CMake retains call order, and the final resource build lets later matching variants override earlier variants while keeping nonmatching variants.
+For application targets, the precompiled framework package and all registered roots are merged through outputs attached directly to the target, without auxiliary resource targets.
+Each call supplies a root and a `NAMESPACE` value that is both the resource domain and exact generated C++ namespace; only its generated header adds `_resources`.
+`huxerui_add_app` registers the framework package first and then the compact `RESOURCES resources` application root.
+An application that needs to replace selected framework defaults adds a later root with `NAMESPACE huxerui`; no bundle metadata is required.
 
-The installed package contains public headers, platform libraries, CMake helpers, the CLI, and host code generators.
+The installed package contains public headers, platform libraries, the precompiled framework resource package, CMake helpers, the CLI, and host code generators.
 Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and always run on the development host, independently of the target architecture.
 
 ## Generated integration
@@ -217,7 +226,7 @@ huxerui platform add macos
 
 Creation writes the common CMake project and complete minimal shells for the selected platforms.
 The generated project recursively collects C++ sources under `src`, so adding a source file does not require a platform-specific CMake edit.
-It also creates the `assets/images`, `assets/raw`, and `assets/strings` resource categories.
+The template creates `resources/images`, `resources/raw`, and `resources/strings` directly, without an additional domain directory.
 It uses a temporary tree and publishes the project only after every file succeeds.
 `platform add` similarly refuses to overwrite an existing platform directory and rolls back directories created by a failed multi-platform operation.
 
@@ -337,50 +346,184 @@ It does not define a parallel JavaScript component system or expose browsers as 
 
 ## Modules and native integration
 
-The remainder of this section is a design contract, not implemented CLI behavior.
+The CMake target, acquisition, and resource contracts in this section are implemented.
+Native dependency and permission projection remains proposed and does not yet change CLI behavior or native shells.
 
-A HuxerUI module is a compile-time CMake target that may also provide platform-native sources, dependencies, resources, permissions, typed services, or NativeView factories.
+A HuxerUI module is a compile-time CMake target that may also provide platform-native sources, dependencies, resources, permissions, typed services, PlatformView factories, or ExternalTexture producers.
 It is not a runtime plugin and does not require a universal public `Module` base class.
 
 ```text
 huxerui-camera/
   CMakeLists.txt
+  README.md
+  LICENSE
   include/huxerui_camera/
+  resources/
+    images/
+    strings/
+    raw/
   src/
   platform/
     android/
+    ios/
     macos/
     windows/
+    linux/
+    web/
+  examples/
+  tests/
 ```
 
-The ordinary CMake graph remains authoritative:
+The module repository declares its public target and integration metadata in CMake rather than adding a JSON or YAML manifest:
 
 ```cmake
-add_subdirectory(modules/camera)
-target_link_libraries(my_app PRIVATE HuxerUI::camera)
+huxerui_add_module(huxerui_camera
+        SOURCES
+            src/camera.cpp
+)
+
+huxerui_add_resources(huxerui_camera
+        ROOT resources
+        NAMESPACE huxerui_camera
+)
+
+add_library(HuxerUI::camera ALIAS huxerui_camera)
 ```
 
-Installed modules use `find_package`, and Git modules use `FetchContent` with an immutable revision.
-There is no second dependency list in a HuxerUI manifest.
+Applications acquire and link one module through one repeated helper.
+A local path supports application and module development in one checkout:
 
-A future module integration pipeline is:
+```cmake
+huxerui_use_module(my_app
+        TARGET HuxerUI::camera
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/modules/huxerui-camera"
+)
+```
+
+A GitHub or other HTTPS Git repository uses a pinned revision:
+
+```cmake
+huxerui_use_module(my_app
+        TARGET HuxerUI::camera
+        URL "https://github.com/example/huxerui-camera.git"
+        REVISION "0123456789abcdef0123456789abcdef01234567"
+)
+```
+
+A module target declared by the application or another CMake package is consumed without a source location:
+
+```cmake
+find_package(HuxerUICamera CONFIG REQUIRED)
+
+huxerui_use_module(my_app
+        TARGET HuxerUI::camera
+)
+```
+
+PATH and URL are mutually exclusive.
+PATH resolves relative to the caller and uses the local source directly.
+URL accepts HTTPS Git repositories only and requires REVISION.
+Remote source uses FetchContent's normal build-directory cache, and repeated use by several application targets acquires and configures the repository only once.
+If the requested target already exists, PATH and URL must be omitted; the helper never assigns a requested origin to an unrelated target.
+The helper verifies that acquisition creates the requested CMake target, links it to the application, and appends its compiled resource package in declaration order without a separate finalize call.
+Calling `target_link_libraries` alone links ordinary code but intentionally does not merge module resources or request future native integration.
+
+The application CMakeLists is both the dependency declaration and revision lock.
+A full commit SHA is the reproducible remote form; a release tag may identify a human-facing version on GitHub but is not treated as immutable dependency identity.
+There is no second dependency list or lock manifest in the initial design.
+Remote CMake source executes with the same authority as any other build dependency, so HTTPS transport does not replace commit review and pinning.
+
+Module resource directories are ordinary ordered target resource roots.
+Their CMake `NAMESPACE` selects the domain, and applications may add a later root with the same namespace to replace selected variants.
+The final package is one merged binary index and payload set rather than a runtime collection of module bundles.
+PATH and URL modules compile these packages from source; the binary installation contract for resource-bearing predeclared modules remains future packaging work.
+
+The implemented module integration pipeline is:
 
 ```text
-CMake target closure
-  -> module platform directories
+huxerui_use_module declaration order
+  -> acquire or reuse module target
+  -> link common C++ target and append its resource package
+```
+
+Future native integration continues from the target closure:
+
+```text
+module target closure
+  -> select module platform directory
   -> versioned integration projection
   -> native shell integration
   -> native build system
 ```
+
+Runtime installation remains explicit C++ application policy.
+An application includes the module's public header and places its typed installer directly in `AppOptions::root_hooks`:
+
+```cpp
+#include <huxerui_camera/camera.h>
+
+HUXERUI_APP(
+    App,
+    AppOptions {
+        .root_hooks = {
+            huxerui_camera::Install,
+        },
+    }
+)
+```
+
+There is no generated installer header, hidden `HUXERUI_APP` rewriting, process-global static registration, or generic runtime module registry.
+Future native project fragments remain build output rather than another editable project or runtime plugin list.
 
 Native dependencies remain expressed in their owning ecosystem.
 Gradle dependencies are not flattened into generic CMake strings, and Apple or future package metadata remains native to those platforms.
 
 Mergeable permissions may travel with a module, but application policy does not.
 For example, a module may require camera capability while an application must still provide user-facing privacy text and signing-sensitive policy.
+A future integration projection must reject a required permission whose platform policy value is missing rather than generating a generic privacy explanation.
 
-NativeView remains a real leaf View with Runtime-owned identity, reconciliation, measurement, layout, visibility, hit testing, focus, accessibility, and lifecycle.
-Modules and platform shells provide typed factories and services without introducing Runtime subclasses or native types into shared public headers.
+Modules use three runtime integration forms:
+
+- Permission, Audio, Camera control, and similar nonvisual features install typed Root Services backed by registered platform module instances.
+- WebView, map, document preview, and native SDK controls register PlatformView factories by stable string type.
+- Camera preview, video decode, and high-frequency visual streams register platform-owned ExternalTexture instances and return platform-neutral handles to shared code.
+
+One module may combine the forms.
+Camera normally provides a Camera service plus ExternalTexture preview, while Audio provides only a service and WebView provides a PlatformView factory.
+The application retrieves services through their typed `UseXxx()` helpers; there is no generic module-service lookup.
+
+PlatformView and nonvisual module instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
+PlatformPayload is the only dynamic cross-language representation and is restricted to null, scalar, bytes, list, and string-keyed object data.
+Concrete module headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
+Callbacks, arbitrary C++ objects, native handles, and media streams never enter the payload.
+
+Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
+The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during module installation.
+Registration does not use a generated header, hidden `HUXERUI_APP` rewriting, editable metadata bundle, or process-global static initializer.
+The module's documented Install function remains an ordinary RootHook selected explicitly by the application.
+
+`RootContext::Modules()` exposes the per-surface registry to explicit platform module installers.
+A nonvisual installer opens a registered instance and provides its public typed service through `root.Provide()`.
+The service translates typed methods and events to Create, Call, Result, Event, and Dispose messages, owns pending requests and subscriptions, and closes its platform instance during reverse Root Service teardown.
+Applications never call `Modules()` or use string method names directly.
+
+The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and proposed ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
+SDK projection connects the module's explicitly installed RootHook to the current platform registrations and native dependencies without generating another runtime API or composition mode.
+A projected PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the native object to a global foreground or background plane.
+Native projection for nonvisual modules will register the module's platform-neutral or platform-specific factory; module-owned typed Root Services already keep PlatformPayload codecs and string method names behind those services.
+The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, and `example_platform_module` provides source-level Foundation and Java timer reference integrations behind one typed service. The remaining adapters and generated native dependency projection still need equivalent wiring.
+
+Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
+Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.
+
+ExternalTexture is instance registration rather than a factory registry.
+A module's platform service registers its producer with the current renderer, receives a platform-neutral ExternalTexture value, and exposes that value to shared code.
+Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
+Frame notifications advance a texture revision and request presentation without writing application State or executing a per-frame language bridge callback.
+
+Modules and platform shells provide these factories, registrations, payload codecs, and typed services without introducing Runtime subclasses or native types into shared public headers.
+Future native integration must report a missing current-platform implementation, duplicate registered type, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, incompatible HuxerUI version, or missing permission policy with the owning module and application target in the diagnostic.
+The implemented CMake integration already rejects invalid URL schemes, absent revisions, ambiguous origins, duplicate module use, and missing requested targets.
 
 ## Future commands and platforms
 
@@ -403,7 +546,7 @@ No future command may silently skip an explicitly requested platform or claim an
 - Process invocation passes argument arrays and does not route ordinary commands through a shell.
 - Windows batch tools are handled explicitly and reject unsafe expansion characters.
 - Generated metadata contains no credentials or signing keys.
-- Git modules must use immutable release revisions for reproducible builds.
+- Git modules must use full commit SHA revisions for reproducible builds.
 - A clean checkout plus the selected SDK and native toolchains reproduces generated integration metadata.
 
 ## Validation
@@ -412,6 +555,7 @@ The current workflow is covered by:
 
 - CLI project, shell, diagnostics, device parsing, process execution, and command-construction tests.
 - A CMake script test for Android plan defaults and compatibility rejection.
+- CMake module validation for URL policy, full commit revisions, unambiguous origins, predeclared targets, ordered module resources, and explicit runtime Root Service installation.
 - An installed desktop consumer test that installs the SDK, runs the installed CLI, creates a project, and builds it without source-tree lookup.
 - Existing common, header, code-generation, platform, and example builds.
 
@@ -423,7 +567,7 @@ Platform work must additionally validate every affected native toolchain availab
 - One shared Runtime implementation.
 - One `PlatformAdapter` boundary per application surface.
 - Public identity remains `huxerui`, `<huxerui/huxerui.h>`, and `HuxerUI::huxerui`.
-- CMake owns common C++ and resource targets.
+- CMake owns common C++ targets and resource generation.
 - Native shells own platform lifecycle, platform-only configuration, signing, and packaging.
 - Native shells are source-controlled and built directly.
 - Generated integration files are reproducible projections, not generated projects.

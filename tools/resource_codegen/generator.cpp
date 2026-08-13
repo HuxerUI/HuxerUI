@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -47,6 +48,60 @@ struct Entry {
   float intrinsic_width = 0.0F;
   float intrinsic_height = 0.0F;
   std::vector<std::byte> generated_payload;
+  std::string domain;
+};
+
+class Reader {
+public:
+  explicit Reader(std::span<const std::byte> bytes) : bytes_(bytes) {}
+
+  std::uint8_t U8() {
+    Require(1);
+    return std::to_integer<std::uint8_t>(bytes_[offset_++]);
+  }
+
+  std::uint32_t U32() {
+    Require(4);
+    const std::uint32_t value =
+        static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes_[offset_])) |
+        (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes_[offset_ + 1])) << 8U) |
+        (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes_[offset_ + 2])) << 16U) |
+        (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes_[offset_ + 3])) << 24U);
+    offset_ += 4;
+    return value;
+  }
+
+  std::uint64_t U64() {
+    const std::uint64_t low = U32();
+    const std::uint64_t high = U32();
+    return low | (high << 32U);
+  }
+
+  float F32() {
+    return std::bit_cast<float>(U32());
+  }
+
+  std::string String() {
+    const std::uint32_t length = U32();
+    Require(length);
+    const char* begin = reinterpret_cast<const char*>(bytes_.data() + offset_);
+    offset_ += length;
+    return std::string(begin, length);
+  }
+
+  [[nodiscard]] bool AtEnd() const noexcept {
+    return offset_ == bytes_.size();
+  }
+
+private:
+  void Require(std::size_t count) const {
+    if (count > bytes_.size() - offset_) {
+      throw std::runtime_error("resource index is truncated");
+    }
+  }
+
+  std::span<const std::byte> bytes_;
+  std::size_t offset_ = 0;
 };
 
 std::string Trim(std::string_view value) {
@@ -552,6 +607,82 @@ void CopyPayload(const Entry& entry, const std::filesystem::path& output) {
   std::filesystem::copy_file(entry.source_path, destination, std::filesystem::copy_options::overwrite_existing);
 }
 
+void ValidateEntries(std::vector<Entry>& entries) {
+  std::ranges::sort(entries, {}, [](const Entry& entry) {
+    return std::tuple{entry.domain, entry.key, entry.locale, entry.scale, entry.package_path};
+  });
+  for (std::size_t index = 1; index < entries.size(); ++index) {
+    const Entry& previous = entries[index - 1];
+    const Entry& current = entries[index];
+    if (previous.kind == current.kind && previous.domain == current.domain && previous.key == current.key &&
+        previous.locale == current.locale && previous.scale == current.scale) {
+      throw std::runtime_error("duplicate resource variant: " + current.key);
+    }
+  }
+
+  using ResourceFamily = std::pair<std::string, std::string>;
+  std::map<ResourceFamily, std::pair<float, float>> image_sizes;
+  std::map<ResourceFamily, bool> vector_images;
+  std::map<ResourceFamily, std::vector<std::size_t>> default_string_schemas;
+  std::map<std::string, std::pair<std::uint64_t, std::string>> payloads;
+  for (const Entry& entry : entries) {
+    if (!entry.package_path.empty()) {
+      const auto [payload, inserted] = payloads.try_emplace(entry.package_path, entry.content_hash, entry.mime_type);
+      if (!inserted && payload->second != std::pair{entry.content_hash, entry.mime_type}) {
+        throw std::runtime_error("resource variants assign conflicting payloads to: " + entry.package_path);
+      }
+    }
+    const ResourceFamily family{entry.domain, entry.key};
+    if (entry.kind == EntryKind::Image) {
+      const bool is_vector = entry.mime_type == "application/x-huxerui-vector";
+      const auto [format, inserted_format] = vector_images.try_emplace(family, is_vector);
+      if (!inserted_format && format->second != is_vector) {
+        throw std::runtime_error("raster and vector variants must not share an image resource key: " + entry.key);
+      }
+      const std::pair logical_size{entry.intrinsic_width, entry.intrinsic_height};
+      const auto [found, inserted] = image_sizes.try_emplace(family, logical_size);
+      if (!inserted && found->second != logical_size) {
+        throw std::runtime_error("image scale variants must have the same intrinsic logical size: " + entry.key);
+      }
+    } else if (entry.kind == EntryKind::String && entry.locale.empty()) {
+      const std::vector<std::size_t> schema = PlaceholderIndices(entry.value);
+      for (std::size_t index = 0; index < schema.size(); ++index) {
+        if (schema[index] != index) {
+          throw std::runtime_error("default localized string arguments must be contiguous from zero: " + entry.key);
+        }
+      }
+      default_string_schemas.emplace(family, schema);
+    }
+  }
+  for (Entry& entry : entries) {
+    if (entry.kind != EntryKind::String) {
+      continue;
+    }
+    const auto schema = default_string_schemas.find({entry.domain, entry.key});
+    if (schema == default_string_schemas.end()) {
+      throw std::runtime_error("localized string requires a default catalog entry: " + entry.key);
+    }
+    for (std::size_t index : PlaceholderIndices(entry.value)) {
+      if (!std::ranges::binary_search(schema->second, index)) {
+        throw std::runtime_error("localized string references an undeclared argument: " + entry.key);
+      }
+    }
+    entry.argument_count = static_cast<std::uint32_t>(schema->second.size());
+  }
+
+  std::map<std::tuple<std::string, EntryKind, std::string>, std::string> generated_identifiers;
+  for (const Entry& entry : entries) {
+    const std::string identifier = Identifier(entry.key.substr(entry.key.find('/') + 1));
+    const auto [found, inserted] =
+        generated_identifiers.try_emplace(std::tuple{entry.domain, entry.kind, identifier}, entry.key);
+    if (!inserted && found->second != entry.key) {
+      throw std::runtime_error(
+          "resource keys generate the same C++ identifier: " + found->second + " and " + entry.key
+      );
+    }
+  }
+}
+
 std::vector<Entry> Discover(const Options& options) {
   std::vector<Entry> entries;
   const std::filesystem::path images = options.root / "images";
@@ -596,6 +727,7 @@ std::vector<Entry> Discover(const Options& options) {
             compiled.intrinsic_width,
             compiled.intrinsic_height,
             compiled.payload,
+            {},
         });
         continue;
       }
@@ -619,6 +751,7 @@ std::vector<Entry> Discover(const Options& options) {
           file.path(),
           static_cast<float>(width) / scale,
           static_cast<float>(height) / scale,
+          {},
           {},
       });
     }
@@ -648,6 +781,7 @@ std::vector<Entry> Discover(const Options& options) {
           file.path(),
           0.0F,
           0.0F,
+          {},
           {},
       });
     }
@@ -701,74 +835,14 @@ std::vector<Entry> Discover(const Options& options) {
     }
   }
 
-  std::ranges::sort(entries, {}, [](const Entry& entry) {
-    return std::tuple{entry.key, entry.locale, entry.scale, entry.package_path};
-  });
-  for (std::size_t index = 1; index < entries.size(); ++index) {
-    const Entry& previous = entries[index - 1];
-    const Entry& current = entries[index];
-    if (previous.kind == current.kind && previous.key == current.key && previous.locale == current.locale &&
-        previous.scale == current.scale) {
-      throw std::runtime_error("duplicate resource variant: " + current.key);
-    }
-  }
-  std::map<std::string, std::pair<float, float>> image_sizes;
-  std::map<std::string, bool> vector_images;
-  std::map<std::string, std::vector<std::size_t>> default_string_schemas;
-  for (const Entry& entry : entries) {
-    if (entry.kind == EntryKind::Image) {
-      const bool is_vector = !entry.generated_payload.empty();
-      const auto [format, inserted_format] = vector_images.try_emplace(entry.key, is_vector);
-      if (!inserted_format && format->second != is_vector) {
-        throw std::runtime_error("raster and vector variants must not share an image resource key: " + entry.key);
-      }
-      const std::pair logical_size{
-          entry.intrinsic_width,
-          entry.intrinsic_height,
-      };
-      const auto [found, inserted] = image_sizes.try_emplace(entry.key, logical_size);
-      if (!inserted && found->second != logical_size) {
-        throw std::runtime_error("image scale variants must have the same intrinsic logical size: " + entry.key);
-      }
-    } else if (entry.kind == EntryKind::String && entry.locale.empty()) {
-      const std::vector<std::size_t> schema = PlaceholderIndices(entry.value);
-      for (std::size_t index = 0; index < schema.size(); ++index) {
-        if (schema[index] != index) {
-          throw std::runtime_error("default localized string arguments must be contiguous from zero: " + entry.key);
-        }
-      }
-      default_string_schemas.emplace(entry.key, schema);
-    }
-  }
   for (Entry& entry : entries) {
-    if (entry.kind != EntryKind::String) {
-      continue;
-    }
-    const auto schema = default_string_schemas.find(entry.key);
-    if (schema == default_string_schemas.end()) {
-      throw std::runtime_error("localized string requires a default catalog entry: " + entry.key);
-    }
-    for (std::size_t index : PlaceholderIndices(entry.value)) {
-      if (!std::ranges::binary_search(schema->second, index)) {
-        throw std::runtime_error("localized string references an undeclared argument: " + entry.key);
-      }
-    }
-    entry.argument_count = static_cast<std::uint32_t>(schema->second.size());
+    entry.domain = options.resource_namespace;
   }
-  std::map<std::pair<EntryKind, std::string>, std::string> generated_identifiers;
-  for (const Entry& entry : entries) {
-    const std::string identifier = Identifier(entry.key.substr(entry.key.find('/') + 1));
-    const auto [found, inserted] = generated_identifiers.try_emplace(std::pair{entry.kind, identifier}, entry.key);
-    if (!inserted && found->second != entry.key) {
-      throw std::runtime_error(
-          "resource keys generate the same C++ identifier: " + found->second + " and " + entry.key
-      );
-    }
-  }
+  ValidateEntries(entries);
   return entries;
 }
 
-std::vector<std::byte> EncodeIndex(const Options& options, const std::vector<Entry>& entries) {
+std::vector<std::byte> EncodeIndex(const std::vector<Entry>& entries) {
   std::vector<std::byte> bytes{
       std::byte{'H'},
       std::byte{'U'},
@@ -783,7 +857,7 @@ std::vector<std::byte> EncodeIndex(const Options& options, const std::vector<Ent
   AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
   for (const Entry& entry : entries) {
     bytes.push_back(static_cast<std::byte>(entry.kind));
-    AppendString(bytes, options.resource_namespace);
+    AppendString(bytes, entry.domain);
     AppendString(bytes, entry.key);
     AppendString(bytes, entry.package_path);
     AppendString(bytes, entry.mime_type);
@@ -800,28 +874,175 @@ std::vector<std::byte> EncodeIndex(const Options& options, const std::vector<Ent
   return bytes;
 }
 
-std::string GenerateHeader(const Options& options, const std::vector<Entry>& entries) {
+std::string GenerateHeader(std::string_view resource_namespace, const std::vector<Entry>& entries) {
   std::map<EntryKind, std::map<std::string, std::string>> declarations;
   for (const Entry& entry : entries) {
+    if (entry.domain != resource_namespace) {
+      continue;
+    }
     declarations[entry.kind].try_emplace(entry.key, Identifier(entry.key.substr(entry.key.find('/') + 1)));
   }
   std::ostringstream output;
-  output << "#pragma once\n\n#include <huxerui/resource.h>\n\nnamespace " << Identifier(options.resource_namespace)
-         << "_resources {\n\n";
+  output << "#pragma once\n\n#include <huxerui/resource.h>\n\nnamespace " << resource_namespace << " {\n\n";
   const auto write_group =
-      [&output, &options, &declarations](EntryKind kind, std::string_view name, std::string_view type) {
+      [&output, resource_namespace, &declarations](EntryKind kind, std::string_view name, std::string_view type) {
         output << "namespace " << name << " {\n";
         for (const auto& [key, identifier] : declarations[kind]) {
-          output << "inline const huxerui::" << type << ' ' << identifier << "{\"" << options.resource_namespace
-                 << "\", \"" << key << "\"};\n";
+          output << "inline const huxerui::" << type << ' ' << identifier << "{\"" << resource_namespace << "\", \""
+                 << key << "\"};\n";
         }
         output << "} // namespace " << name << "\n\n";
       };
   write_group(EntryKind::Image, "images", "ImageResource");
   write_group(EntryKind::Raw, "raw", "RawResource");
   write_group(EntryKind::String, "strings", "StringResource");
-  output << "} // namespace " << Identifier(options.resource_namespace) << "_resources\n";
+  output << "} // namespace " << resource_namespace << "\n";
   return output.str();
+}
+
+std::vector<Entry> ReadPackage(const std::filesystem::path& package) {
+  const std::filesystem::path index_path = package / "huxerui" / "resources.bin";
+  const std::vector<std::byte> bytes = ReadBytes(index_path);
+  constexpr std::byte magic[] = {
+      std::byte{'H'},
+      std::byte{'U'},
+      std::byte{'X'},
+      std::byte{'R'},
+      std::byte{'E'},
+      std::byte{'S'},
+      std::byte{0},
+      std::byte{0},
+  };
+  if (bytes.size() < std::size(magic) || !std::equal(std::begin(magic), std::end(magic), bytes.begin())) {
+    throw std::runtime_error("resource index has an invalid signature: " + index_path.string());
+  }
+
+  Reader reader(std::span<const std::byte>(bytes).subspan(std::size(magic)));
+  const std::uint32_t version = reader.U32();
+  if (version != 1 && version != 2) {
+    throw std::runtime_error("resource index version is unsupported: " + std::to_string(version));
+  }
+  const std::uint32_t count = reader.U32();
+  std::vector<Entry> entries;
+  entries.reserve(count);
+  for (std::uint32_t index = 0; index < count; ++index) {
+    const std::uint8_t kind_value = reader.U8();
+    if (kind_value < static_cast<std::uint8_t>(EntryKind::Raw) ||
+        kind_value > static_cast<std::uint8_t>(EntryKind::String)) {
+      throw std::runtime_error("resource index contains an unknown entry kind");
+    }
+    Entry entry;
+    entry.kind = static_cast<EntryKind>(kind_value);
+    entry.domain = reader.String();
+    entry.key = reader.String();
+    entry.package_path = reader.String();
+    entry.mime_type = reader.String();
+    entry.locale = reader.String();
+    entry.value = reader.String();
+    entry.scale = reader.F32();
+    entry.pixel_width = reader.U32();
+    entry.pixel_height = reader.U32();
+    entry.content_hash = reader.U64();
+    entry.argument_count = reader.U32();
+    if (version >= 2) {
+      entry.intrinsic_width = reader.F32();
+      entry.intrinsic_height = reader.F32();
+    } else if (entry.kind == EntryKind::Image) {
+      entry.intrinsic_width = static_cast<float>(entry.pixel_width) / entry.scale;
+      entry.intrinsic_height = static_cast<float>(entry.pixel_height) / entry.scale;
+    }
+
+    ValidateNamespace(entry.domain);
+    const std::string normalized_key = GenericPath(PathFromUtf8(entry.key));
+    const std::string_view expected_prefix = entry.kind == EntryKind::Image ? "images/"
+                                             : entry.kind == EntryKind::Raw ? "raw/"
+                                                                            : "strings/";
+    if (normalized_key != entry.key || !entry.key.starts_with(expected_prefix) ||
+        entry.key.size() == expected_prefix.size()) {
+      throw std::runtime_error("resource index contains an invalid key: " + entry.key);
+    }
+    if (!entry.locale.empty() && NormalizeLocale(entry.locale) != entry.locale) {
+      throw std::runtime_error("resource index contains a non-normalized locale: " + entry.locale);
+    }
+    if (!std::isfinite(entry.scale) || entry.scale <= 0.0F) {
+      throw std::runtime_error("resource index contains an invalid image scale");
+    }
+    if (entry.kind == EntryKind::String) {
+      if (!entry.package_path.empty()) {
+        throw std::runtime_error("string resource index entry must not contain a package path");
+      }
+    } else {
+      const std::string normalized_path = GenericPath(PathFromUtf8(entry.package_path));
+      const std::string expected_path_prefix = "huxerui/" + entry.domain + '/';
+      if (normalized_path != entry.package_path || !entry.package_path.starts_with(expected_path_prefix)) {
+        throw std::runtime_error("resource index contains an invalid package path: " + entry.package_path);
+      }
+      entry.source_path = package / PathFromUtf8(entry.package_path);
+      if (!std::filesystem::is_regular_file(entry.source_path)) {
+        throw std::runtime_error("resource package payload is missing: " + entry.package_path);
+      }
+      if (Hash(ReadBytes(entry.source_path)) != entry.content_hash) {
+        throw std::runtime_error("resource package payload hash does not match the index: " + entry.package_path);
+      }
+    }
+    if (entry.kind == EntryKind::Raw && !entry.locale.empty()) {
+      throw std::runtime_error("raw resource index entry must not contain a locale");
+    }
+    if (entry.kind == EntryKind::Image &&
+        (!std::isfinite(entry.intrinsic_width) || !std::isfinite(entry.intrinsic_height) ||
+         entry.intrinsic_width <= 0.0F || entry.intrinsic_height <= 0.0F)) {
+      throw std::runtime_error("resource index contains invalid image dimensions");
+    }
+    entries.push_back(std::move(entry));
+  }
+  if (!reader.AtEnd()) {
+    throw std::runtime_error("resource index contains trailing data: " + index_path.string());
+  }
+  ValidateEntries(entries);
+  return entries;
+}
+
+using VariantIdentity = std::tuple<EntryKind, std::string, std::string, std::string, std::uint32_t>;
+
+VariantIdentity Identity(const Entry& entry) {
+  const std::string locale = entry.kind == EntryKind::Raw ? std::string{} : entry.locale;
+  const std::uint32_t scale = entry.kind == EntryKind::Image ? std::bit_cast<std::uint32_t>(entry.scale) : 0;
+  return {entry.kind, entry.domain, entry.key, locale, scale};
+}
+
+bool IsWithin(const std::filesystem::path& child, const std::filesystem::path& parent) {
+  const std::filesystem::path normalized_child = std::filesystem::absolute(child).lexically_normal();
+  const std::filesystem::path normalized_parent = std::filesystem::absolute(parent).lexically_normal();
+  const auto mismatch = std::mismatch(
+      normalized_parent.begin(),
+      normalized_parent.end(),
+      normalized_child.begin(),
+      normalized_child.end()
+  );
+  return mismatch.first == normalized_parent.end();
+}
+
+void Publish(
+    const std::filesystem::path& output,
+    const std::vector<Entry>& entries,
+    const std::set<std::string>& resource_namespaces,
+    std::string_view header_name = {}
+) {
+  // These roots are wholly generator-owned; replacing them prevents deleted resources or namespaces from surviving.
+  std::filesystem::remove_all(output / "package");
+  std::filesystem::remove_all(output / "include");
+  for (const Entry& entry : entries) {
+    if (!entry.package_path.empty()) {
+      CopyPayload(entry, output);
+    }
+  }
+  const std::filesystem::path index_path = output / "package" / "huxerui" / "resources.bin";
+  WriteBytesIfChanged(index_path, EncodeIndex(entries));
+  for (const std::string& resource_namespace : resource_namespaces) {
+    const std::string output_name =
+        header_name.empty() ? Identifier(resource_namespace) + "_resources.h" : std::string(header_name);
+    WriteTextIfChanged(output / "include" / output_name, GenerateHeader(resource_namespace, entries));
+  }
 }
 
 } // namespace
@@ -830,29 +1051,55 @@ void Generate(const Options& options) {
   if (!std::filesystem::is_directory(options.root)) {
     throw std::runtime_error("resource root is not a directory: " + options.root.string());
   }
+  if (options.output.empty()) {
+    throw std::runtime_error("resource output path must not be empty");
+  }
   ValidateNamespace(options.resource_namespace);
-  const std::vector<Entry> entries = Discover(options);
-  std::filesystem::remove(options.output / "resources.stamp");
-  // These roots are wholly generator-owned; replacing them prevents deleted resources or namespaces from surviving.
-  std::filesystem::remove_all(options.output / "package");
-  std::filesystem::remove_all(options.output / "include");
-  for (const Entry& entry : entries) {
-    if (!entry.package_path.empty()) {
-      CopyPayload(entry, options.output);
+  if (!options.header_name.empty()) {
+    const std::filesystem::path header_name(options.header_name);
+    if (header_name != header_name.filename() || header_name.extension() != ".h") {
+      throw std::runtime_error("resource header name must be a .h filename without a directory");
     }
   }
-  const std::filesystem::path index_path = options.output / "package" / "huxerui" / "resources.bin";
-  WriteBytesIfChanged(index_path, EncodeIndex(options, entries));
-  WriteTextIfChanged(
-      options.output / "include" / (Identifier(options.resource_namespace) + "_resources.h"),
-      GenerateHeader(options, entries)
-  );
-  const std::filesystem::path stamp = options.output / "resources.stamp";
-  std::filesystem::create_directories(stamp.parent_path());
-  std::ofstream stamp_stream(stamp, std::ios::binary | std::ios::trunc);
-  if (!stamp_stream || !(stamp_stream << "huxerui resources\n")) {
-    throw std::runtime_error("unable to write generated resource stamp: " + stamp.string());
+  const std::vector<Entry> entries = Discover(options);
+  if (entries.empty()) {
+    throw std::runtime_error("resource root does not contain any supported resources: " + options.root.string());
   }
+  Publish(options.output, entries, {options.resource_namespace}, options.header_name);
+}
+
+void Merge(const MergeOptions& options) {
+  if (options.inputs.empty()) {
+    throw std::runtime_error("resource merge requires at least one input package");
+  }
+  if (options.output.empty()) {
+    throw std::runtime_error("resource merge output path must not be empty");
+  }
+  const std::filesystem::path output_package = options.output / "package";
+  std::set<std::string> resource_namespaces;
+
+  std::map<VariantIdentity, Entry> merged;
+  for (const std::filesystem::path& input : options.inputs) {
+    if (!std::filesystem::is_directory(input)) {
+      throw std::runtime_error("resource merge input is not a package directory: " + input.string());
+    }
+    if (IsWithin(input, output_package)) {
+      throw std::runtime_error("resource merge input must not be inside the output package: " + input.string());
+    }
+    for (Entry& entry : ReadPackage(input)) {
+      resource_namespaces.insert(entry.domain);
+      merged.insert_or_assign(Identity(entry), std::move(entry));
+    }
+  }
+
+  std::vector<Entry> entries;
+  entries.reserve(merged.size());
+  for (auto& [identity, entry] : merged) {
+    static_cast<void>(identity);
+    entries.push_back(std::move(entry));
+  }
+  ValidateEntries(entries);
+  Publish(options.output, entries, resource_namespaces);
 }
 
 } // namespace huxerui::resource_codegen

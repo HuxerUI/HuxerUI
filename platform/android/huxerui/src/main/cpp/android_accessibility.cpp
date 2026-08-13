@@ -71,6 +71,17 @@ void OptionalBool(Writer& writer, const std::optional<bool>& value) {
   writer.Integer<std::int8_t>(value.has_value() ? (*value ? 1 : 0) : -1);
 }
 
+void PlatformViewIdentity(Writer& writer, const std::optional<std::uint64_t>& identity) {
+  writer.Integer<std::uint8_t>(identity.has_value() ? 1 : 0);
+  if (!identity.has_value()) {
+    return;
+  }
+  if (*identity > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+    throw std::overflow_error("HuxerUI Android PlatformView semantic identity exceeds the Java long range");
+  }
+  writer.Integer(static_cast<std::int64_t>(*identity));
+}
+
 std::int32_t AndroidRole(SemanticRole role) noexcept {
   switch (role) {
   case SemanticRole::Generic:
@@ -170,6 +181,7 @@ std::int8_t AndroidCheckedState(const std::optional<SemanticCheckedState>& check
 void EncodeNode(Writer& writer, const SemanticNode& node) {
   writer.Integer(AndroidNodeId(node.id));
   writer.Integer(node.parent.has_value() ? AndroidNodeId(*node.parent) : -1);
+  PlatformViewIdentity(writer, node.platform_view_identity);
   writer.Integer(AndroidRole(node.role));
   if (node.children.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
     throw std::overflow_error("HuxerUI Android semantic node has too many children");

@@ -53,9 +53,9 @@ struct WindowTitleBarMetrics {
 };
 
 struct WindowCaptionLabels {
-  StringVariant minimize = "Minimize";
-  StringVariant toggle_maximize = "Maximize or restore";
-  StringVariant close = "Close";
+  StringVariant minimize;
+  StringVariant toggle_maximize;
+  StringVariant close;
 
   bool operator==(const WindowCaptionLabels&) const = default;
 };

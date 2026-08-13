@@ -46,6 +46,16 @@ constexpr Time kDoubleClickTimeMs = 400;
 constexpr float kDoubleClickSlop = 4.0F;
 constexpr unsigned int kScrollLeftButton = 6;
 constexpr unsigned int kScrollRightButton = 7;
+// Motif WM hints flag requesting that the window manager drop server decorations.
+constexpr unsigned long kMwmHintsDecorations = 1UL << 1;
+
+struct MotifWmHints {
+  unsigned long flags;
+  unsigned long functions;
+  unsigned long decorations;
+  long input_mode;
+  unsigned long status;
+};
 
 Key TranslateKey(KeySym keysym) {
   switch (keysym) {
@@ -176,6 +186,7 @@ public:
       XMapWindow(display_, window_);
       XFlush(display_);
 
+      RefreshWindowState();
       runtime_->UpdateResourceConfiguration(Configuration());
       UpdateRuntimeViewport();
 
@@ -200,6 +211,28 @@ public:
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), window_ != 0)) {
       ScheduleFrame(*scheduled);
+    }
+  }
+
+  void RequestWindowCommand(huxerui::WindowCommand command) override {
+    switch (command) {
+    case huxerui::WindowCommand::Minimize:
+      XIconifyWindow(display_, window_, screen_);
+      XFlush(display_);
+      break;
+    case huxerui::WindowCommand::Maximize:
+      SetWindowMaximized(true);
+      break;
+    case huxerui::WindowCommand::Restore:
+      SetWindowMaximized(false);
+      break;
+    case huxerui::WindowCommand::ToggleMaximize:
+      ReadMaximizedState();
+      SetWindowMaximized(!maximized_);
+      break;
+    case huxerui::WindowCommand::Close:
+      RequestClose();
+      break;
     }
   }
 
@@ -327,15 +360,17 @@ private:
     const float scale = DpiScale();
     width_ = std::max(1, static_cast<int>(std::lround(options.initial_size.width * scale)));
     height_ = std::max(1, static_cast<int>(std::lround(options.initial_size.height * scale)));
+    custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
+    custom_title_bar_height_ = options.title_bar_height;
 
-    const int screen = DefaultScreen(display_);
+    screen_ = DefaultScreen(display_);
     const Window root = DefaultRootWindow(display_);
 
     // EGL window surfaces require a window whose visual matches the EGLConfig.
     // Create the window with the renderer's native visual and colormap when EGL
     // is available, and fall back to the default visual otherwise.
     XVisualInfo* presentation_visual = nullptr;
-    int depth = DefaultDepth(display_, screen);
+    int depth = DefaultDepth(display_, screen_);
     if (renderer_.HasPresentation() && renderer_.NativeVisualId() != 0) {
       XVisualInfo visual_info_template{};
       visual_info_template.visualid = static_cast<VisualID>(renderer_.NativeVisualId());
@@ -349,12 +384,12 @@ private:
     }
 
     XSetWindowAttributes attributes{};
-    attributes.background_pixel = BlackPixel(display_, screen);
-    attributes.border_pixel = WhitePixel(display_, screen);
+    attributes.background_pixel = BlackPixel(display_, screen_);
+    attributes.border_pixel = WhitePixel(display_, screen_);
     attributes.colormap = colormap_;
     attributes.event_mask =
         StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask;
+            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask | PropertyChangeMask;
     unsigned long value_mask = CWBackPixel | CWBorderPixel | CWEventMask;
     if (colormap_ != 0) {
       value_mask |= CWColormap;
@@ -369,7 +404,7 @@ private:
         0,
         depth,
         InputOutput,
-        presentation_visual != nullptr ? presentation_visual->visual : DefaultVisual(display_, screen),
+        presentation_visual != nullptr ? presentation_visual->visual : DefaultVisual(display_, screen_),
         value_mask,
         &attributes
     );
@@ -392,11 +427,34 @@ private:
     wm_delete_window_ = XInternAtom(display_, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(display_, window_, &wm_delete_window_, 1);
 
+    motif_wm_hints_ = XInternAtom(display_, "_MOTIF_WM_HINTS", 0);
+    net_wm_state_ = XInternAtom(display_, "_NET_WM_STATE", 0);
+    net_wm_state_max_h_ = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_HORZ", 0);
+    net_wm_state_max_v_ = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_VERT", 0);
+    net_wm_moveresize_ = XInternAtom(display_, "_NET_WM_MOVERESIZE", 0);
+    net_frame_extents_ = XInternAtom(display_, "_NET_FRAME_EXTENTS", 0);
+
+    if (custom_chrome_) {
+      MotifWmHints hints{};
+      hints.flags = kMwmHintsDecorations;
+      hints.decorations = 0;
+      XChangeProperty(
+          display_,
+          window_,
+          motif_wm_hints_,
+          motif_wm_hints_,
+          32,
+          PropModeReplace,
+          reinterpret_cast<const unsigned char*>(&hints),
+          5
+      );
+    }
+
     XSelectInput(
         display_,
         window_,
         StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask
+            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask | PropertyChangeMask
     );
 
     clipboard_atom_ = XInternAtom(display_, "CLIPBOARD", 0);
@@ -619,6 +677,9 @@ private:
     case SelectionClear:
       clipboard_text_.clear();
       break;
+    case PropertyNotify:
+      HandlePropertyNotify(event.xproperty);
+      break;
     default:
       if (randr_event_base_ != 0 && event.type - randr_event_base_ == RRScreenChangeNotify) {
         XRRUpdateConfiguration(&event);
@@ -637,6 +698,52 @@ private:
     }
   }
 
+  void SetWindowMaximized(bool add) {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    XClientMessageEvent event{};
+    event.type = ClientMessage;
+    event.window = window_;
+    event.message_type = net_wm_state_;
+    event.format = 32;
+    event.data.l[0] = add ? 1 : 0;
+    event.data.l[1] = static_cast<long>(net_wm_state_max_h_);
+    event.data.l[2] = static_cast<long>(net_wm_state_max_v_);
+    event.data.l[3] = 0;
+    event.data.l[4] = 0;
+    XEvent send_event{};
+    send_event.xclient = event;
+    XSendEvent(
+        display_,
+        DefaultRootWindow(display_),
+        0,
+        SubstructureRedirectMask | SubstructureNotifyMask,
+        &send_event
+    );
+    XFlush(display_);
+  }
+
+  void RequestClose() {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    XClientMessageEvent event{};
+    event.type = ClientMessage;
+    event.window = window_;
+    event.message_type = wm_protocols_;
+    event.format = 32;
+    event.data.l[0] = static_cast<long>(wm_delete_window_);
+    event.data.l[1] = CurrentTime;
+    event.data.l[2] = 0;
+    event.data.l[3] = 0;
+    event.data.l[4] = 0;
+    XEvent send_event{};
+    send_event.xclient = event;
+    XSendEvent(display_, window_, 0, NoEventMask, &send_event);
+    XFlush(display_);
+  }
+
   void HandleConfigureNotify(const XConfigureEvent& event) {
     if (event.width == width_ && event.height == height_) {
       return;
@@ -647,6 +754,95 @@ private:
     renderer_.Resize(display_, window_, width_, height_, dpi_);
     UpdateRuntimeViewport();
     RequestFrameAt(Now());
+  }
+
+  void HandlePropertyNotify(const XPropertyEvent& event) {
+    if (event.window != window_ || event.state != PropertyNewValue) {
+      return;
+    }
+    if (event.atom == net_wm_state_) {
+      const bool was_maximized = maximized_;
+      ReadMaximizedState();
+      if (maximized_ != was_maximized) {
+        UpdateRuntimeViewport();
+      }
+    } else if (event.atom == net_frame_extents_) {
+      ReadFrameExtents();
+    }
+  }
+
+  void ReadMaximizedState() {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    Atom actual_type = 0;
+    int actual_format = 0;
+    unsigned long item_count = 0;
+    unsigned long bytes_after = 0;
+    unsigned char* data = nullptr;
+    const int status = XGetWindowProperty(
+        display_,
+        window_,
+        net_wm_state_,
+        0,
+        64,
+        0,
+        XA_ATOM,
+        &actual_type,
+        &actual_format,
+        &item_count,
+        &bytes_after,
+        &data
+    );
+    if (status == 0 && data != nullptr && actual_type == XA_ATOM && actual_format == 32) {
+      const auto* atoms = reinterpret_cast<const Atom*>(data);
+      maximized_ = LinuxMaximizedFromAtoms(
+          std::vector<Atom>(atoms, atoms + item_count), net_wm_state_max_h_, net_wm_state_max_v_
+      );
+    }
+    if (data != nullptr) {
+      XFree(data);
+    }
+  }
+
+  void ReadFrameExtents() {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    Atom actual_type = 0;
+    int actual_format = 0;
+    unsigned long item_count = 0;
+    unsigned long bytes_after = 0;
+    unsigned char* data = nullptr;
+    const int status = XGetWindowProperty(
+        display_,
+        window_,
+        net_frame_extents_,
+        0,
+        4,
+        0,
+        XA_CARDINAL,
+        &actual_type,
+        &actual_format,
+        &item_count,
+        &bytes_after,
+        &data
+    );
+    if (status == 0 && data != nullptr && actual_format == 32 && item_count >= 4) {
+      frame_extents_ =
+          LinuxReadFrameExtents(static_cast<const long*>(static_cast<const void*>(data)), static_cast<int>(item_count));
+    }
+    if (data != nullptr) {
+      XFree(data);
+    }
+  }
+
+  void RefreshWindowState() {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    ReadMaximizedState();
+    ReadFrameExtents();
   }
 
   void HandleExpose(const XExposeEvent& event) {
@@ -664,17 +860,77 @@ private:
     if (event.button != Button1) {
       return;
     }
+    suppress_pointer_ = false;
+    if (TryBeginNativeWindowOperation(event)) {
+      suppress_pointer_ = true;
+      return;
+    }
     pointer_down_ = true;
     const Point position = ClientPoint(event.x, event.y);
     SendPointer(PointerEventType::Down, position, ComputeClickCount(event.button, position, event.time));
   }
 
   void HandleButtonRelease(const XButtonEvent& event) {
+    // The press began a native window operation, so the matching release belongs
+    // to the window manager and must not be forwarded to the runtime.
+    if (suppress_pointer_) {
+      suppress_pointer_ = false;
+      return;
+    }
     if (event.button != Button1) {
       return;
     }
     pointer_down_ = false;
     SendPointer(PointerEventType::Up, ClientPoint(event.x, event.y));
+  }
+
+  bool TryBeginNativeWindowOperation(const XButtonEvent& event) {
+    if (!custom_chrome_) {
+      return false;
+    }
+    const Point position = ClientPoint(event.x, event.y);
+    const float scale = DpiScale();
+    const Size viewport{static_cast<float>(width_) / scale, static_cast<float>(height_) / scale};
+    const WindowTitleBarMetrics title = ResolveLinuxTitleBarMetrics(custom_title_bar_height_, viewport, maximized_);
+    const float border = LinuxResizeBorderDips(frame_extents_, scale, kLinuxResizeBorderDips);
+    const Rect caption_bounds{viewport.width - title.right_inset, 0.0F, title.right_inset, title.height};
+    const LinuxResizeDirection direction =
+        ResolveLinuxResizeDirection(position, border, viewport, maximized_, caption_bounds);
+    if (direction != LinuxResizeDirection::None) {
+      InitiateWindowMoveResize(event, static_cast<long>(direction));
+      return true;
+    }
+    if (runtime_ != nullptr && runtime_->IsWindowDragRegion(position)) {
+      InitiateWindowMoveResize(event, static_cast<long>(LinuxResizeDirection::Move));
+      return true;
+    }
+    return false;
+  }
+
+  void InitiateWindowMoveResize(const XButtonEvent& event, long direction) {
+    if (display_ == nullptr || window_ == 0) {
+      return;
+    }
+    XClientMessageEvent message{};
+    message.type = ClientMessage;
+    message.window = window_;
+    message.message_type = net_wm_moveresize_;
+    message.format = 32;
+    message.data.l[0] = event.x_root;
+    message.data.l[1] = event.y_root;
+    message.data.l[2] = direction;
+    message.data.l[3] = event.button;
+    message.data.l[4] = event.time;
+    XEvent send_event{};
+    send_event.xclient = message;
+    XSendEvent(
+        display_,
+        DefaultRootWindow(display_),
+        0,
+        SubstructureRedirectMask | SubstructureNotifyMask,
+        &send_event
+    );
+    XFlush(display_);
   }
 
   void HandleScrollButton(const XButtonEvent& event) {
@@ -836,9 +1092,15 @@ private:
       return;
     }
     const float scale = DpiScale();
-    runtime_->SetWindowMetrics({
+    WindowMetrics metrics{
         .viewport = {static_cast<float>(width_) / scale, static_cast<float>(height_) / scale},
-    });
+        .safe_area = {},
+        .title_bar = std::nullopt,
+    };
+    if (custom_chrome_) {
+      metrics.title_bar = ResolveLinuxTitleBarMetrics(custom_title_bar_height_, metrics.viewport, maximized_);
+    }
+    runtime_->SetWindowMetrics(metrics);
   }
 
   void HandleDisplayChange() {
@@ -1015,12 +1277,24 @@ private:
   Atom utf8_string_atom_ = 0;
   Atom targets_atom_ = 0;
   Atom clipboard_property_ = 0;
+  bool custom_chrome_ = false;
+  float custom_title_bar_height_ = 0.0F;
+  bool maximized_ = false;
+  int screen_ = 0;
+  LinuxFrameExtents frame_extents_;
+  Atom motif_wm_hints_ = 0;
+  Atom net_wm_state_ = 0;
+  Atom net_wm_state_max_h_ = 0;
+  Atom net_wm_state_max_v_ = 0;
+  Atom net_wm_moveresize_ = 0;
+  Atom net_frame_extents_ = 0;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   bool running_ = false;
   bool pointer_down_ = false;
+  bool suppress_pointer_ = false;
   Point last_pointer_position_;
   std::uint32_t last_click_count_ = 0;
   unsigned int last_click_button_ = 0;

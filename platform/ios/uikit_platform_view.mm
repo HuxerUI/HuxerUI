@@ -1,0 +1,513 @@
+#include "uikit_platform_view.h"
+
+#import <dispatch/dispatch.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <huxerui/ios/platform_view.h>
+
+#include "uikit_renderer.h"
+#include "internal.h"
+
+@interface HuxerUIPlatformSliceView : UIView {
+@public
+  huxerui::detail::UIKitRenderer* huxeruiRenderer;
+  const huxerui::RenderFrame* huxeruiFrame;
+  std::size_t huxeruiFirstCommand;
+  std::size_t huxeruiCommandCount;
+}
+@end
+
+@implementation HuxerUIPlatformSliceView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+  self = [super initWithFrame:frame];
+  if (self != nil) {
+    self.backgroundColor = UIColor.clearColor;
+    self.opaque = NO;
+    self.userInteractionEnabled = NO;
+    self.contentMode = UIViewContentModeRedraw;
+  }
+  return self;
+}
+
+- (void)drawRect:(CGRect)rect {
+  [super drawRect:rect];
+  if (huxeruiRenderer == nullptr) {
+    return;
+  }
+  huxeruiRenderer->DrawSlice(
+      UIGraphicsGetCurrentContext(), rect, huxeruiFrame, huxeruiFirstCommand, huxeruiCommandCount, false
+  );
+}
+
+@end
+
+@interface HuxerUIPlatformViewContainer : UIView
+@end
+
+@implementation HuxerUIPlatformViewContainer
+
+- (instancetype)initWithFrame:(CGRect)frame {
+  self = [super initWithFrame:frame];
+  if (self != nil) {
+    self.backgroundColor = UIColor.clearColor;
+    self.clipsToBounds = YES;
+  }
+  return self;
+}
+
+- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+  static_cast<void>(touches);
+  static_cast<void>(event);
+}
+
+- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+  static_cast<void>(touches);
+  static_cast<void>(event);
+}
+
+- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+  static_cast<void>(touches);
+  static_cast<void>(event);
+}
+
+- (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+  static_cast<void>(touches);
+  static_cast<void>(event);
+}
+
+@end
+
+namespace huxerui::detail {
+
+namespace {
+
+struct SliceKey {
+  std::optional<std::uint64_t> preceding;
+  std::optional<std::uint64_t> following;
+
+  bool operator==(const SliceKey&) const = default;
+};
+
+struct SliceKeyHash {
+  std::size_t operator()(const SliceKey& key) const noexcept {
+    const std::size_t preceding = key.preceding.has_value() ? std::hash<std::uint64_t>{}(*key.preceding) : 0;
+    const std::size_t following = key.following.has_value() ? std::hash<std::uint64_t>{}(*key.following) : 0;
+    return preceding ^ (following + 0x9e3779b9U + (preceding << 6U) + (preceding >> 2U));
+  }
+};
+
+struct EventRoute {
+  Runtime* runtime = nullptr;
+  std::uint64_t identity = 0;
+  bool active = false;
+};
+
+struct HostedPlatformView {
+  std::uint64_t properties_revision = 0;
+  std::string type;
+  std::shared_ptr<EventRoute> event_route;
+  ios::PlatformViewFactory factory;
+  __strong UIView* view = nil;
+  __strong HuxerUIPlatformViewContainer* container = nil;
+
+  ~HostedPlatformView() {
+    if (event_route) {
+      event_route->active = false;
+    }
+    [container removeFromSuperview];
+    if (view != nil && factory.dispose) {
+      @try {
+        try {
+          factory.dispose(view);
+        } catch (...) {
+        }
+      } @catch (NSException* exception) {
+        static_cast<void>(exception);
+      }
+    }
+  }
+
+  void Update(const PlatformPayload& properties) {
+    if (!factory.update) {
+      throw std::logic_error("HuxerUI iOS PlatformView factory does not support property updates");
+    }
+    @try {
+      factory.update(view, properties);
+    } @catch (NSException* exception) {
+      static_cast<void>(exception);
+      throw std::logic_error("HuxerUI iOS PlatformView factory raised an Objective-C exception while updating");
+    }
+  }
+};
+
+Rect VisibleBounds(const PlatformViewPlacement& placement) {
+  return placement.clip.has_value() ? placement.world_bounds.Intersection(*placement.clip) : placement.world_bounds;
+}
+
+CGRect NativeRect(Rect rect) {
+  return CGRectMake(rect.x, rect.y, std::max(0.0F, rect.width), std::max(0.0F, rect.height));
+}
+
+void InvalidateView(UIView* view, const DamageRegion& damage) {
+  if (damage.full) {
+    [view setNeedsDisplay];
+    return;
+  }
+  const CGFloat scale = std::max<CGFloat>(1.0, view.contentScaleFactor);
+  for (const Rect& rect : damage.rects) {
+    if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) || !std::isfinite(rect.height)) {
+      [view setNeedsDisplay];
+      return;
+    }
+    if (rect.IsEmpty()) {
+      continue;
+    }
+    CGRect dirty = CGRectIntersection(NativeRect(rect), view.bounds);
+    if (CGRectIsEmpty(dirty)) {
+      continue;
+    }
+    const CGFloat left = std::floor(CGRectGetMinX(dirty) * scale) / scale;
+    const CGFloat top = std::floor(CGRectGetMinY(dirty) * scale) / scale;
+    const CGFloat right = std::ceil(CGRectGetMaxX(dirty) * scale) / scale;
+    const CGFloat bottom = std::ceil(CGRectGetMaxY(dirty) * scale) / scale;
+    [view setNeedsDisplayInRect:CGRectMake(left, top, right - left, bottom - top)];
+  }
+}
+
+UIView* FindFirstResponder(UIView* root) {
+  if (root.isFirstResponder) {
+    return root;
+  }
+  for (UIView* subview in root.subviews) {
+    if (UIView* responder = FindFirstResponder(subview)) {
+      return responder;
+    }
+  }
+  return nil;
+}
+
+bool IsDescendant(UIView* view, UIView* ancestor) {
+  for (UIView* current = view; current != nil; current = current.superview) {
+    if (current == ancestor) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+struct UIKitPlatformViews::State {
+  State(UIKitRenderer& renderer_value, PlatformModules& modules_value, Runtime& runtime_value)
+      : renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value) {}
+
+  std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
+    const PlacePlatformViewCommand& command = *placement.command;
+    const auto* factory = modules->Find<ios::PlatformViewFactory>(command.Type());
+    if (factory == nullptr) {
+      throw std::logic_error("HuxerUI iOS PlatformView type is not registered: " + std::string(command.Type()));
+    }
+    if (!factory->create) {
+      throw std::logic_error("HuxerUI iOS PlatformView factory must provide create");
+    }
+
+    auto route = std::make_shared<EventRoute>(EventRoute{
+        runtime,
+        command.Identity(),
+        false,
+    });
+    const std::weak_ptr<EventRoute> weak_route = route;
+    PlatformEventSink event_sink = [weak_route](std::string name, PlatformPayload payload) mutable {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        const std::shared_ptr<EventRoute> route = weak_route.lock();
+        if (!route || !route->active || route->runtime == nullptr) {
+          return;
+        }
+        static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
+      });
+    };
+
+    UIView* view = nil;
+    @try {
+      view = factory->create(command.Properties(), std::move(event_sink));
+    } @catch (NSException* exception) {
+      static_cast<void>(exception);
+      throw std::logic_error("HuxerUI iOS PlatformView factory raised an Objective-C exception while creating");
+    }
+    if (view == nil) {
+      throw std::logic_error("HuxerUI iOS PlatformView factory returned a null UIView");
+    }
+
+    auto hosted = std::make_unique<HostedPlatformView>();
+    hosted->properties_revision = command.PropertiesRevision();
+    hosted->type = command.Type();
+    hosted->event_route = std::move(route);
+    hosted->factory = *factory;
+    hosted->view = view;
+    hosted->container = [[HuxerUIPlatformViewContainer alloc] initWithFrame:CGRectZero];
+    [hosted->container addSubview:hosted->view];
+    return hosted;
+  }
+
+  void Place(HostedPlatformView& hosted, const PlatformViewPlacement& placement) {
+    const Rect visible_bounds = VisibleBounds(placement);
+    const bool hidden = !placement.visible || visible_bounds.IsEmpty();
+    const CGRect container_frame = NativeRect(visible_bounds);
+    const CGRect view_frame = NativeRect({
+        placement.world_bounds.x - visible_bounds.x,
+        placement.world_bounds.y - visible_bounds.y,
+        placement.world_bounds.width,
+        placement.world_bounds.height,
+    });
+    if (hosted.container.hidden != hidden) {
+      hosted.container.hidden = hidden;
+    }
+    if (!CGRectEqualToRect(hosted.container.frame, container_frame)) {
+      hosted.container.frame = container_frame;
+    }
+    if (!CGRectEqualToRect(hosted.view.frame, view_frame)) {
+      hosted.view.frame = view_frame;
+    }
+  }
+
+  std::optional<std::uint64_t> IdentityForResponder(UIView* responder) const {
+    if (responder == nil) {
+      return std::nullopt;
+    }
+    for (const auto& [identity, hosted_view] : hosted) {
+      if (IsDescendant(responder, hosted_view->view)) {
+        return identity;
+      }
+    }
+    return std::nullopt;
+  }
+
+  UIKitRenderer* renderer;
+  PlatformModules* modules;
+  Runtime* runtime;
+  __weak UIView* root = nil;
+  const RenderFrame* frame = nullptr;
+  std::optional<RenderSlice> base_slice;
+  std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
+  std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
+};
+
+UIKitPlatformViews::UIKitPlatformViews(UIKitRenderer& renderer, PlatformModules& modules, Runtime& runtime)
+    : state_(std::make_unique<State>(renderer, modules, runtime)) {}
+
+UIKitPlatformViews::~UIKitPlatformViews() {
+  Shutdown();
+}
+
+bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
+  NSArray<UIView*>* previous_subviews = [root.subviews copy];
+  const std::optional<std::uint64_t> responder_identity = state_->IdentityForResponder(FindFirstResponder(root));
+  RenderComposition composition = BuildRenderComposition(frame.scene);
+  std::unordered_set<std::uint64_t> retained_identities;
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<HostedPlatformView>>> pending;
+
+  for (const RenderCompositionLayer& layer : composition.layers) {
+    const auto* placement = std::get_if<PlatformViewPlacement>(&layer);
+    if (placement == nullptr) {
+      continue;
+    }
+    const PlacePlatformViewCommand& command = *placement->command;
+    retained_identities.insert(command.Identity());
+    const auto found = state_->hosted.find(command.Identity());
+    if (found == state_->hosted.end() || found->second->type != command.Type()) {
+      pending.emplace_back(command.Identity(), state_->Create(*placement));
+      continue;
+    }
+    if (found->second->properties_revision != command.PropertiesRevision()) {
+      found->second->Update(command.Properties());
+      found->second->properties_revision = command.PropertiesRevision();
+    }
+  }
+
+  const bool focused_instance_removed =
+      responder_identity.has_value() && (!retained_identities.contains(*responder_identity) ||
+                                         std::ranges::any_of(pending, [responder_identity](const auto& entry) {
+                                           return entry.first == *responder_identity;
+                                         }));
+  if (focused_instance_removed) {
+    [root becomeFirstResponder];
+  }
+  for (auto& [identity, hosted] : pending) {
+    state_->hosted.erase(identity);
+    state_->hosted.emplace(identity, std::move(hosted));
+  }
+  std::erase_if(state_->hosted, [&retained_identities](const auto& entry) {
+    return !retained_identities.contains(entry.first);
+  });
+
+  NSMutableArray<UIView*>* ordered_subviews = [NSMutableArray array];
+  std::unordered_set<SliceKey, SliceKeyHash> retained_slices;
+  state_->base_slice.reset();
+  bool passed_platform_view = false;
+  for (const RenderCompositionLayer& layer : composition.layers) {
+    if (const auto* slice = std::get_if<RenderSlice>(&layer)) {
+      if (!passed_platform_view && !state_->base_slice.has_value()) {
+        state_->base_slice = *slice;
+        continue;
+      }
+      const SliceKey key{slice->preceding_platform_view, slice->following_platform_view};
+      retained_slices.insert(key);
+      HuxerUIPlatformSliceView* slice_view = state_->slices[key];
+      if (slice_view == nil) {
+        slice_view = [[HuxerUIPlatformSliceView alloc] initWithFrame:root.bounds];
+        slice_view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        state_->slices[key] = slice_view;
+      }
+      slice_view->huxeruiRenderer = state_->renderer;
+      slice_view->huxeruiFrame = &frame;
+      slice_view->huxeruiFirstCommand = slice->first_command;
+      slice_view->huxeruiCommandCount = slice->command_count;
+      if (!CGRectEqualToRect(slice_view.frame, root.bounds)) {
+        slice_view.frame = root.bounds;
+      }
+      [ordered_subviews addObject:slice_view];
+      continue;
+    }
+
+    const auto& placement = std::get<PlatformViewPlacement>(layer);
+    passed_platform_view = true;
+    HostedPlatformView& hosted = *state_->hosted.at(placement.command->Identity());
+    state_->Place(hosted, placement);
+    [ordered_subviews addObject:hosted.container];
+  }
+
+  std::erase_if(state_->slices, [&retained_slices](const auto& entry) {
+    if (retained_slices.contains(entry.first)) {
+      return false;
+    }
+    [entry.second removeFromSuperview];
+    return true;
+  });
+
+  const bool composition_changed = ![previous_subviews isEqualToArray:ordered_subviews];
+  if (composition_changed) {
+    for (NSUInteger index = 0; index < ordered_subviews.count; ++index) {
+      UIView* subview = ordered_subviews[index];
+      if (subview.superview != root || index >= root.subviews.count || root.subviews[index] != subview) {
+        [root insertSubview:subview atIndex:index];
+      }
+    }
+  }
+  state_->root = root;
+  state_->frame = &frame;
+  for (auto& [identity, hosted] : state_->hosted) {
+    static_cast<void>(identity);
+    hosted->event_route->active = true;
+  }
+  const std::optional<std::uint64_t> focused_identity = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> current_responder_identity =
+      state_->IdentityForResponder(FindFirstResponder(root));
+  if (focused_identity.has_value()) {
+    const auto focused = state_->hosted.find(*focused_identity);
+    if (focused == state_->hosted.end() || focused->second->container.hidden) {
+      if (current_responder_identity == focused_identity) {
+        [root becomeFirstResponder];
+      }
+      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+    } else if (current_responder_identity != focused_identity) {
+      if (![focused->second->view becomeFirstResponder]) {
+        RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      }
+    }
+  } else if (current_responder_identity.has_value()) {
+    [root becomeFirstResponder];
+  }
+  for (const auto& [key, slice] : state_->slices) {
+    static_cast<void>(key);
+    if (composition_changed) {
+      [slice setNeedsDisplay];
+    } else {
+      InvalidateView(slice, frame.damage);
+    }
+  }
+  return composition_changed;
+}
+
+void UIKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect) {
+  if (state_->base_slice.has_value()) {
+    const RenderSlice& slice = *state_->base_slice;
+    state_->renderer->DrawSlice(context, dirty_rect, state_->frame, slice.first_command, slice.command_count, true);
+    return;
+  }
+  state_->renderer->DrawSlice(context, dirty_rect, state_->frame, 0, 0, true);
+}
+
+UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
+  if (state_->runtime == nullptr) {
+    return nil;
+  }
+  const std::optional<std::uint64_t> identity = RuntimeAccess::HitTestPlatformView(*state_->runtime, point);
+  if (!identity.has_value()) {
+    return nil;
+  }
+  const auto found = state_->hosted.find(*identity);
+  if (found == state_->hosted.end() || found->second->container.hidden || state_->root == nil) {
+    return nil;
+  }
+  const CGPoint root_point = CGPointMake(point.x, point.y);
+  const CGPoint container_point = [found->second->container convertPoint:root_point fromView:state_->root];
+  UIView* target = [found->second->container hitTest:container_point withEvent:event];
+  if (target != nil && event != nil && event.type == UIEventTypeTouches &&
+      RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
+    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, false);
+  }
+  return target;
+}
+
+void UIKitPlatformViews::SynchronizeFocus(UIView* responder) {
+  if (state_->runtime == nullptr) {
+    return;
+  }
+  const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
+  if (identity.has_value()) {
+    if (RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
+      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, false);
+    }
+    return;
+  }
+  if (RuntimeAccess::FocusedPlatformView(*state_->runtime).has_value()) {
+    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+  }
+}
+
+void UIKitPlatformViews::Shutdown() {
+  if (!state_) {
+    return;
+  }
+  for (auto& [identity, hosted] : state_->hosted) {
+    static_cast<void>(identity);
+    hosted->event_route->active = false;
+    hosted->event_route->runtime = nullptr;
+  }
+  for (auto& [key, slice] : state_->slices) {
+    static_cast<void>(key);
+    slice->huxeruiRenderer = nullptr;
+    slice->huxeruiFrame = nullptr;
+    [slice removeFromSuperview];
+  }
+  state_->slices.clear();
+  state_->hosted.clear();
+  state_->base_slice.reset();
+  state_->frame = nullptr;
+  state_->root = nil;
+  state_->runtime = nullptr;
+}
+
+} // namespace huxerui::detail

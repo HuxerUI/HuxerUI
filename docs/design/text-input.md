@@ -613,9 +613,9 @@ const ValidationResult validation = Validate(
 return TextField(email).Validation(validation);
 ```
 
-`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending`. TextField consumes the result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. It does not reject an edit, mutate the controlled value, or decide whether validation runs on change, focus loss, or submission. Those trigger policies remain application state and can later be coordinated by a Form layer without changing TextField.
+`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending` and retains its message as a StringVariant until TextField composition. TextField consumes the resolved result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. It does not reject an edit, mutate the controlled value, or decide whether validation runs on change, focus loss, or submission. Those trigger policies remain application state and can later be coordinated by a Form layer without changing TextField.
 
-Synchronous rules return a `ValidationResult` and `Validate()` stops at the first result that is not valid. `Required` and `EmailAddress` provide common defaults while custom callables remain equally supported. `Pending` is supplied by asynchronous application state and may display a neutral supporting message without the invalid border; TextField does not own asynchronous work.
+Synchronous rules return a `ValidationResult` and `Validate()` stops at the first result that is not valid. `Required` and `EmailAddress` use `validation_required` and `validation_email` from the built-in `huxerui` resource domain unless the application supplies another StringVariant. Custom callables remain equally supported. `Pending` is supplied by asynchronous application state and may display a neutral supporting message without the invalid border; TextField does not own asynchronous work.
 
 Visual properties remain Theme styles or modifiers rather than growing one-off TextField styling methods.
 
@@ -883,7 +883,7 @@ Each `TextFieldVariantStyle` owns one variant's background, optional disabled ba
 
 Text input configuration, selection behavior, an explicit variant, label and placeholder content, and icon assets are not Theme values.
 
-The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Its horizontal toolbar reuses the active `MenuStyle` surface, foreground, shape, shadow, item geometry, separators, and indication without adopting the public Menu service lifecycle. `TextSelectionMenuLabels` is an Environment value providing overridable Cut, Copy, Paste, and Select All labels without coupling localization to Theme. Editing actions execute on release; Cut, Copy, and Paste make the menu non-interactive until the indication exit animation finishes, while Select All retains the overlay, exposes range handles, and recomputes the remaining actions. The public Menu service keeps separate LayerStack lifecycle, anchoring, focus, and dismissal.
+The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Its horizontal toolbar reuses the active `MenuStyle` surface, foreground, shape, shadow, item geometry, separators, and indication without adopting the public Menu service lifecycle. Cut, Copy, Paste, and Select All resolve from the built-in `huxerui` resource domain and use the inherited Locale for shaping. An explicitly provided `TextSelectionMenuLabels` Environment value overrides each non-empty field for that subtree, while empty fields continue to resolve their localized framework defaults. Editing actions execute on release; Cut, Copy, and Paste make the menu non-interactive until the indication exit animation finishes, while Select All retains the overlay, exposes range handles, and recomputes the remaining actions. The public Menu service keeps separate LayerStack lifecycle, anchoring, focus, and dismissal.
 
 A collapsed TextField selection uses a caret-anchored menu without selection handles. This allows an empty field to expose Paste when the clipboard contains text. A range selection uses the same menu together with themed start and end handles.
 
@@ -984,7 +984,7 @@ The first Windows implementation uses IMM32:
 
 TSF can replace or augment the adapter later without changing Runtime, TextInputClient, TextField, or SweetEditor integration.
 
-## NativeView focus
+## PlatformView focus
 
 An embedded native control and a HuxerUI TextInputClient cannot own the same host input session.
 
@@ -996,7 +996,12 @@ When input enters a native view:
 
 When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
-The Runtime remains authoritative for HuxerUI hit-test and focus ordering. PlatformAdapter remains authoritative for native focus transfer and event dispatch. This follows the NativeView ownership model in [`sdk-cli.md`](sdk-cli.md).
+Focus transfer resolves the PlatformView identity from the current committed `RenderComposition`; a delayed native focus notification for an obsolete identity is ignored.
+The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for native focus transfer and native input dispatch.
+These focus and IME lifecycle messages are internal adapter coordination rather than PlatformPayload module events.
+A module may emit a typed application event describing a native focus change, but that event neither starts nor ends a HuxerUI text-input session.
+The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one native subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global native focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus, while hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
+This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
 
@@ -1085,7 +1090,7 @@ Runtime tests use a fake `PlatformTextInput` and cover:
 - Restored modal focus receives a new session.
 - Stale commands and context queries are rejected.
 - Unmount, disable, and read-only transitions stop input.
-- NativeView focus closes the HuxerUI session.
+- PlatformView focus closes the HuxerUI session.
 - Pointer caret placement occurs before native state synchronization.
 - External value changes request update or restart as appropriate.
 - Key events do not duplicate committed text.
@@ -1188,6 +1193,6 @@ The implementation should preserve these constraints:
 - Authoritative controlled updates are not converted into inferred edits.
 - Text geometry is based on real layout data, not average character width.
 - TextField and SweetEditor share the input protocol without sharing their state models.
-- NativeView focus transfers IME ownership instead of creating two active clients.
+- PlatformView focus transfers IME ownership instead of creating two active clients.
 - Text input protocol types remain concentrated in `text_input.h`; TextField, its events, and its style follow the ownership of existing built-in controls.
 - TextField supports reliable single-line and multiline editing without becoming a document-editor abstraction.

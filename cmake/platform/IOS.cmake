@@ -1,6 +1,7 @@
 function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_adapter.mm"
+            "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_platform_view.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_renderer.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_text_input.mm"
             PARENT_SCOPE

@@ -13,6 +13,7 @@
 #include <huxerui/theme.h>
 #include <huxerui/window.h>
 
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "tooltip_internal.h"
 
@@ -947,9 +948,6 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
-    const EdgeInsets safe_area = context.SafeAreaInsets();
-    const WindowTitleBarMetrics* title_bar = context.TitleBarMetrics();
-    const float overlay_top = std::max(safe_area.top, title_bar == nullptr ? 0.0F : title_bar->height);
     for (MountedNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose));
     }
@@ -960,25 +958,19 @@ public:
       result.Place(
           panel,
           {
-              std::min(
-                  safe_area.left + 16.0F,
-                  std::max(safe_area.left, constraints.max_width - safe_area.right - panel.LayoutSize().width)
-              ),
-              std::min(
-                  overlay_top + 16.0F,
-                  std::max(overlay_top, constraints.max_height - safe_area.bottom - panel.LayoutSize().height)
-              ),
+              std::min(16.0F, std::max(0.0F, constraints.max_width - panel.LayoutSize().width)),
+              std::min(16.0F, std::max(0.0F, constraints.max_height - panel.LayoutSize().height)),
           }
       );
     }
     if (node.ChildCount() > 1) {
-      constexpr float corner_inset = 28.0F;
+      constexpr float corner_inset = 30.0F;
       MountedNode& ribbon = node.ChildAt(1);
       result.Place(
           ribbon,
           {
               constraints.max_width - corner_inset - ribbon.LayoutSize().width * 0.5F,
-              overlay_top + corner_inset - ribbon.LayoutSize().height * 0.5F,
+              corner_inset - ribbon.LayoutSize().height * 0.5F,
           }
       );
     }
@@ -1018,7 +1010,7 @@ public:
   }
 };
 
-constexpr Color debug_ribbon_background = Color::Rgb(183, 28, 28);
+constexpr Color debug_ribbon_background = Color::Rgb(103, 80, 164);
 constexpr Color debug_ribbon_foreground = Color::White();
 constexpr Color debug_ribbon_shadow = Color::Rgb(0, 0, 0, 0.32F);
 constexpr Color debug_panel_background = Color::Rgb(17, 22, 31, 0.97F);
@@ -1177,10 +1169,10 @@ View DebugPanel(
 
 View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snapshot) {
   Frame ribbon_frame;
-  ribbon_frame.width = 96.0F;
-  ribbon_frame.height = 18.0F;
+  ribbon_frame.width = 104.0F;
+  ribbon_frame.height = 20.0F;
   return Row {
-    Text("DEBUG").Style(TextStyle{Font::System(12.0F).WithWeight(FontWeight::Bold), debug_ribbon_foreground}),
+    Text("DEBUG").Style(TextStyle{Font::System(11.0F).WithWeight(FontWeight::SemiBold), debug_ribbon_foreground}),
   }.With(
       ribbon_frame,
       MainAlign{MainAxisAlignment::Center},
@@ -1189,7 +1181,7 @@ View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snaps
       Shadow{
           .color = debug_ribbon_shadow,
           .offset = {},
-          .blur_radius = 8.0F,
+          .blur_radius = 12.0F,
       },
       Rotation{45.0F}
   ).OnClick([expanded, snapshot] {
@@ -1592,7 +1584,7 @@ View MenuService::ItemView(
 
   std::vector<View> content;
   if (item.checked_.value_or(false)) {
-    content.push_back(Text("\xE2\x9C\x93").With(icon_frame, Foreground{style.foreground}));
+    content.push_back(Image(images::check).Fit(ImageFit::Contain).Tint(style.foreground).With(icon_frame));
   }
   if (const auto* resource = std::get_if<ImageResource>(&item.icon_)) {
     content.push_back(Image(*resource).Fit(ImageFit::Contain).With(icon_frame));
@@ -1600,7 +1592,7 @@ View MenuService::ItemView(
     content.push_back(Image(*asset).Fit(ImageFit::Contain).With(icon_frame));
   }
 
-  std::string label = detail::ResolveStringVariant(std::move(item.label_));
+  std::string label = UseString(std::move(item.label_));
   if (label.empty()) {
     throw std::invalid_argument("HuxerUI menu item label must not be empty");
   }
@@ -1633,7 +1625,7 @@ View MenuService::ItemView(
     };
     return MenuItemLayout{
         Row {std::move(content)}.With(Spacing{style.item_content_spacing}, CrossAlign{CrossAxisAlignment::Center}),
-        Text("\xE2\x80\xBA").With(arrow_frame, Foreground{style.foreground}),
+        Image(images::chevron_right).Fit(ImageFit::Contain).Tint(style.foreground).With(arrow_frame),
     }
         .With(
             submenu.Anchor(),
@@ -1742,17 +1734,17 @@ View DialogService::StandardContent(
     const LayerController& layers,
     LayerId id
 ) {
-  std::string resolved_title = detail::ResolveStringVariant(title);
-  std::string resolved_message = detail::ResolveStringVariant(message);
-  std::string resolved_positive = detail::ResolveStringVariant(positive);
+  std::string resolved_title = UseString(title);
+  std::string resolved_message = UseString(message);
+  std::string resolved_positive = UseString(positive);
   if (resolved_positive.empty()) {
-    resolved_positive = "OK";
+    resolved_positive = UseString(strings::dialog_ok);
   }
   std::optional<std::string> resolved_negative;
   if (negative.has_value()) {
-    resolved_negative = detail::ResolveStringVariant(*negative);
+    resolved_negative = UseString(*negative);
     if (resolved_negative->empty()) {
-      *resolved_negative = "Cancel";
+      *resolved_negative = UseString(strings::dialog_cancel);
     }
   }
   if (resolved_title.empty()) {
@@ -2072,7 +2064,7 @@ LayerId detail::ToastService::Show(
           .barrier_color = std::nullopt,
       },
       [service, id, message = std::move(message), options, style, transition]() -> View {
-        std::string resolved_message = detail::ResolveStringVariant(message);
+        std::string resolved_message = UseString(message);
         if (resolved_message.empty()) {
           throw std::invalid_argument("HuxerUI toast message must not be empty");
         }

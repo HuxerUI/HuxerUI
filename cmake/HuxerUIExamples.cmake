@@ -61,4 +61,9 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
 
     target_compile_features(${target_name} PRIVATE cxx_std_20)
     huxerui_enable_codegen(${target_name})
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_RESOURCE_PACKAGES
+            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+    )
+    _huxerui_schedule_resources(${target_name})
 endfunction()

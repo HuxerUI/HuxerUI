@@ -503,6 +503,7 @@ TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
   popup_focus_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -560,6 +561,7 @@ TEST_CASE("TestSubmenuLeavesItsParentInteractiveAndOutsideDismissesTheCascade") 
   parent_menu_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -614,6 +616,7 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
   parent_menu_clicks = 0;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -624,7 +627,8 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
   });
   const FlattenedScene& shown = runtime.BuildFrame();
   REQUIRE(ContainsText(shown, "Checked"));
-  REQUIRE(ContainsText(shown, "\xE2\x9C\x93"));
+  REQUIRE_FALSE(ContainsText(shown, "\xE2\x9C\x93"));
+  REQUIRE(FindPresentedStrokePathRect(shown, MenuStyle::Default().foreground).has_value());
   const std::optional<Rect> disabled = FindPresentedTextRect(shown, "Disabled");
   REQUIRE(disabled.has_value());
 
@@ -704,6 +708,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
 
   layer_menu.reset();
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{LayerApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -746,7 +751,8 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   );
   const FlattenedScene& fixed_submenu = runtime.BuildFrame();
   const std::optional<Rect> submenu_label = FindPresentedTextRect(fixed_submenu, "Fixed submenu");
-  const std::optional<Rect> submenu_arrow = FindPresentedTextRect(fixed_submenu, "\xE2\x80\xBA");
+  const std::optional<Rect> submenu_arrow =
+      FindPresentedStrokePathRect(fixed_submenu, MenuStyle::Default().foreground);
   REQUIRE(submenu_label.has_value());
   REQUIRE(submenu_arrow.has_value());
   REQUIRE(submenu_arrow->x > fixed_surface->x + fixed_surface->width * 0.75F);
@@ -755,7 +761,8 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   const FlattenedScene& natural_submenu = runtime.BuildFrame();
   const std::optional<Rect> natural_submenu_surface =
       FindPresentedRectWithColor(natural_submenu, MenuStyle::Default().background);
-  const std::optional<Rect> natural_submenu_arrow = FindPresentedTextRect(natural_submenu, "\xE2\x80\xBA");
+  const std::optional<Rect> natural_submenu_arrow =
+      FindPresentedStrokePathRect(natural_submenu, MenuStyle::Default().foreground);
   REQUIRE(natural_submenu_surface.has_value());
   REQUIRE(natural_submenu_surface->width < 300.0F);
   REQUIRE(natural_submenu_arrow.has_value());
@@ -1278,6 +1285,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   layer_background_clicks = 0;
   AppOptions options;
   options.show_debug_overlay = true;
+  options.window.content_mode = WindowContentMode::EdgeToEdge;
 
   TestPlatform platform;
   platform.process_metrics = ProcessMetrics{
@@ -1286,7 +1294,11 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
       .processor_count = 4,
   };
   Runtime runtime{DebugOverlayApp, platform, std::move(options)};
-  runtime.SetWindowMetrics({.viewport = {360.0F, 260.0F}});
+  runtime.SetWindowMetrics({
+      .viewport = {360.0F, 260.0F},
+      .safe_area = {.top = 72.0F, .right = 40.0F, .bottom = 24.0F, .left = 64.0F},
+      .title_bar = WindowTitleBarMetrics{.height = 80.0F, .left_inset = 20.0F, .right_inset = 100.0F},
+  });
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(ContainsText(initial, "DEBUG"));
   REQUIRE(!ContainsText(initial, "HuxerUI Performance"));
@@ -1295,18 +1307,18 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(banner_text->x > 300.0F);
   REQUIRE(banner_text->x + banner_text->width <= 360.0F);
   REQUIRE(banner_text->y < 56.0F);
-  REQUIRE(FindRectWithColor(initial, Color::Rgb(183, 28, 28)) != nullptr);
+  REQUIRE(FindRectWithColor(initial, Color::Rgb(103, 80, 164)) != nullptr);
   REQUIRE(std::ranges::any_of(initial.Commands(), [](const PaintCommand& command) {
     const auto* shadow = std::get_if<DrawShadowCommand>(&command);
     return shadow != nullptr && shadow->color == Color::Rgb(0, 0, 0, 0.32F) && shadow->offset == Point{} &&
-           shadow->blur_radius == 8.0F;
+           shadow->blur_radius == 12.0F;
   }));
   REQUIRE(layer_app_compositions == 1);
 
   ClickAt(runtime, {20.0F, 220.0F}, 123);
   REQUIRE(layer_background_clicks == 1);
 
-  ClickAt(runtime, {332.0F, 28.0F}, 124);
+  ClickAt(runtime, {330.0F, 30.0F}, 124);
   const FlattenedScene& expanded = runtime.BuildFrame();
   REQUIRE(ContainsText(expanded, "DEBUG"));
   REQUIRE(ContainsText(expanded, "HuxerUI Performance"));
@@ -1318,6 +1330,8 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(panel_title.has_value());
   REQUIRE(panel_title->x >= 16.0F);
   REQUIRE(panel_title->y >= 16.0F);
+  REQUIRE(panel_title->x < 64.0F);
+  REQUIRE(panel_title->y < 72.0F);
   REQUIRE(FindRectWithColor(expanded, Color::Rgb(17, 22, 31, 0.97F)) != nullptr);
   REQUIRE(layer_app_compositions == 1);
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
@@ -1339,7 +1353,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(ContainsText(sampled, "72.0 MiB"));
   REQUIRE(layer_app_compositions == 1);
 
-  ClickAt(runtime, {332.0F, 28.0F}, 125);
+  ClickAt(runtime, {330.0F, 30.0F}, 125);
   const FlattenedScene& collapsed = runtime.BuildFrame();
   REQUIRE(ContainsText(collapsed, "DEBUG"));
   REQUIRE(!ContainsText(collapsed, "HuxerUI Performance"));
@@ -1354,7 +1368,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
       .memory_usage_bytes = 96ULL * 1024ULL * 1024ULL,
       .processor_count = 4,
   };
-  ClickAt(runtime, {332.0F, 28.0F}, 127);
+  ClickAt(runtime, {330.0F, 30.0F}, 127);
   const FlattenedScene& reopened = runtime.BuildFrame();
   REQUIRE(ContainsText(reopened, "HuxerUI Performance"));
   REQUIRE(!ContainsText(reopened, "72.0 MiB"));

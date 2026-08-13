@@ -42,7 +42,7 @@ template <class IconVariant> std::optional<ResolvedImageAsset> ResolveNavigation
 
 struct NavigationItemAccess {
   static std::string ResolveLabel(NavigationItem& item) {
-    return ResolveStringVariant(std::move(item.label_));
+    return UseString(std::move(item.label_));
   }
 
   static std::optional<ResolvedImageAsset> ResolveIcon(NavigationItem& item) {
@@ -1067,7 +1067,7 @@ TopAppBar::Construction TopAppBar::Build(
 ) {
   Construction construction;
   construction.style = ResolveNavigationStyle<TopAppBarStyle>();
-  std::string resolved_title = detail::ResolveStringVariant(std::move(title));
+  std::string resolved_title = UseString(std::move(title));
   if (resolved_title.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
     throw std::invalid_argument("HuxerUI TopAppBar requires a non-empty title");
   }

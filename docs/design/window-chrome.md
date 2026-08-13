@@ -1,6 +1,6 @@
 # Window Chrome Design
 
-Status: shared contract plus Windows and macOS Custom modes implemented; Linux Custom mode remains deferred
+Status: shared contract plus Windows, macOS, and Linux Custom modes implemented
 
 This document defines desktop window-chrome ownership, application-defined title-bar content, standard window controls, drag hit testing, and platform fallback behavior.
 It complements the mobile-oriented [Window Insets and System Bars Design](window-insets.md) without changing safe-area semantics.
@@ -13,7 +13,7 @@ It complements the mobile-oriented [Window Insets and System Bars Design](window
 - Keep native window metadata available to task switching, window management, system menus, and accessibility.
 - Reuse mounted layout and pointer geometry for drag and native hit testing.
 - Provide convenient per-window commands without exposing platform window objects.
-- Keep one ownership model across Windows, macOS, and future Linux client-side decorations.
+- Keep one ownership model across Windows, macOS, and Linux client-side decorations.
 
 ## Non-goals
 
@@ -82,9 +82,9 @@ struct WindowTitleBarMetrics {
 };
 
 struct WindowCaptionLabels {
-  StringVariant minimize = "Minimize";
-  StringVariant toggle_maximize = "Maximize or restore";
-  StringVariant close = "Close";
+  StringVariant minimize;
+  StringVariant toggle_maximize;
+  StringVariant close;
 };
 
 struct WindowMetrics {
@@ -128,6 +128,7 @@ They deliberately do not use leading and trailing terminology because the adapte
 
 `WindowOptions::caption_labels` makes framework-rendered accessibility labels configurable and resource-aware without
 exposing native window objects.
+Empty fields resolve `window_minimize`, `window_maximize` or `window_restore` according to platform state, and `window_close` from the built-in `huxerui` resource domain; a non-empty `toggle_maximize` continues to override both maximize and restore states.
 The chrome mode, preferred height, and label sources remain stable for one Runtime, while resolved localized labels
 refresh with the Runtime resource configuration.
 
@@ -305,12 +306,24 @@ System mode retains the ordinary AppKit title bar and submits no title-bar metri
 
 ## Linux mapping
 
-The current Linux backend uses X11 with window-manager decorations.
-X11 does not provide one portable contract for embedding client content into a server-decorated title bar while preserving its buttons.
+The current Linux backend uses X11.
+Custom mode removes server-side decorations through `_MOTIF_WM_HINTS` with `MWM_HINTS_DECORATIONS` and zero decorations.
+The window remains window-manager managed rather than override-redirect, so taskbar presence, snap, and window-manager keybindings keep working.
 
-Until client-side decorations are implemented, Linux resolves Custom to System, submits no title-bar metrics, and renders `WindowTitleBar` as an ordinary client-area bar.
+The framework renders the standard minimize, maximize or restore, and close controls in a `WindowControlsLayout` layer.
+Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three times 46 DIP, matching the Windows modern interaction width because X11 has no native caption system metric.
 
-Future X11 Custom support removes server decorations, renders framework standard controls, delegates movement and resizing through `_NET_WM_MOVERESIZE`, and uses window-manager protocols for maximize, minimize, and close.
+Linux metric resolution prefers `AppOptions::window.title_bar_height`, enforces a 32-DIP minimum height, clamps to the viewport, reports zero left inset, caps the right inset at the viewport width, and tracks the maximized state.
+
+Native drag and edge or corner resize send `_NET_WM_MOVERESIZE` client messages to the root window from the pointer button event, using root-relative coordinates, the pointer button, and the event time.
+Hit testing mirrors the Windows `HTCAPTION` approach: caption-control bounds first, then resize edges, then `Runtime::IsWindowDragRegion()`, then normal client handling.
+
+The resize border prefers the window-manager-reported `_NET_FRAME_EXTENTS` subscribed through `PropertyNotify` and falls back to a fixed 6-DIP border; resize edges are skipped while maximized.
+
+Maximize, restore, and toggle use EWMH `_NET_WM_STATE` with `_NET_WM_STATE_MAXIMIZED_HORZ` and `_NET_WM_STATE_MAXIMIZED_VERT`, minimize uses `XIconifyWindow`, and close reuses the `WM_DELETE_WINDOW` protocol path.
+The maximized state is tracked through `PropertyNotify` on `_NET_WM_STATE` and drives the caption glyph swap through the shared `maximize_state_changed` path.
+
+System mode is unchanged and submits no title-bar metrics.
 
 A future Wayland backend negotiates decorations through `xdg-decoration`.
 Client-side movement and resize use `xdg_toplevel` requests with the seat and serial from the initiating pointer event; they never depend on global pointer coordinates.
@@ -345,7 +358,7 @@ The removed Windows Extended experiment has no compatibility alias or retained D
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
 macOS Custom mode uses full-size AppKit content, native traffic lights, converted left-side control geometry, native dragging, and native window commands.
-Linux continues to resolve Custom according to its platform section until client-side decorations are implemented.
+Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, `_MOTIF_WM_HINTS` decoration removal, `_NET_WM_MOVERESIZE` drag and resize, EWMH and `XIconifyWindow` commands, and `PropertyNotify`-tracked maximized state.
 
 ## Testing
 
@@ -369,10 +382,11 @@ High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still re
 
 macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
 Manual macOS validation remains required for native window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
-Linux Custom decorations remain deferred; the current adapter continues to use system decorations.
+Linux tests isolate metric resolution, resize-direction edge semantics including maximized skip and caption-bounds exclusion and viewport clamping, maximized-state atom detection, and frame-extents fallback.
+Manual Linux validation currently covers decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on KWin.
 
 ## Delivery order
 
 The shared contract and Windows Custom implementation form the first delivery.
 The macOS implementation forms the second delivery and retains native traffic lights.
-Linux Custom decorations and Wayland remain later platform work under the same two-mode contract.
+Linux Custom mode is delivered under the same two-mode contract, while Wayland remains later platform work.

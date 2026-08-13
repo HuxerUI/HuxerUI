@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -20,6 +21,7 @@
 #include <huxerui/app.h>
 
 #include "appkit_accessibility.h"
+#include "appkit_platform_view.h"
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
@@ -38,6 +40,12 @@ double TimevalSeconds(const timeval& value) noexcept {
 }
 
 } // namespace
+
+@interface HuxerUIWindow : NSWindow {
+@public
+  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
+}
+@end
 
 @interface HuxerUIView : NSView {
 @public
@@ -151,6 +159,16 @@ namespace huxerui::detail {
 
 class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
+  MacPlatformAdapter()
+      : PlatformAdapter([](std::function<void()> task) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            try {
+              task();
+            } catch (...) {
+            }
+          });
+        }) {}
+
   int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     @autoreleasepool {
       runtime_ = &runtime;
@@ -169,7 +187,11 @@ public:
       if (custom_chrome_) {
         style |= NSWindowStyleMaskFullSizeContentView;
       }
-      window_ = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
+      window_ = [[HuxerUIWindow alloc] initWithContentRect:frame
+                                                 styleMask:style
+                                                   backing:NSBackingStoreBuffered
+                                                     defer:NO];
+      window_->huxeruiAdapter = this;
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;
       window_.delegate = delegate_;
@@ -190,7 +212,8 @@ public:
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
-      accessibility_ = std::make_unique<MacAccessibility>(runtime, view_);
+      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, Modules(), runtime);
+      accessibility_ = std::make_unique<MacAccessibility>(runtime, view_, *platform_views_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
       [window_ center];
@@ -210,11 +233,14 @@ public:
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiAdapter = nullptr;
       delegate_->huxeruiAdapter = nullptr;
+      window_->huxeruiAdapter = nullptr;
       [frame_scheduler_ shutdown];
       frame_scheduler_ = nil;
       scheduled_frame_deadline_.reset();
       committed_frame_ = nullptr;
       accessibility_.reset();
+      platform_views_->Shutdown();
+      platform_views_.reset();
       runtime_ = nullptr;
     }
     return 0;
@@ -297,9 +323,15 @@ public:
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
+    const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
     committed_frame_ = &commit.render_frame;
     accessibility_->Commit(commit.semantic_frame);
-    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    if (composition_changed) {
+      [view_ setNeedsDisplay:YES];
+      frame_state_.MarkPaintPending();
+    } else {
+      static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    }
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
@@ -308,9 +340,46 @@ public:
 
   void DrawCommittedFrame(CGContextRef context, NSRect dirty_rect) {
     frame_state_.BeginPaint();
-    renderer_.Draw(context, NSRectToCGRect(dirty_rect), committed_frame_);
+    platform_views_->DrawBase(context, NSRectToCGRect(dirty_rect));
     if (const std::optional<double> deadline = frame_state_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
+    }
+  }
+
+  NSView* HitTestPlatformView(Point point) const {
+    if (runtime_ == nullptr || platform_views_ == nullptr) {
+      return nil;
+    }
+    return platform_views_->HitTest(point);
+  }
+
+  void SynchronizePlatformViewFocus() {
+    if (platform_views_ != nullptr && window_ != nil) {
+      platform_views_->SynchronizeFocus(window_.firstResponder);
+    }
+  }
+
+  void SynchronizePlatformViewFocus(NSResponder* responder) {
+    if (platform_views_ != nullptr) {
+      platform_views_->SynchronizeFocus(responder);
+    }
+  }
+
+  bool BeginPlatformViewFocusTraversal(NSEvent* event) {
+    if (platform_views_ == nullptr || window_ == nil || event == nil || event.type != NSEventTypeKeyDown ||
+        event.isARepeat) {
+      return false;
+    }
+    const KeyEvent key_event = MakeMacKeyEvent(event, KeyEventType::Down);
+    if (key_event.key != Key::Tab) {
+      return false;
+    }
+    return platform_views_->BeginFocusTraversal(window_.firstResponder, key_event.modifiers.shift);
+  }
+
+  void EndPlatformViewFocusTraversal() {
+    if (platform_views_ != nullptr) {
+      platform_views_->EndFocusTraversal();
     }
   }
 
@@ -605,12 +674,13 @@ private:
   Runtime* runtime_ = nullptr;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
-  __strong NSWindow* window_ = nil;
+  __strong HuxerUIWindow* window_ = nil;
   __strong HuxerUIView* view_ = nil;
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
   std::unique_ptr<MacAccessibility> accessibility_;
+  std::unique_ptr<AppKitPlatformViews> platform_views_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
@@ -625,14 +695,55 @@ int RunPlatformApp(AppDefinition definition) {
 
 } // namespace huxerui::detail
 
+@implementation HuxerUIWindow
+
+- (void)sendEvent:(NSEvent*)event {
+  if (huxeruiAdapter == nullptr || !huxeruiAdapter->BeginPlatformViewFocusTraversal(event)) {
+    [super sendEvent:event];
+    return;
+  }
+  @try {
+    [super sendEvent:event];
+  } @finally {
+    huxeruiAdapter->EndPlatformViewFocusTraversal();
+  }
+}
+
+@end
+
 @implementation HuxerUIView
 
 - (BOOL)isFlipped {
   return YES;
 }
 
+- (NSView*)hitTest:(NSPoint)point {
+  const NSPoint local_point = self.superview == nil ? point : [self convertPoint:point fromView:self.superview];
+  if (!NSPointInRect(local_point, self.bounds)) {
+    return nil;
+  }
+  if (huxeruiAdapter != nullptr) {
+    NSView* platform_view = huxeruiAdapter->HitTestPlatformView({
+        static_cast<float>(local_point.x),
+        static_cast<float>(local_point.y),
+    });
+    if (platform_view != nil) {
+      return platform_view;
+    }
+  }
+  return self;
+}
+
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+
+- (BOOL)becomeFirstResponder {
+  const BOOL became_first_responder = [super becomeFirstResponder];
+  if (became_first_responder && huxeruiAdapter != nullptr) {
+    huxeruiAdapter->SynchronizePlatformViewFocus(self);
+  }
+  return became_first_responder;
 }
 
 - (BOOL)isAccessibilityElement {
@@ -893,6 +1004,13 @@ int RunPlatformApp(AppDefinition definition) {
   static_cast<void>(notification);
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->InvalidateTextInputGeometry();
+  }
+}
+
+- (void)windowDidUpdate:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->SynchronizePlatformViewFocus();
   }
 }
 

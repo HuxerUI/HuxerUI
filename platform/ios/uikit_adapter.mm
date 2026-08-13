@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -18,6 +19,7 @@
 
 #include <huxerui/app.h>
 
+#include "uikit_platform_view.h"
 #include "uikit_renderer.h"
 #include "uikit_text_input.h"
 #include "uikit_view.h"
@@ -236,6 +238,16 @@ namespace huxerui::detail {
 
 class IosPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
+  IosPlatformAdapter()
+      : PlatformAdapter([](std::function<void()> task) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            try {
+              task();
+            } catch (...) {
+            }
+          });
+        }) {}
+
   int Run(Runtime& runtime) {
     if (active_adapter_ != nullptr) {
       throw std::logic_error("HuxerUI iOS application is already running");
@@ -264,6 +276,7 @@ public:
     view_.translatesAutoresizingMaskIntoConstraints = NO;
     view_->huxeruiRuntime = runtime_;
     view_->huxeruiAdapter = this;
+    platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, Modules(), *runtime_);
     [view_controller_.view addSubview:view_];
     [NSLayoutConstraint activateConstraints:@[
       [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
@@ -304,13 +317,16 @@ public:
     [NSNotificationCenter.defaultCenter removeObserver:view_];
     [frame_scheduler_ shutdown];
     frame_scheduler_ = nil;
+    if (platform_views_) {
+      platform_views_->Shutdown();
+      platform_views_.reset();
+    }
     if (view_ != nil) {
       view_->huxeruiTextInput = nullptr;
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiAdapter = nullptr;
     }
     text_input_.reset();
-    committed_frame_ = nullptr;
     scheduled_frame_deadline_.reset();
     view_ = nil;
     view_controller_ = nil;
@@ -365,8 +381,13 @@ public:
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
-    committed_frame_ = &commit.render_frame;
-    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
+    if (composition_changed) {
+      [view_ setNeedsDisplay];
+      frame_state_.MarkPaintPending();
+    } else {
+      static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    }
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
@@ -375,7 +396,7 @@ public:
 
   void DrawCommittedFrame(CGContextRef context, CGRect dirty_rect) {
     frame_state_.BeginPaint();
-    renderer_.Draw(context, dirty_rect, committed_frame_);
+    platform_views_->DrawBase(context, dirty_rect);
     if (const std::optional<double> deadline = frame_state_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
@@ -399,6 +420,19 @@ public:
 
   void CancelActiveTouches() {
     [view_ cancelHuxerUITouches];
+  }
+
+  UIView* HitTestPlatformView(Point point, UIEvent* event) const {
+    if (runtime_ == nullptr || platform_views_ == nullptr) {
+      return nil;
+    }
+    return platform_views_->HitTest(point, event);
+  }
+
+  void SynchronizePlatformViewFocus(UIView* responder) {
+    if (platform_views_ != nullptr) {
+      platform_views_->SynchronizeFocus(responder);
+    }
   }
 
   FontMetrics Metrics(const Font& font) override {
@@ -591,11 +625,11 @@ private:
   __strong HuxerUIView* view_ = nil;
   __strong HuxerUIIOSFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<UIKitTextInput> text_input_;
+  std::unique_ptr<UIKitPlatformViews> platform_views_;
   PlatformFrameState frame_state_;
   CGSize viewport_size_ = CGSizeZero;
   std::optional<CGRect> keyboard_frame_;
   std::optional<double> scheduled_frame_deadline_;
-  const RenderFrame* committed_frame_ = nullptr;
 };
 
 int RunPlatformApp(AppDefinition definition) {
@@ -615,6 +649,7 @@ int RunPlatformApp(AppDefinition definition) {
   }
   self.backgroundColor = UIColor.whiteColor;
   self.opaque = YES;
+  self.clipsToBounds = YES;
   self.multipleTouchEnabled = YES;
   self.contentMode = UIViewContentModeRedraw;
   huxeruiTouches = [[NSMutableSet alloc] init];
@@ -623,6 +658,25 @@ int RunPlatformApp(AppDefinition definition) {
 
 - (BOOL)canBecomeFirstResponder {
   return YES;
+}
+
+- (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
+  if (!CGRectContainsPoint(self.bounds, point)) {
+    return nil;
+  }
+  if (huxeruiAdapter != nullptr) {
+    UIView* platform_view = huxeruiAdapter->HitTestPlatformView(
+        {static_cast<float>(point.x), static_cast<float>(point.y)}, event
+    );
+    if (platform_view != nil) {
+      return platform_view;
+    }
+    if (event != nil && event.type == UIEventTypeTouches) {
+      [self becomeFirstResponder];
+      huxeruiAdapter->SynchronizePlatformViewFocus(self);
+    }
+  }
+  return self;
 }
 
 - (void)layoutSubviews {

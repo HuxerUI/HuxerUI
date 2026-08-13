@@ -14,10 +14,10 @@ enum class TextEditingAction {
 };
 
 struct TextSelectionMenuLabels {
-  std::string cut = "Cut";
-  std::string copy = "Copy";
-  std::string paste = "Paste";
-  std::string select_all = "Select all";
+  std::string cut;
+  std::string copy;
+  std::string paste;
+  std::string select_all;
 
   static TextSelectionMenuLabels Default() {
     return {};

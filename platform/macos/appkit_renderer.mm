@@ -1004,13 +1004,29 @@ std::unique_ptr<TextLayout> AppKitRenderer::CreateTextLayout(
   return std::make_unique<MacTextLayout>(text, style, max_width, options);
 }
 
-void AppKitRenderer::RenderSequence(const PaintSequence& sequence, CGContextRef context) {
+struct AppKitRenderer::CommandRange {
+  std::size_t first = 0;
+  std::size_t end = 0;
+  std::size_t cursor = 0;
+};
+
+void AppKitRenderer::RenderSequence(const PaintSequence& sequence, CGContextRef context, CommandRange* range) {
   for (const PaintCommand& command : sequence.Commands()) {
+    if (std::holds_alternative<PlacePlatformViewCommand>(command)) {
+      continue;
+    }
+    const bool selected = range == nullptr || (range->cursor >= range->first && range->cursor < range->end);
+    if (range != nullptr) {
+      ++range->cursor;
+    }
+    if (!selected) {
+      continue;
+    }
     std::visit([this, context](const auto& value) { RenderCommand(context, value); }, command);
   }
 }
 
-void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef context) {
+void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef context, CommandRange* range) {
   const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
   if (!node.visible || opacity <= 0.0F) {
     return;
@@ -1031,7 +1047,7 @@ void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef contex
     CGContextBeginTransparencyLayer(context, nullptr);
   }
 
-  RenderSequence(node.content, context);
+  RenderSequence(node.content, context, range);
   for (const RenderClip& clip : node.child_clips) {
     std::visit([&](const auto& command) { RenderCommand(context, command); }, clip);
   }
@@ -1041,7 +1057,7 @@ void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef contex
   }
   for (const RenderNode* child : node.children) {
     if (child != nullptr) {
-      RenderSceneNode(*child, context);
+      RenderSceneNode(*child, context, range);
     }
   }
   if (children_transformed) {
@@ -1050,7 +1066,7 @@ void AppKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef contex
   for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
     RenderCommand(context, PopClipCommand{});
   }
-  RenderSequence(node.foreground, context);
+  RenderSequence(node.foreground, context, range);
   if (translucent) {
     CGContextEndTransparencyLayer(context);
     CGContextRestoreGState(context);
@@ -1380,13 +1396,39 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const PopTransformComma
   CGContextRestoreGState(context);
 }
 
+void AppKitRenderer::RenderCommand(CGContextRef context, const PlacePlatformViewCommand& command) {
+  static_cast<void>(context);
+  static_cast<void>(command);
+}
+
 void AppKitRenderer::Draw(CGContextRef context, CGRect dirty_rect, const RenderFrame* frame) {
   CGContextSaveGState(context);
   CGContextClipToRect(context, dirty_rect);
   SetFillColor(context, Color::Rgb(247, 248, 250));
   CGContextFillRect(context, dirty_rect);
   if (frame != nullptr && frame->scene.root != nullptr) {
-    RenderSceneNode(*frame->scene.root, context);
+    RenderSceneNode(*frame->scene.root, context, nullptr);
+  }
+  CGContextRestoreGState(context);
+}
+
+void AppKitRenderer::DrawSlice(
+    CGContextRef context,
+    CGRect dirty_rect,
+    const RenderFrame* frame,
+    std::size_t first_command,
+    std::size_t command_count,
+    bool draw_background
+) {
+  CGContextSaveGState(context);
+  CGContextClipToRect(context, dirty_rect);
+  if (draw_background) {
+    SetFillColor(context, Color::Rgb(247, 248, 250));
+    CGContextFillRect(context, dirty_rect);
+  }
+  if (frame != nullptr && frame->scene.root != nullptr && command_count > 0) {
+    CommandRange range{first_command, first_command + command_count, 0};
+    RenderSceneNode(*frame->scene.root, context, &range);
   }
   CGContextRestoreGState(context);
 }

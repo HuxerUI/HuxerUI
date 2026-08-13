@@ -16,3 +16,11 @@ add_subdirectory(environment)
 add_subdirectory(canvas)
 add_subdirectory(image)
 add_subdirectory(window_chrome)
+
+if (APPLE OR ANDROID)
+    add_subdirectory(platform_view)
+endif ()
+
+if (APPLE OR ANDROID)
+    add_subdirectory(platform_module)
+endif ()

@@ -36,6 +36,12 @@ execute_process(
 if (NOT INSTALL_RESULT EQUAL 0)
     message(FATAL_ERROR "SDK installation failed:\n${INSTALL_OUTPUT}${INSTALL_ERROR}")
 endif ()
+file(GLOB_RECURSE INSTALLED_BUILTIN_RESOURCE_INDEXES
+        "${SDK_ROOT}/*/huxerui/resources/huxerui/resources.bin"
+)
+if (NOT INSTALLED_BUILTIN_RESOURCE_INDEXES)
+    message(FATAL_ERROR "Installed SDK is missing the HuxerUI built-in resource package")
+endif ()
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)
@@ -83,5 +89,24 @@ execute_process(
 if (NOT BUILD_RESULT EQUAL 0)
     message(FATAL_ERROR "Installed SDK consumer build failed:\n${BUILD_OUTPUT}${BUILD_ERROR}")
 endif ()
+file(GLOB_RECURSE BUILTIN_RESOURCE_HEADERS
+        "${PROJECT_ROOT}/.huxerui/build/*/huxerui_resources.h"
+)
+if (NOT BUILTIN_RESOURCE_HEADERS)
+    message(FATAL_ERROR "Installed SDK consumer did not generate the HuxerUI resource header")
+endif ()
+list(GET BUILTIN_RESOURCE_HEADERS 0 BUILTIN_RESOURCE_HEADER)
+file(READ "${BUILTIN_RESOURCE_HEADER}" BUILTIN_RESOURCE_HEADER_CONTENT)
+foreach (EXPECTED_CONTENT IN ITEMS
+        "namespace huxerui \\{"
+        dialog_ok
+        text_selection_copy
+        validation_required
+        window_restore
+)
+    if (NOT BUILTIN_RESOURCE_HEADER_CONTENT MATCHES "${EXPECTED_CONTENT}")
+        message(FATAL_ERROR "Installed SDK consumer generated an invalid HuxerUI resource header")
+    endif ()
+endforeach ()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")

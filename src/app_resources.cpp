@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string_view>
 
 #include <huxerui/environment.h>
 #include <huxerui/root.h>
@@ -11,18 +12,79 @@ namespace huxerui::detail {
 
 namespace {
 
+bool IsAsciiAlpha(char value) {
+  return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+}
+
+bool IsAsciiDigit(char value) {
+  return value >= '0' && value <= '9';
+}
+
+bool IsScriptSubtag(std::string_view value) {
+  return value.size() == 4 && std::ranges::all_of(value, IsAsciiAlpha);
+}
+
+bool IsRegionSubtag(std::string_view value) {
+  return (value.size() == 2 && std::ranges::all_of(value, IsAsciiAlpha)) ||
+         (value.size() == 3 && std::ranges::all_of(value, IsAsciiDigit));
+}
+
+std::string JoinLocalePrefix(const std::vector<std::string_view>& subtags, std::size_t count) {
+  std::string result;
+  for (std::size_t index = 0; index < count; ++index) {
+    if (!result.empty()) {
+      result.push_back('-');
+    }
+    result.append(subtags[index]);
+  }
+  return result;
+}
+
+void AppendLocaleFallback(std::vector<std::string>& fallbacks, std::string value) {
+  if (std::ranges::find(fallbacks, value) == fallbacks.end()) {
+    fallbacks.push_back(std::move(value));
+  }
+}
+
 std::vector<std::string> LocaleFallbacks(const Locale& locale) {
-  std::vector<std::string> result;
-  std::string current(locale.LanguageTag());
-  while (!current.empty()) {
-    result.push_back(current);
-    const std::size_t separator = current.rfind('-');
-    if (separator == std::string::npos) {
+  const std::string_view language_tag = locale.LanguageTag();
+  std::vector<std::string_view> subtags;
+  std::size_t start = 0;
+  while (start < language_tag.size()) {
+    const std::size_t end = language_tag.find('-', start);
+    subtags.push_back(language_tag.substr(start, end == std::string_view::npos ? end : end - start));
+    if (end == std::string_view::npos) {
       break;
     }
-    current.erase(separator);
+    start = end + 1;
   }
-  result.emplace_back();
+
+  constexpr std::size_t no_subtag = std::string_view::npos;
+  std::size_t script_index = no_subtag;
+  std::size_t region_index = no_subtag;
+  std::size_t core_count = 1;
+  if (core_count < subtags.size() && IsScriptSubtag(subtags[core_count])) {
+    script_index = core_count++;
+  }
+  if (core_count < subtags.size() && IsRegionSubtag(subtags[core_count])) {
+    region_index = core_count++;
+  }
+
+  std::vector<std::string> result;
+  for (std::size_t count = subtags.size(); count >= core_count; --count) {
+    AppendLocaleFallback(result, JoinLocalePrefix(subtags, count));
+    if (count == core_count) {
+      break;
+    }
+  }
+  if (region_index != no_subtag) {
+    AppendLocaleFallback(result, std::string(subtags.front()) + '-' + std::string(subtags[region_index]));
+  }
+  if (script_index != no_subtag) {
+    AppendLocaleFallback(result, std::string(subtags.front()) + '-' + std::string(subtags[script_index]));
+  }
+  AppendLocaleFallback(result, std::string(subtags.front()));
+  AppendLocaleFallback(result, {});
   return result;
 }
 
@@ -205,19 +267,23 @@ ResolvedImageAsset UseImageResource(ImageResource resource) {
   return CurrentResources()->ResolveImage(std::move(resource), UseEnvironment<Locale>());
 }
 
-std::string ResolveStringVariant(const StringVariant& value) {
+} // namespace detail
+
+std::string UseString(const StringVariant& value) {
   if (const auto* literal = std::get_if<std::string>(&value.value_)) {
     return *literal;
   }
-  return UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
+  return detail::UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
 }
 
-std::string ResolveStringVariant(StringVariant&& value) {
+std::string UseString(StringVariant&& value) {
   if (auto* literal = std::get_if<std::string>(&value.value_)) {
     return std::move(*literal);
   }
-  return UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
+  return detail::UseStringArguments(std::get<StringResource>(value.value_), value.arguments_);
 }
+
+namespace detail {
 
 std::string UseStringArguments(const StringResource& resource, std::span<const std::string> arguments) {
   const ResolvedStringResource resolved = CurrentResources()->Resolve(resource, UseEnvironment<Locale>());

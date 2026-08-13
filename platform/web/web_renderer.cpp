@@ -1032,6 +1032,11 @@ void WebRenderer::RenderCommand(const PopTransformCommand& command) {
   context_.call<void>("restore");
 }
 
+void WebRenderer::RenderCommand(const PlacePlatformViewCommand& command) {
+  static_cast<void>(command);
+  throw std::logic_error("HuxerUI Web adapter does not support PlatformView composition yet");
+}
+
 void WebRenderer::Draw(const RenderFrame& frame) {
   const bool full_redraw = std::exchange(force_redraw_, false) || frame.damage.full;
   if (!full_redraw && frame.damage.rects.empty()) {

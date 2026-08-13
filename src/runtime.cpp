@@ -562,7 +562,10 @@ bool IsCompatibleVirtualLayout(const VirtualLayoutDescriptor* left, const Virtua
 
 bool IsCompatibleNode(const MountedNode& mounted, const ViewSpec& incoming) {
   return mounted.kind == incoming.kind && IsCompatibleLayout(mounted.layout_descriptor, incoming.layout_descriptor) &&
-         IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, incoming.virtual_layout_descriptor);
+         IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, incoming.virtual_layout_descriptor) &&
+         (incoming.kind != NodeKind::PlatformView ||
+          (mounted.platform_view && incoming.platform_view &&
+           mounted.platform_view->type == incoming.platform_view->type));
 }
 
 bool IsCompatibleVirtualItemState(const MountedNode& mounted, const VirtualItemState& state) {
@@ -588,6 +591,7 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
     return false;
   }
   return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+         PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties.ContentPaintEquals(incoming.properties);
 }
 
@@ -603,6 +607,7 @@ bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
 
 bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
   return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+         PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties == incoming.properties && mounted.component_semantics == incoming.component_semantics &&
          mounted.author_semantics == incoming.author_semantics &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
@@ -615,6 +620,9 @@ bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incomi
 
 // Child structure, virtual sources, and retained modifiers reconcile separately because they carry mounted state.
 void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
+  if (!PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view)) {
+    ++mounted.platform_view_properties_revision;
+  }
   mounted.kind = incoming.kind;
   mounted.key = incoming.key;
   mounted.text = incoming.text;
@@ -624,6 +632,7 @@ void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
   mounted.scope_factory = incoming.scope_factory;
   mounted.canvas_painter = incoming.canvas_painter;
   mounted.image_properties = incoming.image_properties;
+  mounted.platform_view = incoming.platform_view;
   mounted.layout_descriptor = incoming.layout_descriptor;
   mounted.virtual_layout_descriptor = incoming.virtual_layout_descriptor;
   mounted.layout_values = incoming.layout_values;
@@ -967,8 +976,13 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   );
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
-  RootContext
-      root{state_->layer_controller_, *state_->root_environment_, state_->root_service_types_, state_->root_services_};
+  RootContext root{
+      state_->layer_controller_,
+      platform.Modules(),
+      *state_->root_environment_,
+      state_->root_service_types_,
+      state_->root_services_,
+  };
   state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
   state_->root_environment_->Set(resource_configuration.locale);
@@ -1020,16 +1034,12 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
   state_->window_->metrics = metrics;
   if (state_->mounted_root_) {
     state_->mounted_root_->measure_dirty = true;
-    if (window_controls_visibility_changed && state_->window_->chrome_mode == WindowChromeMode::Custom) {
+    if ((window_controls_visibility_changed || maximize_state_changed) &&
+        state_->window_->chrome_mode == WindowChromeMode::Custom) {
       ReconcileWindowControls();
     }
     if (detail::MountedNode* backplane = FindWindowBackplane(*state_->mounted_root_)) {
       backplane->content_paint_dirty = true;
-    }
-    if (maximize_state_changed) {
-      if (detail::MountedNode* controls = FindWindowControls(*state_->mounted_root_)) {
-        MarkContentPaintDirtyTree(*controls);
-      }
     }
   }
   if (state_->text_selection_overlay_.state.visible) {
@@ -1049,6 +1059,75 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
 bool Runtime::IsWindowDragRegion(Point position) const {
   return state_->window_->metrics.title_bar.has_value() && state_->mounted_root_ &&
          detail::HitTestWindowDragRegion(*state_->mounted_root_, position);
+}
+
+std::optional<std::uint64_t> Runtime::HitTestPlatformView(Point position) const {
+  if (!state_->mounted_root_) {
+    return std::nullopt;
+  }
+  std::vector<detail::MountedNode*> route;
+  if (!detail::BuildPointerRoute(*state_->mounted_root_, position, route) || route.empty()) {
+    return std::nullopt;
+  }
+  const detail::MountedNode* target = route.back();
+  return target->kind == detail::NodeKind::PlatformView ? std::optional{target->identity} : std::nullopt;
+}
+
+std::optional<std::uint64_t> Runtime::FocusedPlatformView() const {
+  if (!state_->focused_node_identity_.has_value() || !state_->mounted_root_) {
+    return std::nullopt;
+  }
+  const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (focused == nullptr || focused->kind != detail::NodeKind::PlatformView) {
+    return std::nullopt;
+  }
+  return state_->focused_node_identity_;
+}
+
+void Runtime::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
+  if (identity.has_value()) {
+    if (!state_->mounted_root_) {
+      return;
+    }
+    const detail::MountedNode* node = FindNode(*state_->mounted_root_, *identity);
+    if (node == nullptr || node->kind != detail::NodeKind::PlatformView) {
+      return;
+    }
+    SetFocusedNode(identity, focus_visible);
+    return;
+  }
+  if (FocusedPlatformView().has_value()) {
+    SetFocusedNode(std::nullopt, focus_visible);
+  }
+}
+
+void Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+  if (FocusedPlatformView() != identity) {
+    return;
+  }
+  MoveFocus(reverse);
+}
+
+bool Runtime::DispatchPlatformViewEvent(
+    std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+) {
+  if (!state_->mounted_root_) {
+    return false;
+  }
+  detail::MountedNode* node = FindNode(*state_->mounted_root_, identity);
+  if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view) {
+    return false;
+  }
+  const auto event = std::ranges::find(node->platform_view->events, name, &detail::PlatformEventDescriptor::name);
+  if (event == node->platform_view->events.end() || !node->event_bindings.contains(event->key)) {
+    return false;
+  }
+  try {
+    event->dispatch(payload, node->event_bindings);
+  } catch (...) {
+    return false;
+  }
+  return true;
 }
 
 // Requests raised while a frame is being built are retained for its FrameCommit instead of re-entering the platform
@@ -1119,6 +1198,9 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   ReconcileWindowControls();
   InvalidateRoot();
   state_->layer_controller_.InvalidateAllEntries();
+  if (state_->text_selection_overlay_.state.visible) {
+    state_->text_selection_overlay_.state.paint_dirty = true;
+  }
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {

@@ -157,6 +157,7 @@ struct SemanticAction {
 struct SemanticNode {
   SemanticNodeId id = 0;
   std::optional<SemanticNodeId> parent;
+  std::optional<std::uint64_t> platform_view_identity;
   std::vector<SemanticNodeId> children;
   SemanticRole role = SemanticRole::Generic;
   std::string label;

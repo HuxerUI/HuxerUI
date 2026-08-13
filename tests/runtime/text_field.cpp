@@ -112,7 +112,7 @@ View TextFieldApp() {
 }
 
 View EmptyTextFieldApp() {
-  return Stack{
+  return Stack {
       TextField(TextEditingValue::FromText("")).Placeholder("Name").With(huxerui::Frame{160.0F, 40.0F}),
   };
 }
@@ -2754,6 +2754,7 @@ TEST_CASE("TestEmptyTextFieldLongPressShowsPasteAtCaret") {
   clipboard.text = "pasted";
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{EmptyTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
@@ -2796,6 +2797,7 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
   TextFieldClipboard clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{MaterialTextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();

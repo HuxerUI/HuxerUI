@@ -5,16 +5,23 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
+#include <huxerui/platform_module.h>
 #include <huxerui/resource.h>
 #include <huxerui/text.h>
 #include <huxerui/vector.h>
 
 namespace huxerui {
+
+namespace detail {
+struct PlatformViewPaintAccess;
+} // namespace detail
 
 struct DrawRectCommand {
   Rect rect;
@@ -158,6 +165,50 @@ struct PopTransformCommand {
   bool operator==(const PopTransformCommand&) const = default;
 };
 
+class PlacePlatformViewCommand final {
+public:
+  [[nodiscard]] std::uint64_t Identity() const noexcept {
+    return identity_;
+  }
+
+  [[nodiscard]] std::string_view Type() const noexcept {
+    return type_;
+  }
+
+  [[nodiscard]] const PlatformPayload& Properties() const noexcept {
+    return properties_;
+  }
+
+  [[nodiscard]] std::uint64_t PropertiesRevision() const noexcept {
+    return properties_revision_;
+  }
+
+  [[nodiscard]] Rect Bounds() const noexcept {
+    return bounds_;
+  }
+
+  bool operator==(const PlacePlatformViewCommand& other) const = default;
+
+private:
+  PlacePlatformViewCommand(
+      std::uint64_t identity,
+      std::string type,
+      PlatformPayload properties,
+      std::uint64_t properties_revision,
+      Rect bounds
+  )
+      : identity_(identity), type_(std::move(type)), properties_(std::move(properties)),
+        properties_revision_(properties_revision), bounds_(bounds) {}
+
+  std::uint64_t identity_ = 0;
+  std::string type_;
+  PlatformPayload properties_;
+  std::uint64_t properties_revision_ = 0;
+  Rect bounds_;
+
+  friend struct detail::PlatformViewPaintAccess;
+};
+
 using PaintCommand = std::variant<
     DrawRectCommand,
     DrawTextCommand,
@@ -174,7 +225,8 @@ using PaintCommand = std::variant<
     PushPathClipCommand,
     PopClipCommand,
     PushTransformCommand,
-    PopTransformCommand>;
+    PopTransformCommand,
+    PlacePlatformViewCommand>;
 
 class PaintContext;
 
@@ -272,6 +324,7 @@ private:
   };
 
   void Include(Rect rect) noexcept;
+  void PlacePlatformView(PlacePlatformViewCommand command);
   void RequireOpen() const;
 
   PaintSequence& sequence_;
@@ -282,6 +335,8 @@ private:
   std::vector<std::optional<Rect>> clip_stack_;
   std::vector<StackEntry> command_stack_;
   bool finished_ = false;
+
+  friend struct detail::PlatformViewPaintAccess;
 };
 
 } // namespace huxerui

@@ -1807,6 +1807,10 @@ struct Win32Renderer::State {
     transform_stack_.pop_back();
   }
 
+  void RenderCommand(const PlacePlatformViewCommand&) {
+    throw std::logic_error("HuxerUI Windows adapter does not support PlatformView composition yet");
+  }
+
   void PopClip() {
     if (clip_stack_.empty()) {
       return;

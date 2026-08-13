@@ -8,6 +8,8 @@
 
 #include <huxerui/app.h>
 
+#include "appkit_platform_view.h"
+
 @interface HuxerUIAccessibilityElement : NSAccessibilityElement {
 @public
   huxerui::detail::MacAccessibility* huxeruiAccessibility;
@@ -89,7 +91,7 @@ bool SemanticLayoutChanged(const huxerui::SemanticFrame* previous, const huxerui
   return std::ranges::any_of(current->nodes, [previous](const huxerui::SemanticNode& node) {
     const huxerui::SemanticNode* old = FindNode(*previous, node.id);
     return old == nullptr || old->parent != node.parent || old->children != node.children || old->role != node.role ||
-           old->bounds != node.bounds;
+           old->platform_view_identity != node.platform_view_identity || old->bounds != node.bounds;
   });
 }
 
@@ -125,7 +127,8 @@ NSNumber* AccessibilityCheckedValue(huxerui::SemanticCheckedState checked) {
 
 namespace huxerui::detail {
 
-MacAccessibility::MacAccessibility(Runtime& runtime, NSView* view) noexcept : runtime_(&runtime), view_(view) {}
+MacAccessibility::MacAccessibility(Runtime& runtime, NSView* root_view, AppKitPlatformViews& platform_views) noexcept
+    : runtime_(&runtime), root_view_(root_view), platform_views_(&platform_views) {}
 
 MacAccessibility::~MacAccessibility() {
   for (HuxerUIAccessibilityElement* element in elements_.allValues) {
@@ -155,11 +158,11 @@ void MacAccessibility::Commit(std::shared_ptr<const SemanticFrame> frame) {
       }
     }
   }
-  if (view_ == nil) {
+  if (root_view_ == nil) {
     return;
   }
   if (layout_changed) {
-    NSAccessibilityPostNotification(view_, NSAccessibilityLayoutChangedNotification);
+    NSAccessibilityPostNotification(root_view_, NSAccessibilityLayoutChangedNotification);
     return;
   }
   if (!previous || !frame_) {
@@ -171,6 +174,9 @@ void MacAccessibility::Commit(std::shared_ptr<const SemanticFrame> frame) {
       continue;
     }
     id element = Element(node.id);
+    if (element == nil) {
+      continue;
+    }
     if (old->label != node.label) {
       NSAccessibilityPostNotification(element, NSAccessibilityTitleChangedNotification);
     }
@@ -179,7 +185,7 @@ void MacAccessibility::Commit(std::shared_ptr<const SemanticFrame> frame) {
     }
     if (old->focused != node.focused) {
       NSAccessibilityPostNotification(
-          node.focused ? element : view_,
+          node.focused ? element : root_view_,
           NSAccessibilityFocusedUIElementChangedNotification
       );
     }
@@ -200,7 +206,23 @@ const SemanticNode* MacAccessibility::NodeForId(SemanticNodeId id) const noexcep
 
 id MacAccessibility::Element(SemanticNodeId id) {
   if (id == frame_->root) {
-    return view_;
+    return root_view_;
+  }
+  const SemanticNode* node = NodeForId(id);
+  if (node == nullptr) {
+    return nil;
+  }
+  if (node->platform_view_identity.has_value()) {
+    NSView* platform_view =
+        platform_views_ == nullptr ? nil : platform_views_->AccessibilityView(*node->platform_view_identity);
+    NSObject<NSAccessibility>* platform_element = static_cast<NSObject<NSAccessibility>*>(
+        platform_view == nil ? nil : NSAccessibilityUnignoredDescendant(platform_view)
+    );
+    if (platform_element != nil && node->parent.has_value() &&
+        [platform_element respondsToSelector:@selector(setAccessibilityParent:)]) {
+      [platform_element setAccessibilityParent:Element(*node->parent)];
+    }
+    return platform_element;
   }
   if (elements_ == nil) {
     elements_ = [[NSMutableDictionary alloc] init];
@@ -223,20 +245,23 @@ NSArray* MacAccessibility::Children(SemanticNodeId id) {
   }
   NSMutableArray* children = [[NSMutableArray alloc] initWithCapacity:node->children.size()];
   for (SemanticNodeId child : node->children) {
-    [children addObject:Element(child)];
+    if (NSObject* child_element = Element(child)) {
+      [children addObject:child_element];
+    }
   }
   return children;
 }
 
 NSRect MacAccessibility::Frame(SemanticNodeId id) const {
   const SemanticNode* node = NodeForId(id);
-  NSView* view = view_;
-  if (node == nullptr || view == nil || view.window == nil) {
+  NSView* root_view = root_view_;
+  if (node == nullptr || root_view == nil || root_view.window == nil) {
     return NSZeroRect;
   }
   const Rect& bounds = node->bounds;
-  const NSRect window_rect = [view convertRect:NSMakeRect(bounds.x, bounds.y, bounds.width, bounds.height) toView:nil];
-  return [view.window convertRectToScreen:window_rect];
+  const NSRect window_rect = [root_view convertRect:NSMakeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+                                             toView:nil];
+  return [root_view.window convertRectToScreen:window_rect];
 }
 
 bool MacAccessibility::PerformAction(SemanticNodeId id, SemanticAction action) {

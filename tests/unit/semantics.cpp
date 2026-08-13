@@ -366,6 +366,7 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
   semantic_button_clicks = 0;
   semantic_icon_button_clicks = 0;
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime(SemanticBasicsApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -401,6 +402,7 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
 
 TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime(SemanticBasicsApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 

@@ -11,11 +11,11 @@ This document defines the implemented HuxerUI Web preview and its target contrac
 - Produce an ES module and WebAssembly application that can be mounted into a browser-owned Canvas.
 - Preserve logical coordinates, retained PaintSequences, Runtime damage, controlled text editing, typed resources, and platform-owned native services.
 - Support mouse, touch, pen, wheel, keyboard, browser IME, high-density displays, resizing, and asynchronous image decoding.
-- Leave room for future accessibility, DOM-backed NativeView, worker rendering, and alternative renderers without exposing a second public UI surface.
+- Leave room for future accessibility, DOM-backed PlatformView, worker rendering, and alternative renderers without exposing a second public UI surface.
 
 ## Non-goals
 
-The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, PWA packaging, or DOM-backed NativeView.
+The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, PWA packaging, or DOM-backed PlatformView.
 
 The initial backend targets a Canvas-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
 
@@ -169,6 +169,37 @@ Browser URLs are not ResourceIds. Network code fetches bytes asynchronously, con
 
 The initial locale derives from `navigator.language` and is normalized through the existing Locale model. Dynamic browser-language updates are not implemented in the preview; display-scale updates use `Runtime::UpdateResourceConfiguration()`.
 
+## PlatformView composition
+
+DOM-backed PlatformView remains proposed, but its composition contract follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
+`PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
+The WebPlatformAdapter will consume the shared internal `RenderComposition` before drawing and retain compatible Canvas elements and DOM objects across frames.
+
+Web factories register explicitly under the same stable UTF-8 type strings as native platforms.
+The JavaScript bridge maps `PlatformPayload` null, boolean, signed integer, double, UTF-8 string, bytes, list, and object values to null, boolean, `BigInt`, Number, string, `Uint8Array`, Array, and a prototype-free string-keyed object without JSON serialization.
+This preserves the integer and double distinction and never silently converts a 64-bit integer to an imprecise Number.
+Factory results and events return through the owning instance identity, are queued outside the initiating JavaScript call stack, and are decoded by the same module-owned method and Event Key codecs used on native platforms.
+Functions, DOM nodes, promises, and JavaScript object identity never enter `PlatformPayload`.
+
+A PlatformView-capable session owns one isolated CSS stacking context around the browser-supplied Canvas.
+The original Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and PlatformView elements become absolutely positioned ordered siblings in the same composition root.
+DOM child order represents `RenderComposition` order; application z-index values do not participate in or escape that root.
+Every Canvas slice shares the logical viewport, backing-store scale, clipping root, and resize transaction, while its renderer replays only the retained scene content assigned to that slice.
+A scene without PlatformViews keeps the current single-Canvas structure and does not allocate a wrapper surface per RenderNode.
+
+Composition-root and DOM hierarchy changes occur while applying a committed `RenderComposition`, never during Canvas command replay.
+Disposal removes adapter-owned slices and PlatformViews, releases native listeners and accessibility bridges, and leaves no hidden interactive DOM objects behind.
+Moving or resizing a PlatformView updates its CSS geometry and old and new damage, while unchanged slices retain their Canvas and rendering caches.
+
+The composition root observes pointer events during capture and asks Runtime for the topmost committed HuxerUI or PlatformView hit target.
+When HuxerUI wins, the adapter prevents native activation and routes the pointer sequence to Runtime.
+When a PlatformView wins, its DOM subtree receives the ordinary browser event and owns browser pointer capture, focus, selection, and editing until the sequence ends.
+Transparent Canvas slices never become full-viewport input blockers merely because they are visually above a PlatformView.
+
+The first Web contract supports axis-aligned CSS bounds, translation, rectangular overflow clipping, visibility, and sibling ordering.
+CSS transforms, filters, blend modes, or stacking contexts created inside a PlatformView cannot alter ordering outside its assigned placement.
+An element that requires top-layer presentation, a separate browsing context with incompatible policy, or another mechanism that cannot remain in the composition root is rejected rather than moved above the complete HuxerUI scene.
+
 ## Accessibility and semantics
 
 Canvas pixels alone do not provide the browser accessibility tree required by interactive applications. Stable Web support therefore depends on mapping the implemented platform-neutral semantics foundation into the browser.
@@ -181,7 +212,9 @@ Semantic DOM is not a second visual renderer.
 It remains visually unobtrusive, participates in browser focus and assistive technology, forwards typed semantic actions to Runtime, maintains live regions and collection metadata, and follows committed order, visibility, transforms, and clipping where geometry is exposed.
 Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
-DOM-backed NativeView is a separate future leaf-node capability. It must follow the NativeView lifecycle, composition, clipping, focus, input, and accessibility contract rather than using the semantics overlay as a general DOM container.
+DOM-backed PlatformView is a separate future leaf-node capability.
+Its visual DOM element occupies the `RenderComposition` position, while its semantic anchor occupies the corresponding SemanticFrame position and exposes the native accessible subtree without duplicating it in semantic DOM.
+It must not use the semantics overlay as a general visual DOM container.
 
 ## Threading
 
@@ -221,13 +254,14 @@ The second preview milestone added Pointer Events, wheel, keyboard, WebTextLayou
 
 The next milestone hardens disposal, failures, locale and display changes, browser integration tests, release-size settings, and SDK or CLI serving and packaging.
 
-The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, DOM-backed NativeView, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
+The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, DOM-backed PlatformView, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
 
 ## Invariants
 
 - Web adds a PlatformAdapter and renderer, not another Runtime or component implementation.
 - Ordinary Views render through RenderScene and Canvas rather than DOM.
-- DOM use is limited to browser services, text measurement, text input, semantics, and future NativeView.
+- DOM use is limited to browser services, text measurement, text input, semantics, and future PlatformView.
+- Future PlatformViews and Canvas slices share one isolated composition root and follow RenderScene paint order.
 - Runtime logical coordinates remain CSS-pixel coordinates; display scale is applied at the platform boundary.
 - Resources are ready and synchronously readable before Runtime starts.
 - Browser text input emits shared TextInputCommandBatch values and never owns authoritative TextField state.

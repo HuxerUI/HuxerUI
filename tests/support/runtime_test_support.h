@@ -4,6 +4,7 @@
 #include <huxerui/huxerui.h>
 
 #include <cmath>
+#include <functional>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -18,6 +19,8 @@
 namespace huxerui::test {
 
 class Runtime;
+
+PlatformResources* BuiltinTestResources();
 
 using huxerui::AnimateTo;
 using huxerui::Axis;
@@ -100,6 +103,7 @@ using huxerui::RenderNode;
 using huxerui::Rotation;
 using huxerui::Row;
 using huxerui::Scale;
+using huxerui::StrokePathCommand;
 using huxerui::ScrollAlignment;
 using huxerui::ScrollController;
 using huxerui::ScrollEvent;
@@ -362,8 +366,24 @@ private:
   const FrameCommit* last_commit_ = nullptr;
 };
 
-class TestPlatform final : public huxerui::PlatformAdapter {
+class TestPlatform : public huxerui::PlatformAdapter {
 public:
+  TestPlatform()
+      : PlatformAdapter([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}
+
+  explicit TestPlatform(huxerui::UIThreadDispatcher dispatch_to_ui_thread)
+      : PlatformAdapter(std::move(dispatch_to_ui_thread)) {}
+
+  void RunPlatformModuleTasks() {
+    while (!platform_module_tasks_.empty()) {
+      std::vector<std::function<void()>> tasks = std::move(platform_module_tasks_);
+      platform_module_tasks_.clear();
+      for (const auto& task : tasks) {
+        task();
+      }
+    }
+  }
+
   class TextLayout final : public huxerui::detail::TextLayout {
   public:
     TextLayout(std::string_view text, float max_width) {
@@ -643,6 +663,9 @@ public:
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;
+
+private:
+  std::vector<std::function<void()>> platform_module_tasks_;
 };
 
 inline void SettlePresentation(TestPlatform& platform, Runtime& runtime, double duration = 0.5) {
@@ -774,6 +797,25 @@ inline std::optional<Rect> FindPresentedTextRect(const FlattenedScene& scene, st
     const auto* text = std::get_if<DrawTextCommand>(&command);
     if (text && text->text == expected) {
       return detail::TransformBounds(transform_stack.back(), text->rect);
+    }
+  }
+  return std::nullopt;
+}
+
+inline std::optional<Rect> FindPresentedStrokePathRect(const FlattenedScene& scene, Color expected) {
+  std::vector<Transform2D> transform_stack{Transform2D{}};
+  for (const PaintCommand& command : scene.Commands()) {
+    if (const auto* transform = std::get_if<PushTransformCommand>(&command)) {
+      transform_stack.push_back(detail::ComposeTransform(transform_stack.back(), transform->transform));
+      continue;
+    }
+    if (std::holds_alternative<PopTransformCommand>(command)) {
+      transform_stack.pop_back();
+      continue;
+    }
+    const auto* path = std::get_if<StrokePathCommand>(&command);
+    if (path && path->color == expected) {
+      return detail::TransformBounds(transform_stack.back(), path->path.Bounds());
     }
   }
   return std::nullopt;

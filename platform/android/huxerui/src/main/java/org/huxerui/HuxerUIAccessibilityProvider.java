@@ -94,11 +94,14 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         manager = (AccessibilityManager) view.getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
     }
 
-    void commitFrame(byte[] encoded) {
+    void commitFrame(byte[] encoded, boolean platformViewStructureChanged) {
         Frame next = Frame.decode(encoded);
         Frame previous = frame;
         frame = next;
-        if (accessibilityFocusedId != NO_VIRTUAL_VIEW && next.nodes.get(accessibilityFocusedId) == null) {
+        synchronizePlatformViews(next);
+        Node accessibilityFocused = next.nodes.get(accessibilityFocusedId);
+        if (accessibilityFocusedId != NO_VIRTUAL_VIEW
+                && (accessibilityFocused == null || accessibilityFocused.platformViewIdentity != null)) {
             int staleId = accessibilityFocusedId;
             accessibilityFocusedId = NO_VIRTUAL_VIEW;
             sendEvent(staleId, AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED);
@@ -106,10 +109,21 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         if (!isAccessibilityEnabled()) {
             return;
         }
-        publishChanges(previous, next);
+        publishChanges(previous, next, platformViewStructureChanged);
+    }
+
+    void commitPlatformViews() {
+        if (frame == null) {
+            return;
+        }
+        synchronizePlatformViews(frame);
+        if (isAccessibilityEnabled()) {
+            sendContentChanged(AccessibilityNodeProvider.HOST_VIEW_ID, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
+        }
     }
 
     void reset() {
+        view.resetPlatformViewAccessibility();
         frame = null;
         accessibilityFocusedId = NO_VIRTUAL_VIEW;
         hoveredId = NO_VIRTUAL_VIEW;
@@ -123,6 +137,10 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             return false;
         }
         int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_HOVER_EXIT && view.platformViewAt(event.getX(), event.getY()) != 0L) {
+            updateHoveredNode(NO_VIRTUAL_VIEW);
+            return false;
+        }
         if (action == MotionEvent.ACTION_HOVER_EXIT) {
             updateHoveredNode(NO_VIRTUAL_VIEW);
             return true;
@@ -142,7 +160,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             return createHostNode();
         }
         Node node = current == null ? null : current.nodes.get(virtualViewId);
-        return node == null ? null : createVirtualNode(current, node);
+        return node == null || node.platformViewIdentity != null ? null : createVirtualNode(current, node);
     }
 
     @Override
@@ -173,7 +191,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         }
         if (focus == AccessibilityNodeInfo.FOCUS_INPUT) {
             for (Node node : current.orderedNodes) {
-                if (node.focused && node.id != current.root) {
+                if (node.focused && node.id != current.root && node.platformViewIdentity == null) {
                     return createVirtualNode(current, node);
                 }
             }
@@ -189,7 +207,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             return view.performAccessibilityAction(action, arguments);
         }
         Node node = current == null ? null : current.nodes.get(virtualViewId);
-        if (node == null) {
+        if (node == null || node.platformViewIdentity != null) {
             return false;
         }
         if (action == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) {
@@ -217,17 +235,21 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         info.removeAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
         info.removeAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_FOCUS);
         info.removeAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_FOCUS);
+        view.removePlatformViewAccessibilityChildren(info);
         Frame current = frame;
         Node root = current == null ? null : current.nodes.get(current.root);
         if (root != null) {
             for (int child : root.children) {
-                info.addChild(view, child);
+                addChild(current, info, child);
             }
         }
         return info;
     }
 
     private AccessibilityNodeInfo createVirtualNode(Frame current, Node node) {
+        if (node.platformViewIdentity != null) {
+            return null;
+        }
         AccessibilityNodeInfo info = AccessibilityNodeInfo.obtain();
         info.setPackageName(view.getContext().getPackageName());
         info.setSource(view, node.id);
@@ -237,7 +259,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             info.setParent(view, node.parent);
         }
         for (int child : node.children) {
-            info.addChild(view, child);
+            addChild(current, info, child);
         }
         info.setClassName(className(node.role));
         applyBounds(current, node, info);
@@ -246,6 +268,33 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         applyCollection(current, node, info);
         applyActions(node, info);
         return info;
+    }
+
+    private void addChild(Frame current, AccessibilityNodeInfo info, int childId) {
+        Node child = current.nodes.get(childId);
+        if (child == null) {
+            return;
+        }
+        if (child.platformViewIdentity == null) {
+            info.addChild(view, childId);
+            return;
+        }
+        View platformChild = view.platformViewAccessibilityChild(child.platformViewIdentity);
+        if (platformChild != null) {
+            info.addChild(platformChild);
+        }
+    }
+
+    private void synchronizePlatformViews(Frame current) {
+        view.resetPlatformViewAccessibility();
+        for (Node node : current.orderedNodes) {
+            if (node.platformViewIdentity == null) {
+                continue;
+            }
+            int parentId = node.parent < 0 || node.parent == current.root ? AccessibilityNodeProvider.HOST_VIEW_ID
+                                                                         : node.parent;
+            view.configurePlatformViewAccessibility(node.platformViewIdentity, parentId);
+        }
     }
 
     private void applyBounds(Frame current, Node node, AccessibilityNodeInfo info) {
@@ -580,8 +629,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         }
         for (int index = current.orderedNodes.length - 1; index >= 0; --index) {
             Node node = current.orderedNodes[index];
-            if (node.id != current.root && !node.offscreen && x >= node.x && x <= node.x + node.width && y >= node.y
-                    && y <= node.y + node.height) {
+            if (node.id != current.root && node.platformViewIdentity == null && !node.offscreen && x >= node.x
+                    && x <= node.x + node.width && y >= node.y && y <= node.y + node.height) {
                 return node.id;
             }
         }
@@ -590,6 +639,9 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
 
     private void collectMatchingNodes(
             Frame current, Node node, String needle, List<AccessibilityNodeInfo> result) {
+        if (node.platformViewIdentity != null) {
+            return;
+        }
         if (node.id != current.root && (contains(node.label, needle) || contains(node.value, needle)
                 || contains(node.hint, needle) || contains(node.stateDescription, needle))) {
             AccessibilityNodeInfo info = createVirtualNode(current, node);
@@ -605,13 +657,13 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         }
     }
 
-    private void publishChanges(Frame previous, Frame next) {
-        if (previous == null || structureChanged(previous, next)) {
+    private void publishChanges(Frame previous, Frame next, boolean platformViewStructureChanged) {
+        if (previous == null || platformViewStructureChanged || structureChanged(previous, next)) {
             sendContentChanged(AccessibilityNodeProvider.HOST_VIEW_ID, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
         }
         for (Node current : next.orderedNodes) {
             Node before = previous == null ? null : previous.nodes.get(current.id);
-            if (current.id == next.root) {
+            if (current.id == next.root || current.platformViewIdentity != null) {
                 continue;
             }
             if (before == null) {
@@ -757,7 +809,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         for (int index = 0; index < current.nodes.size(); ++index) {
             Node node = current.nodes.valueAt(index);
             Node before = previous.nodes.get(node.id);
-            if (before == null || before.parent != node.parent || !Arrays.equals(before.children, node.children)) {
+            if (before == null || before.parent != node.parent || !Arrays.equals(before.children, node.children)
+                    || !Objects.equals(before.platformViewIdentity, node.platformViewIdentity)) {
                 return true;
             }
         }
@@ -920,6 +973,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     private static final class Node {
         int id;
         int parent;
+        Long platformViewIdentity;
         int role;
         int[] children;
         long actions;
@@ -959,6 +1013,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             Node node = new Node();
             node.id = buffer.getInt();
             node.parent = buffer.getInt();
+            node.platformViewIdentity = readPresent(buffer) ? buffer.getLong() : null;
             node.role = buffer.getInt();
             int childCount = readCount(buffer, "child");
             node.children = new int[childCount];

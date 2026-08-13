@@ -7,6 +7,7 @@
 
 #include <huxerui/theme.h>
 
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "resource_internal.h"
 #include "indication_internal.h"
@@ -42,7 +43,7 @@ struct SegmentedButtonItemAccess {
   }
 
   static std::string ResolveLabel(SegmentedButtonItem& item) {
-    return ResolveStringVariant(std::move(item.label_));
+    return UseString(std::move(item.label_));
   }
 
   static bool ShowsLabel(const SegmentedButtonItem& item) noexcept {
@@ -56,7 +57,7 @@ struct TabItemAccess {
   }
 
   static std::string ResolveLabel(TabItem& item) {
-    return ResolveStringVariant(std::move(item.label_));
+    return UseString(std::move(item.label_));
   }
 
   static bool ShowsLabel(const TabItem& item) noexcept {
@@ -354,6 +355,7 @@ struct ToggleVisual {
 
   ToggleVisualKind kind;
   bool checked;
+  VectorAsset checkmark;
 
   bool operator==(const ToggleVisual&) const = default;
 };
@@ -366,6 +368,7 @@ public:
 
   void Update(MountedNode& node, const ToggleVisual& modifier) {
     kind_ = modifier.kind;
+    checkmark_ = modifier.checkmark;
     if (kind_ == ToggleVisualKind::Checkbox) {
       checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyle::Default());
     } else if (kind_ == ToggleVisualKind::RadioButton) {
@@ -469,12 +472,7 @@ private:
           disabled ? checkbox_style_.disabled_checked_background : checkbox_style_.checked_background;
       const Color checkmark = disabled ? checkbox_style_.disabled_checkmark : checkbox_style_.checkmark;
       context.DrawRect(frame, background, std::max(0.0F, checkbox_style_.corner_radius));
-      context.DrawText(
-          frame,
-          "✓",
-          TextStyle{Font::System(std::max(0.1F, checkbox_style_.size * 0.72F)), checkmark},
-          TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
-      );
+      context.DrawImage(checkmark_, frame, checkmark);
       return;
     }
     context.DrawBorder(
@@ -557,6 +555,7 @@ private:
   CheckboxStyle checkbox_style_;
   RadioButtonStyle radio_button_style_;
   SwitchStyle switch_style_;
+  VectorAsset checkmark_;
   detail::AnimatedValue<float> progress_;
   bool checked_ = false;
   bool initialized_ = false;
@@ -1887,6 +1886,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
   spec.properties.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
   spec.properties.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
+  spec.properties.focus_ring_offset = std::max(0.0F, theme.interactions.focus_ring_offset);
   spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
     spec.properties.text_style =
@@ -2201,6 +2201,8 @@ MakeSegmentedButtonSpec(std::vector<StringVariant> labels, std::size_t selected_
 
 std::shared_ptr<detail::ViewSpec>
 MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked, std::string label = {}) {
+  VectorAsset checkmark =
+      visual_kind == ToggleVisualKind::Checkbox ? UseVectorImage(images::check) : VectorAsset{};
   auto spec = std::make_shared<detail::ViewSpec>(kind);
   spec->text = std::move(label);
   spec->focusable = true;
@@ -2215,7 +2217,9 @@ MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked
     }
     detail::EmitEvent<ToggleEvents::Changed>(bindings, !checked);
   };
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ToggleVisual{visual_kind, checked}));
+  spec->retained_modifiers.push_back(
+      detail::MakeModifierSpec(ToggleVisual{visual_kind, checked, std::move(checkmark)})
+  );
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
@@ -2683,19 +2687,19 @@ Button::Button(const char* label) : Button(label == nullptr ? std::string{} : st
 IconButton::IconButton(ImageResource icon, StringVariant semantic_label)
     : detail::TypedView<IconButton>(MakeIconButtonSpec(
           ResolveControlIcon(std::move(icon)),
-          detail::ResolveStringVariant(std::move(semantic_label))
+          UseString(std::move(semantic_label))
       )) {}
 
 IconButton::IconButton(ImageAsset icon, StringVariant semantic_label)
     : detail::TypedView<IconButton>(MakeIconButtonSpec(
           ResolveControlIcon(std::move(icon)),
-          detail::ResolveStringVariant(std::move(semantic_label))
+          UseString(std::move(semantic_label))
       )) {}
 
 IconButton::IconButton(VectorAsset icon, StringVariant semantic_label)
     : detail::TypedView<IconButton>(MakeIconButtonSpec(
           ResolveControlIcon(std::move(icon)),
-          detail::ResolveStringVariant(std::move(semantic_label))
+          UseString(std::move(semantic_label))
       )) {}
 
 Chip::Chip(StringResource resource) : Chip(UseString(std::move(resource))) {}
@@ -2718,42 +2722,42 @@ Chip::Chip(const char* label, bool selected)
 
 Chip::Chip(ImageResource icon, StringVariant label)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           std::nullopt,
           ResolveControlIcon(std::move(icon))
       )) {}
 
 Chip::Chip(ImageAsset icon, StringVariant label)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           std::nullopt,
           ResolveControlIcon(std::move(icon))
       )) {}
 
 Chip::Chip(VectorAsset icon, StringVariant label)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           std::nullopt,
           ResolveControlIcon(std::move(icon))
       )) {}
 
 Chip::Chip(ImageResource icon, StringVariant label, bool selected)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           selected,
           ResolveControlIcon(std::move(icon))
       )) {}
 
 Chip::Chip(ImageAsset icon, StringVariant label, bool selected)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           selected,
           ResolveControlIcon(std::move(icon))
       )) {}
 
 Chip::Chip(VectorAsset icon, StringVariant label, bool selected)
     : detail::TypedView<Chip>(MakeChipSpec(
-          detail::ResolveStringVariant(std::move(label)),
+          UseString(std::move(label)),
           selected,
           ResolveControlIcon(std::move(icon))
       )) {}
@@ -2861,7 +2865,7 @@ Checkbox::Checkbox(StringVariant label, bool checked)
           detail::NodeKind::Checkbox,
           ToggleVisualKind::Checkbox,
           checked,
-          detail::ResolveStringVariant(std::move(label))
+          UseString(std::move(label))
       )) {}
 
 RadioButton::RadioButton(bool selected)
@@ -2874,7 +2878,7 @@ RadioButton::RadioButton(StringVariant label, bool selected)
           detail::NodeKind::RadioButton,
           ToggleVisualKind::RadioButton,
           selected,
-          detail::ResolveStringVariant(std::move(label))
+          UseString(std::move(label))
       )) {}
 
 Switch::Switch(bool checked)
@@ -2885,7 +2889,7 @@ Switch::Switch(StringVariant label, bool checked)
           detail::NodeKind::Switch,
           ToggleVisualKind::Switch,
           checked,
-          detail::ResolveStringVariant(std::move(label))
+          UseString(std::move(label))
       )) {}
 
 ProgressCircle::ProgressCircle() : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(std::nullopt)) {}

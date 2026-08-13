@@ -23,7 +23,7 @@ It intentionally removes the legacy absolute-frame and flat-DisplayList runtime 
 - Renderer-specific objects in shared Runtime state.
 - A general dependency graph in the first implementation.
 - GPU layer promotion, occlusion culling, or partial swap-chain submission in the first implementation.
-- Encoding future `NativeView` or external-surface behavior before its composition rules are defined.
+- A public PlatformView composition mode, PlatformView frame, or application-managed render slice.
 
 ## Implemented foundation
 
@@ -73,6 +73,37 @@ The mounted tree and render scene have different responsibilities:
 | Local layout geometry | Measured size and parent-relative placement |
 | `RenderNode` | Retained drawing records and presentation properties |
 | Platform renderer | Native resource resolution and scene traversal |
+
+## PlatformView composition foundation
+
+Status: shared placement and `RenderComposition` derivation implemented; macOS retained native slices and Android same-Canvas slice replay implemented; remaining adapters proposed
+
+PlatformView extends the retained scene without adding another Runtime output tree.
+Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
+The command contributes no pixels and marks the exact RenderScene paint position at which the native hierarchy participates.
+
+One shared internal builder derives a `RenderComposition` from the committed scene before platform presentation.
+Adapters consume the result rather than duplicating traversal-order or state-boundary policy.
+Scene traversal accumulates the same transforms, clips, visibility, content, child, and foreground order used by raster replay.
+Each placement boundary closes the current nonempty HuxerUI render slice, emits the resolved native placement, and opens a following slice only when later drawing exists.
+For `p` mounted PlatformViews, the composition therefore contains at most `p + 1` HuxerUI slices, while a scene without PlatformViews remains on the existing single-surface path.
+
+Slice construction references retained RenderNodes and PaintSequences rather than copying or rerecording their commands.
+A compatible macOS slice retains its native surface when its surrounding PlatformView boundaries and scene role remain stable. Android instead replays the committed command ranges into the host Canvas around ordinary child drawing, while remaining adapters choose the platform-appropriate retained representation when implemented.
+Insertion, removal, or reordering invalidates only changed boundaries and the old and new visible bounds they affect at the shared composition level.
+The macOS host intersects stable slice invalidation with the committed DamageRegion and escalates to a complete redraw only when the native sibling composition changes.
+Android retains shared DamageRegion calculation but currently invalidates its complete native View when a committed frame changes.
+A PlatformView property revision updates its native instance without marking unrelated HuxerUI PaintSequences dirty.
+EventBinding changes and incoming platform events do not change the property revision, while native visual invalidation requests presentation through the adapter without writing application State.
+
+The RenderComposition is complete before native hierarchy mutation begins.
+Adapters apply view creation, property updates, bounds, clipping, visibility, sibling order, slice reuse, and removals as one platform-thread commit, then present damaged HuxerUI slices.
+Paint callbacks only replay the already committed slice assigned to them and never mutate native hierarchy.
+New native candidates remain inactive until they enter the committed hierarchy, while compatible factory updates apply in place and are not a rollback boundary.
+
+The first contract accepts translation, axis-aligned bounds, rectangular clipping, and visibility around PlatformView.
+A scene that would require rotation, path clipping, a group-opacity boundary spanning native and HuxerUI content, a backdrop filter, or another unsupported offscreen effect is rejected rather than flattened into a foreground or background plane.
+ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing composition slices.
 
 There is one `RenderNode` per paintable mounted node.
 Non-painting structural nodes may either own an empty render node or be elided when doing so does not change clipping, transforms, opacity, hit testing, or stable scene identity.
@@ -279,7 +310,7 @@ It remains true when local paint or an unclipped descendant contributes visible 
 An effective child clip can still make that descendant and therefore the clipped subtree invisible.
 
 `PaintSequence` contains immutable platform-neutral `PaintCommand` values in node-local coordinates.
-`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, and future primitives.
+`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, external textures, and proposed PlatformView placement boundaries.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
 Platform renderers traverse `RenderScene`, maintain the native transform and clip stacks, and replay only the records referenced by the scene.
@@ -514,7 +545,7 @@ Applications do not receive render-node handles, call invalidation methods, or m
 - Layout changes do not invalidate descendant paint merely because their window position changed.
 - Presentation changes do not invoke layout.
 - Platform adapters do not branch on concrete components or modifiers.
-- Every renderer handles every `PaintCommand` explicitly.
+- Every platform backend handles every `PaintCommand` explicitly; the shared `RenderComposition` path consumes PlatformView placement before raster replay.
 
 ## Implemented adoption sequence
 

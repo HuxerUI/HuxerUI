@@ -6,11 +6,14 @@ endif ()
 
 include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 
+file(TO_CMAKE_PATH "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE)
 add_executable(huxerui_tests
         tests_main.cpp
+        support/builtin_resources.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
+        unit/platform_payload.cpp
         unit/resource.cpp
         unit/semantics.cpp
         unit/text.cpp
@@ -28,6 +31,8 @@ add_executable(huxerui_tests
         runtime/layout.cpp
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
+        runtime/platform_module.cpp
+        runtime/platform_view.cpp
         runtime/presentation.cpp
         runtime/presentation_semantics.cpp
         runtime/render_scene.cpp
@@ -43,8 +48,19 @@ add_executable(huxerui_tests
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
+            platform/macos_platform_module.mm
+            platform/macos_platform_view.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
+    )
+    set_source_files_properties(
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    target_include_directories(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
 endif ()
 
@@ -66,6 +82,7 @@ if (UNIX AND NOT APPLE)
             platform/linux_damage.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp
+            platform/linux_window_chrome.cpp
     )
 endif ()
 
@@ -77,6 +94,10 @@ target_include_directories(huxerui_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/platform/windows"
         "${HUXERUI_PROJECT_DIR}/platform/web"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+
+target_compile_definitions(huxerui_tests PRIVATE
+        HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE="${HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE}"
 )
 
 target_link_libraries(huxerui_tests PRIVATE
@@ -105,6 +126,8 @@ set(HUXERUI_PUBLIC_HEADERS
         modifier.h
         navigation.h
         paint.h
+        platform_module.h
+        platform_view.h
         presentation.h
         render_scene.h
         resource.h
@@ -120,12 +143,20 @@ set(HUXERUI_PUBLIC_HEADERS
         view.h
         virtual_layout.h
         window.h
+        android/jni.h
+        android/platform_module.h
+        android/platform_view.h
+        ios/platform_view.h
+        macos/platform_view.h
 )
 
 set(HUXERUI_HEADER_TEST_SOURCES)
 foreach (HUXERUI_PUBLIC_HEADER IN LISTS HUXERUI_PUBLIC_HEADERS)
     string(REPLACE "." "_" HUXERUI_HEADER_TEST_NAME
             "${HUXERUI_PUBLIC_HEADER}"
+    )
+    string(REPLACE "/" "_" HUXERUI_HEADER_TEST_NAME
+            "${HUXERUI_HEADER_TEST_NAME}"
     )
     set(HUXERUI_HEADER_TEST_SOURCE
             "${CMAKE_CURRENT_BINARY_DIR}/header_compile/${HUXERUI_HEADER_TEST_NAME}.cpp"
@@ -200,6 +231,22 @@ target_link_libraries(huxerui_resource_codegen_tests PRIVATE
 
 add_test(NAME HuxerUIResourceCodegenTests COMMAND huxerui_resource_codegen_tests)
 
+add_test(NAME HuxerUIResourceMergeTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/resource_merge.cmake"
+)
+
+add_test(NAME HuxerUIModuleValidationTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/module_validation.cmake"
+)
+
 add_test(NAME HuxerUIAndroidPlanTests
         COMMAND "${CMAKE_COMMAND}"
                 "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
@@ -248,6 +295,32 @@ if (TARGET huxerui_cli AND (WIN32 OR APPLE))
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/installed_consumer.cmake"
     )
 endif ()
+
+add_executable(huxerui_module_tests
+        tests_main.cpp
+        runtime/modules.cpp
+)
+
+target_include_directories(huxerui_module_tests PRIVATE
+        "${HUXERUI_PROJECT_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/support"
+)
+target_link_libraries(huxerui_module_tests PRIVATE
+        HuxerUI3p::Catch2
+        ${HUXERUI_TEST_LIBRARY}
+)
+huxerui_use_module(huxerui_module_tests
+        TARGET HuxerUI::test_module
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/modules/root_service"
+)
+huxerui_add_resources(huxerui_module_tests
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/modules/application_resources"
+        NAMESPACE huxerui_test_module
+)
+target_compile_definitions(huxerui_module_tests PRIVATE
+        "HUXERUI_MODULE_TEST_RESOURCE_PACKAGE=\"${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/huxerui_module_tests/package\""
+)
+add_test(NAME HuxerUIModuleTests COMMAND huxerui_module_tests)
 
 add_executable(huxerui_codegen_runtime_tests
         tests_main.cpp

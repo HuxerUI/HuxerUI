@@ -103,6 +103,7 @@ struct InteractionScheme {
   IndicationKind indication = IndicationKind::StateOverlay;
   std::optional<Color> focus_ring;
   float focus_ring_width = 2.0F;
+  float focus_ring_offset = 2.0F;
   float disabled_opacity = 0.42F;
 
   bool operator==(const InteractionScheme&) const = default;
