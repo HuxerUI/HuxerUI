@@ -569,7 +569,7 @@ struct ChartHover {
   bool operator==(const ChartHover&) const = default;
 };
 
-class ChartHoverExtension final : public NodeExtension, public detail::HoverMoveExtension {
+class ChartHoverExtension final : public NodeExtension {
 public:
   ChartHoverExtension(MountedNode& node, const ChartHover& modifier) {
     Update(node, modifier);
@@ -606,14 +606,14 @@ public:
     }
   }
 
-  void OnHoverMoved(MountedNode& node, Point position) override {
-    if (!hovered_) {
-      return;
+  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+    if (!hovered_ || event.type != PointerEventType::Move) {
+      return PointerResult::Ignored;
     }
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     const Rect content = mounted.ContentBounds();
     const Size size{content.width, content.height};
-    const Point local{position.x - content.x, position.y - content.y};
+    const Point local{event.position.x - content.x, event.position.y - content.y};
     std::optional<std::size_t> next;
     if (kind_ == ChartHoverKind::Bar) {
       const BarChartGeometry geometry = ResolveBarChartGeometry(size, data_, bar_options_);
@@ -626,6 +626,7 @@ public:
       hovered_index_ = next;
       InvalidatePaint();
     }
+    return PointerResult::Ignored;
   }
 
   void Paint(const MountedNode& node, PaintContext& context) const override {

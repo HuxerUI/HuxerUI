@@ -1317,21 +1317,6 @@ void Runtime::UpdateHoveredExtensions(Point position) {
     }
   }
   state_->hovered_extensions_ = std::move(next_hovered);
-  if (state_->mounted_root_) {
-    for (const detail::NodeExtensionHandle& hovered : state_->hovered_extensions_) {
-      NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered);
-      detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity);
-      if (!extension || !node) {
-        continue;
-      }
-      const std::optional<Point> local_position = node->presentation.resolved_transform.Inverse(position);
-      if (local_position.has_value()) {
-        if (auto* hover_move = dynamic_cast<detail::HoverMoveExtension*>(extension)) {
-          hover_move->OnHoverMoved(*node, *local_position);
-        }
-      }
-    }
-  }
   if (hover_set_changed) {
     RequestFrame();
   }

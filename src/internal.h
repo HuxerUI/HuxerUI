@@ -958,12 +958,6 @@ struct ScrollBarGeometry {
   float thumb_travel = 0.0F;
 };
 
-class HoverMoveExtension {
-public:
-  virtual ~HoverMoveExtension() = default;
-  virtual void OnHoverMoved(huxerui::MountedNode& node, Point position) = 0;
-};
-
 struct NodeExtensionHandle {
   std::uint64_t node_identity = 0;
   std::size_t extension_index = 0;

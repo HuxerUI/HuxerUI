@@ -364,6 +364,13 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   if (captured == state_->pointer_sessions_.end()) {
     if (SupportsHover(event.device_kind)) {
       UpdateHoveredExtensions(event.position);
+      for (const NodeExtensionHandle& hovered : state_->hovered_extensions_) {
+        NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered);
+        detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity);
+        if (extension && node) {
+          static_cast<void>(extension->OnPointer(*node, LocalPointerEvent(*node, event)));
+        }
+      }
     }
     if (detail::MountedNode* target = HitTestPointer(*state_->mounted_root_, event.position);
         target && target->enabled) {

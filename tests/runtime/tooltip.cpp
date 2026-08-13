@@ -7,6 +7,8 @@ namespace {
 int tooltip_clicks = 0;
 bool first_hovered = false;
 bool second_hovered = false;
+std::optional<Point> first_hover_position;
+std::optional<Point> second_hover_position;
 State<bool> tooltip_target_visible;
 State<bool> tooltip_use_updated_message;
 
@@ -82,6 +84,7 @@ View MultipleTooltipTargetsApp() {
 
 struct HoverProbe {
   bool* hovered = nullptr;
+  std::optional<Point>* hover_position = nullptr;
 
   static const detail::ModifierDescriptor& Descriptor();
 
@@ -97,6 +100,7 @@ public:
   void Update(MountedNode& node, const HoverProbe& modifier) {
     static_cast<void>(node);
     hovered_ = modifier.hovered;
+    hover_position_ = modifier.hover_position;
   }
 
   bool HoverHitTest(MountedNode& node, Point position) const override {
@@ -110,8 +114,17 @@ public:
     }
   }
 
+  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+    static_cast<void>(node);
+    if (hover_position_ && event.type == PointerEventType::Move) {
+      *hover_position_ = event.position;
+    }
+    return PointerResult::Ignored;
+  }
+
 private:
   bool* hovered_ = nullptr;
+  std::optional<Point>* hover_position_ = nullptr;
 };
 
 const detail::ModifierDescriptor& HoverProbe::Descriptor() {
@@ -122,7 +135,9 @@ View MultipleHoverApp() {
   return Column {
     Text("Hover target")
         .With(
-            Frame{.width = 100.0F, .height = 40.0F}, HoverProbe{&first_hovered}, HoverProbe{&second_hovered}
+            Frame{.width = 100.0F, .height = 40.0F},
+            HoverProbe{&first_hovered, &first_hover_position},
+            HoverProbe{&second_hovered, &second_hover_position}
         ),
   };
 }
@@ -344,6 +359,8 @@ TEST_CASE("TestOnlyOneTooltipIsVisiblePerWindow") {
 TEST_CASE("TestRuntimeDispatchesHoverToEveryExtensionOnDeepestNode") {
   first_hovered = false;
   second_hovered = false;
+  first_hover_position.reset();
+  second_hover_position.reset();
   TestPlatform platform;
   Runtime runtime{MultipleHoverApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
@@ -352,6 +369,8 @@ TEST_CASE("TestRuntimeDispatchesHoverToEveryExtensionOnDeepestNode") {
   MovePointer(runtime, {40.0F, 20.0F});
   REQUIRE(first_hovered);
   REQUIRE(second_hovered);
+  REQUIRE(first_hover_position == Point{40.0F, 20.0F});
+  REQUIRE(second_hover_position == Point{40.0F, 20.0F});
 
   MovePointer(runtime, {200.0F, 120.0F});
   REQUIRE_FALSE(first_hovered);
