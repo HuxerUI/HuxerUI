@@ -948,9 +948,6 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
-    const EdgeInsets safe_area = context.SafeAreaInsets();
-    const WindowTitleBarMetrics* title_bar = context.TitleBarMetrics();
-    const float overlay_top = std::max(safe_area.top, title_bar == nullptr ? 0.0F : title_bar->height);
     for (MountedNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose));
     }
@@ -961,25 +958,19 @@ public:
       result.Place(
           panel,
           {
-              std::min(
-                  safe_area.left + 16.0F,
-                  std::max(safe_area.left, constraints.max_width - safe_area.right - panel.LayoutSize().width)
-              ),
-              std::min(
-                  overlay_top + 16.0F,
-                  std::max(overlay_top, constraints.max_height - safe_area.bottom - panel.LayoutSize().height)
-              ),
+              std::min(16.0F, std::max(0.0F, constraints.max_width - panel.LayoutSize().width)),
+              std::min(16.0F, std::max(0.0F, constraints.max_height - panel.LayoutSize().height)),
           }
       );
     }
     if (node.ChildCount() > 1) {
-      constexpr float corner_inset = 28.0F;
+      constexpr float corner_inset = 30.0F;
       MountedNode& ribbon = node.ChildAt(1);
       result.Place(
           ribbon,
           {
               constraints.max_width - corner_inset - ribbon.LayoutSize().width * 0.5F,
-              overlay_top + corner_inset - ribbon.LayoutSize().height * 0.5F,
+              corner_inset - ribbon.LayoutSize().height * 0.5F,
           }
       );
     }
@@ -1019,7 +1010,7 @@ public:
   }
 };
 
-constexpr Color debug_ribbon_background = Color::Rgb(183, 28, 28);
+constexpr Color debug_ribbon_background = Color::Rgb(103, 80, 164);
 constexpr Color debug_ribbon_foreground = Color::White();
 constexpr Color debug_ribbon_shadow = Color::Rgb(0, 0, 0, 0.32F);
 constexpr Color debug_panel_background = Color::Rgb(17, 22, 31, 0.97F);
@@ -1178,10 +1169,10 @@ View DebugPanel(
 
 View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snapshot) {
   Frame ribbon_frame;
-  ribbon_frame.width = 96.0F;
-  ribbon_frame.height = 18.0F;
+  ribbon_frame.width = 104.0F;
+  ribbon_frame.height = 20.0F;
   return Row {
-    Text("DEBUG").Style(TextStyle{Font::System(12.0F).WithWeight(FontWeight::Bold), debug_ribbon_foreground}),
+    Text("DEBUG").Style(TextStyle{Font::System(11.0F).WithWeight(FontWeight::SemiBold), debug_ribbon_foreground}),
   }.With(
       ribbon_frame,
       MainAlign{MainAxisAlignment::Center},
@@ -1190,7 +1181,7 @@ View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snaps
       Shadow{
           .color = debug_ribbon_shadow,
           .offset = {},
-          .blur_radius = 8.0F,
+          .blur_radius = 12.0F,
       },
       Rotation{45.0F}
   ).OnClick([expanded, snapshot] {

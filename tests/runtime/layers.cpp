@@ -1285,6 +1285,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   layer_background_clicks = 0;
   AppOptions options;
   options.show_debug_overlay = true;
+  options.window.content_mode = WindowContentMode::EdgeToEdge;
 
   TestPlatform platform;
   platform.process_metrics = ProcessMetrics{
@@ -1293,7 +1294,11 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
       .processor_count = 4,
   };
   Runtime runtime{DebugOverlayApp, platform, std::move(options)};
-  runtime.SetWindowMetrics({.viewport = {360.0F, 260.0F}});
+  runtime.SetWindowMetrics({
+      .viewport = {360.0F, 260.0F},
+      .safe_area = {.top = 72.0F, .right = 40.0F, .bottom = 24.0F, .left = 64.0F},
+      .title_bar = WindowTitleBarMetrics{.height = 80.0F, .left_inset = 20.0F, .right_inset = 100.0F},
+  });
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(ContainsText(initial, "DEBUG"));
   REQUIRE(!ContainsText(initial, "HuxerUI Performance"));
@@ -1302,18 +1307,18 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(banner_text->x > 300.0F);
   REQUIRE(banner_text->x + banner_text->width <= 360.0F);
   REQUIRE(banner_text->y < 56.0F);
-  REQUIRE(FindRectWithColor(initial, Color::Rgb(183, 28, 28)) != nullptr);
+  REQUIRE(FindRectWithColor(initial, Color::Rgb(103, 80, 164)) != nullptr);
   REQUIRE(std::ranges::any_of(initial.Commands(), [](const PaintCommand& command) {
     const auto* shadow = std::get_if<DrawShadowCommand>(&command);
     return shadow != nullptr && shadow->color == Color::Rgb(0, 0, 0, 0.32F) && shadow->offset == Point{} &&
-           shadow->blur_radius == 8.0F;
+           shadow->blur_radius == 12.0F;
   }));
   REQUIRE(layer_app_compositions == 1);
 
   ClickAt(runtime, {20.0F, 220.0F}, 123);
   REQUIRE(layer_background_clicks == 1);
 
-  ClickAt(runtime, {332.0F, 28.0F}, 124);
+  ClickAt(runtime, {330.0F, 30.0F}, 124);
   const FlattenedScene& expanded = runtime.BuildFrame();
   REQUIRE(ContainsText(expanded, "DEBUG"));
   REQUIRE(ContainsText(expanded, "HuxerUI Performance"));
@@ -1325,6 +1330,8 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(panel_title.has_value());
   REQUIRE(panel_title->x >= 16.0F);
   REQUIRE(panel_title->y >= 16.0F);
+  REQUIRE(panel_title->x < 64.0F);
+  REQUIRE(panel_title->y < 72.0F);
   REQUIRE(FindRectWithColor(expanded, Color::Rgb(17, 22, 31, 0.97F)) != nullptr);
   REQUIRE(layer_app_compositions == 1);
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
@@ -1346,7 +1353,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(ContainsText(sampled, "72.0 MiB"));
   REQUIRE(layer_app_compositions == 1);
 
-  ClickAt(runtime, {332.0F, 28.0F}, 125);
+  ClickAt(runtime, {330.0F, 30.0F}, 125);
   const FlattenedScene& collapsed = runtime.BuildFrame();
   REQUIRE(ContainsText(collapsed, "DEBUG"));
   REQUIRE(!ContainsText(collapsed, "HuxerUI Performance"));
@@ -1361,7 +1368,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
       .memory_usage_bytes = 96ULL * 1024ULL * 1024ULL,
       .processor_count = 4,
   };
-  ClickAt(runtime, {332.0F, 28.0F}, 127);
+  ClickAt(runtime, {330.0F, 30.0F}, 127);
   const FlattenedScene& reopened = runtime.BuildFrame();
   REQUIRE(ContainsText(reopened, "HuxerUI Performance"));
   REQUIRE(!ContainsText(reopened, "72.0 MiB"));
