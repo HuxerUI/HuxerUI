@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol, macOS owning-thread dispatch for nonvisual modules, and macOS native PlatformView hosting with focus and accessibility bridging are implemented. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. macOS and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; macOS also bridges native accessibility. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, iOS PlatformView accessibility, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -362,7 +362,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; macOS owning-thread dispatch and PlatformView hosting implemented; production modules and remaining native adapters proposed
+Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; macOS and iOS owning-thread dispatch and PlatformView hosting implemented; production modules and remaining native adapters proposed
 
 Native modules produce three integration forms:
 
@@ -427,7 +427,7 @@ Large or continuous media data does not travel through PlatformPayload; resource
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
 `PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-The macOS visual registration is `macos::PlatformViewFactory`, while nonvisual implementations use the platform-neutral `PlatformModuleFactory`; another registry or registration-kind enum is unnecessary.
+Apple visual registrations are `macos::PlatformViewFactory` and `ios::PlatformViewFactory`, while nonvisual implementations use the platform-neutral `PlatformModuleFactory`; another registry or registration-kind enum is unnecessary.
 Registration callbacks remain in the platform adapter or platform module source and may use native types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
 The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
 Type strings are module contract rather than application configuration, and modules normally expose them only through their concrete C++ component or service.
@@ -506,7 +506,7 @@ void InstallAudio(RootContext& root) {
 The resulting service owns the `PlatformInstance`, encodes typed calls, decodes results and events, and closes the instance from its destructor.
 An application-wide native engine may remain shared behind several per-window instances, but each Runtime retains only its own identities, subscriptions, and typed services.
 The shared protocol and deterministic dispatcher fixture are implemented and tested.
-The macOS adapter configures asynchronous main-queue delivery, and the macOS-only `example_platform_module` registers an AppKit timer behind a typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
+The macOS and iOS adapters configure asynchronous main-queue delivery, and the macOS-only `example_platform_module` registers an AppKit timer behind a typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
 Other production adapters and concrete product modules remain proposed.
 
 ### PlatformView

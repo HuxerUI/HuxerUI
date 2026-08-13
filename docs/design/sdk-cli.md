@@ -14,7 +14,7 @@ The current implementation provides:
 - Android and iOS device discovery with deterministic device selection.
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, and ordered resource packages.
 
-Android binary distribution, `package` and `clean` commands, native module metadata projection, production nonvisual modules, native PlatformView hosting outside macOS, ExternalTexture, iOS device distribution, OHOS, and Linux remain proposed. The shared `PlatformPayload`, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, macOS main-queue module dispatch, and macOS NSView hosting are implemented.
+Android binary distribution, `package` and `clean` commands, native module metadata projection, production nonvisual modules, native PlatformView hosting outside Apple platforms, ExternalTexture, iOS device distribution, OHOS, and Linux remain proposed. The shared `PlatformPayload`, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, Apple main-queue module dispatch, macOS NSView hosting, and iOS UIView hosting are implemented.
 The current Android and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 
@@ -511,7 +511,7 @@ The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed
 SDK projection connects the module's explicitly installed RootHook to the current platform registrations and native dependencies without generating another runtime API or composition mode.
 A projected PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the native object to a global foreground or background plane.
 Native projection for nonvisual modules will register each module's `PlatformModuleFactory`; module-owned typed Root Services already keep PlatformPayload codecs and string method names behind those services.
-The macOS adapter supplies a `UIThreadDispatcher` backed by the AppKit main queue, and `example_platform_module` provides a source-level AppKit timer reference integration; the remaining adapters and generated native dependency projection still need equivalent wiring.
+The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, and `example_platform_module` provides a source-level AppKit timer reference integration; the remaining adapters and generated native dependency projection still need equivalent wiring.
 
 Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.

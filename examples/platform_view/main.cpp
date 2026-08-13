@@ -45,7 +45,7 @@ View PlatformViewDemo() {
 
   return Column {
     Text("PlatformView", TextRole::Title),
-    Text("The AppKit text field participates in HuxerUI layout, rendering order, state, and events."),
+    Text("The native text field participates in HuxerUI layout, rendering order, state, and events."),
     std::move(native_content),
     Text("Controlled value: " + value.Get(), TextRole::Label),
     Row {

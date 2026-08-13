@@ -2,6 +2,7 @@
 
 #include <CoreGraphics/CoreGraphics.h>
 
+#include <cstddef>
 #include <memory>
 #include <string_view>
 
@@ -29,13 +30,21 @@ public:
   [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(
       std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
   );
-  void Draw(CGContextRef context, CGRect dirty_rect, const RenderFrame* frame);
+  void DrawSlice(
+      CGContextRef context,
+      CGRect dirty_rect,
+      const RenderFrame* frame,
+      std::size_t first_command,
+      std::size_t command_count,
+      bool draw_background
+  );
 
 private:
   struct State;
+  struct CommandRange;
 
-  void RenderSequence(const PaintSequence& sequence, CGContextRef context);
-  void RenderSceneNode(const RenderNode& node, CGContextRef context);
+  void RenderSequence(const PaintSequence& sequence, CGContextRef context, CommandRange* range);
+  void RenderSceneNode(const RenderNode& node, CGContextRef context, CommandRange* range);
   void RenderCommand(CGContextRef context, const DrawRectCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextRunsCommand& command);

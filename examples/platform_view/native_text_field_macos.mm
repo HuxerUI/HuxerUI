@@ -7,12 +7,8 @@
 #include <utility>
 
 #include <huxerui/macos/platform_view.h>
-#include <huxerui/platform_view.h>
 
 namespace {
-
-constexpr std::string_view native_text_field_type = "example/NativeTextField";
-constexpr std::string_view text_property = "text";
 
 NSString* NativeString(std::string_view value) {
   return [[NSString alloc] initWithBytes:value.data() length:value.size() encoding:NSUTF8StringEncoding];
@@ -47,7 +43,7 @@ namespace huxerui::example {
 namespace {
 
 void ApplyProperties(HuxerUIExampleNativeTextField* text_field, const PlatformPayload& properties) {
-  const std::string_view text = properties.AsObject().at(std::string(text_property)).AsString();
+  const std::string_view text = properties.AsObject().at(std::string(native_text_field::text_property)).AsString();
   NSString* native_text = NativeString(text);
   if (![text_field.stringValue isEqualToString:native_text]) {
     text_field.stringValue = native_text;
@@ -83,20 +79,10 @@ macos::PlatformViewFactory NativeTextFieldFactory() {
 }
 
 void RegisterNativeTextField(RootContext& root) {
-  root.Modules().Register(std::string(native_text_field_type), NativeTextFieldFactory());
+  root.Modules().Register(std::string(native_text_field::type), NativeTextFieldFactory());
 }
 
 } // namespace
-
-std::string NativeTextFieldEvents::Changed::Decode(const PlatformPayload& payload) {
-  return std::string(payload.AsString());
-}
-
-View NativeTextField(std::string value) {
-  PlatformPayload properties = PlatformPayload::Object{{std::string(text_property), std::move(value)}};
-  return PlatformView(std::string(native_text_field_type), std::move(properties))
-      .Events<NativeTextFieldEvents::Changed>();
-}
 
 RootHook InstallNativeTextField() {
   return RegisterNativeTextField;
