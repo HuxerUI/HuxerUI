@@ -1,4 +1,4 @@
-#import <AppKit/AppKit.h>
+#import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
 
 #include "timer.h"
@@ -26,7 +26,7 @@ View MacPlatformModuleApp() {
 
 AppOptions MacPlatformModuleOptions() {
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back(example::InstallTimer());
+  options.root_hooks.push_back(example::InstallTimer);
   return options;
 }
 
@@ -121,7 +121,7 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
   }
 }
 
-TEST_CASE("MacPlatformModuleCancelsAndDisposesAppKitTimer") {
+TEST_CASE("MacPlatformModuleCancelsAndDisposesFoundationTimer") {
   @autoreleasepool {
     mac_timer_service.reset();
     bool completed = false;

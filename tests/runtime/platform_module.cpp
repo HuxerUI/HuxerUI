@@ -151,6 +151,22 @@ PlatformModuleFactory TestModuleFactory(const std::shared_ptr<NativeState>& nati
   return factory;
 }
 
+struct TestPlatformModuleFactory {
+  PlatformModuleFactory factory;
+};
+
+class ProjectingTestPlatform final : public TestPlatform {
+protected:
+  PlatformModuleFactory::Instance CreatePlatformModule(
+      std::string_view type, const PlatformPayload& options, PlatformEventSink events
+  ) override {
+    if (const auto* registration = FindPlatformModuleRegistration<TestPlatformModuleFactory>(type)) {
+      return registration->factory.create(options, std::move(events));
+    }
+    return TestPlatform::CreatePlatformModule(type, options, std::move(events));
+  }
+};
+
 class TestService final {
 public:
   explicit TestService(PlatformInstance instance) : instance_(std::move(instance)) {}
@@ -312,6 +328,25 @@ TEST_CASE("PlatformInstanceMoveAndRootTeardownCloseNativeState") {
   native->events("changed", PlatformPayload(3));
   platform.RunPlatformModuleTasks();
   REQUIRE(native->disposals == 1);
+}
+
+TEST_CASE("PlatformAdapterCreatesNativePlatformModuleRegistration") {
+  ProjectingTestPlatform platform;
+  auto native = std::make_shared<NativeState>();
+  std::shared_ptr<TestService> service;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([native, &service](RootContext& root) {
+    root.Modules().Register("test/NativeModule", TestPlatformModuleFactory{TestModuleFactory(native)});
+    service = std::make_shared<TestService>(
+        root.Modules().Open("test/NativeModule", PlatformPayload::Object{{"native", true}})
+    );
+    root.Provide(service);
+  });
+  Runtime runtime(PlatformModuleApp, platform, std::move(options));
+
+  REQUIRE(native->creates == 1);
+  REQUIRE(native->options.AsObject().at("native").AsBoolean());
+  REQUIRE(service != nullptr);
 }
 
 TEST_CASE("PlatformModulesValidateNonvisualFactoryRegistration") {

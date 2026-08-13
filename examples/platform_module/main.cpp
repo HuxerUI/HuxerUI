@@ -31,7 +31,7 @@ View PlatformModuleDemo() {
 
   return Column {
     Text("PlatformModule", TextRole::Title),
-    Text("An AppKit timer sends typed results and events through a nonvisual root service."),
+    Text("A native timer sends typed results and events through a nonvisual root service."),
     Text("Tick: " + std::to_string(tick.Get()), TextRole::Title),
     Text(status.Get(), TextRole::Label),
     Row {
@@ -81,6 +81,6 @@ HUXERUI_APP(
             .title = "HuxerUI PlatformModule",
             .initial_size = {720.0F, 440.0F},
         },
-        .root_hooks = {example::InstallTimer()},
+        .root_hooks = {example::InstallTimer},
     }
 )

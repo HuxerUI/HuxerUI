@@ -8,6 +8,8 @@
 #include <utility>
 #include <variant>
 
+#include <huxerui/app.h>
+
 namespace huxerui {
 
 struct PlatformPayload::Data {
@@ -514,16 +516,12 @@ PlatformInstance PlatformModules::Open(std::string type, PlatformPayload options
   if (!dispatch_to_ui_thread_) {
     throw std::logic_error("HuxerUI UI thread dispatcher is not configured");
   }
-  const PlatformModuleFactory* factory = Find<PlatformModuleFactory>(type);
-  if (factory == nullptr) {
+  if (!registrations_.contains(type)) {
     throw std::logic_error("HuxerUI platform module type is not registered: " + type);
-  }
-  if (!factory->create) {
-    throw std::logic_error("HuxerUI platform module factory must provide create");
   }
 
   auto state = std::make_shared<PlatformInstance::State>(dispatch_to_ui_thread_);
-  PlatformModuleFactory::Instance native = factory->create(options, state->EventSink());
+  PlatformModuleFactory::Instance native = adapter_->CreatePlatformModule(type, options, state->EventSink());
   if (!native.call) {
     if (native.dispose) {
       try {

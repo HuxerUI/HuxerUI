@@ -101,6 +101,15 @@ public:
   }
 
 protected:
+  template <class Registration>
+  [[nodiscard]] const Registration* FindPlatformModuleRegistration(std::string_view type) const {
+    return platform_modules_->FindCompatible<Registration>(type);
+  }
+
+  virtual PlatformModuleFactory::Instance CreatePlatformModule(
+      std::string_view type, const PlatformPayload& options, PlatformEventSink events
+  );
+
   PlatformModules& Modules() noexcept {
     return *platform_modules_;
   }
@@ -108,6 +117,7 @@ protected:
 private:
   std::unique_ptr<PlatformModules> platform_modules_;
 
+  friend class PlatformModules;
   friend class Runtime;
 };
 

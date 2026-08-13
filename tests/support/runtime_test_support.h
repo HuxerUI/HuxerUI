@@ -366,7 +366,7 @@ private:
   const FrameCommit* last_commit_ = nullptr;
 };
 
-class TestPlatform final : public huxerui::PlatformAdapter {
+class TestPlatform : public huxerui::PlatformAdapter {
 public:
   TestPlatform()
       : PlatformAdapter([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}

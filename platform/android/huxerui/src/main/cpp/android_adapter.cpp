@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <huxerui/android/jni.h>
+#include <huxerui/android/platform_module.h>
 
 #include "android_accessibility.h"
 #include "android_platform_view.h"
@@ -376,6 +377,7 @@ private:
       throw std::runtime_error("HuxerUI could not inspect its Android view");
     }
 
+    const jmethodID get_context = environment->GetMethodID(view_class, "getContext", "()Landroid/content/Context;");
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
     invalidate_full_frame_ = environment->GetMethodID(view_class, "invalidateFullFrame", "()V");
     font_metrics_ = environment->GetMethodID(view_class, "fontMetrics", "(FI[BII)[F");
@@ -397,12 +399,16 @@ private:
     set_system_bars_content_brightness_ =
         environment->GetMethodID(view_class, "setSystemBarsContentBrightness", "(II)V");
 
-    if (schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr || font_metrics_ == nullptr ||
-        measure_text_ == nullptr || measure_text_run_ == nullptr || create_text_layout_ == nullptr ||
-        start_text_input_ == nullptr || update_text_input_ == nullptr || restart_text_input_ == nullptr ||
-        stop_text_input_ == nullptr || request_show_text_input_ == nullptr || read_clipboard_text_ == nullptr ||
-        write_clipboard_text_ == nullptr || resource_locale_ == nullptr || resource_scale_ == nullptr ||
-        process_pss_bytes_ == nullptr || read_resource_ == nullptr || set_system_bars_content_brightness_ == nullptr) {
+    if (get_context == nullptr || schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr ||
+        font_metrics_ == nullptr || measure_text_ == nullptr || measure_text_run_ == nullptr ||
+        create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
+        restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
+        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || resource_locale_ == nullptr ||
+        resource_scale_ == nullptr || process_pss_bytes_ == nullptr || read_resource_ == nullptr ||
+        set_system_bars_content_brightness_ == nullptr) {
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionClear();
+      }
       environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
@@ -418,6 +424,26 @@ private:
       throw;
     }
     environment->DeleteLocalRef(view_class);
+
+    jobject local_context = environment->CallObjectMethod(view, get_context);
+    if (environment->ExceptionCheck() || local_context == nullptr) {
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionClear();
+      }
+      environment->DeleteGlobalRef(view_);
+      view_ = nullptr;
+      throw std::runtime_error("HuxerUI Android view could not provide its Context");
+    }
+    context_ = environment->NewGlobalRef(local_context);
+    environment->DeleteLocalRef(local_context);
+    if (context_ == nullptr) {
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionClear();
+      }
+      environment->DeleteGlobalRef(view_);
+      view_ = nullptr;
+      throw std::runtime_error("HuxerUI could not retain the Android platform Context");
+    }
   }
 
 public:
@@ -425,6 +451,9 @@ public:
     JNIEnv* environment = Environment();
     if (dispatch_state_) {
       dispatch_state_->Shutdown(environment);
+    }
+    if (environment != nullptr && context_ != nullptr) {
+      environment->DeleteGlobalRef(context_);
     }
     if (environment != nullptr && view_ != nullptr) {
       environment->DeleteGlobalRef(view_);
@@ -479,6 +508,7 @@ public:
     platform_views_ = std::make_unique<AndroidPlatformViews>(
         environment,
         view_,
+        context_,
         renderer_,
         Modules(),
         runtime,
@@ -963,6 +993,45 @@ public:
   }
 
 private:
+  PlatformModuleFactory::Instance
+  CreatePlatformModule(std::string_view type, const PlatformPayload& options, PlatformEventSink events) override {
+    const auto* factory = FindPlatformModuleRegistration<android::PlatformModuleFactory>(type);
+    if (factory == nullptr) {
+      return PlatformAdapter::CreatePlatformModule(type, options, std::move(events));
+    }
+    if (!factory->create) {
+      throw std::logic_error("HuxerUI Android platform module factory must provide create");
+    }
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || context_ == nullptr) {
+      throw std::logic_error("HuxerUI Android platform module host is unavailable");
+    }
+
+    PlatformModuleFactory::Instance instance;
+    try {
+      instance = factory->create(environment, context_, options, std::move(events));
+    } catch (...) {
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionClear();
+      }
+      throw;
+    }
+    if (environment->ExceptionCheck()) {
+      environment->ExceptionClear();
+      if (instance.dispose) {
+        try {
+          instance.dispose();
+        } catch (...) {
+        }
+        if (environment->ExceptionCheck()) {
+          environment->ExceptionClear();
+        }
+      }
+      throw std::logic_error("HuxerUI Android platform module factory raised a Java exception while creating");
+    }
+    return instance;
+  }
+
   void CallTextInput(
       jmethodID method,
       TextInputSessionId session_id,
@@ -1015,6 +1084,7 @@ private:
   std::unique_ptr<AndroidPlatformViews> platform_views_;
   JavaVM* virtual_machine_ = nullptr;
   jobject view_ = nullptr;
+  jobject context_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
   jmethodID invalidate_full_frame_ = nullptr;
   jmethodID font_metrics_ = nullptr;

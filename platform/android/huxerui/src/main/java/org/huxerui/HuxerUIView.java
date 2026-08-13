@@ -835,10 +835,6 @@ public final class HuxerUIView extends ViewGroup {
         });
     }
 
-    private Context platformContext() {
-        return getContext();
-    }
-
     private int validatePlatformView(Object candidate) {
         if (!(candidate instanceof View)) {
             return 1;

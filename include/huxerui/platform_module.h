@@ -22,6 +22,8 @@
 
 namespace huxerui {
 
+class PlatformAdapter;
+
 enum class PlatformPayloadKind {
   Null,
   Boolean,
@@ -300,9 +302,15 @@ public:
   PlatformModules& operator=(PlatformModules&&) = delete;
 
 private:
-  explicit PlatformModules(UIThreadDispatcher dispatch_to_ui_thread)
-      : dispatch_to_ui_thread_(std::move(dispatch_to_ui_thread)) {}
+  template <class Registration> [[nodiscard]] const Registration* FindCompatible(std::string_view type) const {
+    const auto found = registrations_.find(std::string(type));
+    return found == registrations_.end() ? nullptr : std::any_cast<Registration>(&found->second);
+  }
 
+  PlatformModules(PlatformAdapter& adapter, UIThreadDispatcher dispatch_to_ui_thread)
+      : adapter_(&adapter), dispatch_to_ui_thread_(std::move(dispatch_to_ui_thread)) {}
+
+  PlatformAdapter* adapter_;
   std::unordered_map<std::string, std::any> registrations_;
   UIThreadDispatcher dispatch_to_ui_thread_;
 

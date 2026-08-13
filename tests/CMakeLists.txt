@@ -47,14 +47,15 @@ add_executable(huxerui_tests
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
-            "${HUXERUI_PROJECT_DIR}/examples/platform_module/appkit_timer.mm"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
             platform/macos_platform_module.mm
             platform/macos_platform_view.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
     )
     set_source_files_properties(
-            "${HUXERUI_PROJECT_DIR}/examples/platform_module/appkit_timer.mm"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
             PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     target_include_directories(huxerui_tests PRIVATE
@@ -141,6 +142,7 @@ set(HUXERUI_PUBLIC_HEADERS
         virtual_layout.h
         window.h
         android/jni.h
+        android/platform_module.h
         android/platform_view.h
         ios/platform_view.h
         macos/platform_view.h

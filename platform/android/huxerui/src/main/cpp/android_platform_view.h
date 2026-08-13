@@ -23,6 +23,7 @@ public:
   AndroidPlatformViews(
       JNIEnv* environment,
       jobject root,
+      jobject context,
       AndroidRenderer& renderer,
       PlatformModules& modules,
       Runtime& runtime,

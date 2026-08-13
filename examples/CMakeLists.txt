@@ -21,6 +21,6 @@ if (APPLE OR ANDROID)
     add_subdirectory(platform_view)
 endif ()
 
-if (APPLE AND NOT IOS)
+if (APPLE OR ANDROID)
     add_subdirectory(platform_module)
 endif ()

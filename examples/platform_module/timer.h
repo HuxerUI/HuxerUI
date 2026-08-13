@@ -11,6 +11,15 @@
 
 namespace huxerui::example {
 
+namespace timer {
+
+inline constexpr char type[] = "example/Timer";
+inline constexpr char start_method[] = "start";
+inline constexpr char stop_method[] = "stop";
+inline constexpr char tick_event[] = "tick";
+
+} // namespace timer
+
 class TimerService final {
 public:
   using TickHandler = std::function<void(std::uint64_t)>;
@@ -36,6 +45,6 @@ private:
 };
 
 std::shared_ptr<TimerService> UseTimer();
-RootHook InstallTimer();
+void InstallTimer(RootContext& root);
 
 } // namespace huxerui::example

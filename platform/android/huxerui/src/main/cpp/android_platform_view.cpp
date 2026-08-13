@@ -54,12 +54,13 @@ struct AndroidPlatformViews::State {
   State(
       JNIEnv* environment,
       jobject root_value,
+      jobject context_value,
       AndroidRenderer& renderer_value,
       PlatformModules& modules_value,
       Runtime& runtime_value,
       UIThreadDispatcher dispatcher
   )
-      : renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value),
+      : context(context_value), renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value),
         dispatch_to_ui_thread(std::move(dispatcher)) {
     if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for PlatformView hosting");
@@ -74,7 +75,6 @@ struct AndroidPlatformViews::State {
       root = nullptr;
       throw std::runtime_error("HuxerUI could not inspect the Android PlatformView host");
     }
-    platform_context = environment->GetMethodID(root_class, "platformContext", "()Landroid/content/Context;");
     validate_platform_view = environment->GetMethodID(root_class, "validatePlatformView", "(Ljava/lang/Object;)I");
     mount_platform_view = environment->GetMethodID(root_class, "mountPlatformView", "(JLjava/lang/Object;)I");
     place_platform_view = environment->GetMethodID(root_class, "placePlatformView", "(JFFFFFFFFZ)V");
@@ -82,9 +82,8 @@ struct AndroidPlatformViews::State {
     commit_composition = environment->GetMethodID(root_class, "commitPlatformComposition", "([J)V");
     apply_platform_view_focus = environment->GetMethodID(root_class, "applyPlatformViewFocus", "(J)Z");
     environment->DeleteLocalRef(root_class);
-    if (platform_context == nullptr || validate_platform_view == nullptr || mount_platform_view == nullptr ||
-        place_platform_view == nullptr || remove_platform_view == nullptr || commit_composition == nullptr ||
-        apply_platform_view_focus == nullptr) {
+    if (validate_platform_view == nullptr || mount_platform_view == nullptr || place_platform_view == nullptr ||
+        remove_platform_view == nullptr || commit_composition == nullptr || apply_platform_view_focus == nullptr) {
       ClearJavaException(environment);
       environment->DeleteGlobalRef(root);
       root = nullptr;
@@ -130,20 +129,8 @@ struct AndroidPlatformViews::State {
       });
     };
 
-    jobject context = environment->CallObjectMethod(root, platform_context);
-    if (environment->ExceptionCheck() || context == nullptr) {
-      ClearJavaException(environment);
-      throw std::logic_error("HuxerUI Android PlatformView host could not provide a Context");
-    }
-
     jobject local_view = nullptr;
-    try {
-      local_view = factory->create(environment, context, command.Properties(), std::move(event_sink));
-    } catch (...) {
-      environment->DeleteLocalRef(context);
-      throw;
-    }
-    environment->DeleteLocalRef(context);
+    local_view = factory->create(environment, context, command.Properties(), std::move(event_sink));
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
       if (local_view != nullptr && factory->dispose) {
@@ -265,6 +252,7 @@ struct AndroidPlatformViews::State {
 
   JavaVM* virtual_machine = nullptr;
   jobject root = nullptr;
+  jobject context = nullptr;
   AndroidRenderer* renderer = nullptr;
   PlatformModules* modules = nullptr;
   Runtime* runtime = nullptr;
@@ -272,7 +260,6 @@ struct AndroidPlatformViews::State {
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
-  jmethodID platform_context = nullptr;
   jmethodID validate_platform_view = nullptr;
   jmethodID mount_platform_view = nullptr;
   jmethodID place_platform_view = nullptr;
@@ -284,13 +271,15 @@ struct AndroidPlatformViews::State {
 AndroidPlatformViews::AndroidPlatformViews(
     JNIEnv* environment,
     jobject root,
+    jobject context,
     AndroidRenderer& renderer,
     PlatformModules& modules,
     Runtime& runtime,
     UIThreadDispatcher dispatch_to_ui_thread
 )
-    : state_(std::make_unique<State>(environment, root, renderer, modules, runtime, std::move(dispatch_to_ui_thread))) {
-}
+    : state_(std::make_unique<State>(
+          environment, root, context, renderer, modules, runtime, std::move(dispatch_to_ui_thread)
+      )) {}
 
 AndroidPlatformViews::~AndroidPlatformViews() {
   if (state_) {
@@ -495,6 +484,7 @@ void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
   state_->frame = nullptr;
   state_->base_slice.reset();
   state_->runtime = nullptr;
+  state_->context = nullptr;
   environment->DeleteGlobalRef(state_->root);
   state_->root = nullptr;
 }
