@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -158,6 +159,16 @@ namespace huxerui::detail {
 
 class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
+  MacPlatformAdapter()
+      : PlatformAdapter([](std::function<void()> task) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            try {
+              task();
+            } catch (...) {
+            }
+          });
+        }) {}
+
   int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     @autoreleasepool {
       runtime_ = &runtime;

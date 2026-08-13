@@ -30,6 +30,7 @@ add_executable(huxerui_tests
         runtime/layout.cpp
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
+        runtime/platform_module.cpp
         runtime/platform_view.cpp
         runtime/presentation.cpp
         runtime/presentation_semantics.cpp
@@ -46,9 +47,18 @@ add_executable(huxerui_tests
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/appkit_timer.mm"
+            platform/macos_platform_module.mm
             platform/macos_platform_view.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
+    )
+    set_source_files_properties(
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/appkit_timer.mm"
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    target_include_directories(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
 endif ()
 

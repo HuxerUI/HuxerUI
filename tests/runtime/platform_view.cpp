@@ -8,7 +8,7 @@ namespace {
 
 struct TestPlatformEvents {
   struct Changed : Event<int> {
-    static constexpr std::string_view PlatformName = "changed";
+    static constexpr std::string_view Name = "changed";
 
     static int Decode(const PlatformPayload& payload) {
       return static_cast<int>(payload.AsInteger());
@@ -16,7 +16,7 @@ struct TestPlatformEvents {
   };
 
   struct DuplicateChanged : Event<int> {
-    static constexpr std::string_view PlatformName = "changed";
+    static constexpr std::string_view Name = "changed";
 
     static int Decode(const PlatformPayload& payload) {
       return static_cast<int>(payload.AsInteger());

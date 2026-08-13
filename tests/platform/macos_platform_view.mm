@@ -114,7 +114,7 @@ NSTextField* mac_created_focus_text_field = nil;
 
 struct MacPlatformViewEvents {
   struct Changed : Event<int> {
-    static constexpr std::string_view PlatformName = "changed";
+    static constexpr std::string_view Name = "changed";
 
     static int Decode(const PlatformPayload& payload) {
       return static_cast<int>(payload.AsInteger());

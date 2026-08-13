@@ -35,7 +35,7 @@ NSString* NativeString(std::string_view value) {
   }
   const char* utf8 = self.stringValue.UTF8String;
   (*huxeruiEventSink)(
-      std::string(huxerui::example::NativeTextFieldEvents::Changed::PlatformName),
+      std::string(huxerui::example::NativeTextFieldEvents::Changed::Name),
       huxerui::PlatformPayload(utf8 == nullptr ? "" : utf8)
   );
 }

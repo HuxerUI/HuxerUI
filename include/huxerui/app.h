@@ -62,7 +62,8 @@ struct ProcessMetrics {
 
 class PlatformAdapter : public TextMeasurer {
 public:
-  PlatformAdapter();
+  // The dispatcher must enqueue work onto this adapter's UI thread without invoking it inline.
+  explicit PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread = {});
   virtual ~PlatformAdapter();
 
   PlatformAdapter(const PlatformAdapter&) = delete;

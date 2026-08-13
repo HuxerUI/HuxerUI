@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface visual factory registration, and macOS native PlatformView hosting with focus and accessibility bridging are implemented. Applications install module RootHooks explicitly. Nonvisual Call and Result interoperability, native hosting and matching bridges on the remaining platforms, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol, macOS owning-thread dispatch for nonvisual modules, and macOS native PlatformView hosting with focus and accessibility bridging are implemented. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -362,7 +362,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, leaf, placement, visual registry, event routing, and composition derivation implemented; macOS native hosting implemented; nonvisual instances and remaining native adapters proposed
+Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; macOS owning-thread dispatch and PlatformView hosting implemented; production modules and remaining native adapters proposed
 
 Native modules produce three integration forms:
 
@@ -374,7 +374,8 @@ Native modules produce three integration forms:
 
 The categories may coexist in one module.
 A Camera module normally installs a Camera service and returns an ExternalTexture for preview, while a WebView module installs a PlatformView factory.
-PlatformView and nonvisual modules share one platform-neutral instance and messaging contract without introducing a Runtime subclass, a public Module base class, native platform types in shared headers, or an application-visible generic module lookup.
+PlatformView and nonvisual modules share the same registry namespace, payload model, event naming, and lifecycle rules without forcing their different update and request models through one factory type.
+This does not introduce a Runtime subclass, a public Module base class, native platform types in shared headers, or an application-visible generic module lookup.
 
 ### Platform payload and instance protocol
 
@@ -398,7 +399,7 @@ Decoders require the declared kind and range instead of converting a string to a
 
 The shared public surface stays focused as the phases land:
 
-- `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformEventSink`, and the implemented per-surface `PlatformModules` visual registry capability; the protocol-level `PlatformError` and move-only nonvisual `PlatformInstance` handle join it when instance interoperability lands.
+- `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
 
 There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
@@ -426,51 +427,51 @@ Large or continuous media data does not travel through PlatformPayload; resource
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
 `PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-The implemented macOS registration is `macos::PlatformViewFactory`; future platforms and nonvisual module phases add their own registration data types without adding an abstract factory hierarchy or another registry API.
+The macOS visual registration is `macos::PlatformViewFactory`, while nonvisual implementations use the platform-neutral `PlatformModuleFactory`; another registry or registration-kind enum is unnecessary.
 Registration callbacks remain in the platform adapter or platform module source and may use native types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
 The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
 Type strings are module contract rather than application configuration, and modules normally expose them only through their concrete C++ component or service.
 Registration is not a process-global static side effect and does not choose a composition mode.
 An explicitly selected RootHook connects its platform registrations before opening a nonvisual instance or composing the first PlatformView, and a root cannot replace a registration while an instance of that type is alive.
 
-The host gives each created instance a narrow platform-side context for emitting an Event, completing or failing a Call, and, for PlatformView only, requesting presentation after native visual content changes.
-This context carries the instance identity but does not expose Runtime, MountedNode, EventBindings, or HuxerUI application state.
-The owning bridge validates payloads at Create, Update, Call, Result, and Event boundaries and reports the registered type plus operation name in a `PlatformError`.
+The host gives each created instance narrow sinks for emitting an Event and completing or failing a Call; PlatformView independently retains its existing presentation invalidation path.
+Sink closures route to their owning instance state without exposing Runtime, MountedNode, EventBindings, or HuxerUI application state.
+The owning bridge validates payloads at Create, Update, Call, Result, and Event boundaries and converts native failures to `PlatformError`.
 
-Both factory kinds follow the same internal instance protocol:
+The two integration forms use the same message vocabulary while retaining distinct factory contracts:
 
 ```text
-Create(instance identity, type, initial payload) -> success or PlatformError
-Update(instance, payload)
-Call(instance, method, payload, request identity)
-Result(instance, request identity, payload or PlatformError)
-Event(instance, event, payload)
-Dispose(instance)
+Create(type, initial payload, event sink) -> native instance
+Update(native instance, payload)
+Call(native instance, method, payload, result sink) -> optional cancellation operation
+Result(result sink, payload or PlatformError)
+Event(event sink, event, payload)
+Dispose(native instance)
 ```
 
-PlatformView uses Create, Update, Event, and Dispose, while nonvisual modules may additionally use Call and Result.
+PlatformView uses Create, Update, Event, and Dispose, while `PlatformInstance` uses Create, Call, Result, Event, Cancel, and Dispose.
 Application callback objects never cross the platform boundary; the host transfers only protocol results and event envelopes.
-Calls are asynchronous even when the native implementation can answer immediately, complete at most once, and return a structured `PlatformError` with a stable code, English diagnostic message, and optional PlatformPayload details.
+Calls are asynchronous even when the native implementation answers synchronously, complete at most once, and return a structured `PlatformError` with a stable code, English diagnostic message, and optional PlatformPayload details.
 Framework error codes use the reserved `huxerui/` prefix, while modules namespace their own codes; neither side requires an enum that would prevent third-party extension.
 C++ exceptions, Objective-C exceptions, Java exceptions, and JavaScript exceptions are converted at their owning boundary and never propagate through another language runtime.
 
-Every instance has a Runtime-assigned identity that is not reused for the lifetime of that Runtime.
-The platform adapter delivers events in emission order per instance on the owning Runtime thread, outside frame construction, reconciliation, native drawing, and the initiating native call stack.
+The platform adapter receives an optional `UIThreadDispatcher` during construction; HuxerUI defines its UI thread as the thread owning that adapter, its Runtime, and its event loop.
+The dispatcher must enqueue without invoking inline and delivers events in emission order per instance outside frame construction, reconciliation, native drawing, and the initiating native call stack.
+Module services call `PlatformInstance::Call`, `On`, `Cancel`, and `Close` only from that UI thread; native Result and Event sinks may be invoked from other threads and cross through the dispatcher.
 Call results use request identity and may complete out of call order, but their delivery obeys the same thread and reentrancy boundary.
 Events produced while creating a visual candidate remain queued until the candidate enters the committed `RenderComposition`; a failed candidate expires without publishing events.
 Compatible Update mutates an existing native instance in place and is not a cross-instance rollback boundary.
 A nonvisual instance begins delivering events only after Create succeeds.
-Dispose first rejects new calls, cancels or completes pending requests according to their contract, detaches event delivery, and then releases native state.
+`Cancel(request)` removes the completion before invoking the optional native cancellation operation, and a result already queued for that request is subsequently ignored.
+Dispose first rejects new calls, cancels pending requests, detaches event delivery, and then releases native state.
 Results and events carrying an obsolete instance or request identity are ignored safely.
 
 Platform events retain the existing HuxerUI typed-event model.
 A module event key supplies its wire event name and a PlatformPayload decoder in addition to its ordinary `Signature`:
 
 ```cpp
-struct NavigationChanged {
-  using Signature = void(NavigationState);
-
-  static constexpr std::string_view PlatformName = "navigationChanged";
+struct NavigationChanged : Event<NavigationState> {
+  static constexpr std::string_view Name = "navigationChanged";
   static NavigationState Decode(const PlatformPayload& payload);
 };
 ```
@@ -482,13 +483,15 @@ An unbound declared event is ignored without decoding.
 A duplicate declared event name is rejected as invalid component configuration, while an undeclared incoming event, malformed subscribed payload, or decoder failure is dropped without invoking application code.
 
 Nonvisual method keys follow the same pattern without becoming Event Keys.
-A method key declares its request type, result type, stable wire name, encoder, and decoder; a typed service calls `PlatformInstance::Call<Key>(request)` internally and exposes an application-facing asynchronous result in its own API.
-`PlatformInstance` is the move-only module-author handle returned by `PlatformModules::Open()` and owns the native instance, pending calls, and typed event subscriptions.
+A method key declares its request type, result type, stable wire name, encoder, and decoder; a typed service calls `PlatformInstance::Call<Method>(request, completion)` internally and exposes an application-facing asynchronous result in its own API.
+The request and result must be object types, the result must be move-constructible and distinct from `PlatformError`, `Encode` returns `PlatformPayload` exactly, and `Decode` may return a type implicitly convertible to the declared result.
+Call completions and event handlers must be constructible as the declared typed callback before the template participates in overload resolution.
+`PlatformInstance` is the move-only module-author handle returned by `PlatformModules::Open()` and owns the native instance, monotonically assigned request identities, pending calls, and typed event subscriptions.
 Its `On<Key>(handler)` operation registers the Key's wire-name and decoder descriptor together with one service-owned handler; it does not expose a raw payload callback to application code.
 It is not a generic application service surface.
 
 Nonvisual modules use the same event descriptors and payload codecs behind their typed Root Services.
-Runtime exposes a platform-neutral `PlatformModules` client to RootHook through `RootContext::Modules()`.
+Runtime exposes the platform-neutral `PlatformModules` capability to RootHook through `RootContext::Modules()`.
 A module installer may open a registered native instance and provide a typed service directly:
 
 ```cpp
@@ -502,6 +505,9 @@ void InstallAudio(RootContext& root) {
 `PlatformModules` is a module-author capability rather than an application service locator.
 The resulting service owns the `PlatformInstance`, encodes typed calls, decodes results and events, and closes the instance from its destructor.
 An application-wide native engine may remain shared behind several per-window instances, but each Runtime retains only its own identities, subscriptions, and typed services.
+The shared protocol and deterministic dispatcher fixture are implemented and tested.
+The macOS adapter configures asynchronous main-queue delivery, and the macOS-only `example_platform_module` registers an AppKit timer behind a typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
+Other production adapters and concrete product modules remain proposed.
 
 ### PlatformView
 

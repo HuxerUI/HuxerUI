@@ -12,7 +12,7 @@ namespace huxerui::example {
 
 struct NativeTextFieldEvents {
   struct Changed : Event<std::string> {
-    static constexpr std::string_view PlatformName = "changed";
+    static constexpr std::string_view Name = "changed";
 
     static std::string Decode(const PlatformPayload& payload);
   };

@@ -18,7 +18,8 @@ std::optional<AppDefinition>& AppRegistration() {
 
 } // namespace
 
-PlatformAdapter::PlatformAdapter() : platform_modules_(new PlatformModules()) {}
+PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
+    : platform_modules_(new PlatformModules(std::move(dispatch_to_ui_thread))) {}
 
 PlatformAdapter::~PlatformAdapter() = default;
 

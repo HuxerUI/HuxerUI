@@ -4,6 +4,7 @@
 #include <huxerui/huxerui.h>
 
 #include <cmath>
+#include <functional>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -367,6 +368,22 @@ private:
 
 class TestPlatform final : public huxerui::PlatformAdapter {
 public:
+  TestPlatform()
+      : PlatformAdapter([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}
+
+  explicit TestPlatform(huxerui::UIThreadDispatcher dispatch_to_ui_thread)
+      : PlatformAdapter(std::move(dispatch_to_ui_thread)) {}
+
+  void RunPlatformModuleTasks() {
+    while (!platform_module_tasks_.empty()) {
+      std::vector<std::function<void()>> tasks = std::move(platform_module_tasks_);
+      platform_module_tasks_.clear();
+      for (const auto& task : tasks) {
+        task();
+      }
+    }
+  }
+
   class TextLayout final : public huxerui::detail::TextLayout {
   public:
     TextLayout(std::string_view text, float max_width) {
@@ -646,6 +663,9 @@ public:
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;
+
+private:
+  std::vector<std::function<void()>> platform_module_tasks_;
 };
 
 inline void SettlePresentation(TestPlatform& platform, Runtime& runtime, double duration = 0.5) {
