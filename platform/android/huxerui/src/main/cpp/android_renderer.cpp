@@ -4,12 +4,15 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <huxerui/android/jni.h>
 
 #include "path_internal.h"
 #include "resource_internal.h"
@@ -30,38 +33,12 @@ jint PackColor(Color color) {
   );
 }
 
-jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
-  auto* bytes = environment->NewByteArray(static_cast<jsize>(text.size()));
-  if (bytes == nullptr || text.empty()) {
-    return bytes;
-  }
-  environment
-      ->SetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
-  return bytes;
+std::span<const std::byte> ByteSpan(std::string_view value) {
+  return {reinterpret_cast<const std::byte*>(value.data()), value.size()};
 }
 
-jbyteArray ToByteArray(JNIEnv* environment, std::span<const std::byte> values) {
-  if (values.size() > static_cast<std::size_t>(std::numeric_limits<jsize>::max())) {
-    return nullptr;
-  }
-  auto* bytes = environment->NewByteArray(static_cast<jsize>(values.size()));
-  if (bytes != nullptr && !values.empty()) {
-    environment->SetByteArrayRegion(
-        bytes,
-        0,
-        static_cast<jsize>(values.size()),
-        reinterpret_cast<const jbyte*>(values.data())
-    );
-  }
-  return bytes;
-}
-
-jbyteArray ToByteArray(JNIEnv* environment, const std::vector<jbyte>& values) {
-  jbyteArray result = environment->NewByteArray(static_cast<jsize>(values.size()));
-  if (result != nullptr && !values.empty()) {
-    environment->SetByteArrayRegion(result, 0, static_cast<jsize>(values.size()), values.data());
-  }
-  return result;
+std::span<const std::byte> ByteSpan(const std::vector<jbyte>& value) {
+  return {reinterpret_cast<const std::byte*>(value.data()), value.size()};
 }
 
 jintArray ToIntArray(JNIEnv* environment, const std::vector<jint>& values) {
@@ -148,14 +125,26 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   }
 }
 
-void AndroidRenderer::Render(JNIEnv* environment, jobject view, jobject canvas, const RenderFrame& frame) {
-  if (frame.scene.root != nullptr) {
-    RenderSceneNode(environment, view, canvas, *frame.scene.root);
-  }
-}
+struct AndroidRenderer::CommandRange {
+  std::size_t first = 0;
+  std::size_t end = 0;
+  std::size_t cursor = 0;
+};
 
-bool AndroidRenderer::RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence) {
+bool AndroidRenderer::RenderSequence(
+    JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range
+) {
   for (const PaintCommand& command : sequence.Commands()) {
+    if (std::holds_alternative<PlacePlatformViewCommand>(command)) {
+      continue;
+    }
+    const bool selected = range == nullptr || (range->cursor >= range->first && range->cursor < range->end);
+    if (range != nullptr) {
+      ++range->cursor;
+    }
+    if (!selected) {
+      continue;
+    }
     std::visit(
         [this, environment, view, canvas](const auto& value) { RenderCommand(environment, view, canvas, value); },
         command
@@ -167,7 +156,9 @@ bool AndroidRenderer::RenderSequence(JNIEnv* environment, jobject view, jobject 
   return true;
 }
 
-bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node) {
+bool AndroidRenderer::RenderSceneNode(
+    JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range
+) {
   const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
   if (!node.visible || opacity <= 0.0F || environment->ExceptionCheck()) {
     return !environment->ExceptionCheck();
@@ -192,7 +183,7 @@ bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject
     }
   }
 
-  if (!RenderSequence(environment, view, canvas, node.content)) {
+  if (!RenderSequence(environment, view, canvas, node.content, range)) {
     return false;
   }
   for (const RenderClip& clip : node.child_clips) {
@@ -209,7 +200,7 @@ bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject
     }
   }
   for (const RenderNode* child : node.children) {
-    if (child != nullptr && !RenderSceneNode(environment, view, canvas, *child)) {
+    if (child != nullptr && !RenderSceneNode(environment, view, canvas, *child, range)) {
       return false;
     }
   }
@@ -225,7 +216,7 @@ bool AndroidRenderer::RenderSceneNode(JNIEnv* environment, jobject view, jobject
       return false;
     }
   }
-  if (!RenderSequence(environment, view, canvas, node.foreground)) {
+  if (!RenderSequence(environment, view, canvas, node.foreground, range)) {
     return false;
   }
   if (translucent) {
@@ -258,26 +249,17 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command) {
-  jbyteArray bytes = ToByteArray(environment, command.text);
-  jbyteArray family = ToByteArray(environment, command.style.font.FamilyName());
-  jbyteArray locale = ToByteArray(environment, command.options.shaping.locale);
-  if (bytes == nullptr || family == nullptr || locale == nullptr) {
-    if (bytes != nullptr) {
-      environment->DeleteLocalRef(bytes);
-    }
-    if (family != nullptr) {
-      environment->DeleteLocalRef(family);
-    }
-    if (locale != nullptr) {
-      environment->DeleteLocalRef(locale);
-    }
+  auto bytes = android::BytesToJavaByteArray(environment, ByteSpan(command.text));
+  auto family = android::BytesToJavaByteArray(environment, ByteSpan(command.style.font.FamilyName()));
+  auto locale = android::BytesToJavaByteArray(environment, ByteSpan(command.options.shaping.locale));
+  if (!bytes || !family || !locale) {
     return;
   }
   environment->CallVoidMethod(
       view,
       draw_text_,
       canvas,
-      bytes,
+      bytes.Get(),
       command.rect.x,
       command.rect.y,
       command.rect.width,
@@ -285,18 +267,15 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
       PackColor(command.style.foreground),
       command.style.font.Size(),
       static_cast<jint>(command.style.font.FamilyKind()),
-      family,
+      family.Get(),
       static_cast<jint>(command.style.font.Weight()),
       static_cast<jint>(command.style.font.Slant()),
       static_cast<jint>(command.style.decoration),
       static_cast<jint>(command.options.align),
       static_cast<jint>(command.options.wrap),
       static_cast<jint>(command.options.shaping.direction),
-      locale
+      locale.Get()
   );
-  environment->DeleteLocalRef(locale);
-  environment->DeleteLocalRef(family);
-  environment->DeleteLocalRef(bytes);
 }
 
 void AndroidRenderer::RenderCommand(
@@ -346,39 +325,36 @@ void AndroidRenderer::RenderCommand(
     );
   }
 
-  jbyteArray text_array = ToByteArray(environment, text_data);
+  auto text_array = android::BytesToJavaByteArray(environment, ByteSpan(text_data));
   jintArray text_range_array = ToIntArray(environment, text_ranges);
   jfloatArray baseline_array = ToFloatArray(environment, baselines);
   jintArray color_array = ToIntArray(environment, colors);
   jfloatArray font_size_array = ToFloatArray(environment, font_sizes);
   jintArray style_array = ToIntArray(environment, styles);
-  jbyteArray metadata_array = ToByteArray(environment, metadata);
+  auto metadata_array = android::BytesToJavaByteArray(environment, ByteSpan(metadata));
   jintArray metadata_range_array = ToIntArray(environment, metadata_ranges);
-  if (text_array != nullptr && text_range_array != nullptr && baseline_array != nullptr && color_array != nullptr &&
-      font_size_array != nullptr && style_array != nullptr && metadata_array != nullptr &&
-      metadata_range_array != nullptr) {
+  if (text_array && text_range_array != nullptr && baseline_array != nullptr && color_array != nullptr &&
+      font_size_array != nullptr && style_array != nullptr && metadata_array && metadata_range_array != nullptr) {
     environment->CallVoidMethod(
         view,
         draw_text_runs_,
         canvas,
-        text_array,
+        text_array.Get(),
         text_range_array,
         baseline_array,
         color_array,
         font_size_array,
         style_array,
-        metadata_array,
+        metadata_array.Get(),
         metadata_range_array
     );
   }
   const jobject references[] = {
-      text_array,
       text_range_array,
       baseline_array,
       color_array,
       font_size_array,
       style_array,
-      metadata_array,
       metadata_range_array,
   };
   for (jobject reference : references) {
@@ -416,10 +392,9 @@ void AndroidRenderer::RenderCommand(
   if (draw(nullptr) || environment->ExceptionCheck()) {
     return;
   }
-  jbyteArray encoded = ToByteArray(environment, command.image.EncodedBytes());
-  if (encoded != nullptr) {
-    static_cast<void>(draw(encoded));
-    environment->DeleteLocalRef(encoded);
+  auto encoded = android::BytesToJavaByteArray(environment, command.image.EncodedBytes());
+  if (encoded) {
+    static_cast<void>(draw(encoded.Get()));
   }
 }
 
@@ -599,13 +574,26 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const PlacePlatformViewCommand& command
 ) {
+  static_cast<void>(environment);
   static_cast<void>(view);
   static_cast<void>(canvas);
   static_cast<void>(command);
-  jclass exception = environment->FindClass("java/lang/UnsupportedOperationException");
-  if (exception != nullptr) {
-    environment->ThrowNew(exception, "HuxerUI Android adapter does not support PlatformView composition yet");
-    environment->DeleteLocalRef(exception);
+}
+
+void AndroidRenderer::DrawSlice(
+    JNIEnv* environment,
+    jobject view,
+    jobject canvas,
+    const RenderFrame& frame,
+    std::size_t first_command,
+    std::size_t command_count
+) {
+  if (frame.scene.root != nullptr && command_count > 0) {
+    const std::size_t end = command_count > std::numeric_limits<std::size_t>::max() - first_command
+                                ? std::numeric_limits<std::size_t>::max()
+                                : first_command + command_count;
+    CommandRange range{first_command, end, 0};
+    static_cast<void>(RenderSceneNode(environment, view, canvas, *frame.scene.root, &range));
   }
 }
 

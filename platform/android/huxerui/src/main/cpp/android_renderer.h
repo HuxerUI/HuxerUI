@@ -2,6 +2,8 @@
 
 #include <jni.h>
 
+#include <cstddef>
+
 #include <huxerui/render_scene.h>
 
 namespace huxerui::detail {
@@ -9,11 +11,21 @@ namespace huxerui::detail {
 class AndroidRenderer final {
 public:
   void Initialize(JNIEnv* environment, jclass view_class);
-  void Render(JNIEnv* environment, jobject view, jobject canvas, const RenderFrame& frame);
+  void DrawSlice(
+      JNIEnv* environment,
+      jobject view,
+      jobject canvas,
+      const RenderFrame& frame,
+      std::size_t first_command,
+      std::size_t command_count
+  );
 
 private:
-  bool RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence);
-  bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node);
+  struct CommandRange;
+
+  bool
+  RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range);
+  bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);

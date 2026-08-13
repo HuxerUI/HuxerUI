@@ -12,14 +12,19 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include <huxerui/android/jni.h>
+
 #include "android_accessibility.h"
+#include "android_platform_view.h"
 #include "android_renderer.h"
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
@@ -112,38 +117,24 @@ std::optional<SemanticActionKind> ToSemanticAction(jint action) {
 }
 
 jbyteArray ToByteArray(JNIEnv* environment, std::string_view text) {
-  auto* bytes = environment->NewByteArray(static_cast<jsize>(text.size()));
-  if (bytes == nullptr || text.empty()) {
-    return bytes;
-  }
-  environment
-      ->SetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
-  return bytes;
+  const std::span<const std::byte> bytes(reinterpret_cast<const std::byte*>(text.data()), text.size());
+  return android::BytesToJavaByteArray(environment, bytes).Release();
 }
 
 jbyteArray ToByteArray(JNIEnv* environment, const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() > static_cast<std::size_t>(std::numeric_limits<jsize>::max())) {
-    throw std::overflow_error("HuxerUI Android byte array is too large");
-  }
-  auto* result = environment->NewByteArray(static_cast<jsize>(bytes.size()));
-  if (result == nullptr || bytes.empty()) {
-    return result;
-  }
-  environment
-      ->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()), reinterpret_cast<const jbyte*>(bytes.data()));
-  return result;
+  const std::span<const std::byte> values(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
+  return android::BytesToJavaByteArray(environment, values).Release();
 }
 
 std::string FromByteArray(JNIEnv* environment, jbyteArray bytes) {
   if (bytes == nullptr) {
     return {};
   }
-  const jsize size = environment->GetArrayLength(bytes);
-  std::string text(static_cast<std::size_t>(size), '\0');
-  if (size > 0) {
-    environment->GetByteArrayRegion(bytes, 0, size, reinterpret_cast<jbyte*>(text.data()));
+  const std::vector<std::byte> values = android::JavaByteArrayToBytes(environment, bytes);
+  if (values.empty()) {
+    return {};
   }
-  return text;
+  return {reinterpret_cast<const char*>(values.data()), values.size()};
 }
 
 Key TranslateKey(jint key_code) {
@@ -216,12 +207,160 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
     environment->DeleteLocalRef(exception_class);
   }
 }
+
+class AndroidUIThreadDispatcherState final {
+public:
+  ~AndroidUIThreadDispatcherState() {
+    bool attached = false;
+    JNIEnv* environment = Environment(attached);
+    Shutdown(environment);
+    if (attached) {
+      virtual_machine_->DetachCurrentThread();
+    }
+  }
+
+  void Initialize(JNIEnv* environment, jobject view) {
+    if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
+      throw std::runtime_error("HuxerUI could not access the Android Java VM for UI dispatch");
+    }
+    view_ = environment->NewGlobalRef(view);
+    jclass view_class = environment->GetObjectClass(view);
+    if (view_ == nullptr || view_class == nullptr) {
+      if (view_ != nullptr) {
+        environment->DeleteGlobalRef(view_);
+        view_ = nullptr;
+      }
+      throw std::runtime_error("HuxerUI could not initialize Android UI dispatch");
+    }
+    schedule_tasks_ = environment->GetMethodID(view_class, "schedulePlatformTasks", "()V");
+    environment->DeleteLocalRef(view_class);
+    if (schedule_tasks_ == nullptr) {
+      environment->ExceptionClear();
+      environment->DeleteGlobalRef(view_);
+      view_ = nullptr;
+      throw std::runtime_error("HuxerUI Android UI dispatcher method does not match the native backend");
+    }
+  }
+
+  void Dispatch(std::function<void()> task) {
+    bool schedule = false;
+    {
+      std::lock_guard lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      tasks_.push_back(std::move(task));
+      if (!scheduled_) {
+        scheduled_ = true;
+        schedule = true;
+      }
+    }
+    if (!schedule) {
+      return;
+    }
+    bool attached = false;
+    JNIEnv* environment = Environment(attached);
+    if (environment == nullptr) {
+      std::lock_guard lock(mutex_);
+      scheduled_ = false;
+      return;
+    }
+    {
+      std::lock_guard lock(mutex_);
+      if (!closed_ && view_ != nullptr) {
+        environment->CallVoidMethod(view_, schedule_tasks_);
+        if (environment->ExceptionCheck()) {
+          environment->ExceptionClear();
+          scheduled_ = false;
+        }
+      } else {
+        scheduled_ = false;
+      }
+    }
+    if (attached) {
+      virtual_machine_->DetachCurrentThread();
+    }
+  }
+
+  void Drain() {
+    std::vector<std::function<void()>> tasks;
+    {
+      std::lock_guard lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      scheduled_ = false;
+      tasks.swap(tasks_);
+    }
+    for (auto& task : tasks) {
+      try {
+        task();
+      } catch (...) {
+      }
+    }
+  }
+
+  void Shutdown(JNIEnv* environment) {
+    std::lock_guard lock(mutex_);
+    closed_ = true;
+    scheduled_ = false;
+    tasks_.clear();
+    if (environment != nullptr && view_ != nullptr) {
+      environment->DeleteGlobalRef(view_);
+      view_ = nullptr;
+    }
+  }
+
+private:
+  JNIEnv* Environment(bool& attached) const {
+    attached = false;
+    if (virtual_machine_ == nullptr) {
+      return nullptr;
+    }
+    JNIEnv* environment = nullptr;
+    const jint result = virtual_machine_->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6);
+    if (result == JNI_OK) {
+      return environment;
+    }
+    if (result == JNI_EDETACHED && virtual_machine_->AttachCurrentThread(&environment, nullptr) == JNI_OK) {
+      attached = true;
+      return environment;
+    }
+    return nullptr;
+  }
+
+  JavaVM* virtual_machine_ = nullptr;
+  jobject view_ = nullptr;
+  jmethodID schedule_tasks_ = nullptr;
+  std::mutex mutex_;
+  std::vector<std::function<void()>> tasks_;
+  bool scheduled_ = false;
+  bool closed_ = false;
+};
+
+UIThreadDispatcher MakeUIThreadDispatcher(const std::shared_ptr<AndroidUIThreadDispatcherState>& state) {
+  const std::weak_ptr<AndroidUIThreadDispatcherState> weak_state = state;
+  return [weak_state](std::function<void()> task) mutable {
+    if (const std::shared_ptr locked_state = weak_state.lock()) {
+      locked_state->Dispatch(std::move(task));
+    }
+  };
+}
+
 class AndroidViewPlatformAdapter final : public PlatformAdapter,
                                          public PlatformTextInput,
                                          public PlatformClipboard,
                                          public PlatformResources {
 public:
-  AndroidViewPlatformAdapter(JNIEnv* environment, jobject view) {
+  AndroidViewPlatformAdapter(JNIEnv* environment, jobject view)
+      : AndroidViewPlatformAdapter(environment, view, std::make_shared<AndroidUIThreadDispatcherState>()) {}
+
+private:
+  AndroidViewPlatformAdapter(
+      JNIEnv* environment, jobject view, std::shared_ptr<AndroidUIThreadDispatcherState> dispatch_state
+  )
+      : PlatformAdapter(MakeUIThreadDispatcher(dispatch_state)), dispatch_state_(std::move(dispatch_state)) {
+    dispatch_state_->Initialize(environment, view);
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM");
     }
@@ -281,8 +420,12 @@ public:
     environment->DeleteLocalRef(view_class);
   }
 
+public:
   ~AndroidViewPlatformAdapter() override {
     JNIEnv* environment = Environment();
+    if (dispatch_state_) {
+      dispatch_state_->Shutdown(environment);
+    }
     if (environment != nullptr && view_ != nullptr) {
       environment->DeleteGlobalRef(view_);
     }
@@ -299,7 +442,10 @@ public:
   }
 
   void CommitFrame(const FrameCommit& commit) {
-    committed_frame_ = &commit.render_frame;
+    if (platform_views_ == nullptr) {
+      throw std::logic_error("HuxerUI Android PlatformView host is not attached to Runtime");
+    }
+    platform_views_->Commit(Environment(), commit.render_frame);
     static_cast<void>(InvalidateDamage(commit.render_frame.damage));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
@@ -307,14 +453,62 @@ public:
     FlushDeferredFrame();
   }
 
-  void Draw(JNIEnv* environment, jobject canvas) {
+  void BeginDraw() {
     frame_state_.BeginPaint();
-    if (committed_frame_ != nullptr) {
-      Render(environment, canvas, *committed_frame_);
+  }
+
+  void DrawBase(JNIEnv* environment, jobject canvas) {
+    if (platform_views_ != nullptr) {
+      platform_views_->DrawBase(environment, canvas);
     }
+  }
+
+  void DrawSlice(JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count) {
+    if (platform_views_ != nullptr) {
+      platform_views_->DrawSlice(environment, canvas, first_command, command_count);
+    }
+  }
+
+  void EndDraw() {
     if (const std::optional<double> deadline = frame_state_.EndPaint(view_ != nullptr)) {
       ScheduleFrame(*deadline);
     }
+  }
+
+  void AttachRuntime(JNIEnv* environment, Runtime& runtime) {
+    platform_views_ = std::make_unique<AndroidPlatformViews>(
+        environment,
+        view_,
+        renderer_,
+        Modules(),
+        runtime,
+        MakeUIThreadDispatcher(dispatch_state_)
+    );
+  }
+
+  void ShutdownPlatformViews() {
+    if (platform_views_ != nullptr) {
+      platform_views_->Shutdown(Environment());
+      platform_views_.reset();
+    }
+  }
+
+  void DrainPlatformTasks() {
+    dispatch_state_->Drain();
+  }
+
+  std::optional<std::uint64_t> HitTestPlatformView(Point point) const {
+    return platform_views_ == nullptr ? std::nullopt : platform_views_->HitTest(point);
+  }
+
+  void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
+    if (platform_views_ != nullptr) {
+      platform_views_->SynchronizeFocus(identity, focus_visible);
+    }
+  }
+
+  bool MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+    return platform_views_ != nullptr && platform_views_->MoveFocus(identity, reverse);
   }
 
   double Now() const noexcept override {
@@ -768,10 +962,6 @@ public:
     }
   }
 
-  void Render(JNIEnv* environment, jobject canvas, const RenderFrame& frame) {
-    renderer_.Render(environment, view_, canvas, frame);
-  }
-
 private:
   void CallTextInput(
       jmethodID method,
@@ -821,6 +1011,8 @@ private:
   }
 
   AndroidRenderer renderer_;
+  std::shared_ptr<AndroidUIThreadDispatcherState> dispatch_state_;
+  std::unique_ptr<AndroidPlatformViews> platform_views_;
   JavaVM* virtual_machine_ = nullptr;
   jobject view_ = nullptr;
   jmethodID schedule_frame_ = nullptr;
@@ -842,13 +1034,18 @@ private:
   jmethodID read_resource_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
   PlatformFrameState frame_state_;
-  const RenderFrame* committed_frame_ = nullptr;
 };
 
 class AndroidSession final {
 public:
   AndroidSession(JNIEnv* environment, jobject view, AppDefinition definition)
-      : platform_(environment, view), runtime_(std::move(definition), platform_) {}
+      : platform_(environment, view), runtime_(std::move(definition), platform_) {
+    platform_.AttachRuntime(environment, runtime_);
+  }
+
+  ~AndroidSession() {
+    platform_.ShutdownPlatformViews();
+  }
 
   void Resize(float width, float height, float safe_left, float safe_top, float safe_right, float safe_bottom) {
     runtime_.SetWindowMetrics({
@@ -866,8 +1063,36 @@ public:
     runtime_.UpdateResourceConfiguration({Locale::FromLanguageTag(language_tag), display_scale});
   }
 
-  void Draw(JNIEnv* environment, jobject canvas) {
-    platform_.Draw(environment, canvas);
+  void BeginDraw() {
+    platform_.BeginDraw();
+  }
+
+  void DrawBase(JNIEnv* environment, jobject canvas) {
+    platform_.DrawBase(environment, canvas);
+  }
+
+  void DrawSlice(JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count) {
+    platform_.DrawSlice(environment, canvas, first_command, command_count);
+  }
+
+  void EndDraw() {
+    platform_.EndDraw();
+  }
+
+  void DrainPlatformTasks() {
+    platform_.DrainPlatformTasks();
+  }
+
+  std::optional<std::uint64_t> HitTestPlatformView(Point point) const {
+    return platform_.HitTestPlatformView(point);
+  }
+
+  void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
+    platform_.SynchronizePlatformViewFocus(identity, focus_visible);
+  }
+
+  bool MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+    return platform_.MoveFocusFromPlatformView(identity, reverse);
   }
 
   std::optional<std::vector<std::uint8_t>> CommitFrame() {
@@ -1147,13 +1372,122 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativePerform
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_HuxerUIView_nativeDraw(JNIEnv* environment, jclass, jlong handle, jobject canvas) {
+Java_org_huxerui_HuxerUIView_nativeBeginDraw(JNIEnv* environment, jclass, jlong handle) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->Draw(environment, canvas);
+      session->BeginDraw();
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_huxerui_HuxerUIView_nativeDrawBase(JNIEnv* environment, jclass, jlong handle, jobject canvas) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->DrawBase(environment, canvas);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeDrawSlice(
+    JNIEnv* environment, jclass, jlong handle, jobject canvas, jlong first_command, jlong command_count
+) {
+  try {
+    if (first_command < 0 || command_count < 0) {
+      throw std::invalid_argument("HuxerUI Android RenderComposition slice indices must not be negative");
+    }
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->DrawSlice(
+          environment,
+          canvas,
+          static_cast<std::size_t>(first_command),
+          static_cast<std::size_t>(command_count)
+      );
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_huxerui_HuxerUIView_nativeEndDraw(JNIEnv* environment, jclass, jlong handle) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->EndDraw();
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_huxerui_HuxerUIView_nativeDrainPlatformTasks(JNIEnv* environment, jclass, jlong handle) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->DrainPlatformTasks();
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_huxerui_HuxerUIView_nativeHitTestPlatformView(JNIEnv* environment, jclass, jlong handle, jfloat x, jfloat y) {
+  try {
+    auto* session = huxerui::detail::Session(handle);
+    if (session == nullptr) {
+      return 0;
+    }
+    const std::optional<std::uint64_t> identity = session->HitTestPlatformView({x, y});
+    if (!identity.has_value()) {
+      return 0;
+    }
+    if (*identity > static_cast<std::uint64_t>(std::numeric_limits<jlong>::max())) {
+      throw std::overflow_error("HuxerUI Android PlatformView identity exceeds the JNI range");
+    }
+    return static_cast<jlong>(*identity);
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return 0;
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeSynchronizePlatformViewFocus(
+    JNIEnv* environment, jclass, jlong handle, jlong identity, jboolean focus_visible
+) {
+  try {
+    if (identity < 0) {
+      throw std::invalid_argument("HuxerUI Android PlatformView focus identity must not be negative");
+    }
+    if (auto* session = huxerui::detail::Session(handle)) {
+      const std::optional<std::uint64_t> focused =
+          identity == 0 ? std::nullopt : std::optional{static_cast<std::uint64_t>(identity)};
+      session->SynchronizePlatformViewFocus(focused, focus_visible == JNI_TRUE);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeMoveFocusFromPlatformView(
+    JNIEnv* environment, jclass, jlong handle, jlong identity, jboolean reverse
+) {
+  try {
+    if (identity <= 0) {
+      return JNI_FALSE;
+    }
+    auto* session = huxerui::detail::Session(handle);
+    return session != nullptr &&
+                   session->MoveFocusFromPlatformView(static_cast<std::uint64_t>(identity), reverse == JNI_TRUE)
+               ? JNI_TRUE
+               : JNI_FALSE;
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return JNI_FALSE;
   }
 }
 

@@ -13,8 +13,8 @@ Current implementation status:
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. macOS and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; macOS also bridges native accessibility. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, iOS PlatformView accessibility, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and native accessibility bridges on Android, macOS, and Windows are implemented. Complete component semantics and the remaining native adapters are follow-up work.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. Android, macOS, and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Android and macOS also attach native PlatformView accessibility beneath semantic anchors. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, iOS PlatformView accessibility, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -362,7 +362,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; macOS and iOS owning-thread dispatch and PlatformView hosting implemented; production modules and remaining native adapters proposed
+Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; Android, macOS, and iOS owning-thread dispatch and PlatformView hosting implemented; production modules and remaining native adapters proposed
 
 Native modules produce three integration forms:
 
@@ -401,6 +401,7 @@ The shared public surface stays focused as the phases land:
 
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
+- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; `<huxerui/android/platform_view.h>` owns only the Android factory contract.
 
 There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
 Implemented headers are re-exported through `<huxerui/huxerui.h>`; future headers join it when their phases land, while ordinary applications normally see only a module's typed component and service headers.
@@ -427,7 +428,7 @@ Large or continuous media data does not travel through PlatformPayload; resource
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
 `PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-Apple visual registrations are `macos::PlatformViewFactory` and `ios::PlatformViewFactory`, while nonvisual implementations use the platform-neutral `PlatformModuleFactory`; another registry or registration-kind enum is unnecessary.
+Visual registrations are `android::PlatformViewFactory`, `macos::PlatformViewFactory`, and `ios::PlatformViewFactory`, while nonvisual implementations use the platform-neutral `PlatformModuleFactory`; another registry or registration-kind enum is unnecessary.
 Registration callbacks remain in the platform adapter or platform module source and may use native types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
 The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
 Type strings are module contract rather than application configuration, and modules normally expose them only through their concrete C++ component or service.
@@ -602,7 +603,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 
 | Platform | Composition strategy |
 | --- | --- |
-| Android | The host becomes a ViewGroup and alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child. A `SurfaceView`, protected surface, or topmost surface is accepted only when its system composition path preserves the declared order. |
+| Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and native UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
 | macOS | Transparent HuxerUI slice views or layers and native NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
 | Windows | HuxerUI slices and native child HWNDs require an ordered child-window or DirectComposition strategy rather than one swap chain around all child windows. A foreign HWND or Windows 7 compatibility path that cannot preserve the order is unsupported. |
@@ -616,9 +617,10 @@ Modules may choose a different native implementation internally, while high-freq
 
 Current shared tests cover payload invariants, per-surface registration, leaf layout, identity and property revisions, typed event delivery, frontmost hit testing, basic paint order, adjacent PlatformViews, keyed movement, replacement, and unsupported transforms and opacity.
 The macOS integration fixture covers native creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, focus synchronization, accessibility identity resolution, removal, stale-event rejection, and disposal.
+Android focused tests cover semantic-anchor encoding, while the Android PlatformView example and device validation cover native creation, controlled updates, slice ordering, hit testing, focus and IME transfer, native accessibility attachment, removal, and recreation.
 Later composition phases add content-child-foreground order, nested rectangular clips, visibility, and equivalent adapter coverage as those behaviors land.
 Each available platform adds an integration fixture with HuxerUI content below and above one native control, verifies frontmost pointer ownership, native focus and IME transfer, accessibility traversal through the anchor, retained native state across recomposition and temporary hiding, and deterministic teardown.
-Surface-specific tests cover Android `SurfaceView`, Windows child HWND, X11 child-window composition, and Web DOM stacking only where the host reports the required capability.
+Future surface-specific tests cover Android `SurfaceView` rejection, Windows child HWND, X11 child-window composition, and Web DOM stacking as the corresponding adapters land.
 
 ### ExternalTexture
 

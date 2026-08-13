@@ -140,6 +140,8 @@ set(HUXERUI_PUBLIC_HEADERS
         view.h
         virtual_layout.h
         window.h
+        android/jni.h
+        android/platform_view.h
         ios/platform_view.h
         macos/platform_view.h
 )

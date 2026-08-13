@@ -76,7 +76,7 @@ The mounted tree and render scene have different responsibilities:
 
 ## PlatformView composition foundation
 
-Status: shared placement and `RenderComposition` derivation implemented; macOS adapter consumption and retained native slices implemented; remaining adapters proposed
+Status: shared placement and `RenderComposition` derivation implemented; macOS retained native slices and Android same-Canvas slice replay implemented; remaining adapters proposed
 
 PlatformView extends the retained scene without adding another Runtime output tree.
 Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
@@ -89,9 +89,10 @@ Each placement boundary closes the current nonempty HuxerUI render slice, emits 
 For `p` mounted PlatformViews, the composition therefore contains at most `p + 1` HuxerUI slices, while a scene without PlatformViews remains on the existing single-surface path.
 
 Slice construction references retained RenderNodes and PaintSequences rather than copying or rerecording their commands.
-A compatible macOS slice retains its native surface when its surrounding PlatformView boundaries and scene role remain stable; remaining adapters follow the same rule when implemented.
-Insertion, removal, or reordering invalidates only changed boundaries and the old and new visible bounds they affect.
+A compatible macOS slice retains its native surface when its surrounding PlatformView boundaries and scene role remain stable. Android instead replays the committed command ranges into the host Canvas around ordinary child drawing, while remaining adapters choose the platform-appropriate retained representation when implemented.
+Insertion, removal, or reordering invalidates only changed boundaries and the old and new visible bounds they affect at the shared composition level.
 The macOS host intersects stable slice invalidation with the committed DamageRegion and escalates to a complete redraw only when the native sibling composition changes.
+Android retains shared DamageRegion calculation but currently invalidates its complete native View when a committed frame changes.
 A PlatformView property revision updates its native instance without marking unrelated HuxerUI PaintSequences dirty.
 EventBinding changes and incoming platform events do not change the property revision, while native visual invalidation requests presentation through the adapter without writing application State.
 

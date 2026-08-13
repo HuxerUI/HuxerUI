@@ -21,13 +21,17 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextDirectionHeuristics;
 import android.util.AttributeSet;
+import android.util.LongSparseArray;
 import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -41,7 +45,7 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.Objects;
 
-public final class HuxerUIView extends View {
+public final class HuxerUIView extends ViewGroup {
     static {
         System.loadLibrary("huxerui");
     }
@@ -82,6 +86,7 @@ public final class HuxerUIView extends View {
     private static final int PATH_CUBIC_TO = 3;
     private static final int PATH_CLOSE = 4;
     private static final int IMAGE_CACHE_BUDGET = 64 * 1024 * 1024;
+    private static final long[] EMPTY_PLATFORM_COMPOSITION = new long[0];
 
     static final int SYSTEM_BAR_CONTENT_LIGHT = 1;
     static final int SYSTEM_BAR_CONTENT_DARK = 2;
@@ -110,8 +115,11 @@ public final class HuxerUIView extends View {
     private final float[] transformValues = new float[9];
     private final int[] screenLocation = new int[2];
     private final HuxerUIAccessibilityProvider accessibilityProvider;
+    private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
     private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
+    private final ViewTreeObserver.OnGlobalFocusChangeListener platformViewFocusListener =
+            this::synchronizePlatformViewFocus;
     private final Runnable frameCallback = new Runnable() {
         @Override
         public void run() {
@@ -119,9 +127,21 @@ public final class HuxerUIView extends View {
             frameTime = 0L;
             if (nativeHandle != 0L) {
                 byte[] semantics = nativeCommitFrame(nativeHandle);
+                boolean platformViewStructureChanged = platformAccessibilityStructureChanged;
+                platformAccessibilityStructureChanged = false;
                 if (semantics != null) {
-                    accessibilityProvider.commitFrame(semantics);
+                    accessibilityProvider.commitFrame(semantics, platformViewStructureChanged);
+                } else if (platformViewStructureChanged) {
+                    accessibilityProvider.commitPlatformViews();
                 }
+            }
+        }
+    };
+    private final Runnable platformTasksCallback = new Runnable() {
+        @Override
+        public void run() {
+            if (nativeHandle != 0L) {
+                nativeDrainPlatformTasks(nativeHandle);
             }
         }
     };
@@ -137,6 +157,12 @@ public final class HuxerUIView extends View {
     private int safeInsetRight;
     private int safeInsetBottom;
     private SystemBarsController systemBarsController;
+    private long[] platformComposition = EMPTY_PLATFORM_COMPOSITION;
+    private boolean nativeDrawing;
+    private boolean applyingPlatformViewFocus;
+    private boolean platformAccessibilityStructureChanged;
+    private long touchPlatformViewIdentity;
+    private boolean platformTabKeyHandled;
 
     private boolean updateTextInputGeometry() {
         if (inputConnection != null) {
@@ -160,6 +186,7 @@ public final class HuxerUIView extends View {
         setFocusable(true);
         setFocusableInTouchMode(true);
         setClickable(true);
+        setWillNotDraw(false);
     }
 
     void setSystemBarsController(SystemBarsController controller) {
@@ -169,7 +196,10 @@ public final class HuxerUIView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        getViewTreeObserver().addOnPreDrawListener(textInputGeometryListener);
+        ViewTreeObserver observer = getViewTreeObserver();
+        observer.addOnPreDrawListener(textInputGeometryListener);
+        observer.addOnGlobalFocusChangeListener(platformViewFocusListener);
+        requestFocus();
         if (nativeHandle == 0L) {
             nativeHandle = nativeCreate(this);
             resizeNativeState(getWidth(), getHeight());
@@ -182,8 +212,10 @@ public final class HuxerUIView extends View {
         ViewTreeObserver observer = getViewTreeObserver();
         if (observer.isAlive()) {
             observer.removeOnPreDrawListener(textInputGeometryListener);
+            observer.removeOnGlobalFocusChangeListener(platformViewFocusListener);
         }
         removeCallbacks(frameCallback);
+        removeCallbacks(platformTasksCallback);
         if (shadowRenderer != null) {
             shadowRenderer.clear();
             shadowRenderer = null;
@@ -230,9 +262,21 @@ public final class HuxerUIView extends View {
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
+        for (int index = 0; index < platformViews.size(); ++index) {
+            platformViews.valueAt(index).applyLayout();
+        }
         if (changed && inputConnection != null) {
             inputConnection.updateCursorAnchorPosition();
+        }
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        for (int index = 0; index < platformViews.size(); ++index) {
+            PlatformViewContainer container = platformViews.valueAt(index);
+            container.measure(MeasureSpec.makeMeasureSpec(container.containerWidth, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(container.containerHeight, MeasureSpec.EXACTLY));
         }
     }
 
@@ -270,10 +314,64 @@ public final class HuxerUIView extends View {
         if (nativeHandle == 0L) {
             return;
         }
+        nativeBeginDraw(nativeHandle);
+        nativeDrawing = true;
         int saveCount = canvas.save();
         canvas.scale(density, density);
-        nativeDraw(nativeHandle, canvas);
+        nativeDrawBase(nativeHandle, canvas);
         canvas.restoreToCount(saveCount);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            touchPlatformViewIdentity = platformViewAt(event.getX(), event.getY());
+        }
+        boolean handled = super.dispatchTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            touchPlatformViewIdentity = 0L;
+        }
+        return handled;
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent event) {
+        return touchPlatformViewIdentity == 0L;
+    }
+
+    @Override
+    protected void dispatchDraw(Canvas canvas) {
+        try {
+            if (nativeHandle == 0L) {
+                return;
+            }
+            if (!nativeDrawing) {
+                nativeBeginDraw(nativeHandle);
+                nativeDrawing = true;
+            }
+            long drawingTime = getDrawingTime();
+            for (int index = 0; index < platformComposition.length; index += 3) {
+                long kind = platformComposition[index];
+                if (kind == 0L) {
+                    int saveCount = canvas.save();
+                    canvas.scale(density, density);
+                    nativeDrawSlice(
+                            nativeHandle, canvas, platformComposition[index + 1], platformComposition[index + 2]);
+                    canvas.restoreToCount(saveCount);
+                    continue;
+                }
+                PlatformViewContainer container = platformViews.get(platformComposition[index + 1]);
+                if (container != null && container.getVisibility() == VISIBLE) {
+                    drawChild(canvas, container, drawingTime);
+                }
+            }
+        } finally {
+            if (nativeDrawing && nativeHandle != 0L) {
+                nativeDrawing = false;
+                nativeEndDraw(nativeHandle);
+            }
+        }
     }
 
     @Override
@@ -307,7 +405,14 @@ public final class HuxerUIView extends View {
 
     @Override
     public boolean dispatchHoverEvent(MotionEvent event) {
-        return accessibilityProvider.dispatchHoverEvent(event) || super.dispatchHoverEvent(event);
+        boolean accessibilityHandled = accessibilityProvider.dispatchHoverEvent(event);
+        boolean viewHandled = super.dispatchHoverEvent(event);
+        return accessibilityHandled || viewHandled;
+    }
+
+    @Override
+    public boolean onInterceptHoverEvent(MotionEvent event) {
+        return platformViewAt(event.getX(), event.getY()) == 0L;
     }
 
     @Override
@@ -337,6 +442,34 @@ public final class HuxerUIView extends View {
             return true;
         }
         return super.onGenericMotionEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_SCROLL && platformViewAt(event.getX(), event.getY()) == 0L) {
+            return onGenericMotionEvent(event);
+        }
+        return super.dispatchGenericMotionEvent(event);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (nativeHandle != 0L && event.getKeyCode() == KeyEvent.KEYCODE_TAB) {
+            long identity = platformViewIdentity(findFocus());
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    platformTabKeyHandled = identity != 0L
+                            && nativeMoveFocusFromPlatformView(nativeHandle, identity, event.isShiftPressed());
+                }
+                if (platformTabKeyHandled) {
+                    return true;
+                }
+            } else if (event.getAction() == KeyEvent.ACTION_UP && platformTabKeyHandled) {
+                platformTabKeyHandled = false;
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
@@ -630,6 +763,219 @@ public final class HuxerUIView extends View {
                 event.isAltPressed(), event.isMetaPressed(), event.getRepeatCount() > 0);
     }
 
+    long platformViewAt(float x, float y) {
+        if (nativeHandle == 0L) {
+            return 0L;
+        }
+        long identity = nativeHitTestPlatformView(nativeHandle, x / density, y / density);
+        PlatformViewContainer container = identity == 0L ? null : platformViews.get(identity);
+        return container != null && container.getVisibility() == VISIBLE ? identity : 0L;
+    }
+
+    private long platformViewIdentity(View view) {
+        if (view == null) {
+            return 0L;
+        }
+        for (int index = 0; index < platformViews.size(); ++index) {
+            PlatformViewContainer container = platformViews.valueAt(index);
+            if (container.contains(view)) {
+                return platformViews.keyAt(index);
+            }
+        }
+        return 0L;
+    }
+
+    private void synchronizePlatformViewFocus(View oldFocus, View newFocus) {
+        if (applyingPlatformViewFocus || nativeHandle == 0L) {
+            return;
+        }
+        long oldIdentity = platformViewIdentity(oldFocus);
+        long newIdentity = platformViewIdentity(newFocus);
+        if (newIdentity != 0L) {
+            nativeSynchronizePlatformViewFocus(nativeHandle, newIdentity, !isInTouchMode());
+        } else if (oldIdentity != 0L) {
+            nativeSynchronizePlatformViewFocus(nativeHandle, 0L, false);
+            hidePlatformViewInput();
+        }
+    }
+
+    private boolean applyPlatformViewFocus(long identity) {
+        PlatformViewContainer container = identity == 0L ? null : platformViews.get(identity);
+        if (container != null && container.getVisibility() != VISIBLE) {
+            container = null;
+        }
+        applyingPlatformViewFocus = true;
+        try {
+            if (identity == 0L) {
+                if (platformViewIdentity(findFocus()) != 0L) {
+                    requestFocus();
+                    hidePlatformViewInput();
+                }
+                return platformViewIdentity(findFocus()) == 0L;
+            }
+            if (platformViewIdentity(findFocus()) == identity) {
+                return true;
+            }
+            return container != null && container.requestContentFocus()
+                    && platformViewIdentity(findFocus()) == identity;
+        } finally {
+            applyingPlatformViewFocus = false;
+        }
+    }
+
+    private void hidePlatformViewInput() {
+        post(() -> {
+            if (inputConnection == null && platformViewIdentity(findFocus()) == 0L && getWindowToken() != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && getWindowInsetsController() != null) {
+                    getWindowInsetsController().hide(WindowInsets.Type.ime());
+                } else {
+                    inputMethodManager().hideSoftInputFromWindow(getWindowToken(), 0);
+                }
+            }
+        });
+    }
+
+    private Context platformContext() {
+        return getContext();
+    }
+
+    private int validatePlatformView(Object candidate) {
+        if (!(candidate instanceof View)) {
+            return 1;
+        }
+        View content = (View) candidate;
+        if (containsSurfaceView(content)) {
+            return 2;
+        }
+        return content.getParent() == null ? 0 : 3;
+    }
+
+    private int mountPlatformView(long identity, Object candidate) {
+        int validation = validatePlatformView(candidate);
+        if (validation != 0) {
+            return validation;
+        }
+        if (platformViews.get(identity) != null) {
+            return 3;
+        }
+        View content = (View) candidate;
+        PlatformViewContainer container = new PlatformViewContainer(this, content);
+        container.setVisibility(INVISIBLE);
+        platformViews.put(identity, container);
+        addView(container);
+        platformAccessibilityStructureChanged = true;
+        return 0;
+    }
+
+    private void placePlatformView(long identity, float worldX, float worldY, float worldWidth, float worldHeight,
+            float visibleX, float visibleY, float visibleWidth, float visibleHeight, boolean visible) {
+        PlatformViewContainer container = platformViews.get(identity);
+        if (container == null) {
+            throw new IllegalStateException("HuxerUI Android PlatformView placement has no mounted View");
+        }
+        platformAccessibilityStructureChanged |= container.place(density, worldX, worldY, worldWidth, worldHeight,
+                visibleX, visibleY, visibleWidth, visibleHeight, visible);
+    }
+
+    private void removePlatformView(long identity) {
+        PlatformViewContainer container = platformViews.get(identity);
+        if (container == null) {
+            return;
+        }
+        boolean focused = container.contains(findFocus());
+        applyingPlatformViewFocus = true;
+        try {
+            container.clearAccessibilityParent();
+            removeView(container);
+            platformViews.remove(identity);
+            platformAccessibilityStructureChanged = true;
+            if (focused) {
+                requestFocus();
+            }
+        } finally {
+            applyingPlatformViewFocus = false;
+        }
+        hidePlatformViewInput();
+    }
+
+    void resetPlatformViewAccessibility() {
+        for (int index = 0; index < platformViews.size(); ++index) {
+            platformViews.valueAt(index).clearAccessibilityParent();
+        }
+    }
+
+    void configurePlatformViewAccessibility(long identity, int parentId) {
+        PlatformViewContainer container = platformViews.get(identity);
+        if (container != null && container.getVisibility() == VISIBLE) {
+            container.setAccessibilityParent(parentId);
+        }
+    }
+
+    View platformViewAccessibilityChild(long identity) {
+        PlatformViewContainer container = platformViews.get(identity);
+        return container != null && container.hasAccessibilityParent() ? container : null;
+    }
+
+    void removePlatformViewAccessibilityChildren(AccessibilityNodeInfo info) {
+        for (int index = 0; index < platformViews.size(); ++index) {
+            info.removeChild(platformViews.valueAt(index));
+        }
+    }
+
+    private void commitPlatformComposition(long[] composition) {
+        if (composition == null || composition.length % 3 != 0) {
+            throw new IllegalArgumentException("HuxerUI Android RenderComposition descriptor is invalid");
+        }
+        platformComposition = composition.length == 0 ? EMPTY_PLATFORM_COMPOSITION : composition;
+        for (int index = 0; index < platformViews.size(); ++index) {
+            platformViews.valueAt(index).allowContentFocus();
+        }
+        synchronizePlatformViewOrder();
+        invalidate();
+    }
+
+    private void synchronizePlatformViewOrder() {
+        int childIndex = 0;
+        boolean orderChanged = false;
+        for (int index = 0; index < platformComposition.length; index += 3) {
+            if (platformComposition[index] != 1L) {
+                continue;
+            }
+            PlatformViewContainer container = platformViews.get(platformComposition[index + 1]);
+            if (container != null) {
+                orderChanged |= childIndex >= getChildCount() || getChildAt(childIndex) != container;
+                ++childIndex;
+            }
+        }
+        if (!orderChanged) {
+            return;
+        }
+        for (int index = 0; index < platformComposition.length; index += 3) {
+            if (platformComposition[index] == 1L) {
+                PlatformViewContainer container = platformViews.get(platformComposition[index + 1]);
+                if (container != null) {
+                    bringChildToFront(container);
+                }
+            }
+        }
+    }
+
+    private static boolean containsSurfaceView(View view) {
+        if (view instanceof SurfaceView) {
+            return true;
+        }
+        if (!(view instanceof ViewGroup)) {
+            return false;
+        }
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); ++index) {
+            if (containsSurfaceView(group.getChildAt(index))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void scheduleFrame(long delayMilliseconds) {
         long now = SystemClock.uptimeMillis();
         long targetTime = now + Math.max(0L, delayMilliseconds);
@@ -648,8 +994,145 @@ public final class HuxerUIView extends View {
         }
     }
 
+    private void schedulePlatformTasks() {
+        post(platformTasksCallback);
+    }
+
     private void invalidateFullFrame() {
         invalidate();
+    }
+
+    private static final class PlatformViewContainer extends ViewGroup {
+        private final HuxerUIView root;
+        private final View content;
+        private int accessibilityParentId = AccessibilityNodeProvider.HOST_VIEW_ID;
+        private boolean accessibilityParentSet;
+        private int containerLeft;
+        private int containerTop;
+        private int containerWidth;
+        private int containerHeight;
+        private int contentLeft;
+        private int contentTop;
+        private int contentWidth;
+        private int contentHeight;
+
+        PlatformViewContainer(HuxerUIView root, View content) {
+            super(content.getContext());
+            this.root = root;
+            this.content = content;
+            setClipChildren(true);
+            setClipToPadding(true);
+            setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+            addView(content);
+        }
+
+        void allowContentFocus() {
+            if (getDescendantFocusability() == FOCUS_BLOCK_DESCENDANTS) {
+                setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
+            }
+        }
+
+        boolean place(float density, float worldX, float worldY, float worldWidth, float worldHeight, float visibleX,
+                float visibleY, float visibleWidth, float visibleHeight, boolean visible) {
+            int nextContainerLeft = Math.round(visibleX * density);
+            int nextContainerTop = Math.round(visibleY * density);
+            int nextContainerRight = Math.round((visibleX + visibleWidth) * density);
+            int nextContainerBottom = Math.round((visibleY + visibleHeight) * density);
+            int worldLeft = Math.round(worldX * density);
+            int worldTop = Math.round(worldY * density);
+            int worldRight = Math.round((worldX + worldWidth) * density);
+            int worldBottom = Math.round((worldY + worldHeight) * density);
+            int nextContainerWidth = Math.max(0, nextContainerRight - nextContainerLeft);
+            int nextContainerHeight = Math.max(0, nextContainerBottom - nextContainerTop);
+            int nextContentWidth = Math.max(0, worldRight - worldLeft);
+            int nextContentHeight = Math.max(0, worldBottom - worldTop);
+            int nextContentLeft = worldLeft - nextContainerLeft;
+            int nextContentTop = worldTop - nextContainerTop;
+            boolean geometryChanged = containerLeft != nextContainerLeft || containerTop != nextContainerTop
+                    || containerWidth != nextContainerWidth || containerHeight != nextContainerHeight
+                    || contentLeft != nextContentLeft || contentTop != nextContentTop
+                    || contentWidth != nextContentWidth || contentHeight != nextContentHeight;
+            containerLeft = nextContainerLeft;
+            containerTop = nextContainerTop;
+            containerWidth = nextContainerWidth;
+            containerHeight = nextContainerHeight;
+            contentLeft = nextContentLeft;
+            contentTop = nextContentTop;
+            contentWidth = nextContentWidth;
+            contentHeight = nextContentHeight;
+            int nextVisibility = visible ? VISIBLE : INVISIBLE;
+            boolean visibilityChanged = getVisibility() != nextVisibility;
+            if (visibilityChanged) {
+                setVisibility(nextVisibility);
+            }
+            if (geometryChanged) {
+                requestLayout();
+            }
+            return visibilityChanged;
+        }
+
+        void setAccessibilityParent(int parentId) {
+            accessibilityParentId = parentId;
+            accessibilityParentSet = true;
+        }
+
+        void clearAccessibilityParent() {
+            accessibilityParentSet = false;
+        }
+
+        boolean hasAccessibilityParent() {
+            return accessibilityParentSet && getVisibility() == VISIBLE;
+        }
+
+        void applyLayout() {
+            layout(containerLeft, containerTop, containerLeft + containerWidth, containerTop + containerHeight);
+        }
+
+        boolean contains(View view) {
+            View current = view;
+            while (current != null) {
+                if (current == this) {
+                    return true;
+                }
+                ViewParent parent = current.getParent();
+                current = parent instanceof View ? (View) parent : null;
+            }
+            return false;
+        }
+
+        boolean requestContentFocus() {
+            return content.requestFocus();
+        }
+
+        @Override
+        public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            if (accessibilityParentSet) {
+                if (accessibilityParentId == AccessibilityNodeProvider.HOST_VIEW_ID) {
+                    info.setParent(root);
+                } else {
+                    info.setParent(root, accessibilityParentId);
+                }
+            }
+            info.setFocusable(false);
+            info.setClickable(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.setScreenReaderFocusable(false);
+            }
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec));
+            content.measure(MeasureSpec.makeMeasureSpec(contentWidth, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(contentHeight, MeasureSpec.EXACTLY));
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            content.layout(contentLeft, contentTop, contentLeft + contentWidth, contentTop + contentHeight);
+        }
     }
 
     private float[] fontMetrics(float fontSize, int familyKind, byte[] familyName, int weight, int slant) {
@@ -1219,7 +1702,21 @@ public final class HuxerUIView extends View {
     private static native boolean nativePerformSemanticAction(long handle, int nodeId, int actionKind, byte[] text,
             long argument0, long argument1, double number, float x, float y, long customId);
 
-    private static native void nativeDraw(long handle, Canvas canvas);
+    private static native void nativeBeginDraw(long handle);
+
+    private static native void nativeDrawBase(long handle, Canvas canvas);
+
+    private static native void nativeDrawSlice(long handle, Canvas canvas, long firstCommand, long commandCount);
+
+    private static native void nativeEndDraw(long handle);
+
+    private static native void nativeDrainPlatformTasks(long handle);
+
+    private static native long nativeHitTestPlatformView(long handle, float x, float y);
+
+    private static native void nativeSynchronizePlatformViewFocus(long handle, long identity, boolean focusVisible);
+
+    private static native boolean nativeMoveFocusFromPlatformView(long handle, long identity, boolean reverse);
 
     private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y);
 

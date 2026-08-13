@@ -673,6 +673,11 @@ The native frame commit returns a versioned binary semantic snapshot only when t
 The synthetic root contributes its children to the host View rather than appearing as another virtual descendant.
 Bounds remain logical and View-local in the shared frame; the provider converts them to parent-relative pixels and applies the complete View-to-global matrix for screen bounds.
 
+A PlatformView identity travels in the same version-one node record as its semantic anchor.
+The provider omits that virtual anchor and adds the corresponding real `PlatformViewContainer` alongside virtual children in the declared sibling order.
+The container is a non-focusable structural accessibility node whose parent points to the host or the matching virtual semantic parent; its native content retains its own Android accessibility behavior and descendants.
+Provider touch exploration yields to a frontmost native subtree, and mount, removal, or visibility changes publish one host-subtree change after the frame has synchronized native accessibility parents.
+
 Roles map to the closest Android widget class, while checked, selected, expanded, editable, secure, range, collection, heading, live-region, invalid, and scrolling state use the corresponding AccessibilityNodeInfo contracts available on the current API level.
 Collections containing RadioButton children map to Android single-selection collections without adding a platform role to the shared semantic model.
 Secure fields never publish text or selection.

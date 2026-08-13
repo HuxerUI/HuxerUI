@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 
 #include <memory>
-#include <string>
+#include <string_view>
 #include <utility>
 
 #include <huxerui/ios/platform_view.h>
@@ -31,7 +31,7 @@ NSString* NativeString(std::string_view value) {
   }
   const char* utf8 = self.text.UTF8String;
   (*huxeruiEventSink)(
-      std::string(huxerui::example::NativeTextFieldEvents::Changed::Name),
+      huxerui::example::NativeTextFieldEvents::Changed::Name,
       huxerui::PlatformPayload(utf8 == nullptr ? "" : utf8)
   );
 }
@@ -43,7 +43,7 @@ namespace huxerui::example {
 namespace {
 
 void ApplyProperties(HuxerUIExampleNativeTextField* text_field, const PlatformPayload& properties) {
-  const std::string_view text = properties.AsObject().at(std::string(native_text_field::text_property)).AsString();
+  const std::string_view text = properties.AsObject().at(native_text_field::text_property).AsString();
   NSString* native_text = NativeString(text);
   if (![text_field.text isEqualToString:native_text]) {
     text_field.text = native_text;
@@ -84,14 +84,10 @@ ios::PlatformViewFactory NativeTextFieldFactory() {
   };
 }
 
-void RegisterNativeTextField(RootContext& root) {
-  root.Modules().Register(std::string(native_text_field::type), NativeTextFieldFactory());
-}
-
 } // namespace
 
-RootHook InstallNativeTextField() {
-  return RegisterNativeTextField;
+void InstallNativeTextField(RootContext& root) {
+  root.Modules().Register(native_text_field::type, NativeTextFieldFactory());
 }
 
 } // namespace huxerui::example

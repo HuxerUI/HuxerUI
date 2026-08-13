@@ -438,6 +438,9 @@ function(_huxerui_configure_resources target_name)
             TARGET ${target_name}
             PROPERTY HUXERUI_RESOURCE_NAMESPACES
     )
+    if (NOT HUXERUI_RESOURCE_PACKAGES AND NOT HUXERUI_RESOURCE_ROOTS)
+        return()
+    endif ()
 
     set(HUXERUI_RESOURCE_PACKAGE_INDEXES)
     foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGES)

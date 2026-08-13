@@ -35,6 +35,8 @@ file(WRITE "${PROJECT_ROOT}/CMakeLists.txt"
         "set(HUXERUI_HOST_TOOL_ROOT \"${SOURCE_DIRECTORY}/tools/prebuilt\")\n"
         "set(HUXERUI_PROJECT_DIR \"${PROJECT_ROOT}\")\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUITargets.cmake\")\n"
+        "add_executable(no_resource_app main.cpp)\n"
+        "_huxerui_schedule_resources(no_resource_app)\n"
         "add_executable(resource_app MACOSX_BUNDLE main.cpp)\n"
         "_huxerui_configure_builtin_resources(resource_app)\n"
         "set_property(TARGET resource_app APPEND PROPERTY HUXERUI_RESOURCE_PACKAGES \"\${HUXERUI_BUILTIN_RESOURCE_PACKAGE}\")\n"
@@ -64,7 +66,7 @@ endif ()
 execute_process(
         COMMAND "${CMAKE_COMMAND}" --build "${BUILD_ROOT}"
                 --config Debug
-                --target resource_app
+                --target no_resource_app resource_app
         RESULT_VARIABLE BUILD_RESULT
         OUTPUT_VARIABLE BUILD_OUTPUT
         ERROR_VARIABLE BUILD_ERROR
@@ -73,6 +75,9 @@ if (NOT BUILD_RESULT EQUAL 0)
     message(FATAL_ERROR
             "Resource merge build failed:\n${BUILD_OUTPUT}${BUILD_ERROR}"
     )
+endif ()
+if (EXISTS "${BUILD_ROOT}/huxerui-resources/no_resource_app")
+    message(FATAL_ERROR "Resource scheduling created output for a target without resources")
 endif ()
 
 set(RESOURCE_OUTPUT "${BUILD_ROOT}/huxerui-resources/resource_app")
