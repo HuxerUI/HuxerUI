@@ -100,6 +100,10 @@ View ZeroPlatformViewApp() {
   }.With(CrossAlign{CrossAxisAlignment::Start});
 }
 
+View NonFocusablePlatformViewApp() {
+  return PlatformView("test/View").With(Focusable(false), Frame{80.0F, 40.0F});
+}
+
 View CoveredPlatformViewApp() {
   return Stack {
     PlatformView("test/View").With(Frame{80.0F, 40.0F}),
@@ -163,6 +167,56 @@ TEST_CASE("PlatformViewHasNoIntrinsicSize") {
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   REQUIRE(FindPlatformView(runtime.BuildRenderFrame()).Bounds() == Rect{});
+}
+
+TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
+  TestPlatform platform;
+  Runtime runtime(PlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+
+  const FrameCommit& initial = runtime.BuildCommit();
+  const PlacePlatformViewCommand& placement = FindPlatformView(initial.render_frame);
+  const auto anchor = std::ranges::find(
+      initial.semantic_frame->nodes,
+      std::optional<std::uint64_t>{placement.Identity()},
+      &SemanticNode::platform_view_identity
+  );
+  REQUIRE(anchor != initial.semantic_frame->nodes.end());
+  REQUIRE((anchor->actions & SemanticActionMask(SemanticActionKind::Focus)) != 0);
+  REQUIRE_FALSE(anchor->focused);
+
+  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.NativeRuntime(), placement.Identity(), false);
+  REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.NativeRuntime()) == placement.Identity());
+  const FrameCommit& focused = runtime.BuildCommit();
+  const auto focused_anchor = std::ranges::find(
+      focused.semantic_frame->nodes,
+      std::optional<std::uint64_t>{placement.Identity()},
+      &SemanticNode::platform_view_identity
+  );
+  REQUIRE(focused_anchor != focused.semantic_frame->nodes.end());
+  REQUIRE(focused_anchor->focused);
+
+  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.NativeRuntime(), std::nullopt, false);
+  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(runtime.NativeRuntime()).has_value());
+
+  TestPlatform non_focusable_platform;
+  Runtime non_focusable(NonFocusablePlatformViewApp, non_focusable_platform);
+  non_focusable.SetWindowMetrics({{300.0F, 200.0F}});
+  const FrameCommit& non_focusable_frame = non_focusable.BuildCommit();
+  const PlacePlatformViewCommand& non_focusable_placement = FindPlatformView(non_focusable_frame.render_frame);
+  const auto non_focusable_anchor = std::ranges::find(
+      non_focusable_frame.semantic_frame->nodes,
+      std::optional<std::uint64_t>{non_focusable_placement.Identity()},
+      &SemanticNode::platform_view_identity
+  );
+  REQUIRE(non_focusable_anchor != non_focusable_frame.semantic_frame->nodes.end());
+  REQUIRE((non_focusable_anchor->actions & SemanticActionMask(SemanticActionKind::Focus)) == 0);
+  detail::RuntimeAccess::SynchronizePlatformViewFocus(
+      non_focusable.NativeRuntime(),
+      non_focusable_placement.Identity(),
+      false
+  );
+  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(non_focusable.NativeRuntime()).has_value());
 }
 
 TEST_CASE("PlatformViewTypeChangesReplaceTheMountedLeaf") {

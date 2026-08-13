@@ -1073,6 +1073,41 @@ std::optional<std::uint64_t> Runtime::HitTestPlatformView(Point position) const 
   return target->kind == detail::NodeKind::PlatformView ? std::optional{target->identity} : std::nullopt;
 }
 
+std::optional<std::uint64_t> Runtime::FocusedPlatformView() const {
+  if (!state_->focused_node_identity_.has_value() || !state_->mounted_root_) {
+    return std::nullopt;
+  }
+  const detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (focused == nullptr || focused->kind != detail::NodeKind::PlatformView) {
+    return std::nullopt;
+  }
+  return state_->focused_node_identity_;
+}
+
+void Runtime::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
+  if (identity.has_value()) {
+    if (!state_->mounted_root_) {
+      return;
+    }
+    const detail::MountedNode* node = FindNode(*state_->mounted_root_, *identity);
+    if (node == nullptr || node->kind != detail::NodeKind::PlatformView) {
+      return;
+    }
+    SetFocusedNode(identity, focus_visible);
+    return;
+  }
+  if (FocusedPlatformView().has_value()) {
+    SetFocusedNode(std::nullopt, focus_visible);
+  }
+}
+
+void Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+  if (FocusedPlatformView() != identity) {
+    return;
+  }
+  MoveFocus(reverse);
+}
+
 bool Runtime::DispatchPlatformViewEvent(
     std::uint64_t identity, std::string_view name, const PlatformPayload& payload
 ) {

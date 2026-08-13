@@ -30,6 +30,7 @@ std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string type, PlatformPayload
   }
   static_cast<void>(PlatformPayload(type));
   auto spec = std::make_shared<ViewSpec>(NodeKind::PlatformView);
+  spec->focusable = true;
   spec->platform_view = std::make_shared<PlatformViewDeclaration>(PlatformViewDeclaration{
       std::move(type),
       std::move(properties),

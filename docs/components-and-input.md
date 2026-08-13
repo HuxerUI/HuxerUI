@@ -24,6 +24,8 @@ SelectionArea {
 
 Button, Checkbox, RadioButton, and Switch participate in focus traversal and share their pointer and keyboard activation paths. Checkbox, RadioButton, and Switch are controlled:
 
+Keyboard-visible focus uses `InteractionScheme::focus_ring`, `focus_ring_width`, and `focus_ring_offset`. The offset is the clear gap between the control and an outside ring; it affects paint bounds without changing measurement or layout. Material uses a 3-unit ring with a 2-unit gap, while Flat uses a 2-unit ring with the same gap.
+
 ```cpp
 auto checked = UseState(false);
 

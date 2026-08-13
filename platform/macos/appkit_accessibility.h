@@ -12,9 +12,11 @@ class Runtime;
 
 namespace detail {
 
+class AppKitPlatformViews;
+
 class MacAccessibility final {
 public:
-  MacAccessibility(Runtime& runtime, NSView* view) noexcept;
+  MacAccessibility(Runtime& runtime, NSView* root_view, AppKitPlatformViews& platform_views) noexcept;
   ~MacAccessibility();
 
   MacAccessibility(const MacAccessibility&) = delete;
@@ -31,7 +33,8 @@ public:
 
 private:
   Runtime* runtime_;
-  __weak NSView* view_;
+  __weak NSView* root_view_;
+  AppKitPlatformViews* platform_views_;
   std::shared_ptr<const SemanticFrame> frame_;
   __strong NSMutableDictionary* elements_ = nil;
 };

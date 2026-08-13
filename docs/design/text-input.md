@@ -1000,6 +1000,7 @@ Focus transfer resolves the PlatformView identity from the current committed `Re
 The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for native focus transfer and native input dispatch.
 These focus and IME lifecycle messages are internal adapter coordination rather than PlatformPayload module events.
 A module may emit a typed application event describing a native focus change, but that event neither starts nor ends a HuxerUI text-input session.
+The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one native subtree, while traversal across its boundary returns to Runtime focus order. The remaining PlatformView hosts add equivalent native focus bridges with their hosting phases.
 This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration

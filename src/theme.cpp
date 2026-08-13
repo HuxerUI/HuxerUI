@@ -1357,6 +1357,7 @@ ThemeSpec FlatLightThemeSpec() {
       .indication = IndicationKind::StateOverlay,
       .focus_ring = std::nullopt,
       .focus_ring_width = 2.0F,
+      .focus_ring_offset = 2.0F,
       .disabled_opacity = 0.42F,
   };
   return theme;
@@ -1393,6 +1394,7 @@ ThemeSpec FlatDarkThemeSpec() {
       .indication = IndicationKind::StateOverlay,
       .focus_ring = std::nullopt,
       .focus_ring_width = 2.0F,
+      .focus_ring_offset = 2.0F,
       .disabled_opacity = 0.42F,
   };
   return theme;
@@ -1466,6 +1468,7 @@ ThemeSpec MaterialLightThemeSpec() {
       .indication = IndicationKind::Ripple,
       .focus_ring = Color::Rgb(103, 80, 164),
       .focus_ring_width = 3.0F,
+      .focus_ring_offset = 2.0F,
       .disabled_opacity = 0.38F,
   };
   return theme;
@@ -1527,6 +1530,7 @@ ThemeSpec MaterialDarkThemeSpec() {
       .indication = IndicationKind::Ripple,
       .focus_ring = Color::Rgb(208, 188, 255),
       .focus_ring_width = 3.0F,
+      .focus_ring_offset = 2.0F,
       .disabled_opacity = 0.38F,
   };
   return theme;

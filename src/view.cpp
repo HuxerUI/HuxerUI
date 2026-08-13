@@ -1886,6 +1886,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
   const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
   spec.properties.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
   spec.properties.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
+  spec.properties.focus_ring_offset = std::max(0.0F, theme.interactions.focus_ring_offset);
   spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
     spec.properties.text_style =

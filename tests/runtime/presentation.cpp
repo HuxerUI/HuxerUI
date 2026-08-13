@@ -627,6 +627,7 @@ template <class Factory> View FocusTestTheme(Factory&& content) {
   spec.motion.reduced_motion = true;
   spec.interactions.focus_ring = Color::Rgb(40, 180, 90);
   spec.interactions.focus_ring_width = 3.0F;
+  spec.interactions.focus_ring_offset = 4.0F;
   spec.interactions.disabled_opacity = 0.3F;
   return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
 }
@@ -973,6 +974,8 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
   REQUIRE(std::abs(light.interactions.hover_overlay.alpha - 0.10F) < 0.001F);
   REQUIRE(std::abs(light.interactions.pressed_overlay.alpha - 0.16F) < 0.001F);
+  REQUIRE(light.interactions.focus_ring_width == 2.0F);
+  REQUIRE(light.interactions.focus_ring_offset == 2.0F);
   REQUIRE(std::abs(dark.interactions.hover_overlay.alpha - 0.12F) < 0.001F);
   REQUIRE(std::abs(dark.interactions.pressed_overlay.alpha - 0.18F) < 0.001F);
 
@@ -1045,6 +1048,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(light.shapes.extra_large == 28.0F);
   REQUIRE(light.elevation.medium == 3.0F);
   REQUIRE(light.interactions.indication == huxerui::IndicationKind::Ripple);
+  REQUIRE(light.interactions.focus_ring_width == 3.0F);
+  REQUIRE(light.interactions.focus_ring_offset == 2.0F);
 
   const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
   const ButtonStyle button_style = ThemeDefinitionValue<ButtonStyle>(definition);
@@ -2890,6 +2895,18 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   const DrawBorderCommand* first_border = FindBorderWithColor(first_focused, Color::Rgb(40, 180, 90));
   REQUIRE(first_border != nullptr);
   REQUIRE(first_border->width == 3.0F);
+  const detail::MountedNode* focused_first_node = FindMountedText(*runtime.RootNode(), "first");
+  REQUIRE(focused_first_node != nullptr);
+  const Rect focused_bounds = focused_first_node->PresentationBounds();
+  const float focus_ring_outset = 7.0F;
+  const Rect expected_focus_ring{
+      focused_bounds.x - focus_ring_outset,
+      focused_bounds.y - focus_ring_outset,
+      focused_bounds.width + focus_ring_outset * 2.0F,
+      focused_bounds.height + focus_ring_outset * 2.0F,
+  };
+  REQUIRE(first_border->rect == expected_focus_ring);
+  REQUIRE(first_border->corner_radius == focused_first_node->properties.corner_radii.top_left + focus_ring_outset);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,

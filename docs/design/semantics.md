@@ -409,10 +409,10 @@ It contains no pointer to MountedNode, ViewSpec, NodeExtension, RenderNode, or a
 It represents the same reconciliation, layout, presentation, focus, and layer state as the surrounding `FrameCommit`.
 A platform adapter retains the shared pointer for as long as native queries may reference it.
 
-## Proposed PlatformView semantic bridge
+## PlatformView semantic bridge
 
 A PlatformView contributes one semantic anchor at its mounted position rather than converting its native accessibility descendants into SemanticNodes.
-The PlatformView phase adds an optional Runtime-owned platform-view identity to anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
+An optional Runtime-owned platform-view identity marks anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
 The anchor carries the same stable PlatformView identity as `PlacePlatformViewCommand`, while its parent and sibling position come from ordinary semantic resolution.
 Visual `RenderComposition` order and accessibility traversal are derived from the same committed mounted tree but remain distinct outputs: paint-only decoration does not become accessible merely because it occupies a later render slice.
 
@@ -695,6 +695,7 @@ Runtime actions run on the main thread, while the existing `UITextInput` object 
 
 The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
 It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
+For a PlatformView anchor, it resolves the committed identity through the native host and substitutes the unignored native accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
 The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
 AppKit calls and Runtime actions remain on the main thread.
 `NSTextInputClient` continues to own IME communication.
@@ -803,7 +804,7 @@ Android AccessibilityNodeProvider and Windows UI Automation now consume that con
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge, and the Windows UI Automation bridge are implemented.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge including native anchor substitution, and the Windows UI Automation bridge are implemented.
 - Deferred: extend the native adapter sequence to iOS, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
 - Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
 

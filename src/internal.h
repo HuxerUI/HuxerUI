@@ -443,6 +443,7 @@ struct ViewProperties {
   VerticalAlignment vertical_alignment = VerticalAlignment::Start;
   Color focus_ring = Color::Rgb(31, 111, 235);
   float focus_ring_width = 2.0F;
+  float focus_ring_offset = 2.0F;
   float disabled_opacity = 0.42F;
   // Runtime resolves this declaration against final window-edge geometry after layout and presentation transforms.
   std::optional<SystemBarsAppearance> system_bars_appearance;
@@ -469,8 +470,8 @@ struct ViewProperties {
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewProperties& other) const {
     return corner_radii == other.corner_radii && focus_ring == other.focus_ring &&
-           focus_ring_width == other.focus_ring_width && indication_size == other.indication_size &&
-           indication_corner_radius == other.indication_corner_radius &&
+           focus_ring_width == other.focus_ring_width && focus_ring_offset == other.focus_ring_offset &&
+           indication_size == other.indication_size && indication_corner_radius == other.indication_corner_radius &&
            indication_override == other.indication_override;
   }
 };
@@ -1220,6 +1221,19 @@ struct RuntimeAccess {
 
   static std::optional<std::uint64_t> HitTestPlatformView(const Runtime& runtime, Point position) {
     return runtime.HitTestPlatformView(position);
+  }
+
+  static std::optional<std::uint64_t> FocusedPlatformView(const Runtime& runtime) {
+    return runtime.FocusedPlatformView();
+  }
+
+  static void
+  SynchronizePlatformViewFocus(Runtime& runtime, std::optional<std::uint64_t> identity, bool focus_visible) {
+    runtime.SynchronizePlatformViewFocus(identity, focus_visible);
+  }
+
+  static void MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse) {
+    runtime.MoveFocusFromPlatformView(identity, reverse);
   }
 
   static bool DispatchPlatformViewEvent(

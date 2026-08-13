@@ -17,17 +17,21 @@ namespace huxerui::detail {
 
 class AppKitRenderer;
 
-class AppKitPlatformViewHost final {
+class AppKitPlatformViews final {
 public:
-  AppKitPlatformViewHost(AppKitRenderer& renderer, PlatformModules& modules, Runtime& runtime);
-  ~AppKitPlatformViewHost();
+  AppKitPlatformViews(AppKitRenderer& renderer, PlatformModules& modules, Runtime& runtime);
+  ~AppKitPlatformViews();
 
-  AppKitPlatformViewHost(const AppKitPlatformViewHost&) = delete;
-  AppKitPlatformViewHost& operator=(const AppKitPlatformViewHost&) = delete;
+  AppKitPlatformViews(const AppKitPlatformViews&) = delete;
+  AppKitPlatformViews& operator=(const AppKitPlatformViews&) = delete;
 
   [[nodiscard]] bool Commit(NSView* root, const RenderFrame& frame);
   void DrawBase(CGContextRef context, CGRect dirty_rect);
   NSView* HitTest(Point point) const;
+  NSView* AccessibilityView(std::uint64_t identity) const;
+  [[nodiscard]] bool BeginFocusTraversal(NSResponder* responder, bool reverse);
+  void EndFocusTraversal();
+  void SynchronizeFocus(NSResponder* responder);
   void Shutdown();
 
 private:

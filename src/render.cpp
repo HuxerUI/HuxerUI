@@ -353,12 +353,20 @@ void PaintFocusRing(const MountedNode& node, const Rect& bounds, PaintContext& c
   if (!node.focus_visible || !node.enabled || node.properties.focus_ring_width <= 0.0F) {
     return;
   }
-  context.DrawBorder(
-      bounds,
-      node.properties.focus_ring,
-      node.properties.focus_ring_width,
-      node.properties.corner_radii
-  );
+  const float ring_outset = node.properties.focus_ring_width + node.properties.focus_ring_offset;
+  const Rect ring_bounds{
+      bounds.x - ring_outset,
+      bounds.y - ring_outset,
+      bounds.width + ring_outset * 2.0F,
+      bounds.height + ring_outset * 2.0F,
+  };
+  const CornerRadii ring_radii{
+      node.properties.corner_radii.top_left + ring_outset,
+      node.properties.corner_radii.top_right + ring_outset,
+      node.properties.corner_radii.bottom_right + ring_outset,
+      node.properties.corner_radii.bottom_left + ring_outset,
+  };
+  context.DrawBorder(ring_bounds, node.properties.focus_ring, node.properties.focus_ring_width, ring_radii);
 }
 
 void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {

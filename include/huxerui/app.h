@@ -167,6 +167,9 @@ private:
   void RequestFrameAfter(double delay_seconds);
   void NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source);
   [[nodiscard]] std::optional<std::uint64_t> HitTestPlatformView(Point position) const;
+  [[nodiscard]] std::optional<std::uint64_t> FocusedPlatformView() const;
+  void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible);
+  void MoveFocusFromPlatformView(std::uint64_t identity, bool reverse);
   bool DispatchPlatformViewEvent(std::uint64_t identity, std::string_view name, const PlatformPayload& payload);
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);

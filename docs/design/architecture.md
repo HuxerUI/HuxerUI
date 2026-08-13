@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and an initial macOS accessibility bridge are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface visual factory registration, and macOS native PlatformView hosting are implemented. Applications install module RootHooks explicitly. Nonvisual Call and Result interoperability, native hosting on the remaining platforms, ExternalTexture composition, focus and accessibility bridging, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface visual factory registration, and macOS native PlatformView hosting with focus and accessibility bridging are implemented. Applications install module RootHooks explicitly. Nonvisual Call and Result interoperability, native hosting and matching bridges on the remaining platforms, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -523,6 +523,7 @@ public:
 
 Default-constructed `PlatformPayload` is null, so `PlatformView("module/Type")` is valid for a factory with no creation properties.
 `Events<Key...>()` stores only wire-name and decoder descriptors; application callbacks remain ordinary EventBindings added later through `View::On<Key>()`.
+PlatformView participates in shared focus traversal by default, while the ordinary `Focusable(false)` modifier removes a non-focusable native surface from that order.
 
 A module exposes a concrete component such as `WebView()` and internally constructs `PlatformView(type, properties)` with a stable registered type string and immutable PlatformPayload properties.
 Compatible recomposition retains the mounted and native instance when the type string and key remain compatible.
@@ -608,8 +609,8 @@ It must not silently flatten the declaration into a global foreground or backgro
 Modules may choose a different native implementation internally, while high-frequency visual content without native interaction remains an ExternalTexture.
 
 Current shared tests cover payload invariants, per-surface registration, leaf layout, identity and property revisions, typed event delivery, frontmost hit testing, basic paint order, adjacent PlatformViews, keyed movement, replacement, and unsupported transforms and opacity.
-The macOS integration fixture covers native creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, removal, stale-event rejection, and disposal.
-Later composition phases add content-child-foreground order, nested rectangular clips, visibility, native focus and accessibility bridging, and equivalent adapter coverage as those behaviors land.
+The macOS integration fixture covers native creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, focus synchronization, accessibility identity resolution, removal, stale-event rejection, and disposal.
+Later composition phases add content-child-foreground order, nested rectangular clips, visibility, and equivalent adapter coverage as those behaviors land.
 Each available platform adds an integration fixture with HuxerUI content below and above one native control, verifies frontmost pointer ownership, native focus and IME transfer, accessibility traversal through the anchor, retained native state across recomposition and temporary hiding, and deterministic teardown.
 Surface-specific tests cover Android `SurfaceView`, Windows child HWND, X11 child-window composition, and Web DOM stacking only where the host reports the required capability.
 
