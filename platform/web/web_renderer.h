@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include <emscripten/val.h>
 
@@ -32,6 +34,40 @@ public:
   void Draw(const RenderFrame& frame);
 
 private:
+  // Layout results depend only on text, font, the maximum width, and the
+  // layout options. Caching them avoids rebuilding grapheme boundaries and
+  // re-measuring every cluster through the JS bridge on every frame.
+  struct TextLayoutCacheKey {
+    std::string text;
+    Font font;
+    float max_width = 0.0F;
+    TextLayoutOptions options;
+
+    bool operator==(const TextLayoutCacheKey&) const = default;
+  };
+
+  struct TextLayoutCacheKeyHash {
+    [[nodiscard]] std::size_t operator()(const TextLayoutCacheKey& key) const noexcept {
+      std::size_t seed = std::hash<std::string>{}(key.text);
+      const auto mix = [&seed](std::size_t value) {
+        seed ^= value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+      };
+      mix(std::hash<std::string_view>{}(key.font.FamilyName()));
+      mix(std::hash<int>{}(static_cast<int>(key.font.FamilyKind())));
+      mix(std::hash<float>{}(key.font.Size()));
+      mix(std::hash<int>{}(static_cast<int>(key.font.Weight())));
+      mix(std::hash<int>{}(static_cast<int>(key.font.Slant())));
+      mix(std::hash<float>{}(key.max_width));
+      mix(std::hash<int>{}(static_cast<int>(key.options.align)));
+      mix(std::hash<int>{}(static_cast<int>(key.options.wrap)));
+      mix(std::hash<int>{}(static_cast<int>(key.options.shaping.direction)));
+      mix(std::hash<std::string>{}(key.options.shaping.locale));
+      return seed;
+    }
+  };
+
+  [[nodiscard]] const TextLayout* FindOrCreateTextLayout(const TextLayoutCacheKey& key);
+
   void RenderSceneNode(const RenderNode& node);
   void RenderSequence(const PaintSequence& sequence);
   void RenderCommand(const DrawRectCommand& command);
@@ -58,6 +94,8 @@ private:
   float display_scale_ = 1.0F;
   std::uintptr_t session_id_ = 0;
   bool force_redraw_ = true;
+  std::unordered_map<TextLayoutCacheKey, std::shared_ptr<TextLayout>, TextLayoutCacheKeyHash>
+      text_layout_cache_;
 };
 
 } // namespace huxerui::detail

@@ -797,11 +797,36 @@ void WebRenderer::RenderCommand(const DrawRectCommand& command) {
   context_.call<void>("fill");
 }
 
+const TextLayout* WebRenderer::FindOrCreateTextLayout(const TextLayoutCacheKey& key) {
+  const auto existing = text_layout_cache_.find(key);
+  if (existing != text_layout_cache_.end()) {
+    return existing->second.get();
+  }
+  // Rebuilding layouts dominates draw cost: every cluster boundary is
+  // measured through the JS bridge. Cap the cache and evict wholesale when
+  // it grows beyond the working set of one screen.
+  if (text_layout_cache_.size() >= 512) {
+    text_layout_cache_.clear();
+  }
+  auto layout = std::make_shared<WebTextLayout>(
+      context_, key.text, TextStyle{key.font, Color::Rgb(0, 0, 0), TextDecoration::None}, key.max_width, key.options
+  );
+  const TextLayout* pointer = layout.get();
+  text_layout_cache_.emplace(key, std::move(layout));
+  return pointer;
+}
+
 void WebRenderer::RenderCommand(const DrawTextCommand& command) {
   if (command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
     return;
   }
-  WebTextLayout layout(context_, command.text, command.style, command.rect.width, command.options);
+  const TextLayoutCacheKey key{
+      command.text,
+      command.style.font,
+      command.rect.width,
+      command.options,
+  };
+  const auto& layout = static_cast<const WebTextLayout&>(*FindOrCreateTextLayout(key));
   const float vertical_offset =
       command.options.wrap == TextWrap::NoWrap ? (command.rect.height - layout.Metrics().size.height) * 0.5F : 0.0F;
   context_.call<void>("save");

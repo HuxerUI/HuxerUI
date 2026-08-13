@@ -213,6 +213,10 @@ function(huxerui_resolve_host_tool tool_name output_variable)
     string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" HUXERUI_HOST_SYSTEM)
     if (HUXERUI_HOST_SYSTEM STREQUAL "darwin")
         set(HUXERUI_HOST_SYSTEM "macos")
+    elseif (HUXERUI_HOST_SYSTEM STREQUAL "android")
+        # Termux local builds treat the Android host like a Linux host for
+        # the locally built hcg/hapt tools (local build compatibility only).
+        set(HUXERUI_HOST_SYSTEM "linux")
     elseif (NOT HUXERUI_HOST_SYSTEM STREQUAL "windows"
             AND NOT HUXERUI_HOST_SYSTEM STREQUAL "linux")
         message(FATAL_ERROR
