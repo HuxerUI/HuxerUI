@@ -78,10 +78,16 @@ endif ()
 
 if (UNIX AND NOT APPLE)
     target_sources(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/linux_timer.cpp"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
             platform/linux_damage.cpp
+            platform/linux_platform_module.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp
             platform/linux_window_chrome.cpp
+    )
+    target_include_directories(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
 endif ()
 

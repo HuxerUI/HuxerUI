@@ -28,7 +28,7 @@ function(huxerui_configure_platform)
     elseif (WIN32)
         set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Windows.cmake")
-    elseif (UNIX)
+    elseif (UNIX AND NOT APPLE)
         set(HUXERUI_PLATFORM_ID "linux")
         include("${HUXERUI_TARGETS_CMAKE_DIR}/platform/Linux.cmake")
     else ()
@@ -533,7 +533,7 @@ function(_huxerui_configure_resources target_name)
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
         )
-    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    elseif (UNIX AND NOT APPLE)
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
         )

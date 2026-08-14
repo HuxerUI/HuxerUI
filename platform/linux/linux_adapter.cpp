@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <clocale>
@@ -32,6 +33,7 @@
 
 #include "linux_renderer.h"
 #include "linux_text_input.h"
+#include "linux_ui_dispatcher.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
@@ -154,6 +156,8 @@ class LinuxPlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
+  LinuxPlatformAdapter() : LinuxPlatformAdapter(std::make_shared<LinuxUIThreadDispatcher>()) {}
+
   int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     text_input_.SetRuntime(runtime_);
@@ -350,6 +354,9 @@ public:
   }
 
 private:
+  explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher)
+      : PlatformAdapter(ui_dispatcher->Bind()), ui_dispatcher_(std::move(ui_dispatcher)) {}
+
   void ScheduleFrame(double deadline) {
     if (!scheduled_frame_deadline_.has_value() || deadline < *scheduled_frame_deadline_) {
       scheduled_frame_deadline_ = deadline;
@@ -572,10 +579,11 @@ private:
         );
       }
 
-      pollfd descriptor{};
-      descriptor.fd = connection;
-      descriptor.events = POLLIN;
-      const int poll_result = poll(&descriptor, 1, timeout_ms);
+      std::array<pollfd, 2> descriptors{{
+          {.fd = connection, .events = POLLIN, .revents = 0},
+          {.fd = ui_dispatcher_->FileDescriptor(), .events = POLLIN, .revents = 0},
+      }};
+      const int poll_result = poll(descriptors.data(), descriptors.size(), timeout_ms);
       if (poll_result < 0) {
         if (errno == EINTR) {
           continue;
@@ -584,6 +592,17 @@ private:
           failure_ = std::make_exception_ptr(std::runtime_error("HuxerUI Linux X11 event poll failed"));
         }
         break;
+      }
+
+      if ((descriptors[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0) {
+        try {
+          ui_dispatcher_->RunPending();
+        } catch (...) {
+          if (!failure_) {
+            failure_ = std::current_exception();
+          }
+          running_ = false;
+        }
       }
 
       while (running_ && XPending(display_) > 0) {
@@ -1288,6 +1307,7 @@ private:
   Atom net_wm_state_max_v_ = 0;
   Atom net_wm_moveresize_ = 0;
   Atom net_frame_extents_ = 0;
+  std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   PlatformFrameState frame_state_;
