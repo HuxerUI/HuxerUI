@@ -257,6 +257,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_text_input.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/linux/linux_ui_dispatcher.cpp"
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES

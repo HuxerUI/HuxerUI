@@ -23,4 +23,6 @@ endif ()
 
 if (APPLE OR ANDROID)
     add_subdirectory(platform_module)
+elseif (UNIX AND NOT APPLE)
+    add_subdirectory(platform_module)
 endif ()

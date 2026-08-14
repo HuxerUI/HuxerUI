@@ -3,6 +3,9 @@
 #include <X11/Xlib.h>
 
 #undef None
+#undef Above
+#undef Always
+#undef Below
 #undef Bool
 #undef True
 #undef False
