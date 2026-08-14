@@ -336,6 +336,25 @@ std::optional<std::string> ReadEnvironmentVariable(std::string_view name) {
 #endif
 }
 
+void SetProcessEnvironmentVariable(std::string_view name, std::string_view value) {
+  if (name.empty() || name.find('=') != std::string_view::npos) {
+    throw std::invalid_argument("environment variable name is invalid");
+  }
+#if defined(_WIN32)
+  const std::wstring wide_name = Utf8ToWide(name);
+  const std::wstring wide_value = Utf8ToWide(value);
+  if (!SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str())) {
+    throw std::runtime_error("cannot set environment variable: " + std::string(name));
+  }
+#else
+  const std::string key(name);
+  const std::string environment_value(value);
+  if (setenv(key.c_str(), environment_value.c_str(), 1) != 0) {
+    throw std::runtime_error("cannot set environment variable: " + key);
+  }
+#endif
+}
+
 std::string DescribeProcess(const ProcessCommand& command) {
   std::string description = QuoteForDisplay(command.executable);
   for (const std::string& argument : command.arguments) {

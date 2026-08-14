@@ -68,8 +68,11 @@ The Android integration provides:
 - `HuxerUIActivity` for full-screen applications
 - `HuxerUIView` for embedding HuxerUI in an existing Android interface
 - The `HuxerUI` Gradle library module
-- Prefab metadata in the source Gradle module for source-SDK application builds
+- Prefab metadata in the current source Gradle module
 - The `demo` application module
+
+Generated source-SDK applications use the Gradle library for Java integration while their app module configures the application root `CMakeLists.txt` directly for the shared native library and final resources.
+The generated Gradle shell owns Android SDK and NDK versions, ABIs, identifiers, native and Java dependencies, manifests, signing, and packaging policy without a CMake configuration projection.
 
 A full-screen launcher derives from `HuxerUIActivity`:
 
@@ -125,7 +128,7 @@ The iOS adapter dispatches nonvisual `PlatformInstance` results and events async
 The minimum deployment target is iOS 13. CLI projects contain a source-controlled native Xcode project that owns application packaging, signing, native assets, launch metadata, and debugging. Its build phase links an architecture-correct CMake application core containing the common C++ application and HuxerUI. The CLI discovers paired devices through `devicectl`, discovers booted Simulators through `simctl`, and keeps their DerivedData directories separate:
 
 ```bash
-huxerui create hello_huxer --platform ios
+huxerui create app hello_huxer --platform ios
 cd hello_huxer
 huxerui doctor ios
 huxerui devices ios
@@ -165,8 +168,10 @@ Text input uses the X Input Method protocol with full preedit callbacks, mirrori
 Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
 Nonvisual module results and events enter a thread-safe FIFO and wake the X11 event loop through `eventfd`, so application callbacks run asynchronously on the Runtime thread without native-thread reentry.
 The Linux `example_platform_module` registers a platform-neutral factory backed by `timerfd` and exposes the same typed Timer Root Service, cancellation, and disposal behavior as the Android and Apple implementations.
-System dependencies are resolved through pkg-config: X11, XKB common, EGL, OpenGL ES 2, Cairo, FreeType, HarfBuzz, fontconfig, libpng, and libjpeg.
+System dependencies are resolved through pkg-config for X11, Xext, XKB common, XRandR, EGL, and OpenGL ES 2; source-checkout builds fetch the pinned graphics, text, image, and compression libraries used by the renderer.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`, matching the macOS and Windows distribution model.
+The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
+The current Linux CLI path uses a source SDK checkout. A relocatable installed Linux SDK remains release-packaging work because its static dependency closure must be packaged without build-tree paths.
 
 ## Web technical preview
 
@@ -195,7 +200,7 @@ Each example produces an HTML entry point, an ES module, a WebAssembly module, a
 CLI applications can generate and run a source-controlled Web shell directly:
 
 ```bash
-huxerui create hello_huxer --platform web
+huxerui create app hello_huxer --platform web
 cd hello_huxer
 huxerui doctor web
 huxerui build web
@@ -203,7 +208,8 @@ huxerui run web
 ```
 
 The CLI uses `emcmake` for configuration and `emrun` to serve and open the generated application entry point.
-Web CLI projects currently require `HUXERUI_SDK_ROOT` to identify a source SDK checkout.
+Web CLI projects currently require `HUXERUI_HOME` to identify a source SDK checkout.
+The formal SDK design adds an Emscripten-compatible SDK archive while preserving the same root-project configuration and SDK-home discovery contract.
 
 The configured Emscripten compiler must provide the C++20 language and library support required by HuxerUI; obsolete toolchains are not supported through compatibility headers.
 The backend remains a technical preview until platform-neutral semantics and browser accessibility mapping, broader browser integration tests, production packaging, and real mobile-browser IME validation are complete.

@@ -47,14 +47,14 @@ struct PlatformDevice {
 struct ProjectTemplateContext {
   std::string project_name;
   std::string target_name;
-  std::string package_name;
+  std::string project_id;
 
   [[nodiscard]] std::string Render(std::string_view value) const;
 };
 
 struct PlatformCommandContext {
   std::filesystem::path project_root;
-  std::filesystem::path sdk_root;
+  std::filesystem::path huxerui_home;
   std::filesystem::path build_directory;
   std::string cmake_generator;
   std::string profile;
@@ -69,9 +69,12 @@ public:
   [[nodiscard]] virtual bool SupportsCurrentHost() const noexcept = 0;
   [[nodiscard]] virtual std::span<const std::string_view> RequiredTools() const noexcept = 0;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const = 0;
+  [[nodiscard]] virtual std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const;
   [[nodiscard]] virtual std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const = 0;
   [[nodiscard]] virtual bool SupportsDeviceDiscovery() const noexcept;
   [[nodiscard]] virtual std::vector<PlatformDevice> DiscoverDevices() const;
+  [[nodiscard]] virtual std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const;
+  virtual void UpdateModuleIntegration(const PlatformCommandContext& context) const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const;

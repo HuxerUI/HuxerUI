@@ -121,7 +121,6 @@ install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
-        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIAndroidPlan.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIModules.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUITargets.cmake"

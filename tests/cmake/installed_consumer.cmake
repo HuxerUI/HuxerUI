@@ -15,14 +15,15 @@ endif ()
 
 string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef TEST_NONCE)
 set(TEST_ROOT "${WORK_DIRECTORY}/hux-${TEST_NONCE}")
-set(SDK_ROOT "${TEST_ROOT}/sdk")
+set(SDK_INSTALL_ROOT "${TEST_ROOT}/sdk-install")
+set(SDK_ROOT "${TEST_ROOT}/sdk-relocated")
 set(PROJECT_PARENT "${TEST_ROOT}")
 set(PROJECT_ROOT "${PROJECT_PARENT}/app")
 file(MAKE_DIRECTORY "${PROJECT_PARENT}")
 
 set(INSTALL_COMMAND
         "${CMAKE_COMMAND}" --install "${BUILD_DIRECTORY}"
-        --prefix "${SDK_ROOT}"
+        --prefix "${SDK_INSTALL_ROOT}"
 )
 if (BUILD_CONFIG)
     list(APPEND INSTALL_COMMAND --config "${BUILD_CONFIG}")
@@ -37,19 +38,46 @@ if (NOT INSTALL_RESULT EQUAL 0)
     message(FATAL_ERROR "SDK installation failed:\n${INSTALL_OUTPUT}${INSTALL_ERROR}")
 endif ()
 file(GLOB_RECURSE INSTALLED_BUILTIN_RESOURCE_INDEXES
-        "${SDK_ROOT}/*/huxerui/resources/huxerui/resources.bin"
+        "${SDK_INSTALL_ROOT}/*/huxerui/resources/huxerui/resources.bin"
 )
 if (NOT INSTALLED_BUILTIN_RESOURCE_INDEXES)
     message(FATAL_ERROR "Installed SDK is missing the HuxerUI built-in resource package")
 endif ()
+file(RENAME "${SDK_INSTALL_ROOT}" "${SDK_ROOT}")
+file(REAL_PATH "${SDK_ROOT}" SDK_ROOT)
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)
     set(BUILD_PROFILE debug)
 endif ()
 execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_SDK_ROOT
-                "${HUXERUI_CLI}" create app --platform "${PLATFORM_ID}"
+        COMMAND "${CMAKE_COMMAND}" -E env
+                "HUXERUI_HOME=${SDK_ROOT}"
+                "${HUXERUI_CLI}" doctor
+        WORKING_DIRECTORY "${PROJECT_PARENT}"
+        OUTPUT_VARIABLE DOCTOR_OUTPUT
+        ERROR_VARIABLE DOCTOR_ERROR
+)
+if (NOT DOCTOR_OUTPUT MATCHES "HUXERUI_HOME \\(environment\\): ${SDK_ROOT}"
+        OR DOCTOR_ERROR)
+    message(FATAL_ERROR "Relocated SDK environment discovery failed:\n${DOCTOR_OUTPUT}${DOCTOR_ERROR}")
+endif ()
+execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env
+                "HUXERUI_HOME=${TEST_ROOT}/missing"
+                "${HUXERUI_CLI}" --version
+        RESULT_VARIABLE INVALID_HOME_RESULT
+        OUTPUT_VARIABLE INVALID_HOME_OUTPUT
+        ERROR_VARIABLE INVALID_HOME_ERROR
+)
+if (INVALID_HOME_RESULT EQUAL 0
+        OR NOT INVALID_HOME_ERROR MATCHES "HUXERUI_HOME is not a HuxerUI SDK or source checkout")
+    message(FATAL_ERROR "Invalid HUXERUI_HOME was not rejected:\n${INVALID_HOME_OUTPUT}${INVALID_HOME_ERROR}")
+endif ()
+execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
+                "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
+                "${HUXERUI_CLI}" create app app --platform "${PLATFORM_ID}"
         WORKING_DIRECTORY "${PROJECT_PARENT}"
         RESULT_VARIABLE CREATE_RESULT
         OUTPUT_VARIABLE CREATE_OUTPUT
@@ -77,7 +105,8 @@ file(WRITE "${APP_MAIN}" "${APP_MAIN_CONTENT}")
 file(WRITE "${PROJECT_ROOT}/src/extra.cpp" "int AdditionalSource() {\n  return 42;\n}\n")
 
 execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_SDK_ROOT
+        COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
+                "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
                 "${HUXERUI_CLI}" build "${PLATFORM_ID}"
                 --profile "${BUILD_PROFILE}"
                 --generator "${HOST_GENERATOR}"
@@ -88,6 +117,21 @@ execute_process(
 )
 if (NOT BUILD_RESULT EQUAL 0)
     message(FATAL_ERROR "Installed SDK consumer build failed:\n${BUILD_OUTPUT}${BUILD_ERROR}")
+endif ()
+file(GLOB_RECURSE APP_INTEGRATION_PLANS
+        "${PROJECT_ROOT}/.huxerui/build/*/*/huxerui-integration/*/app.json"
+)
+list(LENGTH APP_INTEGRATION_PLANS APP_INTEGRATION_PLAN_COUNT)
+if (NOT APP_INTEGRATION_PLAN_COUNT EQUAL 1)
+    message(FATAL_ERROR "Installed SDK consumer generated an unexpected number of application integration plans")
+endif ()
+list(GET APP_INTEGRATION_PLANS 0 APP_INTEGRATION_PLAN)
+file(READ "${APP_INTEGRATION_PLAN}" APP_INTEGRATION_JSON)
+string(JSON APP_INTEGRATION_PLATFORM GET "${APP_INTEGRATION_JSON}" platform)
+if (NOT APP_INTEGRATION_PLATFORM STREQUAL PLATFORM_ID)
+    message(FATAL_ERROR
+            "Installed SDK consumer reported platform ${APP_INTEGRATION_PLATFORM}, expected ${PLATFORM_ID}"
+    )
 endif ()
 file(GLOB_RECURSE BUILTIN_RESOURCE_HEADERS
         "${PROJECT_ROOT}/.huxerui/build/*/huxerui_resources.h"

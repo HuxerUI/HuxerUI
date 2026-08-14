@@ -20,6 +20,7 @@ struct ProcessResult {
 };
 
 [[nodiscard]] std::optional<std::string> ReadEnvironmentVariable(std::string_view name);
+void SetProcessEnvironmentVariable(std::string_view name, std::string_view value);
 [[nodiscard]] std::string DescribeProcess(const ProcessCommand& command);
 int RunProcess(const ProcessCommand& command);
 [[nodiscard]] ProcessResult RunProcessCapture(const ProcessCommand& command);

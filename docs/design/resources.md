@@ -70,7 +70,7 @@ The domains have stable ownership:
 
 - `app` belongs to the current application.
 - `huxerui` belongs to framework resources.
-- A module owns the domain declared by its module name.
+- A module owns each domain explicitly declared by its resource `NAMESPACE`.
 - Multiple target resource roots may contribute to the same domain.
 - For one resource variant in one domain, a later target resource root overrides an earlier root.
 
@@ -176,7 +176,17 @@ huxerui_add_app(application_target
 )
 ```
 
-The application helper registers the precompiled built-in `huxerui` package before the primary application root.
+`huxerui_add_module` provides the same compact form for a module's primary resource root:
+
+```cmake
+huxerui_add_module(camera_kit
+    SOURCES src/camera_kit.cpp
+    RESOURCES resources
+    RESOURCE_NAMESPACE camera_kit
+)
+```
+
+The application helper registers the precompiled built-in `huxerui` package before the primary application root, while the module helper attaches its primary package to the module target.
 Advanced consumers that need more than one root omit the compact resource arguments and call `huxerui_add_resources` in the required order.
 Later roots override earlier roots only when they declare the same resource variant; all other variants coexist.
 This permits application roots to override selected `huxerui` or module resources without a separate override declaration.

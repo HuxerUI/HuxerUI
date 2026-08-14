@@ -63,7 +63,10 @@ std::string Read(const std::filesystem::path& path) {
 
 TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   TemporaryDirectory temporary;
-  const Invocation invocation = Invoke(temporary.Path(), {"create", "Sample-App", "--platform", "windows,android,web"});
+  const Invocation invocation = Invoke(
+      temporary.Path(),
+      {"create", "app", "Sample-App", "--id", "dev.example.sampleapp", "--platform", "windows,android,web"}
+  );
 
   REQUIRE(invocation.result == 0);
   const std::filesystem::path project = temporary.Path() / "Sample-App";
@@ -76,6 +79,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/web/index.html.in"));
   REQUIRE_FALSE(std::filesystem::exists(project / "platform/macos"));
+  REQUIRE_FALSE(std::filesystem::exists(project / ".huxerui"));
   REQUIRE(Read(project / ".gitignore").find("/.huxerui/") != std::string::npos);
   const std::string cmake = Read(project / "CMakeLists.txt");
   REQUIRE(cmake.find("huxerui_add_app(sample_app") != std::string::npos);
@@ -83,30 +87,134 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(cmake.find("SOURCES\n            ${APP_SOURCE_FILES}") != std::string::npos);
   REQUIRE(cmake.find("RESOURCES\n            resources") != std::string::npos);
   REQUIRE(cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
+  REQUIRE(cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
+  REQUIRE(cmake.find("HUXERUI_MODULE_GRAPH_OUTPUT") != std::string::npos);
   const std::string android_settings = Read(project / "platform/android/settings.gradle");
   const std::string android_app = Read(project / "platform/android/app/build.gradle");
-  const std::string android_cmake = Read(project / "platform/android/app/src/main/cpp/CMakeLists.txt");
+  const std::string android_properties = Read(project / "platform/android/gradle.properties");
   REQUIRE(android_settings.find("project(\":HuxerUI\").projectDir") != std::string::npos);
+  REQUIRE(android_settings.find("huxeruiModuleGraph.modules.eachWithIndex") != std::string::npos);
+  REQUIRE(android_settings.find("module.sourceRoot") != std::string::npos);
+  REQUIRE(android_settings.find("providers.environmentVariable(\"HUXERUI_HOME\")") != std::string::npos);
   REQUIRE(android_settings.find("mavenCentral()") != std::string::npos);
   REQUIRE(android_app.find("implementation project(\":HuxerUI\")") != std::string::npos);
-  REQUIRE(android_app.find("huxeruiSdkRoot") == std::string::npos);
-  REQUIRE(android_cmake.find("HUXERUI_APP_SOURCE_FILES") != std::string::npos);
-  REQUIRE(android_cmake.find("${HUXERUI_APP_ROOT}/resources") != std::string::npos);
-  REQUIRE(android_cmake.find("src/main.cpp") == std::string::npos);
+  REQUIRE(android_app.find("implementation project(module.projectPath)") != std::string::npos);
+  REQUIRE(android_app.find("path = file(\"../../../CMakeLists.txt\")") != std::string::npos);
+  REQUIRE(android_app.find("-DHUXERUI_HOME=${huxeruiHome.absolutePath}") != std::string::npos);
+  REQUIRE(android_app.find("compileSdk = huxeruiCompileSdk") != std::string::npos);
+  REQUIRE(android_properties.find("huxeruiBuildNative=false") != std::string::npos);
+  REQUIRE_FALSE(std::filesystem::exists(project / "platform/android/app/src/main/cpp/CMakeLists.txt"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "platform/android/huxerui.cmake"));
   REQUIRE(std::filesystem::is_regular_file(
-      project / "platform/android/app/src/main/java/com/example/sample_app/MainActivity.java"
+      project / "platform/android/app/src/main/java/dev/example/sampleapp/MainActivity.java"
   ));
+}
+
+TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(
+      temporary.Path(),
+      {
+          "create",
+          "module",
+          "HuxerUI-CameraKit",
+          "--id",
+          "dev.example.camera.kit",
+          "--platform",
+          "android,ios,linux",
+      }
+  );
+
+  REQUIRE(invocation.result == 0);
+  const std::filesystem::path module = temporary.Path() / "HuxerUI-CameraKit";
+  const std::filesystem::path preview = module / "examples/preview";
+  REQUIRE(std::filesystem::is_regular_file(module / "include/huxer_ui_camera_kit/huxer_ui_camera_kit.h"));
+  REQUIRE(std::filesystem::is_regular_file(module / "src/huxer_ui_camera_kit.cpp"));
+  REQUIRE(std::filesystem::is_directory(module / "resources/images"));
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/android/build.gradle"));
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/android/src/main/AndroidManifest.xml"));
+  const std::string android_module = Read(module / "platform/android/build.gradle");
+  REQUIRE(android_module.find("id \"com.android.library\"") != std::string::npos);
+  REQUIRE(android_module.find("namespace = \"dev.example.camera.kit\"") != std::string::npos);
+  REQUIRE(Read(module / "platform/android/settings.gradle").find("version \"8.13.2\"") != std::string::npos);
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/ios/Package.swift"));
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/ios/Sources/HuxerUICameraKit/HuxerUICameraKit.swift"));
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/linux/src/.gitkeep"));
+  const std::string swift_package = Read(module / "platform/ios/Package.swift");
+  REQUIRE(swift_package.find("name: \"HuxerUI-CameraKit\"") != std::string::npos);
+  REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
+  const std::string module_cmake = Read(module / "CMakeLists.txt");
+  REQUIRE(module_cmake.find("huxerui_add_module(huxer_ui_camera_kit") != std::string::npos);
+  REQUIRE(module_cmake.find("RESOURCES\n            resources") != std::string::npos);
+  REQUIRE(module_cmake.find("RESOURCE_NAMESPACE\n            huxer_ui_camera_kit") != std::string::npos);
+  REQUIRE(module_cmake.find("huxerui_add_resources") == std::string::npos);
+  REQUIRE(
+      module_cmake.find("add_library(HuxerUICameraKit::HuxerUICameraKit ALIAS huxer_ui_camera_kit)") !=
+      std::string::npos
+  );
+  REQUIRE(module_cmake.find("platform/android/src/main/cpp/*.cpp") != std::string::npos);
+  REQUIRE(module_cmake.find("platform/linux/src/*.cpp") != std::string::npos);
+  const std::string preview_cmake = Read(preview / "CMakeLists.txt");
+  REQUIRE(preview_cmake.find("huxerui_add_app(example_huxer_ui_camera_kit") != std::string::npos);
+  REQUIRE(preview_cmake.find("TARGET HuxerUICameraKit::HuxerUICameraKit") != std::string::npos);
+  REQUIRE(preview_cmake.find("PATH \"${CMAKE_CURRENT_SOURCE_DIR}/../..\"") != std::string::npos);
+  REQUIRE(Read(preview / "src/main.cpp").find("huxer_ui_camera_kit::Install") != std::string::npos);
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/android/settings.gradle"));
+  REQUIRE(
+      std::filesystem::is_regular_file(preview / "platform/ios/example_huxer_ui_camera_kit.xcodeproj/project.pbxproj")
+  );
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/linux/.gitkeep"));
+
+  std::filesystem::remove_all(module / ".huxerui");
+  std::filesystem::remove_all(preview / ".huxerui");
+  const huxerui::cli::Project application =
+      huxerui::cli::ResolveApplicationProject(huxerui::cli::DiscoverProject(module));
+  REQUIRE(std::filesystem::equivalent(application.root, preview));
+  REQUIRE(application.platforms == std::vector<std::string>{"android", "ios", "linux"});
+  REQUIRE_FALSE(std::filesystem::exists(module / ".huxerui"));
+  REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
+
+  const Invocation doctor = Invoke(module, {"doctor", "all"});
+  REQUIRE(doctor.output.find("Project: " + preview.string()) != std::string::npos);
+  REQUIRE(doctor.output.find("missing app/build.gradle") == std::string::npos);
+  REQUIRE_FALSE(std::filesystem::exists(module / ".huxerui"));
+  REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
+}
+
+TEST_CASE("HuxerUICliCreatesCommonOnlyModulesWithoutNativeShells") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(temporary.Path(), {"create", "module", "AudioTools"});
+
+  REQUIRE(invocation.result == 0);
+  const std::filesystem::path module = temporary.Path() / "AudioTools";
+  REQUIRE(std::filesystem::is_regular_file(module / "CMakeLists.txt"));
+  REQUIRE(std::filesystem::is_regular_file(module / "examples/preview/CMakeLists.txt"));
+  REQUIRE_FALSE(std::filesystem::exists(module / "platform"));
+  REQUIRE_FALSE(std::filesystem::exists(module / "examples/preview/platform"));
+  const Invocation platform_add = Invoke(module, {"platform", "add", "android,macos"});
+  REQUIRE(platform_add.result == 0);
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/android/build.gradle"));
+  REQUIRE_FALSE(std::filesystem::exists(module / "platform/macos"));
+  REQUIRE(std::filesystem::is_regular_file(module / "examples/preview/platform/android/settings.gradle"));
+  REQUIRE(std::filesystem::is_regular_file(module / "examples/preview/platform/macos/Info.plist.in"));
+
+  const Invocation duplicate = Invoke(module, {"platform", "add", "windows,macos"});
+  REQUIRE(duplicate.result == 1);
+  REQUIRE_FALSE(std::filesystem::exists(module / "examples/preview/platform/windows"));
 }
 
 TEST_CASE("HuxerUICliRefusesInvalidAndExistingDestinations") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "../invalid"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "../invalid"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"create", "module", "camera--kit"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--id", "Invalid.ID"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"create", "sample"}).result == 2);
 
-  const Invocation first = Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"});
+  const Invocation first = Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"});
   REQUIRE(first.result == 0);
   const std::string cmake = Read(temporary.Path() / "sample/CMakeLists.txt");
 
-  const Invocation second = Invoke(temporary.Path(), {"create", "sample", "--platform", "android"});
+  const Invocation second = Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "android"});
   REQUIRE(second.result == 1);
   REQUIRE(Read(temporary.Path() / "sample/CMakeLists.txt") == cmake);
   REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "sample/platform/android"));
@@ -114,9 +222,13 @@ TEST_CASE("HuxerUICliRefusesInvalidAndExistingDestinations") {
 
 TEST_CASE("HuxerUICliAddsMissingPlatformsFromNestedProjectDirectories") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"}).result == 0);
+  REQUIRE(
+      Invoke(temporary.Path(), {"create", "app", "sample", "--id", "dev.example.custom", "--platform", "windows"})
+          .result == 0
+  );
   const std::filesystem::path nested = temporary.Path() / "sample/src/nested";
   std::filesystem::create_directories(nested);
+  std::filesystem::remove_all(temporary.Path() / "sample/.huxerui");
 
   const Invocation invocation = Invoke(nested, {"platform", "add", "all"});
 
@@ -126,12 +238,21 @@ TEST_CASE("HuxerUICliAddsMissingPlatformsFromNestedProjectDirectories") {
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/ios/sample.xcodeproj/project.pbxproj"));
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/web/index.html.in"));
+  REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/linux/.gitkeep"));
+  REQUIRE(
+      Read(temporary.Path() / "sample/platform/android/app/build.gradle").find("dev.example.custom") !=
+      std::string::npos
+  );
+  REQUIRE(
+      Read(temporary.Path() / "sample/platform/ios/Config/Base.xcconfig").find("dev.example.custom") !=
+      std::string::npos
+  );
   REQUIRE(Invoke(nested, {"platform", "add", "all"}).result == 1);
 }
 
 TEST_CASE("HuxerUICliDoctorReportsIncompleteAndUnknownPlatforms") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"}).result == 0);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::remove(project / "platform/windows/app.manifest");
   std::filesystem::create_directories(project / "platform/custom");
@@ -146,7 +267,7 @@ TEST_CASE("HuxerUICliDoctorReportsIncompleteAndUnknownPlatforms") {
 
 TEST_CASE("HuxerUICliDoctorAcceptsAReorganizedSourceDirectory") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"}).result == 0);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::rename(project / "src/main.cpp", project / "src/app.cpp");
 
@@ -157,7 +278,7 @@ TEST_CASE("HuxerUICliDoctorAcceptsAReorganizedSourceDirectory") {
 
 TEST_CASE("HuxerUICliRejectsUnknownPlatformsAsUsageErrors") {
   TemporaryDirectory temporary;
-  const Invocation invocation = Invoke(temporary.Path(), {"create", "sample", "--platform", "plan9"});
+  const Invocation invocation = Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "plan9"});
 
   REQUIRE(invocation.result == 2);
   REQUIRE(invocation.error.find("unknown platform: plan9") != std::string::npos);
@@ -191,7 +312,6 @@ TEST_CASE("HuxerUICliCreatesStableDesktopBuildCommands") {
           "-B",
           context.build_directory.string(),
           "-DCMAKE_BUILD_TYPE=Release",
-          "-DHUXERUI_SDK_ROOT=" + context.sdk_root.string(),
       }
   );
   REQUIRE(
@@ -206,14 +326,65 @@ TEST_CASE("HuxerUICliCreatesStableDesktopBuildCommands") {
   );
 }
 
+TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject") {
+  TemporaryDirectory temporary;
+  const huxerui::cli::PlatformDriver* linux = huxerui::cli::FindPlatformDriver("linux");
+  REQUIRE(linux != nullptr);
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::filesystem::path build = project / ".huxerui/build/linux/debug";
+  const huxerui::cli::PlatformCommandContext context{
+      project,
+      temporary.Path() / "sdk",
+      build,
+      "Ninja",
+      "debug",
+      {},
+  };
+
+  const std::vector<huxerui::cli::GeneratedFile> shell =
+      linux->CreateShell(huxerui::cli::MakeProjectTemplateContext("sample"));
+  REQUIRE(shell.size() == 1);
+  REQUIRE(shell.front().path == ".gitkeep");
+  REQUIRE(linux->ModuleGraphCommands(context).empty());
+
+  const std::vector<huxerui::cli::ProcessCommand> build_commands = linux->BuildCommands(context);
+  REQUIRE(build_commands.size() == 2);
+  REQUIRE(
+      build_commands[0].arguments ==
+      std::vector<std::string>{
+          "-G",
+          "Ninja",
+          "-S",
+          project.string(),
+          "-B",
+          build.string(),
+          "-DCMAKE_BUILD_TYPE=Debug",
+      }
+  );
+  REQUIRE(
+      build_commands[1].arguments ==
+      std::vector<std::string>{"--build", build.string(), "--config", "Debug", "--parallel"}
+  );
+
+  const std::filesystem::path artifact = build / "bin/sample";
+  const std::filesystem::path plan = build / "huxerui-integration/sample/Debug/app.json";
+  std::filesystem::create_directories(artifact.parent_path());
+  std::filesystem::create_directories(plan.parent_path());
+  std::ofstream(artifact) << "test\n";
+  std::ofstream(plan) << "{\n  \"artifact\": \"" << artifact.generic_string() << "\"\n}\n";
+
+  const std::vector<huxerui::cli::ProcessCommand> run_commands = linux->RunCommands(context);
+  REQUIRE(run_commands.size() == 1);
+  REQUIRE(run_commands[0].executable == artifact.string());
+  REQUIRE(run_commands[0].arguments.empty());
+  REQUIRE(std::filesystem::equivalent(run_commands[0].working_directory, artifact.parent_path()));
+}
+
 TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
   TemporaryDirectory temporary;
   const huxerui::cli::PlatformDriver* android = huxerui::cli::FindPlatformDriver("android");
   REQUIRE(android != nullptr);
   const std::filesystem::path sdk = temporary.Path() / "sdk";
-  const std::filesystem::path helper = sdk / "cmake/HuxerUIAndroidPlan.cmake";
-  std::filesystem::create_directories(helper.parent_path());
-  std::ofstream(helper) << "# test\n";
   const huxerui::cli::PlatformCommandContext context{
       temporary.Path() / "sample",
       sdk,
@@ -223,15 +394,65 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
       {},
   };
 
+  const std::vector<huxerui::cli::ProcessCommand> module_commands = android->ModuleGraphCommands(context);
   const std::vector<huxerui::cli::ProcessCommand> commands = android->BuildCommands(context);
 
-  REQUIRE(commands.size() == 2);
-  REQUIRE(commands[0].executable == "cmake");
+  REQUIRE(module_commands.size() == 1);
+  REQUIRE(module_commands[0].executable == "cmake");
   REQUIRE(
-      std::find(commands[0].arguments.begin(), commands[0].arguments.end(), "-DHUXERUI_SDK_ROOT=" + sdk.string()) !=
-      commands[0].arguments.end()
+      module_commands[0].arguments ==
+      std::vector<std::string>{
+          "-S",
+          context.project_root.string(),
+          "-B",
+          (context.project_root / ".huxerui/build/module-graph").string(),
+          "-DCMAKE_BUILD_TYPE=Debug",
+      }
   );
-  REQUIRE(commands[1].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(commands.size() == 1);
+  REQUIRE(commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(module_commands[0].working_directory == context.project_root);
+  REQUIRE(commands[0].working_directory == context.project_root / "platform/android");
+
+  huxerui::cli::PlatformCommandContext explicit_generator = context;
+  explicit_generator.cmake_generator = "Ninja";
+  REQUIRE_THROWS_WITH(
+      android->ModuleGraphCommands(explicit_generator),
+      "Android native builds do not use a CMake generator option"
+  );
+}
+
+TEST_CASE("HuxerUICliUsesGradleMetadataToLaunchAndroidApplications") {
+  TemporaryDirectory temporary;
+  const huxerui::cli::PlatformDriver* android = huxerui::cli::FindPlatformDriver("android");
+  REQUIRE(android != nullptr);
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::filesystem::path output = project / "platform/android/app/build/outputs/apk/debug";
+  const std::filesystem::path metadata = output / "output-metadata.json";
+  const std::filesystem::path apk = output / "sample-custom.apk";
+  std::filesystem::create_directories(metadata.parent_path());
+  std::ofstream(metadata) << "{\n"
+                             "  \"applicationId\": \"dev.example.sample.debug\",\n"
+                             "  \"elements\": [{\"outputFile\": \"sample-custom.apk\"}]\n"
+                             "}\n";
+  std::ofstream(apk) << "test\n";
+  const huxerui::cli::PlatformCommandContext context{
+      project,
+      temporary.Path() / "sdk",
+      project / ".huxerui/build/android/debug",
+      {},
+      "debug",
+      {},
+  };
+
+  const std::vector<huxerui::cli::ProcessCommand> commands = android->RunCommands(context);
+
+  REQUIRE(commands.size() == 2);
+  REQUIRE(commands[0].arguments == std::vector<std::string>{"install", "-r", apk.string()});
+  REQUIRE(
+      commands[1].arguments ==
+      std::vector<std::string>{"shell", "am", "start", "-n", "dev.example.sample.debug/.MainActivity"}
+  );
 }
 
 TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
@@ -264,7 +485,6 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
           "-B",
           build.string(),
           "-DCMAKE_BUILD_TYPE=Debug",
-          "-DHUXERUI_SDK_ROOT=" + context.sdk_root.string(),
       }
   );
   REQUIRE(build_commands[1].executable == "cmake");
@@ -299,7 +519,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
     return file.path == "Config/Base.xcconfig";
   });
   REQUIRE(base_configuration != shell.end());
-  REQUIRE(base_configuration->content.find("com.example.sample-app") != std::string::npos);
+  REQUIRE(base_configuration->content.find("com.example.sampleapp") != std::string::npos);
   REQUIRE(base_configuration->content.find("HUXERUI_LINK_OPTIONS_FILE") != std::string::npos);
   REQUIRE(base_configuration->content.find("@\"$(HUXERUI_LINK_OPTIONS_FILE)\"") != std::string::npos);
   REQUIRE(base_configuration->content.find("-framework UIKit") == std::string::npos);
@@ -308,9 +528,14 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   });
   REQUIRE(launch_screen != shell.end());
   REQUIRE(launch_screen->content.find("initialViewController=\"hux-controller\"") != std::string::npos);
-  REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
-            return file.path == "sample_app.xcodeproj/project.pbxproj";
-          }) != shell.end());
+  const auto xcode_project_file = std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "sample_app.xcodeproj/project.pbxproj";
+  });
+  REQUIRE(xcode_project_file != shell.end());
+  REQUIRE(xcode_project_file->content.find("XCLocalSwiftPackageReference") != std::string::npos);
+  REQUIRE(xcode_project_file->content.find("../../.huxerui/generated/ios/modules") != std::string::npos);
+  REQUIRE(xcode_project_file->content.find("productName = HuxerUIModules") != std::string::npos);
+  REQUIRE(xcode_project_file->content.find("productName = \"Sample-App\"") != std::string::npos);
   REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
             return file.path == "App/main.mm";
           }) != shell.end());
@@ -332,8 +557,21 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
       {},
   };
 
+  const std::vector<huxerui::cli::ProcessCommand> module_commands = ios->ModuleGraphCommands(context);
   const std::vector<huxerui::cli::ProcessCommand> build_commands = ios->BuildCommands(context);
 
+  REQUIRE(module_commands.size() == 1);
+  REQUIRE(module_commands[0].executable == "cmake");
+  REQUIRE(
+      module_commands[0].arguments ==
+      std::vector<std::string>{
+          "-S",
+          context.project_root.string(),
+          "-B",
+          (context.project_root / ".huxerui/build/module-graph").string(),
+          "-DCMAKE_BUILD_TYPE=Debug",
+      }
+  );
   REQUIRE(build_commands.size() == 1);
   REQUIRE(build_commands[0].executable == "xcodebuild");
   REQUIRE(
@@ -349,7 +587,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           (build / "DerivedData").string(),
           "-destination",
           "generic/platform=iOS Simulator",
-          "HUXERUI_SDK_ROOT=" + context.sdk_root.string(),
+          "HUXERUI_HOME=" + context.huxerui_home.string(),
           "HUXERUI_INTEGRATION_PLAN=" + (build / "huxerui-integration/app.json").string(),
           "build",
       }
@@ -405,7 +643,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           (physical_context.build_directory / "DerivedData").string(),
           "-destination",
           "id=00008130-000C048A1A90001C",
-          "HUXERUI_SDK_ROOT=" + physical_context.sdk_root.string(),
+          "HUXERUI_HOME=" + physical_context.huxerui_home.string(),
           "HUXERUI_INTEGRATION_PLAN=" + (physical_context.build_directory / "huxerui-integration/app.json").string(),
           "-allowProvisioningUpdates",
           "build",
@@ -464,19 +702,70 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   );
 }
 
-TEST_CASE("HuxerUICliConfiguresIosSdkWithoutReplacingLocalSigningSettings") {
+TEST_CASE("HuxerUICliGeneratesIosModuleIntegrationFromTheCommonGraph") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::filesystem::path camera = temporary.Path() / "camera module";
+  const std::filesystem::path maps = temporary.Path() / "maps";
+  const std::filesystem::path common = temporary.Path() / "common";
+  std::filesystem::create_directories(project / ".huxerui/generated");
+  std::filesystem::create_directories(camera / "platform/ios");
+  std::filesystem::create_directories(maps / "platform/ios");
+  std::filesystem::create_directories(common);
+  std::ofstream(camera / "platform/ios/Package.swift") << "// camera\n";
+  std::ofstream(maps / "platform/ios/Package.swift") << "// maps\n";
+  std::ofstream(project / ".huxerui/generated/modules.json")
+      << "{\n  \"schema\": 1,\n  \"modules\": [\n"
+      << "    {\"target\": \"HuxerUICameraKit::HuxerUICameraKit\", \"sourceRoot\": \"" << camera.generic_string()
+      << "\"},\n"
+      << "    {\"target\": \"CommonTools::CommonTools\", \"sourceRoot\": \"" << common.generic_string() << "\"},\n"
+      << "    {\"target\": \"map_view\", \"sourceRoot\": \"" << maps.generic_string() << "\"}\n"
+      << "  ]\n}\n";
+
+  huxerui::cli::UpdateIosModuleIntegration(project);
+
+  const std::filesystem::path integration = project / ".huxerui/generated/ios/modules";
+  const std::string manifest = Read(integration / "Package.swift");
+  const std::size_t camera_dependency = manifest.find(".package(name: \"HuxerUICameraKit\"");
+  const std::size_t maps_dependency = manifest.find(".package(name: \"MapView\"");
+  REQUIRE(camera_dependency != std::string::npos);
+  REQUIRE(maps_dependency != std::string::npos);
+  REQUIRE(camera_dependency < maps_dependency);
+  REQUIRE(manifest.find("HuxerUICameraKit") != std::string::npos);
+  REQUIRE(manifest.find("MapView") != std::string::npos);
+  REQUIRE(manifest.find("CommonTools") == std::string::npos);
+  REQUIRE(manifest.find(camera.generic_string()) != std::string::npos);
+  REQUIRE(std::filesystem::is_regular_file(integration / "Sources/HuxerUIModules/HuxerUIModules.swift"));
+}
+
+TEST_CASE("HuxerUICliRejectsIncompleteIosModulePackages") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::filesystem::path module = temporary.Path() / "camera";
+  std::filesystem::create_directories(project / ".huxerui/generated");
+  std::filesystem::create_directories(module / "platform/ios");
+  std::ofstream(project / ".huxerui/generated/modules.json")
+      << "{\n  \"schema\": 1,\n  \"modules\": [\n"
+      << "    {\"target\": \"CameraKit::CameraKit\", \"sourceRoot\": \"" << module.generic_string() << "\"}\n"
+      << "  ]\n}\n";
+
+  REQUIRE_THROWS_WITH(
+      huxerui::cli::UpdateIosModuleIntegration(project),
+      Catch::Matchers::ContainsSubstring("iOS module package is missing Package.swift")
+  );
+}
+
+TEST_CASE("HuxerUICliConfiguresIosHomeWithoutReplacingLocalSigningSettings") {
   TemporaryDirectory temporary;
   const std::filesystem::path configuration = temporary.Path() / "platform/ios/Config/Local.xcconfig";
   std::filesystem::create_directories(configuration.parent_path());
-  std::ofstream(configuration) << "DEVELOPMENT_TEAM = ABC123\nHUXERUI_SDK_ROOT = /old/sdk\n";
+  std::ofstream(configuration) << "DEVELOPMENT_TEAM = ABC123\nHUXERUI_HOME = /old/sdk\n";
 
-  huxerui::cli::ConfigureIosLocalSdk(temporary.Path(), temporary.Path() / "installed sdk");
+  huxerui::cli::ConfigureIosLocalHome(temporary.Path(), temporary.Path() / "installed sdk");
 
   const std::string content = Read(configuration);
   REQUIRE(content.find("DEVELOPMENT_TEAM = ABC123") != std::string::npos);
-  REQUIRE(
-      content.find("HUXERUI_SDK_ROOT = " + (temporary.Path() / "installed sdk").generic_string()) != std::string::npos
-  );
+  REQUIRE(content.find("HUXERUI_HOME = " + (temporary.Path() / "installed sdk").generic_string()) != std::string::npos);
   REQUIRE(content.find("/old/sdk") == std::string::npos);
 }
 
@@ -576,13 +865,19 @@ TEST_CASE("HuxerUICliRejectsDeviceDiscoveryForDesktopPlatforms") {
 
 TEST_CASE("HuxerUICliRejectsDeviceSelectionForDesktopRunsBeforeBuilding") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"}).result == 0);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   const std::vector<std::string_view> arguments{"run", "windows", "--device", "phone"};
   std::ostringstream output;
   std::ostringstream error;
 
-  const int result = huxerui::cli::Run(arguments, project, temporary.Path(), output, error);
+  const int result = huxerui::cli::Run(
+      arguments,
+      project,
+      {temporary.Path(), huxerui::cli::SdkLocationSource::Executable},
+      output,
+      error
+  );
 
   REQUIRE(result == 2);
   REQUIRE(error.str().find("--device is not supported for platform windows") != std::string::npos);
@@ -591,28 +886,24 @@ TEST_CASE("HuxerUICliRejectsDeviceSelectionForDesktopRunsBeforeBuilding") {
 
 TEST_CASE("HuxerUICliRejectsUnknownProjectPlatformsBeforeRun") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"create", "sample", "--platform", "windows"}).result == 0);
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::create_directories(project / "platform/custom");
   const std::vector<std::string_view> arguments{"run", "windows"};
   std::ostringstream output;
   std::ostringstream error;
 
-  const int result = huxerui::cli::Run(arguments, project, temporary.Path(), output, error);
+  const int result = huxerui::cli::Run(
+      arguments,
+      project,
+      {temporary.Path(), huxerui::cli::SdkLocationSource::Executable},
+      output,
+      error
+  );
 
   REQUIRE(result == 1);
   REQUIRE(error.str().find("unknown platform directory: custom") != std::string::npos);
   REQUIRE(output.str().empty());
-}
-
-TEST_CASE("HuxerUICliFindsCMakeHelpersInPortableInstallLayouts") {
-  TemporaryDirectory temporary;
-  const std::filesystem::path helper = temporary.Path() / "lib64/cmake/HuxerUI/HuxerUIAndroidPlan.cmake";
-  std::filesystem::create_directories(helper.parent_path());
-  std::ofstream(helper) << "# test\n";
-  std::ofstream(helper.parent_path() / "HuxerUIConfig.cmake") << "# test\n";
-
-  REQUIRE(huxerui::cli::LocateSdkCMakeFile(temporary.Path(), "HuxerUIAndroidPlan.cmake") == helper);
 }
 
 TEST_CASE("HuxerUICliDoctorReportsTheResolvedSdk") {
@@ -621,10 +912,16 @@ TEST_CASE("HuxerUICliDoctorReportsTheResolvedSdk") {
   std::ostringstream output;
   std::ostringstream error;
 
-  const int result = huxerui::cli::Run(arguments, temporary.Path(), temporary.Path(), output, error);
+  const int result = huxerui::cli::Run(
+      arguments,
+      temporary.Path(),
+      {temporary.Path(), huxerui::cli::SdkLocationSource::Environment},
+      output,
+      error
+  );
 
   REQUIRE(result == 0);
-  REQUIRE(output.str().find("[ok] HuxerUI SDK: " + temporary.Path().string()) != std::string::npos);
+  REQUIRE(output.str().find("[ok] HUXERUI_HOME (environment): " + temporary.Path().string()) != std::string::npos);
   REQUIRE(error.str().empty());
 }
 

@@ -39,10 +39,14 @@ std::filesystem::path InstalledCMakeDirectory(const std::filesystem::path& root)
   return {};
 }
 
-bool IsSdkRoot(const std::filesystem::path& path) {
+bool IsSdkHome(const std::filesystem::path& path) {
   const bool has_headers = std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h");
-  const bool source = std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake");
-  const bool installed = !InstalledCMakeDirectory(path).empty();
+  const bool source = std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
+                      std::filesystem::is_directory(path / "tools/prebuilt") &&
+                      std::filesystem::is_directory(path / "resources");
+  const bool installed = !InstalledCMakeDirectory(path).empty() &&
+                         std::filesystem::is_directory(path / "share/huxerui/tools") &&
+                         std::filesystem::is_regular_file(path / "share/huxerui/resources/huxerui/resources.bin");
   return has_headers && (source || installed);
 }
 
@@ -79,13 +83,16 @@ std::filesystem::path ExecutablePath(std::string_view argument_zero) {
   return Normalize(std::filesystem::path(std::string(argument_zero)));
 }
 
-std::filesystem::path LocateSdkRoot(const std::filesystem::path& executable_path) {
-  if (const std::optional<std::string> environment = ReadEnvironmentVariable("HUXERUI_SDK_ROOT")) {
-    const std::filesystem::path root = Normalize(*environment);
-    if (!IsSdkRoot(root)) {
-      throw std::runtime_error("HUXERUI_SDK_ROOT is not a HuxerUI SDK: " + root.string());
+SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
+  if (const std::optional<std::string> environment = ReadEnvironmentVariable("HUXERUI_HOME")) {
+    if (environment->empty()) {
+      throw std::runtime_error("HUXERUI_HOME is empty");
     }
-    return root;
+    const std::filesystem::path home = Normalize(*environment);
+    if (!IsSdkHome(home)) {
+      throw std::runtime_error("HUXERUI_HOME is not a HuxerUI SDK or source checkout: " + home.string());
+    }
+    return {home, SdkLocationSource::Environment};
   }
 
   const std::filesystem::path executable_directory = executable_path.parent_path();
@@ -94,26 +101,23 @@ std::filesystem::path LocateSdkRoot(const std::filesystem::path& executable_path
       executable_directory.parent_path().parent_path(),
   };
   for (const std::filesystem::path& candidate : candidates) {
-    if (IsSdkRoot(candidate)) {
-      return Normalize(candidate);
+    if (IsSdkHome(candidate)) {
+      return {Normalize(candidate), SdkLocationSource::Executable};
     }
   }
   return {};
 }
 
-std::filesystem::path LocateSdkCMakeFile(const std::filesystem::path& sdk_root, std::string_view name) {
-  const std::filesystem::path source_file = sdk_root / "cmake" / name;
-  if (std::filesystem::is_regular_file(source_file)) {
-    return source_file;
+std::string_view SdkLocationSourceName(SdkLocationSource source) noexcept {
+  switch (source) {
+  case SdkLocationSource::Missing:
+    return "missing";
+  case SdkLocationSource::Environment:
+    return "environment";
+  case SdkLocationSource::Executable:
+    return "executable";
   }
-  const std::filesystem::path installed_directory = InstalledCMakeDirectory(sdk_root);
-  if (!installed_directory.empty()) {
-    const std::filesystem::path installed_file = installed_directory / name;
-    if (std::filesystem::is_regular_file(installed_file)) {
-      return installed_file;
-    }
-  }
-  throw std::runtime_error("HuxerUI SDK CMake file is missing: " + std::string(name));
+  return "missing";
 }
 
 } // namespace huxerui::cli

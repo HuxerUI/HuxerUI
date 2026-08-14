@@ -1,18 +1,17 @@
 #include "ios_project.h"
 
-#include <algorithm>
+#include <cctype>
 #include <fstream>
+#include <iterator>
+#include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+
+#include "project.h"
 
 namespace huxerui::cli {
 namespace {
-
-ProjectTemplateContext AppleContext(const ProjectTemplateContext& context) {
-  ProjectTemplateContext result = context;
-  std::replace(result.package_name.begin(), result.package_name.end(), '_', '-');
-  return result;
-}
 
 void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement) {
   std::size_t offset = 0;
@@ -46,13 +45,216 @@ std::string EscapePbxString(std::string_view value) {
   return escaped;
 }
 
+void SkipJsonWhitespace(std::string_view json, std::size_t& offset) {
+  while (offset < json.size() && std::isspace(static_cast<unsigned char>(json[offset]))) {
+    ++offset;
+  }
+}
+
+void ExpectJsonCharacter(std::string_view json, std::size_t& offset, char expected) {
+  SkipJsonWhitespace(json, offset);
+  if (offset >= json.size() || json[offset] != expected) {
+    throw std::runtime_error("HuxerUI iOS module graph is malformed");
+  }
+  ++offset;
+}
+
+std::string ParseJsonString(std::string_view json, std::size_t& offset) {
+  SkipJsonWhitespace(json, offset);
+  if (offset >= json.size() || json[offset++] != '"') {
+    throw std::runtime_error("HuxerUI iOS module graph contains a non-string value");
+  }
+
+  std::string value;
+  while (offset < json.size()) {
+    const char character = json[offset++];
+    if (character == '"') {
+      return value;
+    }
+    if (character != '\\') {
+      if (static_cast<unsigned char>(character) < 0x20) {
+        throw std::runtime_error("HuxerUI iOS module graph contains an unescaped control character");
+      }
+      value += character;
+      continue;
+    }
+    if (offset >= json.size()) {
+      break;
+    }
+    switch (json[offset++]) {
+    case '"':
+      value += '"';
+      break;
+    case '\\':
+      value += '\\';
+      break;
+    case '/':
+      value += '/';
+      break;
+    case 'b':
+      value += '\b';
+      break;
+    case 'f':
+      value += '\f';
+      break;
+    case 'n':
+      value += '\n';
+      break;
+    case 'r':
+      value += '\r';
+      break;
+    case 't':
+      value += '\t';
+      break;
+    default:
+      throw std::runtime_error("HuxerUI iOS module graph contains an unsupported string escape");
+    }
+  }
+  throw std::runtime_error("HuxerUI iOS module graph contains an unterminated string");
+}
+
+void ExpectJsonKey(std::string_view json, std::size_t& offset, std::string_view expected) {
+  if (ParseJsonString(json, offset) != expected) {
+    throw std::runtime_error("HuxerUI iOS module graph contains an unexpected field");
+  }
+  ExpectJsonCharacter(json, offset, ':');
+}
+
+struct IosModulePackage {
+  std::string target;
+  std::filesystem::path path;
+  std::string product;
+};
+
+std::string ModuleProductName(std::string_view target) {
+  const std::size_t separator = target.rfind("::");
+  if (separator == std::string_view::npos) {
+    return MakeModuleProductName(target);
+  }
+  const std::string_view product = target.substr(separator + 2);
+  if (product.empty()) {
+    throw std::runtime_error("HuxerUI iOS module target has an empty product name: " + std::string(target));
+  }
+  return std::string(product);
+}
+
+std::vector<IosModulePackage> ParseIosModulePackages(std::string_view json) {
+  std::size_t offset = 0;
+  ExpectJsonCharacter(json, offset, '{');
+  ExpectJsonKey(json, offset, "schema");
+  SkipJsonWhitespace(json, offset);
+  if (offset >= json.size() || json[offset++] != '1') {
+    throw std::runtime_error("HuxerUI iOS module graph has an unsupported schema");
+  }
+  ExpectJsonCharacter(json, offset, ',');
+  ExpectJsonKey(json, offset, "modules");
+  ExpectJsonCharacter(json, offset, '[');
+
+  std::vector<IosModulePackage> modules;
+  std::set<std::string> targets;
+  std::set<std::string> products;
+  SkipJsonWhitespace(json, offset);
+  while (offset < json.size() && json[offset] != ']') {
+    ExpectJsonCharacter(json, offset, '{');
+    ExpectJsonKey(json, offset, "target");
+    std::string target = ParseJsonString(json, offset);
+    ExpectJsonCharacter(json, offset, ',');
+    ExpectJsonKey(json, offset, "sourceRoot");
+    const std::filesystem::path source_root = ParseJsonString(json, offset);
+    ExpectJsonCharacter(json, offset, '}');
+
+    const std::filesystem::path package = source_root / "platform/ios";
+    if (std::filesystem::is_directory(package)) {
+      if (!std::filesystem::is_regular_file(package / "Package.swift")) {
+        throw std::runtime_error("HuxerUI iOS module package is missing Package.swift: " + package.string());
+      }
+      std::string product = ModuleProductName(target);
+      if (!targets.insert(target).second) {
+        throw std::runtime_error("HuxerUI iOS module target is duplicated: " + target);
+      }
+      if (!products.insert(product).second) {
+        throw std::runtime_error("HuxerUI iOS module product is duplicated: " + product);
+      }
+      modules.push_back({std::move(target), package, std::move(product)});
+    }
+
+    SkipJsonWhitespace(json, offset);
+    if (offset < json.size() && json[offset] == ',') {
+      ++offset;
+      SkipJsonWhitespace(json, offset);
+    } else {
+      break;
+    }
+  }
+  ExpectJsonCharacter(json, offset, ']');
+  ExpectJsonCharacter(json, offset, '}');
+  SkipJsonWhitespace(json, offset);
+  if (offset != json.size()) {
+    throw std::runtime_error("HuxerUI iOS module graph contains trailing data");
+  }
+  return modules;
+}
+
+std::string EscapeSwiftString(std::string_view value) {
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (const char character : value) {
+    switch (character) {
+    case '\\':
+      escaped += "\\\\";
+      break;
+    case '"':
+      escaped += "\\\"";
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      escaped += "\\r";
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      if (static_cast<unsigned char>(character) < 0x20) {
+        throw std::runtime_error("HuxerUI iOS module path contains an unsupported control character");
+      }
+      escaped += character;
+      break;
+    }
+  }
+  return escaped;
+}
+
+void WriteFile(const std::filesystem::path& path, std::string_view content) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output || !output.write(content.data(), static_cast<std::streamsize>(content.size()))) {
+    throw std::runtime_error("HuxerUI cannot write iOS module integration: " + path.string());
+  }
+}
+
 } // namespace
 
+std::vector<GeneratedFile> CreateIosModulePackage(const ProjectTemplateContext& context) {
+  const std::string product = MakeModuleProductName(context.project_name);
+  return {
+      {".gitignore", ".build/\n.swiftpm/\nxcuserdata/\n"},
+      {"Package.swift",
+       "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"" +
+           context.project_name +
+           "\",\n    platforms: [\n        .iOS(.v13),\n    ],\n    products: [\n        .library(\n            name: "
+           "\"" +
+           product + "\",\n            targets: [\"" + product +
+           "\"]\n        ),\n    ],\n    targets: [\n        .target(name: \"" + product + "\"),\n    ]\n)\n"},
+      {"Sources/" + product + "/" + product + ".swift", ""},
+  };
+}
+
 std::vector<GeneratedFile> CreateIosProject(const ProjectTemplateContext& context) {
-  const ProjectTemplateContext apple_context = AppleContext(context);
-  const std::string build_script = apple_context.Render(R"TEMPLATE(set -eu
-if [ -z "${HUXERUI_SDK_ROOT:-}" ]; then
-  echo "error: HUXERUI_SDK_ROOT is not configured; set it in Config/Local.xcconfig" >&2
+  const std::string build_script = context.Render(R"TEMPLATE(set -eu
+if [ -z "${HUXERUI_HOME:-}" ]; then
+  echo "error: HUXERUI_HOME is not configured; set it in Config/Local.xcconfig" >&2
   exit 1
 fi
 HUXERUI_CMAKE_ARCHS=$(printf '%s' "$ARCHS" | tr ' ' ';')
@@ -62,14 +264,14 @@ cmake -S "$HUXERUI_PROJECT_ROOT" -B "$HUXERUI_CORE_BUILD_DIR" \
   -DCMAKE_OSX_ARCHITECTURES="$HUXERUI_CMAKE_ARCHS" \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" \
   -DCMAKE_BUILD_TYPE="$CONFIGURATION" \
-  -DHUXERUI_SDK_ROOT="$HUXERUI_SDK_ROOT" \
+  -DHUXERUI_HOME="$HUXERUI_HOME" \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_TESTS=OFF \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
   -DHUXERUI_BUILD_CLI=OFF
 cmake --build "$HUXERUI_CORE_BUILD_DIR" --target @TARGET_NAME@_huxerui_ios_core --parallel
 )TEMPLATE");
-  const std::string stage_script = apple_context.Render(R"TEMPLATE(set -eu
+  const std::string stage_script = context.Render(R"TEMPLATE(set -eu
 HUXERUI_RESOURCE_SOURCE="$HUXERUI_CORE_BUILD_DIR/huxerui-resources/@TARGET_NAME@/package"
 HUXERUI_RESOURCE_DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI"
 cmake -E remove_directory "$HUXERUI_RESOURCE_DESTINATION"
@@ -89,7 +291,7 @@ if [ -n "${HUXERUI_INTEGRATION_PLAN:-}" ]; then
   } > "$HUXERUI_INTEGRATION_PLAN"
 fi
 )TEMPLATE");
-  std::string project = apple_context.Render(R"TEMPLATE(// !$*UTF8*$!
+  std::string project = context.Render(R"TEMPLATE(// !$*UTF8*$!
 {
 	archiveVersion = 1;
 	classes = {};
@@ -108,6 +310,10 @@ fi
 		000000000000000000000103 /* LaunchScreen.storyboard in Resources */ = {
 			isa = PBXBuildFile;
 			fileRef = 000000000000000000000204 /* LaunchScreen.storyboard */;
+		};
+		000000000000000000000104 /* HuxerUIModules in Frameworks */ = {
+			isa = PBXBuildFile;
+			productRef = 000000000000000000000901 /* HuxerUIModules */;
 		};
 /* End PBXBuildFile section */
 
@@ -173,7 +379,9 @@ fi
 		000000000000000000000302 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				000000000000000000000104 /* HuxerUIModules in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -234,7 +442,10 @@ fi
 			buildRules = ();
 			dependencies = ();
 			name = @TARGET_NAME@;
-			productName = @PROJECT_NAME@;
+			packageProductDependencies = (
+				000000000000000000000901 /* HuxerUIModules */,
+			);
+			productName = "@PROJECT_NAME@";
 			productReference = 000000000000000000000200 /* @PROJECT_NAME@.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -261,6 +472,9 @@ fi
 				Base,
 			);
 			mainGroup = 000000000000000000000400;
+			packageReferences = (
+				000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */,
+			);
 			productRefGroup = 000000000000000000000403 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -381,6 +595,21 @@ fi
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../.huxerui/generated/ios/modules;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		000000000000000000000901 /* HuxerUIModules */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */;
+			productName = HuxerUIModules;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000600 /* Project object */;
 }
@@ -389,8 +618,8 @@ fi
   ReplaceAll(project, "@STAGE_SCRIPT@", EscapePbxString(stage_script));
   return {
       {".gitignore", "DerivedData/\nxcuserdata/\n*.xcuserstate\narchives/\nConfig/Local.xcconfig\n"},
-      {"Config/Base.xcconfig", apple_context.Render(R"TEMPLATE(PRODUCT_NAME = @PROJECT_NAME@
-PRODUCT_BUNDLE_IDENTIFIER = @PACKAGE_NAME@
+      {"Config/Base.xcconfig", context.Render(R"TEMPLATE(PRODUCT_NAME = @PROJECT_NAME@
+PRODUCT_BUNDLE_IDENTIFIER = @PROJECT_ID@
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
 IPHONEOS_DEPLOYMENT_TARGET = 13.0
@@ -431,7 +660,7 @@ int main() {
   }
 }
 )TEMPLATE"},
-      {"App/Info.plist", apple_context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
+      {"App/Info.plist", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -547,9 +776,9 @@ int main() {
   }
 }
 )TEMPLATE"},
-      {apple_context.Render("@TARGET_NAME@.xcodeproj/project.pbxproj"), std::move(project)},
-      {apple_context.Render("@TARGET_NAME@.xcodeproj/xcshareddata/xcschemes/@TARGET_NAME@.xcscheme"),
-       apple_context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
+      {context.Render("@TARGET_NAME@.xcodeproj/project.pbxproj"), std::move(project)},
+      {context.Render("@TARGET_NAME@.xcodeproj/xcshareddata/xcschemes/@TARGET_NAME@.xcscheme"),
+       context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="1600" version="1.7">
   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
     <BuildActionEntries>
@@ -607,9 +836,60 @@ int main() {
   };
 }
 
-void ConfigureIosLocalSdk(const std::filesystem::path& project_root, const std::filesystem::path& sdk_root) {
-  if (sdk_root.empty()) {
-    throw std::invalid_argument("HuxerUI iOS local configuration requires an SDK root");
+void UpdateIosModuleIntegration(const std::filesystem::path& project_root) {
+  const std::filesystem::path graph = project_root / ".huxerui/generated/modules.json";
+  std::ifstream input(graph, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error("HuxerUI iOS module graph is missing: " + graph.string());
+  }
+  const std::string json{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  const std::vector<IosModulePackage> modules = ParseIosModulePackages(json);
+
+  std::string manifest = R"TEMPLATE(// swift-tools-version: 5.9
+
+import PackageDescription
+
+let package = Package(
+    name: "HuxerUIModules",
+    platforms: [
+        .iOS(.v13),
+    ],
+    products: [
+        .library(
+            name: "HuxerUIModules",
+            targets: ["HuxerUIModules"]
+        ),
+    ],
+    dependencies: [
+)TEMPLATE";
+  for (const IosModulePackage& module : modules) {
+    manifest += "        .package(name: \"" + EscapeSwiftString(module.product) + "\", path: \"" +
+                EscapeSwiftString(module.path.generic_string()) + "\"),\n";
+  }
+  manifest += R"TEMPLATE(    ],
+    targets: [
+        .target(
+            name: "HuxerUIModules",
+            dependencies: [
+)TEMPLATE";
+  for (const IosModulePackage& module : modules) {
+    manifest += "                .product(name: \"" + EscapeSwiftString(module.product) + "\", package: \"" +
+                EscapeSwiftString(module.product) + "\"),\n";
+  }
+  manifest += R"TEMPLATE(            ]
+        ),
+    ]
+)
+)TEMPLATE";
+
+  const std::filesystem::path output = project_root / ".huxerui/generated/ios/modules";
+  WriteFile(output / "Package.swift", manifest);
+  WriteFile(output / "Sources/HuxerUIModules/HuxerUIModules.swift", "enum HuxerUIModulesAnchor {}\n");
+}
+
+void ConfigureIosLocalHome(const std::filesystem::path& project_root, const std::filesystem::path& huxerui_home) {
+  if (huxerui_home.empty()) {
+    throw std::invalid_argument("HuxerUI iOS local configuration requires HUXERUI_HOME");
   }
   const std::filesystem::path configuration = project_root / "platform/ios/Config/Local.xcconfig";
   if (!std::filesystem::is_directory(configuration.parent_path())) {
@@ -621,8 +901,8 @@ void ConfigureIosLocalSdk(const std::filesystem::path& project_root, const std::
     content.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
   }
 
-  constexpr std::string_view setting_name = "HUXERUI_SDK_ROOT";
-  const std::string setting = std::string(setting_name) + " = " + sdk_root.generic_string();
+  constexpr std::string_view setting_name = "HUXERUI_HOME";
+  const std::string setting = std::string(setting_name) + " = " + huxerui_home.generic_string();
   bool replaced = false;
   std::size_t line_start = 0;
   while (line_start < content.size()) {

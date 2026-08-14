@@ -28,7 +28,8 @@ constexpr std::string_view version = HUXERUI_CLI_VERSION;
 void PrintHelp(std::ostream& output) {
   output << "HuxerUI project and platform tool\n\n"
          << "Usage:\n"
-         << "  huxerui create <name> [-p|--platform <platform-list>]\n"
+         << "  huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
+         << "  huxerui create module <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui devices [platform]\n"
@@ -136,31 +137,71 @@ bool FindExecutable(std::string_view name) {
 int RunCreate(
     std::span<const std::string_view> arguments, const std::filesystem::path& working_directory, std::ostream& output
 ) {
-  if (arguments.size() < 2) {
-    throw UsageError("create requires a project name");
+  if (arguments.size() < 3) {
+    throw UsageError("create requires app or module and a project name");
   }
-  if (!IsValidProjectName(arguments[1])) {
+  ProjectKind kind;
+  if (arguments[1] == "app") {
+    kind = ProjectKind::App;
+  } else if (arguments[1] == "module") {
+    kind = ProjectKind::Module;
+  } else {
+    throw UsageError("create kind must be app or module");
+  }
+  if (!IsValidProjectName(arguments[2])) {
     throw UsageError("project name must start with a letter and contain only letters, digits, underscores, or hyphens");
   }
-  const ProjectTemplateContext context = MakeProjectTemplateContext(arguments[1]);
-  std::string_view platform_list = "all";
-  for (std::size_t index = 2; index < arguments.size(); ++index) {
-    if (arguments[index] != "-p" && arguments[index] != "--platform") {
+  if (kind == ProjectKind::Module && !IsValidModuleProjectName(arguments[2])) {
+    throw UsageError(
+        "module name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
+    );
+  }
+
+  std::optional<std::string_view> project_id;
+  std::optional<std::string_view> platform_list;
+  bool platform_specified = false;
+  if (kind == ProjectKind::App) {
+    platform_list = "all";
+  }
+  for (std::size_t index = 3; index < arguments.size(); ++index) {
+    const std::string_view argument = arguments[index];
+    if (argument != "-p" && argument != "--platform" && argument != "--id") {
       throw UsageError("unexpected create argument: " + std::string(arguments[index]));
     }
     if (++index >= arguments.size()) {
-      throw UsageError("--platform requires a value");
+      throw UsageError(std::string(argument) + " requires a value");
     }
-    platform_list = arguments[index];
+    if (argument == "--id") {
+      if (project_id) {
+        throw UsageError("--id may be specified only once");
+      }
+      project_id = arguments[index];
+    } else {
+      if (platform_specified) {
+        throw UsageError("--platform may be specified only once");
+      }
+      platform_list = arguments[index];
+      platform_specified = true;
+    }
   }
 
-  const std::vector<const PlatformDriver*> platforms = ResolvePlatforms(platform_list);
+  if (project_id && !IsValidProjectId(*project_id)) {
+    throw UsageError("project ID must be a lowercase reverse-domain identifier with letter-prefixed segments");
+  }
+  const ProjectTemplateContext context = kind == ProjectKind::Module
+                                             ? MakeModuleProjectTemplateContext(arguments[2], project_id.value_or(""))
+                                             : MakeProjectTemplateContext(arguments[2], project_id.value_or(""));
+  const std::vector<const PlatformDriver*> platforms =
+      platform_list ? ResolvePlatforms(*platform_list) : std::vector<const PlatformDriver*>{};
   const std::filesystem::path destination = working_directory / context.project_name;
-  CreateProject(destination, context, platforms);
+  CreateProject(destination, kind, context, platforms);
 
-  output << "Created " << destination.string() << "\nPlatforms:";
+  output << "Created " << (kind == ProjectKind::App ? "app " : "module ") << destination.string() << "\nPlatforms:";
   for (const PlatformDriver* platform : platforms) {
     output << ' ' << platform->Id();
+  }
+  if (platforms.empty()) {
+    output << " none";
   }
   output << '\n';
   return 0;
@@ -174,16 +215,17 @@ int RunPlatform(
   }
 
   const Project project = DiscoverProject(working_directory);
-  const ProjectTemplateContext context = MakeProjectTemplateContext(project.root.filename().string());
+  const auto [kind, context] = LoadProjectTemplateContext(project);
   std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
   if (arguments[2] == "all") {
     platforms.erase(
         std::remove_if(
             platforms.begin(),
             platforms.end(),
-            [&project](const PlatformDriver* platform) {
-              return std::find(project.platforms.begin(), project.platforms.end(), platform->Id()) !=
-                     project.platforms.end();
+            [&project, kind](const PlatformDriver* platform) {
+              const std::filesystem::path platform_root =
+                  kind == ProjectKind::App ? project.root / "platform" : project.root / "examples/preview/platform";
+              return std::filesystem::is_directory(platform_root / platform->Id());
             }
         ),
         platforms.end()
@@ -192,7 +234,7 @@ int RunPlatform(
       throw std::runtime_error("all available platforms are already enabled");
     }
   }
-  AddProjectPlatforms(project, context, platforms);
+  AddProjectPlatforms(project, kind, context, platforms);
 
   output << "Added platforms:";
   for (const PlatformDriver* platform : platforms) {
@@ -205,7 +247,7 @@ int RunPlatform(
 int RunDoctor(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
-    const std::filesystem::path& sdk_root,
+    const SdkLocation& sdk,
     std::ostream& output
 ) {
   if (arguments.size() > 2) {
@@ -215,11 +257,11 @@ int RunDoctor(
   bool failed = false;
   output << "HuxerUI CLI " << version << '\n';
   output << "Host: " << CurrentHostId() << '\n';
-  if (sdk_root.empty()) {
-    output << "[missing] HuxerUI SDK; set HUXERUI_SDK_ROOT\n";
+  if (sdk.home.empty()) {
+    output << "[missing] HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME\n";
     failed = true;
   } else {
-    output << "[ok] HuxerUI SDK: " << sdk_root.string() << '\n';
+    output << "[ok] HUXERUI_HOME (" << SdkLocationSourceName(sdk.source) << "): " << sdk.home.string() << '\n';
   }
   if (FindExecutable("cmake")) {
     output << "[ok] cmake\n";
@@ -228,7 +270,10 @@ int RunDoctor(
     failed = true;
   }
 
-  const std::optional<Project> project = TryDiscoverProject(working_directory);
+  std::optional<Project> project = TryDiscoverProject(working_directory);
+  if (project) {
+    project = ResolveApplicationProject(*project);
+  }
   std::vector<const PlatformDriver*> platforms;
   if (!project) {
     output << "Project: not found\n";
@@ -441,7 +486,7 @@ std::vector<const PlatformDriver*> ResolveBuildPlatforms(
 PlatformCommandContext MakeCommandContext(
     const Project& project,
     const PlatformDriver& platform,
-    const std::filesystem::path& sdk_root,
+    const std::filesystem::path& huxerui_home,
     const BuildOptions& options
 ) {
   std::string build_variant(platform.Id());
@@ -451,14 +496,14 @@ PlatformCommandContext MakeCommandContext(
   }
   const std::filesystem::path build_directory = project.root / ".huxerui/build" / build_variant / options.profile;
   std::string cmake_generator = options.cmake_generator;
-  if (platform.Id() != "ios" && cmake_generator.empty() &&
+  if (platform.Id() != "android" && platform.Id() != "ios" && cmake_generator.empty() &&
       !std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
       !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {
     cmake_generator = "Ninja";
   }
   return {
       project.root,
-      sdk_root,
+      huxerui_home,
       build_directory,
       std::move(cmake_generator),
       options.profile,
@@ -482,14 +527,15 @@ void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& out
 void BuildPlatform(
     const Project& project,
     const PlatformDriver& platform,
-    const std::filesystem::path& sdk_root,
+    const std::filesystem::path& huxerui_home,
     const BuildOptions& options,
     std::ostream& output
 ) {
   output << "Building " << platform.Id() << " (" << options.profile << ")\n";
-  const PlatformCommandContext context = MakeCommandContext(project, platform, sdk_root, options);
-  const std::vector<ProcessCommand> commands = platform.BuildCommands(context);
-  ExecuteCommands(commands, output);
+  const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
+  ExecuteCommands(platform.ModuleGraphCommands(context), output);
+  platform.UpdateModuleIntegration(context);
+  ExecuteCommands(platform.BuildCommands(context), output);
 }
 
 std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::string_view requested) {
@@ -537,14 +583,14 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
 int RunBuild(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
-    const std::filesystem::path& sdk_root,
+    const std::filesystem::path& huxerui_home,
     std::ostream& output
 ) {
-  if (sdk_root.empty()) {
-    throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
+  if (huxerui_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
   BuildOptions options = ParseBuildOptions(arguments, {});
-  const Project project = DiscoverProject(working_directory);
+  const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
@@ -554,7 +600,7 @@ int RunBuild(
     options.selected_device = SelectDevice(*platforms.front(), options.device);
   }
   for (const PlatformDriver* platform : platforms) {
-    BuildPlatform(project, *platform, sdk_root, options, output);
+    BuildPlatform(project, *platform, huxerui_home, options, output);
   }
   return 0;
 }
@@ -562,14 +608,14 @@ int RunBuild(
 int RunApplication(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
-    const std::filesystem::path& sdk_root,
+    const std::filesystem::path& huxerui_home,
     std::ostream& output
 ) {
-  if (sdk_root.empty()) {
-    throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
+  if (huxerui_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
   BuildOptions options = ParseBuildOptions(arguments, "run");
-  const Project project = DiscoverProject(working_directory);
+  const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
@@ -585,10 +631,10 @@ int RunApplication(
     }
     output << '\n';
   }
-  BuildPlatform(project, platform, sdk_root, options, output);
+  BuildPlatform(project, platform, huxerui_home, options, output);
 
   output << "Running " << platform.Id() << '\n';
-  const PlatformCommandContext context = MakeCommandContext(project, platform, sdk_root, options);
+  const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   const std::vector<ProcessCommand> commands = platform.RunCommands(context);
   ExecuteCommands(commands, output);
   return 0;
@@ -597,7 +643,7 @@ int RunApplication(
 int RunOpen(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
-    const std::filesystem::path& sdk_root,
+    const std::filesystem::path& huxerui_home,
     std::ostream& output
 ) {
   if (arguments.size() != 2 || arguments[1] != "ios") {
@@ -605,7 +651,7 @@ int RunOpen(
   }
   BuildOptions options;
   options.platforms = "ios";
-  const Project project = DiscoverProject(working_directory);
+  const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
@@ -614,13 +660,15 @@ int RunOpen(
   if (platform.Id() != "ios") {
     throw UsageError("open currently supports ios only");
   }
-  if (sdk_root.empty()) {
-    throw std::runtime_error("cannot locate the HuxerUI SDK; set HUXERUI_SDK_ROOT");
+  if (huxerui_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
 
-  ConfigureIosLocalSdk(project.root, sdk_root);
+  ConfigureIosLocalHome(project.root, huxerui_home);
   output << "Opening ios Xcode project\n";
-  const PlatformCommandContext context = MakeCommandContext(project, platform, sdk_root, options);
+  const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
+  ExecuteCommands(platform.ModuleGraphCommands(context), output);
+  platform.UpdateModuleIntegration(context);
   ExecuteCommands(platform.OpenCommands(context), output);
   return 0;
 }
@@ -630,7 +678,7 @@ int RunOpen(
 int Run(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
-    const std::filesystem::path& sdk_root,
+    const SdkLocation& sdk,
     std::ostream& output,
     std::ostream& error
 ) {
@@ -650,19 +698,19 @@ int Run(
       return RunPlatform(arguments, working_directory, output);
     }
     if (arguments[0] == "doctor") {
-      return RunDoctor(arguments, working_directory, sdk_root, output);
+      return RunDoctor(arguments, working_directory, sdk, output);
     }
     if (arguments[0] == "devices") {
       return RunDevices(arguments, output);
     }
     if (arguments[0] == "build") {
-      return RunBuild(arguments, working_directory, sdk_root, output);
+      return RunBuild(arguments, working_directory, sdk.home, output);
     }
     if (arguments[0] == "run") {
-      return RunApplication(arguments, working_directory, sdk_root, output);
+      return RunApplication(arguments, working_directory, sdk.home, output);
     }
     if (arguments[0] == "open") {
-      return RunOpen(arguments, working_directory, sdk_root, output);
+      return RunOpen(arguments, working_directory, sdk.home, output);
     }
     throw UsageError("unknown command: " + std::string(arguments[0]));
   } catch (const UsageError& exception) {

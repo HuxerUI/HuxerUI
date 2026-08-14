@@ -251,13 +251,6 @@ add_test(NAME HuxerUIModuleValidationTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/module_validation.cmake"
 )
 
-add_test(NAME HuxerUIAndroidPlanTests
-        COMMAND "${CMAKE_COMMAND}"
-                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
-                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android_platform_plan.cmake"
-)
-
 if (TARGET huxerui_cli_core)
     add_executable(huxerui_cli_tests
             tests_main.cpp

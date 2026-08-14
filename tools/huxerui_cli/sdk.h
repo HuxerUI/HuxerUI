@@ -5,8 +5,19 @@
 
 namespace huxerui::cli {
 
+enum class SdkLocationSource {
+  Missing,
+  Environment,
+  Executable,
+};
+
+struct SdkLocation {
+  std::filesystem::path home;
+  SdkLocationSource source = SdkLocationSource::Missing;
+};
+
 [[nodiscard]] std::filesystem::path ExecutablePath(std::string_view argument_zero);
-[[nodiscard]] std::filesystem::path LocateSdkRoot(const std::filesystem::path& executable_path);
-[[nodiscard]] std::filesystem::path LocateSdkCMakeFile(const std::filesystem::path& sdk_root, std::string_view name);
+[[nodiscard]] SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
+[[nodiscard]] std::string_view SdkLocationSourceName(SdkLocationSource source) noexcept;
 
 } // namespace huxerui::cli

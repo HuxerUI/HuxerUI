@@ -155,12 +155,6 @@ std::string ProfileConfiguration(std::string_view profile) {
   throw std::invalid_argument("unknown build profile: " + std::string(profile));
 }
 
-ProjectTemplateContext AppleTemplateContext(const ProjectTemplateContext& context) {
-  ProjectTemplateContext result = context;
-  std::replace(result.package_name.begin(), result.package_name.end(), '_', '-');
-  return result;
-}
-
 bool IsIosPhysicalDevice(const PlatformCommandContext& context) {
   if (!context.device) {
     return false;
@@ -197,7 +191,6 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
       "-B",
       context.build_directory.string(),
       "-DCMAKE_BUILD_TYPE=" + configuration,
-      "-DHUXERUI_SDK_ROOT=" + context.sdk_root.string(),
   };
   if (!context.cmake_generator.empty()) {
     configure_arguments.insert(configure_arguments.begin(), {"-G", context.cmake_generator});
@@ -206,6 +199,20 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
       {"cmake", std::move(configure_arguments), context.project_root},
       {"cmake",
        {"--build", context.build_directory.string(), "--config", configuration, "--parallel"},
+       context.project_root},
+  };
+}
+
+std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandContext& context) {
+  return {
+      {"cmake",
+       {
+           "-S",
+           context.project_root.string(),
+           "-B",
+           (context.project_root / ".huxerui/build/module-graph").string(),
+           "-DCMAKE_BUILD_TYPE=Debug",
+       },
        context.project_root},
   };
 }
@@ -232,7 +239,7 @@ public:
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     std::string java_path = "app/src/main/java/";
-    std::string package_path = context.package_name;
+    std::string package_path = context.project_id;
     std::replace(package_path.begin(), package_path.end(), '.', '/');
     java_path += package_path + "/MainActivity.java";
 
@@ -254,11 +261,22 @@ pluginManagement {
     }
 }
 
-def huxeruiPlanFile = file("../../.huxerui/generated/android/app.json")
-if (!huxeruiPlanFile.isFile()) {
-    throw new GradleException("Run 'huxerui build android' to generate the platform integration plan")
+def huxeruiHomeValue = providers.environmentVariable("HUXERUI_HOME").orNull
+if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
+    throw new GradleException("HUXERUI_HOME is required")
 }
-def huxeruiPlan = new JsonSlurper().parse(huxeruiPlanFile)
+def huxeruiHome = file(huxeruiHomeValue)
+def huxeruiLibrary = new File(huxeruiHome, "platform/android/huxerui")
+if (!huxeruiLibrary.isDirectory()) {
+    throw new GradleException("HuxerUI Android library does not exist: ${huxeruiLibrary}")
+}
+
+def huxeruiModuleGraphFile = file("../../.huxerui/generated/modules.json")
+if (!huxeruiModuleGraphFile.isFile()) {
+    throw new GradleException("Run 'huxerui build android' to generate the module graph")
+}
+def huxeruiModuleGraph = new JsonSlurper().parse(huxeruiModuleGraphFile)
+def huxeruiModules = []
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
@@ -268,10 +286,23 @@ dependencyResolutionManagement {
     }
 }
 
-gradle.ext.huxeruiPlan = huxeruiPlan
+gradle.ext.huxeruiHome = huxeruiHome
 rootProject.name = "@PROJECT_NAME@"
 include(":HuxerUI")
-project(":HuxerUI").projectDir = file(huxeruiPlan.huxeruiSourceDirectory)
+project(":HuxerUI").projectDir = huxeruiLibrary
+huxeruiModuleGraph.modules.eachWithIndex { module, index ->
+    def moduleDirectory = file("${module.sourceRoot}/platform/android")
+    if (moduleDirectory.isDirectory()) {
+        if (!new File(moduleDirectory, "build.gradle").isFile()) {
+            throw new GradleException("Android module package is missing build.gradle: ${moduleDirectory}")
+        }
+        def projectPath = ":huxeruiModule${index}"
+        include(projectPath)
+        project(projectPath).projectDir = moduleDirectory
+        huxeruiModules.add([target: module.target, projectPath: projectPath])
+    }
+}
+gradle.ext.huxeruiModules = huxeruiModules
 include(":app")
 )TEMPLATE")},
         {"build.gradle",
@@ -284,6 +315,14 @@ include(":app")
          R"TEMPLATE(org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
 org.gradle.parallel=true
 android.useAndroidX=true
+huxeruiCompileSdk=36
+huxeruiMinCompileSdk=23
+huxeruiMinSdk=23
+huxeruiTargetSdk=36
+huxeruiNdkVersion=29.0.14206865
+huxeruiAbis=arm64-v8a,x86_64
+huxeruiStl=c++_shared
+huxeruiBuildNative=false
 )TEMPLATE"},
         {"gradle/libs.versions.toml",
          R"TEMPLATE([versions]
@@ -297,32 +336,39 @@ android-library = { id = "com.android.library", version.ref = "agp" }
     alias(libs.plugins.android.application)
 }
 
-def huxeruiPlan = rootProject.gradle.ext.huxeruiPlan
+def huxeruiProperty = { String name -> providers.gradleProperty(name).get() }
+def huxeruiHome = rootProject.gradle.ext.huxeruiHome
+def huxeruiModules = rootProject.gradle.ext.huxeruiModules
+def huxeruiCompileSdk = huxeruiProperty("huxeruiCompileSdk").toInteger()
+def huxeruiMinSdk = huxeruiProperty("huxeruiMinSdk").toInteger()
+def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
+def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
+def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
+def huxeruiStl = huxeruiProperty("huxeruiStl")
 def huxeruiDebugAssets = layout.buildDirectory.dir("generated/huxerui/assets/debug").get().asFile
 def huxeruiReleaseAssets = layout.buildDirectory.dir("generated/huxerui/assets/release").get().asFile
 
 android {
-    namespace = huxeruiPlan.applicationId
-    compileSdk = huxeruiPlan.compileSdk
-    ndkVersion = huxeruiPlan.ndkVersion
+    namespace = "@PROJECT_ID@"
+    compileSdk = huxeruiCompileSdk
+    ndkVersion = huxeruiNdkVersion
 
     defaultConfig {
-        applicationId = huxeruiPlan.applicationId
-        minSdk = huxeruiPlan.minSdk
-        targetSdk = huxeruiPlan.targetSdk
+        applicationId = "@PROJECT_ID@"
+        minSdk = huxeruiMinSdk
+        targetSdk = huxeruiTargetSdk
         versionCode = 1
         versionName = "1.0"
 
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=${huxeruiPlan.stl}",
-                        "-DHUXERUI_CMAKE_PACKAGE_DIR=${huxeruiPlan.cmakePackageDirectory}",
-                        "-DHUXERUI_HOST_TOOL_ROOT=${huxeruiPlan.hostToolDirectory}"
+                arguments "-DANDROID_STL=${huxeruiStl}",
+                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}"
             }
         }
 
         ndk {
-            abiFilters(*huxeruiPlan.abis)
+            abiFilters(*huxeruiAbis)
         }
     }
 
@@ -349,17 +395,16 @@ android {
 
     externalNativeBuild {
         cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
+            path = file("../../../CMakeLists.txt")
         }
-    }
-
-    buildFeatures {
-        prefab = true
     }
 }
 
 dependencies {
     implementation project(":HuxerUI")
+    huxeruiModules.each { module ->
+        implementation project(module.projectPath)
+    }
 }
 
 def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
@@ -411,51 +456,62 @@ registerHuxerUIResourceStaging("release", huxeruiReleaseAssets)
     </application>
 </manifest>
 )TEMPLATE")},
-        {java_path, context.Render(R"TEMPLATE(package @PACKAGE_NAME@;
+        {java_path, context.Render(R"TEMPLATE(package @PROJECT_ID@;
 
 import org.huxerui.HuxerUIActivity;
 
 public final class MainActivity extends HuxerUIActivity {}
 )TEMPLATE")},
-        {"app/src/main/cpp/CMakeLists.txt", context.Render(R"TEMPLATE(cmake_minimum_required(VERSION 3.20)
-project(@TARGET_NAME@_android LANGUAGES CXX)
+    };
+  }
 
-if (NOT HUXERUI_CMAKE_PACKAGE_DIR OR NOT HUXERUI_HOST_TOOL_ROOT)
-    message(FATAL_ERROR
-            "HUXERUI_CMAKE_PACKAGE_DIR and HUXERUI_HOST_TOOL_ROOT are required"
-    )
-endif ()
+  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const override {
+    return {
+        {".gitignore", ".gradle/\nlocal.properties\nbuild/\n"},
+        {"settings.gradle", context.Render(R"TEMPLATE(pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+    plugins {
+        id "com.android.library" version "8.13.2"
+    }
+}
 
-find_package(huxerui REQUIRED CONFIG)
-include("${HUXERUI_CMAKE_PACKAGE_DIR}/HuxerUITargets.cmake")
-include("${HUXERUI_CMAKE_PACKAGE_DIR}/HuxerUIApp.cmake")
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
 
-get_filename_component(HUXERUI_APP_ROOT
-        "${CMAKE_CURRENT_LIST_DIR}/../../../../../.."
-        ABSOLUTE
-)
-file(GLOB_RECURSE HUXERUI_APP_SOURCE_FILES CONFIGURE_DEPENDS
-        "${HUXERUI_APP_ROOT}/src/*.cpp"
-        "${HUXERUI_APP_ROOT}/src/*.cc"
-        "${HUXERUI_APP_ROOT}/src/*.cxx"
-)
-
-huxerui_add_app(@TARGET_NAME@
-        SOURCES
-            ${HUXERUI_APP_SOURCE_FILES}
-        RESOURCES
-            "${HUXERUI_APP_ROOT}/resources"
-        RESOURCE_NAMESPACE
-            app
-)
+rootProject.name = "@PROJECT_NAME@"
 )TEMPLATE")},
-        {"huxerui.cmake", context.Render(R"TEMPLATE(set(HUXERUI_ANDROID_APPLICATION_ID "@PACKAGE_NAME@")
-set(HUXERUI_ANDROID_COMPILE_SDK 36)
-set(HUXERUI_ANDROID_MIN_SDK 23)
-set(HUXERUI_ANDROID_TARGET_SDK 36)
-set(HUXERUI_ANDROID_NDK_VERSION "29.0.14206865")
-set(HUXERUI_ANDROID_ABIS arm64-v8a x86_64)
+        {"build.gradle", context.Render(R"TEMPLATE(plugins {
+    id "com.android.library"
+}
+
+android {
+    namespace = "@PROJECT_ID@"
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 23
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+}
 )TEMPLATE")},
+        {"gradle.properties",
+         "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\nandroid.useAndroidX=true\n"},
+        {"consumer-rules.pro", ""},
+        {"src/main/AndroidManifest.xml", "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest />\n"},
     };
   }
 
@@ -467,8 +523,6 @@ set(HUXERUI_ANDROID_ABIS arm64-v8a x86_64)
         std::string_view{"gradle/libs.versions.toml"},
         std::string_view{"app/build.gradle"},
         std::string_view{"app/src/main/AndroidManifest.xml"},
-        std::string_view{"app/src/main/cpp/CMakeLists.txt"},
-        std::string_view{"huxerui.cmake"},
     };
     std::vector<Diagnostic> diagnostics = ValidateRequiredFiles(shell_root, required);
     bool has_activity = false;
@@ -502,32 +556,35 @@ set(HUXERUI_ANDROID_ABIS arm64-v8a x86_64)
     return ParseAdbDevices(result.output);
   }
 
+  std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const override {
+    if (!context.cmake_generator.empty()) {
+      throw std::invalid_argument("Android native builds do not use a CMake generator option");
+    }
+    return ModuleGraphConfigureCommands(context);
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     const std::filesystem::path shell = context.project_root / "platform/android";
-    const std::filesystem::path plan = context.project_root / ".huxerui/generated/android/app.json";
-    const std::filesystem::path plan_script = LocateSdkCMakeFile(context.sdk_root, "HuxerUIAndroidPlan.cmake");
     const std::string configuration = ProfileConfiguration(context.profile);
     const std::filesystem::path wrapper = shell / (CurrentHostId() == "windows" ? "gradlew.bat" : "gradlew");
     const std::string gradle = std::filesystem::is_regular_file(wrapper) ? wrapper.string() : "gradle";
-    return {
-        {"cmake",
-         {
-             "-DHUXERUI_PLATFORM_FILE=" + (shell / "huxerui.cmake").string(),
-             "-DHUXERUI_PLATFORM_PLAN_OUTPUT=" + plan.string(),
-             "-DHUXERUI_SDK_ROOT=" + context.sdk_root.string(),
-             "-P",
-             plan_script.string(),
-         },
-         context.project_root},
-        {gradle, {":app:assemble" + configuration}, shell},
-    };
+    return {{gradle, {":app:assemble" + configuration}, shell}};
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
-    const std::filesystem::path plan = context.project_root / ".huxerui/generated/android/app.json";
-    const std::string application_id = JsonString(ReadFile(plan), "applicationId");
-    const std::filesystem::path apk = context.project_root / "platform/android/app/build/outputs/apk" /
-                                      context.profile / ("app-" + context.profile + ".apk");
+    const std::filesystem::path output_directory =
+        context.project_root / "platform/android/app/build/outputs/apk" / context.profile;
+    const std::string metadata = ReadFile(output_directory / "output-metadata.json");
+    const std::string application_id = JsonString(metadata, "applicationId");
+    const std::filesystem::path output_file = JsonString(metadata, "outputFile");
+    if (application_id.empty()) {
+      throw std::runtime_error("Android APK metadata contains an empty applicationId");
+    }
+    if (output_file.empty() || output_file.is_absolute() ||
+        std::find(output_file.begin(), output_file.end(), std::filesystem::path{".."}) != output_file.end()) {
+      throw std::runtime_error("Android APK metadata contains an invalid outputFile");
+    }
+    const std::filesystem::path apk = output_directory / output_file;
     if (!std::filesystem::is_regular_file(apk)) {
       throw std::runtime_error("Android build artifact is missing: " + apk.string());
     }
@@ -566,7 +623,7 @@ public:
 )TEMPLATE"},
         {"app.manifest", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity name="@PACKAGE_NAME@" version="1.0.0.0" type="win32" />
+  <assemblyIdentity name="@PROJECT_ID@" version="1.0.0.0" type="win32" />
   <description>@PROJECT_NAME@</description>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
@@ -599,6 +656,46 @@ public:
   }
 };
 
+class LinuxDriver final : public PlatformDriver {
+public:
+  std::string_view Id() const noexcept override {
+    return "linux";
+  }
+
+  bool SupportsCurrentHost() const noexcept override {
+    return CurrentHostId() == "linux";
+  }
+
+  std::span<const std::string_view> RequiredTools() const noexcept override {
+    static constexpr std::array tools{std::string_view{"cmake"}};
+    return tools;
+  }
+
+  std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext&) const override {
+    return {{".gitkeep", {}}};
+  }
+
+  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext&) const override {
+    return {{"src/.gitkeep", {}}};
+  }
+
+  std::vector<Diagnostic> Diagnose(const std::filesystem::path&) const override {
+    return {};
+  }
+
+  std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
+    return DesktopBuildCommands(context);
+  }
+
+  std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
+    const std::string artifact = JsonString(ReadFile(AppIntegrationPlan(context)), "artifact");
+    if (!std::filesystem::is_regular_file(artifact)) {
+      throw std::runtime_error("HuxerUI Linux build artifact is missing: " + artifact);
+    }
+    return {{artifact, {}, std::filesystem::path(artifact).parent_path()}};
+  }
+};
+
 class MacOSDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -615,21 +712,20 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    const ProjectTemplateContext apple_context = AppleTemplateContext(context);
     return {
         {".gitignore", "DerivedData/\nxcuserdata/\n*.xcuserstate\narchives/\n"},
-        {"huxerui.cmake", apple_context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
-set(HUXERUI_MACOS_BUNDLE_IDENTIFIER "@PACKAGE_NAME@")
+        {"huxerui.cmake", context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
+set(HUXERUI_MACOS_BUNDLE_IDENTIFIER "@PROJECT_ID@")
 set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
 )TEMPLATE")},
-        {"Info.plist.in", apple_context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
+        {"Info.plist.in", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
   <string>@PROJECT_NAME@</string>
   <key>CFBundleIdentifier</key>
-  <string>@PACKAGE_NAME@</string>
+  <string>@PROJECT_ID@</string>
   <key>CFBundleName</key>
   <string>@PROJECT_NAME@</string>
   <key>CFBundlePackageType</key>
@@ -683,6 +779,10 @@ public:
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     return CreateIosProject(context);
+  }
+
+  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const override {
+    return CreateIosModulePackage(context);
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
@@ -755,6 +855,17 @@ public:
     return devices;
   }
 
+  std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const override {
+    if (!context.cmake_generator.empty()) {
+      throw std::invalid_argument("iOS native builds do not use a CMake generator option");
+    }
+    return ModuleGraphConfigureCommands(context);
+  }
+
+  void UpdateModuleIntegration(const PlatformCommandContext& context) const override {
+    UpdateIosModuleIntegration(context.project_root);
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("iOS native builds do not use a CMake generator option");
@@ -772,7 +883,7 @@ public:
         (context.build_directory / "DerivedData").string(),
         "-destination",
         IosDestination(context),
-        "HUXERUI_SDK_ROOT=" + context.sdk_root.string(),
+        "HUXERUI_HOME=" + context.huxerui_home.string(),
         "HUXERUI_INTEGRATION_PLAN=" + (context.build_directory / "huxerui-integration/app.json").string(),
     };
     if (IsIosPhysicalDevice(context)) {
@@ -923,7 +1034,6 @@ endfunction()
         "-B",
         context.build_directory.string(),
         "-DCMAKE_BUILD_TYPE=" + configuration,
-        "-DHUXERUI_SDK_ROOT=" + context.sdk_root.string(),
     };
     if (!context.cmake_generator.empty()) {
       configure_arguments.insert(configure_arguments.begin() + 1, {"-G", context.cmake_generator});
@@ -953,18 +1063,24 @@ endfunction()
 
 const AndroidDriver android_driver;
 const WindowsDriver windows_driver;
+const LinuxDriver linux_driver;
 const MacOSDriver macos_driver;
 const IosDriver ios_driver;
 const WebDriver web_driver;
-constexpr std::array<const PlatformDriver*, 5> platform_drivers{
+constexpr std::array<const PlatformDriver*, 6> platform_drivers{
     &android_driver,
     &windows_driver,
+    &linux_driver,
     &macos_driver,
     &ios_driver,
     &web_driver,
 };
 
 } // namespace
+
+std::vector<GeneratedFile> PlatformDriver::CreateModulePackage(const ProjectTemplateContext&) const {
+  return {};
+}
 
 bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {
   return false;
@@ -973,6 +1089,12 @@ bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {
 std::vector<PlatformDevice> PlatformDriver::DiscoverDevices() const {
   throw std::logic_error("platform does not support device discovery: " + std::string(Id()));
 }
+
+std::vector<ProcessCommand> PlatformDriver::ModuleGraphCommands(const PlatformCommandContext&) const {
+  return {};
+}
+
+void PlatformDriver::UpdateModuleIntegration(const PlatformCommandContext&) const {}
 
 std::vector<ProcessCommand> PlatformDriver::OpenCommands(const PlatformCommandContext&) const {
   throw std::logic_error("platform does not support opening a development project: " + std::string(Id()));
@@ -1106,7 +1228,7 @@ std::string ProjectTemplateContext::Render(std::string_view value) const {
   std::string rendered(value);
   ReplaceAll(rendered, "@PROJECT_NAME@", project_name);
   ReplaceAll(rendered, "@TARGET_NAME@", target_name);
-  ReplaceAll(rendered, "@PACKAGE_NAME@", package_name);
+  ReplaceAll(rendered, "@PROJECT_ID@", project_id);
   return rendered;
 }
 

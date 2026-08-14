@@ -5,6 +5,7 @@ function(_huxerui_escape_json input output)
     string(REPLACE "\"" "\\\"" value "${value}")
     string(REPLACE "\n" "\\n" value "${value}")
     string(REPLACE "\r" "\\r" value "${value}")
+    string(REPLACE "\t" "\\t" value "${value}")
     set(${output} "${value}" PARENT_SCOPE)
 endfunction()
 
@@ -214,6 +215,22 @@ function(huxerui_add_app target_name)
         )
     endif ()
 
+    if (HUXERUI_MODULE_GRAPH_OUTPUT)
+        get_filename_component(HUXERUI_APP_MODULE_GRAPH_OUTPUT
+                "${HUXERUI_MODULE_GRAPH_OUTPUT}"
+                ABSOLUTE
+                BASE_DIR "${CMAKE_BINARY_DIR}"
+        )
+        set_property(TARGET ${target_name} PROPERTY
+                HUXERUI_MODULE_GRAPH_OUTPUT
+                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+        )
+        _huxerui_write_module_graph(
+                ${target_name}
+                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+        )
+    endif ()
+
     if (IOS)
         set_property(TARGET ${target_name} PROPERTY
                 HUXERUI_APP_FRAMEWORK_TARGET
@@ -232,6 +249,8 @@ function(huxerui_add_app target_name)
             set(HUXERUI_PLATFORM_ID "macos")
         elseif (WIN32)
             set(HUXERUI_PLATFORM_ID "windows")
+        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            set(HUXERUI_PLATFORM_ID "linux")
         else ()
             set(HUXERUI_PLATFORM_ID "generic")
         endif ()

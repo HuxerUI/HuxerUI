@@ -75,17 +75,21 @@ ctest --test-dir build --output-on-failure
 Top-level builds also produce the `huxerui` CLI:
 
 ```bash
-huxerui create hello_huxer --platform android,ios,windows,macos,web
+huxerui create app hello_huxer --platform android,ios,windows,macos,linux,web
 huxerui doctor
 huxerui devices ios
 huxerui open ios
 huxerui build windows
 huxerui run windows
+huxerui run linux
 ```
 
-The CLI creates and validates source-controlled platform shells, including a native Xcode project for iOS, discovers Android and iOS devices, builds enabled Android, iOS Simulator or physical-device, Windows, macOS, and Web targets from compatible hosts, and launches development artifacts.
-The CMake install exports a platform-specific SDK package, the CLI, and host code generators.
-Android and Web CLI projects currently build against a source SDK checkout. iOS accepts either a source checkout or an installed SDK built for the selected Apple SDK and architectures; versioned mobile distribution artifacts, package commands, and module integration remain staged work.
+The CLI creates and validates source-controlled platform shells, including a native Xcode project for iOS, discovers Android and iOS devices, builds enabled Android, iOS Simulator or physical-device, Windows, macOS, Linux, and Web targets from compatible hosts, and launches development artifacts.
+The current CMake install exports a platform-specific SDK package, the CLI, host code generators, and built-in resources.
+Android, Linux, and Web CLI projects currently build against a source SDK checkout, while iOS accepts either a source checkout or a compatible installed SDK.
+Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
+The approved distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
+Versioned Windows, Linux, and macOS installers, native platform artifacts, and package commands remain staged work.
 
 See [Getting Started](docs/getting-started.md) for application setup, platform builds, CMake options, code generation, and example launch commands.
 

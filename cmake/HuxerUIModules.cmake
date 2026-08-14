@@ -19,11 +19,91 @@ function(_huxerui_resolve_module_target requested_target output_variable)
     set(${output_variable} "${HUXERUI_MODULE_TARGET}" PARENT_SCOPE)
 endfunction()
 
+function(_huxerui_module_json_escape input output)
+    string(REPLACE "\\" "\\\\" value "${input}")
+    string(REPLACE "\"" "\\\"" value "${value}")
+    string(REPLACE "\n" "\\n" value "${value}")
+    string(REPLACE "\r" "\\r" value "${value}")
+    string(REPLACE "\t" "\\t" value "${value}")
+    set(${output} "${value}" PARENT_SCOPE)
+endfunction()
+
+function(_huxerui_write_module_graph target_name output_file)
+    if (NOT TARGET ${target_name})
+        message(FATAL_ERROR
+                "HuxerUI module graph application target does not exist: ${target_name}"
+        )
+    endif ()
+
+    get_property(HUXERUI_GRAPH_MODULES
+            TARGET ${target_name}
+            PROPERTY HUXERUI_MODULES
+    )
+    get_property(HUXERUI_GRAPH_REQUESTED_TARGETS
+            TARGET ${target_name}
+            PROPERTY HUXERUI_REQUESTED_MODULE_TARGETS
+    )
+    list(LENGTH HUXERUI_GRAPH_MODULES HUXERUI_GRAPH_MODULE_COUNT)
+    list(LENGTH HUXERUI_GRAPH_REQUESTED_TARGETS
+            HUXERUI_GRAPH_REQUESTED_TARGET_COUNT
+    )
+    if (NOT HUXERUI_GRAPH_MODULE_COUNT EQUAL
+            HUXERUI_GRAPH_REQUESTED_TARGET_COUNT)
+        message(FATAL_ERROR
+                "HuxerUI module graph target identity is inconsistent for ${target_name}"
+        )
+    endif ()
+    set(HUXERUI_GRAPH_ENTRIES)
+    set(HUXERUI_GRAPH_INDEX 0)
+    foreach (HUXERUI_GRAPH_MODULE IN LISTS HUXERUI_GRAPH_MODULES)
+        list(GET HUXERUI_GRAPH_REQUESTED_TARGETS
+                ${HUXERUI_GRAPH_INDEX}
+                HUXERUI_GRAPH_REQUESTED_TARGET
+        )
+        math(EXPR HUXERUI_GRAPH_INDEX "${HUXERUI_GRAPH_INDEX} + 1")
+        get_property(HUXERUI_GRAPH_SOURCE_ROOT_SET
+                TARGET ${HUXERUI_GRAPH_MODULE}
+                PROPERTY HUXERUI_MODULE_SOURCE_ROOT
+                SET
+        )
+        if (NOT HUXERUI_GRAPH_SOURCE_ROOT_SET)
+            continue()
+        endif ()
+        get_property(HUXERUI_GRAPH_SOURCE_ROOT
+                TARGET ${HUXERUI_GRAPH_MODULE}
+                PROPERTY HUXERUI_MODULE_SOURCE_ROOT
+        )
+        _huxerui_module_json_escape(
+                "${HUXERUI_GRAPH_REQUESTED_TARGET}"
+                HUXERUI_GRAPH_JSON_TARGET
+        )
+        _huxerui_module_json_escape(
+                "${HUXERUI_GRAPH_SOURCE_ROOT}"
+                HUXERUI_GRAPH_JSON_SOURCE_ROOT
+        )
+        if (HUXERUI_GRAPH_ENTRIES)
+            string(APPEND HUXERUI_GRAPH_ENTRIES ",\n")
+        endif ()
+        string(APPEND HUXERUI_GRAPH_ENTRIES
+                "    {\"target\": \"${HUXERUI_GRAPH_JSON_TARGET}\", \"sourceRoot\": \"${HUXERUI_GRAPH_JSON_SOURCE_ROOT}\"}"
+        )
+    endforeach ()
+
+    get_filename_component(HUXERUI_GRAPH_DIRECTORY
+            "${output_file}"
+            DIRECTORY
+    )
+    file(MAKE_DIRECTORY "${HUXERUI_GRAPH_DIRECTORY}")
+    file(WRITE "${output_file}"
+            "{\n  \"schema\": 1,\n  \"modules\": [\n${HUXERUI_GRAPH_ENTRIES}\n  ]\n}\n"
+    )
+endfunction()
+
 function(huxerui_add_module target_name)
     cmake_parse_arguments(HUXERUI_MODULE
             ""
-            ""
-            "SOURCES"
+            "RESOURCE_NAMESPACE"
+            "SOURCES;RESOURCES"
             ${ARGN}
     )
     if (HUXERUI_MODULE_UNPARSED_ARGUMENTS)
@@ -39,6 +119,22 @@ function(huxerui_add_module target_name)
     if (NOT HUXERUI_MODULE_SOURCES)
         message(FATAL_ERROR
                 "huxerui_add_module() requires at least one source"
+        )
+    endif ()
+    if (HUXERUI_MODULE_RESOURCES AND NOT HUXERUI_MODULE_RESOURCE_NAMESPACE)
+        message(FATAL_ERROR
+                "huxerui_add_module() requires RESOURCE_NAMESPACE when RESOURCES is present"
+        )
+    endif ()
+    if (HUXERUI_MODULE_RESOURCE_NAMESPACE AND NOT HUXERUI_MODULE_RESOURCES)
+        message(FATAL_ERROR
+                "huxerui_add_module() RESOURCE_NAMESPACE requires RESOURCES"
+        )
+    endif ()
+    list(LENGTH HUXERUI_MODULE_RESOURCES HUXERUI_MODULE_RESOURCE_ROOT_COUNT)
+    if (HUXERUI_MODULE_RESOURCE_ROOT_COUNT GREATER 1)
+        message(FATAL_ERROR
+                "huxerui_add_module() currently accepts one resource root"
         )
     endif ()
     add_library(${target_name} STATIC ${HUXERUI_MODULE_SOURCES})
@@ -89,10 +185,25 @@ function(huxerui_add_module target_name)
     )
     huxerui_enable_codegen(${target_name})
 
+    file(REAL_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            HUXERUI_MODULE_SOURCE_ROOT
+    )
     set_property(TARGET ${target_name} PROPERTY HUXERUI_MODULE TRUE)
+    set_property(TARGET ${target_name} PROPERTY
+            HUXERUI_MODULE_SOURCE_ROOT
+            "${HUXERUI_MODULE_SOURCE_ROOT}"
+    )
     set_property(TARGET ${target_name} APPEND PROPERTY EXPORT_PROPERTIES
             HUXERUI_MODULE
     )
+    if (HUXERUI_MODULE_RESOURCES)
+        list(GET HUXERUI_MODULE_RESOURCES 0 HUXERUI_MODULE_RESOURCE_ROOT)
+        huxerui_add_resources(${target_name}
+                ROOT "${HUXERUI_MODULE_RESOURCE_ROOT}"
+                NAMESPACE "${HUXERUI_MODULE_RESOURCE_NAMESPACE}"
+        )
+    endif ()
 endfunction()
 
 function(huxerui_use_module target_name)
@@ -266,6 +377,25 @@ function(huxerui_use_module target_name)
             HUXERUI_MODULES
             "${HUXERUI_RESOLVED_MODULE_TARGET}"
     )
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_REQUESTED_MODULE_TARGETS
+            "${HUXERUI_USE_MODULE_TARGET}"
+    )
+    get_property(HUXERUI_MODULE_GRAPH_OUTPUT_SET
+            TARGET ${target_name}
+            PROPERTY HUXERUI_MODULE_GRAPH_OUTPUT
+            SET
+    )
+    if (HUXERUI_MODULE_GRAPH_OUTPUT_SET)
+        get_property(HUXERUI_MODULE_GRAPH_OUTPUT
+                TARGET ${target_name}
+                PROPERTY HUXERUI_MODULE_GRAPH_OUTPUT
+        )
+        _huxerui_write_module_graph(
+                ${target_name}
+                "${HUXERUI_MODULE_GRAPH_OUTPUT}"
+        )
+    endif ()
     get_property(HUXERUI_MODULE_RESOURCE_PACKAGE_SET
             TARGET ${HUXERUI_RESOLVED_MODULE_TARGET}
             PROPERTY HUXERUI_RESOURCE_PACKAGE
