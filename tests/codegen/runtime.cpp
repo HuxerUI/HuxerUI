@@ -12,6 +12,7 @@
 
 namespace {
 
+using huxerui::Application;
 using huxerui::DrawTextCommand;
 using huxerui::FrameCommit;
 using huxerui::PlatformAdapter;
@@ -138,13 +139,8 @@ View GeneratedApp() {
 
 TEST_CASE("Generated scopes run in Runtime") {
   TestPlatform platform;
-  Runtime runtime{
-      {
-          .root_factory = GeneratedApp,
-          .options = {.show_debug_overlay = false},
-      },
-      platform,
-  };
+  Application application{GeneratedApp, {.show_debug_overlay = false}};
+  Runtime runtime{application, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "3");

@@ -74,7 +74,7 @@ View App() {
   return MaterialTheme(PlatformModuleDemo);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -83,4 +83,4 @@ HUXERUI_APP(
         },
         .root_hooks = {example::InstallTimer},
     }
-)
+};

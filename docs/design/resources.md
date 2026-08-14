@@ -170,7 +170,7 @@ huxerui_add_resources(
 
 ```cmake
 huxerui_add_app(application_target
-    SOURCES src/main.cpp
+    SOURCES src/app.cpp
     RESOURCES resources
     RESOURCE_NAMESPACE app
 )
@@ -285,7 +285,7 @@ ResourceConfiguration supplies only values that vary at runtime and affect resol
 
 Packaged resources must be synchronously readable before Runtime is created.
 A platform whose package transport is asynchronous completes that transport during platform startup and exposes the resulting immutable payload through PlatformResources.
-In particular, the Web entry integration loads the resource index and payload before invoking the registered HUXERUI_APP definition.
+In particular, the Web entry integration loads the resource index and payload before creating a Runtime from the registered `Application`.
 Remote URLs remain application or module inputs and do not become package paths.
 
 When system locale or display scale changes, the platform integration calls `Runtime::UpdateResourceConfiguration()` with the new value.

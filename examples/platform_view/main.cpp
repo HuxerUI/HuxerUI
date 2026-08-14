@@ -71,7 +71,7 @@ View App() {
   return MaterialTheme(PlatformViewDemo);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -80,4 +80,4 @@ HUXERUI_APP(
         },
         .root_hooks = {example::InstallNativeTextField},
     }
-)
+};

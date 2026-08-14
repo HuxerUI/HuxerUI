@@ -35,7 +35,7 @@ View App() {
       .With(ScrollBar(), Padding(24.0F), Spacing(8.0F));
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -43,4 +43,4 @@ HUXERUI_APP(
             .initial_size = {760.0F, 320.0F},
         },
     }
-)
+};

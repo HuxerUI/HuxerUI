@@ -45,9 +45,18 @@ struct AppOptions {
 
 using RootFactory = View (*)();
 
-struct AppDefinition {
-  RootFactory root_factory = nullptr;
-  AppOptions options;
+class Application final {
+public:
+  explicit Application(RootFactory root_factory, AppOptions options = {});
+  ~Application();
+
+  Application(const Application&) = delete;
+  Application& operator=(const Application&) = delete;
+  Application(Application&&) = delete;
+  Application& operator=(Application&&) = delete;
+
+  const RootFactory root_factory;
+  const AppOptions options;
 };
 
 struct ProcessMetrics {
@@ -123,6 +132,9 @@ private:
 
 namespace detail {
 
+const Application& CurrentApplication();
+int RunPlatformApplication(const Application& application);
+
 struct NodeExtensionHandle;
 struct MountedNode;
 struct PointerSession;
@@ -136,7 +148,7 @@ class VirtualMeasureSession;
 
 class Runtime final {
 public:
-  Runtime(AppDefinition definition, PlatformAdapter& platform);
+  Runtime(const Application& application, PlatformAdapter& platform);
   ~Runtime();
 
   Runtime(const Runtime&) = delete;
@@ -262,42 +274,6 @@ private:
   friend struct detail::RuntimeAccess;
 };
 
-namespace detail {
-
-void RegisterAppDefinition(AppDefinition definition);
-const AppDefinition& RegisteredAppDefinition();
-
-} // namespace detail
-
-int RunApp(AppDefinition definition);
+int RunApplication();
 
 } // namespace huxerui
-
-#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
-#define HUXERUI_APP(app_root, ...) \
-  namespace { \
-  [[maybe_unused]] const bool huxerui_app_registration = [] { \
-    ::huxerui::detail::RegisterAppDefinition({ \
-        .root_factory = (app_root), \
-        .options = __VA_ARGS__, \
-    }); \
-    return true; \
-  }(); \
-  }
-#elif defined(TARGET_OS_IOS) && TARGET_OS_IOS
-#define HUXERUI_APP(app_root, ...) \
-  extern "C" int HuxerUIRunApplication() { \
-    return ::huxerui::RunApp({ \
-        .root_factory = (app_root), \
-        .options = __VA_ARGS__, \
-    }); \
-  }
-#else
-#define HUXERUI_APP(app_root, ...) \
-  int main() { \
-    return ::huxerui::RunApp({ \
-        .root_factory = (app_root), \
-        .options = __VA_ARGS__, \
-    }); \
-  }
-#endif

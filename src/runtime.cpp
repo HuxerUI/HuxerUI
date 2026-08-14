@@ -944,12 +944,9 @@ namespace huxerui {
 
 using namespace detail;
 
-Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
-  if (definition.root_factory == nullptr) {
-    throw std::invalid_argument("HuxerUI root factory must not be null");
-  }
-  ValidateViewportBreakpoints(definition.options.viewport_breakpoints);
-  const WindowOptions& window_options = definition.options.window;
+Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
+  ValidateViewportBreakpoints(application.options.viewport_breakpoints);
+  const WindowOptions& window_options = application.options.window;
   if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
       !std::isfinite(window_options.initial_size.height) || window_options.initial_size.height <= 0.0F) {
     throw std::invalid_argument("HuxerUI initial window size must be finite and positive");
@@ -967,11 +964,11 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   }
   auto window = std::make_shared<WindowState>(window_options);
   state_ = std::make_unique<State>(
-      definition.root_factory,
+      application.root_factory,
       &platform,
       std::make_shared<RecomposeScope>(*this, 1),
       LayerController(*this),
-      definition.options.viewport_breakpoints,
+      application.options.viewport_breakpoints,
       std::move(window)
   );
   state_->root_environment_ = std::make_shared<Environment>();
@@ -991,13 +988,13 @@ Runtime::Runtime(AppDefinition definition, PlatformAdapter& platform) {
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
   InstallBuiltinPresentation(root);
-  for (RootHook& hook : definition.options.root_hooks) {
+  for (const RootHook& hook : application.options.root_hooks) {
     if (!hook) {
       throw std::invalid_argument("HuxerUI root hook must not be empty");
     }
     hook(root);
   }
-  if (definition.options.show_debug_overlay) {
+  if (application.options.show_debug_overlay) {
     state_->debug_metrics_ = std::make_shared<DebugMetricsState>(platform);
     InstallDebugOverlay(root, state_->debug_metrics_);
   }

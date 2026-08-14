@@ -24,7 +24,7 @@ View App() {
   }.With(Padding(24.0F), Spacing(16.0F), CrossAlign(CrossAxisAlignment::Center));
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -32,4 +32,4 @@ HUXERUI_APP(
             .initial_size = {520.0F, 440.0F},
         },
     }
-)
+};

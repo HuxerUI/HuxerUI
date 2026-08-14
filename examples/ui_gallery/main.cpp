@@ -471,7 +471,7 @@ View App() {
                    : MaterialTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -481,4 +481,4 @@ HUXERUI_APP(
         },
         .viewport_breakpoints = ViewportBreakpoints{720.0F, 1040.0F},
     }
-)
+};

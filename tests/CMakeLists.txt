@@ -10,6 +10,7 @@ file(TO_CMAKE_PATH "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" HUXERUI_TEST_BUILTIN_RE
 add_executable(huxerui_tests
         tests_main.cpp
         support/builtin_resources.cpp
+        unit/application.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp

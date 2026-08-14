@@ -58,9 +58,9 @@ View App() {
   return MaterialTheme(WindowChromeDemo);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
-    AppOptions {
+    {
         .window = {
             .title = "HuxerUI Window Chrome",
             .initial_size = {760.0F, 480.0F},
@@ -68,4 +68,4 @@ HUXERUI_APP(
             .title_bar_height = 48.0F,
         },
     }
-)
+};

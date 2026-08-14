@@ -1108,8 +1108,8 @@ private:
 
 class AndroidSession final {
 public:
-  AndroidSession(JNIEnv* environment, jobject view, AppDefinition definition)
-      : platform_(environment, view), runtime_(std::move(definition), platform_) {
+  AndroidSession(JNIEnv* environment, jobject view, const Application& application)
+      : platform_(environment, view), runtime_(application, platform_) {
     platform_.AttachRuntime(environment, runtime_);
   }
 
@@ -1369,7 +1369,7 @@ Java_org_huxerui_HuxerUIView_nativeCreate(JNIEnv* environment, jclass, jobject v
     auto session = std::make_unique<huxerui::detail::AndroidSession>(
         environment,
         view,
-        huxerui::detail::RegisteredAppDefinition()
+        huxerui::detail::CurrentApplication()
     );
     return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session.release()));
   } catch (const std::exception& exception) {

@@ -259,13 +259,7 @@ public:
       huxerui::PlatformAdapter& platform,
       huxerui::AppOptions options = {.show_debug_overlay = false}
   )
-      : runtime_(
-            {
-                .root_factory = root_factory,
-                .options = std::move(options),
-            },
-            platform
-        ) {}
+      : application_(root_factory, std::move(options)), runtime_(application_, platform) {}
 
   void SetWindowMetrics(huxerui::WindowMetrics metrics) {
     runtime_.SetWindowMetrics(metrics);
@@ -361,6 +355,7 @@ public:
   }
 
 private:
+  huxerui::Application application_;
   huxerui::Runtime runtime_;
   FlattenedScene flattened_scene_;
   const FrameCommit* last_commit_ = nullptr;

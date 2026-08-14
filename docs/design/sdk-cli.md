@@ -79,7 +79,7 @@ A generated project has this shape:
 hello_huxer/
   .gitignore
   CMakeLists.txt
-  src/main.cpp
+  src/app.cpp
   resources/
     images/
     strings/default.properties
@@ -104,9 +104,13 @@ hello_huxer/
         Local.xcconfig.example
       hello_huxer.xcodeproj/
     windows/
+      main.cpp
       app.manifest
     macos/
+      main.cpp
       Info.plist.in
+    linux/
+      main.cpp
     web/
       index.html.in
   .huxerui/
@@ -130,7 +134,7 @@ Android ignores Gradle and native intermediates inside `platform/android`, while
 The current generator still writes transitional platform CMake configuration files for several shells.
 They are migration inputs, not part of the target project shape, and are removed as each platform starts configuring the root CMake project directly.
 
-The application entry remains shared:
+The application declaration remains shared:
 
 ```cpp
 #include <huxerui/huxerui.h>
@@ -143,11 +147,11 @@ View App() {
   });
 }
 
-HUXERUI_APP(App, {})
+const Application application{App};
 ```
 
-Native executable targets generate the process entry point.
-Hosted platforms such as Android and Web register the immutable application definition consumed by their platform shell.
+Native platform shells own the process entry point and call `RunApplication()` after static initialization.
+Hosted platforms such as Android and Web create sessions from the same automatically registered `Application`.
 
 ## CMake SDK
 
@@ -441,7 +445,7 @@ Missing PlatformView, accessibility, or module capabilities are backend limitati
 
 The shell is a source-controlled native Xcode application project. It owns the Info.plist, launch screen, asset catalog, build configurations, shared scheme, product identifier, signing, Capabilities, native sources, archive behavior, and final App Bundle.
 
-On iOS, `HUXERUI_APP` exports the fixed application entry consumed by the shell's minimal Objective-C++ `main.mm`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, native resources, destination selection, signing, packaging, installation metadata, and debugging.
+On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, native resources, destination selection, signing, packaging, installation metadata, and debugging.
 
 iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_HOME` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding remain outside the current preview.
 
@@ -485,7 +489,7 @@ CameraKit/
   examples/
     preview/
       CMakeLists.txt
-      src/main.cpp
+      src/app.cpp
       resources/
       platform/
         android/
@@ -534,7 +538,7 @@ Every generated module instead contains `examples/preview`, an ordinary standalo
 ```cmake
 huxerui_add_app(example_camera_kit
         SOURCES
-            src/main.cpp
+            src/app.cpp
         RESOURCES
             resources
         RESOURCE_NAMESPACE
@@ -561,14 +565,14 @@ View App() {
   });
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .root_hooks = {
             camera_kit::Install,
         },
     }
-)
+};
 ```
 
 Developers use the ordinary application commands from either the module root or the preview directory. Commands issued at the module root resolve to `examples/preview` without introducing a separate module build path:
@@ -681,17 +685,17 @@ An application includes the module's public header and places its typed installe
 ```cpp
 #include <camera_kit/camera_kit.h>
 
-HUXERUI_APP(
+const Application application{
     App,
-    AppOptions {
+    {
         .root_hooks = {
             camera_kit::Install,
         },
     }
-)
+};
 ```
 
-There is no generated installer header, hidden `HUXERUI_APP` rewriting, process-global static registration, or generic runtime module registry.
+There is no generated installer header, hidden application-entry rewriting, or generic runtime module registry. The process-level `Application` registers only its root and `AppOptions`; module installation remains explicit through `root_hooks`.
 Generated native attachment files remain build output rather than another editable project or runtime plugin list.
 
 Native dependencies remain expressed in their owning ecosystem.
@@ -722,7 +726,7 @@ Callbacks, arbitrary C++ objects, native handles, and media streams never enter 
 
 Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
 The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during module installation.
-Registration does not use a generated header, hidden `HUXERUI_APP` rewriting, editable metadata bundle, or process-global static initializer.
+Module registration does not use a generated header, hidden application-entry rewriting, editable metadata bundle, or process-global static initializer.
 The module's documented Install function remains an ordinary RootHook selected explicitly by the application.
 
 `RootContext::Modules()` exposes the per-surface registry to explicit platform module installers.
@@ -800,7 +804,7 @@ Formal SDK validation must install a relocatable SDK, resolve it through both ex
 
 ## Invariants
 
-- One common `HUXERUI_APP` definition.
+- One static `Application` declaration per final application binary.
 - One shared Runtime implementation.
 - One `PlatformAdapter` boundary per application surface.
 - Public identity remains `huxerui`, `<huxerui/huxerui.h>`, and `HuxerUI::huxerui`.

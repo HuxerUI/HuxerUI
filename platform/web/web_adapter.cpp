@@ -667,7 +667,7 @@ class WebSession final {
 public:
   WebSession(std::uintptr_t session_id, val canvas, ResourceConfiguration configuration)
       : session_id_(session_id), platform_(session_id, std::move(canvas), configuration),
-        runtime_(RegisteredAppDefinition(), platform_) {
+        runtime_(CurrentApplication(), platform_) {
     platform_.Attach(runtime_);
   }
 
@@ -677,7 +677,7 @@ public:
   }
 
   bool Initialize(std::string_view selector) {
-    const WindowOptions& options = RegisteredAppDefinition().options.window;
+    const WindowOptions& options = CurrentApplication().options.window;
     const std::string selector_copy{selector};
     if (!InstallWebSession(
             session_id_, selector_copy.c_str(), options.initial_size.width, options.initial_size.height,

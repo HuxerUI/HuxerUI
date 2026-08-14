@@ -87,21 +87,21 @@ if (NOT CREATE_RESULT EQUAL 0)
     message(FATAL_ERROR "Installed CLI project creation failed:\n${CREATE_OUTPUT}${CREATE_ERROR}")
 endif ()
 
-set(APP_MAIN "${PROJECT_ROOT}/src/main.cpp")
-file(READ "${APP_MAIN}" APP_MAIN_CONTENT)
+set(APP_SOURCE "${PROJECT_ROOT}/src/app.cpp")
+file(READ "${APP_SOURCE}" APP_SOURCE_CONTENT)
 string(REPLACE
         "using namespace huxerui;\n"
         "using namespace huxerui;\n\nint AdditionalSource();\n"
-        APP_MAIN_CONTENT
-        "${APP_MAIN_CONTENT}"
+        APP_SOURCE_CONTENT
+        "${APP_SOURCE_CONTENT}"
 )
 string(REPLACE
         "View App() {\n"
         "View App() {\n  static_cast<void>(AdditionalSource());\n"
-        APP_MAIN_CONTENT
-        "${APP_MAIN_CONTENT}"
+        APP_SOURCE_CONTENT
+        "${APP_SOURCE_CONTENT}"
 )
-file(WRITE "${APP_MAIN}" "${APP_MAIN_CONTENT}")
+file(WRITE "${APP_SOURCE}" "${APP_SOURCE_CONTENT}")
 file(WRITE "${PROJECT_ROOT}/src/extra.cpp" "int AdditionalSource() {\n  return 42;\n}\n")
 
 execute_process(

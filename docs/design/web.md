@@ -7,7 +7,7 @@ This document defines the implemented HuxerUI Web preview and its target contrac
 ## Goals
 
 - Reuse the existing Runtime, View model, layout, input state machines, animation, text editing protocol, RenderScene, and PaintCommand types without a Web-specific Runtime.
-- Keep `HUXERUI_APP` and shared application source unchanged across native and Web targets.
+- Keep the static `Application` declaration and shared application source unchanged across native and Web targets.
 - Produce an ES module and WebAssembly application that can be mounted into a browser-owned Canvas.
 - Preserve logical coordinates, retained PaintSequences, Runtime damage, controlled text editing, typed resources, and platform-owned native services.
 - Support mouse, touch, pen, wheel, keyboard, browser IME, high-density displays, resizing, and asynchronous image decoding.
@@ -23,7 +23,7 @@ The initial backend may run before the platform-neutral semantics tree is availa
 
 ## Current preview
 
-The current implementation includes Emscripten platform selection, platform-owned `HUXERUI_APP` registration, ES module mounting and disposal, Canvas sizing, frame scheduling, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, Canvas sizing, frame scheduling, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The preview has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -46,13 +46,13 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 | WebResources | Synchronous reads from resources loaded before Runtime creation and current locale and display scale |
 | ES module integration | Canvas lookup, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
 
-There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted Canvas. Multiple sessions may use the same registered `AppDefinition` without sharing Runtime state, focus, layout, resources, or input sessions.
+There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted Canvas. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
 
 Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand, or application state. JavaScript identifies sessions with validated numeric IDs rather than retaining raw C++ object pointers as application-visible values.
 
 ## Application startup
 
-Web compilation uses the platform-owned lifecycle form of `HUXERUI_APP`. The macro registers an immutable `AppDefinition`; it does not create a native desktop `main()`.
+Web compilation constructs the same static `Application` used by native targets. Its constructor registers the immutable root and `AppOptions`; Web does not create or require a native desktop `main()`.
 
 The generated ES module exposes a synchronous mount operation that accepts a Canvas selector after module and font loading have completed. Broader startup configuration such as a resource base URL, containing element, and page-integration policy remains deferred and does not belong in `AppOptions`.
 
@@ -60,7 +60,7 @@ Startup occurs in this order:
 
 - Instantiate the Emscripten module and complete packaged-resource preload into the virtual filesystem.
 - Await `document.fonts.ready` in the JavaScript entry point.
-- Resolve the target Canvas and create WebPlatformAdapter and Runtime from the registered AppDefinition.
+- Resolve the target Canvas and create WebPlatformAdapter and Runtime from the uniquely registered Application.
 - Create the JavaScript session record and install browser observers and event listeners.
 - Apply the initial CSS-pixel viewport and ResourceConfiguration.
 - Request the initial frame.

@@ -145,7 +145,7 @@ View App() {
   });
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -153,4 +153,4 @@ HUXERUI_APP(
             .initial_size = {560.0F, 820.0F},
         },
     }
-)
+};

@@ -70,7 +70,7 @@ View App() {
   return MaterialTheme(EnvironmentContent);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -78,4 +78,4 @@ HUXERUI_APP(
             .initial_size = {620.0F, 700.0F},
         },
     }
-)
+};

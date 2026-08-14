@@ -90,7 +90,7 @@ View App() {
   return DynamicList();
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -98,4 +98,4 @@ HUXERUI_APP(
             .initial_size = {720.0F, 620.0F},
         },
     }
-)
+};

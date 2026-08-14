@@ -1168,10 +1168,10 @@ private:
   Win32Renderer renderer_;
 };
 
-int RunPlatformApp(AppDefinition definition) {
-  WindowOptions options = definition.options.window;
+int RunPlatformApplication(const Application& application) {
+  WindowOptions options = application.options.window;
   Win32PlatformAdapter platform;
-  Runtime runtime{std::move(definition), platform};
+  Runtime runtime{application, platform};
   return platform.Run(runtime, options);
 }
 

@@ -1,9 +1,9 @@
 #import <UIKit/UIKit.h>
 
-extern "C" int HuxerUIRunApplication();
+#include <huxerui/app.h>
 
 int main() {
   @autoreleasepool {
-    return HuxerUIRunApplication();
+    return huxerui::RunApplication();
   }
 }

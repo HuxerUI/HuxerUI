@@ -64,12 +64,12 @@ case ViewportClass::Expanded:
 The default Compact-to-Medium and Medium-to-Expanded boundaries are 600 and 840 logical units. Applications can configure them through `AppOptions::viewport_breakpoints`:
 
 ```cpp
-HUXERUI_APP(
+const Application application{
     App,
     {
         .viewport_breakpoints = ViewportBreakpoints{640.0F, 960.0F},
     }
-)
+};
 ```
 
 Changing width within one class only runs measurement and layout. Crossing a boundary updates the root Environment and recomposes the application root and window layers so captured themed presentation sees the same class. HuxerUI intentionally does not publish continuously changing viewport dimensions through Environment; exact dimensions remain layout constraints and platform geometry.

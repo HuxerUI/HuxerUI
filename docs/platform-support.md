@@ -18,7 +18,7 @@ Android exposes the shared frame through virtual `AccessibilityNodeInfo` descend
 
 ## Runtime and PlatformAdapter
 
-Each application surface owns one `Runtime`. Multiple surfaces may share the same registered root factory without sharing state, layout, frame scheduling, focus, or input sessions.
+Each application surface owns one `Runtime`. Multiple surfaces may use the same `Application` without sharing state, layout, frame scheduling, focus, or input sessions.
 
 ```cpp
 class NativeAdapter final : public PlatformAdapter {
@@ -26,13 +26,13 @@ class NativeAdapter final : public PlatformAdapter {
 };
 
 NativeAdapter platform;
-Runtime runtime{
+Application application{
+    App,
     {
-        .root_factory = App,
-        .options = {.window = {.title = "HuxerUI"}},
+        .window = {.title = "HuxerUI"},
     },
-    platform,
 };
+Runtime runtime{application, platform};
 
 runtime.SetWindowMetrics({
     .viewport = {width, height},
@@ -80,7 +80,7 @@ A full-screen launcher derives from `HuxerUIActivity`:
 public final class MainActivity extends HuxerUIActivity {}
 ```
 
-The application native library is named `huxerui_app`. Loading it registers the immutable `HUXERUI_APP` definition before the activity creates its `HuxerUIView`.
+The application native library is named `huxerui_app`. Loading it constructs the application's static `Application` before the activity creates its `HuxerUIView`; the adapter requires that exactly one application declaration is alive when it creates a Runtime session.
 
 `HuxerUIActivity` owns a lifecycle-bound Back callback and forwards Back to the shared Runtime. Applications using this full-screen Activity set `android:enableOnBackInvokedCallback="true"` on their manifest `application` element, as the demo module does. Android 14 and later forward predictive Back start, progress, cancel, and commit phases; Android 13 forwards Commit; older versions use `onBackPressed()` for the same Commit path. When Runtime does not consume Commit, the Activity calls its overridable `onUnhandledBack()` fallback, which finishes the Activity with transition by default. An embedded integration owns registration itself, may call `HuxerUIView.handleBack()`, and continues its native fallback only when that method returns `false`.
 
@@ -175,7 +175,7 @@ The current Linux CLI path uses a source SDK checkout. A relocatable installed L
 
 ## Web technical preview
 
-The Web backend compiles the same `HUXERUI_APP` application through Emscripten, mounts one shared `Runtime` and `WebPlatformAdapter` per browser Canvas, and emits an ES module with WebAssembly output.
+The Web backend compiles the same static `Application` declaration through Emscripten, mounts one `Runtime` and `WebPlatformAdapter` pair per browser Canvas, and emits an ES module with WebAssembly output.
 Canvas 2D replays the shared `RenderScene`, while browser Pointer Events, wheel events, keyboard events, hidden native text controls, resource preloading, and asynchronous `ImageBitmap` decoding remain platform-owned services.
 
 Configure and build all examples with a modern Emscripten toolchain:

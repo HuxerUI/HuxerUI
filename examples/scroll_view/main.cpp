@@ -153,7 +153,7 @@ View App() {
       .With(Padding(24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch));
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -161,4 +161,4 @@ HUXERUI_APP(
             .initial_size = {640.0F, 560.0F},
         },
     }
-)
+};

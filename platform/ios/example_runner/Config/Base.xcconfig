@@ -13,6 +13,7 @@ HUXERUI_PROJECT_ROOT = $(PROJECT_DIR)/../../..
 HUXERUI_CORE_BUILD_DIR = $(DERIVED_FILE_DIR)/huxerui-core
 HUXERUI_APP_TARGET = example_ui_gallery
 HUXERUI_LINK_OPTIONS_FILE = $(HUXERUI_CORE_BUILD_DIR)/huxerui-ios/$(HUXERUI_APP_TARGET)/link.rsp
+HEADER_SEARCH_PATHS = $(inherited) "$(HUXERUI_PROJECT_ROOT)/include"
 OTHER_LDFLAGS = $(inherited) @"$(HUXERUI_LINK_OPTIONS_FILE)"
 
 #include? "Local.xcconfig"

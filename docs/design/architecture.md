@@ -39,10 +39,10 @@ RuntimeRoot
     └── system entries
 ```
 
-The application still starts with the existing shape:
+The application declares one process-level root and options value:
 
 ```cpp
-HUXERUI_APP(App, {})
+const Application application{App};
 ```
 
 `RuntimeRoot` is synthesized by the Runtime. It is not a public layout component and does not require applications to wrap their root View.
@@ -1263,13 +1263,14 @@ It does not discover compile-time modules, download dependencies, expose native 
 Installation uses `AppOptions`:
 
 ```cpp
-HUXERUI_APP(
+const Application application{
     App,
     {
         .root_hooks = {
             InstallXxxToast(),
         },
-    })
+    },
+};
 ```
 
 A service hook can be a function:

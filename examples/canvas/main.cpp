@@ -374,7 +374,7 @@ View App() {
   return MaterialTheme(CanvasDemo);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -382,4 +382,4 @@ HUXERUI_APP(
             .initial_size = {640.0F, 560.0F},
         },
     }
-)
+};

@@ -27,7 +27,7 @@ View App() {
   }.With(Padding(32.0F));
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -35,4 +35,4 @@ HUXERUI_APP(
             .initial_size = {520.0F, 360.0F},
         },
     }
-)
+};

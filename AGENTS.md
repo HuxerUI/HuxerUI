@@ -23,7 +23,8 @@ HuxerUI's public identity is fixed:
 - Umbrella header: `<huxerui/huxerui.h>`.
 - CMake targets: `HuxerUI::huxerui` and `HuxerUI::huxerui_static`.
 - Scoped components: `[[huxerui::scope]]`.
-- Application entry: `HUXERUI_APP`.
+- Application declaration: `huxerui::Application`.
+- Native application entry: `huxerui::RunApplication()`.
 
 Do not restore an old identity or add legacy aliases without an explicitly approved compatibility policy. When a breaking public API change is approved, migrate headers, implementation, tests, examples, and documentation together and remove the old entry point.
 

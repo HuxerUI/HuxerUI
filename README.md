@@ -44,7 +44,7 @@ View App() {
   return MaterialTheme(Counter);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -52,15 +52,28 @@ HUXERUI_APP(
             .initial_size = {480.0F, 320.0F},
         },
     }
-)
+};
 ```
 
-Add the application target. The helper links HuxerUI and enables scope generation:
+The platform shell owns the process entry point.
+A desktop shell can use:
+
+```cpp
+#include <huxerui/app.h>
+
+int main() {
+  return huxerui::RunApplication();
+}
+```
+
+Add the common declaration and the selected platform entry to the application target.
+The helper links HuxerUI and enables scope generation:
 
 ```cmake
 huxerui_add_app(my_app
         SOURCES
-            main.cpp
+            src/app.cpp
+            platform/main.cpp
 )
 ```
 

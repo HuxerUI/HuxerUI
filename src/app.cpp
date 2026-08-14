@@ -1,9 +1,10 @@
 #include <huxerui/app.h>
 
+#include <algorithm>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "text_layout_internal.h"
 
@@ -11,9 +12,9 @@ namespace huxerui {
 
 namespace {
 
-std::optional<AppDefinition>& AppRegistration() {
-  static std::optional<AppDefinition> definition;
-  return definition;
+std::vector<const Application*>& Applications() {
+  static std::vector<const Application*> applications;
+  return applications;
 }
 
 } // namespace
@@ -48,42 +49,47 @@ std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
 
 namespace detail {
 
-int RunPlatformApp(AppDefinition definition);
 #if defined(__EMSCRIPTEN__)
 void EnsureWebPlatformLinked();
 #endif
 
-void RegisterAppDefinition(AppDefinition definition) {
-#if defined(__EMSCRIPTEN__)
-  EnsureWebPlatformLinked();
-#endif
-  if (definition.root_factory == nullptr) {
-    throw std::invalid_argument("HuxerUI application registration requires a root factory");
+const Application& CurrentApplication() {
+  const auto& applications = Applications();
+  if (applications.empty()) {
+    throw std::logic_error("HuxerUI application has not been declared");
   }
-
-  auto& registration = AppRegistration();
-  if (registration.has_value()) {
-    throw std::logic_error("HuxerUI application has already been registered");
+  if (applications.size() != 1) {
+    throw std::logic_error("HuxerUI application declaration is not unique");
   }
-  registration.emplace(std::move(definition));
-}
-
-const AppDefinition& RegisteredAppDefinition() {
-  const auto& registration = AppRegistration();
-  if (!registration.has_value()) {
-    throw std::logic_error("HuxerUI application has not been registered");
-  }
-  return *registration;
+  return *applications.front();
 }
 
 } // namespace detail
 
-int RunApp(AppDefinition definition) {
+Application::Application(RootFactory root_factory, AppOptions options)
+    : root_factory(root_factory), options(std::move(options)) {
+  if (root_factory == nullptr) {
+    throw std::invalid_argument("HuxerUI application requires a root factory");
+  }
+#if defined(__EMSCRIPTEN__)
+  detail::EnsureWebPlatformLinked();
+#endif
+  Applications().push_back(this);
+}
+
+Application::~Application() {
+  auto& applications = Applications();
+  const auto found = std::find(applications.begin(), applications.end(), this);
+  if (found != applications.end()) {
+    applications.erase(found);
+  }
+}
+
+int RunApplication() {
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
-  static_cast<void>(definition);
-  throw std::runtime_error("RunApp() is not available on Android or Web");
+  throw std::runtime_error("RunApplication() is not available on Android or Web");
 #else
-  return detail::RunPlatformApp(std::move(definition));
+  return detail::RunPlatformApplication(detail::CurrentApplication());
 #endif
 }
 

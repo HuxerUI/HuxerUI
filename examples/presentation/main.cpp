@@ -113,7 +113,7 @@ View PresentationRoot() {
   return MaterialTheme(App);
 }
 
-HUXERUI_APP(
+const Application application{
     PresentationRoot,
     {
         .window = {
@@ -121,4 +121,4 @@ HUXERUI_APP(
             .initial_size = {720.0F, 560.0F},
         },
     }
-)
+};

@@ -633,6 +633,7 @@ ENABLE_USER_SCRIPT_SANDBOXING = NO
 HUXERUI_PROJECT_ROOT = $(PROJECT_DIR)/../..
 HUXERUI_CORE_BUILD_DIR = $(DERIVED_FILE_DIR)/huxerui-core
 HUXERUI_LINK_OPTIONS_FILE = $(HUXERUI_CORE_BUILD_DIR)/huxerui-ios/@TARGET_NAME@/link.rsp
+HEADER_SEARCH_PATHS = $(inherited) "$(HUXERUI_HOME)/include"
 OTHER_LDFLAGS = $(inherited) @"$(HUXERUI_LINK_OPTIONS_FILE)"
 
 #include? "Local.xcconfig"
@@ -652,11 +653,11 @@ SWIFT_COMPILATION_MODE = wholemodule
 )TEMPLATE"},
       {"App/main.mm", R"TEMPLATE(#import <UIKit/UIKit.h>
 
-extern "C" int HuxerUIRunApplication();
+#include <huxerui/app.h>
 
 int main() {
   @autoreleasepool {
-    return HuxerUIRunApplication();
+    return huxerui::RunApplication();
   }
 }
 )TEMPLATE"},

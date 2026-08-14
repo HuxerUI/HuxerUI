@@ -245,6 +245,13 @@ file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
 )
+if (WIN32)
+    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/main.cpp")
+elseif (APPLE AND NOT IOS)
+    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/main.cpp")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/main.cpp")
+endif ()
 
 set(HUXERUI_MODULE_GRAPH_OUTPUT
         "${CMAKE_CURRENT_SOURCE_DIR}/.huxerui/generated/modules.json"
@@ -286,7 +293,7 @@ std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext&
   return {
       {".gitignore", std::string(project_gitignore)},
       {"CMakeLists.txt", ApplicationCMake(context)},
-      {"src/main.cpp", context.Render(R"TEMPLATE(#include <huxerui/huxerui.h>
+      {"src/app.cpp", context.Render(R"TEMPLATE(#include <huxerui/huxerui.h>
 
 using namespace huxerui;
 
@@ -296,7 +303,7 @@ View App() {
   });
 }
 
-HUXERUI_APP(App, {.window = {.title = "@PROJECT_NAME@"}})
+const Application application{App, {.window = {.title = "@PROJECT_NAME@"}}};
 )TEMPLATE")},
       {"resources/strings/default.properties", context.Render("app_name = \"@PROJECT_NAME@\"\n")},
   };
@@ -387,14 +394,14 @@ std::vector<GeneratedFile> PreviewProjectFiles(const ModuleTemplateContext& modu
   return {
       {".gitignore", std::string(project_gitignore)},
       {"CMakeLists.txt", ApplicationCMake(context, module.public_target, "../..")},
-      {"src/main.cpp",
+      {"src/app.cpp",
        "#include <huxerui/huxerui.h>\n#include <" + module.header_path +
            ">\n\nusing namespace huxerui;\n\n"
            "View App() {\n  return MaterialTheme([] {\n    return Text(\"" +
            module.project.project_name +
-           " preview\");\n  });\n}\n\nHUXERUI_APP(\n    App,\n    {\n        .window = {\n            .title = \"" +
+           " preview\");\n  });\n}\n\nconst Application application{\n    App,\n    {\n        .window = {\n            .title = \"" +
            module.project.project_name + " Preview\",\n        },\n        .root_hooks = {\n            " +
-           module.cpp_namespace + "::Install,\n        },\n    }\n)\n"},
+           module.cpp_namespace + "::Install,\n        },\n    }\n};\n"},
       {"resources/strings/default.properties", "app_name = \"" + module.project.project_name + " Preview\"\n"},
   };
 }

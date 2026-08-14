@@ -632,9 +632,9 @@ private:
   std::optional<double> scheduled_frame_deadline_;
 };
 
-int RunPlatformApp(AppDefinition definition) {
+int RunPlatformApplication(const Application& application) {
   IosPlatformAdapter platform;
-  Runtime runtime{std::move(definition), platform};
+  Runtime runtime{application, platform};
   return platform.Run(runtime);
 }
 

@@ -234,7 +234,7 @@ View App() {
   return MaterialTheme(NavigationDemo);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -242,4 +242,4 @@ HUXERUI_APP(
             .initial_size = {640.0F, 480.0F},
         },
     }
-)
+};

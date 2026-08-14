@@ -20,6 +20,11 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
         add_executable(${target_name}
                 main.cpp
         )
+        if (NOT EMSCRIPTEN)
+            target_sources(${target_name} PRIVATE
+                    "${HUXERUI_PROJECT_DIR}/examples/main.cpp"
+            )
+        endif ()
 
         if (TARGET HuxerUI::huxerui_static)
             target_link_libraries(${target_name} PRIVATE HuxerUI::huxerui_static)

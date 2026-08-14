@@ -35,7 +35,7 @@ View App() {
   return MaterialTheme(Counter);
 }
 
-HUXERUI_APP(
+const Application application{
     App,
     {
         .window = {
@@ -43,21 +43,34 @@ HUXERUI_APP(
             .initial_size = {480.0F, 320.0F},
         },
     }
-)
+};
 ```
 
-`HUXERUI_APP` generates the desktop entry point or registers the application definition for a mobile host. The root already owns an implicit scope. `[[huxerui::scope]]` is needed only when a component requires its own local state and recomposition boundary.
+The platform shell owns the process entry point.
+For a desktop shell, its `main.cpp` can be:
+
+```cpp
+#include <huxerui/app.h>
+
+int main() {
+  return huxerui::RunApplication();
+}
+```
+
+The static `Application` declares the process-level root and `AppOptions`; its constructor makes the declaration available to the platform shell without requiring a fixed C++ variable or factory name. Desktop platform projects call `RunApplication()` from their native entry point, while Android and Web create Runtime sessions from the same registered application after loading its native library. The root already owns an implicit scope. `[[huxerui::scope]]` is needed only when a component requires its own local state and recomposition boundary.
 
 ## CMake target
 
 ```cmake
 huxerui_add_app(my_app
         SOURCES
-            main.cpp
+            src/app.cpp
+            platform/main.cpp
 )
 ```
 
 `huxerui_add_app()` creates the platform-appropriate application target, links HuxerUI, and enables scope code generation after all declared sources are known.
+CLI-generated projects select `platform/windows/main.cpp`, `platform/macos/main.cpp`, or `platform/linux/main.cpp` for the current desktop host; iOS owns the corresponding Objective-C++ entry, while Android and Web are hosted.
 Advanced embedded targets may still create their target directly and call `huxerui_enable_codegen()` after adding all sources.
 The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
 

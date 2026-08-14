@@ -1327,10 +1327,10 @@ private:
   std::exception_ptr failure_;
 };
 
-int RunPlatformApp(AppDefinition definition) {
-  WindowOptions options = definition.options.window;
+int RunPlatformApplication(const Application& application) {
+  WindowOptions options = application.options.window;
   LinuxPlatformAdapter platform;
-  Runtime runtime{std::move(definition), platform};
+  Runtime runtime{application, platform};
   return platform.Run(runtime, options);
 }
 

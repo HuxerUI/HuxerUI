@@ -15,6 +15,13 @@
 namespace huxerui::cli {
 namespace {
 
+constexpr std::string_view application_main = R"TEMPLATE(#include <huxerui/app.h>
+
+int main() {
+  return huxerui::RunApplication();
+}
+)TEMPLATE";
+
 void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement) {
   std::size_t position = 0;
   while ((position = value.find(token, position)) != std::string::npos) {
@@ -618,6 +625,7 @@ public:
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     return {
         {".gitignore", "build/\nout/\npackages/\n"},
+        {"main.cpp", std::string(application_main)},
         {"huxerui.cmake",
          R"TEMPLATE(set(HUXERUI_WINDOWS_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/app.manifest")
 )TEMPLATE"},
@@ -637,6 +645,7 @@ public:
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
     static constexpr std::array required{
+        std::string_view{"main.cpp"},
         std::string_view{"huxerui.cmake"},
         std::string_view{"app.manifest"},
     };
@@ -672,15 +681,16 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext&) const override {
-    return {{".gitkeep", {}}};
+    return {{"main.cpp", std::string(application_main)}};
   }
 
   std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext&) const override {
     return {{"src/.gitkeep", {}}};
   }
 
-  std::vector<Diagnostic> Diagnose(const std::filesystem::path&) const override {
-    return {};
+  std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
+    static constexpr std::array required{std::string_view{"main.cpp"}};
+    return ValidateRequiredFiles(shell_root, required);
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
@@ -714,6 +724,7 @@ public:
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     return {
         {".gitignore", "DerivedData/\nxcuserdata/\n*.xcuserstate\narchives/\n"},
+        {"main.cpp", std::string(application_main)},
         {"huxerui.cmake", context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
 set(HUXERUI_MACOS_BUNDLE_IDENTIFIER "@PROJECT_ID@")
 set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
@@ -738,6 +749,7 @@ set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
     static constexpr std::array required{
+        std::string_view{"main.cpp"},
         std::string_view{"huxerui.cmake"},
         std::string_view{"Info.plist.in"},
     };
