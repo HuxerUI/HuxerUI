@@ -153,6 +153,12 @@ function(huxerui_platform_configure)
             COMMAND ${CMAKE_COMMAND} --install "${libpng_BINARY_DIR}"
             COMMAND ${CMAKE_COMMAND} --install "${freetype_BINARY_DIR}"
             COMMAND ${CMAKE_COMMAND} --install "${harfbuzz_BINARY_DIR}"
+            BYPRODUCTS
+                    "${HUXERUI_LINUX_STAGE}/lib/libz.a"
+                    "${HUXERUI_LINUX_STAGE}/lib/libexpat.a"
+                    "${HUXERUI_LINUX_STAGE}/lib/libpng16.a"
+                    "${HUXERUI_LINUX_STAGE}/lib/libfreetype.a"
+                    "${HUXERUI_LINUX_STAGE}/lib/libharfbuzz.a"
             DEPENDS zlibstatic expat png_static freetype harfbuzz
     )
 
