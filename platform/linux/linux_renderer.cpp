@@ -61,10 +61,17 @@ void CombineHash(std::size_t& seed, std::size_t value) noexcept {
 }
 
 std::size_t HashFont(const Font& font) noexcept {
-  std::size_t result = std::hash<std::string_view>{}(font.FamilyName());
+  std::size_t result = std::hash<FontFamilyKind>{}(font.FamilyKind());
+  CombineHash(result, std::hash<std::string_view>{}(font.FamilyName()));
   CombineHash(result, std::hash<float>{}(font.Size()));
   CombineHash(result, std::hash<FontWeight>{}(font.Weight()));
   CombineHash(result, std::hash<FontSlant>{}(font.Slant()));
+  return result;
+}
+
+std::size_t HashShaping(const TextShapingOptions& shaping) noexcept {
+  std::size_t result = std::hash<TextDirection>{}(shaping.direction);
+  CombineHash(result, std::hash<std::string_view>{}(shaping.locale));
   return result;
 }
 
@@ -74,12 +81,10 @@ struct FontHash {
   }
 };
 
-// Shaping output depends only on the run text plus the font; decoration, shaping
-// locale, and direction are applied after shaping, so the cache key omits them.
-// This diverges from win32, where DirectWrite embeds those values in the layout.
 struct TextRunKey {
   std::string text;
   Font font;
+  TextShapingOptions shaping;
 
   bool operator==(const TextRunKey&) const = default;
 };
@@ -87,23 +92,25 @@ struct TextRunKey {
 struct TextRunKeyView {
   std::string_view text;
   const Font& font;
+  const TextShapingOptions& shaping;
 };
 
 struct TextRunKeyHash {
   using is_transparent = void;
 
   std::size_t operator()(const TextRunKey& key) const noexcept {
-    return Hash(key.text, key.font);
+    return Hash(key.text, key.font, key.shaping);
   }
 
   std::size_t operator()(const TextRunKeyView& key) const noexcept {
-    return Hash(key.text, key.font);
+    return Hash(key.text, key.font, key.shaping);
   }
 
 private:
-  static std::size_t Hash(std::string_view text, const Font& font) noexcept {
+  static std::size_t Hash(std::string_view text, const Font& font, const TextShapingOptions& shaping) noexcept {
     std::size_t result = std::hash<std::string_view>{}(text);
     CombineHash(result, HashFont(font));
+    CombineHash(result, HashShaping(shaping));
     return result;
   }
 };
@@ -116,7 +123,7 @@ struct TextRunKeyEqual {
   }
 
   bool operator()(const TextRunKey& left, const TextRunKeyView& right) const noexcept {
-    return std::string_view(left.text) == right.text && left.font == right.font;
+    return std::string_view(left.text) == right.text && left.font == right.font && left.shaping == right.shaping;
   }
 
   bool operator()(const TextRunKeyView& left, const TextRunKey& right) const noexcept {
@@ -124,15 +131,11 @@ struct TextRunKeyEqual {
   }
 };
 
-// Line breaking depends only on the paragraph text, font, wrap width, and wrap
-// mode; alignment is applied at draw time and shaping locale/direction never
-// influence wrapping, so the cache key omits them. This diverges from win32,
-// where DirectWrite embeds those values in the layout.
 struct ParagraphKey {
   std::string text;
   Font font;
   float wrap_width = 0.0F;
-  TextWrap wrap = TextWrap::NoWrap;
+  TextLayoutOptions options;
 
   bool operator==(const ParagraphKey&) const = default;
 };
@@ -141,26 +144,29 @@ struct ParagraphKeyView {
   std::string_view text;
   const Font& font;
   float wrap_width;
-  TextWrap wrap;
+  const TextLayoutOptions& options;
 };
 
 struct ParagraphKeyHash {
   using is_transparent = void;
 
   std::size_t operator()(const ParagraphKey& key) const noexcept {
-    return Hash(key.text, key.font, key.wrap_width, key.wrap);
+    return Hash(key.text, key.font, key.wrap_width, key.options);
   }
 
   std::size_t operator()(const ParagraphKeyView& key) const noexcept {
-    return Hash(key.text, key.font, key.wrap_width, key.wrap);
+    return Hash(key.text, key.font, key.wrap_width, key.options);
   }
 
 private:
-  static std::size_t Hash(std::string_view text, const Font& font, float wrap_width, TextWrap wrap) noexcept {
+  static std::size_t
+  Hash(std::string_view text, const Font& font, float wrap_width, const TextLayoutOptions& options) noexcept {
     std::size_t result = std::hash<std::string_view>{}(text);
     CombineHash(result, HashFont(font));
     CombineHash(result, std::hash<float>{}(wrap_width));
-    CombineHash(result, std::hash<TextWrap>{}(wrap));
+    CombineHash(result, HashShaping(options.shaping));
+    CombineHash(result, std::hash<TextAlign>{}(options.align));
+    CombineHash(result, std::hash<TextWrap>{}(options.wrap));
     return result;
   }
 };
@@ -174,7 +180,7 @@ struct ParagraphKeyEqual {
 
   bool operator()(const ParagraphKey& left, const ParagraphKeyView& right) const noexcept {
     return std::string_view(left.text) == right.text && left.font == right.font &&
-           left.wrap_width == right.wrap_width && left.wrap == right.wrap;
+           left.wrap_width == right.wrap_width && left.options == right.options;
   }
 
   bool operator()(const ParagraphKeyView& left, const ParagraphKey& right) const noexcept {
@@ -194,7 +200,21 @@ struct ShapedGlyph {
 struct ShapedRun {
   std::vector<ShapedGlyph> glyphs;
   float advance = 0.0F;
+  TextDirection direction = TextDirection::LeftToRight;
 };
+
+// Repeated round glyphs expose fractional raster phases as apparent size changes. Keep their device phase stable while
+// retaining the shaped advances used for layout.
+[[nodiscard]] bool ShouldSnapRepeatedGlyphOrigins(const std::vector<ShapedGlyph>& glyphs) noexcept {
+  if (glyphs.size() < 2) {
+    return false;
+  }
+  const ShapedGlyph& first = glyphs.front();
+  return std::all_of(glyphs.begin() + 1, glyphs.end(), [&](const ShapedGlyph& glyph) {
+    return glyph.index == first.index && glyph.x_advance == first.x_advance && glyph.x_offset == first.x_offset &&
+           glyph.y_offset == first.y_offset && glyph.fallback == first.fallback;
+  });
+}
 
 struct LayoutLine {
   std::string text;
@@ -205,6 +225,7 @@ struct LayoutLine {
   float leading = 0.0F;
   float baseline = 0.0F;
   std::size_t byte_start = 0;
+  TextDirection direction = TextDirection::LeftToRight;
 };
 
 [[nodiscard]] std::uint32_t DecodeCodePoint(std::string_view text, std::size_t offset, std::size_t width) {
@@ -314,26 +335,27 @@ public:
         break;
       }
       float x = 0.0F;
-      for (const ShapedGlyph& glyph : line.glyphs) {
+      for (std::size_t glyph_index = 0; glyph_index < line.glyphs.size(); ++glyph_index) {
+        const ShapedGlyph& glyph = line.glyphs[glyph_index];
         const float glyph_end = x + glyph.x_advance;
         const float distance = ClampTo(x, glyph_end, point.x);
-        const std::size_t glyph_utf16 = Utf16At(line.byte_start + glyph.cluster);
-        if (distance < best_distance || (distance == best_distance && glyph_utf16 > 0)) {
-          const bool trailing = point.x > (x + glyph_end) * 0.5F;
-          const std::size_t resolved_utf16 =
-              trailing ? Utf16At(
-                             line.byte_start + glyph.cluster +
-                                 Utf8Width(static_cast<unsigned char>(text_[line.byte_start + glyph.cluster]))
-                         )
-                       : glyph_utf16;
+        const std::size_t glyph_start = Utf16At(line.byte_start + glyph.cluster);
+        const std::size_t glyph_finish = Utf16At(line.byte_start + GlyphLogicalEnd(line, glyph_index));
+        if (distance < best_distance || (distance == best_distance && glyph_start > 0)) {
+          const bool right_half = point.x > (x + glyph_end) * 0.5F;
+          const std::size_t resolved_utf16 = line.direction == TextDirection::RightToLeft
+                                                 ? (right_half ? glyph_start : glyph_finish)
+                                                 : (right_half ? glyph_finish : glyph_start);
           best_offset = static_cast<TextOffset>(resolved_utf16);
-          best_affinity = trailing ? TextAffinity::Upstream : TextAffinity::Downstream;
+          best_affinity = right_half ? TextAffinity::Upstream : TextAffinity::Downstream;
           best_distance = distance;
         }
         x = glyph_end;
       }
       if (point.x >= x && x - point.x <= best_distance) {
-        best_offset = static_cast<TextOffset>(Utf16At(line.byte_start + line.text.size()));
+        best_offset = line.direction == TextDirection::RightToLeft
+                          ? static_cast<TextOffset>(Utf16At(line.byte_start))
+                          : static_cast<TextOffset>(Utf16At(line.byte_start + line.text.size()));
         best_affinity = TextAffinity::Downstream;
         best_distance = x - point.x;
       }
@@ -349,14 +371,7 @@ public:
       if (clamped < static_cast<TextOffset>(line_start_utf16) || clamped > static_cast<TextOffset>(line_end_utf16)) {
         continue;
       }
-      float x = 0.0F;
-      for (const ShapedGlyph& glyph : line.glyphs) {
-        const std::size_t glyph_utf16 = Utf16At(line.byte_start + glyph.cluster);
-        if (glyph_utf16 >= static_cast<std::size_t>(clamped)) {
-          break;
-        }
-        x += glyph.x_advance;
-      }
+      const float x = XForUtf16(line, clamped - static_cast<TextOffset>(line_start_utf16));
       static_cast<void>(affinity);
       const float height = line.ascent + line.descent + line.leading;
       return {
@@ -384,8 +399,10 @@ public:
       if (visible_start >= visible_end) {
         continue;
       }
-      const float left = XForUtf16(line, visible_start - static_cast<TextOffset>(line_start_utf16));
-      const float right = XForUtf16(line, visible_end - static_cast<TextOffset>(line_start_utf16));
+      const float first = XForUtf16(line, visible_start - static_cast<TextOffset>(line_start_utf16));
+      const float last = XForUtf16(line, visible_end - static_cast<TextOffset>(line_start_utf16));
+      const float left = std::min(first, last);
+      const float right = std::max(first, last);
       const float height = line.ascent + line.descent + line.leading;
       rects.push_back({
           left,
@@ -477,14 +494,33 @@ private:
   [[nodiscard]] float XForUtf16(const LayoutLine& line, TextOffset utf16_within_line) const {
     const std::size_t line_start_utf16 = Utf16At(line.byte_start);
     float x = 0.0F;
-    for (const ShapedGlyph& glyph : line.glyphs) {
-      const std::size_t glyph_utf16 = Utf16At(line.byte_start + glyph.cluster);
-      if (static_cast<TextOffset>(glyph_utf16 - line_start_utf16) >= utf16_within_line) {
-        break;
+    for (std::size_t glyph_index = 0; glyph_index < line.glyphs.size(); ++glyph_index) {
+      const ShapedGlyph& glyph = line.glyphs[glyph_index];
+      const TextOffset glyph_start =
+          static_cast<TextOffset>(Utf16At(line.byte_start + glyph.cluster) - line_start_utf16);
+      const TextOffset glyph_end =
+          static_cast<TextOffset>(Utf16At(line.byte_start + GlyphLogicalEnd(line, glyph_index)) - line_start_utf16);
+      if (utf16_within_line >= glyph_start && utf16_within_line <= glyph_end) {
+        const float fraction = glyph_end == glyph_start ? 0.0F
+                                                        : static_cast<float>(utf16_within_line - glyph_start) /
+                                                              static_cast<float>(glyph_end - glyph_start);
+        return line.direction == TextDirection::RightToLeft ? x + glyph.x_advance * (1.0F - fraction)
+                                                            : x + glyph.x_advance * fraction;
       }
       x += glyph.x_advance;
     }
     return x;
+  }
+
+  [[nodiscard]] std::size_t GlyphLogicalEnd(const LayoutLine& line, std::size_t glyph_index) const noexcept {
+    const std::size_t cluster = line.glyphs[glyph_index].cluster;
+    std::size_t end = line.text.size();
+    for (const ShapedGlyph& candidate : line.glyphs) {
+      if (candidate.cluster > cluster) {
+        end = std::min(end, static_cast<std::size_t>(candidate.cluster));
+      }
+    }
+    return end;
   }
 
   std::string text_;
@@ -607,23 +643,21 @@ struct CairoSurfaceHandle {
 };
 
 [[nodiscard]] GLuint CompileProgram() {
-  const char* vertex_source =
-      "attribute vec2 a_pos;\n"
-      "attribute vec2 a_uv;\n"
-      "varying vec2 v_uv;\n"
-      "void main() {\n"
-      "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
-      "  v_uv = a_uv;\n"
-      "}\n";
-  const char* fragment_source =
-      "precision mediump float;\n"
-      "varying vec2 v_uv;\n"
-      "uniform sampler2D u_tex;\n"
-      "uniform bool u_bgra;\n"
-      "void main() {\n"
-      "  vec4 c = texture2D(u_tex, v_uv);\n"
-      "  gl_FragColor = u_bgra ? c.bgra : c;\n"
-      "}\n";
+  const char* vertex_source = "attribute vec2 a_pos;\n"
+                              "attribute vec2 a_uv;\n"
+                              "varying vec2 v_uv;\n"
+                              "void main() {\n"
+                              "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+                              "  v_uv = a_uv;\n"
+                              "}\n";
+  const char* fragment_source = "precision mediump float;\n"
+                                "varying vec2 v_uv;\n"
+                                "uniform sampler2D u_tex;\n"
+                                "uniform bool u_bgra;\n"
+                                "void main() {\n"
+                                "  vec4 c = texture2D(u_tex, v_uv);\n"
+                                "  gl_FragColor = u_bgra ? c.bgra : c;\n"
+                                "}\n";
 
   const GLuint vertex = glCreateShader(GL_VERTEX_SHADER);
   glShaderSource(vertex, 1, &vertex_source, nullptr);
@@ -1094,15 +1128,8 @@ struct LinuxRenderer::State {
     return face;
   }
 
-  [[nodiscard]] ShapedRun ShapeRun(std::string_view text, const TextStyle& style) {
-    // A cache hit skips FaceFor and the char-size reset below. That is safe
-    // because the next cache miss re-establishes the shared face's 96-dpi char
-    // size, MetricsFor uses font-wide metrics independent of char size, and
-    // Cairo re-scales faces during rendering.
-    const auto cached = shaped_run_cache.find(TextRunKeyView{text, style.font});
-    if (cached != shaped_run_cache.end()) {
-      return cached->second;
-    }
+  [[nodiscard]] ShapedRun
+  ShapeRunValue(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
     FT_Face face = FaceFor(style.font);
     // Cairo's FT load face rewrites the shared face's character size while
     // rendering; reset it to the 96-dpi reference so shaping stays in DIPs.
@@ -1119,10 +1146,15 @@ struct LinuxRenderer::State {
         false,
     };
     hb_buffer_add_utf8(shaping.buffer, text.data(), static_cast<int>(text.size()), 0, static_cast<int>(text.size()));
+    const TextDirection direction =
+        options.direction == TextDirection::Auto ? ResolveDirection(text) : options.direction;
     hb_buffer_set_direction(
         shaping.buffer,
-        ResolveDirection(text) == TextDirection::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR
+        direction == TextDirection::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR
     );
+    if (!options.locale.empty()) {
+      hb_buffer_set_language(shaping.buffer, hb_language_from_string(options.locale.data(), options.locale.size()));
+    }
     hb_buffer_guess_segment_properties(shaping.buffer);
     hb_shape(shaping.font, shaping.buffer, nullptr, 0);
 
@@ -1131,6 +1163,7 @@ struct LinuxRenderer::State {
     const hb_glyph_position_t* glyph_position = hb_buffer_get_glyph_positions(shaping.buffer, nullptr);
 
     ShapedRun run;
+    run.direction = direction;
     run.glyphs.reserve(glyph_count);
     for (unsigned int index = 0; index < glyph_count; ++index) {
       run.glyphs.push_back({
@@ -1144,24 +1177,56 @@ struct LinuxRenderer::State {
     }
 
     if (std::any_of(run.glyphs.begin(), run.glyphs.end(), [](const ShapedGlyph& glyph) { return glyph.index == 0; })) {
-      run = ApplyFallbackShaping(text, style, std::move(run));
+      run = ApplyFallbackShaping(text, style, options, std::move(run));
     }
-    if (shaped_run_cache.size() >= kMaxShapedRuns) {
-      shaped_run_cache.erase(shaped_run_cache.begin());
-    }
-    shaped_run_cache.emplace(TextRunKey{std::string(text), style.font}, run);
     return run;
   }
 
-  [[nodiscard]] float ProbeAdvance(std::string_view text, const TextStyle& style) {
-    const auto cached = shaped_run_cache.find(TextRunKeyView{text, style.font});
+  [[nodiscard]] static std::uint64_t ShapedRunBytes(const TextRunKey& key, const ShapedRun& run) noexcept {
+    return static_cast<std::uint64_t>(sizeof(TextRunKey) + key.text.size() + key.shaping.locale.size()) +
+           static_cast<std::uint64_t>(sizeof(ShapedRun) + run.glyphs.size() * sizeof(ShapedGlyph));
+  }
+
+  [[nodiscard]] const ShapedRun&
+  ShapeRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
+    // A cache hit skips FaceFor and the char-size reset below. That is safe
+    // because the next cache miss re-establishes the shared face's 96-dpi char
+    // size, MetricsFor uses font-wide metrics independent of char size, and
+    // Cairo re-scales faces during rendering.
+    const auto cached = shaped_run_cache.find(TextRunKeyView{text, style.font, options});
+    if (cached != shaped_run_cache.end()) {
+      return cached->second;
+    }
+    ShapedRun run = ShapeRunValue(text, style, options);
+    TextRunKey key{std::string(text), style.font, options};
+    const std::uint64_t entry_bytes = ShapedRunBytes(key, run);
+    if (entry_bytes > kShapedRunCacheBudget) {
+      transient_shaped_run = std::move(run);
+      return transient_shaped_run;
+    }
+    while (!shaped_run_cache.empty() && (shaped_run_cache.size() >= kMaxShapedRuns ||
+                                         shaped_run_cache_bytes > kShapedRunCacheBudget - entry_bytes)) {
+      const auto victim = shaped_run_cache.begin();
+      shaped_run_cache_bytes -= ShapedRunBytes(victim->first, victim->second);
+      shaped_run_cache.erase(victim);
+    }
+    auto [inserted, was_inserted] = shaped_run_cache.emplace(std::move(key), std::move(run));
+    static_cast<void>(was_inserted);
+    shaped_run_cache_bytes += entry_bytes;
+    return inserted->second;
+  }
+
+  [[nodiscard]] float ProbeAdvance(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
+    const auto cached = shaped_run_cache.find(TextRunKeyView{text, style.font, options});
     if (cached != shaped_run_cache.end()) {
       return cached->second.advance;
     }
-    return ShapeRun(text, style).advance;
+    return ShapeRunValue(text, style, options).advance;
   }
 
-  [[nodiscard]] ShapedRun ApplyFallbackShaping(std::string_view text, const TextStyle& style, ShapedRun run) {
+  [[nodiscard]] ShapedRun ApplyFallbackShaping(
+      std::string_view text, const TextStyle& style, const TextShapingOptions& options, ShapedRun run
+  ) {
     std::size_t offset = 0;
     while (offset < run.glyphs.size()) {
       ShapedGlyph& glyph = run.glyphs[offset];
@@ -1194,6 +1259,16 @@ struct LinuxRenderer::State {
           0,
           static_cast<int>(width)
       );
+      hb_buffer_set_direction(
+          fallback_shaping.buffer,
+          run.direction == TextDirection::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR
+      );
+      if (!options.locale.empty()) {
+        hb_buffer_set_language(
+            fallback_shaping.buffer,
+            hb_language_from_string(options.locale.data(), options.locale.size())
+        );
+      }
       hb_buffer_guess_segment_properties(fallback_shaping.buffer);
       hb_shape(fallback_shaping.font, fallback_shaping.buffer, nullptr, 0);
       const unsigned int count = hb_buffer_get_length(fallback_shaping.buffer);
@@ -1215,19 +1290,25 @@ struct LinuxRenderer::State {
     return run;
   }
 
-  void
-  ShapeLine(std::string_view text, const TextStyle& style, std::size_t byte_start, std::vector<LayoutLine>& lines) {
-    ShapedRun run = ShapeRun(text, style);
+  void ShapeLine(
+      std::string_view text,
+      const TextStyle& style,
+      const TextShapingOptions& options,
+      std::size_t byte_start,
+      std::vector<LayoutLine>& lines
+  ) {
+    const ShapedRun& run = ShapeRun(text, style, options);
     const FontMetrics metrics = MetricsFor(style.font);
     lines.push_back({
         std::string(text),
-        std::move(run.glyphs),
+        run.glyphs,
         run.advance,
         metrics.ascent,
         metrics.descent,
         metrics.leading,
         0.0F,
         byte_start,
+        run.direction,
     });
   }
 
@@ -1369,9 +1450,8 @@ struct LinuxRenderer::State {
   }
 
   [[nodiscard]] EGLDisplay GetPlatformDisplay(Display* display) const {
-    const auto get_platform_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-        eglGetProcAddress("eglGetPlatformDisplay")
-    );
+    const auto get_platform_display =
+        reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplay"));
     if (get_platform_display != nullptr) {
       return get_platform_display(EGL_PLATFORM_X11_KHR, display, nullptr);
     }
@@ -1489,10 +1569,22 @@ struct LinuxRenderer::State {
       attrib_position = glGetAttribLocation(program, "a_pos");
       attrib_uv = glGetAttribLocation(program, "a_uv");
       static constexpr float kQuadVertices[] = {
-          -1.0F, -1.0F, 0.0F, 1.0F,
-           1.0F, -1.0F, 1.0F, 1.0F,
-          -1.0F,  1.0F, 0.0F, 0.0F,
-           1.0F,  1.0F, 1.0F, 0.0F,
+          -1.0F,
+          -1.0F,
+          0.0F,
+          1.0F,
+          1.0F,
+          -1.0F,
+          1.0F,
+          1.0F,
+          -1.0F,
+          1.0F,
+          0.0F,
+          0.0F,
+          1.0F,
+          1.0F,
+          1.0F,
+          0.0F,
       };
       glGenBuffers(1, &quad_vbo);
       glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
@@ -1507,7 +1599,6 @@ struct LinuxRenderer::State {
     // byte-for-byte and the shader swizzles to RGBA when it is missing.
     const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     use_bgra_upload = ExtensionSupported(extensions, "GL_EXT_texture_format_BGRA8888");
-
     gl_ready = true;
     return true;
   }
@@ -1547,8 +1638,7 @@ struct LinuxRenderer::State {
       glBindTexture(GL_TEXTURE_2D, texture);
     }
     const GLenum filter =
-        egl_size_valid && static_cast<int>(egl_width) == surface_width &&
-                static_cast<int>(egl_height) == surface_height
+        egl_size_valid && static_cast<int>(egl_width) == surface_width && static_cast<int>(egl_height) == surface_height
             ? GL_NEAREST
             : GL_LINEAR;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
@@ -1656,83 +1746,158 @@ struct LinuxRenderer::State {
   }
 };
 
-[[nodiscard]] std::vector<LayoutLine>
-WrapLines(std::string_view text, const TextStyle& style, float wrap_width, TextWrap wrap, LinuxRenderer::State& state) {
-  std::vector<LayoutLine> lines;
-  if (text.empty()) {
-    return lines;
+[[nodiscard]] std::uint64_t ParagraphBytes(const ParagraphKey& key, const std::vector<LayoutLine>& lines) noexcept {
+  std::uint64_t result =
+      static_cast<std::uint64_t>(sizeof(ParagraphKey) + key.text.size() + key.options.shaping.locale.size());
+  result += static_cast<std::uint64_t>(sizeof(LayoutLine)) * lines.size();
+  for (const LayoutLine& line : lines) {
+    result += static_cast<std::uint64_t>(line.text.size());
+    result += static_cast<std::uint64_t>(line.glyphs.size()) * sizeof(ShapedGlyph);
   }
-  const auto cached = state.paragraph_cache.find(ParagraphKeyView{text, style.font, wrap_width, wrap});
+  return result;
+}
+
+[[nodiscard]] const std::vector<LayoutLine>& WrapLines(
+    std::string_view text,
+    const TextStyle& style,
+    float wrap_width,
+    const TextLayoutOptions& options,
+    LinuxRenderer::State& state
+) {
+  std::vector<LayoutLine> lines;
+  const auto cached = state.paragraph_cache.find(ParagraphKeyView{text, style.font, wrap_width, options});
   if (cached != state.paragraph_cache.end()) {
     return cached->second;
   }
   const std::size_t length = text.size();
-  std::size_t line_start = 0;
-  std::size_t line_end = 0;
-  std::size_t last_space = std::string_view::npos;
-
-  const auto flush_line = [&]() {
-    if (line_end <= line_start) {
-      return;
-    }
-    const std::string_view span = text.substr(line_start, line_end - line_start);
-    state.ShapeLine(span, style, line_start, lines);
+  const auto flush_span = [&](std::size_t start, std::size_t end) {
+    state.ShapeLine(text.substr(start, end - start), style, options.shaping, start, lines);
   };
 
-  if (wrap == TextWrap::NoWrap) {
+  if (options.wrap == TextWrap::NoWrap) {
+    std::size_t line_start = 0;
     std::size_t offset = 0;
     while (offset < length) {
       if (text[offset] == '\n') {
-        line_end = offset;
-        flush_line();
+        flush_span(line_start, offset);
         line_start = offset + 1;
       }
-      ++offset;
+      const std::size_t width = Utf8Width(static_cast<unsigned char>(text[offset]));
+      offset += std::min(width, length - offset);
     }
-    line_end = length;
-    flush_line();
-    return lines;
-  }
+    flush_span(line_start, length);
+  } else {
+    std::size_t paragraph_start = 0;
+    while (paragraph_start <= length) {
+      const std::size_t newline = text.find('\n', paragraph_start);
+      const std::size_t paragraph_end = newline == std::string_view::npos ? length : newline;
+      std::vector<std::size_t> boundaries;
+      boundaries.push_back(paragraph_start);
+      for (std::size_t offset = paragraph_start; offset < paragraph_end;) {
+        const std::size_t scalar_width =
+            std::min(Utf8Width(static_cast<unsigned char>(text[offset])), paragraph_end - offset);
+        offset += scalar_width;
+        boundaries.push_back(offset);
+      }
 
-  std::size_t offset = 0;
-  while (offset < length) {
-    const char ch = text[offset];
-    if (ch == '\n') {
-      line_end = offset;
-      flush_line();
-      line_start = offset + 1;
-      last_space = std::string_view::npos;
-      ++offset;
-      continue;
+      if (boundaries.size() == 1) {
+        flush_span(paragraph_start, paragraph_end);
+      } else {
+        std::size_t line_start_index = 0;
+        const std::size_t final_index = boundaries.size() - 1;
+        while (line_start_index < final_index) {
+          const auto fits = [&](std::size_t candidate_index) {
+            return state.ProbeAdvance(
+                       text.substr(
+                           boundaries[line_start_index],
+                           boundaries[candidate_index] - boundaries[line_start_index]
+                       ),
+                       style,
+                       options.shaping
+                   ) <= wrap_width;
+          };
+
+          std::size_t fitting_index = line_start_index;
+          std::size_t first_overflow_index = line_start_index + 1;
+          // Exponential probes keep long wrapped paragraphs from reshaping every growing prefix; binary search
+          // then finds the exact scalar boundary within the first overflowing span.
+          std::size_t span = 1;
+          while (true) {
+            const std::size_t remaining = final_index - line_start_index;
+            const std::size_t candidate_index = line_start_index + std::min(span, remaining);
+            if (!fits(candidate_index)) {
+              first_overflow_index = candidate_index;
+              break;
+            }
+            fitting_index = candidate_index;
+            if (candidate_index == final_index) {
+              break;
+            }
+            span = span > remaining / 2 ? remaining : span * 2;
+          }
+
+          if (fitting_index == final_index) {
+            flush_span(boundaries[line_start_index], paragraph_end);
+            break;
+          }
+          if (fitting_index > line_start_index && first_overflow_index > fitting_index + 1) {
+            std::size_t low = fitting_index + 1;
+            std::size_t high = first_overflow_index - 1;
+            while (low <= high) {
+              const std::size_t middle = low + (high - low) / 2;
+              if (fits(middle)) {
+                fitting_index = middle;
+                low = middle + 1;
+              } else {
+                high = middle - 1;
+              }
+            }
+          }
+          if (fitting_index == line_start_index) {
+            fitting_index = line_start_index + 1;
+          }
+
+          std::size_t break_index = fitting_index;
+          for (std::size_t index = fitting_index; index > line_start_index; --index) {
+            const std::size_t scalar_start = boundaries[index - 1];
+            if (scalar_start > boundaries[line_start_index] &&
+                (text[scalar_start] == ' ' || text[scalar_start] == '\t')) {
+              break_index = index - 1;
+              break;
+            }
+          }
+          flush_span(boundaries[line_start_index], boundaries[break_index]);
+          line_start_index = break_index == fitting_index ? fitting_index : break_index + 1;
+        }
+      }
+
+      if (newline == std::string_view::npos) {
+        break;
+      }
+      paragraph_start = newline + 1;
     }
-    if (ch == ' ' || ch == '\t') {
-      last_space = offset;
-    }
-    const std::string_view candidate = text.substr(line_start, offset + 1 - line_start);
-    const float probe_advance = state.ProbeAdvance(candidate, style);
-    if (probe_advance <= wrap_width) {
-      ++offset;
-      continue;
-    }
-    if (last_space != std::string_view::npos && last_space > line_start) {
-      line_end = last_space;
-      flush_line();
-      line_start = last_space + 1;
-      last_space = std::string_view::npos;
-      continue;
-    }
-    line_end = offset > line_start ? offset : line_start + 1;
-    flush_line();
-    line_start = line_end;
-    last_space = std::string_view::npos;
   }
-  line_end = length;
-  flush_line();
-  if (state.paragraph_cache.size() >= state.kMaxParagraphs) {
-    state.paragraph_cache.erase(state.paragraph_cache.begin());
+  float baseline_offset = 0.0F;
+  for (LayoutLine& line : lines) {
+    line.baseline = baseline_offset + line.ascent;
+    baseline_offset += line.ascent + line.descent + line.leading;
   }
-  state.paragraph_cache.emplace(ParagraphKey{std::string(text), style.font, wrap_width, wrap}, lines);
-  return lines;
+  ParagraphKey key{std::string(text), style.font, wrap_width, options};
+  const std::uint64_t entry_bytes = ParagraphBytes(key, lines);
+  if (entry_bytes > state.kParagraphCacheBudget) {
+    state.transient_paragraph = std::move(lines);
+    return state.transient_paragraph;
+  }
+  while (!state.paragraph_cache.empty() && (state.paragraph_cache.size() >= state.kMaxParagraphs ||
+                                            state.paragraph_cache_bytes > state.kParagraphCacheBudget - entry_bytes)) {
+    const auto victim = state.paragraph_cache.begin();
+    state.paragraph_cache_bytes -= ParagraphBytes(victim->first, victim->second);
+    state.paragraph_cache.erase(victim);
+  }
+  auto [inserted, was_inserted] = state.paragraph_cache.emplace(std::move(key), std::move(lines));
+  static_cast<void>(was_inserted);
+  state.paragraph_cache_bytes += entry_bytes;
+  return inserted->second;
 }
 
 LinuxRenderer::LinuxRenderer() : state_(std::make_unique<State>()) {}
@@ -1826,14 +1991,29 @@ LinuxRenderer::MeasureRun(std::string_view text, const TextStyle& style, const T
   if (text.find_first_of("\r\n") != std::string_view::npos) {
     throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
   }
-  static_cast<void>(options);
   if (text.empty()) {
     const FontMetrics empty_metrics = Metrics(style.font);
     return {0.0F, {0.0F, 0.0F, 0.0F, 0.0F}, empty_metrics};
   }
-  ShapedRun run = state_->ShapeRun(text, style);
+  const ShapedRun& run = state_->ShapeRun(text, style, options);
   const FontMetrics metrics = state_->MetricsFor(style.font);
-  const Rect visual_bounds{0.0F, -metrics.ascent, run.advance, metrics.ascent + metrics.descent};
+  Rect visual_bounds{0.0F, -metrics.ascent, run.advance, metrics.ascent + metrics.descent};
+  const auto include_decoration = [&](float center, float thickness) {
+    if (run.advance <= 0.0F || thickness <= 0.0F) {
+      return;
+    }
+    const float top = center - thickness * 0.5F;
+    const float current_top = std::min(visual_bounds.y, top);
+    const float current_bottom = std::max(visual_bounds.y + visual_bounds.height, top + thickness);
+    visual_bounds.y = current_top;
+    visual_bounds.height = current_bottom - current_top;
+  };
+  if (HasTextDecoration(style.decoration, TextDecoration::Underline)) {
+    include_decoration(metrics.underline_position, metrics.underline_thickness);
+  }
+  if (HasTextDecoration(style.decoration, TextDecoration::StrikeThrough)) {
+    include_decoration(-metrics.strike_through_position, metrics.strike_through_thickness);
+  }
   return {run.advance, visual_bounds, metrics};
 }
 
@@ -1845,7 +2025,7 @@ TextLayoutMetrics LinuxRenderer::MeasureText(
   }
   const bool constrained = std::isfinite(max_width) && max_width > 0.0F;
   const float wrap_width = constrained ? max_width : std::numeric_limits<float>::max();
-  std::vector<LayoutLine> lines = WrapLines(text, style, wrap_width, options.wrap, *state_);
+  const std::vector<LayoutLine>& lines = WrapLines(text, style, wrap_width, options, *state_);
 
   if (lines.empty()) {
     return {};
@@ -1853,8 +2033,7 @@ TextLayoutMetrics LinuxRenderer::MeasureText(
 
   float width = 0.0F;
   float total_height = 0.0F;
-  for (LayoutLine& line : lines) {
-    line.baseline = total_height + line.ascent;
+  for (const LayoutLine& line : lines) {
     total_height += line.ascent + line.descent + line.leading;
     width = std::max(width, line.advance);
   }
@@ -1876,7 +2055,7 @@ std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
 ) {
   const bool constrained = std::isfinite(max_width) && max_width > 0.0F;
   const float wrap_width = constrained ? max_width : std::numeric_limits<float>::max();
-  std::vector<LayoutLine> lines = WrapLines(text, style, wrap_width, options.wrap, *state_);
+  std::vector<LayoutLine> lines = WrapLines(text, style, wrap_width, options, *state_);
 
   if (lines.empty()) {
     const FontMetrics metrics = state_->MetricsFor(style.font);
@@ -1888,16 +2067,6 @@ std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
     lines.push_back(std::move(empty_line));
   }
 
-  float width = 0.0F;
-  float total_height = 0.0F;
-  for (LayoutLine& line : lines) {
-    line.baseline = total_height + line.ascent;
-    total_height += line.ascent + line.descent + line.leading;
-    width = std::max(width, line.advance);
-  }
-  if (constrained) {
-    width = std::min(width, max_width);
-  }
   return std::make_unique<LinuxTextLayout>(std::string(text), std::move(lines));
 }
 
@@ -1987,6 +2156,19 @@ namespace {
 
 void SetSourceColor(cairo_t* cr, const Color& color) {
   cairo_set_source_rgba(cr, color.red, color.green, color.blue, color.alpha);
+}
+
+void SnapTextOriginToDevicePixels(cairo_t* cr, double& x, double& y) {
+  cairo_matrix_t matrix{};
+  cairo_get_matrix(cr, &matrix);
+  constexpr double epsilon = 1.0e-6;
+  if (std::abs(matrix.xy) > epsilon || std::abs(matrix.yx) > epsilon) {
+    return;
+  }
+  cairo_user_to_device(cr, &x, &y);
+  x = std::round(x);
+  y = std::round(y);
+  cairo_device_to_user(cr, &x, &y);
 }
 
 [[nodiscard]] cairo_line_cap_t CairoLineCap(StrokeCap cap) noexcept {
@@ -2139,6 +2321,23 @@ public:
 
 private:
   void RenderSequence(const PaintSequence& sequence) {
+    if (sequence.Commands().empty()) {
+      return;
+    }
+    double clip_left = 0.0;
+    double clip_top = 0.0;
+    double clip_right = 0.0;
+    double clip_bottom = 0.0;
+    cairo_clip_extents(cr_, &clip_left, &clip_top, &clip_right, &clip_bottom);
+    const Rect clip{
+        static_cast<float>(clip_left),
+        static_cast<float>(clip_top),
+        static_cast<float>(std::max(0.0, clip_right - clip_left)),
+        static_cast<float>(std::max(0.0, clip_bottom - clip_top)),
+    };
+    if (!sequence.Bounds().Intersects(clip)) {
+      return;
+    }
     for (const PaintCommand& command : sequence.Commands()) {
       std::visit([this](const auto& value) { RenderCommand(value); }, command);
     }
@@ -2174,12 +2373,14 @@ private:
 
   void RenderCommand(const DrawTextRunsCommand& command) {
     for (const TextRun& run : command.runs) {
-      ShapedRun shaped = state_.ShapeRun(run.text, run.style);
-      cairo_font_face_t* current_face = state_.CairoFontFor(run.style.font);
-      cairo_set_font_face(cr_, current_face);
+      const ShapedRun& shaped = state_.ShapeRun(run.text, run.style, run.shaping);
+      cairo_font_face_t* primary_face = state_.CairoFontFor(run.style.font);
+      cairo_font_face_t* current_face = primary_face;
+      cairo_set_font_face(cr_, primary_face);
       cairo_set_font_size(cr_, run.style.font.Size());
       SetSourceColor(cr_, run.style.foreground);
-      std::vector<cairo_glyph_t> batch;
+      std::vector<cairo_glyph_t>& batch = state_.glyph_scratch;
+      batch.clear();
       batch.reserve(shaped.glyphs.size());
       const auto flush = [&]() {
         if (!batch.empty()) {
@@ -2188,6 +2389,10 @@ private:
         }
       };
       double x = run.baseline_origin.x;
+      double baseline_y = run.baseline_origin.y;
+      SnapTextOriginToDevicePixels(cr_, x, baseline_y);
+      const double decoration_x = x;
+      const bool snap_repeated_glyph_origins = ShouldSnapRepeatedGlyphOrigins(shaped.glyphs);
       for (const ShapedGlyph& glyph : shaped.glyphs) {
         if (glyph.fallback) {
           cairo_font_face_t* fallback =
@@ -2197,11 +2402,27 @@ private:
             cairo_set_font_face(cr_, fallback);
             current_face = fallback;
           }
+        } else if (current_face != primary_face) {
+          flush();
+          cairo_set_font_face(cr_, primary_face);
+          current_face = primary_face;
         }
-        batch.push_back({glyph.index, x + glyph.x_offset, run.baseline_origin.y + glyph.y_offset});
+        double draw_x = x + glyph.x_offset;
+        double draw_y = baseline_y + glyph.y_offset;
+        if (snap_repeated_glyph_origins) {
+          SnapTextOriginToDevicePixels(cr_, draw_x, draw_y);
+        }
+        batch.push_back({glyph.index, draw_x, draw_y});
         x += glyph.x_advance;
       }
       flush();
+      DrawDecorations(
+          static_cast<float>(decoration_x),
+          static_cast<float>(baseline_y),
+          shaped.advance,
+          run.style,
+          state_.MetricsFor(run.style.font)
+      );
     }
   }
 
@@ -2591,24 +2812,25 @@ private:
     }
     const float wrap_width =
         std::isfinite(rect.width) && rect.width > 0.0F ? rect.width : std::numeric_limits<float>::max();
-    std::vector<LayoutLine> lines = WrapLines(text, style, wrap_width, options.wrap, state_);
+    const std::vector<LayoutLine>& lines = WrapLines(text, style, wrap_width, options, state_);
     if (lines.empty()) {
       return;
     }
     float total_height = 0.0F;
-    for (LayoutLine& line : lines) {
-      line.baseline = total_height + line.ascent;
+    for (const LayoutLine& line : lines) {
       total_height += line.ascent + line.descent + line.leading;
     }
     float y = rect.y;
     if (options.wrap == TextWrap::NoWrap && total_height < rect.height) {
       y += (rect.height - total_height) * 0.5F;
     }
-    cairo_font_face_t* current_face = state_.CairoFontFor(style.font);
-    cairo_set_font_face(cr_, current_face);
+    cairo_font_face_t* primary_face = state_.CairoFontFor(style.font);
+    cairo_font_face_t* current_face = primary_face;
+    cairo_set_font_face(cr_, primary_face);
     cairo_set_font_size(cr_, style.font.Size());
     SetSourceColor(cr_, style.foreground);
-    std::vector<cairo_glyph_t> batch;
+    std::vector<cairo_glyph_t>& batch = state_.glyph_scratch;
+    batch.clear();
     const auto flush = [&]() {
       if (!batch.empty()) {
         cairo_show_glyphs(cr_, batch.data(), static_cast<int>(batch.size()));
@@ -2619,12 +2841,18 @@ private:
       float x = rect.x;
       if (options.align == TextAlign::Center) {
         x += std::max(0.0F, (rect.width - line.advance) * 0.5F);
-      } else if (options.align == TextAlign::Trailing) {
+      } else if (
+          (options.align == TextAlign::Leading && line.direction == TextDirection::RightToLeft) ||
+          (options.align == TextAlign::Trailing && line.direction != TextDirection::RightToLeft)
+      ) {
         x += std::max(0.0F, rect.width - line.advance);
       }
       batch.reserve(line.glyphs.size());
-      const double baseline_y = y + line.baseline;
-      double glyph_x = x;
+      double run_x = x;
+      double baseline_y = y + line.baseline;
+      SnapTextOriginToDevicePixels(cr_, run_x, baseline_y);
+      double glyph_x = run_x;
+      const bool snap_repeated_glyph_origins = ShouldSnapRepeatedGlyphOrigins(line.glyphs);
       for (const ShapedGlyph& glyph : line.glyphs) {
         if (glyph.fallback) {
           cairo_font_face_t* fallback =
@@ -2634,11 +2862,54 @@ private:
             cairo_set_font_face(cr_, fallback);
             current_face = fallback;
           }
+        } else if (current_face != primary_face) {
+          flush();
+          cairo_set_font_face(cr_, primary_face);
+          current_face = primary_face;
         }
-        batch.push_back({glyph.index, glyph_x + glyph.x_offset, baseline_y + glyph.y_offset});
+        double draw_x = glyph_x + glyph.x_offset;
+        double draw_y = baseline_y + glyph.y_offset;
+        if (snap_repeated_glyph_origins) {
+          SnapTextOriginToDevicePixels(cr_, draw_x, draw_y);
+        }
+        batch.push_back({glyph.index, draw_x, draw_y});
         glyph_x += glyph.x_advance;
       }
       flush();
+      DrawDecorations(
+          static_cast<float>(run_x),
+          static_cast<float>(baseline_y),
+          line.advance,
+          style,
+          state_.MetricsFor(style.font)
+      );
+    }
+  }
+
+  void DrawDecorations(float x, float baseline, float advance, const TextStyle& style, const FontMetrics& metrics) {
+    if (advance <= 0.0F || style.decoration == TextDecoration::None) {
+      return;
+    }
+    SetSourceColor(cr_, style.foreground);
+    if (HasTextDecoration(style.decoration, TextDecoration::Underline) && metrics.underline_thickness > 0.0F) {
+      cairo_rectangle(
+          cr_,
+          x,
+          baseline + metrics.underline_position - metrics.underline_thickness * 0.5F,
+          advance,
+          metrics.underline_thickness
+      );
+      cairo_fill(cr_);
+    }
+    if (HasTextDecoration(style.decoration, TextDecoration::StrikeThrough) && metrics.strike_through_thickness > 0.0F) {
+      cairo_rectangle(
+          cr_,
+          x,
+          baseline - metrics.strike_through_position - metrics.strike_through_thickness * 0.5F,
+          advance,
+          metrics.strike_through_thickness
+      );
+      cairo_fill(cr_);
     }
   }
 
