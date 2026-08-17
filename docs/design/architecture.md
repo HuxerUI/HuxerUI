@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and native accessibility bridges on Android, iOS, macOS, and Windows are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. Android, macOS, and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, and macOS also attach native PlatformView accessibility beneath semantic anchors. Android, iOS, Linux, and macOS provide native nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, ExternalTexture composition, and native dependency projection remain proposed; their contracts below preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS also provides the first native `CVPixelBuffer` source, latest-frame mailbox, and AppKit frame import; other native producer and renderer paths remain proposed. Android, macOS, and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, and macOS also attach native PlatformView accessibility beneath semantic anchors. Android, iOS, Linux, and macOS provide native nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and native dependency projection preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -362,7 +362,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, and nonvisual instance protocol implemented; Android, macOS, and iOS owning-thread dispatch, PlatformView hosting, and nonvisual reference modules implemented; production modules and remaining native adapters proposed
+Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; macOS native ExternalTexture production and consumption implemented; production modules and remaining native adapters proposed
 
 Native modules produce three integration forms:
 
@@ -380,11 +380,14 @@ This does not introduce a Runtime subclass, a public Module base class, native p
 ### Platform payload and instance protocol
 
 Direct registration from Objective-C, Swift, Java, Kotlin, JavaScript, C++, and future platform languages requires one value model that every boundary can represent.
-`PlatformPayload` is an immutable equality-comparable tree containing only null, boolean, signed 64-bit integer, double, UTF-8 string, bytes, list, and string-keyed object values.
+`PlatformPayload` is an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, bytes, list, string-keyed object, and one closed framework capability kind, `ExternalTexture`.
+The capability kind does not admit arbitrary objects.
 Objects require unique keys and compare independently of insertion order; encoders preserve the distinction between integers, doubles, strings, and bytes rather than routing through JSON.
 Strings and object keys must be valid UTF-8, doubles must be finite, and positive and negative zero compare equal.
 Construction rejects excessive nesting, while platform decoders enforce input-size limits before allocating containers from untrusted data.
-`PlatformPayload` never contains a callback, C++ type-erased object, native handle, pointer, platform View, or executable closure.
+`PlatformPayload` is an in-process platform boundary value rather than a persistence, network, or general serialization format.
+It never contains a callback, open-ended C++ type-erased object, native handle, pointer, platform View, or executable closure.
+`ExternalTexture` is the only framework-owned capability kind and remains an opaque value rather than opening a generic native-object alternative.
 
 Boundary bridges preserve these kinds directly rather than relying on implicit coercion:
 
@@ -396,17 +399,19 @@ Boundary bridges preserve these kinds directly rather than relying on implicit c
 | JavaScript and future JS-hosted adapters | Boolean, BigInt, Number, and string | Uint8Array, Array, and a prototype-free string-keyed object |
 
 Decoders require the declared kind and range instead of converting a string to a number, truncating a double to an integer, or treating bytes as text.
+Native ExternalTexture bridge phases represent the value with an unforgeable framework wrapper retaining the same opaque source state; they never expose or reconstruct it from a numeric identity.
 
 The shared public surface stays focused as the phases land:
 
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
+- `<huxerui/external_texture.h>` owns the platform-neutral `ExternalTexture` consumer value; platform-specific headers own native frame producers.
 - `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; `<huxerui/android/platform_module.h>` and `<huxerui/android/platform_view.h>` own the Android nonvisual and visual factory contracts.
 
 There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
 Implemented headers are re-exported through `<huxerui/huxerui.h>`; future headers join it when their phases land, while ordinary applications normally see only a module's typed component and service headers.
 
-The same payload type carries controlled PlatformView properties, nonvisual module creation options, method arguments, method results, event data, and structured error details.
+The same payload type carries controlled PlatformView properties, nonvisual module creation options, method arguments, method results, event data, structured error details, and opaque ExternalTexture references.
 Concrete module APIs remain strongly typed and own their codecs at the module boundary:
 
 ```cpp
@@ -423,7 +428,7 @@ View WebView(const WebViewOptions& options) {
 
 Application code consumes `WebViewOptions`, `NavigationState`, `AudioSource`, and other module types rather than assembling `PlatformPayload` objects or spelling platform type and method names.
 The dynamic representation exists only where shared C++ crosses into a platform implementation.
-Large or continuous media data does not travel through PlatformPayload; resources, ExternalTexture, and platform-owned streaming facilities retain their dedicated paths.
+Large or continuous media frames do not travel through PlatformPayload; only an `ExternalTexture` capability may cross that boundary, while its platform-owned streaming path retains all native frame data.
 
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
@@ -625,10 +630,47 @@ Future surface-specific tests cover Android `SurfaceView` rejection, Windows chi
 
 ### ExternalTexture
 
-ExternalTexture is a copyable platform-neutral value representing one live visual source registered with the current platform surface.
-It contains shared lifetime state, stable identity, fixed logical intrinsic size, and a monotonic frame revision, but no native texture, buffer, view, or device pointer.
-Application code cannot invent an identity; a platform module creates the value through its platform-specific texture registrar.
-An ExternalTexture belongs to one PlatformAdapter surface in the initial contract, and using it with another Runtime is an error.
+Status: shared value, payload, Image, rendering command, scheduling, and damage implemented; macOS native source and AppKit frame import implemented; remaining native sources phased below
+
+`ExternalTexture` is a copyable platform-neutral consumer value representing one live visual source.
+It exposes fixed logical intrinsic size, stable identity equality, and validity, while its shared opaque state retains platform-owned frame production and lifetime data.
+The public value exposes no frame revision, native texture, buffer, view, device pointer, registry identity, or mutation operation.
+Application code cannot construct a valid texture from an integer or native handle; only a platform-specific source creates one.
+
+The platform-neutral public surface remains a value type:
+
+```cpp
+class ExternalTexture final {
+public:
+  ExternalTexture() noexcept = default;
+
+  [[nodiscard]] Size IntrinsicSize() const noexcept;
+  [[nodiscard]] bool HasValue() const noexcept;
+
+  bool operator==(const ExternalTexture& other) const noexcept;
+};
+```
+
+Default construction produces an empty value for optional storage.
+PlatformPayload and Image reject that empty value.
+
+A platform source is move-only and may be created before a Runtime or native surface exists.
+Its `Texture()` operation returns the copyable consumer value, `Publish()` replaces the pending native frame, and `Finish()` rejects later frames while preserving the last published frame for drawing.
+Source destruction performs the same terminal cleanup and is safe even when the texture was never bound to a surface.
+The implemented macOS producer surface is `<huxerui/macos/external_texture.h>` and accepts `CVPixelBufferRef` frames.
+Future iOS, Android, Windows, Linux, and Web producers join the same platform-neutral consumer contract through their own platform headers without widening its public representation.
+
+An unbound texture binds exactly once when it first enters a surface-owned PlatformAdapter boundary.
+A Result or Event binds before delivery to shared C++, a Call argument or PlatformView property binds or validates against the receiving adapter, and a texture created directly by native module code binds when its first committed render use is collected.
+All paths use the same internal surface-binding invariant.
+Re-entering the same surface is valid, while using the texture with another surface fails at the owning boundary with a HuxerUI diagnostic rather than rendering an empty result.
+There is no public or module-visible texture registry: the source state is the capability, and each renderer keeps only the private cache needed to consume sources already bound to its surface.
+
+`PlatformPayloadKind::ExternalTexture` transports the consumer value through module options, Calls, Results, Events, and PlatformView properties, including nested lists and objects.
+Constructing a payload from an empty texture is invalid, and `AsExternalTexture()` requires the exact kind.
+Payload equality delegates to texture identity equality; frame publication never changes payload equality.
+Platform bridges carry an opaque framework wrapper retaining the source state instead of encoding a raw numeric identifier.
+This closed capability does not make PlatformPayload a generic object transport, and PlatformPayload remains explicitly in-process and non-serializable.
 
 The existing Image component accepts ExternalTexture directly and reuses ImageFit, alignment, sampling, measurement, clipping, transform, and opacity behavior:
 
@@ -641,36 +683,56 @@ View CameraView(const CameraSession& camera) {
 
 No separate TextureView or ExternalTextureView class is added.
 Tint remains vector-only and rejects ExternalTexture at the public configuration boundary.
-Camera orientation, mirror state, crop metadata, and color conversion belong to the producer and platform renderer; a logical intrinsic-size change is a controlled Camera state change rather than an asynchronous mutation hidden from layout.
+Camera orientation, mirror state, crop metadata, and color conversion belong to the producer and platform renderer.
+Intrinsic size is immutable because asynchronously changing it would mutate layout without controlled application state; a structural size or format change produces a new ExternalTexture value.
 
 Painting records a distinct `DrawExternalTextureCommand` in PaintCommand.
 The command owns an ExternalTexture value plus source and destination rectangles, sampling, and opacity.
-It remains distinct from DrawImageCommand because immutable encoded images use decode caches while an external texture resolves live content by frame revision.
+It remains distinct from DrawImageCommand because immutable encoded images use decode caches while an external texture resolves the latest platform-owned frame through its opaque source state.
+The command contains no frame revision, so publishing a frame does not make a clean PaintSequence unequal or require rerecording it.
 Adding the command requires explicit handling in every renderer; a backend must not silently draw an empty rectangle.
 
 Frame production does not write application State, recompose a scope, or rerecord an otherwise clean PaintSequence.
-The platform registrar accepts frame notifications from the producer thread, atomically advances the texture revision, coalesces pending work, and marshals one frame request to the platform UI thread.
-Runtime records texture dependencies while publishing PaintSequences.
-On the next BuildFrame it compares committed texture revisions, damages every transformed visible destination that references a changed texture, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
+The source accepts frame publication on the producer thread, atomically advances its private revision, replaces the pending frame, and requests at most one platform frame through the weak scheduler installed during surface binding.
+Runtime records visible texture uses while publishing the RenderScene and retains a committed snapshot of each identity, revision, and transformed destination.
+On the next BuildFrame it compares the source revisions with that snapshot, damages every changed visible destination, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
 The same texture may appear in several nodes; each visible destination participates independently in damage.
 
 ExternalTexture uses a latest-wins mailbox rather than an unbounded frame queue.
 The capture or decoder thread never waits for Runtime, intermediate frames may be dropped, and a renderer acquires the newest frame available when processing damaged content.
-If no newer frame is ready during an unrelated redraw, the registrar retains the last successfully acquired frame.
-When no committed visible command references the texture, frame notifications do not continuously wake the UI and the platform registrar reports inactivity so the producer may throttle.
+The source mailbox and renderer cache together retain at most the currently acquired frame and one newer pending frame.
+If no newer frame is ready during an unrelated redraw, the renderer retains the last successfully acquired frame.
+Before the first frame, Image contributes transparent visual content without treating the valid texture as an error.
+After `Finish()`, rendering freezes on the last acquired or pending frame until the final consumer value and renderer cache release the source state.
+
+Committed visibility controls scheduling rather than production ownership.
+When no committed visible command references the texture, publication updates the mailbox but does not continuously wake the UI.
+The source may receive an activity callback when its committed visibility changes so a camera or decoder can throttle, but Runtime does not own or pause the producer automatically.
+Becoming visible through an ordinary application frame schedules the newest published revision without requiring a new Publish call.
 
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
-Apple, Android, Windows, Linux, and Web module implementations register their producer with the corresponding renderer registry.
-The shared command contains only the opaque identity and immutable drawing data.
+The shared command retains the opaque consumer value and immutable drawing data, while the source state supplies a platform-private mailbox interface only to the matching renderer.
 Each backend chooses a native zero-copy path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
 The API promises no copy through shared Runtime; it does not claim universal zero-copy on the current CoreGraphics, Android Canvas, or Cairo backends.
+The first Apple implementation accepts `CVPixelBufferRef` and uses CoreImage or CoreGraphics conversion compatible with the existing renderer.
+A future Android implementation may accept Bitmap and guarded HardwareBuffer-backed frames while retaining API 23 compatibility and using newer APIs only when available.
 
-The platform registration and all retained PaintCommands share the texture lifetime.
-Unmount first removes committed drawing references and visibility callbacks, then registration teardown releases the producer surface, cached native frame, and synchronization objects.
+The source, payloads, and retained PaintCommands share the opaque source-state lifetime without a registration record.
+Unmount first removes committed drawing references and visibility callbacks, then renderer-cache eviction releases its acquired frame; native mailbox resources are released when the source state loses its final owner.
 Runtime destruction releases RenderScene and platform-content frames before Root Services are destroyed in reverse registration order.
 
 ExternalTexture is visual content, not a native interaction or accessibility subtree.
 Image semantics apply unless the module supplies a more specific HuxerUI semantic declaration, and controls layered over a Camera preview remain ordinary HuxerUI nodes.
+
+Implementation proceeds through reviewable stages:
+
+- The shared protocol has added `ExternalTexture`, the closed PlatformPayload kind, public-header coverage, and focused value and payload tests without adding a registry.
+- Shared rendering has added the Image input, DrawExternalTextureCommand, Runtime dependency snapshots, coalesced frame scheduling, damage invalidation, and explicit renderer command handling.
+- macOS supplies the first platform source, frame mailbox, AppKit renderer cache, module example, and end-to-end current-host validation.
+- iOS and Android add their native source bridges and renderer integration independently, with platform-specific lifecycle, threading, and device validation.
+- Windows, Linux, and Web retain explicit unsupported diagnostics until their native frame and renderer paths are implemented; each later backend preserves the same public contract.
+
+Every stage ends with focused tests, the affected current-host build, `git diff --check`, and owner review before the next stage begins.
 
 ## Animation model
 

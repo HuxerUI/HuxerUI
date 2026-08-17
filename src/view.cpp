@@ -859,7 +859,7 @@ private:
     spec->text = item.label;
     Size icon_size;
     if (item.icon.has_value()) {
-      spec->image_properties.asset = *item.icon;
+      spec->image_properties.SetResolvedAsset(*item.icon);
       icon_size = {std::max(0.0F, style.icon_size), std::max(0.0F, style.icon_size)};
     }
     spec->layout_values.insert_or_assign(
@@ -1854,7 +1854,7 @@ private:
     auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
     spec->text = std::move(label);
     if (icon.has_value()) {
-      spec->image_properties.asset = std::move(*icon);
+      spec->image_properties.SetResolvedAsset(std::move(*icon));
       spec->layout_values.insert_or_assign(
           typeid(detail::LabelContentMetrics),
           detail::MakeErasedLayoutValue(detail::LabelContentMetrics{
@@ -2096,7 +2096,7 @@ std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::IconButton);
   spec->text = std::move(semantic_label);
-  spec->image_properties.asset = std::move(icon);
+  spec->image_properties.SetResolvedAsset(std::move(icon));
   spec->focusable = true;
   spec->component_semantics.role = SemanticRole::Button;
   spec->component_semantics.label = spec->text;
@@ -2114,7 +2114,7 @@ std::shared_ptr<detail::ViewSpec> MakeChipSpec(
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Chip);
   spec->text = std::move(label);
   if (icon.has_value()) {
-    spec->image_properties.asset = std::move(*icon);
+    spec->image_properties.SetResolvedAsset(std::move(*icon));
   }
   spec->focusable = true;
   spec->chip_selection = selection;
@@ -2572,14 +2572,23 @@ void View::SetModifier(detail::ModifierSpec modifier) {
   }
 }
 
-std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ResolvedImageAsset image) {
+std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ImageSource image) {
   const bool has_value = std::visit([](const auto& asset) { return asset.HasValue(); }, image);
   if (!has_value) {
     throw std::invalid_argument("HuxerUI image view asset must not be empty");
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
-  spec->image_properties.asset = std::move(image);
+  spec->image_properties.source = std::move(image);
   return spec;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ResolvedImageAsset image) {
+  return std::visit(
+      [](auto&& asset) {
+        return MakeImageSpec(detail::ImageSource{std::forward<decltype(asset)>(asset)});
+      },
+      std::move(image)
+  );
 }
 
 void View::SetTextStyle(TextStyle style) {
@@ -2612,7 +2621,7 @@ void View::SetImageSampling(ImageSampling sampling) {
 void View::SetImageTint(std::optional<Color> tint) {
   EnsureUniqueSpec();
   if (!spec_->image_properties.IsVector()) {
-    throw std::invalid_argument("HuxerUI raster images do not support Tint");
+    throw std::invalid_argument("HuxerUI image Tint is supported for vector images only");
   }
   spec_->image_properties.tint = tint;
 }
@@ -2837,9 +2846,11 @@ Tabs::Tabs(std::vector<TabItem> items, std::size_t selected_index)
 
 Image::Image(ImageResource resource) : View(MakeImageSpec(detail::UseImageResource(std::move(resource)))) {}
 
-Image::Image(ImageAsset asset) : View(MakeImageSpec(std::move(asset))) {}
+Image::Image(ImageAsset asset) : View(MakeImageSpec(detail::ImageSource{std::move(asset)})) {}
 
-Image::Image(VectorAsset asset) : View(MakeImageSpec(std::move(asset))) {}
+Image::Image(VectorAsset asset) : View(MakeImageSpec(detail::ImageSource{std::move(asset)})) {}
+
+Image::Image(ExternalTexture texture) : View(MakeImageSpec(detail::ImageSource{std::move(texture)})) {}
 
 Image Image::Fit(ImageFit fit) && {
   SetImageFit(fit);

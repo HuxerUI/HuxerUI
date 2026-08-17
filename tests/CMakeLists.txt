@@ -11,6 +11,7 @@ add_executable(huxerui_tests
         tests_main.cpp
         support/builtin_resources.cpp
         unit/application.cpp
+        unit/external_texture.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
@@ -52,6 +53,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
             platform/macos_platform_module.mm
             platform/macos_platform_view.mm
+            platform/macos_external_texture.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
     )
@@ -123,6 +125,7 @@ set(HUXERUI_PUBLIC_HEADERS
         color.h
         environment.h
         event.h
+        external_texture.h
         geometry.h
         huxerui.h
         indication.h
@@ -154,6 +157,10 @@ set(HUXERUI_PUBLIC_HEADERS
         ios/platform_view.h
         macos/platform_view.h
 )
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(APPEND HUXERUI_PUBLIC_HEADERS macos/external_texture.h)
+endif ()
 
 set(HUXERUI_HEADER_TEST_SOURCES)
 foreach (HUXERUI_PUBLIC_HEADER IN LISTS HUXERUI_PUBLIC_HEADERS)

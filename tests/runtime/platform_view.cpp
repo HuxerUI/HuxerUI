@@ -3,6 +3,8 @@
 #include <string>
 #include <string_view>
 
+#include "external_texture_test_support.h"
+
 namespace huxerui::test {
 namespace {
 
@@ -22,12 +24,22 @@ struct TestPlatformEvents {
       return static_cast<int>(payload.AsInteger());
     }
   };
+
+  struct TextureChanged : Event<ExternalTexture> {
+    static constexpr std::string_view Name = "textureChanged";
+
+    static ExternalTexture Decode(const PlatformPayload& payload) {
+      return payload.AsExternalTexture();
+    }
+  };
 };
 
 State<int> platform_view_value;
 State<bool> alternate_platform_view_type;
 State<bool> reverse_platform_views;
 int received_platform_event = 0;
+ExternalTexture platform_view_external_texture;
+ExternalTexture received_platform_texture;
 
 struct TestPlatformRegistration {
   int value = 0;
@@ -92,6 +104,22 @@ View EventPlatformViewApp() {
   return PlatformView("test/Event")
       .Events<TestPlatformEvents::Changed>()
       .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; });
+}
+
+View TextureEventPlatformViewApp() {
+  return PlatformView("test/TextureEvent")
+      .Events<TestPlatformEvents::TextureChanged>()
+      .On<TestPlatformEvents::TextureChanged>([](ExternalTexture texture) {
+        received_platform_texture = std::move(texture);
+      });
+}
+
+View HiddenTexturePlatformViewApp() {
+  return PlatformView(
+             "test/Texture",
+             PlatformPayload::Object{{"texture", platform_view_external_texture}}
+  )
+      .With(Frame{80.0F, 40.0F}, Opacity{0.0F});
 }
 
 View ZeroPlatformViewApp() {
@@ -265,6 +293,46 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
       (PlatformView("test/Event").Events<TestPlatformEvents::Changed, TestPlatformEvents::DuplicateChanged>()),
       std::invalid_argument
   );
+}
+
+TEST_CASE("PlatformViewBindsExternalTexturesBeforeNativeComposition") {
+  platform_view_external_texture = MakeTestExternalTexture({32.0F, 18.0F});
+  TestPlatform platform;
+  Runtime runtime(HiddenTexturePlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+  runtime.BuildRenderFrame();
+
+  TestPlatform other_platform;
+  Runtime other_runtime(HiddenTexturePlatformViewApp, other_platform);
+  REQUIRE_THROWS_AS(other_runtime.BuildRenderFrame(), std::logic_error);
+}
+
+TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
+  received_platform_texture = {};
+  const ExternalTexture texture = MakeTestExternalTexture({32.0F, 18.0F});
+  TestPlatform platform;
+  Runtime runtime(TextureEventPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+  const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
+
+  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.NativeRuntime(),
+      placement.Identity(),
+      "textureChanged",
+      PlatformPayload(texture)
+  ));
+  REQUIRE(received_platform_texture == texture);
+
+  TestPlatform other_platform;
+  Runtime other_runtime(TextureEventPlatformViewApp, other_platform);
+  other_runtime.SetWindowMetrics({{300.0F, 200.0F}});
+  const PlacePlatformViewCommand other_placement = FindPlatformView(other_runtime.BuildRenderFrame());
+  REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      other_runtime.NativeRuntime(),
+      other_placement.Identity(),
+      "textureChanged",
+      PlatformPayload(texture)
+  ));
 }
 
 TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {

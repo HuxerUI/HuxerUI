@@ -3,6 +3,7 @@
 #include <limits>
 #include <vector>
 
+#include "external_texture_test_support.h"
 #include "image_test_support.h"
 
 namespace huxerui::test {
@@ -18,6 +19,7 @@ VerticalAlignment layout_test_image_vertical_alignment = VerticalAlignment::Cent
 ImageSampling layout_test_image_sampling = ImageSampling::Linear;
 Size layout_test_image_frame{100.0F, 100.0F};
 VectorAsset layout_test_vector;
+ExternalTexture layout_test_external_texture;
 
 View ImageLayoutApp() {
   return Column {
@@ -33,6 +35,16 @@ View VectorImageLayoutApp() {
   return Image(layout_test_vector)
       .Tint(Color::Rgb(90, 120, 180))
       .With(Frame{.width = 100.0F, .height = 100.0F});
+}
+
+View ExternalTextureLayoutApp() {
+  return Column {
+    Image(layout_test_external_texture)
+        .Fit(ImageFit::Cover)
+        .Align(HorizontalAlignment::End, VerticalAlignment::Start)
+        .Sampling(ImageSampling::Nearest)
+        .With(Frame{.width = 100.0F, .height = 100.0F}),
+  };
 }
 
 struct FlowBreakBefore {
@@ -404,6 +416,25 @@ TEST_CASE("TestImageRejectsConfigurationForTheWrongAssetFormat") {
 
   REQUIRE_THROWS_AS(Image(raster).Tint(Color::Black()), std::invalid_argument);
   REQUIRE_THROWS_AS(Image(vector).Sampling(ImageSampling::Linear), std::invalid_argument);
+  layout_test_external_texture = MakeTestExternalTexture({20.0F, 10.0F});
+  REQUIRE_THROWS_AS(Image(layout_test_external_texture).Tint(Color::Black()), std::invalid_argument);
+}
+
+TEST_CASE("TestExternalTextureUsesImageFitAlignmentAndSampling") {
+  layout_test_external_texture = MakeTestExternalTexture({20.0F, 10.0F});
+  TestPlatform platform;
+  Runtime runtime{ExternalTextureLayoutApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
+    return std::holds_alternative<DrawExternalTextureCommand>(value);
+  });
+
+  REQUIRE(command != scene.Commands().end());
+  const DrawExternalTextureCommand& texture = std::get<DrawExternalTextureCommand>(*command);
+  REQUIRE(texture.source == Rect{10.0F, 0.0F, 10.0F, 10.0F});
+  REQUIRE(texture.destination == Rect{0.0F, 0.0F, 100.0F, 100.0F});
+  REQUIRE(texture.sampling == ImageSampling::Nearest);
 }
 
 TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {

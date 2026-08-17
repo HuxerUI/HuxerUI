@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <huxerui/event.h>
+#include <huxerui/external_texture.h>
 
 namespace huxerui {
 
@@ -33,6 +34,7 @@ enum class PlatformPayloadKind {
   Bytes,
   List,
   Object,
+  ExternalTexture,
 };
 
 class PlatformPayload {
@@ -58,6 +60,7 @@ public:
   PlatformPayload(Bytes value);
   PlatformPayload(List value);
   PlatformPayload(Object value);
+  PlatformPayload(ExternalTexture value);
 
   [[nodiscard]] PlatformPayloadKind Kind() const noexcept;
   [[nodiscard]] bool IsNull() const noexcept {
@@ -71,6 +74,7 @@ public:
   [[nodiscard]] std::span<const std::byte> AsBytes() const;
   [[nodiscard]] const List& AsList() const;
   [[nodiscard]] const Object& AsObject() const;
+  [[nodiscard]] const ExternalTexture& AsExternalTexture() const;
 
   bool operator==(const PlatformPayload& other) const;
 

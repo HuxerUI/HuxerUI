@@ -30,6 +30,7 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawCircleCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawArcCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawBorderCommand& command);

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "external_texture_internal.h"
 #include "text_layout_internal.h"
 
 namespace huxerui {
@@ -20,9 +21,12 @@ std::vector<const Application*>& Applications() {
 } // namespace
 
 PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
-    : platform_modules_(new PlatformModules(*this, std::move(dispatch_to_ui_thread))) {}
+    : external_texture_surface_(std::make_shared<detail::ExternalTextureSurface>(*this, dispatch_to_ui_thread)),
+      platform_modules_(new PlatformModules(*this, std::move(dispatch_to_ui_thread))) {}
 
-PlatformAdapter::~PlatformAdapter() = default;
+PlatformAdapter::~PlatformAdapter() {
+  external_texture_surface_->Close();
+}
 
 PlatformModuleFactory::Instance PlatformAdapter::CreatePlatformModule(
     std::string_view type, const PlatformPayload& options, PlatformEventSink events

@@ -1164,6 +1164,12 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& 
   CGContextRestoreGState(context);
 }
 
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawExternalTextureCommand& command) {
+  static_cast<void>(context);
+  static_cast<void>(command);
+  throw std::logic_error("HuxerUI iOS external textures are not implemented yet");
+}
+
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawCircleCommand& command) {
   if (command.radius <= 0.0F || command.color.alpha <= 0.0F) {
     return;

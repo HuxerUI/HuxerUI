@@ -10,10 +10,12 @@
 
 #include <huxerui/app.h>
 
+#include "external_texture_internal.h"
+
 namespace huxerui {
 
 struct PlatformPayload::Data {
-  using Value = std::variant<bool, std::int64_t, double, std::string, Bytes, List, Object>;
+  using Value = std::variant<bool, std::int64_t, double, std::string, Bytes, List, Object, ExternalTexture>;
 
   explicit Data(Value value) : value(std::move(value)) {}
 
@@ -80,6 +82,7 @@ void ValidatePayload(const PlatformPayload& payload, std::size_t depth) {
   case PlatformPayloadKind::Double:
   case PlatformPayloadKind::String:
   case PlatformPayloadKind::Bytes:
+  case PlatformPayloadKind::ExternalTexture:
     break;
   case PlatformPayloadKind::List:
     for (const PlatformPayload& child : payload.AsList()) {
@@ -140,6 +143,13 @@ PlatformPayload::PlatformPayload(Object value) : data_(std::make_shared<Data>(st
   ValidatePayload(*this);
 }
 
+PlatformPayload::PlatformPayload(ExternalTexture value) {
+  if (!value.HasValue()) {
+    throw std::invalid_argument("HuxerUI PlatformPayload external texture must not be empty");
+  }
+  data_ = std::make_shared<Data>(std::move(value));
+}
+
 PlatformPayloadKind PlatformPayload::Kind() const noexcept {
   if (!data_) {
     return PlatformPayloadKind::Null;
@@ -175,6 +185,10 @@ const PlatformPayload::Object& PlatformPayload::AsObject() const {
   return std::get<Object>(RequireData().value);
 }
 
+const ExternalTexture& PlatformPayload::AsExternalTexture() const {
+  return std::get<ExternalTexture>(RequireData().value);
+}
+
 const PlatformPayload::Data& PlatformPayload::RequireData() const {
   if (!data_) {
     throw std::bad_variant_access();
@@ -195,7 +209,10 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
     std::function<void()> cancel;
   };
 
-  explicit State(UIThreadDispatcher ui_thread_dispatcher) : dispatch_to_ui_thread(std::move(ui_thread_dispatcher)) {}
+  State(
+      UIThreadDispatcher ui_thread_dispatcher, std::shared_ptr<detail::ExternalTextureSurface> texture_surface
+  )
+      : dispatch_to_ui_thread(std::move(ui_thread_dispatcher)), texture_surface(std::move(texture_surface)) {}
 
   PlatformEventSink EventSink() {
     const std::weak_ptr<State> weak = weak_from_this();
@@ -215,7 +232,6 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
     if (!completion) {
       throw std::invalid_argument("HuxerUI platform module completion must not be empty");
     }
-
     std::function<std::function<void()>(std::string, PlatformPayload, PlatformResultSink)> call;
     PlatformRequestId request = 0;
     {
@@ -223,6 +239,7 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
       if (!open) {
         throw std::logic_error("HuxerUI platform module instance is closed");
       }
+      detail::BindExternalTextures(arguments, texture_surface);
       if (next_request == 0) {
         throw std::logic_error("HuxerUI platform module request identity space is exhausted");
       }
@@ -347,6 +364,19 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
       if (!open || !pending.contains(request)) {
         return;
       }
+      try {
+        if (const auto* payload = std::get_if<PlatformPayload>(&result)) {
+          detail::BindExternalTextures(*payload, texture_surface);
+        } else {
+          detail::BindExternalTextures(std::get<PlatformError>(result).details, texture_surface);
+        }
+      } catch (...) {
+        result = PlatformError{
+            "huxerui/invalid-result",
+            "HuxerUI platform module returned an external texture from another platform surface",
+            {},
+        };
+      }
       dispatch = dispatch_to_ui_thread;
     }
     const std::weak_ptr<State> weak = weak_from_this();
@@ -370,6 +400,11 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
     {
       std::lock_guard lock(mutex);
       if (!open) {
+        return;
+      }
+      try {
+        detail::BindExternalTextures(payload, texture_surface);
+      } catch (...) {
         return;
       }
       queued_events.emplace_back(std::move(event), std::move(payload));
@@ -457,6 +492,7 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
   }
 
   UIThreadDispatcher dispatch_to_ui_thread;
+  std::shared_ptr<detail::ExternalTextureSurface> texture_surface;
   PlatformModuleFactory::Instance native;
   std::mutex mutex;
   PlatformRequestId next_request = 1;
@@ -520,7 +556,9 @@ PlatformInstance PlatformModules::Open(std::string type, PlatformPayload options
     throw std::logic_error("HuxerUI platform module type is not registered: " + type);
   }
 
-  auto state = std::make_shared<PlatformInstance::State>(dispatch_to_ui_thread_);
+  detail::BindExternalTextures(options, adapter_->external_texture_surface_);
+  auto state =
+      std::make_shared<PlatformInstance::State>(dispatch_to_ui_thread_, adapter_->external_texture_surface_);
   PlatformModuleFactory::Instance native = adapter_->CreatePlatformModule(type, options, state->EventSink());
   if (!native.call) {
     if (native.dispose) {

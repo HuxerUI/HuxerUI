@@ -16,7 +16,7 @@ The current implementation provides:
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
 
-Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, and macOS nonvisual timer reference integrations are implemented.
+Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture native producers and renderer frame import outside macOS, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, macOS `CVPixelBuffer` source and AppKit frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, and macOS nonvisual timer reference integrations are implemented.
 The current Android, Linux, and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
@@ -713,16 +713,16 @@ Modules use three runtime integration forms:
 
 - Permission, Audio, Camera control, and similar nonvisual features install typed Root Services backed by registered platform module instances.
 - WebView, map, document preview, and native SDK controls register PlatformView factories by stable string type.
-- Camera preview, video decode, and high-frequency visual streams register platform-owned ExternalTexture instances and return platform-neutral handles to shared code.
+- Camera preview, video decode, and high-frequency visual streams create platform-owned ExternalTexture sources and return platform-neutral consumer values to shared code.
 
 One module may combine the forms.
 Camera normally provides a Camera service plus ExternalTexture preview, while Audio provides only a service and WebView provides a PlatformView factory.
 The application retrieves services through their typed `UseXxx()` helpers; there is no generic module-service lookup.
 
 PlatformView and nonvisual module instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
-PlatformPayload is the only dynamic cross-language representation and is restricted to null, scalar, bytes, list, and string-keyed object data.
+PlatformPayload is the only dynamic in-process cross-language representation and is restricted to null, scalar, bytes, list, string-keyed object data, and the closed framework capability ExternalTexture.
 Concrete module headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
-Callbacks, arbitrary C++ objects, native handles, and media streams never enter the payload.
+Callbacks, arbitrary C++ objects, native handles, and media frames never enter the payload; an ExternalTexture value only retains the opaque platform-owned source state.
 
 Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
 The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during module installation.
@@ -734,19 +734,21 @@ A nonvisual installer opens a registered instance and provides its public typed 
 The service translates typed methods and events to Create, Call, Result, Event, and Dispose messages, owns pending requests and subscriptions, and closes its platform instance during reverse Root Service teardown.
 Applications never call `Modules()` or use string method names directly.
 
-The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and proposed ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
+The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
 Native package attachment only makes a module's platform implementation available to the native application target; the module's explicit RootHook still installs its factories and services without another runtime API or composition mode.
 A PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the native object to a global foreground or background plane.
 Module-owned typed Root Services keep PlatformPayload codecs and string method names behind those services.
-The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, and Linux uses an `eventfd`-backed X11 event-loop queue. `example_platform_module` provides source-level Foundation, Java, and Linux `timerfd` reference integrations behind one typed service. The remaining adapters still need equivalent wiring.
+The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, and Linux uses an `eventfd`-backed X11 event-loop queue. `example_platform_module` provides source-level Foundation, Java, and Linux `timerfd` reference integrations behind one typed service. On macOS it additionally returns an `ExternalTexture` from a typed service and publishes `CVPixelBuffer` frames without per-frame PlatformModule callbacks. The remaining adapters still need equivalent wiring.
 
 Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.
 
-ExternalTexture is instance registration rather than a factory registry.
-A module's platform service registers its producer with the current renderer, receives a platform-neutral ExternalTexture value, and exposes that value to shared code.
+ExternalTexture requires neither a factory registry nor a texture registry.
+A module's platform implementation creates a move-only native source, obtains its copyable ExternalTexture consumer value, and returns that value through its typed service and PlatformPayload codec.
+The source binds once when the value first crosses a surface-owned adapter boundary, while the matching renderer keeps only a private cache for bound source states.
 Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
-Frame notifications advance a texture revision and request presentation without writing application State or executing a per-frame language bridge callback.
+Frame publication replaces a latest-wins native mailbox and requests presentation without writing application State, exposing a numeric texture identity, or executing a per-frame language bridge callback.
+The complete binding, payload, lifetime, scheduling, and staged platform contract is defined in [Architecture Design](architecture.md#externaltexture).
 
 Modules and platform shells provide these factories, registrations, payload codecs, and typed services without introducing Runtime subclasses or native types into shared public headers.
 Future native integration must report a missing current-platform package, ambiguous native product, duplicate registered type, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, or incompatible HuxerUI version with the owning module and application target in the diagnostic.

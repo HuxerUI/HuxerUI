@@ -883,6 +883,11 @@ void WebRenderer::RenderCommand(const DrawImageCommand& command) {
   context_.call<void>("restore");
 }
 
+void WebRenderer::RenderCommand(const DrawExternalTextureCommand& command) {
+  static_cast<void>(command);
+  throw std::logic_error("HuxerUI Web external textures are not implemented yet");
+}
+
 void WebRenderer::RenderCommand(const DrawCircleCommand& command) {
   context_.call<void>("beginPath");
   context_.call<void>("arc", command.center.x, command.center.y, command.radius, 0.0, std::numbers::pi * 2.0);

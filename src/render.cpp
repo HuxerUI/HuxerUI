@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include "external_texture_internal.h"
+
 namespace huxerui::detail {
 
 namespace {
@@ -38,13 +40,13 @@ void PaintImage(
     std::visit(
         [&](const auto& asset) {
           using Asset = std::decay_t<decltype(asset)>;
-          if constexpr (std::same_as<Asset, ImageAsset>) {
+          if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, ExternalTexture>) {
             context.DrawImageRect(asset, source, destination, node.image_properties.sampling);
           } else {
             context.DrawImageRect(asset, source, destination, vector_tint);
           }
         },
-        node.image_properties.asset
+        node.image_properties.source
     );
   };
   const Rect full_source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
@@ -202,11 +204,64 @@ std::optional<Rect> ResolveClip(
   return resolved;
 }
 
+void SnapshotExternalTextures(
+    const PaintSequence& sequence,
+    const Transform2D& world_transform,
+    const std::optional<Rect>& world_clip,
+    std::vector<ExternalTextureUseSnapshot>& textures,
+    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+) {
+  if (!sequence.HasExternalTextureCommands()) {
+    return;
+  }
+  Transform2D transform = world_transform;
+  std::optional<Rect> clip = world_clip;
+  std::vector<Transform2D> transforms;
+  std::vector<std::optional<Rect>> clips;
+  for (const PaintCommand& command : sequence.Commands()) {
+    std::visit(
+        [&](const auto& value) {
+          using Command = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Command, DrawExternalTextureCommand>) {
+            const std::shared_ptr<ExternalTextureState>& state = ExternalTextureState::From(value.texture);
+            state->Bind(texture_surface);
+            Rect bounds = TransformBounds(transform, value.destination);
+            if (clip.has_value()) {
+              bounds = bounds.Intersection(*clip);
+            }
+            if (!bounds.IsEmpty()) {
+              textures.push_back({state, state->Revision(), bounds});
+            }
+          } else if constexpr (std::same_as<Command, PushTransformCommand>) {
+            transforms.push_back(transform);
+            transform = ComposeTransform(transform, value.transform);
+          } else if constexpr (std::same_as<Command, PopTransformCommand>) {
+            transform = transforms.back();
+            transforms.pop_back();
+          } else if constexpr (std::same_as<Command, PushClipCommand>) {
+            clips.push_back(clip);
+            const Rect bounds = TransformBounds(transform, value.rect);
+            clip = clip.has_value() ? clip->Intersection(bounds) : std::optional<Rect>{bounds};
+          } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
+            clips.push_back(clip);
+            const Rect bounds = TransformBounds(transform, value.path.Bounds());
+            clip = clip.has_value() ? clip->Intersection(bounds) : std::optional<Rect>{bounds};
+          } else if constexpr (std::same_as<Command, PopClipCommand>) {
+            clip = clips.back();
+            clips.pop_back();
+          }
+        },
+        command
+    );
+  }
+}
+
 std::optional<Rect> SnapshotRenderNode(
     const RenderNode& node,
     const Transform2D& inherited_transform,
     const std::optional<Rect>& inherited_clip,
-    RenderSceneSnapshot& snapshot
+    RenderSceneSnapshot& snapshot,
+    const std::shared_ptr<ExternalTextureSurface>& texture_surface
 ) {
   RenderNodeSnapshot node_snapshot;
   node_snapshot.content_revision = node.content.Revision();
@@ -231,6 +286,21 @@ std::optional<Rect> SnapshotRenderNode(
     return std::nullopt;
   }
 
+  SnapshotExternalTextures(
+      node.content,
+      node_snapshot.world_transform,
+      inherited_clip,
+      node_snapshot.external_textures,
+      texture_surface
+  );
+  SnapshotExternalTextures(
+      node.foreground,
+      node_snapshot.world_transform,
+      inherited_clip,
+      node_snapshot.external_textures,
+      texture_surface
+  );
+
   std::optional<Rect> own_bounds;
   own_bounds = UnionBounds(std::move(own_bounds), node.content.Bounds());
   own_bounds = UnionBounds(std::move(own_bounds), node.foreground.Bounds());
@@ -249,8 +319,13 @@ std::optional<Rect> SnapshotRenderNode(
     if (child == nullptr) {
       continue;
     }
-    const std::optional<Rect> child_bounds =
-        SnapshotRenderNode(*child, node_snapshot.world_children_transform, node_snapshot.world_child_clip, snapshot);
+    const std::optional<Rect> child_bounds = SnapshotRenderNode(
+        *child,
+        node_snapshot.world_children_transform,
+        node_snapshot.world_child_clip,
+        snapshot,
+        texture_surface
+    );
     if (child_bounds.has_value()) {
       subtree_bounds = UnionBounds(std::move(subtree_bounds), *child_bounds);
     }
@@ -294,6 +369,61 @@ void AddDamageRect(DamageRegion& damage, Rect rect, Rect viewport) {
 void AddSnapshotBounds(DamageRegion& damage, const RenderNodeSnapshot& snapshot, bool subtree, Rect viewport) {
   if (subtree ? snapshot.has_subtree_bounds : snapshot.has_own_bounds) {
     AddDamageRect(damage, subtree ? snapshot.subtree_bounds : snapshot.own_bounds, viewport);
+  }
+}
+
+void AddExternalTextureDamage(
+    DamageRegion& damage,
+    const std::vector<ExternalTextureUseSnapshot>& previous,
+    const std::vector<ExternalTextureUseSnapshot>& current,
+    Rect viewport
+) {
+  if (previous.size() != current.size()) {
+    for (const ExternalTextureUseSnapshot& texture : previous) {
+      AddDamageRect(damage, texture.bounds, viewport);
+    }
+    for (const ExternalTextureUseSnapshot& texture : current) {
+      AddDamageRect(damage, texture.bounds, viewport);
+    }
+    return;
+  }
+  for (std::size_t index = 0; index < current.size(); ++index) {
+    const ExternalTextureUseSnapshot& before = previous[index];
+    const ExternalTextureUseSnapshot& after = current[index];
+    if (before.state != after.state || before.bounds != after.bounds) {
+      AddDamageRect(damage, before.bounds, viewport);
+      AddDamageRect(damage, after.bounds, viewport);
+    } else if (before.revision != after.revision) {
+      AddDamageRect(damage, after.bounds, viewport);
+    }
+  }
+}
+
+std::unordered_set<ExternalTextureState*> ExternalTextureStates(const RenderSceneSnapshot& scene) {
+  std::unordered_set<ExternalTextureState*> states;
+  for (const auto& [id, node] : scene) {
+    static_cast<void>(id);
+    for (const ExternalTextureUseSnapshot& texture : node.external_textures) {
+      states.insert(texture.state.get());
+    }
+  }
+  return states;
+}
+
+void UpdateExternalTextureActivity(
+    const RenderSceneSnapshot& previous,
+    const RenderSceneSnapshot& current,
+    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+) {
+  const std::unordered_set<ExternalTextureState*> previous_states = ExternalTextureStates(previous);
+  const std::unordered_set<ExternalTextureState*> current_states = ExternalTextureStates(current);
+  for (ExternalTextureState* state : previous_states) {
+    if (!current_states.contains(state)) {
+      state->SetActive(texture_surface, false);
+    }
+  }
+  for (ExternalTextureState* state : current_states) {
+    state->SetActive(texture_surface, true);
   }
 }
 
@@ -556,7 +686,8 @@ DamageRegion ComputeDamageRegion(
     Size viewport,
     RenderSceneSnapshot& committed_scene,
     Size& committed_viewport,
-    bool& has_committed_scene
+    bool& has_committed_scene,
+    const std::shared_ptr<ExternalTextureSurface>& texture_surface
 ) {
   const Rect viewport_bounds{
       0.0F,
@@ -566,7 +697,7 @@ DamageRegion ComputeDamageRegion(
   };
   RenderSceneSnapshot current_scene;
   if (root != nullptr) {
-    SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene);
+    SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene, texture_surface);
   }
 
   DamageRegion damage;
@@ -602,6 +733,8 @@ DamageRegion ComputeDamageRegion(
         // A rerecorded sequence affects this node's content or foreground only; unchanged descendants remain valid.
         AddSnapshotBounds(damage, previous, false, viewport_bounds);
         AddSnapshotBounds(damage, current, false, viewport_bounds);
+      } else {
+        AddExternalTextureDamage(damage, previous.external_textures, current.external_textures, viewport_bounds);
       }
     }
 
@@ -612,10 +745,20 @@ DamageRegion ComputeDamageRegion(
     }
   }
 
+  UpdateExternalTextureActivity(committed_scene, current_scene, texture_surface);
   committed_scene = std::move(current_scene);
   committed_viewport = viewport;
   has_committed_scene = true;
   return damage;
+}
+
+void DeactivateExternalTextures(
+    RenderSceneSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
+) {
+  for (ExternalTextureState* state : ExternalTextureStates(committed_scene)) {
+    state->SetActive(texture_surface, false);
+  }
+  committed_scene.clear();
 }
 
 } // namespace huxerui::detail

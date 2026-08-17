@@ -29,6 +29,7 @@ class PlatformResources;
 struct ResourceConfiguration;
 
 namespace detail {
+class ExternalTextureSurface;
 class TextLayout;
 } // namespace detail
 
@@ -124,6 +125,7 @@ protected:
   }
 
 private:
+  std::shared_ptr<detail::ExternalTextureSurface> external_texture_surface_;
   std::unique_ptr<PlatformModules> platform_modules_;
 
   friend class PlatformModules;

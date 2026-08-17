@@ -77,6 +77,7 @@ PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(seq
   RequireRect(bounds);
   sequence_.commands_.clear();
   sequence_.bounds_ = {};
+  sequence_.has_external_texture_commands_ = false;
 }
 
 void PaintContext::DrawRect(Rect rect, Color color, CornerRadii corner_radii) {
@@ -183,6 +184,48 @@ void PaintContext::DrawImageRect(
   sequence_.commands_.emplace_back(
       DrawImageCommand{
           std::move(image),
+          source,
+          destination,
+          sampling,
+          opacity,
+      }
+  );
+  Include(destination);
+}
+
+void PaintContext::DrawImage(
+    ExternalTexture texture, Rect destination, ImageSampling sampling, float opacity
+) {
+  const Size intrinsic = texture.IntrinsicSize();
+  DrawImageRect(
+      std::move(texture), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, sampling, opacity
+  );
+}
+
+void PaintContext::DrawImageRect(
+    ExternalTexture texture, Rect source, Rect destination, ImageSampling sampling, float opacity
+) {
+  RequireOpen();
+  if (!texture.HasValue()) {
+    throw std::invalid_argument("HuxerUI paint external texture must not be empty");
+  }
+  RequireRect(source);
+  RequireRect(destination);
+  const Size intrinsic = texture.IntrinsicSize();
+  if (source.x < 0.0F || source.y < 0.0F || source.x + source.width > intrinsic.width ||
+      source.y + source.height > intrinsic.height) {
+    throw std::invalid_argument("HuxerUI external texture source rectangle must be inside the intrinsic bounds");
+  }
+  if (!std::isfinite(opacity) || opacity < 0.0F || opacity > 1.0F) {
+    throw std::invalid_argument("HuxerUI external texture opacity must be finite and between zero and one");
+  }
+  if (source.IsEmpty() || destination.IsEmpty() || opacity <= 0.0F) {
+    return;
+  }
+  sequence_.has_external_texture_commands_ = true;
+  sequence_.commands_.emplace_back(
+      DrawExternalTextureCommand{
+          std::move(texture),
           source,
           destination,
           sampling,

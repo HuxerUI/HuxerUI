@@ -11,6 +11,8 @@
 
 #include <huxerui/platform_module.h>
 
+#include "external_texture_test_support.h"
+
 namespace huxerui::test {
 namespace {
 
@@ -42,6 +44,23 @@ TEST_CASE("PlatformPayloadObjectEqualityIgnoresInsertionOrder") {
   REQUIRE(PlatformPayload(std::int64_t{1}) != PlatformPayload(1.0));
 }
 
+TEST_CASE("PlatformPayloadRetainsExternalTextureIdentity") {
+  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
+  const ExternalTexture other = MakeTestExternalTexture({320.0F, 180.0F});
+  const PlatformPayload payload = PlatformPayload::Object{
+      {"preview", texture},
+      {"nested", PlatformPayload::List{texture}},
+  };
+
+  const PlatformPayload& preview = payload.AsObject().at("preview");
+  REQUIRE(preview.Kind() == PlatformPayloadKind::ExternalTexture);
+  REQUIRE(preview.AsExternalTexture() == texture);
+  REQUIRE(payload.AsObject().at("nested").AsList().front().AsExternalTexture() == texture);
+  REQUIRE(PlatformPayload(texture) == PlatformPayload(texture));
+  REQUIRE(PlatformPayload(texture) != PlatformPayload(other));
+  REQUIRE_THROWS_AS(PlatformPayload(ExternalTexture{}), std::invalid_argument);
+}
+
 TEST_CASE("PlatformPayloadRejectsInvalidScalars") {
   const std::string invalid_utf8{"\xF0\x28\x8C\x28", 4};
 
@@ -65,6 +84,7 @@ TEST_CASE("PlatformPayloadAccessorsRequireTheDeclaredKind") {
   const PlatformPayload payload = true;
 
   REQUIRE_THROWS_AS(payload.AsInteger(), std::bad_variant_access);
+  REQUIRE_THROWS_AS(payload.AsExternalTexture(), std::bad_variant_access);
   REQUIRE_THROWS_AS(PlatformPayload{}.AsString(), std::bad_variant_access);
 }
 

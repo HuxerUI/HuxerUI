@@ -399,6 +399,16 @@ void AndroidRenderer::RenderCommand(
 }
 
 void AndroidRenderer::RenderCommand(
+    JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command
+) {
+  static_cast<void>(environment);
+  static_cast<void>(view);
+  static_cast<void>(canvas);
+  static_cast<void>(command);
+  throw std::logic_error("HuxerUI Android external textures are not implemented yet");
+}
+
+void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawCircleCommand& command
 ) {
   environment->CallVoidMethod(

@@ -35,9 +35,9 @@ Resource ownership follows the existing Runtime, Environment, PlatformAdapter, a
 | PlatformResources | Read immutable bytes from the installed platform package and report the current resource configuration |
 | AppResources | Resolve typed keys, locale fallback, density variants, and shared immutable assets |
 | Runtime | Own AppResources for each runtime root, seed the resource Environment, and coordinate resource-configuration invalidation |
-| Image | Measure from intrinsic logical size and translate fit and alignment into raster or vector painting |
-| PaintContext | Record raster image commands or expand immutable vector paths with source geometry, tint, and opacity |
-| Platform renderer | Decode and cache raster images, then replay the common platform-neutral path and image commands |
+| Image | Measure from intrinsic logical size and translate fit and alignment into raster, vector, or ExternalTexture painting |
+| PaintContext | Record raster and ExternalTexture commands or expand immutable vector paths with source geometry, tint, and opacity |
+| Platform renderer | Decode and cache raster images, consume platform-owned ExternalTexture frames, then replay the common platform-neutral commands |
 
 Runtime and application state never retain `Bitmap`, `CGImage`, `ID2D1Bitmap`, platform paths, or platform resource identifiers.
 Platform renderers never resolve localized strings or decide ImageFit behavior.
@@ -495,6 +495,7 @@ public:
   explicit Image(ImageResource resource);
   explicit Image(ImageAsset asset);
   explicit Image(VectorAsset asset);
+  explicit Image(ExternalTexture texture);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;
@@ -506,10 +507,11 @@ public:
 The ImageResource constructor lets Runtime resolve raster scale variants or a compiled vector payload from the node's Environment and PlatformResources configuration.
 The ImageAsset constructor supports files, network results, native picker modules, generated images, and explicitly shared application data.
 Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
+The ExternalTexture constructor consumes a live platform-owned visual source without turning native frames into resource bytes.
 
-Sampling configures raster filtering and is invalid for a VectorAsset.
+Sampling configures raster and ExternalTexture filtering and is invalid for a VectorAsset.
 Tint replaces the RGB channels of vector fills and strokes while preserving their per-layer alpha, then multiplies the supplied tint alpha.
-Tint is invalid for an ImageAsset; a future raster color-filter API remains a distinct operation.
+Tint is invalid for an ImageAsset or ExternalTexture; a future raster color-filter API remains a distinct operation.
 
 Image does not add component-specific opacity.
 The existing Opacity presentation modifier applies to the node as a whole.
@@ -542,7 +544,7 @@ Image computes source and destination geometry before recording a command, so na
 
 ## Image painting
 
-PaintCommand adds one immutable image command:
+PaintCommand keeps immutable raster data and live platform texture capabilities in distinct commands:
 
 ```cpp
 struct DrawImageCommand {
@@ -553,6 +555,16 @@ struct DrawImageCommand {
   float opacity = 1.0F;
 
   bool operator==(const DrawImageCommand&) const = default;
+};
+
+struct DrawExternalTextureCommand {
+  ExternalTexture texture;
+  Rect source;
+  Rect destination;
+  ImageSampling sampling = ImageSampling::Linear;
+  float opacity = 1.0F;
+
+  bool operator==(const DrawExternalTextureCommand&) const = default;
 };
 ```
 
@@ -578,6 +590,21 @@ void DrawImageRect(
 );
 
 void DrawImage(
+    ExternalTexture texture,
+    Rect destination,
+    ImageSampling sampling = ImageSampling::Linear,
+    float opacity = 1.0F
+);
+
+void DrawImageRect(
+    ExternalTexture texture,
+    Rect source,
+    Rect destination,
+    ImageSampling sampling = ImageSampling::Linear,
+    float opacity = 1.0F
+);
+
+void DrawImage(
     VectorAsset image,
     Rect destination,
     std::optional<Color> tint = {},
@@ -595,9 +622,11 @@ void DrawImageRect(
 
 The explicit method names avoid a single overload whose optional source geometry is difficult to read at call sites.
 
-DrawImageCommand destination geometry supplies culling, damage, and conservative paint bounds.
+DrawImageCommand and DrawExternalTextureCommand destination geometry supply culling, damage, and conservative paint bounds.
 The renderer does not measure the image or recalculate fit.
 Existing transforms, clips, retained opacity, and PaintSequence reuse apply without image-specific traversal.
+ExternalTexture frame revisions remain private runtime dependencies and do not mutate or rerecord a clean PaintSequence.
+The ownership, scheduling, and native producer contract is defined in [Architecture Design](architecture.md#externaltexture).
 
 Vector drawing is expanded while PaintContext records the sequence.
 The expansion adds a destination clip and a view-box transform, then reuses the existing immutable FillPathCommand, StrokePathCommand, clip, and transform commands.

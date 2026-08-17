@@ -476,8 +476,10 @@ struct ViewProperties {
   }
 };
 
+using ImageSource = std::variant<ImageAsset, VectorAsset, ExternalTexture>;
+
 struct ImageProperties {
-  std::variant<ImageAsset, VectorAsset> asset;
+  ImageSource source;
   ImageFit fit = ImageFit::Contain;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;
@@ -485,15 +487,19 @@ struct ImageProperties {
   std::optional<Color> tint;
 
   [[nodiscard]] Size IntrinsicSize() const noexcept {
-    return std::visit([](const auto& value) { return value.IntrinsicSize(); }, asset);
+    return std::visit([](const auto& value) { return value.IntrinsicSize(); }, source);
   }
 
   [[nodiscard]] bool IsVector() const noexcept {
-    return std::holds_alternative<VectorAsset>(asset);
+    return std::holds_alternative<VectorAsset>(source);
   }
 
   [[nodiscard]] bool HasValue() const noexcept {
-    return std::visit([](const auto& value) { return value.HasValue(); }, asset);
+    return std::visit([](const auto& value) { return value.HasValue(); }, source);
+  }
+
+  void SetResolvedAsset(std::variant<ImageAsset, VectorAsset> value) {
+    std::visit([this](auto&& image) { source = std::forward<decltype(image)>(image); }, std::move(value));
   }
 
   // Only intrinsic logical size affects measurement; image contents, fit, alignment, and sampling are paint inputs.
@@ -825,6 +831,12 @@ struct RenderComposition {
 
 RenderComposition BuildRenderComposition(const RenderScene& scene);
 
+struct ExternalTextureUseSnapshot {
+  std::shared_ptr<ExternalTextureState> state;
+  std::uint64_t revision = 0;
+  Rect bounds;
+};
+
 struct RenderNodeSnapshot {
   std::uint64_t content_revision = 0;
   std::uint64_t foreground_revision = 0;
@@ -836,6 +848,7 @@ struct RenderNodeSnapshot {
   Rect own_bounds;
   Rect subtree_bounds;
   std::vector<std::uint64_t> children;
+  std::vector<ExternalTextureUseSnapshot> external_textures;
   float opacity = 1.0F;
   bool has_own_bounds = false;
   bool has_subtree_bounds = false;
@@ -1263,7 +1276,11 @@ DamageRegion ComputeDamageRegion(
     Size viewport,
     RenderSceneSnapshot& committed_scene,
     Size& committed_viewport,
-    bool& has_committed_scene
+    bool& has_committed_scene,
+    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+);
+void DeactivateExternalTextures(
+    RenderSceneSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
 );
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
