@@ -1,43 +1,58 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <X11/keysym.h>
+
+#include <limits>
 #include <string>
 
-#include <huxerui/event.h>
-
+#include "linux_text_input.h"
 #include "linux_text_input_internal.h"
 
 namespace huxerui::test {
 namespace {
 
-TEST_CASE("IsTextProducingKey classifies editing keys") {
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Backspace));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Delete));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowLeft));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowRight));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowUp));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::ArrowDown));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Home));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::End));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::PageUp));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::PageDown));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Enter));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Tab));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Escape));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Space));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Unknown));
+TEST_CASE("XIM filters active non-secure key events and all protocol events") {
+  REQUIRE(detail::ShouldFilterXimEvent(KeyPress, true, true, false));
+  REQUIRE(detail::ShouldFilterXimEvent(KeyRelease, true, true, false));
+  REQUIRE(detail::ShouldFilterXimEvent(ClientMessage, true, true, false));
+  REQUIRE(detail::ShouldFilterXimEvent(ClientMessage, true, true, true));
+  REQUIRE(detail::ShouldFilterXimEvent(ClientMessage, true, false, false));
 }
 
-TEST_CASE("IsTextProducingKey classifies shortcut and modifier keys") {
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::A));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::C));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::V));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::X));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Y));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Z));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Shift));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Control));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Alt));
-  REQUIRE_FALSE(detail::IsTextProducingKey(Key::Meta));
+TEST_CASE("XIM leaves secure and inactive key events on the shared path") {
+  REQUIRE_FALSE(detail::ShouldFilterXimEvent(KeyPress, true, true, true));
+  REQUIRE_FALSE(detail::ShouldFilterXimEvent(KeyRelease, true, true, true));
+  REQUIRE_FALSE(detail::ShouldFilterXimEvent(KeyPress, true, false, false));
+  REQUIRE_FALSE(detail::ShouldFilterXimEvent(KeyPress, false, true, false));
+  REQUIRE_FALSE(detail::ShouldFilterXimEvent(ClientMessage, false, true, false));
+}
+
+TEST_CASE("XIM lookup accepts unmodified shortcut letters as text") {
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_a, 0));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_C, ShiftMask));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_v, Mod1Mask));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_X, ShiftMask | Mod1Mask));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_y, 0));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_Z, ShiftMask));
+}
+
+TEST_CASE("XIM lookup bypasses explicit application shortcuts after filtering") {
+  REQUIRE(detail::ShouldBypassXimLookup(XK_a, ControlMask));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_C, Mod4Mask));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_v, ControlMask | ShiftMask));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_X, ControlMask | Mod4Mask));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_y, Mod4Mask | ShiftMask));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_Z, ControlMask));
+}
+
+TEST_CASE("XIM lookup leaves switching and composition keys to the input method") {
+  REQUIRE(detail::ShouldBypassXimLookup(XK_Shift_L, 0));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_Super_L, 0));
+  REQUIRE(detail::ShouldBypassXimLookup(XK_space, Mod4Mask));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_space, 0));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_BackSpace, 0));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_Return, 0));
+  REQUIRE_FALSE(detail::ShouldBypassXimLookup(XK_Left, 0));
 }
 
 TEST_CASE("ApplyXimPreeditEdit replaces the reported code-point range") {
@@ -78,6 +93,7 @@ TEST_CASE("ApplyXimPreeditEdit rejects out-of-range changes") {
   REQUIRE_FALSE(detail::ApplyXimPreeditEdit("abc", 2, 2, "x").has_value());
   REQUIRE_FALSE(detail::ApplyXimPreeditEdit("abc", -1, 1, "x").has_value());
   REQUIRE_FALSE(detail::ApplyXimPreeditEdit("abc", 1, -1, "x").has_value());
+  REQUIRE_FALSE(detail::ApplyXimPreeditEdit("abc", std::numeric_limits<int>::max(), 1, "x").has_value());
 }
 
 TEST_CASE("ApplyXimPreeditEdit rejects invalid UTF-8") {
@@ -95,6 +111,49 @@ TEST_CASE("Utf8PrefixUtf16Length maps code points onto the UTF-16 space") {
   REQUIRE_FALSE(detail::Utf8PrefixUtf16Length(text, 4).has_value());
   REQUIRE_FALSE(detail::Utf8PrefixUtf16Length(text, -1).has_value());
   REQUIRE_FALSE(detail::Utf8PrefixUtf16Length("\xFF", 1).has_value());
+}
+
+TEST_CASE("Utf8BytePrefixUtf16Length maps Fcitx byte cursors onto the UTF-16 space") {
+  const std::string text = "a\xE4\xBD\xA0\xF0\x9F\x98\x80";
+  REQUIRE(detail::Utf8BytePrefixUtf16Length(text, 0) == TextOffset{0});
+  REQUIRE(detail::Utf8BytePrefixUtf16Length(text, 1) == TextOffset{1});
+  REQUIRE(detail::Utf8BytePrefixUtf16Length(text, 4) == TextOffset{2});
+  REQUIRE(detail::Utf8BytePrefixUtf16Length(text, 8) == TextOffset{4});
+  REQUIRE_FALSE(detail::Utf8BytePrefixUtf16Length(text, 2).has_value());
+  REQUIRE_FALSE(detail::Utf8BytePrefixUtf16Length(text, 9).has_value());
+  REQUIRE_FALSE(detail::Utf8BytePrefixUtf16Length(text, -1).has_value());
+  REQUIRE_FALSE(detail::Utf8BytePrefixUtf16Length("\xFF", 1).has_value());
+}
+
+TEST_CASE("Utf16OffsetToUtf8Byte maps surrounding-text offsets onto UTF-8 bytes") {
+  const std::string text = "a\xE4\xBD\xA0\xF0\x9F\x98\x80";
+  REQUIRE(detail::Utf16OffsetToUtf8Byte(text, 0) == 0);
+  REQUIRE(detail::Utf16OffsetToUtf8Byte(text, 1) == 1);
+  REQUIRE(detail::Utf16OffsetToUtf8Byte(text, 2) == 4);
+  REQUIRE(detail::Utf16OffsetToUtf8Byte(text, 4) == 8);
+  REQUIRE_FALSE(detail::Utf16OffsetToUtf8Byte(text, 3).has_value());
+  REQUIRE_FALSE(detail::Utf16OffsetToUtf8Byte(text, 5).has_value());
+  REQUIRE_FALSE(detail::Utf16OffsetToUtf8Byte(text, -1).has_value());
+  REQUIRE_FALSE(detail::Utf16OffsetToUtf8Byte("\xFF", 1).has_value());
+}
+
+TEST_CASE("Fcitx frontend selection recognizes common Linux input module variables") {
+  REQUIRE(detail::ShouldUseFcitxFrontend("@im=fcitx", nullptr, nullptr));
+  REQUIRE(detail::ShouldUseFcitxFrontend("@im=Fcitx5", nullptr, nullptr));
+  REQUIRE(detail::ShouldUseFcitxFrontend(nullptr, "fcitx", nullptr));
+  REQUIRE(detail::ShouldUseFcitxFrontend(nullptr, nullptr, "fcitx5"));
+  REQUIRE_FALSE(detail::ShouldUseFcitxFrontend("@im=ibus", "ibus", "ibus"));
+  REQUIRE_FALSE(detail::ShouldUseFcitxFrontend(nullptr, nullptr, nullptr));
+}
+
+TEST_CASE("XIM focus is limited to active non-secure sessions without Fcitx") {
+  REQUIRE_FALSE(detail::ShouldFocusXim(true, true, true, false));
+  REQUIRE(detail::ShouldFocusXim(true, false, true, false));
+  REQUIRE_FALSE(detail::ShouldFocusXim(true, true, false, false));
+  REQUIRE_FALSE(detail::ShouldFocusXim(true, true, true, true));
+  REQUIRE_FALSE(detail::ShouldFocusXim(true, false, false, false));
+  REQUIRE_FALSE(detail::ShouldFocusXim(true, false, true, true));
+  REQUIRE_FALSE(detail::ShouldFocusXim(false, false, true, false));
 }
 
 TEST_CASE("Utf8CodePointCount counts valid UTF-8") {
