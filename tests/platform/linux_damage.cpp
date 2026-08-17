@@ -77,5 +77,48 @@ TEST_CASE("LinuxDamageClampsNegativeRectanglesToZero") {
   REQUIRE(rect.height == 20);
 }
 
+TEST_CASE("LinuxTextureUploadKeepsMultipleSmallDamageRectanglesPartial") {
+  const std::vector<XRectangle> damage{{10, 20, 30, 40}, {200, 100, 20, 10}};
+  const detail::LinuxTextureUploadPlan plan = detail::ResolveLinuxTextureUpload(false, damage, 800, 600, true);
+  REQUIRE_FALSE(plan.full);
+  REQUIRE(plan.rects.size() == 2);
+  REQUIRE(plan.rects[0].x == 10);
+  REQUIRE(plan.rects[0].y == 20);
+  REQUIRE(plan.rects[0].width == 30);
+  REQUIRE(plan.rects[0].height == 40);
+  REQUIRE(plan.rects[1].x == 200);
+  REQUIRE(plan.rects[1].y == 100);
+  REQUIRE(plan.rects[1].width == 20);
+  REQUIRE(plan.rects[1].height == 10);
+  REQUIRE(plan.pixel_count == 1400);
+}
+
+TEST_CASE("LinuxTextureUploadUsesFullSurfaceForLargeDamage") {
+  const std::vector<XRectangle> damage{{0, 0, 800, 400}};
+  const detail::LinuxTextureUploadPlan plan = detail::ResolveLinuxTextureUpload(false, damage, 800, 600, true);
+  REQUIRE(plan.full);
+  REQUIRE(plan.rects.empty());
+  REQUIRE(plan.pixel_count == 480000);
+}
+
+TEST_CASE("LinuxTextureUploadInitializesNewTextureCompletely") {
+  const std::vector<XRectangle> damage{{10, 20, 30, 40}};
+  const detail::LinuxTextureUploadPlan plan = detail::ResolveLinuxTextureUpload(false, damage, 800, 600, false);
+  REQUIRE(plan.full);
+  REQUIRE(plan.pixel_count == 480000);
+}
+
+TEST_CASE("LinuxTextureUploadClampsDamageToTheSurface") {
+  const std::vector<XRectangle> damage{{-10, -5, 30, 20}};
+  const detail::LinuxTextureUploadPlan plan = detail::ResolveLinuxTextureUpload(false, damage, 100, 100, true);
+  REQUIRE_FALSE(plan.full);
+  REQUIRE(plan.rects.size() == 1);
+  REQUIRE(plan.rects[0].x == 0);
+  REQUIRE(plan.rects[0].y == 0);
+  REQUIRE(plan.rects[0].width == 20);
+  REQUIRE(plan.rects[0].height == 15);
+  REQUIRE(plan.pixel_count == 300);
+}
+
 } // namespace
 } // namespace huxerui::test

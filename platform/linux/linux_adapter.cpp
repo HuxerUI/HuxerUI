@@ -5,6 +5,7 @@
 #include <X11/keysym.h>
 
 #include <poll.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -275,6 +276,37 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+      return std::nullopt;
+    }
+    std::uint64_t resident_pages = 0;
+    try {
+      std::ifstream statm("/proc/self/statm");
+      std::uint64_t total_pages = 0;
+      if (!(statm >> total_pages >> resident_pages)) {
+        return std::nullopt;
+      }
+      static_cast<void>(total_pages);
+    } catch (...) {
+      return std::nullopt;
+    }
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (page_size <= 0) {
+      return std::nullopt;
+    }
+    const auto timeval_seconds = [](const timeval& value) {
+      return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1'000'000.0;
+    };
+    return ProcessMetrics{
+        .cpu_time_seconds = timeval_seconds(usage.ru_utime) + timeval_seconds(usage.ru_stime),
+        .memory_usage_bytes = resident_pages * static_cast<std::uint64_t>(page_size),
+        .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
+    };
   }
 
   ResourceConfiguration Configuration() const override {
