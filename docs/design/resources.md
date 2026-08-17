@@ -4,7 +4,7 @@ Status: initial implementation with ordered target resource merging
 
 This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Android, iOS, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android demo.
+The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Android, iOS, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, native raster caches, and generated-assets wiring for the repository Android example runner.
 Reusable installed-Android integration, inherited Locale shaping for ordinary application text, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
@@ -242,7 +242,7 @@ Target packaging maps the staging directory as follows:
 
 - Android CMake builds generate one package per ABI, then a Gradle generated-assets task selects one deterministic
   package after native builds complete and synchronizes it into APK assets.
-  The repository demo recompiles the built-in source package when Prefab does not expose the standalone SDK resource
+  The repository example runner recompiles the built-in source package when Prefab does not expose the standalone SDK resource
   artifact, and its Gradle staging task fails the build rather than packaging an application without that final package.
 - macOS copies it into `.app/Contents/Resources/HuxerUI`.
 - Windows copies it beside the executable under `<executable-name>.resources` so multiple applications can share one output directory without colliding.

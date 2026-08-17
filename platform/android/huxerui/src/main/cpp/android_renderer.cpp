@@ -101,6 +101,11 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
   draw_image_ = environment->GetMethodID(view_class, "drawImage", "(Landroid/graphics/Canvas;J[BFFFFFFFFFI)Z");
+  draw_external_texture_ = environment->GetMethodID(
+      view_class,
+      "drawExternalTexture",
+      "(Landroid/graphics/Canvas;Landroid/graphics/Bitmap;FFFFFFFFFII)V"
+  );
   draw_circle_ = environment->GetMethodID(view_class, "drawCircle", "(Landroid/graphics/Canvas;FFFI)V");
   draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFI)V");
   draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
@@ -117,12 +122,26 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
 
   if (draw_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
-      draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr || draw_shadow_ == nullptr ||
-      fill_path_ == nullptr || stroke_path_ == nullptr || draw_path_shadow_ == nullptr || push_clip_ == nullptr ||
-      push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr ||
-      push_transform_ == nullptr || pop_transform_ == nullptr) {
+      draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr ||
+      draw_shadow_ == nullptr || fill_path_ == nullptr || stroke_path_ == nullptr || draw_path_shadow_ == nullptr ||
+      push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr ||
+      pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the native backend");
   }
+}
+
+void AndroidRenderer::BeginDraw() {
+  if (draw_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
+    draw_epoch_ = 0;
+    for (CachedExternalTexture& cached : external_textures_) {
+      cached.draw_epoch = std::numeric_limits<std::uint64_t>::max();
+    }
+  }
+  ++draw_epoch_;
+  std::erase_if(external_textures_, [](const CachedExternalTexture& cached) {
+    const std::shared_ptr<AndroidExternalTextureState> source = cached.source.lock();
+    return !source || !source->IsActive();
+  });
 }
 
 struct AndroidRenderer::CommandRange {
@@ -401,11 +420,53 @@ void AndroidRenderer::RenderCommand(
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command
 ) {
-  static_cast<void>(environment);
-  static_cast<void>(view);
-  static_cast<void>(canvas);
-  static_cast<void>(command);
-  throw std::logic_error("HuxerUI Android external textures are not implemented yet");
+  const AndroidExternalTextureFrame* frame = FrameFor(command.texture);
+  if (frame == nullptr) {
+    return;
+  }
+  const Size intrinsic_size = command.texture.IntrinsicSize();
+  const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic_size.width;
+  const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic_size.height;
+  environment->CallVoidMethod(
+      view,
+      draw_external_texture_,
+      canvas,
+      frame->Bitmap(),
+      command.source.x * scale_x,
+      command.source.y * scale_y,
+      command.source.width * scale_x,
+      command.source.height * scale_y,
+      command.destination.x,
+      command.destination.y,
+      command.destination.width,
+      command.destination.height,
+      command.opacity,
+      frame->Generation(),
+      static_cast<jint>(command.sampling)
+  );
+}
+
+const AndroidExternalTextureFrame* AndroidRenderer::FrameFor(const ExternalTexture& texture) {
+  const std::shared_ptr<AndroidExternalTextureState> source =
+      std::dynamic_pointer_cast<AndroidExternalTextureState>(ExternalTextureState::From(texture));
+  if (!source) {
+    throw std::logic_error("HuxerUI external texture does not contain an Android Bitmap source");
+  }
+  auto cached = std::ranges::find_if(external_textures_, [&source](const CachedExternalTexture& entry) {
+    return entry.source.lock() == source;
+  });
+  if (cached == external_textures_.end()) {
+    external_textures_.push_back(CachedExternalTexture{source, {}, std::numeric_limits<std::uint64_t>::max()});
+    cached = external_textures_.end() - 1;
+  }
+  if (cached->draw_epoch != draw_epoch_) {
+    AndroidExternalTextureFrame frame = source->AcquireLatestFrame();
+    if (frame) {
+      cached->frame = std::move(frame);
+    }
+    cached->draw_epoch = draw_epoch_;
+  }
+  return cached->frame ? &cached->frame : nullptr;
 }
 
 void AndroidRenderer::RenderCommand(

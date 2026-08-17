@@ -3,14 +3,20 @@
 #include <jni.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 #include <huxerui/render_scene.h>
+
+#include "android_external_texture_internal.h"
 
 namespace huxerui::detail {
 
 class AndroidRenderer final {
 public:
   void Initialize(JNIEnv* environment, jclass view_class);
+  void BeginDraw();
   void DrawSlice(
       JNIEnv* environment,
       jobject view,
@@ -22,10 +28,16 @@ public:
 
 private:
   struct CommandRange;
+  struct CachedExternalTexture {
+    std::weak_ptr<AndroidExternalTextureState> source;
+    AndroidExternalTextureFrame frame;
+    std::uint64_t draw_epoch = 0;
+  };
 
   bool
   RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range);
   bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
+  [[nodiscard]] const AndroidExternalTextureFrame* FrameFor(const ExternalTexture& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
@@ -49,6 +61,7 @@ private:
   jmethodID draw_text_ = nullptr;
   jmethodID draw_text_runs_ = nullptr;
   jmethodID draw_image_ = nullptr;
+  jmethodID draw_external_texture_ = nullptr;
   jmethodID draw_circle_ = nullptr;
   jmethodID draw_arc_ = nullptr;
   jmethodID draw_border_ = nullptr;
@@ -63,6 +76,8 @@ private:
   jmethodID pop_opacity_ = nullptr;
   jmethodID push_transform_ = nullptr;
   jmethodID pop_transform_ = nullptr;
+  std::vector<CachedExternalTexture> external_textures_;
+  std::uint64_t draw_epoch_ = 0;
 };
 
 } // namespace huxerui::detail

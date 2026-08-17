@@ -1649,6 +1649,27 @@ public final class HuxerUIView extends ViewGroup {
         if (bitmap == null) {
             return false;
         }
+        drawBitmap(canvas, bitmap, sourceX, sourceY, sourceWidth, sourceHeight, destinationX, destinationY,
+                destinationWidth, destinationHeight, opacity, sampling);
+        return true;
+    }
+
+    private void drawExternalTexture(Canvas canvas, Bitmap bitmap, float sourceX, float sourceY, float sourceWidth,
+            float sourceHeight, float destinationX, float destinationY, float destinationWidth,
+            float destinationHeight, float opacity, int generation, int sampling) {
+        if (bitmap.isRecycled()) {
+            throw new IllegalStateException("HuxerUI Android external texture Bitmap was recycled while retained");
+        }
+        if (bitmap.getGenerationId() != generation) {
+            throw new IllegalStateException("HuxerUI Android external texture Bitmap changed after publication");
+        }
+        drawBitmap(canvas, bitmap, sourceX, sourceY, sourceWidth, sourceHeight, destinationX, destinationY,
+                destinationWidth, destinationHeight, opacity, sampling);
+    }
+
+    private void drawBitmap(Canvas canvas, Bitmap bitmap, float sourceX, float sourceY, float sourceWidth,
+            float sourceHeight, float destinationX, float destinationY, float destinationWidth,
+            float destinationHeight, float opacity, int sampling) {
         Rect source = new Rect(Math.round(sourceX), Math.round(sourceY), Math.round(sourceX + sourceWidth),
                 Math.round(sourceY + sourceHeight));
         rect.set(destinationX, destinationY, destinationX + destinationWidth, destinationY + destinationHeight);
@@ -1656,7 +1677,6 @@ public final class HuxerUIView extends ViewGroup {
         paint.setAlpha(Math.round(Math.max(0.0F, Math.min(1.0F, opacity)) * 255.0F));
         paint.setFilterBitmap(sampling != 0);
         canvas.drawBitmap(bitmap, source, rect, paint);
-        return true;
     }
 
     private static boolean isTextRightToLeft(String text, int direction) {

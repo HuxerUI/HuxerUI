@@ -484,6 +484,7 @@ public:
 
   void BeginDraw() {
     frame_state_.BeginPaint();
+    renderer_.BeginDraw();
   }
 
   void DrawBase(JNIEnv* environment, jobject canvas) {

@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr char native_timer_class[] = "org/huxerui/demo/NativeTimer";
+constexpr char native_timer_class[] = "org/huxerui/examples/platformmodule/NativeTimer";
 
 huxerui::PlatformError TimerError(std::string code, std::string message) {
   return {
@@ -283,7 +283,7 @@ void InstallTimer(RootContext& root) {
 } // namespace huxerui::example
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_demo_NativeTimer_nativeTick(JNIEnv*, jclass, jlong bridge, jlong generation) {
+Java_org_huxerui_examples_platformmodule_NativeTimer_nativeTick(JNIEnv*, jclass, jlong bridge, jlong generation) {
   auto* state = reinterpret_cast<std::weak_ptr<AndroidTimerState>*>(static_cast<std::uintptr_t>(bridge));
   if (state != nullptr && generation > 0) {
     try {

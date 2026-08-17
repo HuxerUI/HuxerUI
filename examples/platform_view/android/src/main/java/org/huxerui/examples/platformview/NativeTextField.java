@@ -1,4 +1,4 @@
-package org.huxerui.demo;
+package org.huxerui.examples.platformview;
 
 import android.content.Context;
 import android.text.Editable;

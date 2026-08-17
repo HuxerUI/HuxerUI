@@ -7,7 +7,11 @@ huxerui_add_example(
 target_sources(example_platform_module PRIVATE timer.cpp)
 
 if (ANDROID)
-    target_sources(example_platform_module PRIVATE android_timer.cpp)
+    target_sources(example_platform_module PRIVATE
+            android_color_stream.cpp
+            android_timer.cpp
+            color_stream.cpp
+    )
 elseif (APPLE)
     target_sources(example_platform_module PRIVATE
             apple_color_stream.mm

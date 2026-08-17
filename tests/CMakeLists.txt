@@ -151,6 +151,7 @@ set(HUXERUI_PUBLIC_HEADERS
         view.h
         virtual_layout.h
         window.h
+        android/external_texture.h
         android/jni.h
         android/platform_module.h
         android/platform_view.h
