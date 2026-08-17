@@ -1,6 +1,7 @@
 #include "uikit_renderer.h"
 
 #import <UIKit/UIKit.h>
+#import <CoreImage/CoreImage.h>
 #import <CoreText/CoreText.h>
 #import <ImageIO/ImageIO.h>
 
@@ -16,6 +17,7 @@
 #include <variant>
 #include <vector>
 
+#include "ios_external_texture_internal.h"
 #include "path_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
@@ -309,6 +311,53 @@ void SetStrokeColor(CGContextRef context, Color color) {
   CGContextSetRGBStrokeColor(context, color.red, color.green, color.blue, color.alpha);
 }
 
+void DrawNativeImage(
+    CGContextRef context,
+    CGImageRef image,
+    Size intrinsic_size,
+    Rect source,
+    Rect destination,
+    ImageSampling sampling,
+    float opacity
+) {
+  if (image == nullptr || intrinsic_size.width <= 0.0F || intrinsic_size.height <= 0.0F || source.IsEmpty() ||
+      destination.IsEmpty() || opacity <= 0.0F) {
+    return;
+  }
+  const CGFloat pixel_width = static_cast<CGFloat>(CGImageGetWidth(image));
+  const CGFloat pixel_height = static_cast<CGFloat>(CGImageGetHeight(image));
+  const CGFloat scale_x = pixel_width / intrinsic_size.width;
+  const CGFloat scale_y = pixel_height / intrinsic_size.height;
+  const CGRect source_rect = CGRectMake(
+      source.x * scale_x,
+      pixel_height - (source.y + source.height) * scale_y,
+      source.width * scale_x,
+      source.height * scale_y
+  );
+  CGContextSaveGState(context);
+  CGContextSetAlpha(context, opacity);
+  CGContextSetInterpolationQuality(
+      context,
+      sampling == ImageSampling::Nearest ? kCGInterpolationNone : kCGInterpolationHigh
+  );
+  CGContextClipToRect(context, CGRectMake(destination.x, destination.y, destination.width, destination.height));
+  CGContextTranslateCTM(context, destination.x, destination.y + destination.height);
+  CGContextScaleCTM(context, 1.0, -1.0);
+  const CGFloat horizontal_scale = destination.width / source_rect.size.width;
+  const CGFloat vertical_scale = destination.height / source_rect.size.height;
+  CGContextDrawImage(
+      context,
+      CGRectMake(
+          -source_rect.origin.x * horizontal_scale,
+          -source_rect.origin.y * vertical_scale,
+          pixel_width * horizontal_scale,
+          pixel_height * vertical_scale
+      ),
+      image
+  );
+  CGContextRestoreGState(context);
+}
+
 CGMutablePathRef CreatePath(const Path& source) {
   CGMutablePathRef path = CGPathCreateMutable();
   for (const PathElement& element : PathAccess::Elements(source)) {
@@ -365,6 +414,13 @@ struct UIKitRenderer::State {
     std::size_t byte_size = 0;
     CFRef<CGImageRef> native_image;
   };
+
+  struct CachedExternalTexture {
+    std::weak_ptr<IosExternalTextureState> source;
+    CFRef<CGImageRef> native_image;
+  };
+
+  State() : external_texture_context([CIContext contextWithOptions:nil]) {}
 
   struct FontHash {
     std::size_t operator()(const Font& font) const noexcept {
@@ -693,11 +749,51 @@ struct UIKitRenderer::State {
     return images.back().native_image.Get();
   }
 
+  CGImageRef ImageFor(const ExternalTexture& texture) {
+    const std::shared_ptr<IosExternalTextureState> source =
+        std::dynamic_pointer_cast<IosExternalTextureState>(ExternalTextureState::From(texture));
+    if (!source) {
+      throw std::logic_error("HuxerUI external texture does not contain an iOS frame source");
+    }
+    auto cached = std::ranges::find_if(external_textures, [&source](const CachedExternalTexture& entry) {
+      return entry.source.lock() == source;
+    });
+    if (cached == external_textures.end()) {
+      external_textures.push_back(CachedExternalTexture{source, CFRef<CGImageRef>{}});
+      cached = external_textures.end() - 1;
+    }
+
+    CVPixelBufferRef frame = source->AcquireLatestFrame();
+    if (frame == nullptr) {
+      return cached->native_image.Get();
+    }
+    CFRef<CVPixelBufferRef> retained_frame{frame};
+    CIImage* image = [CIImage imageWithCVPixelBuffer:retained_frame.Get()];
+    const CGRect extent = image.extent;
+    if (CGRectIsEmpty(extent) || CGRectIsInfinite(extent)) {
+      return cached->native_image.Get();
+    }
+    CFRef<CGImageRef> native_image{[external_texture_context createCGImage:image fromRect:extent]};
+    if (native_image.Get() != nullptr) {
+      cached->native_image = std::move(native_image);
+    }
+    return cached->native_image.Get();
+  }
+
+  void PruneExternalTextures() {
+    std::erase_if(external_textures, [](const CachedExternalTexture& entry) {
+      const std::shared_ptr<IosExternalTextureState> source = entry.source.lock();
+      return !source || !source->IsActive();
+    });
+  }
+
   std::unordered_map<Font, CachedFont, FontHash> fonts;
   std::unordered_map<RunKey, CachedRun, RunKeyHash, RunKeyEqual> runs;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs;
   std::vector<CachedImage> images;
   std::size_t image_cache_bytes = 0;
+  __strong CIContext* external_texture_context = nil;
+  std::vector<CachedExternalTexture> external_textures;
 };
 
 class UIKitTextLayout final : public TextLayout {
@@ -1123,45 +1219,27 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextRunsComman
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& command) {
-  if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
-    return;
-  }
-  CGImageRef image = state_->ImageFor(command.image);
-  if (image == nullptr) {
-    return;
-  }
-  const float scale = command.image.Scale();
-  const CGRect source_rect = CGRectMake(
-      command.source.x * scale,
-      static_cast<float>(CGImageGetHeight(image)) - (command.source.y + command.source.height) * scale,
-      command.source.width * scale,
-      command.source.height * scale
-  );
-  CGContextSaveGState(context);
-  CGContextSetAlpha(context, command.opacity);
-  CGContextSetInterpolationQuality(
+  DrawNativeImage(
       context,
-      command.sampling == ImageSampling::Nearest ? kCGInterpolationNone : kCGInterpolationHigh
+      state_->ImageFor(command.image),
+      command.image.IntrinsicSize(),
+      command.source,
+      command.destination,
+      command.sampling,
+      command.opacity
   );
-  CGContextClipToRect(
+}
+
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawExternalTextureCommand& command) {
+  DrawNativeImage(
       context,
-      CGRectMake(command.destination.x, command.destination.y, command.destination.width, command.destination.height)
+      state_->ImageFor(command.texture),
+      command.texture.IntrinsicSize(),
+      command.source,
+      command.destination,
+      command.sampling,
+      command.opacity
   );
-  CGContextTranslateCTM(context, command.destination.x, command.destination.y + command.destination.height);
-  CGContextScaleCTM(context, 1.0, -1.0);
-  const CGFloat horizontal_scale = command.destination.width / source_rect.size.width;
-  const CGFloat vertical_scale = command.destination.height / source_rect.size.height;
-  CGContextDrawImage(
-      context,
-      CGRectMake(
-          -source_rect.origin.x * horizontal_scale,
-          -source_rect.origin.y * vertical_scale,
-          static_cast<CGFloat>(CGImageGetWidth(image)) * horizontal_scale,
-          static_cast<CGFloat>(CGImageGetHeight(image)) * vertical_scale
-      ),
-      image
-  );
-  CGContextRestoreGState(context);
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawCircleCommand& command) {
@@ -1407,6 +1485,7 @@ void UIKitRenderer::DrawSlice(
     std::size_t command_count,
     bool draw_background
 ) {
+  state_->PruneExternalTextures();
   CGContextSaveGState(context);
   CGContextClipToRect(context, dirty_rect);
   if (draw_background) {

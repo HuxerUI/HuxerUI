@@ -173,7 +173,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nHUXERUI_RESOURCE_SOURCE=\"$HUXERUI_CORE_BUILD_DIR/huxerui-resources/$HUXERUI_APP_TARGET/package\"\nHUXERUI_RESOURCE_DESTINATION=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI\"\ncmake -E remove_directory \"$HUXERUI_RESOURCE_DESTINATION\"\nif [ -d \"$HUXERUI_RESOURCE_SOURCE\" ]; then\n  cmake -E make_directory \"$HUXERUI_RESOURCE_DESTINATION\"\n  cmake -E copy_directory \"$HUXERUI_RESOURCE_SOURCE\" \"$HUXERUI_RESOURCE_DESTINATION\"\nfi\n";
+			shellScript = "set -eu\nHUXERUI_RESOURCE_SOURCE=\"$HUXERUI_CORE_BUILD_DIR/huxerui-ios/$HUXERUI_APP_TARGET/resources/package\"\nHUXERUI_RESOURCE_DESTINATION=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI\"\nif [ ! -f \"$HUXERUI_RESOURCE_SOURCE/huxerui/resources.bin\" ]; then\n  echo \"error: HuxerUI resource package is missing: $HUXERUI_RESOURCE_SOURCE\" >&2\n  exit 1\nfi\ncmake -E remove_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E make_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E copy_directory \"$HUXERUI_RESOURCE_SOURCE\" \"$HUXERUI_RESOURCE_DESTINATION\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

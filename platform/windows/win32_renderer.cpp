@@ -1292,6 +1292,11 @@ struct Win32Renderer::State {
     );
   }
 
+  void RenderCommand(const DrawExternalTextureCommand& command) {
+    static_cast<void>(command);
+    throw std::logic_error("HuxerUI Windows external textures are not implemented yet");
+  }
+
   ComPtr<ID2D1StrokeStyle>
   CreateStrokeStyle(StrokeCap cap, StrokeJoin join = StrokeJoin::Miter, float miter_limit = 10.0F) const {
     ComPtr<ID2D1StrokeStyle> style;

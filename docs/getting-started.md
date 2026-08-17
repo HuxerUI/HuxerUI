@@ -163,13 +163,13 @@ Android:
 
 ```bash
 cd platform/android
-./gradlew :demo:assembleDebug
-./gradlew :demo:assembleDebug -PhuxeruiDemoExample=image
+./gradlew :example_runner:assembleDebug
+./gradlew :example_runner:assembleDebug -PhuxeruiExample=image
 ```
 
-The Android project contains the reusable `HuxerUI` library module and a `demo` application.
-The demo uses `ui_gallery` by default and accepts any example directory through the `huxeruiDemoExample` Gradle property.
-It adds that example with CMake `add_subdirectory()`, emits `libhuxerui_app.so`, and registers the example's generated resources as variant assets.
+The Android project contains the reusable `HuxerUI` library module and an `example_runner` application.
+The runner uses `ui_gallery` by default and accepts any example directory through the `huxeruiExample` Gradle property.
+It adds that example with CMake `add_subdirectory()`, includes its optional Android Java source set, emits `libhuxerui_app.so`, and registers the example's generated resources as variant assets.
 Cross-compilation resolves the matching host code generators from `tools/prebuilt/<system>/<architecture>`.
 
 iOS applications use the source-controlled Xcode project created by the CLI:

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <huxerui/color.h>
+#include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/platform_module.h>
 #include <huxerui/resource.h>
@@ -66,6 +67,17 @@ struct DrawImageCommand {
   float opacity = 1.0F;
 
   bool operator==(const DrawImageCommand&) const = default;
+};
+
+struct DrawExternalTextureCommand {
+  ExternalTexture texture;
+  // Source uses the texture's intrinsic logical coordinates.
+  Rect source;
+  Rect destination;
+  ImageSampling sampling = ImageSampling::Linear;
+  float opacity = 1.0F;
+
+  bool operator==(const DrawExternalTextureCommand&) const = default;
 };
 
 struct DrawCircleCommand {
@@ -214,6 +226,7 @@ using PaintCommand = std::variant<
     DrawTextCommand,
     DrawTextRunsCommand,
     DrawImageCommand,
+    DrawExternalTextureCommand,
     DrawCircleCommand,
     DrawArcCommand,
     DrawBorderCommand,
@@ -244,10 +257,15 @@ public:
     return revision_;
   }
 
+  [[nodiscard]] bool HasExternalTextureCommands() const noexcept {
+    return has_external_texture_commands_;
+  }
+
 private:
   std::vector<PaintCommand> commands_;
   Rect bounds_;
   std::uint64_t revision_ = 0;
+  bool has_external_texture_commands_ = false;
 
   friend class PaintContext;
 };
@@ -274,6 +292,19 @@ public:
   DrawImage(ImageAsset image, Rect destination, ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
   void DrawImageRect(
       ImageAsset image,
+      Rect source,
+      Rect destination,
+      ImageSampling sampling = ImageSampling::Linear,
+      float opacity = 1.0F
+  );
+  void DrawImage(
+      ExternalTexture texture,
+      Rect destination,
+      ImageSampling sampling = ImageSampling::Linear,
+      float opacity = 1.0F
+  );
+  void DrawImageRect(
+      ExternalTexture texture,
       Rect source,
       Rect destination,
       ImageSampling sampling = ImageSampling::Linear,

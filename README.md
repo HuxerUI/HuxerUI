@@ -173,9 +173,9 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
-| `example_platform_module` | Android, iOS, Linux, and macOS typed nonvisual service backed by a native timer with calls, events, cancellation, and disposal |
+| `example_platform_module` | Android, iOS, Linux, macOS, and Windows typed native services, plus Android `Bitmap` and Apple `CVPixelBuffer` ExternalTexture streams |
 | `example_platform_view` | Android and Apple native text input embedded in HuxerUI layout, state, events, and rendering order |
-| `platform/android/demo` | Android platform integration and application packaging |
+| `platform/android/example_runner` | Android example selection, platform integration, and application packaging |
 
 ## Architecture
 

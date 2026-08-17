@@ -124,7 +124,7 @@ TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
           "--id",
           "dev.example.camera.kit",
           "--platform",
-          "android,ios,linux",
+          "android,ios,linux,windows",
       }
   );
 
@@ -143,6 +143,7 @@ TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
   REQUIRE(std::filesystem::is_regular_file(module / "platform/ios/Package.swift"));
   REQUIRE(std::filesystem::is_regular_file(module / "platform/ios/Sources/HuxerUICameraKit/HuxerUICameraKit.swift"));
   REQUIRE(std::filesystem::is_regular_file(module / "platform/linux/src/.gitkeep"));
+  REQUIRE(std::filesystem::is_regular_file(module / "platform/windows/src/.gitkeep"));
   const std::string swift_package = Read(module / "platform/ios/Package.swift");
   REQUIRE(swift_package.find("name: \"HuxerUI-CameraKit\"") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
@@ -157,6 +158,7 @@ TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
   );
   REQUIRE(module_cmake.find("platform/android/src/main/cpp/*.cpp") != std::string::npos);
   REQUIRE(module_cmake.find("platform/linux/src/*.cpp") != std::string::npos);
+  REQUIRE(module_cmake.find("platform/windows/src/*.cpp") != std::string::npos);
   const std::string preview_cmake = Read(preview / "CMakeLists.txt");
   REQUIRE(preview_cmake.find("huxerui_add_app(example_huxer_ui_camera_kit") != std::string::npos);
   REQUIRE(preview_cmake.find("TARGET HuxerUICameraKit::HuxerUICameraKit") != std::string::npos);
@@ -167,13 +169,14 @@ TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
       std::filesystem::is_regular_file(preview / "platform/ios/example_huxer_ui_camera_kit.xcodeproj/project.pbxproj")
   );
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/linux/main.cpp"));
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/windows/main.cpp"));
 
   std::filesystem::remove_all(module / ".huxerui");
   std::filesystem::remove_all(preview / ".huxerui");
   const huxerui::cli::Project application =
       huxerui::cli::ResolveApplicationProject(huxerui::cli::DiscoverProject(module));
   REQUIRE(std::filesystem::equivalent(application.root, preview));
-  REQUIRE(application.platforms == std::vector<std::string>{"android", "ios", "linux"});
+  REQUIRE(application.platforms == std::vector<std::string>{"android", "ios", "linux", "windows"});
   REQUIRE_FALSE(std::filesystem::exists(module / ".huxerui"));
   REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
 
@@ -541,6 +544,11 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   REQUIRE(xcode_project_file->content.find("../../.huxerui/generated/ios/modules") != std::string::npos);
   REQUIRE(xcode_project_file->content.find("productName = HuxerUIModules") != std::string::npos);
   REQUIRE(xcode_project_file->content.find("productName = \"Sample-App\"") != std::string::npos);
+  REQUIRE(
+      xcode_project_file->content.find("$HUXERUI_CORE_BUILD_DIR/huxerui-ios/sample_app/resources/package") !=
+      std::string::npos
+  );
+  REQUIRE(xcode_project_file->content.find("HuxerUI resource package is missing") != std::string::npos);
   REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
             return file.path == "App/main.mm";
           }) != shell.end());

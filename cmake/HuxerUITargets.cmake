@@ -425,6 +425,29 @@ function(huxerui_enable_codegen target_name)
     )
 endfunction()
 
+function(_huxerui_get_resource_output target_name output_variable)
+    get_property(HUXERUI_RESOURCE_OUTPUT_DIRECTORY_SET
+            TARGET ${target_name}
+            PROPERTY HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+            SET
+    )
+    if (HUXERUI_RESOURCE_OUTPUT_DIRECTORY_SET)
+        get_property(HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+                TARGET ${target_name}
+                PROPERTY HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+        )
+    else ()
+        get_target_property(HUXERUI_RESOURCE_TARGET_BINARY_DIR
+                ${target_name}
+                BINARY_DIR
+        )
+        set(HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+                "${HUXERUI_RESOURCE_TARGET_BINARY_DIR}/huxerui-resources/${target_name}"
+        )
+    endif ()
+    set(${output_variable} "${HUXERUI_RESOURCE_OUTPUT_DIRECTORY}" PARENT_SCOPE)
+endfunction()
+
 function(_huxerui_configure_resources target_name)
     get_property(HUXERUI_RESOURCE_PACKAGES
             TARGET ${target_name}
@@ -460,13 +483,7 @@ function(_huxerui_configure_resources target_name)
     endforeach ()
     list(SORT HUXERUI_RESOURCE_INPUTS)
 
-    get_target_property(HUXERUI_RESOURCE_TARGET_BINARY_DIR
-            ${target_name}
-            BINARY_DIR
-    )
-    set(HUXERUI_RESOURCE_OUTPUT
-            "${HUXERUI_RESOURCE_TARGET_BINARY_DIR}/huxerui-resources/${target_name}"
-    )
+    _huxerui_get_resource_output(${target_name} HUXERUI_RESOURCE_OUTPUT)
     set(HUXERUI_RESOURCE_INDEX
             "${HUXERUI_RESOURCE_OUTPUT}/package/huxerui/resources.bin"
     )
@@ -689,13 +706,10 @@ function(huxerui_add_resources target_name)
             HUXERUI_RESOURCE_NAMESPACES
             "${HUXERUI_RESOURCES_NAMESPACE}"
     )
-    get_target_property(HUXERUI_RESOURCE_TARGET_BINARY_DIR
-            ${target_name}
-            BINARY_DIR
-    )
+    _huxerui_get_resource_output(${target_name} HUXERUI_RESOURCE_OUTPUT)
     set_property(TARGET ${target_name} PROPERTY
             HUXERUI_RESOURCE_PACKAGE
-            "${HUXERUI_RESOURCE_TARGET_BINARY_DIR}/huxerui-resources/${target_name}/package"
+            "${HUXERUI_RESOURCE_OUTPUT}/package"
     )
     _huxerui_schedule_resources(${target_name})
 endfunction()

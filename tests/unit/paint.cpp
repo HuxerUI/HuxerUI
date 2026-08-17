@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "external_texture_test_support.h"
 #include "image_test_support.h"
 #include "shadow_internal.h"
 
@@ -18,6 +19,10 @@ namespace {
 
 ImageAsset TestImage() {
   return ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
+}
+
+ExternalTexture TestExternalTexture() {
+  return MakeTestExternalTexture({20.0F, 10.0F});
 }
 
 } // namespace
@@ -56,6 +61,7 @@ TEST_CASE("PaintContextBuildsAnImmutableLocalSequence") {
   context.Finish();
 
   REQUIRE(sequence.Revision() == 1);
+  REQUIRE_FALSE(sequence.HasExternalTextureCommands());
   REQUIRE(sequence.Commands().size() == 2);
   REQUIRE(std::holds_alternative<DrawRectCommand>(sequence.Commands()[0]));
   REQUIRE(std::holds_alternative<DrawBorderCommand>(sequence.Commands()[1]));
@@ -124,6 +130,44 @@ TEST_CASE("PaintContextValidatesImageSourceAndOpacity") {
       context.DrawImage(TestImage(), {0.0F, 0.0F, 10.0F, 10.0F}, ImageSampling::Linear, 1.1F),
       std::invalid_argument
   );
+}
+
+TEST_CASE("PaintContextRecordsExternalTexturesWithoutFlatteningThemToImages") {
+  const ExternalTexture texture = TestExternalTexture();
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawImageRect(
+      texture,
+      {2.0F, 1.0F, 8.0F, 4.0F},
+      {10.0F, 20.0F, 40.0F, 20.0F},
+      ImageSampling::Nearest,
+      0.5F
+  );
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  REQUIRE(sequence.HasExternalTextureCommands());
+  const auto& command = std::get<DrawExternalTextureCommand>(sequence.Commands().front());
+  REQUIRE(command.texture == texture);
+  REQUIRE(command.source == Rect{2.0F, 1.0F, 8.0F, 4.0F});
+  REQUIRE(command.destination == Rect{10.0F, 20.0F, 40.0F, 20.0F});
+  REQUIRE(command.sampling == ImageSampling::Nearest);
+  REQUIRE(command.opacity == 0.5F);
+  REQUIRE(sequence.Bounds() == command.destination);
+}
+
+TEST_CASE("PaintContextValidatesExternalTextureSourceAndOpacity") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  REQUIRE_THROWS_AS(
+      context.DrawImageRect(TestExternalTexture(), {19.0F, 0.0F, 2.0F, 2.0F}, {}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      context.DrawImage(TestExternalTexture(), {0.0F, 0.0F, 10.0F, 10.0F}, ImageSampling::Linear, 1.1F),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(context.DrawImage(ExternalTexture{}, {}), std::invalid_argument);
 }
 
 TEST_CASE("PaintContextOmitsTextRunsWithoutVisibleBounds") {

@@ -92,6 +92,15 @@ View SemanticBasicsApp() {
   };
 }
 
+View SemanticProgressApp() {
+  return Column {
+    ProgressCircle(),
+    ProgressCircle(0.25F),
+    ProgressBar(),
+    ProgressBar(0.75F),
+  };
+}
+
 View SemanticOverrideApp() {
   return Canvas([](PaintContext&, Size) {}).With(
       Frame{40.0F, 20.0F},
@@ -400,6 +409,34 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
   REQUIRE(unchanged.semantic_frame == first_frame);
 }
 
+TEST_CASE("IndeterminateProgressPublishesLocalizedBusyState") {
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime(SemanticProgressApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+  std::vector<const SemanticNode*> progress_nodes;
+  for (const SemanticNode& node : frame->nodes) {
+    if (node.role == SemanticRole::ProgressIndicator) {
+      progress_nodes.push_back(&node);
+    }
+  }
+  REQUIRE(progress_nodes.size() == 4);
+  REQUIRE(progress_nodes[0]->busy == true);
+  REQUIRE(progress_nodes[0]->state_description == "In progress");
+  REQUIRE_FALSE(progress_nodes[0]->range.has_value());
+  REQUIRE(progress_nodes[1]->busy == false);
+  REQUIRE(progress_nodes[1]->state_description.empty());
+  REQUIRE(progress_nodes[1]->range == SemanticRange{0.0, 1.0, 0.25, std::nullopt});
+  REQUIRE(progress_nodes[2]->busy == true);
+  REQUIRE(progress_nodes[2]->state_description == "In progress");
+  REQUIRE_FALSE(progress_nodes[2]->range.has_value());
+  REQUIRE(progress_nodes[3]->busy == false);
+  REQUIRE(progress_nodes[3]->state_description.empty());
+  REQUIRE(progress_nodes[3]->range == SemanticRange{0.0, 1.0, 0.75, std::nullopt});
+}
+
 TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
@@ -625,7 +662,12 @@ TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
   REQUIRE((scroll.actions & SemanticActionMask(SemanticActionKind::Scroll)) != 0);
 
   const SemanticNode& first = FindSemanticNode(*before, "First");
+  const SemanticNode& second = FindSemanticNode(*before, "Second");
   const SemanticNode& third = FindSemanticNode(*before, "Third");
+  REQUIRE(scroll.children == std::vector<SemanticNodeId>{first.id, second.id, third.id});
+  REQUIRE(std::ranges::none_of(before->nodes, [&](const SemanticNode& node) {
+    return node.id != before->root && node.role == SemanticRole::Generic;
+  }));
   REQUIRE_FALSE(first.offscreen);
   REQUIRE(third.offscreen);
   REQUIRE((third.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) != 0);

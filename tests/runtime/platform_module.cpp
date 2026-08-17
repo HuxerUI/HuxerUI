@@ -8,6 +8,8 @@
 #include <variant>
 #include <vector>
 
+#include "external_texture_test_support.h"
+
 namespace huxerui::test {
 namespace {
 
@@ -37,6 +39,20 @@ struct TestPlatformMethods {
 
     static int Decode(const PlatformPayload& payload) {
       return static_cast<int>(payload.AsInteger());
+    }
+  };
+
+  struct Texture {
+    using Request = ExternalTexture;
+    using Result = ExternalTexture;
+    static constexpr std::string_view Name = "texture";
+
+    static PlatformPayload Encode(const ExternalTexture& value) {
+      return PlatformPayload(value);
+    }
+
+    static ExternalTexture Decode(const PlatformPayload& payload) {
+      return payload.AsExternalTexture();
     }
   };
 };
@@ -87,6 +103,14 @@ struct TestPlatformModuleEvents {
     }
   };
 
+  struct TextureChanged : Event<ExternalTexture> {
+    static constexpr std::string_view Name = "textureChanged";
+
+    static ExternalTexture Decode(const PlatformPayload& payload) {
+      return payload.AsExternalTexture();
+    }
+  };
+
   struct MissingDecoder : Event<int> {
     static constexpr std::string_view Name = "missingDecoder";
   };
@@ -100,10 +124,12 @@ struct TestPlatformModuleEvents {
 
 static_assert(detail::PlatformMethodKey<TestPlatformMethods::Double>);
 static_assert(detail::PlatformMethodKey<TestPlatformMethods::Widen>);
+static_assert(detail::PlatformMethodKey<TestPlatformMethods::Texture>);
 static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::VoidRequest>);
 static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::ReturnsImmovable>);
 static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::ReturnsPlatformError>);
 static_assert(detail::PlatformEventKey<TestPlatformModuleEvents::Changed>);
+static_assert(detail::PlatformEventKey<TestPlatformModuleEvents::TextureChanged>);
 static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::MissingDecoder>);
 static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::InvalidDecoder>);
 
@@ -175,8 +201,18 @@ public:
     return instance_.Call<TestPlatformMethods::Double>(value, std::move(completion));
   }
 
+  PlatformRequestId Texture(
+      const ExternalTexture& texture,
+      std::function<void(PlatformResult<ExternalTexture>)> completion
+  ) {
+    return instance_.Call<TestPlatformMethods::Texture>(texture, std::move(completion));
+  }
+
   void BindEvents() {
     instance_.On<TestPlatformModuleEvents::Changed>([this](int value) { events.push_back(value); });
+    instance_.On<TestPlatformModuleEvents::TextureChanged>([this](ExternalTexture texture) {
+      texture_events.push_back(std::move(texture));
+    });
   }
 
   bool Cancel(PlatformRequestId request) {
@@ -196,6 +232,7 @@ public:
   }
 
   std::vector<int> events;
+  std::vector<ExternalTexture> texture_events;
 
 private:
   PlatformInstance instance_;
@@ -215,6 +252,22 @@ AppOptions InstallTestModule(const std::shared_ptr<NativeState>& native, std::sh
     root.Provide(service);
   });
   return options;
+}
+
+AppOptions InstallTextureOption(const std::shared_ptr<NativeState>& native, ExternalTexture texture) {
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([native, texture = std::move(texture)](RootContext& root) {
+    root.Modules().Register("test/TextureModule", TestModuleFactory(native));
+    static_cast<void>(root.Modules().Open("test/TextureModule", PlatformPayload(texture)));
+  });
+  return options;
+}
+
+void OpenTextureOnAnotherSurface(const ExternalTexture& texture) {
+  TestPlatform platform;
+  const auto native = std::make_shared<NativeState>();
+  Runtime runtime(PlatformModuleApp, platform, InstallTextureOption(native, texture));
+  static_cast<void>(runtime);
 }
 
 TEST_CASE("PlatformInstanceDeliversTypedCallsAndEventsAsynchronously") {
@@ -347,6 +400,66 @@ TEST_CASE("PlatformAdapterCreatesNativePlatformModuleRegistration") {
   REQUIRE(native->creates == 1);
   REQUIRE(native->options.AsObject().at("native").AsBoolean());
   REQUIRE(service != nullptr);
+}
+
+TEST_CASE("PlatformModulesBindNestedExternalTexturePayloadsToOneSurface") {
+  const ExternalTexture texture = MakeTestExternalTexture({32.0F, 18.0F});
+  const auto install = [texture](const std::shared_ptr<NativeState>& native) {
+    AppOptions options{.show_debug_overlay = false};
+    options.root_hooks.push_back([texture, native](RootContext& root) {
+      root.Modules().Register("test/TextureModule", TestModuleFactory(native));
+      static_cast<void>(root.Modules().Open(
+          "test/TextureModule",
+          PlatformPayload::Object{{"textures", PlatformPayload::List{texture}}}
+      ));
+    });
+    return options;
+  };
+
+  TestPlatform first_platform;
+  const auto first_native = std::make_shared<NativeState>();
+  Runtime first_runtime(PlatformModuleApp, first_platform, install(first_native));
+  REQUIRE(first_native->creates == 1);
+  REQUIRE(
+      first_native->options.AsObject().at("textures").AsList().front().AsExternalTexture() == texture
+  );
+
+  TestPlatform other_platform;
+  const auto other_native = std::make_shared<NativeState>();
+  REQUIRE_THROWS_AS(
+      Runtime(PlatformModuleApp, other_platform, install(other_native)),
+      std::logic_error
+  );
+  REQUIRE(other_native->creates == 0);
+}
+
+TEST_CASE("PlatformInstanceBindsExternalTexturesAcrossCallsResultsAndEvents") {
+  TestPlatform platform;
+  auto native = std::make_shared<NativeState>();
+  std::shared_ptr<TestService> service;
+  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+
+  const ExternalTexture argument = MakeTestExternalTexture({32.0F, 18.0F});
+  std::vector<PlatformResult<ExternalTexture>> results;
+  static_cast<void>(service->Texture(argument, [&](PlatformResult<ExternalTexture> result) {
+    results.push_back(std::move(result));
+  }));
+  REQUIRE(native->calls.back()->arguments.AsExternalTexture() == argument);
+
+  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(argument), std::logic_error);
+
+  const ExternalTexture result = MakeTestExternalTexture({32.0F, 18.0F});
+  native->calls.back()->result(PlatformPayload(result));
+  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(result), std::logic_error);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(results.size() == 1);
+  REQUIRE(std::get<ExternalTexture>(results.front()) == result);
+
+  const ExternalTexture event = MakeTestExternalTexture({32.0F, 18.0F});
+  native->events("textureChanged", PlatformPayload(event));
+  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(event), std::logic_error);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(service->texture_events == std::vector<ExternalTexture>{event});
 }
 
 TEST_CASE("PlatformModulesValidateNonvisualFactoryRegistration") {

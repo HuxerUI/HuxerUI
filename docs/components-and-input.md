@@ -359,6 +359,8 @@ ProgressBar(progress);
 
 ProgressBar is a controlled display component and does not emit events. Its default width, height, colors, corner radius, track gap, stop indicator, and indeterminate animation come from `ProgressBarStyle`; layout modifiers can override its dimensions.
 
+ProgressCircle and ProgressBar publish ProgressIndicator semantics. Determinate forms expose their normalized range, while indeterminate forms expose a localized busy state description.
+
 `ProgressBarIndeterminateMotion::Sweep` moves one fixed-width segment and is the Flat Theme default. `Segmented` uses independent head and tail positions for two segments and is the Material Theme default. `ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps a representative static indicator without requesting frames.
 
 ## Slider
@@ -380,7 +382,7 @@ Pointer and touch input update the value while dragging. Arrow keys adjust by `S
 
 ## Image
 
-Image displays raster ImageAsset values, vector VectorAsset values, or an ImageResource that resolves either format automatically:
+Image displays raster ImageAsset values, vector VectorAsset values, live ExternalTexture values, or an ImageResource that resolves either immutable resource format automatically:
 
 ```cpp
 Image(app::images::logo)
@@ -390,7 +392,8 @@ Image(app::images::logo)
 
 UseImage returns a raster asset and UseVectorImage returns a vector asset when application code needs the concrete value.
 Vector assets can also be constructed with VectorAsset::Create and painted by Canvas.
-Sampling applies only to raster images; Tint applies only to vector images.
+Sampling applies to raster images and ExternalTexture; Tint applies only to vector images.
+ExternalTexture reuses ImageFit, alignment, intrinsic measurement, transforms, clipping, and opacity while retaining a distinct renderer command for the latest platform-owned frame.
 
 ## Controlled TextField
 

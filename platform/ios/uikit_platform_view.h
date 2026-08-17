@@ -28,7 +28,8 @@ public:
   [[nodiscard]] bool Commit(UIView* root, const RenderFrame& frame);
   void DrawBase(CGContextRef context, CGRect dirty_rect);
   UIView* HitTest(Point point, UIEvent* event);
-  void SynchronizeFocus(UIView* responder);
+  [[nodiscard]] UIView* AccessibilityView(std::uint64_t identity) const noexcept;
+  void ClearFocus();
   void Shutdown();
 
 private:

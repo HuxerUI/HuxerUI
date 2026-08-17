@@ -19,6 +19,7 @@
 
 #include <huxerui/app.h>
 
+#include "uikit_accessibility.h"
 #include "uikit_platform_view.h"
 #include "uikit_renderer.h"
 #include "uikit_text_input.h"
@@ -290,7 +291,7 @@ public:
     [view_controller_.view layoutIfNeeded];
 
     text_input_ = std::make_unique<UIKitTextInput>(*runtime_, view_);
-    view_->huxeruiTextInput = text_input_.get();
+    accessibility_ = std::make_unique<UIKitAccessibility>(*runtime_, view_, *platform_views_, text_input_->Responder());
     frame_scheduler_ = [[HuxerUIIOSFrameScheduler alloc] initWithView:view_];
 
     NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
@@ -317,12 +318,15 @@ public:
     [NSNotificationCenter.defaultCenter removeObserver:view_];
     [frame_scheduler_ shutdown];
     frame_scheduler_ = nil;
+    if (accessibility_) {
+      accessibility_->Shutdown();
+      accessibility_.reset();
+    }
     if (platform_views_) {
       platform_views_->Shutdown();
       platform_views_.reset();
     }
     if (view_ != nil) {
-      view_->huxeruiTextInput = nullptr;
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiAdapter = nullptr;
     }
@@ -382,6 +386,7 @@ public:
     }
     const FrameCommit& commit = runtime_->BuildFrame();
     const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
+    accessibility_->Commit(commit.semantic_frame, composition_changed);
     if (composition_changed) {
       [view_ setNeedsDisplay];
       frame_state_.MarkPaintPending();
@@ -429,10 +434,14 @@ public:
     return platform_views_->HitTest(point, event);
   }
 
-  void SynchronizePlatformViewFocus(UIView* responder) {
+  void ClearPlatformViewFocus() {
     if (platform_views_ != nullptr) {
-      platform_views_->SynchronizeFocus(responder);
+      platform_views_->ClearFocus();
     }
+  }
+
+  NSArray* AccessibilityElements() const noexcept {
+    return accessibility_ ? accessibility_->Elements() : @[];
   }
 
   FontMetrics Metrics(const Font& font) override {
@@ -626,6 +635,7 @@ private:
   __strong HuxerUIIOSFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<UIKitTextInput> text_input_;
   std::unique_ptr<UIKitPlatformViews> platform_views_;
+  std::unique_ptr<UIKitAccessibility> accessibility_;
   PlatformFrameState frame_state_;
   CGSize viewport_size_ = CGSizeZero;
   std::optional<CGRect> keyboard_frame_;
@@ -651,13 +661,14 @@ int RunPlatformApplication(const Application& application) {
   self.opaque = YES;
   self.clipsToBounds = YES;
   self.multipleTouchEnabled = YES;
+  self.isAccessibilityElement = NO;
   self.contentMode = UIViewContentModeRedraw;
   huxeruiTouches = [[NSMutableSet alloc] init];
   return self;
 }
 
-- (BOOL)canBecomeFirstResponder {
-  return YES;
+- (NSArray*)accessibilityElements {
+  return huxeruiAdapter == nullptr ? @[] : huxeruiAdapter->AccessibilityElements();
 }
 
 - (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
@@ -665,15 +676,13 @@ int RunPlatformApplication(const Application& application) {
     return nil;
   }
   if (huxeruiAdapter != nullptr) {
-    UIView* platform_view = huxeruiAdapter->HitTestPlatformView(
-        {static_cast<float>(point.x), static_cast<float>(point.y)}, event
-    );
+    UIView* platform_view =
+        huxeruiAdapter->HitTestPlatformView({static_cast<float>(point.x), static_cast<float>(point.y)}, event);
     if (platform_view != nil) {
       return platform_view;
     }
     if (event != nil && event.type == UIEventTypeTouches) {
-      [self becomeFirstResponder];
-      huxeruiAdapter->SynchronizePlatformViewFocus(self);
+      huxeruiAdapter->ClearPlatformViewFocus();
     }
   }
   return self;

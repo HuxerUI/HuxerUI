@@ -5,6 +5,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_platform_view.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_renderer.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_text_input.mm"
+            "${HUXERUI_PROJECT_DIR}/platform/macos/macos_external_texture.mm"
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS
@@ -15,7 +16,9 @@ function(huxerui_platform_configure)
             "-framework AppKit"
             "-framework Carbon"
             "-framework CoreGraphics"
+            "-framework CoreImage"
             "-framework CoreText"
+            "-framework CoreVideo"
             "-framework ImageIO"
             "-framework QuartzCore"
             PARENT_SCOPE

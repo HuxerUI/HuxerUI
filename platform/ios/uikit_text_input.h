@@ -5,6 +5,7 @@
 #include <huxerui/app.h>
 
 @class HuxerUIView;
+@protocol UITextInput;
 
 namespace huxerui::detail {
 
@@ -23,6 +24,7 @@ public:
   [[nodiscard]] TextInputContext QueryContext(TextOffset start = 0, TextOffset length = 0) const;
   [[nodiscard]] TextInputGeometry QueryGeometry(TextRange range) const;
   [[nodiscard]] TextInputPositionResult QueryPosition(Point point) const;
+  [[nodiscard]] id<UITextInput> Responder() const noexcept;
   TextInputApplyResult Apply(TextInputCommand command);
   bool PerformAction(TextInputAction action);
 

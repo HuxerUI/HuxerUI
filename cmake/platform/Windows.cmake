@@ -17,6 +17,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_ui_dispatcher.cpp"
             PARENT_SCOPE
     )
     set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS

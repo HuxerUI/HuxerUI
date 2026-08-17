@@ -1010,7 +1010,7 @@ public:
   }
 };
 
-constexpr Color debug_ribbon_background = Color::Rgb(103, 80, 164);
+constexpr Color debug_ribbon_background = Color::Rgb(155, 38, 52);
 constexpr Color debug_ribbon_foreground = Color::White();
 constexpr Color debug_ribbon_shadow = Color::Rgb(0, 0, 0, 0.32F);
 constexpr Color debug_panel_background = Color::Rgb(17, 22, 31, 0.97F);
@@ -1183,7 +1183,13 @@ View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snaps
           .offset = {},
           .blur_radius = 12.0F,
       },
-      Rotation{45.0F}
+      Rotation{45.0F},
+      Semantics{
+          .role = SemanticRole::Button,
+          .label = "DEBUG",
+          .expanded = expanded.Get(),
+          .descendants = SemanticDescendantPolicy::Exclude,
+      }
   ).OnClick([expanded, snapshot] {
     const bool next_expanded = !expanded.Get();
     if (next_expanded) {

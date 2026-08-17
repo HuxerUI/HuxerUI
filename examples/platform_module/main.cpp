@@ -1,5 +1,10 @@
 #include "timer.h"
 
+#if defined(__ANDROID__) || defined(__APPLE__)
+#include "color_stream.h"
+#define HUXERUI_EXAMPLE_COLOR_STREAM 1
+#endif
+
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -20,6 +25,44 @@ template <class Result> std::string ResultStatus(const PlatformResult<Result>& r
 }
 
 } // namespace
+
+#if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
+[[huxerui::scope]]
+View PlatformSpecificDemo() {
+  auto color_stream = example::UseColorStream();
+  auto stream_texture = UseState(ExternalTexture{});
+  auto stream_status = UseState<std::string>("The native stream has not been requested");
+  View stream_preview = Text(stream_status.Get()).With(Frame{.height = 180.0F});
+  if (stream_texture.Get().HasValue()) {
+    stream_preview = Image(stream_texture.Get()).Fit(ImageFit::Cover).With(Frame{.height = 180.0F});
+  }
+  const ThemeSpec& theme = UseTheme();
+
+  return Column {
+    Text("ExternalTexture", TextRole::Title),
+    Text("The module returns one capability; native frames then bypass PlatformModule callbacks."),
+    Button("Load native color stream").OnClick([color_stream, stream_texture, stream_status] {
+      stream_status = "Waiting for the native texture";
+      static_cast<void>(color_stream->Texture([stream_texture, stream_status](PlatformResult<ExternalTexture> result) {
+        if (const auto* error = std::get_if<PlatformError>(&result)) {
+          stream_status = error->message;
+          return;
+        }
+        stream_texture = std::get<ExternalTexture>(std::move(result));
+        stream_status = "Streaming";
+      }));
+    }),
+    std::move(stream_preview),
+  }.With(
+      Spacing(theme.spacing.medium),
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
+}
+#else
+View PlatformSpecificDemo() {
+  return {};
+}
+#endif
 
 [[huxerui::scope]]
 View PlatformModuleDemo() {
@@ -62,6 +105,7 @@ View PlatformModuleDemo() {
         }));
       }),
     }.With(Spacing(theme.spacing.medium)),
+    PlatformSpecificDemo(),
   }.With(
       Padding(theme.spacing.extra_large),
       Spacing(theme.spacing.medium),
@@ -74,13 +118,21 @@ View App() {
   return MaterialTheme(PlatformModuleDemo);
 }
 
-const Application application{
-    App,
-    {
-        .window = {
-            .title = "HuxerUI PlatformModule",
-            .initial_size = {720.0F, 440.0F},
-        },
-        .root_hooks = {example::InstallTimer},
-    }
-};
+AppOptions Options() {
+  AppOptions options;
+  options.window = {
+      .title = "HuxerUI PlatformModule",
+#if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
+      .initial_size = {720.0F, 720.0F},
+#else
+      .initial_size = {720.0F, 440.0F},
+#endif
+  };
+  options.root_hooks.push_back(example::InstallTimer);
+#if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
+  options.root_hooks.push_back(example::InstallColorStream);
+#endif
+  return options;
+}
+
+const Application application{App, Options()};

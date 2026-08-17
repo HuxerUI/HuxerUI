@@ -2,7 +2,9 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
-def huxeruiDemoExample = providers.gradleProperty("huxeruiDemoExample").orElse("ui_gallery").get()
+def huxeruiRoot = rootProject.projectDir.parentFile.parentFile
+def huxeruiExample = providers.gradleProperty("huxeruiExample").orElse("ui_gallery").get()
+def huxeruiExampleJava = new File(huxeruiRoot, "examples/${huxeruiExample}/android/src/main/java")
 def huxeruiCompileSdk = providers.gradleProperty("huxeruiCompileSdk").map { it.toInteger() }.get()
 def huxeruiMinSdk = providers.gradleProperty("huxeruiMinSdk").map { it.toInteger() }.get()
 def huxeruiTargetSdk = providers.gradleProperty("huxeruiTargetSdk").map { it.toInteger() }.get()
@@ -10,17 +12,17 @@ def huxeruiNdkVersion = providers.gradleProperty("huxeruiNdkVersion").get()
 def huxeruiAbis = providers.gradleProperty("huxeruiAbis").get().split(",")
 def huxeruiStl = providers.gradleProperty("huxeruiStl").get()
 def huxeruiDebugAssets = layout.buildDirectory.dir(
-        "generated/huxerui/assets/debug/${huxeruiDemoExample}").get().asFile
+        "generated/huxerui/assets/debug/${huxeruiExample}").get().asFile
 def huxeruiReleaseAssets = layout.buildDirectory.dir(
-        "generated/huxerui/assets/release/${huxeruiDemoExample}").get().asFile
+        "generated/huxerui/assets/release/${huxeruiExample}").get().asFile
 
 android {
-    namespace = "org.huxerui.demo"
+    namespace = "org.huxerui.examples"
     compileSdk = huxeruiCompileSdk
     ndkVersion = huxeruiNdkVersion
 
     defaultConfig {
-        applicationId = "org.huxerui.demo"
+        applicationId = "org.huxerui.examples"
         minSdk = huxeruiMinSdk
         targetSdk = huxeruiTargetSdk
         versionCode = 1
@@ -29,8 +31,8 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=${huxeruiStl}",
-                        "-DHUXERUI_ROOT_DIR=${rootProject.projectDir.parentFile.parentFile.absolutePath}",
-                        "-DHUXERUI_DEMO_EXAMPLE=${huxeruiDemoExample}"
+                        "-DHUXERUI_ROOT_DIR=${huxeruiRoot.absolutePath}",
+                        "-DHUXERUI_EXAMPLE=${huxeruiExample}"
             }
         }
 
@@ -49,6 +51,9 @@ android {
     }
 
     sourceSets {
+        main {
+            java.srcDir huxeruiExampleJava
+        }
         debug {
             assets.srcDir huxeruiDebugAssets
         }
@@ -85,23 +90,33 @@ dependencies {
 def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
     def capitalizedBuildType = buildType.capitalize()
     def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
-    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
-        dependsOn nativeTaskName
-        from {
-            def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
-                include "**/example/huxerui-resources/example_${huxeruiDemoExample}/package/huxerui/resources.bin"
-            }.files
-            // ABI packages are deterministic. Prefer arm64 and the newest active CMake configuration hash.
-            def preferredIndexFiles = indexFiles.findAll {
-                it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
-            }
-            def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
-            def selected = candidates.max { left, right ->
-                def modified = left.lastModified() <=> right.lastModified()
-                modified != 0 ? modified : left.absolutePath <=> right.absolutePath
-            }
-            selected == null ? [] : selected.parentFile.parentFile
+    def resolveResourcePackage = {
+        def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
+            include "**/example/huxerui-resources/example_${huxeruiExample}/package/huxerui/resources.bin"
+        }.files
+        // ABI packages are deterministic. Prefer arm64 and the newest active CMake configuration hash.
+        def preferredIndexFiles = indexFiles.findAll {
+            it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
         }
+        def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
+        def selected = candidates.max { left, right ->
+            def modified = left.lastModified() <=> right.lastModified()
+            modified != 0 ? modified : left.absolutePath <=> right.absolutePath
+        }
+        selected == null ? null : selected.parentFile.parentFile
+    }
+    def verificationTask = tasks.register("verifyHuxerUI${capitalizedBuildType}Resources") {
+        dependsOn nativeTaskName
+        doLast {
+            if (resolveResourcePackage() == null) {
+                throw new GradleException(
+                        "HuxerUI Android example runner resource package is missing for ${huxeruiExample}")
+            }
+        }
+    }
+    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
+        dependsOn verificationTask
+        from { resolveResourcePackage() ?: [] }
         into assetsDirectory
     }
     tasks.matching { it.name == "merge${capitalizedBuildType}Assets" }.configureEach {

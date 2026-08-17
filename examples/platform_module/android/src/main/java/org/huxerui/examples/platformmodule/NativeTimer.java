@@ -1,4 +1,4 @@
-package org.huxerui.demo;
+package org.huxerui.examples.platformmodule;
 
 import android.content.Context;
 

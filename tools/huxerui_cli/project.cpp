@@ -339,6 +339,14 @@ if (ANDROID)
     )
     list(APPEND MODULE_SOURCE_FILES ${MODULE_ANDROID_SOURCE_FILES})
 endif ()
+if (WIN32)
+    file(GLOB_RECURSE MODULE_WINDOWS_SOURCE_FILES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cc"
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cxx"
+    )
+    list(APPEND MODULE_SOURCE_FILES ${MODULE_WINDOWS_SOURCE_FILES})
+endif ()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     file(GLOB_RECURSE MODULE_LINUX_SOURCE_FILES CONFIGURE_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cpp"

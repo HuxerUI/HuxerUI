@@ -2,6 +2,8 @@
 
 #include <limits>
 
+#include "external_texture_test_support.h"
+
 namespace huxerui::test {
 
 View RenderSceneApp() {
@@ -23,6 +25,8 @@ State<bool> shadow_changed;
 State<bool> canvas_changed;
 State<bool> clip_children_enabled;
 State<bool> overflow_clip_enabled;
+ExternalTexture render_scene_external_texture;
+bool render_scene_external_texture_visible = true;
 int canvas_paint_count = 0;
 int clipped_child_clicks = 0;
 int overflowing_child_clicks = 0;
@@ -103,6 +107,13 @@ View PaintReuseApp() {
       Text(changed.Get() ? "changed" : "initial"),
       Text("stable"),
   };
+}
+
+View ExternalTextureRenderApp() {
+  if (!render_scene_external_texture_visible) {
+    return Spacer().With(Frame{80.0F, 40.0F});
+  }
+  return Image(render_scene_external_texture).Fit(ImageFit::Fill).With(Frame{80.0F, 40.0F});
 }
 
 View FramePaintInvalidationApp() {
@@ -523,6 +534,56 @@ TEST_CASE("FrameCommitSeparatesRuntimeWorkFromPlatformScheduling") {
   const FrameCommit& commit = runtime.BuildCommit();
   REQUIRE(platform.requested_frames == requests_before_build);
   REQUIRE(commit.next_frame_deadline == platform.current_time);
+}
+
+TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
+  const auto texture_state = std::make_shared<ExternalTextureTestState>(Size{40.0F, 20.0F});
+  render_scene_external_texture = texture_state->Texture();
+  render_scene_external_texture_visible = true;
+  TestPlatform platform;
+  Runtime runtime{ExternalTextureRenderApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+
+  const RenderFrame& first = runtime.BuildRenderFrame();
+  const detail::MountedNode* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  const RenderNode* before = FindRenderNode(*first.scene.root, mounted->identity);
+  REQUIRE(before != nullptr);
+  REQUIRE(before->content.Commands().size() == 1);
+  REQUIRE(std::holds_alternative<DrawExternalTextureCommand>(before->content.Commands().front()));
+  const std::uint64_t render_revision = before->revision;
+  const std::uint64_t paint_revision = before->content.Revision();
+  const PaintCommand* commands = before->content.Commands().data();
+
+  const int requests_before_frame = platform.requested_frames;
+  texture_state->PublishFrame();
+  texture_state->PublishFrame();
+  REQUIRE(platform.requested_frames == requests_before_frame);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.requested_frames == requests_before_frame + 1);
+
+  const RenderFrame& updated = runtime.BuildRenderFrame();
+  const RenderNode* after = FindRenderNode(*updated.scene.root, mounted->identity);
+  REQUIRE(after == before);
+  REQUIRE(after->revision == render_revision);
+  REQUIRE(after->content.Revision() == paint_revision);
+  REQUIRE(after->content.Commands().data() == commands);
+  REQUIRE_FALSE(updated.damage.full);
+  REQUIRE(DamageContains(updated.damage, Rect{0.0F, 0.0F, 80.0F, 40.0F}));
+
+  render_scene_external_texture_visible = false;
+  runtime.InvalidateRoot();
+  runtime.BuildRenderFrame();
+  const int requests_after_hiding = platform.requested_frames;
+  texture_state->PublishFrame();
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.requested_frames == requests_after_hiding);
+
+  TestPlatform other_platform;
+  Runtime other_runtime{ExternalTextureRenderApp, other_platform};
+  render_scene_external_texture_visible = true;
+  other_runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  REQUIRE_THROWS_AS(other_runtime.BuildRenderFrame(), std::logic_error);
 }
 
 TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {

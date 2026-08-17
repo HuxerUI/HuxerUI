@@ -10,7 +10,7 @@
 
 namespace {
 
-constexpr const char* native_text_field_class = "org/huxerui/demo/NativeTextField";
+constexpr const char* native_text_field_class = "org/huxerui/examples/platformview/NativeTextField";
 
 void ApplyProperties(JNIEnv* environment, jobject view, const huxerui::PlatformPayload& properties) {
   const std::string_view text = properties.AsObject().at(huxerui::example::native_text_field::text_property).AsString();
@@ -84,7 +84,9 @@ void InstallNativeTextField(RootContext& root) {
 } // namespace huxerui::example
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_demo_NativeTextField_nativeChanged(JNIEnv* environment, jclass, jlong sink, jstring value) {
+Java_org_huxerui_examples_platformview_NativeTextField_nativeChanged(
+    JNIEnv* environment, jclass, jlong sink, jstring value
+) {
   auto* event_sink = reinterpret_cast<huxerui::PlatformEventSink*>(static_cast<std::uintptr_t>(sink));
   if (event_sink != nullptr) {
     (*event_sink)(

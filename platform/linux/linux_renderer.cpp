@@ -2471,6 +2471,11 @@ private:
     cairo_restore(cr_);
   }
 
+  void RenderCommand(const DrawExternalTextureCommand& command) {
+    static_cast<void>(command);
+    throw std::logic_error("HuxerUI Linux external textures are not implemented yet");
+  }
+
   void RenderCommand(const DrawCircleCommand& command) {
     SetSourceColor(cr_, command.color);
     cairo_new_path(cr_);

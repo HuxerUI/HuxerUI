@@ -16,7 +16,7 @@ The current implementation provides:
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
 
-Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, and macOS nonvisual timer reference integrations are implemented.
+Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture native producers and renderer frame import outside Android and Apple platforms, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Android `Bitmap` and Apple `CVPixelBuffer` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, macOS, and Windows nonvisual timer reference integrations are implemented.
 The current Android, Linux, and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
@@ -445,7 +445,7 @@ Missing PlatformView, accessibility, or module capabilities are backend limitati
 
 The shell is a source-controlled native Xcode application project. It owns the Info.plist, launch screen, asset catalog, build configurations, shared scheme, product identifier, signing, Capabilities, native sources, archive behavior, and final App Bundle.
 
-On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, native resources, destination selection, signing, packaging, installation metadata, and debugging.
+On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake places the archive, linker response file, and merged HuxerUI resource package under `huxerui-ios/<target>` so every Xcode shell consumes the same stable application-core contract. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, native resources, destination selection, signing, packaging, installation metadata, and debugging, and fails its staging phase when the merged HuxerUI resource package is absent.
 
 iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_HOME` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding remain outside the current preview.
 
@@ -526,8 +526,8 @@ Platform-specific SDK levels, dependencies, permissions, capabilities, publishin
 Application creation retains the current all-platform default when `--platform` is omitted.
 Module creation without `--platform` creates only the common C++ module and common preview sources; it does not create empty native packages.
 Each platform selected for a module creates the matching application shell below `examples/preview`.
-Android additionally creates an independent Gradle library under `platform/android`, iOS creates a Swift Package under `platform/ios`, and Linux creates a CMake-native source root under `platform/linux/src`.
-macOS, Windows, and Web currently add only the Preview shell because no separate native package shape has been defined for them.
+Android additionally creates an independent Gradle library under `platform/android`, iOS creates a Swift Package under `platform/ios`, and Linux and Windows create CMake-native source roots under `platform/<platform>/src`.
+macOS and Web currently add only the Preview shell because no separate native package shape has been defined for them.
 `platform add` applies the same behavior after creation and refuses to overwrite either an existing native package or Preview shell.
 Later commands obtain launch artifacts from the owning native or CMake build output, while native package attachment uses the platform-neutral generated module graph.
 Deleting `.huxerui` and regenerating it does not require parsing `CMakeLists.txt` or maintaining a second editable manifest.
@@ -677,7 +677,7 @@ The application native CMake build includes the same root CMake project, so comm
 The iOS CLI driver projects the same graph into one generated local Swift package aggregator below `.huxerui/generated/ios/modules` before building or opening Xcode.
 The source-controlled Xcode application references one stable aggregator product, so adding or removing modules does not rewrite the project file.
 The aggregator only composes module packages; application privacy text, entitlements, capabilities, signing, and final product policy stay in the Xcode shell.
-Linux module sources join the common target directly from `platform/linux/src`, so Linux and Windows need no native module projection; Web may use the graph later for JavaScript package or import attachment.
+Linux and Windows module sources join the common target directly from `platform/linux/src` and `platform/windows/src`, so neither platform needs native module projection; Web may use the graph later for JavaScript package or import attachment.
 
 Runtime installation remains explicit C++ application policy.
 An application includes the module's public header and places its typed installer directly in `AppOptions::root_hooks`:
@@ -713,16 +713,16 @@ Modules use three runtime integration forms:
 
 - Permission, Audio, Camera control, and similar nonvisual features install typed Root Services backed by registered platform module instances.
 - WebView, map, document preview, and native SDK controls register PlatformView factories by stable string type.
-- Camera preview, video decode, and high-frequency visual streams register platform-owned ExternalTexture instances and return platform-neutral handles to shared code.
+- Camera preview, video decode, and high-frequency visual streams create platform-owned ExternalTexture sources and return platform-neutral consumer values to shared code.
 
 One module may combine the forms.
 Camera normally provides a Camera service plus ExternalTexture preview, while Audio provides only a service and WebView provides a PlatformView factory.
 The application retrieves services through their typed `UseXxx()` helpers; there is no generic module-service lookup.
 
 PlatformView and nonvisual module instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
-PlatformPayload is the only dynamic cross-language representation and is restricted to null, scalar, bytes, list, and string-keyed object data.
+PlatformPayload is the only dynamic in-process cross-language representation and is restricted to null, scalar, bytes, list, string-keyed object data, and the closed framework capability ExternalTexture.
 Concrete module headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
-Callbacks, arbitrary C++ objects, native handles, and media streams never enter the payload.
+Callbacks, arbitrary C++ objects, native handles, and media frames never enter the payload; an ExternalTexture value only retains the opaque platform-owned source state.
 
 Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
 The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during module installation.
@@ -734,19 +734,21 @@ A nonvisual installer opens a registered instance and provides its public typed 
 The service translates typed methods and events to Create, Call, Result, Event, and Dispose messages, owns pending requests and subscriptions, and closes its platform instance during reverse Root Service teardown.
 Applications never call `Modules()` or use string method names directly.
 
-The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and proposed ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
+The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
 Native package attachment only makes a module's platform implementation available to the native application target; the module's explicit RootHook still installs its factories and services without another runtime API or composition mode.
 A PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the native object to a global foreground or background plane.
 Module-owned typed Root Services keep PlatformPayload codecs and string method names behind those services.
-The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, and Linux uses an `eventfd`-backed X11 event-loop queue. `example_platform_module` provides source-level Foundation, Java, and Linux `timerfd` reference integrations behind one typed service. The remaining adapters still need equivalent wiring.
+The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, Linux uses an `eventfd`-backed X11 event-loop queue, and Windows posts a coalesced private message to its application HWND. `example_platform_module` provides source-level Foundation, Java, Linux `timerfd`, and Windows thread-pool timer integrations behind one typed service. On Android and Apple platforms it additionally returns an `ExternalTexture` from a typed service and publishes native `Bitmap` or `CVPixelBuffer` frames without per-frame PlatformModule callbacks. Web still needs equivalent nonvisual module dispatch.
 
 Camera or video may still use PlatformView when a native interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a native input subtree.
 
-ExternalTexture is instance registration rather than a factory registry.
-A module's platform service registers its producer with the current renderer, receives a platform-neutral ExternalTexture value, and exposes that value to shared code.
+ExternalTexture requires neither a factory registry nor a texture registry.
+A module's platform implementation creates a move-only native source, obtains its copyable ExternalTexture consumer value, and returns that value through its typed service and PlatformPayload codec.
+The source binds once when the value first crosses a surface-owned adapter boundary, while the matching renderer keeps only a private cache for bound source states.
 Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
-Frame notifications advance a texture revision and request presentation without writing application State or executing a per-frame language bridge callback.
+Frame publication replaces a latest-wins native mailbox and requests presentation without writing application State, exposing a numeric texture identity, or executing a per-frame language bridge callback.
+The complete binding, payload, lifetime, scheduling, and staged platform contract is defined in [Architecture Design](architecture.md#externaltexture).
 
 Modules and platform shells provide these factories, registrations, payload codecs, and typed services without introducing Runtime subclasses or native types into shared public headers.
 Future native integration must report a missing current-platform package, ambiguous native product, duplicate registered type, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, or incompatible HuxerUI version with the owning module and application target in the diagnostic.

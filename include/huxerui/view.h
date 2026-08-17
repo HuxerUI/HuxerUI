@@ -23,6 +23,7 @@
 
 #include <huxerui/color.h>
 #include <huxerui/event.h>
+#include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
@@ -682,6 +683,7 @@ public:
   explicit Image(ImageResource resource);
   explicit Image(ImageAsset asset);
   explicit Image(VectorAsset asset);
+  explicit Image(ExternalTexture texture);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;

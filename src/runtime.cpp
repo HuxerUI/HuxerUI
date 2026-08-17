@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "external_texture_internal.h"
 #include "resource_internal.h"
 #include "text_input_internal.h"
 #include "window_internal.h"
@@ -1005,6 +1006,7 @@ Runtime::~Runtime() {
     StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
   } catch (...) {
   }
+  DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->platform_->external_texture_surface_);
   state_->pointer_sessions_.clear();
   state_->hovered_extensions_.clear();
   state_->layer_controller_.Disconnect();
@@ -1120,6 +1122,7 @@ bool Runtime::DispatchPlatformViewEvent(
     return false;
   }
   try {
+    detail::BindExternalTextures(payload, state_->platform_->external_texture_surface_);
     event->dispatch(payload, node->event_bindings);
   } catch (...) {
     return false;
@@ -1240,7 +1243,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     BuildSemantics();
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
-    state_->committed_scene_snapshot_.clear();
+    DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->platform_->external_texture_surface_);
     state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
     state_->frame_commit_.next_frame_deadline =
@@ -1341,7 +1344,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       state_->window_->metrics.viewport,
       state_->committed_scene_snapshot_,
       state_->committed_viewport_,
-      state_->has_committed_scene_snapshot_
+      state_->has_committed_scene_snapshot_,
+      state_->platform_->external_texture_surface_
   );
   ++state_->frame_commit_.render_frame.revision;
   if (needs_frame) {
@@ -2332,6 +2336,11 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     return true;
   }
 
+  if (incoming->platform_view &&
+      !detail::PlatformViewPropertiesEqual(mounted->platform_view, incoming->platform_view)) {
+    detail::BindExternalTextures(incoming->platform_view->properties, state_->platform_->external_texture_surface_);
+  }
+
   bool layout_changed = !LayoutInputsEqual(*mounted, *incoming);
   if (!ContentPaintInputsEqual(*mounted, *incoming)) {
     mounted->content_paint_dirty = true;
@@ -2389,6 +2398,9 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
 }
 
 std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming) {
+  if (incoming->platform_view) {
+    detail::BindExternalTextures(incoming->platform_view->properties, state_->platform_->external_texture_surface_);
+  }
   auto mounted = std::make_unique<detail::MountedNode>();
   mounted->identity = state_->next_node_identity_++;
   ApplyViewDeclaration(*mounted, *incoming);

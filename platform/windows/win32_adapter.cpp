@@ -30,6 +30,7 @@
 #include "win32_internal.h"
 #include "win32_renderer.h"
 #include "win32_text_input.h"
+#include "win32_ui_dispatcher.h"
 
 namespace huxerui::detail {
 
@@ -250,23 +251,47 @@ std::string TranslateKeyText(WPARAM virtual_key, LPARAM key_data) {
   }
   return WideToUtf8(std::wstring_view(characters, static_cast<std::size_t>(length)));
 }
+
+class Win32COMApartment final {
+public:
+  Win32COMApartment() {
+    const HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(result) && result != RPC_E_CHANGED_MODE) {
+      throw std::runtime_error("HuxerUI could not initialize Windows COM services");
+    }
+    initialized_ = SUCCEEDED(result);
+  }
+
+  ~Win32COMApartment() {
+    if (initialized_) {
+      CoUninitialize();
+    }
+  }
+
+  Win32COMApartment(const Win32COMApartment&) = delete;
+  Win32COMApartment& operator=(const Win32COMApartment&) = delete;
+
+private:
+  bool initialized_ = false;
+};
+
 } // namespace
+
 class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
+  explicit Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher)
+      : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher) {
+    win32_api_.ConfigureProcessDpiAwareness();
+  }
+
   int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     accessibility_.SetRuntime(runtime_);
     text_input_.SetRuntime(runtime_);
-    win32_api_.ConfigureProcessDpiAwareness();
 
     try {
-      const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-      if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) {
-        throw std::runtime_error("HuxerUI could not initialize Windows COM services");
-      }
-      com_initialized_ = SUCCEEDED(com_result);
       renderer_.Initialize();
       RegisterWindowClass();
       CreateApplicationWindow(options);
@@ -564,6 +589,7 @@ private:
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
     }
+    ui_dispatcher_.Attach(window_);
     if (custom_chrome_) {
       first_nc_calc_ = false;
       if (!SetWindowPos(
@@ -583,6 +609,7 @@ private:
   }
 
   void Cleanup() noexcept {
+    ui_dispatcher_.Shutdown();
     text_input_.Reset();
     committed_frame_ = nullptr;
     if (window_ != nullptr) {
@@ -592,10 +619,6 @@ private:
       window_ = nullptr;
     }
     renderer_.Discard();
-    if (com_initialized_) {
-      CoUninitialize();
-      com_initialized_ = false;
-    }
     if (class_atom_ != 0 && instance_ != nullptr) {
       UnregisterClassW(kWindowClassName, instance_);
       class_atom_ = 0;
@@ -897,6 +920,7 @@ private:
       CancelPointer();
       return 0;
     case WM_DESTROY:
+      ui_dispatcher_.Shutdown();
       accessibility_.Reset();
       window_ = nullptr;
       text_input_.SetWindow(nullptr);
@@ -977,6 +1001,9 @@ private:
       if (frame_state_.FrameBuildPending()) {
         CommitFrameAndInvalidate();
       }
+      return 0;
+    case Win32UIThreadDispatcher::task_message:
+      ui_dispatcher_.RunPending();
       return 0;
     case kWindowCommandMessage:
       ExecuteWindowCommand(static_cast<WindowCommand>(w_param));
@@ -1157,20 +1184,22 @@ private:
   PlatformFrameState frame_state_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   bool pointer_down_ = false;
-  bool com_initialized_ = false;
   Point last_pointer_position_;
   Win32Accessibility accessibility_;
   Win32TextInput text_input_;
   std::exception_ptr failure_;
   std::optional<double> timer_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
+  Win32UIThreadDispatcher& ui_dispatcher_;
   Win32Api win32_api_;
   Win32Renderer renderer_;
 };
 
 int RunPlatformApplication(const Application& application) {
   WindowOptions options = application.options.window;
-  Win32PlatformAdapter platform;
+  Win32COMApartment com_apartment;
+  Win32UIThreadDispatcher ui_dispatcher;
+  Win32PlatformAdapter platform(ui_dispatcher);
   Runtime runtime{application, platform};
   return platform.Run(runtime, options);
 }
