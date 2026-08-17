@@ -255,6 +255,7 @@ Row, Column, Stack, visual wrappers, padding, backgrounds, indications, and othe
 Purely decorative nodes are absent.
 
 A node is emitted when it has meaningful content, state, actions, collection structure, live-region behavior, or an explicit semantic declaration.
+Runtime derives ShowOnScreen only for descendants that already qualify for emission, so scroll ancestry never makes a layout-only node semantic.
 Semantic order follows committed child order.
 The initial API does not provide arbitrary traversal ordering.
 
@@ -578,6 +579,7 @@ The delivery-status section distinguishes implemented defaults from defaults com
 | RadioButton | RadioButton role, label, checked state, and Activate |
 | Switch | Switch role, label, checked state, and Activate |
 | SegmentedButton | Horizontal collection containing labeled, checked, selected RadioButton items and Activate |
+| ProgressCircle and ProgressBar | ProgressIndicator role, normalized range when determinate, or localized busy state when indeterminate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
 | TextField | TextField or author-overridden SearchField role, value, UTF-16 selection, editing actions, and secure redaction |
 | Tabs | TabList collection containing labeled, selected, enabled Tab items and Activate |
@@ -657,7 +659,7 @@ It does not create a Toast role, focus target, action, or announcement service.
 Each adapter retains the newest `SemanticFrame`; adapters with retained native accessibility objects cache them by SemanticNodeId.
 Native objects never retain MountedNode or NodeExtension pointers.
 
-The Android, macOS, and Windows bridges are implemented.
+The Android, iOS, macOS, and Windows bridges are implemented.
 The remaining platform subsections define the intended adapter boundary, not current support.
 
 ### Android
@@ -690,11 +692,38 @@ Detaching the HuxerUIView clears provider focus, hover, custom-action, and snaps
 
 ### iOS
 
-The UIKit host implements `UIAccessibilityContainer` and retains `UIAccessibilityElement` objects by SemanticNodeId.
-Traits, values, custom actions, and geometry derive from the committed semantic frame.
+The `HuxerUIView` host is neither an accessibility element nor a text-input responder and exposes an ordered `UIAccessibilityContainer` hierarchy.
+The bridge retains private UIKit elements by SemanticNodeId so compatible recomposition, geometry changes, and reparenting update native properties without replacing a surviving VoiceOver target.
+Private non-element containers represent semantic groups only when UIKit gains structure from them, including collections, tab lists, lists, grids, grid cells, navigation landmarks, menus, and dialogs.
+ScrollView remains transparent in the UIKit hierarchy: its descendants attach to the nearest native container while scrolling still resolves through the committed semantic parent chain.
+Focus on a structural container preserves the shared keyboard route without creating a separate spoken element; direct activation, expansion, collapse, or custom actions still create an element before the container's children.
+If a semantic node both owns an actionable element and contains descendants, the private container contains that one element followed by its semantic children; no spoken node is duplicated.
 
-VoiceOver focus stays UIKit-owned.
-Runtime actions run on the main thread, while the existing `UITextInput` object remains the only native editing service.
+The host maps Text and Heading to static text and header traits, Button and Link to their direct traits, Image to image, SearchField to search field, Slider to adjustable, and disabled or selected state to the corresponding UIKit traits.
+ShowOnScreen remains a navigation capability and does not by itself make a UIKit element report that it responds to user interaction.
+Checkbox and Switch use the native toggle trait when available and retain an iOS 13 fallback with button behavior and a checked value; RadioButton and Tab use button and selected behavior without treating checked state as an unrelated selection.
+TabList uses the non-element tab-bar contract.
+List and Navigation map to UIKit list and landmark container types, while Grid adopts the data-table protocols only when every logical item is represented by a queryable committed cell and otherwise remains a semantic group.
+Label, value, placeholder fallback, hint, error, identifier, range, and geometry come from the retained committed frame.
+Secure TextField content, selection, and protected length remain absent rather than being reconstructed as masking characters.
+
+Activate, Focus, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and labeled custom actions return to `Runtime::PerformSemanticAction()` on the main thread.
+The default VoiceOver activation prefers Activate, otherwise chooses the currently valid Expand or Collapse action, and finally uses Focus for focusable fields.
+Adjustable callbacks route Increment and Decrement, the two-finger escape gesture routes Dismiss, and scrolling uses the committed axis and viewport extent of the nearest direction-compatible semantic scroll ancestor.
+SetText and SetSelection are not duplicated as custom accessibility actions: activating a TextField establishes the existing Runtime focus and a private non-accessible `UITextInput` view remains the only native editing service.
+On iOS 18.1 and later, only the Runtime-focused TextField or SearchField exposes that view through `accessibilityTextInputResponder`; earlier versions still activate the same Runtime session and private first responder without making the application accessibility container a text input.
+
+VoiceOver focus stays UIKit-owned and never becomes Runtime input focus merely because an accessibility element became focused.
+An offscreen focused element may request ShowOnScreen without changing input focus.
+The bridge preserves the current UIKit element when its SemanticNodeId survives and issues conservative layout notifications only when the accessible hierarchy, role, collection structure, or native subtree changes.
+If the focused element disappears, UIKit remains responsible for choosing the next target from the new committed order; the bridge does not impose a platform-independent fallback.
+Completed semantic scrolling emits a page-scrolled notification only after a later frame confirms the offset change.
+Live-region announcements are diffed from committed frames, coalesced per commit, and use queued polite speech or interrupting assertive speech according to the APIs available on the deployment version.
+
+`UIKitPlatformViews` resolves a PlatformView semantic anchor to the registered native `UIView` after native composition has committed.
+The bridge inserts that view at the anchor's semantic sibling position and does not wrap or copy its native accessibility subtree.
+HuxerUI slice and clipping views remain non-elements, while the native view continues to own its labels, descendants, editing behavior, and actions.
+The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every native query observes one coherent frame.
 
 ### macOS
 
@@ -776,7 +805,7 @@ Broader role-state and automation-identifier diagnostics remain deferred.
 Current shared tests cover:
 
 - Public-header self-containment and umbrella export.
-- Built-in basics, modifier precedence, explicit empty declarations, hidden nodes, descendant exclusion, and disabled actions.
+- Built-in basics, progress state, modifier precedence, explicit empty declarations, hidden nodes, descendant exclusion, and disabled actions.
 - Compatible updates, replacement, unmount through replacement, identity stability, revision changes, focus, and stale action rejection.
 - Virtual child identity, action routing, extension replacement, stale-route rejection, and identity retirement.
 - Slider range actions, invalid payload rejection, shared value validation, and secure TextField redaction.
@@ -791,6 +820,9 @@ The shared-core completion adds focused coverage in this order:
 
 Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.
 Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
+The iOS bridge compiles against the iOS 13 Simulator boundary.
+Physical-device VoiceOver validation covers primary ui_gallery traversal, shared controls, text input, and PlatformView substitution.
+Broader manual coverage for modal isolation, scrolling, live regions, and less common actions remains ongoing.
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
 Manual validation uses the native screen readers and accessibility inspectors available on each platform.
 Unavailable platforms and tools remain explicitly unverified.
@@ -805,13 +837,13 @@ The shared work is delivered in bounded stages so each contract is validated bef
 - Completed: collection semantics derive VirtualList and VirtualGrid metadata from the committed VirtualLayoutResult without eagerly composing unrealized content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
-Android AccessibilityNodeProvider and Windows UI Automation now consume that contract; iOS, Linux, and Web mappings follow according to platform readiness.
+Android AccessibilityNodeProvider, UIKit, AppKit, and Windows UI Automation now consume that contract; Linux and Web mappings follow according to platform readiness.
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Android AccessibilityNodeProvider bridge, the macOS AppKit bridge including native anchor substitution, and the Windows UI Automation bridge are implemented.
-- Deferred: extend the native adapter sequence to iOS, Linux, and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
-- Deferred: add platform accessibility fixtures before advancing iOS or Web beyond technical preview.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Android AccessibilityNodeProvider bridge, the iOS UIKit bridge, the macOS AppKit bridge including native anchor substitution, and the Windows UI Automation bridge are implemented.
+- Deferred: extend the native adapter sequence to Linux and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
+- Deferred: add platform accessibility fixtures before advancing Web beyond technical preview.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.
 Each native adapter is validated on its platform; unavailable platforms remain unverified.

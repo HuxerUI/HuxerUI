@@ -272,8 +272,12 @@ cmake -S "$HUXERUI_PROJECT_ROOT" -B "$HUXERUI_CORE_BUILD_DIR" \
 cmake --build "$HUXERUI_CORE_BUILD_DIR" --target @TARGET_NAME@_huxerui_ios_core --parallel
 )TEMPLATE");
   const std::string stage_script = context.Render(R"TEMPLATE(set -eu
-HUXERUI_RESOURCE_SOURCE="$HUXERUI_CORE_BUILD_DIR/huxerui-resources/@TARGET_NAME@/package"
+HUXERUI_RESOURCE_SOURCE="$HUXERUI_CORE_BUILD_DIR/huxerui-ios/@TARGET_NAME@/resources/package"
 HUXERUI_RESOURCE_DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI"
+if [ ! -f "$HUXERUI_RESOURCE_SOURCE/huxerui/resources.bin" ]; then
+  echo "error: HuxerUI resource package is missing: $HUXERUI_RESOURCE_SOURCE" >&2
+  exit 1
+fi
 cmake -E remove_directory "$HUXERUI_RESOURCE_DESTINATION"
 cmake -E make_directory "$HUXERUI_RESOURCE_DESTINATION"
 cmake -E copy_directory "$HUXERUI_RESOURCE_SOURCE" "$HUXERUI_RESOURCE_DESTINATION"

@@ -2243,6 +2243,8 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
   spec->component_semantics.busy = !progress.has_value();
   if (progress.has_value()) {
     spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
+  } else {
+    spec->component_semantics.state_description = UseString(strings::progress_in_progress);
   }
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
   return spec;
@@ -2257,6 +2259,8 @@ std::shared_ptr<detail::ViewSpec> MakeProgressBarSpec(std::optional<float> progr
   spec->component_semantics.busy = !progress.has_value();
   if (progress.has_value()) {
     spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
+  } else {
+    spec->component_semantics.state_description = UseString(strings::progress_in_progress);
   }
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressBarVisual{progress}));
   return spec;

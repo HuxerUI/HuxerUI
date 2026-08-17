@@ -497,9 +497,6 @@ void Runtime::BuildSemantics() {
     if (mounted.enabled && publishes_scroll && actual_scroll->maximum_offset > 0.0F) {
       actions |= SemanticActionMask(SemanticActionKind::Scroll);
     }
-    if (mounted.enabled && has_scroll_ancestor) {
-      actions |= SemanticActionMask(SemanticActionKind::ShowOnScreen);
-    }
     if (!mounted.enabled) {
       actions = 0;
     }
@@ -519,6 +516,9 @@ void Runtime::BuildSemantics() {
         has_virtual_children,
         owner_extension_declared || mounted.author_semantics.has_value() || is_platform_view
     );
+    if (mounted.enabled && has_scroll_ancestor && emit_owner) {
+      actions |= SemanticActionMask(SemanticActionKind::ShowOnScreen);
+    }
     const SemanticNodeId owner_id = [&] {
       if (!emit_owner) {
         return SemanticNodeId{0};

@@ -1302,6 +1302,13 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(ContainsText(initial, "DEBUG"));
   REQUIRE(!ContainsText(initial, "HuxerUI Performance"));
+  const std::shared_ptr<const SemanticFrame> initial_semantics = runtime.LastCommit().semantic_frame;
+  const auto debug_semantics = std::ranges::find(initial_semantics->nodes, std::string("DEBUG"), &SemanticNode::label);
+  REQUIRE(debug_semantics != initial_semantics->nodes.end());
+  REQUIRE(debug_semantics->role == SemanticRole::Button);
+  REQUIRE(debug_semantics->expanded == false);
+  REQUIRE(debug_semantics->children.empty());
+  REQUIRE(std::ranges::count(initial_semantics->nodes, std::string("DEBUG"), &SemanticNode::label) == 1);
   const std::optional<Rect> banner_text = FindPresentedTextRect(initial, "DEBUG");
   REQUIRE(banner_text.has_value());
   REQUIRE(banner_text->x > 300.0F);
@@ -1335,6 +1342,13 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(FindRectWithColor(expanded, Color::Rgb(17, 22, 31, 0.97F)) != nullptr);
   REQUIRE(layer_app_compositions == 1);
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
+  const auto expanded_debug_semantics = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes,
+      std::string("DEBUG"),
+      &SemanticNode::label
+  );
+  REQUIRE(expanded_debug_semantics != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE(expanded_debug_semantics->expanded == true);
 
   const FlattenedScene& initialized = runtime.BuildFrame();
   REQUIRE(ContainsText(initialized, "64.0 MiB"));

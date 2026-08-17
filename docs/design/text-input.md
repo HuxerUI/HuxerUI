@@ -955,7 +955,7 @@ The adapter can retain a bounded surrounding-text mirror for Android query behav
 
 An AppKit-specific client owned by `MacTextInput` conforms to `NSTextInputClient` on macOS. The host view remains the first responder and exposes the client's explicit `NSTextInputContext`.
 
-On iOS, the HuxerUI View conforms to `UITextInput` through a dedicated `UIKitTextInput` bridge. Native UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same Runtime session and command protocol. The UIKit bridge keeps only session and native-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
+On iOS, a private non-accessible view owned by the `UIKitTextInput` bridge conforms to `UITextInput`, while the HuxerUI drawing host remains a separate accessibility container. Native UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same Runtime session and command protocol. The UIKit bridge keeps only session and native-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
 
 The macOS adapter maps:
 
@@ -1173,7 +1173,7 @@ Android, iOS, macOS, and Windows now provide end-to-end native IME adapters.
 
 The extension milestone validates one non-TextField client through a SweetEditor bridge or equivalent fake document client.
 
-Accessibility semantics, richer iOS selection integration, OHOS, and TSF are incremental features built on the same protocol.
+Richer iOS selection integration, OHOS, and TSF are incremental features built on the same protocol.
 
 ## Final design constraints
 

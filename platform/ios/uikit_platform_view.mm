@@ -36,6 +36,7 @@
     self.backgroundColor = UIColor.clearColor;
     self.opaque = NO;
     self.userInteractionEnabled = NO;
+    self.isAccessibilityElement = NO;
     self.contentMode = UIViewContentModeRedraw;
   }
   return self;
@@ -63,6 +64,7 @@
   if (self != nil) {
     self.backgroundColor = UIColor.clearColor;
     self.clipsToBounds = YES;
+    self.isAccessibilityElement = NO;
   }
   return self;
 }
@@ -196,6 +198,12 @@ UIView* FindFirstResponder(UIView* root) {
     }
   }
   return nil;
+}
+
+void ResignFirstResponder(UIView* root) {
+  if (UIView* responder = FindFirstResponder(root)) {
+    [responder resignFirstResponder];
+  }
 }
 
 bool IsDescendant(UIView* view, UIView* ancestor) {
@@ -342,7 +350,7 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
                                            return entry.first == *responder_identity;
                                          }));
   if (focused_instance_removed) {
-    [root becomeFirstResponder];
+    ResignFirstResponder(root);
   }
   for (auto& [identity, hosted] : pending) {
     state_->hosted.erase(identity);
@@ -418,7 +426,7 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     const auto focused = state_->hosted.find(*focused_identity);
     if (focused == state_->hosted.end() || focused->second->container.hidden) {
       if (current_responder_identity == focused_identity) {
-        [root becomeFirstResponder];
+        ResignFirstResponder(root);
       }
       RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
@@ -427,7 +435,7 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
       }
     }
   } else if (current_responder_identity.has_value()) {
-    [root becomeFirstResponder];
+    ResignFirstResponder(root);
   }
   for (const auto& [key, slice] : state_->slices) {
     static_cast<void>(key);
@@ -471,16 +479,21 @@ UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
   return target;
 }
 
-void UIKitPlatformViews::SynchronizeFocus(UIView* responder) {
-  if (state_->runtime == nullptr) {
+UIView* UIKitPlatformViews::AccessibilityView(std::uint64_t identity) const noexcept {
+  if (!state_) {
+    return nil;
+  }
+  const auto found = state_->hosted.find(identity);
+  return found == state_->hosted.end() ? nil : found->second->view;
+}
+
+void UIKitPlatformViews::ClearFocus() {
+  if (!state_ || state_->runtime == nullptr) {
     return;
   }
-  const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
-  if (identity.has_value()) {
-    if (RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, false);
-    }
-    return;
+  UIView* responder = state_->root == nil ? nil : FindFirstResponder(state_->root);
+  if (state_->IdentityForResponder(responder).has_value()) {
+    [responder resignFirstResponder];
   }
   if (RuntimeAccess::FocusedPlatformView(*state_->runtime).has_value()) {
     RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);

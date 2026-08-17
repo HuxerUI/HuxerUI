@@ -144,6 +144,7 @@ file(READ "${BUILTIN_RESOURCE_HEADER}" BUILTIN_RESOURCE_HEADER_CONTENT)
 foreach (EXPECTED_CONTENT IN ITEMS
         "namespace huxerui \\{"
         dialog_ok
+        progress_in_progress
         text_selection_copy
         validation_required
         window_restore

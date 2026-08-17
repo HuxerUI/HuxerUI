@@ -13,8 +13,8 @@
 
 State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
 The shared Runtime publishes an immutable `SemanticFrame` with built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
-macOS maps that frame through AppKit accessibility, and Windows exposes it as a UI Automation fragment tree with role-specific control patterns and events.
-Android exposes the shared frame through virtual `AccessibilityNodeInfo` descendants, while iOS, Linux, and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
+Android exposes the shared frame through virtual `AccessibilityNodeInfo` descendants, iOS maps it through a retained UIKit accessibility hierarchy, macOS maps it through AppKit accessibility, and Windows exposes it as a UI Automation fragment tree with role-specific control patterns and events.
+Linux and Web native mappings remain planned as defined in [Semantics and Accessibility Design](design/semantics.md).
 
 ## Runtime and PlatformAdapter
 
@@ -121,7 +121,7 @@ The iOS backend creates a UIKit window and safe-area-constrained HuxerUI View, m
 
 Multi-touch, Apple Pencil, indirect pointer, hardware keyboard, clipboard, locale, display scale, keyboard viewport, and packaged-resource events cross one UIKit adapter boundary. A dedicated UITextInput implementation maps native UTF-16 positions, selection, marked text, actions, and caret geometry to the shared text-input session and revision protocol. UIKit does not own a second editing value.
 
-RootHook-installed iOS PlatformView factories create controlled UIViews under the per-surface `PlatformModules` registry. The adapter retains compatible native instances, applies complete property revisions, clips and positions them in logical coordinates, and alternates transparent HuxerUI slice views with native containers in final `RenderComposition` order. Shared hit testing preserves that order, while touch focus and Runtime-driven focus changes synchronize the shared PlatformView focus leaf with UIKit. Platform-specific module source includes `<huxerui/ios/platform_view.h>` and registers an `ios::PlatformViewFactory`; the Apple `example_platform_view` target uses this path to host a controlled UITextField. Hardware-keyboard traversal and native accessibility attachment beneath the PlatformView semantic anchor remain follow-up work.
+RootHook-installed iOS PlatformView factories create controlled UIViews under the per-surface `PlatformModules` registry. The adapter retains compatible native instances, applies complete property revisions, clips and positions them in logical coordinates, and alternates transparent HuxerUI slice views with native containers in final `RenderComposition` order. Shared hit testing preserves that order, while touch focus and Runtime-driven focus changes synchronize the shared PlatformView focus leaf with UIKit. Platform-specific module source includes `<huxerui/ios/platform_view.h>` and registers an `ios::PlatformViewFactory`; the Apple `example_platform_view` target uses this path to host a controlled UITextField. The UIKit accessibility hierarchy substitutes the native UIView subtree at its PlatformView semantic anchor. Hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
 
 The iOS adapter dispatches nonvisual `PlatformInstance` results and events asynchronously through the main queue. The Apple `example_platform_module` uses this path for a Foundation timer while sharing its typed C++ service and factory implementation with macOS.
 
@@ -136,7 +136,7 @@ huxerui open ios
 huxerui run ios --device <id>
 ```
 
-Physical-device development builds use Xcode automatic signing and the `DEVELOPMENT_TEAM` value in `platform/ios/Config/Local.xcconfig` or the native project settings. `huxerui open ios` records the detected HuxerUI SDK in that ignored local file before opening the project. Distribution archive automation, export signing, a public embeddable UIView, native selection rectangles, and accessibility semantics remain outside the preview.
+Physical-device development builds use Xcode automatic signing and the `DEVELOPMENT_TEAM` value in `platform/ios/Config/Local.xcconfig` or the native project settings. `huxerui open ios` records the detected HuxerUI SDK in that ignored local file before opening the project. Distribution archive automation, export signing, a public embeddable UIView, and native selection rectangles remain outside the preview.
 
 The repository-owned `platform/ios/example_runner/HuxerUIExamples.xcodeproj` provides one native debugging host for every CMake `example_*` application target. Its ignored local configuration selects the example and optional signing team, while the shared project continues to build the selected application core through CMake.
 

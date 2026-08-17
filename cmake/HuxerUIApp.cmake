@@ -187,6 +187,13 @@ function(huxerui_add_app target_name)
             ${HUXERUI_APP_FRAMEWORK_TARGET}
     )
 
+    if (IOS)
+        set_property(TARGET ${target_name} PROPERTY
+                HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/huxerui-ios/${target_name}/resources"
+        )
+    endif ()
+
     if (APPLE AND NOT IOS)
         set_target_properties(${target_name} PROPERTIES MACOSX_BUNDLE TRUE)
         if (HUXERUI_APP_BUNDLE_NAME)

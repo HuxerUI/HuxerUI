@@ -541,6 +541,11 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   REQUIRE(xcode_project_file->content.find("../../.huxerui/generated/ios/modules") != std::string::npos);
   REQUIRE(xcode_project_file->content.find("productName = HuxerUIModules") != std::string::npos);
   REQUIRE(xcode_project_file->content.find("productName = \"Sample-App\"") != std::string::npos);
+  REQUIRE(
+      xcode_project_file->content.find("$HUXERUI_CORE_BUILD_DIR/huxerui-ios/sample_app/resources/package") !=
+      std::string::npos
+  );
+  REQUIRE(xcode_project_file->content.find("HuxerUI resource package is missing") != std::string::npos);
   REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
             return file.path == "App/main.mm";
           }) != shell.end());

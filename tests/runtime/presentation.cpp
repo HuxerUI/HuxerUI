@@ -2233,6 +2233,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   };
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime determinate{DeterminateProgressCircleApp, platform};
   determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const FlattenedScene& initial = determinate.BuildFrame();
@@ -2269,6 +2270,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE(std::abs(full_arcs[1].sweep_angle - pi * 2.0F) < 0.001F);
 
   TestPlatform animated_platform;
+  animated_platform.platform_resources = BuiltinTestResources();
   Runtime animated{IndeterminateProgressCircleApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int requests_before = animated_platform.requested_frames;
@@ -2284,6 +2286,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE(std::abs(animated_next[1].start_angle - initial_start) > 0.1F);
 
   TestPlatform reduced_platform;
+  reduced_platform.platform_resources = BuiltinTestResources();
   Runtime reduced{ReducedMotionProgressCircleApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
@@ -2307,6 +2310,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
   const ProgressCircleStyle style = ThemeDefinitionValue<ProgressCircleStyle>(MaterialThemeDefinition());
 
   TestPlatform determinate_platform;
+  determinate_platform.platform_resources = BuiltinTestResources();
   Runtime determinate{MaterialDeterminateProgressCircleApp, determinate_platform};
   determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto determinate_arcs = arcs(determinate.BuildFrame());
@@ -2322,6 +2326,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
   REQUIRE(std::abs(track.sweep_angle - (pi * 2.0F - indicator.sweep_angle - expected_gap_angle * 2.0F)) < 0.001F);
 
   TestPlatform animated_platform;
+  animated_platform.platform_resources = BuiltinTestResources();
   Runtime animated{MaterialIndeterminateProgressCircleApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto initial = arcs(animated.BuildFrame());
@@ -2341,6 +2346,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   const float indeterminate_width = style.width * style.indeterminate_fraction;
 
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime determinate{DeterminateProgressBarApp, platform};
   determinate.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const auto initial_rectangles = DrawRectangles(determinate.BuildFrame());
@@ -2376,6 +2382,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   REQUIRE(full_rectangles[1].rect.width == style.width);
 
   TestPlatform animated_platform;
+  animated_platform.platform_resources = BuiltinTestResources();
   Runtime animated{IndeterminateProgressBarApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int requests_before = animated_platform.requested_frames;
@@ -2417,6 +2424,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   REQUIRE(after_wrap[1].rect.width == indeterminate_width);
 
   TestPlatform reduced_platform;
+  reduced_platform.platform_resources = BuiltinTestResources();
   Runtime reduced{ReducedMotionProgressBarApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
@@ -2429,6 +2437,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
   const ProgressBarStyle style = ProgressBarStyle::Default();
   TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
   Runtime runtime{AdjustableProgressBarApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   runtime.BuildFrame();
@@ -2455,6 +2464,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   const ProgressBarStyle style = ThemeDefinitionValue<ProgressBarStyle>(definition);
 
   TestPlatform determinate_platform;
+  determinate_platform.platform_resources = BuiltinTestResources();
   Runtime determinate{MaterialDeterminateProgressBarApp, determinate_platform};
   determinate.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const FlattenedScene& determinate_scene = determinate.BuildFrame();
@@ -2486,6 +2496,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   REQUIRE(std::abs(stop->center.x - (bar_width - style.stop_indicator_size * 0.5F)) < 0.001F);
 
   TestPlatform animated_platform;
+  animated_platform.platform_resources = BuiltinTestResources();
   Runtime animated{MaterialIndeterminateProgressBarApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   animated.BuildFrame();
@@ -2498,6 +2509,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   REQUIRE(indicator_segments == 2);
 
   TestPlatform reduced_platform;
+  reduced_platform.platform_resources = BuiltinTestResources();
   Runtime reduced{ReducedMotionMaterialProgressBarApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const int requests_before = reduced_platform.requested_frames;

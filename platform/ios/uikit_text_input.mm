@@ -65,7 +65,16 @@
 
 @end
 
-@interface HuxerUIView (HuxerUITextInput) <UITextInput>
+@interface HuxerUITextInputView : UIView <UITextInput> {
+@public
+  huxerui::detail::UIKitTextInput* huxeruiTextInput;
+  __weak HuxerUIView* huxeruiHostView;
+  __weak id<UITextInputDelegate> huxeruiInputDelegate;
+  __strong UITextInputStringTokenizer* huxeruiTokenizer;
+  __strong NSDictionary<NSAttributedStringKey, id>* huxeruiMarkedTextStyle;
+  UITextStorageDirection huxeruiSelectionAffinity;
+}
+- (instancetype)initWithHostView:(HuxerUIView*)hostView;
 @end
 
 namespace huxerui::detail {
@@ -187,12 +196,19 @@ void ApplyCommittedText(
 
 class UIKitTextInputState {
 public:
-  UIKitTextInputState(Runtime& runtime, HuxerUIView* view) : runtime_(&runtime), view_(view) {}
+  UIKitTextInputState(Runtime& runtime, HuxerUIView* host_view, UIKitTextInput& text_input)
+      : runtime_(&runtime), input_view_([[HuxerUITextInputView alloc] initWithHostView:host_view]) {
+    input_view_->huxeruiTextInput = &text_input;
+    [host_view.superview addSubview:input_view_];
+  }
 
   ~UIKitTextInputState() {
-    HuxerUIView* view = view_;
-    if (view != nil && view->huxeruiTextInput != nullptr) {
-      view->huxeruiTextInput = nullptr;
+    if (input_view_ != nil) {
+      if (input_view_.isFirstResponder) {
+        [input_view_ resignFirstResponder];
+      }
+      input_view_->huxeruiTextInput = nullptr;
+      [input_view_ removeFromSuperview];
     }
   }
 
@@ -231,6 +247,10 @@ public:
     return runtime_->QueryTextInputPosition(session_id_, point);
   }
 
+  id<UITextInput> Responder() const noexcept {
+    return input_view_;
+  }
+
   TextInputApplyResult Apply(TextInputCommand command) {
     if (!IsActive()) {
       return {.result_code = TextInputResultCode::SessionMismatch};
@@ -260,7 +280,7 @@ public:
     session_id_ = session_id;
     configuration_ = configuration;
     input_state_ = state;
-    HuxerUIView* view = view_;
+    HuxerUITextInputView* view = input_view_;
     if (view != nil) {
       [view reloadInputViews];
       [view becomeFirstResponder];
@@ -276,7 +296,7 @@ public:
       input_state_ = state;
       return;
     }
-    HuxerUIView* view = view_;
+    HuxerUITextInputView* view = input_view_;
     id<UITextInputDelegate> delegate = view == nil ? nil : view->huxeruiInputDelegate;
     const bool text_changed = state.content_revision != input_state_.content_revision;
     const bool selection_changed =
@@ -307,7 +327,7 @@ public:
     }
     configuration_ = configuration;
     Update(session_id, state, geometry);
-    HuxerUIView* view = view_;
+    HuxerUITextInputView* view = input_view_;
     if (view != nil) {
       [view reloadInputViews];
     }
@@ -320,7 +340,7 @@ public:
     session_id_ = 0;
     configuration_ = {};
     input_state_ = {};
-    HuxerUIView* view = view_;
+    HuxerUITextInputView* view = input_view_;
     if (view != nil && view.isFirstResponder) {
       [view resignFirstResponder];
     }
@@ -330,7 +350,7 @@ public:
     if (session_id != session_id_) {
       return;
     }
-    HuxerUIView* view = view_;
+    HuxerUITextInputView* view = input_view_;
     if (view != nil) {
       [view reloadInputViews];
       [view becomeFirstResponder];
@@ -339,7 +359,7 @@ public:
 
 private:
   Runtime* runtime_ = nullptr;
-  __weak HuxerUIView* view_ = nil;
+  __strong HuxerUITextInputView* input_view_ = nil;
   TextInputSessionId session_id_ = 0;
   TextInputConfiguration configuration_;
   TextInputState input_state_;
@@ -347,7 +367,7 @@ private:
 };
 
 UIKitTextInput::UIKitTextInput(Runtime& runtime, HuxerUIView* view)
-    : state_(std::make_unique<UIKitTextInputState>(runtime, view)) {}
+    : state_(std::make_unique<UIKitTextInputState>(runtime, view, *this)) {}
 
 UIKitTextInput::~UIKitTextInput() = default;
 
@@ -369,6 +389,10 @@ TextInputGeometry UIKitTextInput::QueryGeometry(TextRange range) const {
 
 TextInputPositionResult UIKitTextInput::QueryPosition(Point point) const {
   return state_->QueryPosition(point);
+}
+
+id<UITextInput> UIKitTextInput::Responder() const noexcept {
+  return state_->Responder();
 }
 
 TextInputApplyResult UIKitTextInput::Apply(TextInputCommand command) {
@@ -413,7 +437,28 @@ void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
 
 } // namespace huxerui::detail
 
-@implementation HuxerUIView (HuxerUITextInput)
+@implementation HuxerUITextInputView
+
+- (instancetype)initWithHostView:(HuxerUIView*)hostView {
+  self = [super initWithFrame:CGRectZero];
+  if (self == nil) {
+    return nil;
+  }
+  huxeruiHostView = hostView;
+  self.backgroundColor = UIColor.clearColor;
+  self.opaque = NO;
+  self.isAccessibilityElement = NO;
+  return self;
+}
+
+- (BOOL)canBecomeFirstResponder {
+  return YES;
+}
+
+- (UIResponder*)nextResponder {
+  HuxerUIView* host_view = huxeruiHostView;
+  return host_view == nil ? [super nextResponder] : host_view;
+}
 
 - (BOOL)hasText {
   if (huxeruiTextInput == nullptr) {
@@ -770,7 +815,7 @@ void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
 }
 
 - (UIView*)textInputView {
-  return self;
+  return huxeruiHostView;
 }
 
 - (UITextStorageDirection)selectionAffinity {

@@ -1183,7 +1183,13 @@ View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snaps
           .offset = {},
           .blur_radius = 12.0F,
       },
-      Rotation{45.0F}
+      Rotation{45.0F},
+      Semantics{
+          .role = SemanticRole::Button,
+          .label = "DEBUG",
+          .expanded = expanded.Get(),
+          .descendants = SemanticDescendantPolicy::Exclude,
+      }
   ).OnClick([expanded, snapshot] {
     const bool next_expanded = !expanded.Get();
     if (next_expanded) {

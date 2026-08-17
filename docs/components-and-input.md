@@ -359,6 +359,8 @@ ProgressBar(progress);
 
 ProgressBar is a controlled display component and does not emit events. Its default width, height, colors, corner radius, track gap, stop indicator, and indeterminate animation come from `ProgressBarStyle`; layout modifiers can override its dimensions.
 
+ProgressCircle and ProgressBar publish ProgressIndicator semantics. Determinate forms expose their normalized range, while indeterminate forms expose a localized busy state description.
+
 `ProgressBarIndeterminateMotion::Sweep` moves one fixed-width segment and is the Flat Theme default. `Segmented` uses independent head and tail positions for two segments and is the Material Theme default. `ProgressBarStyle::animation_duration` is the number of seconds per indeterminate loop. Smaller values move faster; a non-positive or non-finite duration keeps a representative static indicator without requesting frames.
 
 ## Slider
