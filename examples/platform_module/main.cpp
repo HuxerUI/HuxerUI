@@ -2,7 +2,7 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#if TARGET_OS_OSX
+#if TARGET_OS_IOS || TARGET_OS_OSX
 #include "color_stream.h"
 #define HUXERUI_EXAMPLE_COLOR_STREAM 1
 #endif

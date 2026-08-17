@@ -158,8 +158,11 @@ set(HUXERUI_PUBLIC_HEADERS
         macos/platform_view.h
 )
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    list(APPEND HUXERUI_PUBLIC_HEADERS macos/external_texture.h)
+if (APPLE)
+    list(APPEND HUXERUI_PUBLIC_HEADERS
+            ios/external_texture.h
+            macos/external_texture.h
+    )
 endif ()
 
 set(HUXERUI_HEADER_TEST_SOURCES)

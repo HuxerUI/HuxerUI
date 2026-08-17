@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and native accessibility bridges on Android, iOS, macOS, and Windows are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS also provides the first native `CVPixelBuffer` source, latest-frame mailbox, and AppKit frame import; other native producer and renderer paths remain proposed. Android, macOS, and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, and macOS also attach native PlatformView accessibility beneath semantic anchors. Android, iOS, Linux, and macOS provide native nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and native dependency projection preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent native `CVPixelBuffer` sources, latest-frame mailboxes, and renderer-owned Core Image frame import; other native producer and renderer paths remain proposed. Android, macOS, and iOS provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, and macOS also attach native PlatformView accessibility beneath semantic anchors. Android, iOS, Linux, and macOS provide native nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and native dependency projection preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -362,7 +362,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; macOS native ExternalTexture production and consumption implemented; production modules and remaining native adapters proposed
+Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; macOS and iOS native ExternalTexture production and consumption implemented; production modules and remaining native adapters proposed
 
 Native modules produce three integration forms:
 
@@ -657,8 +657,9 @@ PlatformPayload and Image reject that empty value.
 A platform source is move-only and may be created before a Runtime or native surface exists.
 Its `Texture()` operation returns the copyable consumer value, `Publish()` replaces the pending native frame, and `Finish()` rejects later frames while preserving the last published frame for drawing.
 Source destruction performs the same terminal cleanup and is safe even when the texture was never bound to a surface.
-The implemented macOS producer surface is `<huxerui/macos/external_texture.h>` and accepts `CVPixelBufferRef` frames.
-Future iOS, Android, Windows, Linux, and Web producers join the same platform-neutral consumer contract through their own platform headers without widening its public representation.
+The implemented macOS and iOS producer surfaces are `<huxerui/macos/external_texture.h>` and `<huxerui/ios/external_texture.h>`.
+Both accept `CVPixelBufferRef` frames while retaining independent platform-specific source state and renderer integration.
+Future Android, Windows, Linux, and Web producers join the same platform-neutral consumer contract through their own platform headers without widening its public representation.
 
 An unbound texture binds exactly once when it first enters a surface-owned PlatformAdapter boundary.
 A Result or Event binds before delivery to shared C++, a Call argument or PlatformView property binds or validates against the receiving adapter, and a texture created directly by native module code binds when its first committed render use is collected.
@@ -728,8 +729,8 @@ Implementation proceeds through reviewable stages:
 
 - The shared protocol has added `ExternalTexture`, the closed PlatformPayload kind, public-header coverage, and focused value and payload tests without adding a registry.
 - Shared rendering has added the Image input, DrawExternalTextureCommand, Runtime dependency snapshots, coalesced frame scheduling, damage invalidation, and explicit renderer command handling.
-- macOS supplies the first platform source, frame mailbox, AppKit renderer cache, module example, and end-to-end current-host validation.
-- iOS and Android add their native source bridges and renderer integration independently, with platform-specific lifecycle, threading, and device validation.
+- macOS and iOS supply independent platform sources, frame mailboxes, renderer-owned caches, and the Apple module example.
+- Android adds its native source bridge and renderer integration independently, with platform-specific lifecycle, threading, and device validation.
 - Windows, Linux, and Web retain explicit unsupported diagnostics until their native frame and renderer paths are implemented; each later backend preserves the same public contract.
 
 Every stage ends with focused tests, the affected current-host build, `git diff --check`, and owner review before the next stage begins.

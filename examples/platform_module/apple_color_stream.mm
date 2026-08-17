@@ -1,6 +1,7 @@
 #include "color_stream.h"
 
 #import <Foundation/Foundation.h>
+#include <TargetConditionals.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +10,15 @@
 #include <string>
 #include <utility>
 
+#if TARGET_OS_IOS
+#include <huxerui/ios/external_texture.h>
+namespace huxerui_apple = huxerui::ios;
+#elif TARGET_OS_OSX
 #include <huxerui/macos/external_texture.h>
+namespace huxerui_apple = huxerui::macos;
+#else
+#error "HuxerUI Apple color stream requires iOS or macOS"
+#endif
 
 namespace {
 
@@ -74,7 +83,7 @@ struct AppleColorStreamState : std::enable_shared_from_this<AppleColorStreamStat
     source.Finish();
   }
 
-  huxerui::macos::ExternalTextureSource source;
+  huxerui_apple::ExternalTextureSource source;
   __strong NSTimer* timer = nil;
   std::uint32_t phase = 0;
 };
