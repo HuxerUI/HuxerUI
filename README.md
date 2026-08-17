@@ -111,7 +111,7 @@ See [Getting Started](docs/getting-started.md) for application setup, platform b
 | Platform | Status | Native integration |
 |---|---|---|
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
-| Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM |
+| Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM, optional Fcitx5 DBus preedit |
 | iOS | Technical preview | UIKit, CoreGraphics, CoreText, UITextInput |
 | macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
 | Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
