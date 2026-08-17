@@ -643,6 +643,10 @@ public:
     };
   }
 
+  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext&) const override {
+    return {{"src/.gitkeep", {}}};
+  }
+
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
     static constexpr std::array required{
         std::string_view{"main.cpp"},

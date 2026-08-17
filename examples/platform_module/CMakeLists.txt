@@ -6,7 +6,9 @@ huxerui_add_example(
 
 target_sources(example_platform_module PRIVATE timer.cpp)
 
-if (ANDROID)
+if (WIN32)
+    target_sources(example_platform_module PRIVATE windows_timer.cpp)
+elseif (ANDROID)
     target_sources(example_platform_module PRIVATE
             android_color_stream.cpp
             android_timer.cpp

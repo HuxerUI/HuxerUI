@@ -68,10 +68,16 @@ endif ()
 
 if (WIN32)
     target_sources(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/windows_timer.cpp"
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
+            platform/windows_platform_module.cpp
             platform/windows_renderer.cpp
             platform/windows_window_chrome.cpp
+    )
+    target_include_directories(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
     target_compile_definitions(huxerui_tests PRIVATE
             NOMINMAX
