@@ -1010,7 +1010,7 @@ public:
   }
 };
 
-constexpr Color debug_ribbon_background = Color::Rgb(103, 80, 164);
+constexpr Color debug_ribbon_background = Color::Rgb(155, 38, 52);
 constexpr Color debug_ribbon_foreground = Color::White();
 constexpr Color debug_ribbon_shadow = Color::Rgb(0, 0, 0, 0.32F);
 constexpr Color debug_panel_background = Color::Rgb(17, 22, 31, 0.97F);

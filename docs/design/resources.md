@@ -242,6 +242,8 @@ Target packaging maps the staging directory as follows:
 
 - Android CMake builds generate one package per ABI, then a Gradle generated-assets task selects one deterministic
   package after native builds complete and synchronizes it into APK assets.
+  The repository demo recompiles the built-in source package when Prefab does not expose the standalone SDK resource
+  artifact, and its Gradle staging task fails the build rather than packaging an application without that final package.
 - macOS copies it into `.app/Contents/Resources/HuxerUI`.
 - Windows copies it beside the executable under `<executable-name>.resources` so multiple applications can share one output directory without colliding.
 - iOS copies it into the application bundle's reserved HuxerUI resources directory.

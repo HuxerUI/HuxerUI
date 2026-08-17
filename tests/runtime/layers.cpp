@@ -1314,7 +1314,7 @@ TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {
   REQUIRE(banner_text->x > 300.0F);
   REQUIRE(banner_text->x + banner_text->width <= 360.0F);
   REQUIRE(banner_text->y < 56.0F);
-  REQUIRE(FindRectWithColor(initial, Color::Rgb(103, 80, 164)) != nullptr);
+  REQUIRE(FindRectWithColor(initial, Color::Rgb(155, 38, 52)) != nullptr);
   REQUIRE(std::ranges::any_of(initial.Commands(), [](const PaintCommand& command) {
     const auto* shadow = std::get_if<DrawShadowCommand>(&command);
     return shadow != nullptr && shadow->color == Color::Rgb(0, 0, 0, 0.32F) && shadow->offset == Point{} &&

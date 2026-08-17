@@ -85,23 +85,33 @@ dependencies {
 def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
     def capitalizedBuildType = buildType.capitalize()
     def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
-    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
-        dependsOn nativeTaskName
-        from {
-            def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
-                include "**/example/huxerui-resources/example_${huxeruiDemoExample}/package/huxerui/resources.bin"
-            }.files
-            // ABI packages are deterministic. Prefer arm64 and the newest active CMake configuration hash.
-            def preferredIndexFiles = indexFiles.findAll {
-                it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
-            }
-            def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
-            def selected = candidates.max { left, right ->
-                def modified = left.lastModified() <=> right.lastModified()
-                modified != 0 ? modified : left.absolutePath <=> right.absolutePath
-            }
-            selected == null ? [] : selected.parentFile.parentFile
+    def resolveResourcePackage = {
+        def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
+            include "**/example/huxerui-resources/example_${huxeruiDemoExample}/package/huxerui/resources.bin"
+        }.files
+        // ABI packages are deterministic. Prefer arm64 and the newest active CMake configuration hash.
+        def preferredIndexFiles = indexFiles.findAll {
+            it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
         }
+        def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
+        def selected = candidates.max { left, right ->
+            def modified = left.lastModified() <=> right.lastModified()
+            modified != 0 ? modified : left.absolutePath <=> right.absolutePath
+        }
+        selected == null ? null : selected.parentFile.parentFile
+    }
+    def verificationTask = tasks.register("verifyHuxerUI${capitalizedBuildType}Resources") {
+        dependsOn nativeTaskName
+        doLast {
+            if (resolveResourcePackage() == null) {
+                throw new GradleException(
+                        "HuxerUI Android demo resource package is missing for ${huxeruiDemoExample}")
+            }
+        }
+    }
+    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
+        dependsOn verificationTask
+        from { resolveResourcePackage() ?: [] }
         into assetsDirectory
     }
     tasks.matching { it.name == "merge${capitalizedBuildType}Assets" }.configureEach {

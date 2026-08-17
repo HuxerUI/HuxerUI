@@ -64,6 +64,10 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
         endif ()
     endif ()
 
+    if (ANDROID AND NOT HUXERUI_BUILTIN_RESOURCE_PACKAGE)
+        _huxerui_configure_builtin_resources(${target_name})
+    endif ()
+
     target_compile_features(${target_name} PRIVATE cxx_std_20)
     huxerui_enable_codegen(${target_name})
     set_property(TARGET ${target_name} APPEND PROPERTY
