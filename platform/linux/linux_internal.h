@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -55,6 +56,12 @@ struct LinuxFrameExtents {
 struct LinuxDamageRegion {
   bool full = false;
   std::vector<XRectangle> rects;
+};
+
+struct LinuxTextureUploadPlan {
+  bool full = false;
+  std::vector<XRectangle> rects;
+  std::uint64_t pixel_count = 0;
 };
 
 inline WindowTitleBarMetrics ResolveLinuxTitleBarMetrics(
@@ -192,6 +199,53 @@ inline LinuxDamageRegion ResolveLinuxDamage(const DamageRegion& damage, float sc
           }
       );
     }
+  }
+  return result;
+}
+
+inline LinuxTextureUploadPlan ResolveLinuxTextureUpload(
+    bool full_damage, const std::vector<XRectangle>& damage_rects, int width, int height, bool texture_initialized
+) {
+  LinuxTextureUploadPlan result;
+  if (width <= 0 || height <= 0) {
+    result.full = true;
+    return result;
+  }
+  const std::uint64_t full_pixels = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+  if (full_damage || !texture_initialized || damage_rects.empty()) {
+    result.full = true;
+    result.pixel_count = full_pixels;
+    return result;
+  }
+
+  constexpr std::size_t maximum_partial_rects = 32;
+  for (const XRectangle& rect : damage_rects) {
+    const int raw_left = static_cast<int>(rect.x);
+    const int raw_top = static_cast<int>(rect.y);
+    const int left = std::clamp(raw_left, 0, width);
+    const int top = std::clamp(raw_top, 0, height);
+    const int right = std::clamp(raw_left + static_cast<int>(rect.width), 0, width);
+    const int bottom = std::clamp(raw_top + static_cast<int>(rect.height), 0, height);
+    const int rect_width = right - left;
+    const int rect_height = bottom - top;
+    if (rect_width <= 0 || rect_height <= 0) {
+      continue;
+    }
+    result.rects.push_back(
+        XRectangle{
+            static_cast<short>(left),
+            static_cast<short>(top),
+            static_cast<unsigned short>(rect_width),
+            static_cast<unsigned short>(rect_height),
+        }
+    );
+    result.pixel_count += static_cast<std::uint64_t>(rect_width) * static_cast<std::uint64_t>(rect_height);
+  }
+
+  if (result.rects.empty() || result.rects.size() > maximum_partial_rects || result.pixel_count * 2U >= full_pixels) {
+    result.full = true;
+    result.rects.clear();
+    result.pixel_count = full_pixels;
   }
   return result;
 }

@@ -690,6 +690,31 @@ struct CairoSurfaceHandle {
   return false;
 }
 
+cairo_user_data_key_t free_type_face_key;
+
+void ReleaseFreeTypeFace(void* data) {
+  if (data != nullptr) {
+    FT_Done_Face(static_cast<FT_Face>(data));
+  }
+}
+
+[[nodiscard]] cairo_font_face_t* CreateCairoFace(FT_Face face) {
+  if (face == nullptr || FT_Reference_Face(face) != 0) {
+    throw std::runtime_error("HuxerUI could not retain the FreeType font face");
+  }
+  cairo_font_face_t* cairo_face = cairo_ft_font_face_create_for_ft_face(face, 0);
+  cairo_status_t status = cairo_font_face_status(cairo_face);
+  if (status == CAIRO_STATUS_SUCCESS) {
+    status = cairo_font_face_set_user_data(cairo_face, &free_type_face_key, face, ReleaseFreeTypeFace);
+  }
+  if (status != CAIRO_STATUS_SUCCESS) {
+    cairo_font_face_destroy(cairo_face);
+    FT_Done_Face(face);
+    throw std::runtime_error("HuxerUI could not create the Cairo font face");
+  }
+  return cairo_face;
+}
+
 } // namespace
 
 struct LinuxRenderer::State {
@@ -702,14 +727,22 @@ struct LinuxRenderer::State {
   std::map<std::pair<std::uint32_t, float>, cairo_font_face_t*> cairo_fallback_font_cache;
   std::unordered_map<TextRunKey, ShapedRun, TextRunKeyHash, TextRunKeyEqual> shaped_run_cache;
   std::unordered_map<ParagraphKey, std::vector<LayoutLine>, ParagraphKeyHash, ParagraphKeyEqual> paragraph_cache;
+  ShapedRun transient_shaped_run;
+  std::vector<LayoutLine> transient_paragraph;
+  std::uint64_t shaped_run_cache_bytes = 0;
+  std::uint64_t paragraph_cache_bytes = 0;
+  static constexpr std::size_t kMaxFonts = 64;
   static constexpr std::size_t kMaxShapedRuns = 1024;
   static constexpr std::size_t kMaxParagraphs = 256;
   static constexpr std::size_t kMaxFallbackFonts = 256;
+  static constexpr std::uint64_t kShapedRunCacheBudget = 8 * 1024 * 1024;
+  static constexpr std::uint64_t kParagraphCacheBudget = 8 * 1024 * 1024;
   hb_buffer_t* hb_scratch_buffer = nullptr;
   // Scratch buffer for the BoxBlurMask horizontal pass, reused across
   // sequential per-frame shadow draws. ScenePainter runs once per frame on a
   // single thread, so the buffer is never reentrant.
   std::vector<unsigned char> blur_scratch;
+  std::vector<cairo_glyph_t> glyph_scratch;
 
   cairo_surface_t* retained_surface = nullptr;
   cairo_t* retained_context = nullptr;
@@ -721,6 +754,7 @@ struct LinuxRenderer::State {
   // present so a standalone PresentGl uploads the full surface.
   std::vector<XRectangle> pending_damage_rects;
   bool pending_damage_full = true;
+  std::vector<unsigned char> upload_scratch;
 
   Display* display = nullptr;
   Window window = 0;
@@ -732,7 +766,6 @@ struct LinuxRenderer::State {
   EGLContext egl_context = EGL_NO_CONTEXT;
   bool egl_ready = false;
   bool gl_ready = false;
-  bool diag_printed_ = false;
   unsigned long native_visual_id = 0;
   bool use_bgra_upload = false;
   GLuint texture = 0;
@@ -744,7 +777,6 @@ struct LinuxRenderer::State {
   GLint uniform_bgra = -1;
   GLint attrib_position = -1;
   GLint attrib_uv = -1;
-
   struct ImageCacheEntry {
     cairo_surface_t* surface = nullptr;
     std::uint64_t bytes = 0;
@@ -753,6 +785,47 @@ struct LinuxRenderer::State {
   std::uint64_t image_cache_bytes = 0;
   static constexpr std::uint64_t kImageCacheBudget = 32 * 1024 * 1024;
 
+  struct ShadowMaskKey {
+    float width = 0.0F;
+    float height = 0.0F;
+    float corner_radius = 0.0F;
+    float blur_radius = 0.0F;
+    float scale = 1.0F;
+
+    bool operator==(const ShadowMaskKey&) const = default;
+  };
+
+  struct ShadowMaskEntry {
+    ShadowMaskKey key;
+    cairo_surface_t* surface = nullptr;
+    std::uint64_t bytes = 0;
+  };
+
+  std::vector<ShadowMaskEntry> shadow_masks;
+  std::uint64_t shadow_mask_bytes = 0;
+  static constexpr std::uint64_t kShadowMaskBudget = 32 * 1024 * 1024;
+  static constexpr std::size_t kMaxShadowMasks = 64;
+
+  struct PathShadowMaskKey {
+    Path path;
+    PathFillRule fill_rule = PathFillRule::NonZero;
+    float blur_radius = 0.0F;
+    float scale = 1.0F;
+
+    bool operator==(const PathShadowMaskKey&) const = default;
+  };
+
+  struct PathShadowMaskEntry {
+    PathShadowMaskKey key;
+    cairo_surface_t* surface = nullptr;
+    std::uint64_t bytes = 0;
+  };
+
+  std::vector<PathShadowMaskEntry> path_shadow_masks;
+  std::uint64_t path_shadow_mask_bytes = 0;
+  static constexpr std::uint64_t kPathShadowMaskBudget = 32 * 1024 * 1024;
+  static constexpr std::size_t kMaxPathShadowMasks = 32;
+
   ~State() {
     for (auto& [key, entry] : image_cache) {
       if (entry.surface != nullptr) {
@@ -760,18 +833,19 @@ struct LinuxRenderer::State {
       }
     }
     image_cache.clear();
+    ClearShadowMasks();
     for (auto& [key, face] : cairo_font_cache) {
       cairo_font_face_destroy(face);
     }
     cairo_font_cache.clear();
-    for (auto& [key, face] : fallback_font_cache) {
-      FT_Done_Face(face);
-    }
-    fallback_font_cache.clear();
     for (auto& [key, face] : cairo_fallback_font_cache) {
       cairo_font_face_destroy(face);
     }
     cairo_fallback_font_cache.clear();
+    for (auto& [key, face] : fallback_font_cache) {
+      FT_Done_Face(face);
+    }
+    fallback_font_cache.clear();
     if (retained_context != nullptr) {
       cairo_destroy(retained_context);
     }
@@ -801,6 +875,23 @@ struct LinuxRenderer::State {
     return std::max(dpi, 1.0F) / kDipsPerInch;
   }
 
+  void ClearShadowMasks() noexcept {
+    for (ShadowMaskEntry& entry : shadow_masks) {
+      if (entry.surface != nullptr) {
+        cairo_surface_destroy(entry.surface);
+      }
+    }
+    shadow_masks.clear();
+    shadow_mask_bytes = 0;
+    for (PathShadowMaskEntry& entry : path_shadow_masks) {
+      if (entry.surface != nullptr) {
+        cairo_surface_destroy(entry.surface);
+      }
+    }
+    path_shadow_masks.clear();
+    path_shadow_mask_bytes = 0;
+  }
+
   void EnsureFontconfig() {
     if (fc_ready) {
       return;
@@ -819,6 +910,32 @@ struct LinuxRenderer::State {
       throw std::runtime_error("HuxerUI could not initialize FreeType");
     }
     ft_ready = true;
+  }
+
+  void EvictFont(const Font& font) noexcept {
+    const auto cairo = cairo_font_cache.find(font);
+    if (cairo != cairo_font_cache.end()) {
+      cairo_font_face_destroy(cairo->second);
+      cairo_font_cache.erase(cairo);
+    }
+    const auto face = font_cache.find(font);
+    if (face != font_cache.end()) {
+      FT_Done_Face(face->second);
+      font_cache.erase(face);
+    }
+  }
+
+  void EvictFallbackFont(const std::pair<std::uint32_t, float>& key) noexcept {
+    const auto cairo = cairo_fallback_font_cache.find(key);
+    if (cairo != cairo_fallback_font_cache.end()) {
+      cairo_font_face_destroy(cairo->second);
+      cairo_fallback_font_cache.erase(cairo);
+    }
+    const auto face = fallback_font_cache.find(key);
+    if (face != fallback_font_cache.end()) {
+      FT_Done_Face(face->second);
+      fallback_font_cache.erase(face);
+    }
   }
 
   FT_Face FaceFor(const Font& font) {
@@ -862,7 +979,15 @@ struct LinuxRenderer::State {
       FT_Done_Face(face);
       throw std::runtime_error("HuxerUI could not set the font size");
     }
-    font_cache.emplace(font, face);
+    if (font_cache.size() >= kMaxFonts) {
+      EvictFont(font_cache.begin()->first);
+    }
+    try {
+      font_cache.emplace(font, face);
+    } catch (...) {
+      FT_Done_Face(face);
+      throw;
+    }
     return face;
   }
 
@@ -873,8 +998,13 @@ struct LinuxRenderer::State {
     }
     FT_Face face = FaceFor(font);
     static_cast<void>(FT_Select_Charmap(face, FT_ENCODING_UNICODE));
-    cairo_font_face_t* cairo_face = cairo_ft_font_face_create_for_ft_face(face, 0);
-    cairo_font_cache.emplace(font, cairo_face);
+    cairo_font_face_t* cairo_face = CreateCairoFace(face);
+    try {
+      cairo_font_cache.emplace(font, cairo_face);
+    } catch (...) {
+      cairo_font_face_destroy(cairo_face);
+      throw;
+    }
     return cairo_face;
   }
 
@@ -889,11 +1019,13 @@ struct LinuxRenderer::State {
       return nullptr;
     }
     static_cast<void>(FT_Select_Charmap(face, FT_ENCODING_UNICODE));
-    cairo_font_face_t* cairo_face = cairo_ft_font_face_create_for_ft_face(face, 0);
-    if (cairo_fallback_font_cache.size() >= kMaxFallbackFonts) {
-      cairo_fallback_font_cache.erase(cairo_fallback_font_cache.begin());
+    cairo_font_face_t* cairo_face = CreateCairoFace(face);
+    try {
+      cairo_fallback_font_cache.emplace(key, cairo_face);
+    } catch (...) {
+      cairo_font_face_destroy(cairo_face);
+      throw;
     }
-    cairo_fallback_font_cache.emplace(key, cairo_face);
     return cairo_face;
   }
 
@@ -951,9 +1083,14 @@ struct LinuxRenderer::State {
       return nullptr;
     }
     if (fallback_font_cache.size() >= kMaxFallbackFonts) {
-      fallback_font_cache.erase(fallback_font_cache.begin());
+      EvictFallbackFont(fallback_font_cache.begin()->first);
     }
-    fallback_font_cache.emplace(key, face);
+    try {
+      fallback_font_cache.emplace(key, face);
+    } catch (...) {
+      FT_Done_Face(face);
+      throw;
+    }
     return face;
   }
 
@@ -1386,32 +1523,17 @@ struct LinuxRenderer::State {
     // strokes under nearest sampling.
     EGLint egl_width = 0;
     EGLint egl_height = 0;
-    const bool egl_size_valid =
-        eglQuerySurface(egl_display, egl_surface, EGL_WIDTH, &egl_width) == EGL_TRUE &&
-        eglQuerySurface(egl_display, egl_surface, EGL_HEIGHT, &egl_height) == EGL_TRUE;
+    const bool egl_size_valid = eglQuerySurface(egl_display, egl_surface, EGL_WIDTH, &egl_width) == EGL_TRUE &&
+                                eglQuerySurface(egl_display, egl_surface, EGL_HEIGHT, &egl_height) == EGL_TRUE;
     glViewport(
         0,
         0,
         egl_size_valid ? static_cast<GLsizei>(egl_width) : surface_width,
         egl_size_valid ? static_cast<GLsizei>(egl_height) : surface_height
     );
-    if (!diag_printed_) {
-      std::fprintf(
-          stderr,
-          "[HuxerUI GL] surface=%dx%d egl=%dx%d scale=%.2f bgra=%d renderer=%s\n",
-          surface_width,
-          surface_height,
-          static_cast<int>(egl_width),
-          static_cast<int>(egl_height),
-          Scale(),
-          use_bgra_upload ? 1 : 0,
-          reinterpret_cast<const char*>(glGetString(GL_RENDERER))
-      );
-      diag_printed_ = true;
-    }
-
     const GLenum format = use_bgra_upload ? GL_BGRA_EXT : GL_RGBA;
-    if (texture_width != surface_width || texture_height != surface_height) {
+    const bool texture_initialized = texture != 0 && texture_width == surface_width && texture_height == surface_height;
+    if (!texture_initialized) {
       if (texture == 0) {
         glGenTextures(1, &texture);
       }
@@ -1436,69 +1558,68 @@ struct LinuxRenderer::State {
     const unsigned char* data = cairo_image_surface_get_data(retained_surface);
     const int stride = cairo_image_surface_get_stride(retained_surface);
     cairo_surface_flush(retained_surface);
-    // Cairo drawing is clipped to the damage rects, so only the damaged rows of
-    // the retained surface change between presents. Uploading just those rows
-    // (GLES2 has no GL_UNPACK_ROW_LENGTH, hence per-row) reproduces the texture
-    // exactly; multi-rect or large-rect damage falls back to the full upload.
-    // A freshly reallocated texture has undefined storage outside the upload, so
-    // partial uploads require the texture to already match the surface size.
-    const bool partial =
-        !pending_damage_full && pending_damage_rects.size() == 1 &&
-        pending_damage_rects[0].height > 0 &&
-        pending_damage_rects[0].height <= static_cast<unsigned short>(surface_height / 2) && surface_height > 0 &&
-        texture_width == surface_width && texture_height == surface_height;
-    if (partial) {
-      const XRectangle& rect = pending_damage_rects[0];
-      const int rect_left = std::clamp(static_cast<int>(rect.x), 0, surface_width);
-      const int rect_top = std::clamp(static_cast<int>(rect.y), 0, surface_height);
-      const int rect_width = std::clamp(static_cast<int>(rect.width), 0, surface_width - rect_left);
-      const int rect_height = std::clamp(static_cast<int>(rect.height), 0, surface_height - rect_top);
-      if (rect_width > 0 && rect_height > 0) {
-        for (int row = 0; row < rect_height; ++row) {
-          const int y = rect_top + row;
-          glTexSubImage2D(
-              GL_TEXTURE_2D,
-              0,
-              rect_left,
-              y,
-              rect_width,
-              1,
-              format,
-              GL_UNSIGNED_BYTE,
-              data + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
-                  static_cast<std::size_t>(rect_left) * 4U
-          );
-        }
-      }
-    } else {
+    const LinuxTextureUploadPlan upload = ResolveLinuxTextureUpload(
+        pending_damage_full,
+        pending_damage_rects,
+        surface_width,
+        surface_height,
+        texture_initialized
+    );
+    if (upload.full) {
       if (stride == surface_width * 4) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, surface_width, surface_height, format, GL_UNSIGNED_BYTE, data);
       } else {
-        // GLES2 has no GL_UNPACK_ROW_LENGTH, so a padded Cairo stride is copied
-        // one row at a time.
+        const std::size_t row_bytes = static_cast<std::size_t>(surface_width) * 4U;
+        upload_scratch.resize(row_bytes * static_cast<std::size_t>(surface_height));
         for (int row = 0; row < surface_height; ++row) {
-          glTexSubImage2D(
-              GL_TEXTURE_2D,
-              0,
-              0,
-              row,
-              surface_width,
-              1,
-              format,
-              GL_UNSIGNED_BYTE,
-              data + static_cast<std::size_t>(row) * static_cast<std::size_t>(stride)
+          std::memcpy(
+              upload_scratch.data() + static_cast<std::size_t>(row) * row_bytes,
+              data + static_cast<std::size_t>(row) * static_cast<std::size_t>(stride),
+              row_bytes
           );
         }
+        glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0,
+            0,
+            0,
+            surface_width,
+            surface_height,
+            format,
+            GL_UNSIGNED_BYTE,
+            upload_scratch.data()
+        );
       }
-    }
-    pending_damage_full = true;
-    pending_damage_rects.clear();
-
-    if (!use_bgra_upload) {
-      glUniform1i(uniform_bgra, 1);
+    } else {
+      for (const XRectangle& rect : upload.rects) {
+        const int rect_width = static_cast<int>(rect.width);
+        const int rect_height = static_cast<int>(rect.height);
+        const std::size_t row_bytes = static_cast<std::size_t>(rect_width) * 4U;
+        upload_scratch.resize(row_bytes * static_cast<std::size_t>(rect_height));
+        for (int row = 0; row < rect_height; ++row) {
+          std::memcpy(
+              upload_scratch.data() + static_cast<std::size_t>(row) * row_bytes,
+              data + static_cast<std::size_t>(static_cast<int>(rect.y) + row) * static_cast<std::size_t>(stride) +
+                  static_cast<std::size_t>(rect.x) * 4U,
+              row_bytes
+          );
+        }
+        glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0,
+            rect.x,
+            rect.y,
+            rect_width,
+            rect_height,
+            format,
+            GL_UNSIGNED_BYTE,
+            upload_scratch.data()
+        );
+      }
     }
 
     glUseProgram(program);
+    glUniform1i(uniform_bgra, use_bgra_upload ? 0 : 1);
     glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
     glVertexAttribPointer(attrib_position, 2, GL_FLOAT, GL_FALSE, 16, nullptr);
     glEnableVertexAttribArray(attrib_position);
@@ -1510,7 +1631,14 @@ struct LinuxRenderer::State {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    if (eglSwapBuffers(egl_display, egl_surface) != EGL_TRUE) {
+    // The retained Cairo bitmap and GL texture support partial updates, but an
+    // EGL back buffer is not preserved without an explicit buffer-age repair
+    // strategy. Swap the complete rendered quad so unchanged text never comes
+    // from an older or undefined back buffer.
+    const EGLBoolean swap_result = eglSwapBuffers(egl_display, egl_surface);
+    pending_damage_full = true;
+    pending_damage_rects.clear();
+    if (swap_result != EGL_TRUE) {
       const EGLint error = eglGetError();
       if (error == EGL_BAD_SURFACE || error == EGL_BAD_CONTEXT || error == EGL_BAD_NATIVE_WINDOW) {
         // A lost or resized native window invalidates the surface; drop it so
@@ -1629,6 +1757,7 @@ void LinuxRenderer::Discard() noexcept {
   }
   state_->image_cache.clear();
   state_->image_cache_bytes = 0;
+  state_->ClearShadowMasks();
   for (auto& [key, face] : state_->cairo_font_cache) {
     cairo_font_face_destroy(face);
   }
@@ -1641,6 +1770,16 @@ void LinuxRenderer::Discard() noexcept {
     FT_Done_Face(face);
   }
   state_->fallback_font_cache.clear();
+  for (auto& [key, face] : state_->font_cache) {
+    FT_Done_Face(face);
+  }
+  state_->font_cache.clear();
+  state_->shaped_run_cache.clear();
+  state_->paragraph_cache.clear();
+  state_->transient_shaped_run = {};
+  state_->transient_paragraph.clear();
+  state_->shaped_run_cache_bytes = 0;
+  state_->paragraph_cache_bytes = 0;
   if (state_->retained_context != nullptr) {
     cairo_destroy(state_->retained_context);
     state_->retained_context = nullptr;
@@ -1674,6 +1813,7 @@ void LinuxRenderer::DpiChanged(Display* display, Window window, float dpi) {
   state_->display = display;
   state_->window = window;
   state_->dpi = dpi;
+  state_->ClearShadowMasks();
   state_->force_full_repaint = true;
 }
 
@@ -2162,21 +2302,12 @@ private:
       return;
     }
     const float scale = state_.Scale();
-    const float blur_pixels = command.blur_radius * scale;
     const int mask_width = std::max(1, static_cast<int>(std::ceil(resolved.bounds.width * scale)));
     const int mask_height = std::max(1, static_cast<int>(std::ceil(resolved.bounds.height * scale)));
-    CairoSurfaceHandle mask_handle{cairo_image_surface_create(CAIRO_FORMAT_A8, mask_width, mask_height)};
-    cairo_surface_t* mask = mask_handle.surface;
-    cairo_t* mask_cr = cairo_create(mask);
-    cairo_scale(mask_cr, scale, scale);
-    cairo_translate(mask_cr, -resolved.bounds.x, -resolved.bounds.y);
-    cairo_set_source_rgb(mask_cr, 1.0, 1.0, 1.0);
-    AddRoundedRect(mask_cr, resolved.caster, resolved.corner_radius);
-    cairo_fill(mask_cr);
-    cairo_destroy(mask_cr);
-
-    const int radius = std::max(1, static_cast<int>(std::ceil(blur_pixels * 0.57735)));
-    cairo_surface_t* blurred = BoxBlurMask(mask, radius);
+    cairo_surface_t* blurred = BlurredRectMaskFor(resolved, command.blur_radius, scale, mask_width, mask_height);
+    if (blurred == nullptr) {
+      return;
+    }
 
     SetSourceColor(cr_, command.color);
     cairo_save(cr_);
@@ -2192,30 +2323,83 @@ private:
     cairo_mask(cr_, blur_pattern);
     cairo_pattern_destroy(blur_pattern);
     cairo_restore(cr_);
-    cairo_surface_destroy(blurred);
+  }
+
+  [[nodiscard]] cairo_surface_t*
+  BlurredRectMaskFor(const ResolvedShadow& shadow, float blur_radius, float scale, int width, int height) {
+    const LinuxRenderer::State::ShadowMaskKey key{
+        shadow.caster.width,
+        shadow.caster.height,
+        shadow.corner_radius,
+        blur_radius,
+        scale,
+    };
+    const auto cached = std::find_if(
+        state_.shadow_masks.begin(),
+        state_.shadow_masks.end(),
+        [&](const LinuxRenderer::State::ShadowMaskEntry& entry) { return entry.key == key; }
+    );
+    if (cached != state_.shadow_masks.end()) {
+      std::rotate(cached, cached + 1, state_.shadow_masks.end());
+      return state_.shadow_masks.back().surface;
+    }
+
+    CairoSurfaceHandle mask_handle{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
+    if (cairo_surface_status(mask_handle.surface) != CAIRO_STATUS_SUCCESS) {
+      return nullptr;
+    }
+    cairo_t* mask_cr = cairo_create(mask_handle.surface);
+    cairo_scale(mask_cr, scale, scale);
+    cairo_translate(mask_cr, blur_radius - shadow.caster.x, blur_radius - shadow.caster.y);
+    cairo_set_source_rgb(mask_cr, 1.0, 1.0, 1.0);
+    AddRoundedRect(mask_cr, shadow.caster, shadow.corner_radius);
+    cairo_fill(mask_cr);
+    cairo_destroy(mask_cr);
+
+    const int radius = std::max(1, static_cast<int>(std::ceil(blur_radius * scale * 0.57735F)));
+    cairo_surface_t* blurred = BoxBlurMask(mask_handle.surface, radius);
+    if (blurred == nullptr || cairo_surface_status(blurred) != CAIRO_STATUS_SUCCESS) {
+      if (blurred != nullptr) {
+        cairo_surface_destroy(blurred);
+      }
+      return nullptr;
+    }
+    const std::uint64_t bytes =
+        static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
+    while (!state_.shadow_masks.empty() && (state_.shadow_masks.size() >= state_.kMaxShadowMasks ||
+                                            state_.shadow_mask_bytes + bytes > state_.kShadowMaskBudget)) {
+      state_.shadow_mask_bytes -= state_.shadow_masks.front().bytes;
+      cairo_surface_destroy(state_.shadow_masks.front().surface);
+      state_.shadow_masks.erase(state_.shadow_masks.begin());
+    }
+    state_.shadow_masks.push_back({key, blurred, bytes});
+    state_.shadow_mask_bytes += bytes;
+    return blurred;
   }
 
   [[nodiscard]] cairo_surface_t* BoxBlurMask(cairo_surface_t* mask, int radius) {
     const int width = cairo_image_surface_get_width(mask);
     const int height = cairo_image_surface_get_height(mask);
     const unsigned char* source = cairo_image_surface_get_data(mask);
+    const int source_stride = cairo_image_surface_get_stride(mask);
     state_.blur_scratch.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     const int window = radius * 2 + 1;
     for (int y = 0; y < height; ++y) {
       int sum = 0;
       for (int x = -radius; x <= radius; ++x) {
         const int clamped_x = std::clamp(x, 0, width - 1);
-        sum += source[y * width + clamped_x];
+        sum += source[y * source_stride + clamped_x];
       }
       for (int x = 0; x < width; ++x) {
         state_.blur_scratch[y * width + x] = static_cast<unsigned char>(sum / window);
         const int remove_x = std::clamp(x - radius, 0, width - 1);
         const int add_x = std::clamp(x + radius + 1, 0, width - 1);
-        sum += source[y * width + add_x] - source[y * width + remove_x];
+        sum += source[y * source_stride + add_x] - source[y * source_stride + remove_x];
       }
     }
     cairo_surface_t* result = cairo_image_surface_create(CAIRO_FORMAT_A8, width, height);
     unsigned char* result_data = cairo_image_surface_get_data(result);
+    const int result_stride = cairo_image_surface_get_stride(result);
     for (int x = 0; x < width; ++x) {
       int sum = 0;
       for (int y = -radius; y <= radius; ++y) {
@@ -2223,7 +2407,7 @@ private:
         sum += state_.blur_scratch[clamped_y * width + x];
       }
       for (int y = 0; y < height; ++y) {
-        result_data[y * width + x] = static_cast<unsigned char>(sum / window);
+        result_data[y * result_stride + x] = static_cast<unsigned char>(sum / window);
         const int remove_y = std::clamp(y - radius, 0, height - 1);
         const int add_y = std::clamp(y + radius + 1, 0, height - 1);
         sum += state_.blur_scratch[add_y * width + x] - state_.blur_scratch[remove_y * width + x];
@@ -2286,22 +2470,10 @@ private:
     }
     const int mask_width = std::max(1, static_cast<int>(std::ceil(shadow_bounds.width * scale)));
     const int mask_height = std::max(1, static_cast<int>(std::ceil(shadow_bounds.height * scale)));
-    CairoSurfaceHandle mask_handle{cairo_image_surface_create(CAIRO_FORMAT_A8, mask_width, mask_height)};
-    cairo_surface_t* mask = mask_handle.surface;
-    cairo_t* mask_cr = cairo_create(mask);
-    cairo_scale(mask_cr, scale, scale);
-    cairo_translate(mask_cr, -shadow_bounds.x, -shadow_bounds.y);
-    cairo_translate(mask_cr, command.offset.x, command.offset.y);
-    cairo_set_source_rgb(mask_cr, 1.0, 1.0, 1.0);
-    AppendPath(mask_cr, command.path);
-    cairo_set_fill_rule(
-        mask_cr,
-        command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_fill(mask_cr);
-    cairo_destroy(mask_cr);
-    cairo_surface_t* blurred =
-        BoxBlurMask(mask, std::max(1, static_cast<int>(std::ceil(command.blur_radius * scale * 0.57735))));
+    cairo_surface_t* blurred = BlurredPathMaskFor(command, bounds, scale, mask_width, mask_height);
+    if (blurred == nullptr) {
+      return;
+    }
 
     SetSourceColor(cr_, command.color);
     cairo_save(cr_);
@@ -2321,7 +2493,62 @@ private:
     cairo_mask(cr_, blur_pattern);
     cairo_pattern_destroy(blur_pattern);
     cairo_restore(cr_);
-    cairo_surface_destroy(blurred);
+  }
+
+  [[nodiscard]] cairo_surface_t*
+  BlurredPathMaskFor(const DrawPathShadowCommand& command, const Rect& bounds, float scale, int width, int height) {
+    const LinuxRenderer::State::PathShadowMaskKey key{
+        command.path,
+        command.fill_rule,
+        command.blur_radius,
+        scale,
+    };
+    const auto cached = std::find_if(
+        state_.path_shadow_masks.begin(),
+        state_.path_shadow_masks.end(),
+        [&](const LinuxRenderer::State::PathShadowMaskEntry& entry) { return entry.key == key; }
+    );
+    if (cached != state_.path_shadow_masks.end()) {
+      std::rotate(cached, cached + 1, state_.path_shadow_masks.end());
+      return state_.path_shadow_masks.back().surface;
+    }
+
+    CairoSurfaceHandle mask_handle{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
+    if (cairo_surface_status(mask_handle.surface) != CAIRO_STATUS_SUCCESS) {
+      return nullptr;
+    }
+    cairo_t* mask_cr = cairo_create(mask_handle.surface);
+    cairo_scale(mask_cr, scale, scale);
+    cairo_translate(mask_cr, command.blur_radius - bounds.x, command.blur_radius - bounds.y);
+    cairo_set_source_rgb(mask_cr, 1.0, 1.0, 1.0);
+    AppendPath(mask_cr, command.path);
+    cairo_set_fill_rule(
+        mask_cr,
+        command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
+    );
+    cairo_fill(mask_cr);
+    cairo_destroy(mask_cr);
+
+    const int radius = std::max(1, static_cast<int>(std::ceil(command.blur_radius * scale * 0.57735F)));
+    cairo_surface_t* blurred = BoxBlurMask(mask_handle.surface, radius);
+    if (blurred == nullptr || cairo_surface_status(blurred) != CAIRO_STATUS_SUCCESS) {
+      if (blurred != nullptr) {
+        cairo_surface_destroy(blurred);
+      }
+      return nullptr;
+    }
+    const std::uint64_t bytes =
+        static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
+    while (!state_.path_shadow_masks.empty() &&
+           (state_.path_shadow_masks.size() >= state_.kMaxPathShadowMasks ||
+            state_.path_shadow_mask_bytes + bytes > state_.kPathShadowMaskBudget)) {
+      state_.path_shadow_mask_bytes -= state_.path_shadow_masks.front().bytes;
+      cairo_surface_destroy(state_.path_shadow_masks.front().surface);
+      state_.path_shadow_masks.erase(state_.path_shadow_masks.begin());
+    }
+    state_.path_shadow_masks.push_back({key, blurred, bytes});
+    state_.path_shadow_mask_bytes += bytes;
+    return blurred;
   }
 
   void RenderCommand(const PushClipCommand& command) {
