@@ -291,9 +291,9 @@ EM_JS(bool, ActivateWebTextInput, (
     element.spellcheck = autocorrect;
     element.value = session.textValue;
 
-    const canvasBounds = session.canvas.getBoundingClientRect();
-    element.style.left = String(canvasBounds.left + caret_x) + "px";
-    element.style.top = String(canvasBounds.top + caret_y) + "px";
+    const rootBounds = session.root.getBoundingClientRect();
+    element.style.left = String(rootBounds.left + caret_x) + "px";
+    element.style.top = String(rootBounds.top + caret_y) + "px";
     element.style.height = String(Math.max(1, caret_height)) + "px";
     const start = Math.min(anchor, active);
     const end = Math.max(anchor, active);
@@ -357,9 +357,9 @@ EM_JS(void, SynchronizeWebTextInput, (
     const start = Math.min(anchor, active);
     const end = Math.max(anchor, active);
     element.setSelectionRange(start, end, anchor > active ? "backward" : "forward");
-    const canvasBounds = session.canvas.getBoundingClientRect();
-    element.style.left = String(canvasBounds.left + caret_x) + "px";
-    element.style.top = String(canvasBounds.top + caret_y) + "px";
+    const rootBounds = session.root.getBoundingClientRect();
+    element.style.left = String(rootBounds.left + caret_x) + "px";
+    element.style.top = String(rootBounds.top + caret_y) + "px";
     element.style.height = String(Math.max(1, caret_height)) + "px";
   } catch (error) {
     console.error("HuxerUI Web text input synchronization failed", error);
@@ -383,7 +383,7 @@ EM_JS(void, DeactivateWebTextInput, (std::uintptr_t web_session_id, std::uint32_
     element.style.display = "none";
     queueMicrotask(() => {
       if (Module.huxerUIWebSessions.get(web_session_id) === session && !session.activeTextInput) {
-        session.canvas.focus({preventScroll: true});
+        session.root.focus({preventScroll: true});
       }
     });
   } catch (error) {

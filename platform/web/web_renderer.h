@@ -22,6 +22,7 @@ public:
 
   void SetViewport(Size viewport, float display_scale);
   void Invalidate() noexcept;
+  [[nodiscard]] bool TakeInvalidation() noexcept;
 
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
@@ -33,12 +34,29 @@ public:
   );
 
   void Draw(const RenderFrame& frame);
+  void DrawSlice(
+      const emscripten::val& canvas,
+      const RenderFrame& frame,
+      std::size_t first_command,
+      std::size_t command_count,
+      bool draw_background,
+      bool force_redraw
+  );
 
 private:
+  struct CommandRange;
+
   [[nodiscard]] const WebTextLayout&
   ParagraphFor(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
-  void RenderSceneNode(const RenderNode& node);
-  void RenderSequence(const PaintSequence& sequence);
+  void DrawTarget(
+      const emscripten::val& canvas,
+      const RenderFrame& frame,
+      CommandRange* range,
+      bool draw_background,
+      bool force_redraw
+  );
+  void RenderSceneNode(const RenderNode& node, CommandRange* range);
+  void RenderSequence(const PaintSequence& sequence, CommandRange* range);
   void RenderCommand(const DrawRectCommand& command);
   void RenderCommand(const DrawTextCommand& command);
   void RenderCommand(const DrawTextRunsCommand& command);

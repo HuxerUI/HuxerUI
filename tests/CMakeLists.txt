@@ -173,6 +173,10 @@ if (APPLE)
     )
 endif ()
 
+if (EMSCRIPTEN)
+    list(APPEND HUXERUI_PUBLIC_HEADERS web/platform_view.h)
+endif ()
+
 if (UNIX AND NOT APPLE)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             linux/external_texture.h

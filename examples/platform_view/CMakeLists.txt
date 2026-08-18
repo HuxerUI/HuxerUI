@@ -8,6 +8,8 @@ target_sources(example_platform_view PRIVATE native_text_field.cpp)
 
 if (ANDROID)
     target_sources(example_platform_view PRIVATE native_text_field_android.cpp)
+elseif (EMSCRIPTEN)
+    target_sources(example_platform_view PRIVATE native_text_field_web.cpp)
 elseif (IOS)
     target_sources(example_platform_view PRIVATE native_text_field_ios.mm)
     target_compile_options(example_platform_view PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")

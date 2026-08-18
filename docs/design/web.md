@@ -8,22 +8,22 @@ This document defines the implemented HuxerUI Web preview and its target contrac
 
 - Reuse the existing Runtime, View model, layout, input state machines, animation, text editing protocol, RenderScene, and PaintCommand types without a Web-specific Runtime.
 - Keep the static `Application` declaration and shared application source unchanged across native and Web targets.
-- Produce an ES module and WebAssembly application that can be mounted into a browser-owned Canvas.
+- Produce an ES module and WebAssembly application that can be mounted into a browser-owned host element.
 - Preserve logical coordinates, retained PaintSequences, Runtime damage, controlled text editing, typed resources, and platform-owned native services.
 - Support mouse, touch, pen, wheel, keyboard, browser IME, high-density displays, resizing, and asynchronous image decoding.
-- Leave room for future accessibility, DOM-backed PlatformView, worker rendering, and alternative renderers without exposing a second public UI surface.
+- Leave room for future accessibility, worker rendering, and alternative renderers without exposing a second public UI surface.
 
 ## Non-goals
 
-The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, PWA packaging, or DOM-backed PlatformView.
+The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, or PWA packaging.
 
-The initial backend targets a Canvas-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
+The initial backend targets a composition-root-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
 
 The initial backend may run before the platform-neutral semantics tree is available, but it remains a technical preview rather than a complete accessible Web backend until equivalent browser semantics are emitted.
 
 ## Current preview
 
-The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The preview has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -38,15 +38,16 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 | Layer | Responsibility |
 |---|---|
 | Shared Runtime | Composition, reconciliation, layout, focus, interaction, scrolling, text editing behavior, animation, PaintSequence recording, RenderScene construction, and damage |
-| WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted Canvas |
+| WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted host element |
 | WebPlatformAdapter | Monotonic time, frame requests, UI-thread dispatch, viewport coordination, and browser service capabilities |
 | WebRenderer | RenderScene traversal, Canvas state, damage replay, path conversion, image decode entries, and renderer caches |
+| WebPlatformViews | DOM factory lifecycle, retained Canvas slices, placement, ordering, hit arbitration, and focus synchronization |
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | Native input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
 | WebResources | Synchronous reads from resources loaded before Runtime creation and current locale and display scale |
-| ES module integration | Canvas lookup, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
+| ES module integration | Host lookup, composition-root creation, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
 
-There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted Canvas. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
+There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted host element. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
 
 Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand, or application state. JavaScript identifies sessions with validated numeric IDs rather than retaining raw C++ object pointers as application-visible values.
 
@@ -54,18 +55,18 @@ Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand,
 
 Web compilation constructs the same static `Application` used by native targets. Its constructor registers the immutable root and `AppOptions`; Web does not create or require a native desktop `main()`.
 
-The generated ES module exposes a synchronous mount operation that accepts a Canvas selector after module and font loading have completed. Broader startup configuration such as a resource base URL, containing element, and page-integration policy remains deferred and does not belong in `AppOptions`.
+The generated ES module exposes a synchronous mount operation that accepts a selector for an `HTMLElement` with no child nodes after module and font loading have completed. The adapter creates and owns one isolated composition root and its base Canvas inside that host. Broader startup configuration such as a resource base URL and page-integration policy remains deferred and does not belong in `AppOptions`.
 
 Startup occurs in this order:
 
 - Instantiate the Emscripten module and complete packaged-resource preload into the virtual filesystem.
 - Await `document.fonts.ready` in the JavaScript entry point.
-- Resolve the target Canvas and create WebPlatformAdapter and Runtime from the uniquely registered Application.
+- Resolve the target host, create its composition root and base Canvas, and create WebPlatformAdapter and Runtime from the uniquely registered Application.
 - Create the JavaScript session record and install browser observers and event listeners.
 - Apply the initial CSS-pixel viewport and ResourceConfiguration.
 - Request the initial frame.
 
-The returned session ID owns explicit disposal. Disposal cancels timers and animation-frame callbacks, removes DOM listeners and hidden input elements, releases renderer caches, ends active text input, destroys Runtime, and invalidates the session ID.
+The returned session ID owns explicit disposal. Disposal cancels timers and animation-frame callbacks, removes DOM listeners, PlatformViews, Canvas slices, the composition root, and hidden input elements, releases renderer caches, ends active text input, destroys Runtime, and invalidates the session ID.
 
 The initial distribution contains an HTML entry point when requested by SDK tooling, an ES module, a WebAssembly module, and optional preloaded resource data. The framework library remains a static or object dependency of the final WebAssembly application; ordinary Emscripten shared-library and dynamic-module modes are not part of the backend contract.
 
@@ -78,16 +79,16 @@ The Web platform configuration supplies Web sources, platform-owned application 
 Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a macOS, Windows, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 
 The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, and local serving through `emrun`.
-The project-owned Web shell keeps its HTML and Canvas mount code under `platform/web`, while the backend continues to avoid a parallel JavaScript component build system.
+The project-owned Web shell keeps its HTML and host-element mount code under `platform/web`, while the backend continues to avoid a parallel JavaScript component build system.
 Release packaging remains separate future work.
 
 ## Viewport and display scale
 
-Runtime logical coordinates map to CSS pixels. The Canvas CSS size defines the Runtime viewport, while its backing bitmap width and height are the rounded CSS dimensions multiplied by `devicePixelRatio`.
+Runtime logical coordinates map to CSS pixels. The composition root's CSS size defines the Runtime viewport, while each Canvas backing bitmap width and height are the rounded CSS dimensions multiplied by `devicePixelRatio`.
 
 The renderer applies the display scale at the Canvas boundary, so layout, pointer positions, text geometry, PaintCommands, and damage remain in logical coordinates. `ResourceConfiguration::display_scale` uses the same value for image variant resolution.
 
-`ResizeObserver` detects Canvas geometry changes. A resolution media query and window resize listener detect display-scale changes, rebuild the backing bitmap, update Runtime resource configuration, and request full repaint. Setting Canvas backing dimensions resets Canvas state, so the renderer restores its baseline transform and clip state before replay.
+`ResizeObserver` detects host geometry changes. A resolution media query and window resize listener detect display-scale changes, rebuild every Canvas backing bitmap, update Runtime resource configuration, and request full repaint. Setting Canvas backing dimensions resets Canvas state, so the renderer restores its baseline transform and clip state before replay.
 
 ## Frame scheduling
 
@@ -133,11 +134,11 @@ The preview resolves paragraph direction from the first strong character and han
 
 The Web integration uses Pointer Events as the single mouse, touch, and pen input source. Pointer identifiers, type, position, and click count are converted at the Canvas boundary. Pressure, buttons, timestamp, and modifiers are not represented by the current shared PointerEvent contract.
 
-An accepted pointer down captures that browser pointer to the Canvas so move, up, and cancel remain ordered when contact leaves the element. Browser pointer cancellation maps to the shared Cancel path and must release pressed, drag, focus-candidate, and retained-extension state.
+An accepted HuxerUI pointer down captures that browser pointer to the composition root so move, up, and cancel remain ordered when contact leaves the element. Browser pointer cancellation maps to the shared Cancel path and must release pressed, drag, focus-candidate, and retained-extension state.
 
-Wheel deltas are normalized from pixel, line, or page units into logical pixels before producing a ScrollEvent. The initial Canvas-owned integration prevents page scrolling for gestures directed at the application surface. An embedded-page mode requires a future Runtime consumption result instead of guessing from concrete components.
+Wheel deltas are normalized from pixel, line, or page units into logical pixels before producing a ScrollEvent. The composition root prevents page scrolling for gestures owned by HuxerUI and leaves events owned by a PlatformView to its DOM subtree. An embedded-page mode requires a future Runtime consumption result instead of guessing from concrete components.
 
-The Canvas is focusable and receives key down and key up events when HuxerUI owns browser focus. Browser key values, repeat, modifiers, and platform conventions map to the existing KeyEvent model. An active hidden text control forwards Tab to the same Runtime key path instead of letting DOM focus leave the Canvas-owned application surface. Text insertion is never inferred from printable key events while a browser text-input session is active.
+The composition root is focusable and receives key down and key up events when HuxerUI owns browser focus. Browser key values, repeat, modifiers, and platform conventions map to the existing KeyEvent model. An active hidden text control forwards Tab to the same Runtime key path. A PlatformView subtree owns ordinary key handling until Tab reaches its internal boundary, where traversal returns to Runtime. Text insertion is never inferred from printable key events while a browser text-input session is active.
 
 CSS `touch-action` belongs to browser integration policy. A full application surface initially owns direct-manipulation gestures and uses a restrictive value. A future embedded mode may expose an explicit page-gesture policy without adding a C++ View modifier.
 
@@ -186,30 +187,34 @@ The Web `example_platform_module` uses an Emscripten interval to exercise factor
 
 ## PlatformView composition
 
-DOM-backed PlatformView remains proposed, but its composition contract follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
+DOM-backed PlatformView is implemented and follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
-The WebPlatformAdapter will consume the shared internal `RenderComposition` before drawing and retain compatible Canvas elements and DOM objects across frames.
+WebPlatformAdapter consumes the shared internal `RenderComposition` before drawing and retains compatible Canvas elements and DOM objects across frames.
 
-Web PlatformView factories will register explicitly under the same stable UTF-8 type strings as native platforms and keep DOM values in platform-owned factory state rather than `PlatformPayload`.
+Web PlatformView factories include `<huxerui/web/platform_view.h>` and register `web::PlatformViewFactory` explicitly under the same stable UTF-8 type strings as native platforms.
+The create callback receives the complete initial `PlatformPayload` and an asynchronous `PlatformEventSink`, and returns a detached `HTMLElement` as an `emscripten::val`.
+The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing, while optional update and dispose callbacks retain module-owned behavior without putting DOM values in `PlatformPayload` or adding a JavaScript registry.
 
-A PlatformView-capable session owns one isolated CSS stacking context around the browser-supplied Canvas.
-The original Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and PlatformView elements become absolutely positioned ordered siblings in the same composition root.
+A PlatformView-capable session owns one isolated CSS stacking context inside the browser-supplied host element.
+The adapter-owned base Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and clipped PlatformView containers become absolutely positioned ordered siblings in the same composition root.
 DOM child order represents `RenderComposition` order; application z-index values do not participate in or escape that root.
 Every Canvas slice shares the logical viewport, backing-store scale, clipping root, and resize transaction, while its renderer replays only the retained scene content assigned to that slice.
-A scene without PlatformViews keeps the current single-Canvas structure and does not allocate a wrapper surface per RenderNode.
+A scene without PlatformViews keeps one base Canvas and does not retain additional slice surfaces or allocate a wrapper per RenderNode.
 
 Composition-root and DOM hierarchy changes occur while applying a committed `RenderComposition`, never during Canvas command replay.
-Disposal removes adapter-owned slices and PlatformViews, releases native listeners and accessibility bridges, and leaves no hidden interactive DOM objects behind.
+Disposal removes adapter-owned slices and PlatformViews, invalidates queued event routes, releases native listeners, and leaves no hidden interactive DOM objects behind.
 Moving or resizing a PlatformView updates its CSS geometry and old and new damage, while unchanged slices retain their Canvas and rendering caches.
 
 The composition root observes pointer events during capture and asks Runtime for the topmost committed HuxerUI or PlatformView hit target.
 When HuxerUI wins, the adapter prevents native activation and routes the pointer sequence to Runtime.
-When a PlatformView wins, its DOM subtree receives the ordinary browser event and owns browser pointer capture, focus, selection, and editing until the sequence ends.
+When a PlatformView wins, its DOM subtree receives ordinary browser pointer and wheel events and owns focus, selection, and editing until the sequence ends.
 Transparent Canvas slices never become full-viewport input blockers merely because they are visually above a PlatformView.
+The composition root currently uses `touch-action: none`, so the initial contract does not promise browser-native touch panning inside a scrollable PlatformView subtree.
 
 The first Web contract supports axis-aligned CSS bounds, translation, rectangular overflow clipping, visibility, and sibling ordering.
 CSS transforms, filters, blend modes, or stacking contexts created inside a PlatformView cannot alter ordering outside its assigned placement.
-An element that requires top-layer presentation, a separate browsing context with incompatible policy, or another mechanism that cannot remain in the composition root is rejected rather than moved above the complete HuxerUI scene.
+Top-layer presentation and browsing contexts with policies that cannot remain inside the composition root are unsupported.
+Factories must keep their visual content within the returned subtree; the adapter does not detect or relocate content that later escapes through browser top-layer APIs.
 
 ## Accessibility and semantics
 
@@ -223,8 +228,7 @@ Semantic DOM is not a second visual renderer.
 It remains visually unobtrusive, participates in browser focus and assistive technology, forwards typed semantic actions to Runtime, maintains live regions and collection metadata, and follows committed order, visibility, transforms, and clipping where geometry is exposed.
 Browser accessibility focus remains separate from Runtime input focus, and the semantic DOM coordinates focus with the hidden input and textarea so an active TextField does not create duplicate keyboard focus targets.
 
-DOM-backed PlatformView is a separate future leaf-node capability.
-Its visual DOM element occupies the `RenderComposition` position, while its semantic anchor occupies the corresponding SemanticFrame position and exposes the native accessible subtree without duplicating it in semantic DOM.
+The PlatformView visual DOM element occupies the `RenderComposition` position, while a future Web semantics bridge will place its semantic anchor at the corresponding SemanticFrame position and expose the native accessible subtree without duplicating it in semantic DOM.
 It must not use the semantics overlay as a general visual DOM container.
 
 ## Threading
@@ -235,7 +239,7 @@ Emscripten pthreads, SharedArrayBuffer deployment headers, worker proxies, and O
 
 ## Browser lifecycle and failures
 
-The integration observes document visibility, Canvas connection at scheduling time, browser focus, geometry, display scale, and disposal. A disconnected Canvas does not destroy application state automatically, but it stops presenting. Replacing a Canvas requires disposing the old session and mounting a new one.
+The integration observes document visibility, composition-root connection at scheduling time, browser focus, geometry, display scale, and disposal. A disconnected root does not destroy application state automatically, but it stops presenting. Replacing a host requires disposing the old session and mounting a new one.
 
 Exceptions do not cross the JavaScript and C++ boundary. Exported operations catch C++ failures and preserve HuxerUI diagnostics. Mount failures are rejected, fatal session-dispatch failures dispose the failed session, and text-input dispatch failures remain contained at the input boundary. Invalid or stale session IDs are ignored without dereferencing destroyed state.
 
@@ -263,16 +267,18 @@ The first milestone added Emscripten platform selection, platform-owned applicat
 
 The second preview milestone added Pointer Events, wheel, keyboard, WebTextLayout, browser text input and composition events, resources, and asynchronous images.
 
+The third preview milestone added typed PlatformModule dispatch and DOM PlatformView hosting with retained Canvas slicing, controlled properties and events, input arbitration, and focus traversal.
+
 The next milestone hardens disposal, failures, locale and display changes, browser integration tests, release-size settings, and SDK or CLI serving and packaging.
 
-The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, DOM-backed PlatformView, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
+The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
 
 ## Invariants
 
 - Web adds a PlatformAdapter and renderer, not another Runtime or component implementation.
 - Ordinary Views render through RenderScene and Canvas rather than DOM.
-- DOM use is limited to browser services, text measurement, text input, semantics, and future PlatformView.
-- Future PlatformViews and Canvas slices share one isolated composition root and follow RenderScene paint order.
+- DOM use is limited to browser services, text measurement, text input, PlatformView, and future semantics.
+- PlatformViews and Canvas slices share one isolated composition root and follow RenderScene paint order.
 - Runtime logical coordinates remain CSS-pixel coordinates; display scale is applied at the platform boundary.
 - Resources are ready and synchronously readable before Runtime starts.
 - Browser text input emits shared TextInputCommandBatch values and never owns authoritative TextField state.

@@ -16,7 +16,7 @@ The current implementation provides:
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
 
-Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows, Linux, and Web, ExternalTexture native producers and renderer frame import on Windows and Web, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, macOS, Windows, and Web nonvisual timer reference integrations are implemented.
+Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Windows and Linux, ExternalTexture native producers and renderer frame import on Windows and Web, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, Web HTMLElement hosting with retained Canvas slices, shared hit testing, focus traversal, IME coordination, native accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, macOS, Windows, and Web nonvisual timer reference integrations are implemented.
 The current Android, Linux, and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
@@ -295,7 +295,7 @@ The shell uses its local `gradlew` or `gradlew.bat` when present and otherwise r
 The current CLI does not generate or download Gradle wrapper binaries.
 
 Web builds use `emcmake` to configure the same root CMake project and produce the ES module, WebAssembly module, and project-owned HTML entry point.
-The Web shell owns the HTML document and Canvas mount code rather than hiding them in the SDK.
+The Web shell owns the HTML document and host-element mount code rather than hiding them in the SDK.
 
 ### Run
 
@@ -453,7 +453,7 @@ iOS has one application build path. Source-checkout development and a packaged S
 
 ### Web
 
-The shell supplies the browser-owned HTML document and Canvas mount code.
+The shell supplies the browser-owned HTML document and empty host element used by the adapter-owned composition root.
 The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development.
 It does not define a parallel JavaScript component system or expose browsers as synthetic devices.
 Formal distribution uses an Emscripten-compatible SDK archive, and a source checkout remains an explicit override of the same root-project configuration.

@@ -706,6 +706,10 @@ void WebRenderer::Invalidate() noexcept {
   force_redraw_ = true;
 }
 
+bool WebRenderer::TakeInvalidation() noexcept {
+  return std::exchange(force_redraw_, false);
+}
+
 const WebTextLayout& WebRenderer::ParagraphFor(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
@@ -771,13 +775,29 @@ std::unique_ptr<TextLayout> WebRenderer::CreateTextLayout(
   return std::make_unique<WebTextLayout>(context_, text, style.font, max_width, options);
 }
 
-void WebRenderer::RenderSequence(const PaintSequence& sequence) {
+struct WebRenderer::CommandRange {
+  std::size_t first = 0;
+  std::size_t end = 0;
+  std::size_t cursor = 0;
+};
+
+void WebRenderer::RenderSequence(const PaintSequence& sequence, CommandRange* range) {
   for (const PaintCommand& command : sequence.Commands()) {
+    if (std::holds_alternative<PlacePlatformViewCommand>(command)) {
+      continue;
+    }
+    const bool selected = range == nullptr || (range->cursor >= range->first && range->cursor < range->end);
+    if (range != nullptr) {
+      ++range->cursor;
+    }
+    if (!selected) {
+      continue;
+    }
     std::visit([this](const auto& value) { RenderCommand(value); }, command);
   }
 }
 
-void WebRenderer::RenderSceneNode(const RenderNode& node) {
+void WebRenderer::RenderSceneNode(const RenderNode& node, CommandRange* range) {
   const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
   if (!node.visible || opacity <= 0.0F) {
     return;
@@ -790,7 +810,7 @@ void WebRenderer::RenderSceneNode(const RenderNode& node) {
   ApplyTransform(context_, transform);
   context_.set("globalAlpha", context_["globalAlpha"].as<double>() * opacity);
 
-  RenderSequence(node.content);
+  RenderSequence(node.content, range);
   for (const RenderClip& clip : node.child_clips) {
     std::visit([this](const auto& command) { RenderCommand(command); }, clip);
   }
@@ -799,7 +819,7 @@ void WebRenderer::RenderSceneNode(const RenderNode& node) {
   }
   for (const RenderNode* child : node.children) {
     if (child != nullptr) {
-      RenderSceneNode(*child);
+      RenderSceneNode(*child, range);
     }
   }
   if (!node.children_transform.IsIdentity()) {
@@ -808,7 +828,7 @@ void WebRenderer::RenderSceneNode(const RenderNode& node) {
   for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
     RenderCommand(PopClipCommand{});
   }
-  RenderSequence(node.foreground);
+  RenderSequence(node.foreground, range);
   context_.call<void>("restore");
 }
 
@@ -1065,12 +1085,41 @@ void WebRenderer::RenderCommand(const PopTransformCommand& command) {
 
 void WebRenderer::RenderCommand(const PlacePlatformViewCommand& command) {
   static_cast<void>(command);
-  throw std::logic_error("HuxerUI Web adapter does not support PlatformView composition yet");
+  throw std::logic_error("HuxerUI Web renderer received a PlatformView outside RenderComposition");
 }
 
 void WebRenderer::Draw(const RenderFrame& frame) {
-  const bool full_redraw = std::exchange(force_redraw_, false) || frame.damage.full;
+  DrawTarget(canvas_, frame, nullptr, true, TakeInvalidation());
+}
+
+void WebRenderer::DrawSlice(
+    const val& canvas,
+    const RenderFrame& frame,
+    std::size_t first_command,
+    std::size_t command_count,
+    bool draw_background,
+    bool force_redraw
+) {
+  const std::size_t end = command_count > std::numeric_limits<std::size_t>::max() - first_command
+                              ? std::numeric_limits<std::size_t>::max()
+                              : first_command + command_count;
+  CommandRange range{first_command, end, 0};
+  DrawTarget(canvas, frame, &range, draw_background, force_redraw);
+}
+
+void WebRenderer::DrawTarget(
+    const val& canvas, const RenderFrame& frame, CommandRange* range, bool draw_background, bool force_redraw
+) {
+  val previous_context = context_;
+  context_ = canvas.call<val>("getContext", std::string("2d"));
+  if (context_.isNull() || context_.isUndefined()) {
+    context_ = std::move(previous_context);
+    throw std::runtime_error("HuxerUI Web Canvas 2D context is unavailable");
+  }
+
+  const bool full_redraw = force_redraw || frame.damage.full;
   if (!full_redraw && frame.damage.rects.empty()) {
+    context_ = std::move(previous_context);
     return;
   }
   std::vector<Rect> regions = frame.damage.rects;
@@ -1079,35 +1128,48 @@ void WebRenderer::Draw(const RenderFrame& frame) {
   }
   std::erase_if(regions, [](const Rect& region) { return region.IsEmpty(); });
   if (regions.empty()) {
+    context_ = std::move(previous_context);
     return;
   }
 
-  context_.call<void>("save");
-  context_.call<void>("setTransform", 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-  context_.call<void>("beginPath");
-  const double display_scale = display_scale_;
-  for (const Rect& region : regions) {
-    const double left = std::floor(static_cast<double>(region.x) * display_scale);
-    const double top = std::floor(static_cast<double>(region.y) * display_scale);
-    const double right = std::ceil(static_cast<double>(region.x + region.width) * display_scale);
-    const double bottom = std::ceil(static_cast<double>(region.y + region.height) * display_scale);
-    context_.call<void>("clearRect", left, top, right - left, bottom - top);
-    context_.call<void>("rect", left, top, right - left, bottom - top);
+  try {
+    context_.call<void>("save");
+    context_.call<void>("setTransform", 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    context_.call<void>("beginPath");
+    const double display_scale = display_scale_;
+    for (const Rect& region : regions) {
+      const double left = std::floor(static_cast<double>(region.x) * display_scale);
+      const double top = std::floor(static_cast<double>(region.y) * display_scale);
+      const double right = std::ceil(static_cast<double>(region.x + region.width) * display_scale);
+      const double bottom = std::ceil(static_cast<double>(region.y + region.height) * display_scale);
+      context_.call<void>("clearRect", left, top, right - left, bottom - top);
+      context_.call<void>("rect", left, top, right - left, bottom - top);
+    }
+    context_.call<void>("clip");
+    if (draw_background) {
+      context_.set("fillStyle", CssColor(Color::Rgb(247, 248, 250)));
+      context_.call<void>(
+          "fillRect",
+          0.0,
+          0.0,
+          std::ceil(static_cast<double>(viewport_.width) * display_scale),
+          std::ceil(static_cast<double>(viewport_.height) * display_scale)
+      );
+    }
+    context_.call<void>("setTransform", display_scale, 0.0, 0.0, display_scale, 0.0, 0.0);
+    if (frame.scene.root != nullptr) {
+      RenderSceneNode(*frame.scene.root, range);
+    }
+    context_.call<void>("restore");
+  } catch (...) {
+    try {
+      context_.call<void>("restore");
+    } catch (...) {
+    }
+    context_ = std::move(previous_context);
+    throw;
   }
-  context_.call<void>("clip");
-  context_.set("fillStyle", CssColor(Color::Rgb(247, 248, 250)));
-  context_.call<void>(
-      "fillRect",
-      0.0,
-      0.0,
-      std::ceil(static_cast<double>(viewport_.width) * display_scale),
-      std::ceil(static_cast<double>(viewport_.height) * display_scale)
-  );
-  context_.call<void>("setTransform", display_scale, 0.0, 0.0, display_scale, 0.0, 0.0);
-  if (frame.scene.root != nullptr) {
-    RenderSceneNode(*frame.scene.root);
-  }
-  context_.call<void>("restore");
+  context_ = std::move(previous_context);
 }
 
 } // namespace huxerui::detail

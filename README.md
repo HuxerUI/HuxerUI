@@ -174,7 +174,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
 | `example_platform_module` | Android, iOS, Linux, macOS, Windows, and Web typed platform services, plus Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA ExternalTexture streams |
-| `example_platform_view` | Android and Apple native text input embedded in HuxerUI layout, state, events, and rendering order |
+| `example_platform_view` | Android, Apple, and Web native text input embedded in HuxerUI layout, state, events, and rendering order |
 | `platform/android/example_runner` | Android example selection, platform integration, and application packaging |
 
 ## Architecture

@@ -1,6 +1,7 @@
 function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_text_input.cpp"
             PARENT_SCOPE
