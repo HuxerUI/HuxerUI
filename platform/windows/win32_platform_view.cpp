@@ -301,34 +301,27 @@ struct Win32PlatformViews::State {
         },
         scale
     );
-    HDWP positions = BeginDeferWindowPos(2);
-    if (positions == nullptr) {
-      throw std::runtime_error("HuxerUI could not begin positioning a Windows PlatformView");
-    }
-    positions = DeferWindowPos(
-        positions,
-        hosted.view,
-        HWND_TOP,
-        view.left,
-        view.top,
-        std::max(0L, view.right - view.left),
-        std::max(0L, view.bottom - view.top),
-        SWP_NOACTIVATE | SWP_SHOWWINDOW
-    );
-    if (positions == nullptr) {
+    // The view and clipping container have different parents, so Win32 forbids batching them in one transaction.
+    if (!SetWindowPos(
+            hosted.view,
+            nullptr,
+            view.left,
+            view.top,
+            std::max(0L, view.right - view.left),
+            std::max(0L, view.bottom - view.top),
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW
+        )) {
       throw std::runtime_error("HuxerUI could not position a Windows PlatformView HWND");
     }
-    positions = DeferWindowPos(
-        positions,
-        hosted.container,
-        HWND_TOP,
-        container.left,
-        container.top,
-        std::max(0L, container.right - container.left),
-        std::max(0L, container.bottom - container.top),
-        SWP_NOACTIVATE | SWP_SHOWWINDOW
-    );
-    if (positions == nullptr || !EndDeferWindowPos(positions)) {
+    if (!SetWindowPos(
+            hosted.container,
+            HWND_TOP,
+            container.left,
+            container.top,
+            std::max(0L, container.right - container.left),
+            std::max(0L, container.bottom - container.top),
+            SWP_NOACTIVATE | SWP_SHOWWINDOW
+        )) {
       throw std::runtime_error("HuxerUI could not position a Windows PlatformView container");
     }
   }

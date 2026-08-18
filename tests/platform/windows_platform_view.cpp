@@ -285,6 +285,16 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(windows_platform_view_updates == 0);
   REQUIRE(windows_platform_view_root != nullptr);
   REQUIRE(GetParent(GetParent(windows_platform_view_root)) == window.Handle());
+  RECT platform_view_bounds{};
+  RECT platform_view_edit_bounds{};
+  REQUIRE(GetClientRect(windows_platform_view_root, &platform_view_bounds));
+  REQUIRE(GetClientRect(windows_platform_view_edit, &platform_view_edit_bounds));
+  REQUIRE(platform_view_bounds.right - platform_view_bounds.left == 80);
+  REQUIRE(platform_view_bounds.bottom - platform_view_bounds.top == 40);
+  REQUIRE(platform_view_edit_bounds.right - platform_view_edit_bounds.left == 80);
+  REQUIRE(platform_view_edit_bounds.bottom - platform_view_edit_bounds.top == 40);
+  REQUIRE((GetWindowLongPtrW(windows_platform_view_root, GWL_STYLE) & WS_VISIBLE) != 0);
+  REQUIRE((GetWindowLongPtrW(windows_platform_view_edit, GWL_STYLE) & WS_VISIBLE) != 0);
 
   const auto anchor = std::ranges::find_if(initial.semantic_frame->nodes, [](const SemanticNode& node) {
     return node.platform_view_identity.has_value();
