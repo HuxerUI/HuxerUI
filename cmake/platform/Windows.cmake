@@ -15,6 +15,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_ui_dispatcher.cpp"
@@ -28,10 +29,11 @@ function(huxerui_platform_configure)
             ${HUXERUI_WINDOWS_VERSION_DEFINITIONS}
             PARENT_SCOPE
     )
-    set(HUXERUI_PLATFORM_LINK_LIBRARIES
+    set(HUXERUI_WINDOWS_LINK_LIBRARIES
             d2d1
             d3d11
             dwrite
+            dwmapi
             dxguid
             dxgi
             imm32
@@ -41,6 +43,12 @@ function(huxerui_platform_configure)
             uiautomationcore
             user32
             windowscodecs
+    )
+    if (NOT HUXERUI_WINDOWS_7_COMPAT)
+        list(APPEND HUXERUI_WINDOWS_LINK_LIBRARIES dcomp)
+    endif ()
+    set(HUXERUI_PLATFORM_LINK_LIBRARIES
+            ${HUXERUI_WINDOWS_LINK_LIBRARIES}
             PARENT_SCOPE
     )
 endfunction()

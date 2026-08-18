@@ -19,6 +19,7 @@
 #include <huxerui/app.h>
 
 #include "win32_internal.h"
+#include "win32_platform_view.h"
 
 namespace huxerui::detail {
 
@@ -400,6 +401,69 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     return frame;
   }
 
+  HWND NativeHandle(std::uint64_t identity) const {
+    std::scoped_lock lock(mutex);
+    const auto found = platform_view_handles.find(identity);
+    return found == platform_view_handles.end() ? nullptr : found->second;
+  }
+
+  static HRESULT QueryWindowProvider(HWND view, REFIID interface_id, void** provider) {
+    if (provider == nullptr) {
+      return E_INVALIDARG;
+    }
+    *provider = nullptr;
+    if (view == nullptr || !IsWindow(view)) {
+      return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    IRawElementProviderSimple* host = nullptr;
+    const HRESULT host_result = UiaHostProviderFromHwnd(view, &host);
+    if (FAILED(host_result) || host == nullptr) {
+      return host_result;
+    }
+    const HRESULT result = host->QueryInterface(interface_id, provider);
+    host->Release();
+    return result;
+  }
+
+  HRESULT QueryNativeProvider(std::uint64_t identity, REFIID interface_id, void** provider) const {
+    return QueryWindowProvider(NativeHandle(identity), interface_id, provider);
+  }
+
+  HRESULT
+  NativeElementFromPoint(std::uint64_t identity, double x, double y, IRawElementProviderFragment** provider) const {
+    HWND target = NativeHandle(identity);
+    if (target == nullptr || !IsWindow(target)) {
+      return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    const POINT screen_point{static_cast<LONG>(std::lround(x)), static_cast<LONG>(std::lround(y))};
+    while (true) {
+      POINT local = screen_point;
+      if (!ScreenToClient(target, &local)) {
+        break;
+      }
+      const HWND child = ChildWindowFromPointEx(target, local, CWP_SKIPINVISIBLE);
+      if (child == nullptr || child == target) {
+        break;
+      }
+      target = child;
+    }
+    return QueryWindowProvider(target, __uuidof(IRawElementProviderFragment), reinterpret_cast<void**>(provider));
+  }
+
+  HRESULT NativeFocusedElement(std::uint64_t identity, IRawElementProviderFragment** provider) const {
+    const HWND root = NativeHandle(identity);
+    if (root == nullptr || !IsWindow(root)) {
+      return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    GUITHREADINFO thread_info{sizeof(GUITHREADINFO)};
+    const DWORD thread = GetWindowThreadProcessId(root, nullptr);
+    HWND focused = GetGUIThreadInfo(thread, &thread_info) ? thread_info.hwndFocus : nullptr;
+    if (focused == nullptr || (focused != root && !IsChild(root, focused))) {
+      focused = root;
+    }
+    return QueryWindowProvider(focused, __uuidof(IRawElementProviderFragment), reinterpret_cast<void**>(provider));
+  }
+
   HRESULT Provider(SemanticNodeId id, IRawElementProviderSimple** result) {
     if (result == nullptr) {
       return E_INVALIDARG;
@@ -509,6 +573,8 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
   HWND window = nullptr;
   DWORD ui_thread = GetCurrentThreadId();
   float dpi_scale = kDefaultDpiScale;
+  // Native handles are copied with the SemanticFrame so off-thread UI Automation queries never reach their owner.
+  std::unordered_map<std::uint64_t, HWND> platform_view_handles;
   std::shared_ptr<const SemanticFrame> frame;
   // The cache owns one COM reference; clients may retain additional references after a node is removed.
   std::unordered_map<SemanticNodeId, Win32SemanticProvider*> providers;
@@ -845,7 +911,44 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetEmbeddedFragmentRoots(SAFEAR
     return E_INVALIDARG;
   }
   *roots = nullptr;
-  return Node() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
+  const SemanticNodeSnapshot node = Node();
+  if (!node) {
+    return UIA_E_ELEMENTNOTAVAILABLE;
+  }
+  if (!node->platform_view_identity.has_value()) {
+    return S_OK;
+  }
+  const std::shared_ptr<Win32Accessibility::State> state = LockState();
+  if (!state) {
+    return UIA_E_ELEMENTNOTAVAILABLE;
+  }
+  IRawElementProviderSimple* embedded = nullptr;
+  const HRESULT provider_result = state->QueryNativeProvider(
+      *node->platform_view_identity,
+      __uuidof(IRawElementProviderSimple),
+      reinterpret_cast<void**>(&embedded)
+  );
+  if (provider_result == UIA_E_ELEMENTNOTAVAILABLE) {
+    return S_OK;
+  }
+  if (FAILED(provider_result)) {
+    return provider_result;
+  }
+  SAFEARRAY* result = SafeArrayCreateVector(VT_UNKNOWN, 0, 1);
+  if (result == nullptr) {
+    embedded->Release();
+    return E_OUTOFMEMORY;
+  }
+  LONG index = 0;
+  IUnknown* unknown = embedded;
+  const HRESULT array_result = SafeArrayPutElement(result, &index, unknown);
+  embedded->Release();
+  if (FAILED(array_result)) {
+    SafeArrayDestroy(result);
+    return array_result;
+  }
+  *roots = result;
+  return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE Win32SemanticProvider::SetFocus() {
@@ -926,6 +1029,13 @@ Win32SemanticProvider::ElementProviderFromPoint(double x, double y, IRawElementP
   if (!hit_test(hit_test, frame->root)) {
     return S_OK;
   }
+  const SemanticNode* found_node = FindNode(*frame, *found);
+  if (found_node != nullptr && found_node->platform_view_identity.has_value()) {
+    const HRESULT result = state->NativeElementFromPoint(*found_node->platform_view_identity, x, y, provider);
+    if (SUCCEEDED(result)) {
+      return result;
+    }
+  }
   return Provider(*found, provider);
 }
 
@@ -944,7 +1054,16 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetFocus(IRawElementProviderFra
   }
   const std::shared_ptr<const SemanticFrame>& frame = root.frame;
   const auto focused = std::ranges::find(frame->nodes, true, &SemanticNode::focused);
-  return focused == frame->nodes.end() ? S_OK : Provider(focused->id, provider);
+  if (focused == frame->nodes.end()) {
+    return S_OK;
+  }
+  if (focused->platform_view_identity.has_value()) {
+    const HRESULT result = state->NativeFocusedElement(*focused->platform_view_identity, provider);
+    if (SUCCEEDED(result)) {
+      return result;
+    }
+  }
+  return Provider(focused->id, provider);
 }
 
 HRESULT STDMETHODCALLTYPE Win32SemanticProvider::Invoke() {
@@ -1445,16 +1564,29 @@ void Win32Accessibility::SetDpiScale(float scale) noexcept {
   state_->dpi_scale = std::isfinite(scale) && scale > 0.0F ? scale : kDefaultDpiScale;
 }
 
-void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame) {
+void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, const Win32PlatformViews* platform_views) {
+  std::unordered_map<std::uint64_t, HWND> platform_view_handles;
+  if (frame && platform_views != nullptr) {
+    for (const SemanticNode& node : frame->nodes) {
+      if (!node.platform_view_identity.has_value()) {
+        continue;
+      }
+      if (HWND view = platform_views->AccessibilityView(*node.platform_view_identity)) {
+        platform_view_handles.emplace(*node.platform_view_identity, view);
+      }
+    }
+  }
+
   std::shared_ptr<const SemanticFrame> previous;
   HWND window = nullptr;
   {
     std::scoped_lock lock(state_->mutex);
-    if (state_->frame == frame) {
+    if (state_->frame == frame && state_->platform_view_handles == platform_view_handles) {
       return;
     }
     previous = state_->frame;
     state_->frame = frame;
+    state_->platform_view_handles = std::move(platform_view_handles);
     window = state_->window;
   }
   state_->RetainProviders(frame.get());
@@ -1607,6 +1739,7 @@ void Win32Accessibility::Reset() noexcept {
     state_->runtime = nullptr;
     state_->window = nullptr;
     state_->frame.reset();
+    state_->platform_view_handles.clear();
   }
   if (window != nullptr) {
     // UI Automation keeps a per-HWND provider map that must be disconnected before the HWND becomes invalid.

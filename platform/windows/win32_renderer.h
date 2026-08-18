@@ -32,6 +32,7 @@ public:
   void ResetDeviceResources() noexcept;
   void Resize(HWND window, float dpi);
   void DpiChanged(HWND window, float dpi);
+  [[nodiscard]] bool EnablePlatformComposition(HWND window);
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options);

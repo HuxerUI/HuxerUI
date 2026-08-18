@@ -73,6 +73,7 @@ if (WIN32)
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
             platform/windows_platform_module.cpp
+            platform/windows_platform_view.cpp
             platform/windows_renderer.cpp
             platform/windows_window_chrome.cpp
     )
@@ -165,6 +166,10 @@ set(HUXERUI_PUBLIC_HEADERS
         ios/platform_view.h
         macos/platform_view.h
 )
+
+if (WIN32)
+    list(APPEND HUXERUI_PUBLIC_HEADERS windows/platform_view.h)
+endif ()
 
 if (APPLE)
     list(APPEND HUXERUI_PUBLIC_HEADERS

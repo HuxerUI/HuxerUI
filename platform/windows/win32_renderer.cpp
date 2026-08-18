@@ -4,6 +4,7 @@
 #include <d2d1_1helper.h>
 #include <d2d1effects.h>
 #include <d3d11.h>
+#include <dcomp.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
 #include <wincodec.h>
@@ -846,6 +847,55 @@ struct Win32Renderer::State {
     return true;
   }
 
+  bool EnsureDirectComposition() {
+    if (!platform_composition_) {
+      return true;
+    }
+    if (composition_device_ && composition_target_ && composition_visual_) {
+      return true;
+    }
+
+    ComPtr<IDXGIDevice> dxgi_device;
+    if (FAILED(d3d_device_.As(&dxgi_device))) {
+      return false;
+    }
+
+    HRESULT result = E_NOTIMPL;
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+    if (dcomp_library_ == nullptr) {
+      dcomp_library_ = LoadLibraryW(L"dcomp.dll");
+    }
+    using CreateDeviceFunction = HRESULT(WINAPI*)(IDXGIDevice*, REFIID, void**);
+    const auto create_device =
+        dcomp_library_ == nullptr
+            ? nullptr
+            : reinterpret_cast<CreateDeviceFunction>(GetProcAddress(dcomp_library_, "DCompositionCreateDevice"));
+    if (create_device != nullptr) {
+      result = create_device(
+          dxgi_device.Get(),
+          __uuidof(IDCompositionDevice),
+          reinterpret_cast<void**>(composition_device_.GetAddressOf())
+      );
+    }
+#else
+    result = DCompositionCreateDevice(
+        dxgi_device.Get(),
+        __uuidof(IDCompositionDevice),
+        reinterpret_cast<void**>(composition_device_.GetAddressOf())
+    );
+#endif
+    if (FAILED(result) ||
+        FAILED(composition_device_->CreateTargetForHwnd(window_, TRUE, composition_target_.GetAddressOf())) ||
+        FAILED(composition_device_->CreateVisual(composition_visual_.GetAddressOf())) ||
+        FAILED(composition_target_->SetRoot(composition_visual_.Get()))) {
+      composition_visual_.Reset();
+      composition_target_.Reset();
+      composition_device_.Reset();
+      return false;
+    }
+    return true;
+  }
+
   bool EnsureShadowResources() {
     if (shadow_context_ && shadow_brush_ && shadow_effect_ && shadow_clip_layer_) {
       return true;
@@ -871,15 +921,21 @@ struct Win32Renderer::State {
     return true;
   }
 
-  HRESULT CreateSwapChain(IDXGIFactory2& factory, DXGI_SWAP_EFFECT effect, UINT buffer_count) {
+  HRESULT CreateSwapChain(IDXGIFactory2& factory, DXGI_SWAP_EFFECT effect, UINT buffer_count, UINT width, UINT height) {
     DXGI_SWAP_CHAIN_DESC1 description{};
+    description.Width = platform_composition_ ? width : 0;
+    description.Height = platform_composition_ ? height : 0;
     description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     description.SampleDesc.Count = 1;
     description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     description.BufferCount = buffer_count;
     description.Scaling = DXGI_SCALING_STRETCH;
     description.SwapEffect = effect;
-    description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    description.AlphaMode = platform_composition_ ? DXGI_ALPHA_MODE_PREMULTIPLIED : DXGI_ALPHA_MODE_IGNORE;
+    if (platform_composition_) {
+      return factory
+          .CreateSwapChainForComposition(d3d_device_.Get(), &description, nullptr, swap_chain_.GetAddressOf());
+    }
     return factory
         .CreateSwapChainForHwnd(d3d_device_.Get(), window_, &description, nullptr, nullptr, swap_chain_.GetAddressOf());
   }
@@ -890,6 +946,9 @@ struct Win32Renderer::State {
     }
     if (!EnsureDeviceResources()) {
       return false;
+    }
+    if (!EnsureDirectComposition()) {
+      throw std::logic_error("HuxerUI Windows PlatformView requires unavailable DirectComposition");
     }
     RECT client{};
     GetClientRect(window_, &client);
@@ -910,22 +969,37 @@ struct Win32Renderer::State {
       }
 
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-      HRESULT swap_chain_result = CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2);
+      HRESULT swap_chain_result = CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, width, height);
       supports_dirty_present_ = SUCCEEDED(swap_chain_result);
-      if (FAILED(swap_chain_result)) {
+      if (FAILED(swap_chain_result) && !platform_composition_) {
         swap_chain_.Reset();
-        swap_chain_result = CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_SEQUENTIAL, 1);
+        swap_chain_result = CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_SEQUENTIAL, 1, width, height);
         supports_dirty_present_ = false;
       }
 #else
-      const HRESULT swap_chain_result = CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2);
+      const HRESULT swap_chain_result =
+          CreateSwapChain(*factory.Get(), DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, width, height);
       supports_dirty_present_ = SUCCEEDED(swap_chain_result);
 #endif
       if (FAILED(swap_chain_result)) {
         DiscardDeviceResources();
+        if (platform_composition_) {
+          ThrowIfFailed(swap_chain_result, "HuxerUI could not create the Windows PlatformView composition surface");
+        }
         return false;
       }
-      static_cast<void>(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER));
+      if (platform_composition_) {
+        HRESULT composition_result = composition_visual_->SetContent(swap_chain_.Get());
+        if (SUCCEEDED(composition_result)) {
+          composition_result = composition_device_->Commit();
+        }
+        if (FAILED(composition_result)) {
+          DiscardDeviceResources();
+          ThrowIfFailed(composition_result, "HuxerUI could not attach the Windows PlatformView composition surface");
+        }
+      } else {
+        static_cast<void>(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER));
+      }
     }
 
     ComPtr<IDXGISurface> surface;
@@ -936,7 +1010,10 @@ struct Win32Renderer::State {
 
     const D2D1_BITMAP_PROPERTIES1 swap_chain_properties = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
+        D2D1::PixelFormat(
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            platform_composition_ ? D2D1_ALPHA_MODE_PREMULTIPLIED : D2D1_ALPHA_MODE_IGNORE
+        ),
         dpi_,
         dpi_
     );
@@ -988,11 +1065,29 @@ struct Win32Renderer::State {
     image_cache_bytes_ = 0;
     brush_.Reset();
     swap_chain_.Reset();
+    if (composition_target_ && composition_device_) {
+      static_cast<void>(composition_target_->SetRoot(nullptr));
+      static_cast<void>(composition_device_->Commit());
+    }
+    composition_visual_.Reset();
+    composition_target_.Reset();
+    composition_device_.Reset();
     device_context_.Reset();
     d2d_device_.Reset();
     d3d_device_.Reset();
     supports_dirty_present_ = false;
     force_full_repaint_ = true;
+  }
+
+  bool EnablePlatformComposition(HWND window) {
+    window_ = window;
+    if (platform_composition_) {
+      return false;
+    }
+    // Switching back to an HWND swap chain would tear down the window surface during every PlatformView unmount.
+    platform_composition_ = true;
+    DiscardDeviceResources();
+    return true;
   }
 
   void ResizeRenderTarget() {
@@ -1057,6 +1152,9 @@ struct Win32Renderer::State {
     device_context_->SetTarget(swap_chain_target_.Get());
     device_context_->BeginDraw();
     device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+    if (platform_composition_) {
+      device_context_->Clear(D2D1::ColorF(0.0F, 0.0F));
+    }
     // Every rotating back buffer receives the complete retained scene; Present1 still limits native damage.
     device_context_->DrawBitmap(scene_target_.Get());
     result = device_context_->EndDraw();
@@ -1812,8 +1910,18 @@ struct Win32Renderer::State {
     transform_stack_.pop_back();
   }
 
-  void RenderCommand(const PlacePlatformViewCommand&) {
-    throw std::logic_error("HuxerUI Windows adapter does not support PlatformView composition yet");
+  void RenderCommand(const PlacePlatformViewCommand& command) {
+    if (!platform_composition_) {
+      throw std::logic_error("HuxerUI Windows PlatformView requires DirectComposition");
+    }
+    const D2D1_PRIMITIVE_BLEND previous = device_context_->GetPrimitiveBlend();
+    const D2D1_ANTIALIAS_MODE previous_antialias = device_context_->GetAntialiasMode();
+    device_context_->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY);
+    device_context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+    brush_->SetColor(D2D1::ColorF(0.0F, 0.0F));
+    device_context_->FillRectangle(ToD2DRect(command.Bounds()), brush_.Get());
+    device_context_->SetAntialiasMode(previous_antialias);
+    device_context_->SetPrimitiveBlend(previous);
   }
 
   void PopClip() {
@@ -1832,6 +1940,7 @@ struct Win32Renderer::State {
   float dpi_ = kDipsPerInch;
   bool force_full_repaint_ = true;
   bool supports_dirty_present_ = false;
+  bool platform_composition_ = false;
   ComPtr<ID2D1Factory1> d2d_factory_;
   ComPtr<IDWriteFactory> write_factory_;
   ComPtr<IWICImagingFactory> wic_factory_;
@@ -1840,6 +1949,9 @@ struct Win32Renderer::State {
   ComPtr<ID2D1DeviceContext> device_context_;
   ComPtr<ID2D1DeviceContext> shadow_context_;
   ComPtr<IDXGISwapChain1> swap_chain_;
+  ComPtr<IDCompositionDevice> composition_device_;
+  ComPtr<IDCompositionTarget> composition_target_;
+  ComPtr<IDCompositionVisual> composition_visual_;
   ComPtr<ID2D1Bitmap1> swap_chain_target_;
   ComPtr<ID2D1Bitmap1> scene_target_;
   ComPtr<ID2D1SolidColorBrush> brush_;
@@ -1855,6 +1967,9 @@ struct Win32Renderer::State {
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
   std::vector<ClipState> clip_stack_;
   std::vector<D2D1_MATRIX_3X2_F> transform_stack_;
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+  HMODULE dcomp_library_ = nullptr;
+#endif
 };
 
 Win32Renderer::Win32Renderer() : state_(std::make_unique<State>()) {}
@@ -1867,12 +1982,19 @@ void Win32Renderer::Initialize() {
 
 void Win32Renderer::Discard() noexcept {
   state_->DiscardDeviceResources();
+  state_->platform_composition_ = false;
   state_->paragraphs_.clear();
   state_->text_runs_.clear();
   state_->font_metrics_.clear();
   state_->wic_factory_.Reset();
   state_->write_factory_.Reset();
   state_->d2d_factory_.Reset();
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+  if (state_->dcomp_library_ != nullptr) {
+    FreeLibrary(state_->dcomp_library_);
+    state_->dcomp_library_ = nullptr;
+  }
+#endif
   state_->window_ = nullptr;
 }
 
@@ -1898,6 +2020,10 @@ void Win32Renderer::DpiChanged(HWND window, float dpi) {
   }
   state_->DiscardSizeDependentResources();
   state_->force_full_repaint_ = true;
+}
+
+bool Win32Renderer::EnablePlatformComposition(HWND window) {
+  return state_->EnablePlatformComposition(window);
 }
 
 FontMetrics Win32Renderer::Metrics(const Font& font) {

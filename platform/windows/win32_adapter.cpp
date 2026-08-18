@@ -28,6 +28,7 @@
 #include "text_layout_internal.h"
 #include "win32_accessibility.h"
 #include "win32_internal.h"
+#include "win32_platform_view.h"
 #include "win32_renderer.h"
 #include "win32_text_input.h"
 #include "win32_ui_dispatcher.h"
@@ -305,8 +306,15 @@ public:
       MSG message{};
       int message_result = 0;
       while ((message_result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (platform_views_ && platform_views_->HandleFocusTraversal(message)) {
+          platform_views_->SynchronizeFocus(GetFocus());
+          continue;
+        }
         TranslateMessage(&message);
         DispatchMessageW(&message);
+        if (platform_views_) {
+          platform_views_->SynchronizeFocus(GetFocus());
+        }
       }
       if (message_result < 0 && !failure_) {
         failure_ = std::make_exception_ptr(std::runtime_error("HuxerUI Windows message loop failed"));
@@ -422,8 +430,7 @@ public:
     return ProcessMetrics{
         .cpu_time_seconds = FileTimeSeconds(kernel) + FileTimeSeconds(user),
         .memory_usage_bytes = static_cast<std::uint64_t>(counters.WorkingSetSize),
-        .processor_count =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
+        .processor_count = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
     };
   }
 
@@ -589,6 +596,16 @@ private:
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
     }
+    platform_views_ = std::make_unique<Win32PlatformViews>(
+        instance_,
+        window_,
+        Modules(),
+        *runtime_,
+        ui_dispatcher_.Bind(),
+        [this](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
+          return HandleOverlayMessage(source, message, w_param, l_param);
+        }
+    );
     ui_dispatcher_.Attach(window_);
     if (custom_chrome_) {
       first_nc_calc_ = false;
@@ -612,10 +629,13 @@ private:
     ui_dispatcher_.Shutdown();
     text_input_.Reset();
     committed_frame_ = nullptr;
+    accessibility_.Reset();
+    if (platform_views_) {
+      platform_views_->Shutdown();
+      platform_views_.reset();
+    }
     if (window_ != nullptr) {
-      if (!DestroyWindow(window_)) {
-        accessibility_.Reset();
-      }
+      static_cast<void>(DestroyWindow(window_));
       window_ = nullptr;
     }
     renderer_.Discard();
@@ -711,8 +731,13 @@ private:
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
-    accessibility_.Commit(commit.semantic_frame);
     committed_frame_ = &commit.render_frame;
+    const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
+    const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
+    accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
+    if (composition_changed) {
+      static_cast<void>(InvalidateFullWindow());
+    }
     static_cast<void>(InvalidateDamage(committed_frame_->damage));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
@@ -720,11 +745,15 @@ private:
     FlushDeferredFrame();
   }
 
-  Point ClientPoint(LPARAM position) const noexcept {
+  Point ClientPoint(HWND source, LPARAM position) const noexcept {
+    POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
+    if (source != window_) {
+      MapWindowPoints(source, window_, &point, 1);
+    }
     const float scale = DpiScale();
     return {
-        static_cast<float>(GET_X_LPARAM(position)) / scale,
-        static_cast<float>(GET_Y_LPARAM(position)) / scale,
+        static_cast<float>(point.x) / scale,
+        static_cast<float>(point.y) / scale,
     };
   }
 
@@ -825,20 +854,20 @@ private:
     }
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
     pointer_down_ = false;
-    if (GetCapture() == window_) {
+    if (GetCapture() != nullptr) {
       ReleaseCapture();
     }
   }
 
-  void TrackMouse(MouseTrackingArea area) {
-    if (mouse_tracking_area_ == area) {
+  void TrackMouse(MouseTrackingArea area, HWND tracked_window) {
+    if (mouse_tracking_area_ == area && mouse_tracking_window_ == tracked_window) {
       return;
     }
     if (mouse_tracking_area_ != MouseTrackingArea::None) {
       TRACKMOUSEEVENT cancellation{
           sizeof(TRACKMOUSEEVENT),
           static_cast<DWORD>(TME_CANCEL | (mouse_tracking_area_ == MouseTrackingArea::NonClient ? TME_NONCLIENT : 0U)),
-          window_,
+          mouse_tracking_window_,
           HOVER_DEFAULT,
       };
       static_cast<void>(TrackMouseEvent(&cancellation));
@@ -846,10 +875,88 @@ private:
     TRACKMOUSEEVENT tracking{
         sizeof(TRACKMOUSEEVENT),
         static_cast<DWORD>(TME_LEAVE | (area == MouseTrackingArea::NonClient ? TME_NONCLIENT : 0U)),
-        window_,
+        tracked_window,
         HOVER_DEFAULT,
     };
     mouse_tracking_area_ = TrackMouseEvent(&tracking) != FALSE ? area : MouseTrackingArea::None;
+    mouse_tracking_window_ = mouse_tracking_area_ == MouseTrackingArea::None ? nullptr : tracked_window;
+  }
+
+  std::optional<LRESULT> HandleClientPointerMessage(HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
+    switch (message) {
+    case WM_CANCELMODE:
+      CancelPointer();
+      return 0;
+    case WM_LBUTTONDOWN:
+      SetFocus(window_);
+      SetCapture(source);
+      pointer_down_ = true;
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param));
+      return 0;
+    case WM_LBUTTONDBLCLK:
+      SetFocus(window_);
+      SetCapture(source);
+      pointer_down_ = true;
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), 2);
+      return 0;
+    case WM_MOUSEMOVE:
+      TrackMouse(MouseTrackingArea::Client, source);
+      SendPointer(PointerEventType::Move, ClientPoint(source, l_param));
+      return 0;
+    case WM_LBUTTONUP:
+      SendPointer(PointerEventType::Up, ClientPoint(source, l_param));
+      pointer_down_ = false;
+      if (GetCapture() == source) {
+        ReleaseCapture();
+      }
+      return 0;
+    case WM_MOUSELEAVE:
+      mouse_tracking_area_ = MouseTrackingArea::None;
+      mouse_tracking_window_ = nullptr;
+      if (!pointer_down_) {
+        SendPointer(PointerEventType::Cancel, last_pointer_position_);
+      }
+      return 0;
+    case WM_CAPTURECHANGED:
+      if (pointer_down_ && reinterpret_cast<HWND>(l_param) != source) {
+        SendPointer(PointerEventType::Cancel, last_pointer_position_);
+        pointer_down_ = false;
+      }
+      return 0;
+    case WM_MOUSEWHEEL: {
+      const float delta =
+          static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
+      runtime_->HandleScrollEvent({ScreenPoint(l_param), 0.0F, -delta});
+      return 0;
+    }
+    case WM_MOUSEHWHEEL: {
+      const float delta =
+          static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
+      runtime_->HandleScrollEvent({ScreenPoint(l_param), delta, 0.0F});
+      return 0;
+    }
+    default:
+      return std::nullopt;
+    }
+  }
+
+  LRESULT HandleOverlayMessage(HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
+    if (message == WM_NCHITTEST) {
+      if (!custom_chrome_) {
+        return HTCLIENT;
+      }
+      if (const std::optional<LRESULT> caption_control = CaptionControlHitTest(l_param)) {
+        return *caption_control;
+      }
+      if (const LRESULT resize = ResizeHitTest(l_param); resize != HTCLIENT) {
+        return resize;
+      }
+      return runtime_ != nullptr && runtime_->IsWindowDragRegion(ScreenPoint(l_param)) ? HTCAPTION : HTCLIENT;
+    }
+    if (const std::optional<LRESULT> handled = HandleClientPointerMessage(source, message, w_param, l_param)) {
+      return *handled;
+    }
+    return DefWindowProcW(source, message, w_param, l_param);
   }
 
   void ExecuteWindowCommand(WindowCommand command) {
@@ -896,6 +1003,9 @@ private:
       }
       return 0;
     }
+    if (const std::optional<LRESULT> handled = HandleClientPointerMessage(window, message, w_param, l_param)) {
+      return *handled;
+    }
     switch (message) {
     case WM_NCHITTEST:
       if (custom_chrome_) {
@@ -916,14 +1026,14 @@ private:
       text_input_.SetWindow(window);
       text_input_.SetDpiScale(DpiScale());
       return 0;
-    case WM_CANCELMODE:
-      CancelPointer();
-      return 0;
     case WM_DESTROY:
       ui_dispatcher_.Shutdown();
-      accessibility_.Reset();
-      window_ = nullptr;
       text_input_.SetWindow(nullptr);
+      accessibility_.Reset();
+      if (platform_views_) {
+        platform_views_->Shutdown();
+      }
+      window_ = nullptr;
       committed_frame_ = nullptr;
       PostQuitMessage(0);
       return 0;
@@ -931,6 +1041,9 @@ private:
       return 1;
     case WM_SIZE:
       renderer_.Resize(window_, dpi_);
+      if (platform_views_) {
+        platform_views_->Resize();
+      }
       if (w_param == SIZE_MINIMIZED) {
         return 0;
       }
@@ -987,10 +1100,14 @@ private:
       }
       PAINTSTRUCT paint{};
       BeginPaint(window, &paint);
-      if (renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint) == Win32RenderResult::Recreate) {
+      const Win32RenderResult render_result = renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint);
+      if (render_result == Win32RenderResult::Recreate) {
         InvalidateFullWindow();
       }
       EndPaint(window, &paint);
+      if (render_result == Win32RenderResult::Presented && platform_views_) {
+        platform_views_->DidPresent();
+      }
       if (const std::optional<double> deadline = frame_state_.EndPaint(window_ != nullptr)) {
         ScheduleFrame(*deadline);
       }
@@ -1019,44 +1136,16 @@ private:
         return 0;
       }
       break;
-    case WM_LBUTTONDOWN:
-      SetFocus(window);
-      SetCapture(window);
-      pointer_down_ = true;
-      SendPointer(PointerEventType::Down, ClientPoint(l_param));
-      return 0;
-    case WM_LBUTTONDBLCLK:
-      SetFocus(window);
-      SetCapture(window);
-      pointer_down_ = true;
-      SendPointer(PointerEventType::Down, ClientPoint(l_param), 2);
-      return 0;
-    case WM_MOUSEMOVE:
-      TrackMouse(MouseTrackingArea::Client);
-      SendPointer(PointerEventType::Move, ClientPoint(l_param));
-      return 0;
-    case WM_LBUTTONUP:
-      SendPointer(PointerEventType::Up, ClientPoint(l_param));
-      pointer_down_ = false;
-      if (GetCapture() == window) {
-        ReleaseCapture();
-      }
-      return 0;
-    case WM_MOUSELEAVE:
-      mouse_tracking_area_ = MouseTrackingArea::None;
-      if (!pointer_down_) {
-        SendPointer(PointerEventType::Cancel, last_pointer_position_);
-      }
-      return 0;
     case WM_NCMOUSEMOVE:
       if (custom_chrome_) {
-        TrackMouse(MouseTrackingArea::NonClient);
+        TrackMouse(MouseTrackingArea::NonClient, window);
         SendPointer(PointerEventType::Move, ScreenPoint(l_param));
       }
       return DefWindowProcW(window, message, w_param, l_param);
     case WM_NCMOUSELEAVE:
       if (mouse_tracking_area_ == MouseTrackingArea::NonClient) {
         mouse_tracking_area_ = MouseTrackingArea::None;
+        mouse_tracking_window_ = nullptr;
         if (!pointer_down_) {
           SendPointer(PointerEventType::Cancel, last_pointer_position_);
         }
@@ -1081,32 +1170,6 @@ private:
         return 0;
       }
       break;
-    case WM_CAPTURECHANGED:
-      if (pointer_down_ && reinterpret_cast<HWND>(l_param) != window) {
-        SendPointer(PointerEventType::Cancel, last_pointer_position_);
-        pointer_down_ = false;
-      }
-      return 0;
-    case WM_MOUSEWHEEL: {
-      const float delta =
-          static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      runtime_->HandleScrollEvent({
-          ScreenPoint(l_param),
-          0.0F,
-          -delta,
-      });
-      return 0;
-    }
-    case WM_MOUSEHWHEEL: {
-      const float delta =
-          static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      runtime_->HandleScrollEvent({
-          ScreenPoint(l_param),
-          delta,
-          0.0F,
-      });
-      return 0;
-    }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
       text_input_.ClearPendingResult();
@@ -1183,6 +1246,7 @@ private:
   bool timer_armed_ = false;
   PlatformFrameState frame_state_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
+  HWND mouse_tracking_window_ = nullptr;
   bool pointer_down_ = false;
   Point last_pointer_position_;
   Win32Accessibility accessibility_;
@@ -1193,6 +1257,7 @@ private:
   Win32UIThreadDispatcher& ui_dispatcher_;
   Win32Api win32_api_;
   Win32Renderer renderer_;
+  std::unique_ptr<Win32PlatformViews> platform_views_;
 };
 
 int RunPlatformApplication(const Application& application) {

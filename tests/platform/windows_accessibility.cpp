@@ -54,7 +54,7 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
 
   detail::Win32Accessibility accessibility;
   accessibility.SetRuntime(&runtime.NativeRuntime());
-  accessibility.Commit(frame);
+  accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> button;
@@ -99,7 +99,7 @@ TEST_CASE("Windows accessibility patterns route actions through Runtime") {
 
   detail::Win32Accessibility accessibility;
   accessibility.SetRuntime(&runtime.NativeRuntime());
-  accessibility.Commit(frame);
+  accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> button;
@@ -135,7 +135,7 @@ TEST_CASE("Windows accessibility patterns route actions through Runtime") {
   REQUIRE(accessibility_text_value.Get().text == "updated");
 
   const std::shared_ptr<const SemanticFrame> updated = runtime.BuildCommit().semantic_frame;
-  accessibility.Commit(updated);
+  accessibility.Commit(updated, nullptr);
   double current = 0.0;
   REQUIRE(range->get_Value(&current) == S_OK);
   REQUIRE(current == 7.5);
@@ -216,7 +216,7 @@ TEST_CASE("Windows accessibility advertises only committed semantic patterns") {
   };
 
   detail::Win32Accessibility accessibility;
-  accessibility.Commit(frame);
+  accessibility.Commit(frame, nullptr);
 
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> checkbox;
   REQUIRE(accessibility.ProviderForNode(2, &checkbox) == S_OK);
@@ -300,7 +300,7 @@ TEST_CASE("Windows accessibility keeps COM interfaces static while replacing cha
   };
 
   detail::Win32Accessibility accessibility;
-  accessibility.Commit(invoke_frame);
+  accessibility.Commit(invoke_frame, nullptr);
 
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> original;
   REQUIRE(accessibility.ProviderForNode(2, &original) == S_OK);
@@ -313,7 +313,7 @@ TEST_CASE("Windows accessibility keeps COM interfaces static while replacing cha
   toggle_frame->revision = 2;
   toggle_frame->nodes[1].role = SemanticRole::Checkbox;
   toggle_frame->nodes[1].checked = SemanticCheckedState::Unchecked;
-  accessibility.Commit(toggle_frame);
+  accessibility.Commit(toggle_frame, nullptr);
 
   Microsoft::WRL::ComPtr<IInvokeProvider> retained_invoke;
   REQUIRE(original.As(&retained_invoke) == S_OK);
@@ -332,7 +332,7 @@ TEST_CASE("Windows accessibility keeps COM interfaces static while replacing cha
   removed_frame->revision = 3;
   removed_frame->root = 1;
   removed_frame->nodes = {SemanticNode{.id = 1}};
-  accessibility.Commit(removed_frame);
+  accessibility.Commit(removed_frame, nullptr);
 
   Microsoft::WRL::ComPtr<IUnknown> retained_unknown;
   REQUIRE(original.As(&retained_unknown) == S_OK);

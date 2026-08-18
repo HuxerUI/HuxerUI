@@ -157,10 +157,15 @@ Debug process metrics use process times, working-set counters, and the native lo
 Nonvisual Windows modules register the platform-neutral `PlatformModuleFactory` from CMake-native sources under `platform/windows/src`.
 Native results and events enter a FIFO owned by the adapter and wake its UI thread through a coalesced private window message; work emitted before HWND creation waits until attachment, and shutdown discards late callbacks.
 The Windows `example_platform_module` implementation uses a thread-pool timer behind the same typed Timer Root Service used by Android, Apple platforms, and Linux.
+RootHook-installed `windows::PlatformViewFactory` registrations create same-process, same-thread child HWNDs inside framework clipping containers.
+When a committed scene contains PlatformViews, one premultiplied DirectComposition surface replays every retained HuxerUI slice and clears ordered rectangular apertures that expose those child windows; no surface is allocated per slice.
+The input overlay arbitrates each hit through Runtime, focus and Tab traversal cross the native boundary through the shared PlatformView identity, and UI Automation attaches the native HWND provider beneath its semantic anchor.
+The Windows `example_platform_view` target hosts a controlled native edit control through this path.
 
 `HUXERUI_WINDOWS_7_COMPAT=ON` builds an opt-in binary for Windows 7 SP1 with Platform Update or later.
 That build resolves modern per-monitor DPI APIs at runtime, uses system-DPI fallbacks on Windows 7, and falls back from flip presentation to a sequential bitblt swap chain when necessary.
 Custom window chrome uses the same HuxerUI controls with the compatibility renderer; Windows 11 Snap Layout is naturally unavailable there.
+PlatformView composition requires DirectComposition and fails explicitly when that capability is unavailable.
 Windows 7 without Platform Update is not supported.
 
 ## Linux

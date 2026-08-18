@@ -14,6 +14,7 @@ class Runtime;
 
 namespace detail {
 
+class Win32PlatformViews;
 class Win32SemanticProvider;
 
 class Win32Accessibility final {
@@ -29,7 +30,7 @@ public:
   void SetRuntime(Runtime* runtime) noexcept;
   void SetWindow(HWND window) noexcept;
   void SetDpiScale(float scale) noexcept;
-  void Commit(std::shared_ptr<const SemanticFrame> frame);
+  void Commit(std::shared_ptr<const SemanticFrame> frame, const Win32PlatformViews* platform_views);
   void Reset() noexcept;
 
   LRESULT HandleGetObject(WPARAM w_param, LPARAM l_param);

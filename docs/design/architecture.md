@@ -14,7 +14,7 @@ Current implementation status:
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and native accessibility bridges on Android, iOS, macOS, and Windows are implemented. Complete component semantics and the remaining native adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent native `CVPixelBuffer` sources and Core Image frame import, Android provides a native `Bitmap` source and Canvas frame import, and Linux provides copied RGBA/BGRA pixel sources and Cairo frame import; Windows and Web native producer and renderer paths remain proposed. Android, macOS, iOS, and Web provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux and Windows provide owning-thread dispatch for nonvisual modules. Android, iOS, and macOS also attach native PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Android, iOS, Linux, macOS, Windows, and Web provide nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and native dependency projection preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent native `CVPixelBuffer` sources and Core Image frame import, Android provides a native `Bitmap` source and Canvas frame import, and Linux provides copied RGBA/BGRA pixel sources and Cairo frame import; Windows and Web native producer and renderer paths remain proposed. Android, macOS, iOS, Web, and Windows provide owning-thread dispatch and native PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, macOS, and Windows also attach native PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Android, iOS, Linux, macOS, Windows, and Web provide nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, native PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and native dependency projection preserve one shared Runtime and keep native objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -406,10 +406,10 @@ The shared public surface stays focused as the phases land:
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
 - `<huxerui/external_texture.h>` owns the platform-neutral `ExternalTexture` consumer value; platform-specific headers own native frame producers.
-- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; `<huxerui/android/platform_module.h>` and `<huxerui/android/platform_view.h>` own the Android nonvisual and visual factory contracts.
+- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; platform-specific `platform_view.h` headers own the Android, Apple, Web, and Windows visual factory contracts.
 
 There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
-Implemented headers are re-exported through `<huxerui/huxerui.h>`; future headers join it when their phases land, while ordinary applications normally see only a module's typed component and service headers.
+Platform-neutral implemented headers are re-exported through `<huxerui/huxerui.h>`, while platform-specific factory and producer headers are included directly by native module sources; ordinary applications normally see only a module's typed component and service headers.
 
 The same payload type carries controlled PlatformView properties, nonvisual module creation options, method arguments, method results, event data, structured error details, and opaque ExternalTexture references.
 Concrete module APIs remain strongly typed and own their codecs at the module boundary:
@@ -433,7 +433,7 @@ Large or continuous media frames do not travel through PlatformPayload; only an 
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
 `PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-Visual registrations are `android::PlatformViewFactory`, `macos::PlatformViewFactory`, and `ios::PlatformViewFactory`. Nonvisual C++ and Apple implementations use the platform-neutral `PlatformModuleFactory`, while Java-backed Android implementations use `android::PlatformModuleFactory` so the owning adapter can inject its retained Context and current UI-thread `JNIEnv`; another registry or registration-kind enum is unnecessary.
+Visual registrations use the platform-specific `PlatformViewFactory` in the `android`, `ios`, `macos`, `web`, or `windows` namespace. Nonvisual C++ and Apple implementations use the platform-neutral `PlatformModuleFactory`, while Java-backed Android implementations use `android::PlatformModuleFactory` so the owning adapter can inject its retained Context and current UI-thread `JNIEnv`; another registry or registration-kind enum is unnecessary.
 Registration callbacks remain in the platform adapter or platform module source and may use native types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
 `PlatformModules::Open()` owns instance protocol setup and delegates registration-specific creation to its `PlatformAdapter`. The default adapter path creates a platform-neutral factory, while an adapter override may recognize its own registration type before falling back. This keeps native host dependencies in the adapter instead of adding a Context service, hidden opener, thread-local state, or process-global registry.
 The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
@@ -578,18 +578,19 @@ Consecutive drawing remains in one slice, adjacent PlatformViews do not create e
 `RenderComposition` is a platform-adapter implementation detail rather than a second public rendering tree or application-visible layer API.
 
 Each nonempty slice has stable retained identity derived from its surrounding PlatformView boundaries and scene role.
-Adapters reuse compatible slice surfaces across frames, diff PlatformView identity and property revisions, and mutate the native hierarchy only while applying a committed RenderComposition on the platform UI thread.
+Adapters reuse the platform-appropriate representation of compatible slices across frames, diff PlatformView identity and property revisions, and mutate the native hierarchy only while applying a committed RenderComposition on the platform UI thread.
 Native objects are never inserted, reordered, or removed from `drawRect:`, `onDraw`, `dispatchDraw`, a paint callback, or renderer command replay.
-A changed composition creates, updates, positions, clips, shows, hides, reorders, or destroys only the affected native instances and slice surfaces.
+A changed composition creates, updates, positions, clips, shows, hides, reorders, or destroys only the affected native instances and adapter-owned slice representations.
 Moving or removing an item damages its previous and current visible bounds without rerecording unrelated clean PaintSequences.
 An offscreen or temporarily hidden PlatformView remains mounted and preserves native state; committed removal detaches input and accessibility references before native destruction.
+On Windows, a visible removed HWND remains retained behind the previous transparent aperture until the replacement HuxerUI surface is successfully presented, then it is destroyed before the next frame; this prevents the root background from flashing between frame commit and presentation.
 
 The adapter creates a native instance when its identity first enters a committed RenderComposition and applies controlled properties before making it visible.
 A property revision sends the complete controlled properties to the compatible instance through an idempotent Update, while bounds-only changes update placement without resending an unchanged property payload.
 Factories should validate an Update before mutating observable native state and apply the complete controlled payload idempotently.
 Replacement prepares the new instance before retiring the old one.
 A factory exception is a module integration error that aborts the platform commit; adapters contain native exceptions at their boundary but do not attempt to roll back arbitrary module-owned native state.
-Runtime shutdown detaches input, focus, and accessibility bridges, destroys PlatformViews and slice surfaces, and only then releases module Root Services in their existing reverse installation order.
+Runtime shutdown detaches input, focus, and accessibility bridges, destroys PlatformViews and adapter-owned composition resources, and only then releases module Root Services in their existing reverse installation order.
 
 Initial PlatformView presentation supports translation, axis-aligned layout, rectangular clipping, visibility, and deterministic ordering among PlatformViews.
 Arbitrary rotation, path clipping, group opacity spanning a PlatformView, backdrop filters, and offscreen effects are unsupported until every platform can preserve their semantics.
@@ -614,21 +615,77 @@ Platform adapters preserve the same contract through platform-specific compositi
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and native UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
 | macOS | Transparent HuxerUI slice views or layers and native NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
-| Windows | HuxerUI slices and native child HWNDs require an ordered child-window or DirectComposition strategy rather than one swap chain around all child windows. A foreign HWND or Windows 7 compatibility path that cannot preserve the order is unsupported. |
+| Windows | One transparent DirectComposition surface replays every HuxerUI slice, while native child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | Linux/X11 | The adapter uses ordered child windows with suitable ARGB composition or redirects native child content through XComposite. A server without the required composition capability cannot host that PlatformView. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
 
 These strategies are conformance requirements, not application-selectable composition modes.
-A factory whose native object cannot preserve exact ordering on the current platform fails with a diagnostic naming the registered PlatformView type and missing capability.
+A factory whose native object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView type or unavailable adapter capability at the layer that detects it.
 It must not silently flatten the declaration into a global foreground or background plane, capture an interactive native hierarchy as stale pixels, or discard covering HuxerUI content.
 Modules may choose a different native implementation internally, while high-frequency visual content without native interaction remains an ExternalTexture.
 
 Current shared tests cover payload invariants, per-surface registration, leaf layout, identity and property revisions, typed event delivery, frontmost hit testing, basic paint order, adjacent PlatformViews, keyed movement, replacement, and unsupported transforms and opacity.
 The macOS integration fixture covers native creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, focus synchronization, accessibility identity resolution, removal, stale-event rejection, and disposal.
 Android focused tests cover semantic-anchor encoding, while the Android PlatformView example and device validation cover native creation, controlled updates, slice ordering, hit testing, focus and IME transfer, native accessibility attachment, removal, and recreation.
+The Windows integration fixture covers native creation and update, retained identity across hiding, nested HWND focus and UI Automation resolution, stale-event rejection, presentation-delayed retirement, remount, and deterministic disposal.
 Later composition phases add content-child-foreground order, nested rectangular clips, visibility, and equivalent adapter coverage as those behaviors land.
 Each available platform adds an integration fixture with HuxerUI content below and above one native control, verifies frontmost pointer ownership, native focus and IME transfer, accessibility traversal through the anchor, retained native state across recomposition and temporary hiding, and deterministic teardown.
-Future surface-specific tests cover Android `SurfaceView` rejection, Windows child HWND, and X11 child-window composition as the corresponding adapters land. Web integration coverage still needs automated DOM stacking, native event, focus-boundary, and disposal checks across supported browsers.
+Future surface-specific tests cover Android `SurfaceView` rejection and X11 child-window composition. Web integration coverage still needs automated DOM stacking, native event, focus-boundary, and disposal checks across supported browsers.
+
+#### Windows PlatformView composition
+
+Status: implemented
+
+The default Windows 10 adapter uses one premultiplied-alpha DirectComposition surface as the complete HuxerUI composition plane whenever the committed scene contains PlatformViews.
+It does not create one HWND, swap chain, bitmap, or DirectComposition surface per HuxerUI slice.
+The existing non-PlatformView presentation path remains unchanged until this composition mode is committed for the window.
+
+The coordinator derives and consumes the ordered `RenderComposition` for native identity, placement, and z-order without deleting or replacing its slice boundaries.
+The single-surface renderer traverses the committed scene once; ordinary HuxerUI drawing remains on that surface, each `PlacePlatformViewCommand` clears its resolved visible rectangle to transparent, and later HuxerUI drawing continues over the aperture.
+This is observably equivalent to replaying the ordered slice ranges while avoiding a surface or replay pass per slice, and the retained slice contract remains available if Windows later needs a multi-surface mapping.
+Native child HWND z-order follows committed PlatformView order, so a later placement replaces earlier HuxerUI drawing within its aperture while drawing after that placement can cover the native content.
+This preserves the shared observable paint order for axis-aligned opaque native islands without pretending that HWND pixels participate directly in Direct2D blending.
+
+Each mounted PlatformView owns one framework-private clipping container HWND.
+The factory creates its native root HWND as a child of that container, while the adapter positions the container at the visible rectangle and offsets the native root by the clip origin.
+The container performs no drawing, never takes focus, contributes no semantic node, and is not a public composition concept.
+It provides a stable ownership and rectangular-clipping boundary without modifying the factory-owned control through `SetWindowRgn`.
+Placement and native z-order changes are applied on the window UI thread.
+
+The Windows-specific factory contract lives in `<huxerui/windows/platform_view.h>`:
+
+```cpp
+namespace huxerui::windows {
+
+struct PlatformViewFactory {
+  std::function<HWND(HWND parent, const PlatformPayload&, PlatformEventSink)> create;
+  std::function<void(HWND, const PlatformPayload&)> update;
+  std::function<void(HWND)> dispose;
+};
+
+} // namespace huxerui::windows
+```
+
+The factory must return a same-process, same-UI-thread `WS_CHILD` HWND whose parent is the supplied clipping container.
+After successful creation, HuxerUI owns destruction of that root HWND.
+The adapter calls `dispose` once before `DestroyWindow`; `dispose` releases module callbacks, subclass state, and other owned resources but does not destroy the HWND.
+Creation, update, disposal, placement, and focus changes run on the owning UI thread, while `PlatformEventSink` delivery uses the existing Windows UI-thread dispatcher and drops events from an inactive route.
+
+A single framework-private transparent input-shield HWND covers the client area while PlatformViews are present.
+It asks Runtime for the committed frontmost hit target.
+When a PlatformView wins, the shield returns `HTTRANSPARENT` so the same-thread child HWND receives ordinary pointer input; when HuxerUI content wins, the shield routes input through the existing adapter path and prevents the covered native control from receiving it.
+Pointer capture remains with the side that won the initial sequence.
+
+Runtime-directed PlatformView focus selects the native root or its first focusable descendant.
+After native message dispatch, the adapter maps `GetFocus()` back through each hosted root and its descendants and synchronizes the matching mounted identity.
+Tab traversal remains within standard native descendants while a next tab stop exists, then crosses the PlatformView boundary through Runtime focus order.
+A focused native editor owns Win32 text services and suspends the HuxerUI text-input session until focus returns to a HuxerUI editor.
+The UI Automation adapter exposes the hosted HWND provider below the existing PlatformView semantic anchor rather than publishing both as sibling roots.
+
+Windows PlatformViews are opaque rectangular native islands.
+A factory that returns a foreign-process HWND, a different-thread HWND, a non-child root, or native content requiring per-pixel composition outside its aperture fails explicitly.
+Rotation, path clipping, cross-boundary group opacity, backdrop effects, and other unsupported declarations remain rejected by the shared composition builder before platform mutation.
+The Windows 7 compatibility renderer does not silently flatten PlatformViews into a global foreground or background plane; a Windows 7 session that requests this DirectComposition capability fails with an explicit unavailable-capability diagnostic.
 
 ### ExternalTexture
 
@@ -1659,7 +1716,7 @@ The architecture follows these rules:
 - A service belongs to one window root.
 - External texture frames invalidate visible destinations without recomposition or PaintSequence recording.
 - PlatformView updates diff committed identities and property revisions instead of recreating native instances every frame.
-- PlatformView composition reuses compatible HuxerUI slice surfaces and does not split a scene that contains no PlatformViews.
+- PlatformView composition reuses compatible platform slice representations, avoids per-slice surfaces on single-surface adapters, and does not split a scene that contains no PlatformViews.
 
 Incremental layout and retained rendering are specified separately in [Incremental Layout and Rendering Design](incremental-rendering.md).
 The implemented pipeline coordinates mounted geometry, extension painting, Runtime frame output, and platform renderers under that contract.
