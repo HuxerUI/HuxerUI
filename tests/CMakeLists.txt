@@ -90,6 +90,7 @@ if (UNIX AND NOT APPLE)
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/linux_timer.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
             platform/linux_damage.cpp
+            platform/linux_external_texture.cpp
             platform/linux_platform_module.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp
@@ -169,6 +170,12 @@ if (APPLE)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             ios/external_texture.h
             macos/external_texture.h
+    )
+endif ()
+
+if (UNIX AND NOT APPLE)
+    list(APPEND HUXERUI_PUBLIC_HEADERS
+            linux/external_texture.h
     )
 endif ()
 

@@ -5,6 +5,8 @@
 
 #include "linux_internal.h"
 
+#include <cairo/cairo.h>
+
 #include <huxerui/geometry.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/text.h>
@@ -50,10 +52,11 @@ public:
       unsigned long damage_count
   );
 
+  void Draw(cairo_t* context, const RenderFrame& frame);
+
 public:
   struct State;
 
-  void RenderSceneNode(const RenderNode& node);
   [[nodiscard]] bool InitializePresentation(Display* display);
   [[nodiscard]] bool EnsureGl(Display* display, Window window);
   [[nodiscard]] bool PresentGl();

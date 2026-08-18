@@ -131,7 +131,7 @@ Public headers live in `include/huxerui`; implementation-only headers live in `s
 
 Use forward declarations only when a complete type is unnecessary. Keep include groups stable: matching module header, standard library, public HuxerUI headers, then private quoted headers.
 
-Do not create a public header per trivial control or grow `view.h` with unrelated services, platform types, or rendering machinery. A new public header updates `<huxerui/huxerui.h>`, public header checks, packaging metadata when applicable, and public documentation.
+Do not create a public header per trivial control or grow `view.h` with unrelated services, platform types, or rendering machinery. A new cross-platform public header updates `<huxerui/huxerui.h>`, public header checks, packaging metadata when applicable, and public documentation. Platform-specific public headers remain explicit includes and update their available-host header checks, packaging metadata when applicable, and public documentation.
 
 Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep a type in `src/internal.h` only when Runtime subsystems genuinely share it.
 

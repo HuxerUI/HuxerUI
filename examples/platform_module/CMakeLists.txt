@@ -28,7 +28,11 @@ elseif (APPLE)
 elseif (EMSCRIPTEN)
     target_sources(example_platform_module PRIVATE web_timer.cpp)
 elseif (UNIX AND NOT APPLE)
-    target_sources(example_platform_module PRIVATE linux_timer.cpp)
+    target_sources(example_platform_module PRIVATE
+            color_stream.cpp
+            linux_color_stream.cpp
+            linux_timer.cpp
+    )
 else ()
     message(FATAL_ERROR "HuxerUI platform module example is not implemented for this platform")
 endif ()

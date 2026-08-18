@@ -43,6 +43,7 @@
 #include <huxerui/text.h>
 
 #include "linux_renderer.h"
+#include "linux_external_texture_internal.h"
 #include "path_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
@@ -819,6 +820,16 @@ struct LinuxRenderer::State {
   std::uint64_t image_cache_bytes = 0;
   static constexpr std::uint64_t kImageCacheBudget = 32 * 1024 * 1024;
 
+  struct ExternalTextureCacheEntry {
+    std::weak_ptr<LinuxExternalTextureState> source;
+    std::unique_ptr<LinuxExternalTextureFrame> frame;
+    cairo_surface_t* surface = nullptr;
+    std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
+  };
+
+  std::vector<ExternalTextureCacheEntry> external_textures;
+  std::uint64_t external_texture_draw_epoch = 0;
+
   struct ShadowMaskKey {
     float width = 0.0F;
     float height = 0.0F;
@@ -867,6 +878,7 @@ struct LinuxRenderer::State {
       }
     }
     image_cache.clear();
+    ClearExternalTextures();
     ClearShadowMasks();
     for (auto& [key, face] : cairo_font_cache) {
       cairo_font_face_destroy(face);
@@ -907,6 +919,38 @@ struct LinuxRenderer::State {
 
   [[nodiscard]] float Scale() const noexcept {
     return std::max(dpi, 1.0F) / kDipsPerInch;
+  }
+
+  void ClearExternalTextures() noexcept {
+    for (ExternalTextureCacheEntry& entry : external_textures) {
+      if (entry.surface != nullptr) {
+        cairo_surface_destroy(entry.surface);
+      }
+    }
+    external_textures.clear();
+  }
+
+  void BeginExternalTextureFrame() {
+    if (external_texture_draw_epoch == std::numeric_limits<std::uint64_t>::max()) {
+      external_texture_draw_epoch = 0;
+      for (ExternalTextureCacheEntry& entry : external_textures) {
+        entry.draw_epoch = std::numeric_limits<std::uint64_t>::max();
+      }
+    } else {
+      ++external_texture_draw_epoch;
+    }
+
+    for (auto entry = external_textures.begin(); entry != external_textures.end();) {
+      const std::shared_ptr<LinuxExternalTextureState> source = entry->source.lock();
+      if (source && source->IsActive()) {
+        ++entry;
+        continue;
+      }
+      if (entry->surface != nullptr) {
+        cairo_surface_destroy(entry->surface);
+      }
+      entry = external_textures.erase(entry);
+    }
   }
 
   void ClearShadowMasks() noexcept {
@@ -1418,6 +1462,56 @@ struct LinuxRenderer::State {
     return surface;
   }
 
+  [[nodiscard]] cairo_surface_t* ExternalTextureSurfaceFor(const ExternalTexture& texture) {
+    const std::shared_ptr<LinuxExternalTextureState> source =
+        std::dynamic_pointer_cast<LinuxExternalTextureState>(ExternalTextureState::From(texture));
+    if (!source) {
+      throw std::logic_error("HuxerUI external texture does not contain a Linux pixel frame source");
+    }
+    auto cached = std::find_if(external_textures.begin(), external_textures.end(), [&source](const auto& entry) {
+      return entry.source.lock() == source;
+    });
+    if (cached == external_textures.end()) {
+      external_textures.push_back(
+          ExternalTextureCacheEntry{
+              source,
+              nullptr,
+              nullptr,
+              std::numeric_limits<std::uint64_t>::max(),
+          }
+      );
+      cached = external_textures.end() - 1;
+    }
+    if (cached->draw_epoch == external_texture_draw_epoch) {
+      return cached->surface;
+    }
+    cached->draw_epoch = external_texture_draw_epoch;
+
+    std::optional<LinuxExternalTextureFrame> pending = source->AcquireLatestFrame();
+    if (!pending.has_value()) {
+      return cached->surface;
+    }
+    auto next_frame = std::make_unique<LinuxExternalTextureFrame>(std::move(*pending));
+    const std::span<const std::byte> pixels = next_frame->Pixels();
+    cairo_surface_t* next_surface = cairo_image_surface_create_for_data(
+        reinterpret_cast<unsigned char*>(const_cast<std::byte*>(pixels.data())),
+        CAIRO_FORMAT_ARGB32,
+        next_frame->PixelWidth(),
+        next_frame->PixelHeight(),
+        static_cast<int>(next_frame->BytesPerRow())
+    );
+    if (cairo_surface_status(next_surface) != CAIRO_STATUS_SUCCESS) {
+      cairo_surface_destroy(next_surface);
+      throw std::runtime_error("HuxerUI could not create the Linux external texture Cairo surface");
+    }
+    if (cached->surface != nullptr) {
+      cairo_surface_destroy(cached->surface);
+    }
+    cached->frame = std::move(next_frame);
+    cached->surface = next_surface;
+    return cached->surface;
+  }
+
   // Creates only the EGL display and picks a config; the native window does not
   // exist yet, so the surface and context are deferred to EnsureGl. The default
   // display is never used because it opens a second X connection on this thread.
@@ -1922,6 +2016,7 @@ void LinuxRenderer::Discard() noexcept {
   }
   state_->image_cache.clear();
   state_->image_cache_bytes = 0;
+  state_->ClearExternalTextures();
   state_->ClearShadowMasks();
   for (auto& [key, face] : state_->cairo_font_cache) {
     cairo_font_face_destroy(face);
@@ -2131,9 +2226,7 @@ LinuxRenderResult LinuxRenderer::Render(
   cairo_set_source_rgba(cr, background.red, background.green, background.blue, background.alpha);
   cairo_paint(cr);
 
-  if (frame.scene.root != nullptr) {
-    RenderSceneNode(*frame.scene.root);
-  }
+  Draw(cr, frame);
 
   cairo_restore(cr);
 
@@ -2432,48 +2525,77 @@ private:
       return;
     }
     const float image_scale = command.image.Scale();
-    const double source_x = command.source.x * image_scale;
-    const double source_y = command.source.y * image_scale;
-    const double source_width = command.source.width * image_scale;
-    const double source_height = command.source.height * image_scale;
-    cairo_save(cr_);
-    cairo_rectangle(
-        cr_,
-        command.destination.x,
-        command.destination.y,
-        command.destination.width,
-        command.destination.height
+    DrawSurface(
+        surface,
+        command.source.x * image_scale,
+        command.source.y * image_scale,
+        command.source.width * image_scale,
+        command.source.height * image_scale,
+        command.destination,
+        command.sampling,
+        command.opacity
     );
+  }
+
+  void RenderCommand(const DrawExternalTextureCommand& command) {
+    cairo_surface_t* surface = state_.ExternalTextureSurfaceFor(command.texture);
+    if (surface == nullptr) {
+      return;
+    }
+    const Size intrinsic_size = command.texture.IntrinsicSize();
+    const float scale_x = static_cast<float>(cairo_image_surface_get_width(surface)) / intrinsic_size.width;
+    const float scale_y = static_cast<float>(cairo_image_surface_get_height(surface)) / intrinsic_size.height;
+    DrawSurface(
+        surface,
+        command.source.x * scale_x,
+        command.source.y * scale_y,
+        command.source.width * scale_x,
+        command.source.height * scale_y,
+        command.destination,
+        command.sampling,
+        command.opacity
+    );
+  }
+
+  void DrawSurface(
+      cairo_surface_t* surface,
+      double source_x,
+      double source_y,
+      double source_width,
+      double source_height,
+      const Rect& destination,
+      ImageSampling sampling,
+      float opacity
+  ) {
+    const double scale_x = source_width / destination.width;
+    const double scale_y = source_height / destination.height;
+    cairo_save(cr_);
+    cairo_rectangle(cr_, destination.x, destination.y, destination.width, destination.height);
     cairo_clip(cr_);
     cairo_pattern_t* pattern = cairo_pattern_create_for_surface(surface);
     cairo_matrix_t matrix{};
     cairo_matrix_init(
         &matrix,
-        source_width / command.destination.width,
+        scale_x,
         0.0,
         0.0,
-        source_height / command.destination.height,
-        source_x,
-        source_y
+        scale_y,
+        source_x - static_cast<double>(destination.x) * scale_x,
+        source_y - static_cast<double>(destination.y) * scale_y
     );
     cairo_pattern_set_matrix(pattern, &matrix);
     cairo_pattern_set_filter(
         pattern,
-        command.sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
+        sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
     );
     cairo_set_source(cr_, pattern);
-    if (command.opacity >= 1.0F) {
+    if (opacity >= 1.0F) {
       cairo_paint(cr_);
     } else {
-      cairo_paint_with_alpha(cr_, command.opacity);
+      cairo_paint_with_alpha(cr_, opacity);
     }
     cairo_pattern_destroy(pattern);
     cairo_restore(cr_);
-  }
-
-  void RenderCommand(const DrawExternalTextureCommand& command) {
-    static_cast<void>(command);
-    throw std::logic_error("HuxerUI Linux external textures are not implemented yet");
   }
 
   void RenderCommand(const DrawCircleCommand& command) {
@@ -2919,13 +3041,15 @@ private:
 
 } // namespace
 
-void LinuxRenderer::RenderSceneNode(const RenderNode& node) {
-  if (state_->retained_context == nullptr) {
-    // A null cairo_t would crash on the first cairo call in ScenePainter.
-    return;
+void LinuxRenderer::Draw(cairo_t* context, const RenderFrame& frame) {
+  if (context == nullptr) {
+    throw std::invalid_argument("HuxerUI Linux renderer Cairo context must not be null");
   }
-  ScenePainter painter(*state_, state_->retained_context);
-  painter.RenderSceneNode(node);
+  state_->BeginExternalTextureFrame();
+  if (frame.scene.root != nullptr) {
+    ScenePainter painter(*state_, context);
+    painter.RenderSceneNode(*frame.scene.root);
+  }
 }
 
 bool LinuxRenderer::InitializePresentation(Display* display) {
