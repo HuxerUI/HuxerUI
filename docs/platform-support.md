@@ -173,7 +173,11 @@ Packaged resources are read from the executable-specific `<name>.resources` dire
 Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
 Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
 Nonvisual module results and events enter a thread-safe FIFO and wake the X11 event loop through `eventfd`, so application callbacks run asynchronously on the Runtime thread without native-thread reentry.
-The Linux `example_platform_module` registers a platform-neutral factory backed by `timerfd` and exposes the same typed Timer Root Service, cancellation, and disposal behavior as the other supported native implementations.
+`linux::ExternalTextureSource` accepts borrowed, untagged sRGB RGBA8888 or BGRA8888 pixel spans with explicit dimensions and row stride from any producer thread.
+Publish validates and copies each frame into a bounded latest-wins mailbox, converting straight alpha to Cairo's native premultiplied ARGB32 representation so the producer may immediately reuse its buffer.
+The Cairo renderer acquires one coherent frame per physical draw, retains the last acquired frame, applies Image cropping, sampling, transforms, clipping, and opacity, and releases inactive cache entries.
+This path is bounded and does not claim zero-copy or native DMA-BUF import.
+The Linux `example_platform_module` registers a platform-neutral timer factory backed by `timerfd` and a background RGBA color stream, exposing the same typed Root Services and disposal behavior as the other supported native implementations.
 System dependencies are resolved through pkg-config for X11, Xext, XKB common, XRandR, EGL, and OpenGL ES 2; source-checkout builds fetch the pinned graphics, text, image, and compression libraries used by the renderer.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`, matching the macOS and Windows distribution model.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
