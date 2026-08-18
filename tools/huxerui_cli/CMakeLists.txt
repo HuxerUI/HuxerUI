@@ -4,6 +4,18 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(huxerui_cli VERSION 0.1.0 LANGUAGES CXX)
 endif ()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../3dparty/cmrc/CMakeRC.cmake")
+
+file(GLOB_RECURSE HUXERUI_CLI_TEMPLATE_FILES CONFIGURE_DEPENDS
+        LIST_DIRECTORIES FALSE
+        "${CMAKE_CURRENT_SOURCE_DIR}/templates/*"
+)
+cmrc_add_resource_library(huxerui_cli_template_resources
+        NAMESPACE huxerui_cli_templates
+        WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/templates"
+        ${HUXERUI_CLI_TEMPLATE_FILES}
+)
+
 add_library(huxerui_cli_core STATIC
         cli.cpp
         ios_project.cpp
@@ -11,6 +23,7 @@ add_library(huxerui_cli_core STATIC
         process_runner.cpp
         project.cpp
         sdk.cpp
+        template.cpp
 )
 target_compile_features(huxerui_cli_core PUBLIC cxx_std_20)
 target_compile_definitions(huxerui_cli_core PRIVATE
@@ -19,6 +32,7 @@ target_compile_definitions(huxerui_cli_core PRIVATE
 target_include_directories(huxerui_cli_core PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+target_link_libraries(huxerui_cli_core PRIVATE huxerui_cli_template_resources)
 target_compile_options(huxerui_cli_core PRIVATE
         "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
         "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"

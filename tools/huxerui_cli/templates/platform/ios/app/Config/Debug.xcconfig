@@ -1,0 +1,4 @@
+#include "Base.xcconfig"
+
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) DEBUG=1
+ONLY_ACTIVE_ARCH = YES

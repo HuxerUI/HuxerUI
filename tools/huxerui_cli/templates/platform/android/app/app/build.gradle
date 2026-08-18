@@ -1,0 +1,103 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+def huxeruiProperty = { String name -> providers.gradleProperty(name).get() }
+def huxeruiHome = rootProject.gradle.ext.huxeruiHome
+def huxeruiModules = rootProject.gradle.ext.huxeruiModules
+def huxeruiCompileSdk = huxeruiProperty("huxeruiCompileSdk").toInteger()
+def huxeruiMinSdk = huxeruiProperty("huxeruiMinSdk").toInteger()
+def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
+def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
+def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
+def huxeruiStl = huxeruiProperty("huxeruiStl")
+def huxeruiDebugAssets = layout.buildDirectory.dir("generated/huxerui/assets/debug").get().asFile
+def huxeruiReleaseAssets = layout.buildDirectory.dir("generated/huxerui/assets/release").get().asFile
+
+android {
+    namespace = "@PROJECT_ID@"
+    compileSdk = huxeruiCompileSdk
+    ndkVersion = huxeruiNdkVersion
+
+    defaultConfig {
+        applicationId = "@PROJECT_ID@"
+        minSdk = huxeruiMinSdk
+        targetSdk = huxeruiTargetSdk
+        versionCode = 1
+        versionName = "1.0"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=${huxeruiStl}",
+                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}"
+            }
+        }
+
+        ndk {
+            abiFilters(*huxeruiAbis)
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    sourceSets {
+        debug {
+            assets.srcDir huxeruiDebugAssets
+        }
+        release {
+            assets.srcDir huxeruiReleaseAssets
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../../../CMakeLists.txt")
+        }
+    }
+}
+
+dependencies {
+    implementation project(":HuxerUI")
+    huxeruiModules.each { module ->
+        implementation project(module.projectPath)
+    }
+}
+
+def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
+    def capitalizedBuildType = buildType.capitalize()
+    def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
+    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
+        dependsOn nativeTaskName
+        from {
+            def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
+                include "**/huxerui-resources/@TARGET_NAME@/package/huxerui/resources.bin"
+            }.files
+            def preferredIndexFiles = indexFiles.findAll {
+                it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
+            }
+            def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
+            def selected = candidates.max { left, right ->
+                def modified = left.lastModified() <=> right.lastModified()
+                modified != 0 ? modified : left.absolutePath <=> right.absolutePath
+            }
+            selected == null ? [] : selected.parentFile.parentFile
+        }
+        into assetsDirectory
+    }
+    tasks.matching { it.name == "merge${capitalizedBuildType}Assets" }.configureEach {
+        dependsOn stagingTask
+    }
+}
+
+registerHuxerUIResourceStaging("debug", huxeruiDebugAssets)
+registerHuxerUIResourceStaging("release", huxeruiReleaseAssets)

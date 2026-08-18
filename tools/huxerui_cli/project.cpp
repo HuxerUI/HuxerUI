@@ -1,16 +1,17 @@
 #include "project.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <fstream>
 #include <iterator>
-#include <sstream>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
 
 #include "process_runner.h"
+#include "template.h"
 
 namespace huxerui::cli {
 namespace {
@@ -40,25 +41,8 @@ private:
 
 struct ModuleTemplateContext {
   ProjectTemplateContext project;
-  std::string module_name;
-  std::string public_target;
-  std::string cpp_namespace;
-  std::string header_path;
+  std::string product_name;
 };
-
-constexpr std::string_view project_gitignore = R"TEMPLATE(/.huxerui/
-/dist/
-/build/
-/cmake-build-*/
-/.cache/
-
-/.idea/
-/.vscode/
-/.vs/
-
-.DS_Store
-Thumbs.db
-)TEMPLATE";
 
 std::filesystem::path TemporaryPath(const std::filesystem::path& parent, std::string_view stem) {
   const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -110,10 +94,6 @@ void PublishGeneratedTree(
   created.push_back(std::move(destination));
 }
 
-std::string ProjectKindName(ProjectKind kind) {
-  return kind == ProjectKind::App ? "app" : "module";
-}
-
 bool IsAsciiLetter(char character) noexcept {
   return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
 }
@@ -154,239 +134,12 @@ std::string NormalizeModuleIdentifier(std::string_view name) {
   return identifier;
 }
 
-std::string ProjectPlanJson(ProjectKind kind, const ProjectTemplateContext& context) {
-  std::ostringstream output;
-  output << "{\n"
-         << "  \"schema\": 1,\n"
-         << "  \"kind\": \"" << ProjectKindName(kind) << "\",\n"
-         << "  \"name\": \"" << context.project_name << "\",\n"
-         << "  \"id\": \"" << context.project_id << "\",\n"
-         << "  \"target\": \"" << context.target_name << "\"\n"
-         << "}\n";
-  return output.str();
-}
-
-std::string ProjectPlanCMake(ProjectKind kind, const ProjectTemplateContext& context) {
-  std::ostringstream output;
-  output << R"TEMPLATE(if (HUXERUI_PROJECT_PLAN_OUTPUT)
-    get_filename_component(HUXERUI_PROJECT_PLAN_DIRECTORY
-            "${HUXERUI_PROJECT_PLAN_OUTPUT}"
-            DIRECTORY
-    )
-    file(MAKE_DIRECTORY "${HUXERUI_PROJECT_PLAN_DIRECTORY}")
-    file(WRITE "${HUXERUI_PROJECT_PLAN_OUTPUT}" [=[
-)TEMPLATE"
-         << ProjectPlanJson(kind, context) << R"TEMPLATE(]=])
-endif ()
-if (HUXERUI_PROJECT_PLAN_ONLY)
-    return()
-endif ()
-
-)TEMPLATE";
-  return output.str();
-}
-
-std::string ProjectBootstrapCMake(const ProjectTemplateContext& context) {
-  return context.Render(R"TEMPLATE(project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-if (NOT TARGET HuxerUI::huxerui)
-    set(HUXERUI_HOME "$ENV{HUXERUI_HOME}" CACHE PATH "HuxerUI SDK or source directory")
-    if (HUXERUI_HOME AND EXISTS "${HUXERUI_HOME}/CMakeLists.txt"
-            AND EXISTS "${HUXERUI_HOME}/include/huxerui/huxerui.h")
-        set(HUXERUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(HUXERUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        if (ANDROID)
-            set(HUXERUI_BUILD_SHARED ON CACHE BOOL "" FORCE)
-            set(HUXERUI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
-        endif ()
-        add_subdirectory("${HUXERUI_HOME}" "${CMAKE_BINARY_DIR}/huxerui-sdk" EXCLUDE_FROM_ALL)
-    else ()
-        if (HUXERUI_HOME)
-            find_package(HuxerUI CONFIG REQUIRED
-                    PATHS "${HUXERUI_HOME}"
-                    NO_DEFAULT_PATH
-                    NO_CMAKE_FIND_ROOT_PATH
-            )
-        else ()
-            find_package(HuxerUI CONFIG REQUIRED)
-        endif ()
-    endif ()
-endif ()
-)TEMPLATE");
-}
-
-std::string ApplicationCMake(
-    const ProjectTemplateContext& context, std::string_view module_target = {}, std::string_view module_path = {}
-) {
-  std::string result = "cmake_minimum_required(VERSION 3.20)\n\n";
-  result += ProjectPlanCMake(ProjectKind::App, context);
-  result += ProjectBootstrapCMake(context);
-  result += context.Render(R"TEMPLATE(
-
-if (WIN32)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/huxerui.cmake" OPTIONAL)
-elseif (APPLE AND NOT IOS)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/huxerui.cmake" OPTIONAL)
-elseif (EMSCRIPTEN)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/platform/web/huxerui.cmake" OPTIONAL)
-endif ()
-
-set(HUXERUI_APP_BUNDLE_IDENTIFIER "@PROJECT_ID@")
-if (APPLE AND NOT IOS AND HUXERUI_MACOS_BUNDLE_IDENTIFIER)
-    set(HUXERUI_APP_BUNDLE_IDENTIFIER "${HUXERUI_MACOS_BUNDLE_IDENTIFIER}")
-endif ()
-
-file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
-)
-if (WIN32)
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/main.cpp")
-elseif (APPLE AND NOT IOS)
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/main.cpp")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/main.cpp")
-endif ()
-
-set(HUXERUI_MODULE_GRAPH_OUTPUT
-        "${CMAKE_CURRENT_SOURCE_DIR}/.huxerui/generated/modules.json"
-)
-
-huxerui_add_app(@TARGET_NAME@
-        SOURCES
-            ${APP_SOURCE_FILES}
-        RESOURCES
-            resources
-        RESOURCE_NAMESPACE
-            app
-        BUNDLE_NAME
-            "@PROJECT_NAME@"
-        BUNDLE_IDENTIFIER
-            "${HUXERUI_APP_BUNDLE_IDENTIFIER}"
-)
-
-if (WIN32 AND HUXERUI_WINDOWS_MANIFEST)
-    target_sources(@TARGET_NAME@ PRIVATE "${HUXERUI_WINDOWS_MANIFEST}")
-endif ()
-if (APPLE AND NOT IOS AND HUXERUI_MACOS_INFO_PLIST)
-    set_target_properties(@TARGET_NAME@ PROPERTIES
-            MACOSX_BUNDLE_INFO_PLIST "${HUXERUI_MACOS_INFO_PLIST}"
-    )
-endif ()
-if (EMSCRIPTEN AND COMMAND huxerui_configure_web_app)
-    huxerui_configure_web_app(@TARGET_NAME@)
-endif ()
-)TEMPLATE");
-  if (!module_target.empty()) {
-    result += "\nhuxerui_use_module(" + context.target_name + "\n        TARGET " + std::string(module_target) +
-              "\n        PATH \"${CMAKE_CURRENT_SOURCE_DIR}/" + std::string(module_path) + "\"\n)\n";
-  }
-  return result;
-}
-
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
-  return {
-      {".gitignore", std::string(project_gitignore)},
-      {"CMakeLists.txt", ApplicationCMake(context)},
-      {"src/app.cpp", context.Render(R"TEMPLATE(#include <huxerui/huxerui.h>
-
-using namespace huxerui;
-
-View App() {
-  return MaterialTheme([] {
-    return Text("Hello, HuxerUI");
-  });
-}
-
-const Application application{App, {.window = {.title = "@PROJECT_NAME@"}}};
-)TEMPLATE")},
-      {"resources/strings/default.properties", context.Render("app_name = \"@PROJECT_NAME@\"\n")},
-  };
+  return RenderTemplateTree("project/app", context);
 }
 
 ModuleTemplateContext MakeModuleTemplateContext(const ProjectTemplateContext& context) {
-  const std::string product_name = MakeModuleProductName(context.project_name);
-  return {
-      context,
-      context.target_name,
-      product_name + "::" + product_name,
-      context.target_name,
-      context.target_name + "/" + context.target_name + ".h",
-  };
-}
-
-std::string ModuleCMake(const ModuleTemplateContext& module) {
-  std::string result = "cmake_minimum_required(VERSION 3.20)\n\n";
-  result += ProjectPlanCMake(ProjectKind::Module, module.project);
-  result += ProjectBootstrapCMake(module.project);
-  result += module.project.Render(R"TEMPLATE(
-
-file(GLOB_RECURSE MODULE_SOURCE_FILES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
-)
-if (ANDROID)
-    file(GLOB_RECURSE MODULE_ANDROID_SOURCE_FILES CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/src/main/cpp/*.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/src/main/cpp/*.cc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/src/main/cpp/*.cxx"
-    )
-    list(APPEND MODULE_SOURCE_FILES ${MODULE_ANDROID_SOURCE_FILES})
-endif ()
-if (WIN32)
-    file(GLOB_RECURSE MODULE_WINDOWS_SOURCE_FILES CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/src/*.cxx"
-    )
-    list(APPEND MODULE_SOURCE_FILES ${MODULE_WINDOWS_SOURCE_FILES})
-endif ()
-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    file(GLOB_RECURSE MODULE_LINUX_SOURCE_FILES CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/src/*.cxx"
-    )
-    list(APPEND MODULE_SOURCE_FILES ${MODULE_LINUX_SOURCE_FILES})
-endif ()
-
-huxerui_add_module(@TARGET_NAME@
-        SOURCES
-            ${MODULE_SOURCE_FILES}
-        RESOURCES
-            resources
-        RESOURCE_NAMESPACE
-            @TARGET_NAME@
-)
-
-target_include_directories(@TARGET_NAME@ PUBLIC
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-        "$<INSTALL_INTERFACE:include>"
-)
-
-)TEMPLATE");
-  result += "\nadd_library(" + module.public_target + " ALIAS " + module.project.target_name + ")\n";
-  return result;
-}
-
-std::vector<GeneratedFile> ModuleProjectFiles(const ModuleTemplateContext& module) {
-  return {
-      {".gitignore", std::string(project_gitignore)},
-      {"CMakeLists.txt", ModuleCMake(module)},
-      {"include/" + module.header_path,
-       "#pragma once\n\n#include <huxerui/root.h>\n\nnamespace " + module.cpp_namespace +
-           " {\n\nvoid Install(huxerui::RootContext& root);\n\n} // namespace " + module.cpp_namespace + "\n"},
-      {"src/" + module.module_name + ".cpp",
-       "#include <" + module.header_path + ">\n\nnamespace " + module.cpp_namespace +
-           " {\n\nvoid Install(huxerui::RootContext&) {}\n\n} // namespace " + module.cpp_namespace + "\n"},
-      {"resources/strings/default.properties", "module_name = \"" + module.project.project_name + "\"\n"},
-  };
+  return {context, MakeModuleProductName(context.project_name)};
 }
 
 ProjectTemplateContext PreviewContext(const ModuleTemplateContext& module) {
@@ -397,21 +150,21 @@ ProjectTemplateContext PreviewContext(const ModuleTemplateContext& module) {
   };
 }
 
+std::vector<GeneratedFile> ModuleProjectFiles(const ModuleTemplateContext& module) {
+  const std::array replacements{
+      TemplateReplacement{"@MODULE_PRODUCT_NAME@", module.product_name},
+  };
+  return RenderTemplateTree("project/module", module.project, replacements);
+}
+
 std::vector<GeneratedFile> PreviewProjectFiles(const ModuleTemplateContext& module) {
   const ProjectTemplateContext context = PreviewContext(module);
-  return {
-      {".gitignore", std::string(project_gitignore)},
-      {"CMakeLists.txt", ApplicationCMake(context, module.public_target, "../..")},
-      {"src/app.cpp",
-       "#include <huxerui/huxerui.h>\n#include <" + module.header_path +
-           ">\n\nusing namespace huxerui;\n\n"
-           "View App() {\n  return MaterialTheme([] {\n    return Text(\"" +
-           module.project.project_name +
-           " preview\");\n  });\n}\n\nconst Application application{\n    App,\n    {\n        .window = {\n            .title = \"" +
-           module.project.project_name + " Preview\",\n        },\n        .root_hooks = {\n            " +
-           module.cpp_namespace + "::Install,\n        },\n    }\n};\n"},
-      {"resources/strings/default.properties", "app_name = \"" + module.project.project_name + " Preview\"\n"},
+  const std::array replacements{
+      TemplateReplacement{"@MODULE_PRODUCT_NAME@", module.product_name},
+      TemplateReplacement{"@MODULE_PROJECT_NAME@", module.project.project_name},
+      TemplateReplacement{"@MODULE_TARGET_NAME@", module.project.target_name},
   };
+  return RenderTemplateTree("project/module_preview", context, replacements);
 }
 
 void CreateResourceDirectories(const std::filesystem::path& root) {

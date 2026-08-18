@@ -1,0 +1,12 @@
+Name: CMakeRC
+Version: 2.0.1
+Upstream: https://github.com/vector-of-bool/cmrc
+License: MIT
+
+Files:
+  https://raw.githubusercontent.com/vector-of-bool/cmrc/2.0.1/CMakeRC.cmake
+  https://raw.githubusercontent.com/vector-of-bool/cmrc/2.0.1/LICENSE.txt
+
+Local changes:
+  Raise CMakeRC.cmake's minimum policy version from 3.3 to HuxerUI's CMake 3.20 baseline for CMake 4 compatibility.
+  Normalize LICENSE.txt with a trailing newline.

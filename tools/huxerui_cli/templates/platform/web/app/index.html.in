@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>@PROJECT_NAME@</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    #huxerui-root {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="huxerui-root"></div>
+  <script type="module">
+    import createHuxerUIApp from "./@HUXERUI_WEB_MODULE_FILE@";
+
+    const module = await createHuxerUIApp();
+    await document.fonts.ready;
+    const session = module.mountHuxerUI("#huxerui-root");
+    if (!session) {
+      throw new Error("HuxerUI Web session could not be mounted");
+    }
+  </script>
+</body>
+</html>

@@ -410,6 +410,12 @@ The current registry contains Android, iOS, Windows, macOS, Linux, and Web.
 The registry is compiled into the CLI; it is not a dynamic extension mechanism.
 Adding a platform may split template storage or driver implementations when their size justifies it, but does not change project discovery or command parsing.
 
+Editable project, module, Preview, platform-shell, and generated-integration templates live as ordinary files under `tools/huxerui_cli/templates`.
+CMakeRC compiles that tree into the CLI, and the internal template loader renders both relative output paths and file contents from the same project identity and feature-specific replacements.
+The installed CLI therefore remains a single executable and never searches the current directory, source checkout, or SDK for template files at runtime.
+These CLI templates are build-time tool resources and are independent of the application-facing `resources.bin` package.
+Empty scaffold files and directories remain explicit generator structure because an embedded filesystem cannot represent an empty directory.
+
 ### Android
 
 The shell is a Gradle application with an `app` module.

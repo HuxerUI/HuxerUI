@@ -11,24 +11,10 @@
 
 #include "ios_project.h"
 #include "sdk.h"
+#include "template.h"
 
 namespace huxerui::cli {
 namespace {
-
-constexpr std::string_view application_main = R"TEMPLATE(#include <huxerui/app.h>
-
-int main() {
-  return huxerui::RunApplication();
-}
-)TEMPLATE";
-
-void ReplaceAll(std::string& value, std::string_view token, std::string_view replacement) {
-  std::size_t position = 0;
-  while ((position = value.find(token, position)) != std::string::npos) {
-    value.replace(position, token.size(), replacement);
-    position += replacement.size();
-  }
-}
 
 std::vector<Diagnostic>
 ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::string_view> paths) {
@@ -245,281 +231,15 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    std::string java_path = "app/src/main/java/";
-    std::string package_path = context.project_id;
-    std::replace(package_path.begin(), package_path.end(), '.', '/');
-    java_path += package_path + "/MainActivity.java";
-
-    return {
-        {".gitignore",
-         R"TEMPLATE(.gradle/
-local.properties
-.cxx/
-.externalNativeBuild/
-**/build/
-)TEMPLATE"},
-        {"settings.gradle", context.Render(R"TEMPLATE(import groovy.json.JsonSlurper
-
-pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-    }
-}
-
-def huxeruiHomeValue = providers.environmentVariable("HUXERUI_HOME").orNull
-if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
-    throw new GradleException("HUXERUI_HOME is required")
-}
-def huxeruiHome = file(huxeruiHomeValue)
-def huxeruiLibrary = new File(huxeruiHome, "platform/android/huxerui")
-if (!huxeruiLibrary.isDirectory()) {
-    throw new GradleException("HuxerUI Android library does not exist: ${huxeruiLibrary}")
-}
-
-def huxeruiModuleGraphFile = file("../../.huxerui/generated/modules.json")
-if (!huxeruiModuleGraphFile.isFile()) {
-    throw new GradleException("Run 'huxerui build android' to generate the module graph")
-}
-def huxeruiModuleGraph = new JsonSlurper().parse(huxeruiModuleGraphFile)
-def huxeruiModules = []
-
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
-gradle.ext.huxeruiHome = huxeruiHome
-rootProject.name = "@PROJECT_NAME@"
-include(":HuxerUI")
-project(":HuxerUI").projectDir = huxeruiLibrary
-huxeruiModuleGraph.modules.eachWithIndex { module, index ->
-    def moduleDirectory = file("${module.sourceRoot}/platform/android")
-    if (moduleDirectory.isDirectory()) {
-        if (!new File(moduleDirectory, "build.gradle").isFile()) {
-            throw new GradleException("Android module package is missing build.gradle: ${moduleDirectory}")
-        }
-        def projectPath = ":huxeruiModule${index}"
-        include(projectPath)
-        project(projectPath).projectDir = moduleDirectory
-        huxeruiModules.add([target: module.target, projectPath: projectPath])
-    }
-}
-gradle.ext.huxeruiModules = huxeruiModules
-include(":app")
-)TEMPLATE")},
-        {"build.gradle",
-         R"TEMPLATE(plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.android.library) apply false
-}
-)TEMPLATE"},
-        {"gradle.properties",
-         R"TEMPLATE(org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-org.gradle.parallel=true
-android.useAndroidX=true
-huxeruiCompileSdk=36
-huxeruiMinCompileSdk=23
-huxeruiMinSdk=23
-huxeruiTargetSdk=36
-huxeruiNdkVersion=29.0.14206865
-huxeruiAbis=arm64-v8a,x86_64
-huxeruiStl=c++_shared
-huxeruiBuildNative=false
-)TEMPLATE"},
-        {"gradle/libs.versions.toml",
-         R"TEMPLATE([versions]
-agp = "8.13.2"
-
-[plugins]
-android-application = { id = "com.android.application", version.ref = "agp" }
-android-library = { id = "com.android.library", version.ref = "agp" }
-)TEMPLATE"},
-        {"app/build.gradle", context.Render(R"TEMPLATE(plugins {
-    alias(libs.plugins.android.application)
-}
-
-def huxeruiProperty = { String name -> providers.gradleProperty(name).get() }
-def huxeruiHome = rootProject.gradle.ext.huxeruiHome
-def huxeruiModules = rootProject.gradle.ext.huxeruiModules
-def huxeruiCompileSdk = huxeruiProperty("huxeruiCompileSdk").toInteger()
-def huxeruiMinSdk = huxeruiProperty("huxeruiMinSdk").toInteger()
-def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
-def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
-def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
-def huxeruiStl = huxeruiProperty("huxeruiStl")
-def huxeruiDebugAssets = layout.buildDirectory.dir("generated/huxerui/assets/debug").get().asFile
-def huxeruiReleaseAssets = layout.buildDirectory.dir("generated/huxerui/assets/release").get().asFile
-
-android {
-    namespace = "@PROJECT_ID@"
-    compileSdk = huxeruiCompileSdk
-    ndkVersion = huxeruiNdkVersion
-
-    defaultConfig {
-        applicationId = "@PROJECT_ID@"
-        minSdk = huxeruiMinSdk
-        targetSdk = huxeruiTargetSdk
-        versionCode = 1
-        versionName = "1.0"
-
-        externalNativeBuild {
-            cmake {
-                arguments "-DANDROID_STL=${huxeruiStl}",
-                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}"
-            }
-        }
-
-        ndk {
-            abiFilters(*huxeruiAbis)
-        }
-    }
-
-    buildTypes {
-        release {
-            minifyEnabled = false
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
-        }
-    }
-
-    sourceSets {
-        debug {
-            assets.srcDir huxeruiDebugAssets
-        }
-        release {
-            assets.srcDir huxeruiReleaseAssets
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("../../../CMakeLists.txt")
-        }
-    }
-}
-
-dependencies {
-    implementation project(":HuxerUI")
-    huxeruiModules.each { module ->
-        implementation project(module.projectPath)
-    }
-}
-
-def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
-    def capitalizedBuildType = buildType.capitalize()
-    def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
-    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
-        dependsOn nativeTaskName
-        from {
-            def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
-                include "**/huxerui-resources/@TARGET_NAME@/package/huxerui/resources.bin"
-            }.files
-            def preferredIndexFiles = indexFiles.findAll {
-                it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
-            }
-            def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
-            def selected = candidates.max { left, right ->
-                def modified = left.lastModified() <=> right.lastModified()
-                modified != 0 ? modified : left.absolutePath <=> right.absolutePath
-            }
-            selected == null ? [] : selected.parentFile.parentFile
-        }
-        into assetsDirectory
-    }
-    tasks.matching { it.name == "merge${capitalizedBuildType}Assets" }.configureEach {
-        dependsOn stagingTask
-    }
-}
-
-registerHuxerUIResourceStaging("debug", huxeruiDebugAssets)
-registerHuxerUIResourceStaging("release", huxeruiReleaseAssets)
-)TEMPLATE")},
-        {"app/proguard-rules.pro", ""},
-        {"app/src/main/AndroidManifest.xml", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:allowBackup="true"
-        android:label="@PROJECT_NAME@"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-)TEMPLATE")},
-        {java_path, context.Render(R"TEMPLATE(package @PROJECT_ID@;
-
-import org.huxerui.HuxerUIActivity;
-
-public final class MainActivity extends HuxerUIActivity {}
-)TEMPLATE")},
-    };
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/android/app", context);
+    files.push_back({"app/proguard-rules.pro", {}});
+    return files;
   }
 
   std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const override {
-    return {
-        {".gitignore", ".gradle/\nlocal.properties\nbuild/\n"},
-        {"settings.gradle", context.Render(R"TEMPLATE(pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-    }
-    plugins {
-        id "com.android.library" version "8.13.2"
-    }
-}
-
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
-rootProject.name = "@PROJECT_NAME@"
-)TEMPLATE")},
-        {"build.gradle", context.Render(R"TEMPLATE(plugins {
-    id "com.android.library"
-}
-
-android {
-    namespace = "@PROJECT_ID@"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 23
-        consumerProguardFiles "consumer-rules.pro"
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-}
-)TEMPLATE")},
-        {"gradle.properties",
-         "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\nandroid.useAndroidX=true\n"},
-        {"consumer-rules.pro", ""},
-        {"src/main/AndroidManifest.xml", "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest />\n"},
-    };
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/android/module", context);
+    files.push_back({"consumer-rules.pro", {}});
+    return files;
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
@@ -623,24 +343,14 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    return {
-        {".gitignore", "build/\nout/\npackages/\n"},
-        {"main.cpp", std::string(application_main)},
-        {"huxerui.cmake",
-         R"TEMPLATE(set(HUXERUI_WINDOWS_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/app.manifest")
-)TEMPLATE"},
-        {"app.manifest", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity name="@PROJECT_ID@" version="1.0.0.0" type="win32" />
-  <description>@PROJECT_NAME@</description>
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-    </windowsSettings>
-  </application>
-</assembly>
-)TEMPLATE")},
-    };
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
+    std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/windows/app", context);
+    files.insert(
+        files.end(),
+        std::make_move_iterator(platform_files.begin()),
+        std::make_move_iterator(platform_files.end())
+    );
+    return files;
   }
 
   std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext&) const override {
@@ -684,8 +394,8 @@ public:
     return tools;
   }
 
-  std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext&) const override {
-    return {{"main.cpp", std::string(application_main)}};
+  std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
+    return RenderTemplateTree("platform/desktop/app", context);
   }
 
   std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext&) const override {
@@ -726,29 +436,14 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    return {
-        {".gitignore", "DerivedData/\nxcuserdata/\n*.xcuserstate\narchives/\n"},
-        {"main.cpp", std::string(application_main)},
-        {"huxerui.cmake", context.Render(R"TEMPLATE(set(HUXERUI_MACOS_BUNDLE_NAME "@PROJECT_NAME@")
-set(HUXERUI_MACOS_BUNDLE_IDENTIFIER "@PROJECT_ID@")
-set(HUXERUI_MACOS_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/Info.plist.in")
-)TEMPLATE")},
-        {"Info.plist.in", context.Render(R"TEMPLATE(<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDisplayName</key>
-  <string>@PROJECT_NAME@</string>
-  <key>CFBundleIdentifier</key>
-  <string>@PROJECT_ID@</string>
-  <key>CFBundleName</key>
-  <string>@PROJECT_NAME@</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-</dict>
-</plist>
-)TEMPLATE")},
-    };
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
+    std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/macos/app", context);
+    files.insert(
+        files.end(),
+        std::make_move_iterator(platform_files.begin()),
+        std::make_move_iterator(platform_files.end())
+    );
+    return files;
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
@@ -968,67 +663,7 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    return {
-        {".gitignore", "dist/\n"},
-        {"huxerui.cmake", R"TEMPLATE(function(huxerui_configure_web_app target_name)
-    if (NOT TARGET ${target_name})
-        message(FATAL_ERROR "huxerui_configure_web_app() target does not exist: ${target_name}")
-    endif ()
-
-    set_target_properties(${target_name} PROPERTIES SUFFIX ".mjs")
-    set(HUXERUI_WEB_MODULE_FILE "${target_name}.mjs")
-    set(HUXERUI_WEB_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/huxerui-web")
-    file(MAKE_DIRECTORY "${HUXERUI_WEB_GENERATED_DIRECTORY}")
-    configure_file(
-            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/index.html.in"
-            "${HUXERUI_WEB_GENERATED_DIRECTORY}/${target_name}.html"
-            @ONLY
-    )
-    add_custom_command(TARGET ${target_name} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${HUXERUI_WEB_GENERATED_DIRECTORY}/${target_name}.html"
-                    "$<TARGET_FILE_DIR:${target_name}>/${target_name}.html"
-            VERBATIM
-    )
-endfunction()
-)TEMPLATE"},
-        {"index.html.in", context.Render(R"TEMPLATE(<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>@PROJECT_NAME@</title>
-  <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-    }
-
-    #huxerui-root {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-  </style>
-</head>
-<body>
-  <div id="huxerui-root"></div>
-  <script type="module">
-    import createHuxerUIApp from "./@HUXERUI_WEB_MODULE_FILE@";
-
-    const module = await createHuxerUIApp();
-    await document.fonts.ready;
-    const session = module.mountHuxerUI("#huxerui-root");
-    if (!session) {
-      throw new Error("HuxerUI Web session could not be mounted");
-    }
-  </script>
-</body>
-</html>
-)TEMPLATE")},
-    };
+    return RenderTemplateTree("platform/web/app", context);
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
@@ -1236,14 +871,6 @@ std::vector<PlatformDevice> ParseIosSimulatorDevices(std::string_view output) {
     });
   }
   return devices;
-}
-
-std::string ProjectTemplateContext::Render(std::string_view value) const {
-  std::string rendered(value);
-  ReplaceAll(rendered, "@PROJECT_NAME@", project_name);
-  ReplaceAll(rendered, "@TARGET_NAME@", target_name);
-  ReplaceAll(rendered, "@PROJECT_ID@", project_id);
-  return rendered;
 }
 
 std::string_view CurrentHostId() noexcept {

@@ -1,0 +1,322 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		000000000000000000000101 /* main.mm in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000201 /* main.mm */;
+		};
+		000000000000000000000102 /* Assets.xcassets in Resources */ = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000203 /* Assets.xcassets */;
+		};
+		000000000000000000000103 /* LaunchScreen.storyboard in Resources */ = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000204 /* LaunchScreen.storyboard */;
+		};
+		000000000000000000000104 /* HuxerUIModules in Frameworks */ = {
+			isa = PBXBuildFile;
+			productRef = 000000000000000000000901 /* HuxerUIModules */;
+		};
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		000000000000000000000200 /* @PROJECT_NAME@.app */ = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = "@PROJECT_NAME@.app";
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		000000000000000000000201 /* main.mm */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.cpp.objcpp;
+			path = main.mm;
+			sourceTree = "<group>";
+		};
+		000000000000000000000202 /* Info.plist */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		000000000000000000000203 /* Assets.xcassets */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
+		000000000000000000000204 /* LaunchScreen.storyboard */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = file.storyboard;
+			path = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		000000000000000000000205 /* Base.xcconfig */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xcconfig;
+			path = Base.xcconfig;
+			sourceTree = "<group>";
+		};
+		000000000000000000000206 /* Debug.xcconfig */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xcconfig;
+			path = Debug.xcconfig;
+			sourceTree = "<group>";
+		};
+		000000000000000000000207 /* Release.xcconfig */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xcconfig;
+			path = Release.xcconfig;
+			sourceTree = "<group>";
+		};
+		000000000000000000000208 /* Local.xcconfig.example */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xcconfig;
+			path = Local.xcconfig.example;
+			sourceTree = "<group>";
+		};
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		000000000000000000000302 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000104 /* HuxerUIModules in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		000000000000000000000400 = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000401 /* App */,
+				000000000000000000000402 /* Config */,
+				000000000000000000000403 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		000000000000000000000401 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000201 /* main.mm */,
+				000000000000000000000202 /* Info.plist */,
+				000000000000000000000203 /* Assets.xcassets */,
+				000000000000000000000204 /* LaunchScreen.storyboard */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		000000000000000000000402 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000205 /* Base.xcconfig */,
+				000000000000000000000206 /* Debug.xcconfig */,
+				000000000000000000000207 /* Release.xcconfig */,
+				000000000000000000000208 /* Local.xcconfig.example */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		000000000000000000000403 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000200 /* @PROJECT_NAME@.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		000000000000000000000500 /* @TARGET_NAME@ */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000702;
+			buildPhases = (
+				000000000000000000000304 /* Build HuxerUI Core */,
+				000000000000000000000301 /* Sources */,
+				000000000000000000000302 /* Frameworks */,
+				000000000000000000000303 /* Resources */,
+				000000000000000000000305 /* Stage HuxerUI Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = @TARGET_NAME@;
+			packageProductDependencies = (
+				000000000000000000000901 /* HuxerUIModules */,
+			);
+			productName = "@PROJECT_NAME@";
+			productReference = 000000000000000000000200 /* @PROJECT_NAME@.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000600 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					000000000000000000000500 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 000000000000000000000701;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 000000000000000000000400;
+			packageReferences = (
+				000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */,
+			);
+			productRefGroup = 000000000000000000000403 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				000000000000000000000500 /* @TARGET_NAME@ */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000000000303 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000102 /* Assets.xcassets in Resources */,
+				000000000000000000000103 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		000000000000000000000304 /* Build HuxerUI Core */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputFileListPaths = ();
+			inputPaths = ();
+			name = "Build HuxerUI Core";
+			outputFileListPaths = ();
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nif [ -z \"${HUXERUI_HOME:-}\" ]; then\n  echo \"error: HUXERUI_HOME is not configured; set it in Config/Local.xcconfig\" >&2\n  exit 1\nfi\nHUXERUI_CMAKE_ARCHS=$(printf '%s' \"$ARCHS\" | tr ' ' ';')\ncmake -S \"$HUXERUI_PROJECT_ROOT\" -B \"$HUXERUI_CORE_BUILD_DIR\" \\\n  -DCMAKE_SYSTEM_NAME=iOS \\\n  -DCMAKE_OSX_SYSROOT=\"$SDKROOT\" \\\n  -DCMAKE_OSX_ARCHITECTURES=\"$HUXERUI_CMAKE_ARCHS\" \\\n  -DCMAKE_OSX_DEPLOYMENT_TARGET=\"$IPHONEOS_DEPLOYMENT_TARGET\" \\\n  -DCMAKE_BUILD_TYPE=\"$CONFIGURATION\" \\\n  -DHUXERUI_HOME=\"$HUXERUI_HOME\" \\\n  -DHUXERUI_BUILD_SHARED=OFF \\\n  -DHUXERUI_BUILD_TESTS=OFF \\\n  -DHUXERUI_BUILD_EXAMPLES=OFF \\\n  -DHUXERUI_BUILD_CLI=OFF\ncmake --build \"$HUXERUI_CORE_BUILD_DIR\" --target @TARGET_NAME@_huxerui_ios_core --parallel\n";
+		};
+		000000000000000000000305 /* Stage HuxerUI Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputFileListPaths = ();
+			inputPaths = ();
+			name = "Stage HuxerUI Resources";
+			outputFileListPaths = ();
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nHUXERUI_RESOURCE_SOURCE=\"$HUXERUI_CORE_BUILD_DIR/huxerui-ios/@TARGET_NAME@/resources/package\"\nHUXERUI_RESOURCE_DESTINATION=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI\"\nif [ ! -f \"$HUXERUI_RESOURCE_SOURCE/huxerui/resources.bin\" ]; then\n  echo \"error: HuxerUI resource package is missing: $HUXERUI_RESOURCE_SOURCE\" >&2\n  exit 1\nfi\ncmake -E remove_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E make_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E copy_directory \"$HUXERUI_RESOURCE_SOURCE\" \"$HUXERUI_RESOURCE_DESTINATION\"\nif [ -n \"${HUXERUI_INTEGRATION_PLAN:-}\" ]; then\n  mkdir -p \"$(dirname \"$HUXERUI_INTEGRATION_PLAN\")\"\n  {\n    printf '{\\n'\n    printf '  \"schema\": 1,\\n'\n    printf '  \"target\": \"%s\",\\n' \"@TARGET_NAME@\"\n    printf '  \"platform\": \"ios\",\\n'\n    printf '  \"artifact\": \"%s\",\\n' \"$TARGET_BUILD_DIR/$EXECUTABLE_PATH\"\n    printf '  \"bundle\": \"%s\",\\n' \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\n    printf '  \"bundleIdentifier\": \"%s\"\\n' \"$PRODUCT_BUNDLE_IDENTIFIER\"\n    printf '}\\n'\n  } > \"$HUXERUI_INTEGRATION_PLAN\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000000000301 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000101 /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		000000000000000000000801 /* Project Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+			};
+			name = Debug;
+		};
+		000000000000000000000802 /* Project Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+			};
+			name = Release;
+		};
+		000000000000000000000803 /* Target Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000206 /* Debug.xcconfig */;
+			buildSettings = {
+				INFOPLIST_FILE = App/Info.plist;
+				PRODUCT_NAME = "$(inherited)";
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		000000000000000000000804 /* Target Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000207 /* Release.xcconfig */;
+			buildSettings = {
+				INFOPLIST_FILE = App/Info.plist;
+				PRODUCT_NAME = "$(inherited)";
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		000000000000000000000701 /* Project configuration list */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000801 /* Project Debug */,
+				000000000000000000000802 /* Project Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		000000000000000000000702 /* Target configuration list */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000803 /* Target Debug */,
+				000000000000000000000804 /* Target Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../.huxerui/generated/ios/modules;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		000000000000000000000901 /* HuxerUIModules */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */;
+			productName = HuxerUIModules;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 000000000000000000000600 /* Project object */;
+}
