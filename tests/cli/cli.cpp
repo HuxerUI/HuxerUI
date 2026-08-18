@@ -17,6 +17,7 @@
 #include "process_runner.h"
 #include "project.h"
 #include "sdk.h"
+#include "template.h"
 
 namespace {
 
@@ -61,6 +62,29 @@ std::string Read(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
+TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
+  const huxerui::cli::ProjectTemplateContext context =
+      huxerui::cli::MakeProjectTemplateContext("Sample-App", "dev.example.sample");
+
+  const std::vector<huxerui::cli::GeneratedFile> files =
+      huxerui::cli::RenderTemplateTree("platform/android/app", context);
+  const auto activity = std::find_if(files.begin(), files.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "app/src/main/java/dev/example/sample/MainActivity.java";
+  });
+
+  REQUIRE(activity != files.end());
+  REQUIRE(activity->content.find("package dev.example.sample;") != std::string::npos);
+  REQUIRE(activity->content.find("@PROJECT_") == std::string::npos);
+  REQUIRE_THROWS_WITH(
+      huxerui::cli::RenderTemplateTree("project/module", context),
+      "HuxerUI CLI template contains an unresolved replacement: @MODULE_PRODUCT_NAME@"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::cli::RenderTemplateTree("missing/templates", context),
+      "HuxerUI CLI template directory is missing: missing/templates"
+  );
+}
+
 TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(
@@ -82,6 +106,10 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE_FALSE(std::filesystem::exists(project / "platform/macos"));
   REQUIRE_FALSE(std::filesystem::exists(project / ".huxerui"));
   REQUIRE(Read(project / ".gitignore").find("/.huxerui/") != std::string::npos);
+  const std::string web_html = Read(project / "platform/web/index.html.in");
+  REQUIRE(web_html.find("<div id=\"huxerui-root\"></div>") != std::string::npos);
+  REQUIRE(web_html.find("mountHuxerUI(\"#huxerui-root\")") != std::string::npos);
+  REQUIRE(web_html.find("huxerui-canvas") == std::string::npos);
   const std::string cmake = Read(project / "CMakeLists.txt");
   REQUIRE(cmake.find("huxerui_add_app(sample_app") != std::string::npos);
   REQUIRE(cmake.find("src/*.cpp") != std::string::npos);

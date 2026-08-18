@@ -1,0 +1,53 @@
+import groovy.json.JsonSlurper
+
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+def huxeruiHomeValue = providers.environmentVariable("HUXERUI_HOME").orNull
+if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
+    throw new GradleException("HUXERUI_HOME is required")
+}
+def huxeruiHome = file(huxeruiHomeValue)
+def huxeruiLibrary = new File(huxeruiHome, "platform/android/huxerui")
+if (!huxeruiLibrary.isDirectory()) {
+    throw new GradleException("HuxerUI Android library does not exist: ${huxeruiLibrary}")
+}
+
+def huxeruiModuleGraphFile = file("../../.huxerui/generated/modules.json")
+if (!huxeruiModuleGraphFile.isFile()) {
+    throw new GradleException("Run 'huxerui build android' to generate the module graph")
+}
+def huxeruiModuleGraph = new JsonSlurper().parse(huxeruiModuleGraphFile)
+def huxeruiModules = []
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+gradle.ext.huxeruiHome = huxeruiHome
+rootProject.name = "@PROJECT_NAME@"
+include(":HuxerUI")
+project(":HuxerUI").projectDir = huxeruiLibrary
+huxeruiModuleGraph.modules.eachWithIndex { module, index ->
+    def moduleDirectory = file("${module.sourceRoot}/platform/android")
+    if (moduleDirectory.isDirectory()) {
+        if (!new File(moduleDirectory, "build.gradle").isFile()) {
+            throw new GradleException("Android module package is missing build.gradle: ${moduleDirectory}")
+        }
+        def projectPath = ":huxeruiModule${index}"
+        include(projectPath)
+        project(projectPath).projectDir = moduleDirectory
+        huxeruiModules.add([target: module.target, projectPath: projectPath])
+    }
+}
+gradle.ext.huxeruiModules = huxeruiModules
+include(":app")
