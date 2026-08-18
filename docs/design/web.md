@@ -23,7 +23,7 @@ The initial backend may run before the platform-neutral semantics tree is availa
 
 ## Current preview
 
-The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, Canvas sizing, frame scheduling, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The preview has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -39,7 +39,7 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 |---|---|
 | Shared Runtime | Composition, reconciliation, layout, focus, interaction, scrolling, text editing behavior, animation, PaintSequence recording, RenderScene construction, and damage |
 | WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted Canvas |
-| WebPlatformAdapter | Monotonic time, frame requests, viewport coordination, and browser service capabilities |
+| WebPlatformAdapter | Monotonic time, frame requests, UI-thread dispatch, viewport coordination, and browser service capabilities |
 | WebRenderer | RenderScene traversal, Canvas state, damage replay, path conversion, image decode entries, and renderer caches |
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | Native input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
@@ -171,17 +171,26 @@ Browser URLs are not ResourceIds. Network code fetches bytes asynchronously, con
 
 The initial locale derives from `navigator.language` and is normalized through the existing Locale model. Dynamic browser-language updates are not implemented in the preview; display-scale updates use `Runtime::UpdateResourceConfiguration()`.
 
+## PlatformModule
+
+Web uses the platform-neutral `PlatformModuleFactory`, `PlatformInstance`, typed method, typed event, cancellation, and disposal contracts without adding a JavaScript factory registry or a second message protocol.
+Module-owned Web sources are ordinary C++ and Emscripten glue selected by the module's CMake target when `EMSCRIPTEN` is active.
+They call browser APIs through Emscripten, register the existing factory from an explicit RootHook, and keep JavaScript values, callbacks, promises, and DOM objects outside `PlatformPayload` and shared application code.
+Modules that require JavaScript libraries express those link inputs through their own Emscripten target configuration; the HuxerUI module graph does not parse or reproduce JavaScript package metadata.
+
+The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
+Native result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
+Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the module instance.
+
+The Web `example_platform_module` uses an Emscripten interval to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, and disposal through the same Timer Root Service as the native examples.
+
 ## PlatformView composition
 
 DOM-backed PlatformView remains proposed, but its composition contract follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
 The WebPlatformAdapter will consume the shared internal `RenderComposition` before drawing and retain compatible Canvas elements and DOM objects across frames.
 
-Web factories register explicitly under the same stable UTF-8 type strings as native platforms.
-The JavaScript bridge maps `PlatformPayload` null, boolean, signed integer, double, UTF-8 string, bytes, list, and object values to null, boolean, `BigInt`, Number, string, `Uint8Array`, Array, and a prototype-free string-keyed object without JSON serialization.
-This preserves the integer and double distinction and never silently converts a 64-bit integer to an imprecise Number.
-Factory results and events return through the owning instance identity, are queued outside the initiating JavaScript call stack, and are decoded by the same module-owned method and Event Key codecs used on native platforms.
-Functions, DOM nodes, promises, and JavaScript object identity never enter `PlatformPayload`.
+Web PlatformView factories will register explicitly under the same stable UTF-8 type strings as native platforms and keep DOM values in platform-owned factory state rather than `PlatformPayload`.
 
 A PlatformView-capable session owns one isolated CSS stacking context around the browser-supplied Canvas.
 The original Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and PlatformView elements become absolutely positioned ordered siblings in the same composition root.

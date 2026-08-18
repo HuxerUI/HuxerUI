@@ -25,6 +25,8 @@ elseif (APPLE)
             "-framework CoreVideo"
             "-framework Foundation"
     )
+elseif (EMSCRIPTEN)
+    target_sources(example_platform_module PRIVATE web_timer.cpp)
 elseif (UNIX AND NOT APPLE)
     target_sources(example_platform_module PRIVATE linux_timer.cpp)
 else ()

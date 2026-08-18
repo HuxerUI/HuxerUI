@@ -8,6 +8,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -69,6 +70,20 @@ std::uintptr_t NextSessionId() noexcept {
 WebSession* FindSession(std::uintptr_t session_id) noexcept {
   const auto found = Sessions().find(session_id);
   return found == Sessions().end() ? nullptr : found->second.get();
+}
+
+void RunWebUIThreadTask(void* context) noexcept {
+  std::unique_ptr<std::function<void()>> task(static_cast<std::function<void()>*>(context));
+  try {
+    (*task)();
+  } catch (...) {
+  }
+}
+
+void DispatchToWebUIThread(std::function<void()> task) {
+  auto pending = std::make_unique<std::function<void()>>(std::move(task));
+  emscripten_async_call(RunWebUIThreadTask, pending.get(), 0);
+  static_cast<void>(pending.release());
 }
 
 // clang-format off
@@ -527,8 +542,8 @@ private:
 class WebPlatformAdapter final : public PlatformAdapter {
 public:
   WebPlatformAdapter(std::uintptr_t session_id, val canvas, ResourceConfiguration configuration)
-      : session_id_(session_id), renderer_(session_id, std::move(canvas)), resources_(std::move(configuration)),
-        text_input_(session_id) {}
+      : PlatformAdapter(DispatchToWebUIThread), session_id_(session_id), renderer_(session_id, std::move(canvas)),
+        resources_(std::move(configuration)), text_input_(session_id) {}
 
   void Attach(Runtime& runtime) noexcept {
     runtime_ = &runtime;

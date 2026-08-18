@@ -182,7 +182,8 @@ The current Linux CLI path uses a source SDK checkout. A relocatable installed L
 ## Web technical preview
 
 The Web backend compiles the same static `Application` declaration through Emscripten, mounts one `Runtime` and `WebPlatformAdapter` pair per browser Canvas, and emits an ES module with WebAssembly output.
-Canvas 2D replays the shared `RenderScene`, while browser Pointer Events, wheel events, keyboard events, hidden native text controls, resource preloading, and asynchronous `ImageBitmap` decoding remain platform-owned services.
+Canvas 2D replays the shared `RenderScene`, while browser Pointer Events, wheel events, keyboard events, hidden native text controls, resource preloading, asynchronous `ImageBitmap` decoding, and browser-event-loop PlatformModule dispatch remain platform-owned services.
+Web module sources use the existing platform-neutral `PlatformModuleFactory` from C++ and Emscripten glue rather than a second JavaScript registry; the Web `example_platform_module` registers an interval-backed Timer through the same typed Root Service used by native platforms.
 
 Configure and build all examples with a modern Emscripten toolchain:
 

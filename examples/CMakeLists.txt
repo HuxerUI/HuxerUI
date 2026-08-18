@@ -21,6 +21,4 @@ if (APPLE OR ANDROID)
     add_subdirectory(platform_view)
 endif ()
 
-if (NOT EMSCRIPTEN)
-    add_subdirectory(platform_module)
-endif ()
+add_subdirectory(platform_module)
