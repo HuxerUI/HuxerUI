@@ -105,7 +105,7 @@ Canvas 2D is the initial rendering backend because it directly represents the cu
 
 WebRenderer traverses `RenderScene` in C++, maintains balanced Canvas save and restore operations, and translates every PaintCommand explicitly. Node offset, presentation transform, group opacity, child clip, children transform, content, descendants, and foreground preserve the ordering defined by the retained-rendering contract.
 
-The Canvas bitmap retains pixels between frames. For partial damage, WebRenderer clears each damaged region, clips replay to that region, and traverses the committed scene. A full-damage frame clears and replays the complete surface. Runtime remains responsible for conservative transformed bounds and damage expansion.
+The Canvas bitmap retains pixels between frames. For partial damage, WebRenderer rounds each region outward to device pixels, uses those same bounds for clearing, background fill, and one compound device-pixel clip, then traverses the committed scene once in logical coordinates. A full-damage frame clears and replays the complete surface. Runtime remains responsible for conservative transformed bounds and damage expansion.
 
 The initial implementation should use a narrow bridge without defining another serialized render model. A compact replay packet, cached JavaScript sequence, or other batching representation is added only if profiling identifies WebAssembly-to-JavaScript calls as a material bottleneck, and remains private to WebRenderer.
 
@@ -122,6 +122,8 @@ WebTextLayout implements the existing synchronous TextLayout contract and uses U
 Each WebRenderer owns one Canvas measurement context rather than a DOM element for every HuxerUI Text node. Canvas TextMetrics supplies font metrics, advances, baselines, and painted bounds.
 
 Creating a WebTextLayout materializes an immutable C++ snapshot containing measured size, baselines, line records, grapheme caret boundaries from `Intl.Segmenter`, and measured caret advances. Hit testing, caret lookup, and range geometry query that snapshot without returning to Canvas.
+
+Non-editable paragraph measurement and drawing share a bounded renderer-owned WebTextLayout cache keyed by text, font, layout options, and logical width. Editable layouts returned through `CreateTextLayout()` remain independently owned so active text geometry does not borrow cache lifetime.
 
 Drawing uses the same resolved CSS font description, direction, locale, alignment, wrapping decisions, and line records as measurement. The generated example entry waits for `document.fonts.ready` before mounting; direct integrations must do the same after loading application fonts. Runtime font-generation invalidation is not implemented in the preview.
 

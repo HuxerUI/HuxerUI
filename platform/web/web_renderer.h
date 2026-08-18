@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <emscripten/val.h>
 
@@ -12,10 +13,12 @@
 namespace huxerui::detail {
 
 class TextLayout;
+class WebTextLayout;
 
 class WebRenderer final {
 public:
   WebRenderer(std::uintptr_t session_id, emscripten::val canvas);
+  ~WebRenderer();
 
   void SetViewport(Size viewport, float display_scale);
   void Invalidate() noexcept;
@@ -32,6 +35,8 @@ public:
   void Draw(const RenderFrame& frame);
 
 private:
+  [[nodiscard]] const WebTextLayout&
+  ParagraphFor(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   void RenderSceneNode(const RenderNode& node);
   void RenderSequence(const PaintSequence& sequence);
   void RenderCommand(const DrawRectCommand& command);
@@ -55,6 +60,7 @@ private:
 
   emscripten::val canvas_;
   emscripten::val context_;
+  std::vector<std::unique_ptr<WebTextLayout>> paragraph_cache_;
   Size viewport_;
   float display_scale_ = 1.0F;
   std::uintptr_t session_id_ = 0;

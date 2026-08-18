@@ -383,6 +383,8 @@ std::vector<TextOffset> BrowserGraphemeBoundaries(std::string_view text, std::st
   return result;
 }
 
+} // namespace
+
 class WebTextLayout final : public TextLayout {
 public:
   struct CaretStop {
@@ -398,16 +400,22 @@ public:
     std::vector<CaretStop> carets;
   };
 
-  WebTextLayout(val context, std::string_view text, TextStyle style, float max_width, TextLayoutOptions options)
-      : context_(std::move(context)), text_(text), style_(std::move(style)), options_(std::move(options)) {
+  WebTextLayout(val context, std::string_view text, Font font, float max_width, TextLayoutOptions options)
+      : context_(std::move(context)), text_(text), font_(std::move(font)), options_(std::move(options)),
+        max_width_(max_width) {
     direction_ = ResolveWebTextDirection(text_, options_.shaping.direction);
     ConfigureContext();
-    font_metrics_ = ResolveWebFontMetrics(context_, style_.font);
+    font_metrics_ = ResolveWebFontMetrics(context_, font_);
     line_height_ = std::max(1.0F, font_metrics_.LineHeight());
     BuildBoundaries();
-    BuildLines(max_width);
+    BuildLines(max_width_);
     BuildCaretStops();
     context_ = val::undefined();
+  }
+
+  [[nodiscard]] bool
+  Matches(std::string_view text, const Font& font, float max_width, const TextLayoutOptions& options) const noexcept {
+    return text_ == text && font_ == font && options_ == options && max_width_ == max_width;
   }
 
   [[nodiscard]] Size Measure() const override {
@@ -526,7 +534,7 @@ public:
 
 private:
   void ConfigureContext() const {
-    context_.set("font", CssFont(style_.font));
+    context_.set("font", CssFont(font_));
     context_.set("textBaseline", std::string("alphabetic"));
     context_.set("direction", std::string(CssDirection(direction_)));
     context_.set("lang", options_.shaping.locale.empty() ? std::string("inherit") : options_.shaping.locale);
@@ -663,7 +671,7 @@ private:
 
   mutable val context_;
   std::string text_;
-  TextStyle style_;
+  Font font_;
   TextLayoutOptions options_;
   TextDirection direction_ = TextDirection::LeftToRight;
   FontMetrics font_metrics_;
@@ -671,11 +679,10 @@ private:
   float line_height_ = 0.0F;
   float widest_line_ = 0.0F;
   float alignment_width_ = 0.0F;
+  float max_width_ = 0.0F;
   std::vector<TextOffset> boundaries_;
   std::vector<Line> lines_;
 };
-
-} // namespace
 
 WebRenderer::WebRenderer(std::uintptr_t session_id, val canvas)
     : canvas_(std::move(canvas)), context_(canvas_.call<val>("getContext", std::string("2d"))),
@@ -684,6 +691,8 @@ WebRenderer::WebRenderer(std::uintptr_t session_id, val canvas)
     throw std::runtime_error("HuxerUI Web Canvas 2D context is unavailable");
   }
 }
+
+WebRenderer::~WebRenderer() = default;
 
 void WebRenderer::SetViewport(Size viewport, float display_scale) {
   viewport_ = viewport;
@@ -695,6 +704,24 @@ void WebRenderer::SetViewport(Size viewport, float display_scale) {
 
 void WebRenderer::Invalidate() noexcept {
   force_redraw_ = true;
+}
+
+const WebTextLayout& WebRenderer::ParagraphFor(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+) {
+  const auto cached = std::find_if(paragraph_cache_.begin(), paragraph_cache_.end(), [&](const auto& layout) {
+    return layout->Matches(text, style.font, max_width, options);
+  });
+  if (cached != paragraph_cache_.end()) {
+    return **cached;
+  }
+
+  constexpr std::size_t maximum_paragraphs = 256;
+  if (paragraph_cache_.size() >= maximum_paragraphs) {
+    paragraph_cache_.erase(paragraph_cache_.begin());
+  }
+  paragraph_cache_.push_back(std::make_unique<WebTextLayout>(context_, text, style.font, max_width, options));
+  return *paragraph_cache_.back();
 }
 
 FontMetrics WebRenderer::Metrics(const Font& font) {
@@ -735,14 +762,13 @@ WebRenderer::MeasureRun(std::string_view text, const TextStyle& style, const Tex
 TextLayoutMetrics WebRenderer::MeasureText(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
-  WebTextLayout layout(context_, text, style, max_width, options);
-  return layout.Metrics();
+  return ParagraphFor(text, style, max_width, options).Metrics();
 }
 
 std::unique_ptr<TextLayout> WebRenderer::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
-  return std::make_unique<WebTextLayout>(context_, text, style, max_width, options);
+  return std::make_unique<WebTextLayout>(context_, text, style.font, max_width, options);
 }
 
 void WebRenderer::RenderSequence(const PaintSequence& sequence) {
@@ -801,7 +827,7 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command) {
   if (command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
     return;
   }
-  WebTextLayout layout(context_, command.text, command.style, command.rect.width, command.options);
+  const WebTextLayout& layout = ParagraphFor(command.text, command.style, command.rect.width, command.options);
   const float vertical_offset =
       command.options.wrap == TextWrap::NoWrap ? (command.rect.height - layout.Metrics().size.height) * 0.5F : 0.0F;
   context_.call<void>("save");
@@ -1051,31 +1077,37 @@ void WebRenderer::Draw(const RenderFrame& frame) {
   if (full_redraw) {
     regions = {{0.0F, 0.0F, viewport_.width, viewport_.height}};
   }
-  for (const Rect& region : regions) {
-    if (region.IsEmpty()) {
-      continue;
-    }
-    context_.call<void>("save");
-    context_.call<void>("setTransform", 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-    const float left = std::floor(region.x * display_scale_);
-    const float top = std::floor(region.y * display_scale_);
-    const float right = std::ceil((region.x + region.width) * display_scale_);
-    const float bottom = std::ceil((region.y + region.height) * display_scale_);
-    context_.call<void>("clearRect", left, top, right - left, bottom - top);
-    context_.call<void>("restore");
-
-    context_.call<void>("save");
-    context_.call<void>("setTransform", display_scale_, 0.0, 0.0, display_scale_, 0.0, 0.0);
-    context_.call<void>("beginPath");
-    context_.call<void>("rect", region.x, region.y, region.width, region.height);
-    context_.call<void>("clip");
-    context_.set("fillStyle", CssColor(Color::Rgb(247, 248, 250)));
-    context_.call<void>("fillRect", region.x, region.y, region.width, region.height);
-    if (frame.scene.root != nullptr) {
-      RenderSceneNode(*frame.scene.root);
-    }
-    context_.call<void>("restore");
+  std::erase_if(regions, [](const Rect& region) { return region.IsEmpty(); });
+  if (regions.empty()) {
+    return;
   }
+
+  context_.call<void>("save");
+  context_.call<void>("setTransform", 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+  context_.call<void>("beginPath");
+  const double display_scale = display_scale_;
+  for (const Rect& region : regions) {
+    const double left = std::floor(static_cast<double>(region.x) * display_scale);
+    const double top = std::floor(static_cast<double>(region.y) * display_scale);
+    const double right = std::ceil(static_cast<double>(region.x + region.width) * display_scale);
+    const double bottom = std::ceil(static_cast<double>(region.y + region.height) * display_scale);
+    context_.call<void>("clearRect", left, top, right - left, bottom - top);
+    context_.call<void>("rect", left, top, right - left, bottom - top);
+  }
+  context_.call<void>("clip");
+  context_.set("fillStyle", CssColor(Color::Rgb(247, 248, 250)));
+  context_.call<void>(
+      "fillRect",
+      0.0,
+      0.0,
+      std::ceil(static_cast<double>(viewport_.width) * display_scale),
+      std::ceil(static_cast<double>(viewport_.height) * display_scale)
+  );
+  context_.call<void>("setTransform", display_scale, 0.0, 0.0, display_scale, 0.0, 0.0);
+  if (frame.scene.root != nullptr) {
+    RenderSceneNode(*frame.scene.root);
+  }
+  context_.call<void>("restore");
 }
 
 } // namespace huxerui::detail
