@@ -311,7 +311,7 @@ void SetStrokeColor(CGContextRef context, Color color) {
   CGContextSetRGBStrokeColor(context, color.red, color.green, color.blue, color.alpha);
 }
 
-void DrawNativeImage(
+void DrawCGImage(
     CGContextRef context,
     CGImageRef image,
     Size intrinsic_size,
@@ -412,12 +412,12 @@ struct UIKitRenderer::State {
   struct CachedImage {
     std::uint64_t identity = 0;
     std::size_t byte_size = 0;
-    CFRef<CGImageRef> native_image;
+    CFRef<CGImageRef> cg_image;
   };
 
   struct CachedExternalTexture {
     std::weak_ptr<IosExternalTextureState> source;
-    CFRef<CGImageRef> native_image;
+    CFRef<CGImageRef> cg_image;
   };
 
   State() : external_texture_context([CIContext contextWithOptions:nil]) {}
@@ -429,7 +429,7 @@ struct UIKitRenderer::State {
   };
 
   struct CachedFont {
-    CFRef<CTFontRef> native_font;
+    CFRef<CTFontRef> ct_font;
     FontMetrics metrics;
   };
 
@@ -570,21 +570,21 @@ struct UIKitRenderer::State {
       return cached->second;
     }
 
-    CFRef<CTFontRef> native_font{CreateFont(font)};
+    CFRef<CTFontRef> ct_font{CreateFont(font)};
     const FontMetrics metrics{
-        static_cast<float>(CTFontGetAscent(native_font.Get())),
-        static_cast<float>(CTFontGetDescent(native_font.Get())),
-        static_cast<float>(CTFontGetLeading(native_font.Get())),
-        static_cast<float>(-CTFontGetUnderlinePosition(native_font.Get())),
-        static_cast<float>(CTFontGetUnderlineThickness(native_font.Get())),
-        static_cast<float>(CTFontGetXHeight(native_font.Get()) * 0.5),
-        static_cast<float>(CTFontGetUnderlineThickness(native_font.Get())),
+        static_cast<float>(CTFontGetAscent(ct_font.Get())),
+        static_cast<float>(CTFontGetDescent(ct_font.Get())),
+        static_cast<float>(CTFontGetLeading(ct_font.Get())),
+        static_cast<float>(-CTFontGetUnderlinePosition(ct_font.Get())),
+        static_cast<float>(CTFontGetUnderlineThickness(ct_font.Get())),
+        static_cast<float>(CTFontGetXHeight(ct_font.Get()) * 0.5),
+        static_cast<float>(CTFontGetUnderlineThickness(ct_font.Get())),
     };
     constexpr std::size_t maximum_fonts = 64;
     if (fonts.size() >= maximum_fonts) {
       fonts.erase(fonts.begin());
     }
-    auto [inserted, was_inserted] = fonts.emplace(font, CachedFont{std::move(native_font), metrics});
+    auto [inserted, was_inserted] = fonts.emplace(font, CachedFont{std::move(ct_font), metrics});
     static_cast<void>(was_inserted);
     return inserted->second;
   }
@@ -597,8 +597,8 @@ struct UIKitRenderer::State {
 
     CachedFont& cached_font = FontFor(style.font);
     TextShapingOptions resolved_shaping = shaping;
-    resolved_shaping.direction = ResolveTextDirection(text, shaping.direction, cached_font.native_font.Get());
-    CFRef<CTLineRef> line{CreateLine(text, style, resolved_shaping, cached_font.native_font.Get())};
+    resolved_shaping.direction = ResolveTextDirection(text, shaping.direction, cached_font.ct_font.Get());
+    CFRef<CTLineRef> line{CreateLine(text, style, resolved_shaping, cached_font.ct_font.Get())};
     CGFloat ascent = 0.0;
     CGFloat descent = 0.0;
     CGFloat leading = 0.0;
@@ -671,7 +671,7 @@ struct UIKitRenderer::State {
       layout_text.append("\xE2\x80\x8B");
     }
     CFRef<CFAttributedStringRef> attributed{
-        CreateAttributedString(layout_text, command.style, command.options, cached_font.native_font.Get())};
+        CreateAttributedString(layout_text, command.style, command.options, cached_font.ct_font.Get())};
     CFRef<CTFramesetterRef> framesetter{CTFramesetterCreateWithAttributedString(attributed.Get())};
     const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
         framesetter.Get(),
@@ -705,7 +705,7 @@ struct UIKitRenderer::State {
         std::ranges::find_if(images, [identity](const CachedImage& entry) { return entry.identity == identity; });
     if (cached != images.end()) {
       std::rotate(cached, cached + 1, images.end());
-      return images.back().native_image.Get();
+      return images.back().cg_image.Get();
     }
     const std::span<const std::byte> bytes = image.EncodedBytes();
     if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
@@ -723,12 +723,12 @@ struct UIKitRenderer::State {
     if (source.Get() == nullptr) {
       return nullptr;
     }
-    CFRef<CGImageRef> native_image{CGImageSourceCreateImageAtIndex(source.Get(), 0, nullptr)};
-    if (native_image.Get() == nullptr) {
+    CFRef<CGImageRef> cg_image{CGImageSourceCreateImageAtIndex(source.Get(), 0, nullptr)};
+    if (cg_image.Get() == nullptr) {
       return nullptr;
     }
-    const std::size_t row_bytes = CGImageGetBytesPerRow(native_image.Get());
-    const std::size_t height = CGImageGetHeight(native_image.Get());
+    const std::size_t row_bytes = CGImageGetBytesPerRow(cg_image.Get());
+    const std::size_t height = CGImageGetHeight(cg_image.Get());
     const std::size_t byte_size = height > 0 && row_bytes > std::numeric_limits<std::size_t>::max() / height
                                       ? std::numeric_limits<std::size_t>::max()
                                       : row_bytes * height;
@@ -736,17 +736,17 @@ struct UIKitRenderer::State {
     if (byte_size > image_cache_budget) {
       // Retain one oversized image so repeated frames do not decode it again; the next insertion evicts it.
       images.clear();
-      images.push_back({identity, byte_size, std::move(native_image)});
+      images.push_back({identity, byte_size, std::move(cg_image)});
       image_cache_bytes = byte_size;
-      return images.back().native_image.Get();
+      return images.back().cg_image.Get();
     }
     while (!images.empty() && image_cache_bytes > image_cache_budget - byte_size) {
       image_cache_bytes -= images.front().byte_size;
       images.erase(images.begin());
     }
-    images.push_back({identity, byte_size, std::move(native_image)});
+    images.push_back({identity, byte_size, std::move(cg_image)});
     image_cache_bytes += byte_size;
-    return images.back().native_image.Get();
+    return images.back().cg_image.Get();
   }
 
   CGImageRef ImageFor(const ExternalTexture& texture) {
@@ -765,19 +765,19 @@ struct UIKitRenderer::State {
 
     CVPixelBufferRef frame = source->AcquireLatestFrame();
     if (frame == nullptr) {
-      return cached->native_image.Get();
+      return cached->cg_image.Get();
     }
     CFRef<CVPixelBufferRef> retained_frame{frame};
     CIImage* image = [CIImage imageWithCVPixelBuffer:retained_frame.Get()];
     const CGRect extent = image.extent;
     if (CGRectIsEmpty(extent) || CGRectIsInfinite(extent)) {
-      return cached->native_image.Get();
+      return cached->cg_image.Get();
     }
-    CFRef<CGImageRef> native_image{[external_texture_context createCGImage:image fromRect:extent]};
-    if (native_image.Get() != nullptr) {
-      cached->native_image = std::move(native_image);
+    CFRef<CGImageRef> cg_image{[external_texture_context createCGImage:image fromRect:extent]};
+    if (cg_image.Get() != nullptr) {
+      cached->cg_image = std::move(cg_image);
     }
-    return cached->native_image.Get();
+    return cached->cg_image.Get();
   }
 
   void PruneExternalTextures() {
@@ -1219,7 +1219,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextRunsComman
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& command) {
-  DrawNativeImage(
+  DrawCGImage(
       context,
       state_->ImageFor(command.image),
       command.image.IntrinsicSize(),
@@ -1231,7 +1231,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& 
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawExternalTextureCommand& command) {
-  DrawNativeImage(
+  DrawCGImage(
       context,
       state_->ImageFor(command.texture),
       command.texture.IntrinsicSize(),

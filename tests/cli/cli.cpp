@@ -215,7 +215,7 @@ TEST_CASE("HuxerUICliCreatesModuleAndPreviewProjects") {
   REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
 }
 
-TEST_CASE("HuxerUICliCreatesCommonOnlyModulesWithoutNativeShells") {
+TEST_CASE("HuxerUICliCreatesCommonOnlyModulesWithoutPlatformShells") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"create", "module", "AudioTools"});
 

@@ -126,7 +126,7 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
       draw_shadow_ == nullptr || fill_path_ == nullptr || stroke_path_ == nullptr || draw_path_shadow_ == nullptr ||
       push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr ||
       pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
-    throw std::runtime_error("HuxerUI Android renderer methods do not match the native backend");
+    throw std::runtime_error("HuxerUI Android renderer methods do not match the platform backend");
   }
 }
 

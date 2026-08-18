@@ -7,9 +7,9 @@ This document defines HuxerUI's platform-neutral Path value, custom Canvas compo
 ## Goals
 
 - Express arbitrary filled, stroked, clipped, and shadowed vector geometry in shared application code.
-- Keep Canvas on the existing View, layout, paint invalidation, RenderScene, and native renderer path.
+- Keep Canvas on the existing View, layout, paint invalidation, RenderScene, and platform renderer path.
 - Preserve node-local logical coordinates and conservative damage bounds.
-- Keep native geometry and blur resources inside platform renderers.
+- Keep platform geometry and blur resources inside platform renderers.
 - Avoid a second imperative rendering surface or public render-object hierarchy.
 
 ## Path
@@ -89,19 +89,19 @@ When a scope recomposes and produces the same Canvas node, its content is conser
 This invalidation remains local to that Canvas and does not repaint clean siblings.
 
 Canvas painters may append commands only to the supplied PaintContext.
-They must not retain the context, mutate layout or interaction state, schedule frames, or query native coordinates.
+They must not retain the context, mutate layout or interaction state, schedule frames, or query platform coordinates.
 Animated retained behavior continues to use NodeExtension frame callbacks and paint invalidation rather than a Canvas-specific scheduler.
 
-## Native rendering
+## Platform rendering
 
-Platform renderers convert Path elements to native geometry while preserving fill rules, stroke caps, joins, transforms, and clip balance:
+Platform renderers convert Path elements to platform geometry while preserving fill rules, stroke caps, joins, transforms, and clip balance:
 
 - Android uses `android.graphics.Path` and the host Canvas.
 - macOS uses Core Graphics paths.
 - Windows uses Direct2D path geometry.
 
 Path shadow masks reuse each backend's existing blur machinery.
-Platform-native geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
+Platform geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
 
 ## Deferred capabilities
 

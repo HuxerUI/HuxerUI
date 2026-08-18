@@ -30,7 +30,7 @@ TEST_CASE("PlatformFrameStateDefersTheEarliestRequestUntilPaintingCompletes") {
   REQUIRE_FALSE(state.TakeDeferred(true).has_value());
 }
 
-TEST_CASE("PlatformFrameStateDefersRequestsMadeDuringNativePainting") {
+TEST_CASE("PlatformFrameStateDefersRequestsMadeDuringPlatformPainting") {
   PlatformFrameState state;
 
   REQUIRE(state.Request(1.0, 0.0, true) == 1.0);

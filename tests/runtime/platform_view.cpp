@@ -213,8 +213,8 @@ TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
   REQUIRE((anchor->actions & SemanticActionMask(SemanticActionKind::Focus)) != 0);
   REQUIRE_FALSE(anchor->focused);
 
-  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.NativeRuntime(), placement.Identity(), false);
-  REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.NativeRuntime()) == placement.Identity());
+  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.CoreRuntime(), placement.Identity(), false);
+  REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.CoreRuntime()) == placement.Identity());
   const FrameCommit& focused = runtime.BuildCommit();
   const auto focused_anchor = std::ranges::find(
       focused.semantic_frame->nodes,
@@ -224,8 +224,8 @@ TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
   REQUIRE(focused_anchor != focused.semantic_frame->nodes.end());
   REQUIRE(focused_anchor->focused);
 
-  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.NativeRuntime(), std::nullopt, false);
-  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(runtime.NativeRuntime()).has_value());
+  detail::RuntimeAccess::SynchronizePlatformViewFocus(runtime.CoreRuntime(), std::nullopt, false);
+  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(runtime.CoreRuntime()).has_value());
 
   TestPlatform non_focusable_platform;
   Runtime non_focusable(NonFocusablePlatformViewApp, non_focusable_platform);
@@ -240,11 +240,11 @@ TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
   REQUIRE(non_focusable_anchor != non_focusable_frame.semantic_frame->nodes.end());
   REQUIRE((non_focusable_anchor->actions & SemanticActionMask(SemanticActionKind::Focus)) == 0);
   detail::RuntimeAccess::SynchronizePlatformViewFocus(
-      non_focusable.NativeRuntime(),
+      non_focusable.CoreRuntime(),
       non_focusable_placement.Identity(),
       false
   );
-  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(non_focusable.NativeRuntime()).has_value());
+  REQUIRE_FALSE(detail::RuntimeAccess::FocusedPlatformView(non_focusable.CoreRuntime()).has_value());
 }
 
 TEST_CASE("PlatformViewTypeChangesReplaceTheMountedLeaf") {
@@ -276,14 +276,14 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
   event.dispatch(PlatformPayload(std::int64_t{7}), mounted->event_bindings);
   REQUIRE(received_platform_event == 7);
   REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.NativeRuntime(),
+      runtime.CoreRuntime(),
       placement.Identity(),
       "changed",
       PlatformPayload(std::int64_t{9})
   ));
   REQUIRE(received_platform_event == 9);
   REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.NativeRuntime(),
+      runtime.CoreRuntime(),
       placement.Identity(),
       "changed",
       PlatformPayload("invalid")
@@ -295,7 +295,7 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
   );
 }
 
-TEST_CASE("PlatformViewBindsExternalTexturesBeforeNativeComposition") {
+TEST_CASE("PlatformViewBindsExternalTexturesBeforePlatformComposition") {
   platform_view_external_texture = MakeTestExternalTexture({32.0F, 18.0F});
   TestPlatform platform;
   Runtime runtime(HiddenTexturePlatformViewApp, platform);
@@ -316,7 +316,7 @@ TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
   REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.NativeRuntime(),
+      runtime.CoreRuntime(),
       placement.Identity(),
       "textureChanged",
       PlatformPayload(texture)
@@ -328,7 +328,7 @@ TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
   other_runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand other_placement = FindPlatformView(other_runtime.BuildRenderFrame());
   REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      other_runtime.NativeRuntime(),
+      other_runtime.CoreRuntime(),
       other_placement.Identity(),
       "textureChanged",
       PlatformPayload(texture)
@@ -341,15 +341,15 @@ TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
-  REQUIRE(detail::RuntimeAccess::HitTestPlatformView(runtime.NativeRuntime(), {20.0F, 20.0F}) ==
+  REQUIRE(detail::RuntimeAccess::HitTestPlatformView(runtime.CoreRuntime(), {20.0F, 20.0F}) ==
           placement.Identity());
-  REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(runtime.NativeRuntime(), {100.0F, 20.0F}).has_value());
+  REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(runtime.CoreRuntime(), {100.0F, 20.0F}).has_value());
 
   TestPlatform covered_platform;
   Runtime covered(CoveredPlatformViewApp, covered_platform);
   covered.SetWindowMetrics({{300.0F, 200.0F}});
   covered.BuildRenderFrame();
-  REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(covered.NativeRuntime(), {20.0F, 20.0F}).has_value());
+  REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(covered.CoreRuntime(), {20.0F, 20.0F}).has_value());
 }
 
 TEST_CASE("PlatformModulesOwnAUniquePerSurfaceTypeRegistry") {

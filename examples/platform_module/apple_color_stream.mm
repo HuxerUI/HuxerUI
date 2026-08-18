@@ -101,7 +101,10 @@ huxerui::PlatformModuleFactory AppleColorStreamFactory() {
         -> std::function<void()> {
       if (!NSThread.isMainThread) {
         result(
-            ColorStreamError("example/color-stream-thread", "The native color stream must be used from the main thread")
+            ColorStreamError(
+                "example/color-stream-thread",
+                "The platform color stream must be used from the main thread"
+            )
         );
         return {};
       }
@@ -111,7 +114,10 @@ huxerui::PlatformModuleFactory AppleColorStreamFactory() {
         return {};
       }
       result(
-          ColorStreamError("example/color-stream-method", "The native color stream method or payload is not supported")
+          ColorStreamError(
+              "example/color-stream-method",
+              "The platform color stream method or payload is not supported"
+          )
       );
       return {};
     };

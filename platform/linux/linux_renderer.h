@@ -61,7 +61,7 @@ public:
   [[nodiscard]] bool EnsureGl(Display* display, Window window);
   [[nodiscard]] bool PresentGl();
   [[nodiscard]] bool HasPresentation() const noexcept;
-  [[nodiscard]] unsigned long NativeVisualId() const noexcept;
+  [[nodiscard]] unsigned long XVisualId() const noexcept;
 
   std::unique_ptr<State> state_;
 };

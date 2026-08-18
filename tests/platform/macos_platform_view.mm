@@ -220,7 +220,7 @@ bool DrainMainQueue() {
   return drained;
 }
 
-TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeNativeViews") {
+TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
   @autoreleasepool {
     mac_platform_view_creates = 0;
     mac_platform_view_updates = 0;
@@ -242,7 +242,7 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeNativeViews") {
     REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.NativeRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
     NSView* root = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
 
     REQUIRE(platform_views.Commit(root, runtime.BuildRenderFrame()));
@@ -309,7 +309,7 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
     REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.NativeRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
@@ -329,7 +329,7 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
 
     REQUIRE([window makeFirstResponder:mac_created_platform_view]);
     platform_views.SynchronizeFocus(window.firstResponder);
-    REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.NativeRuntime()) == platform_view_identity);
+    REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.CoreRuntime()) == platform_view_identity);
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(window.firstResponder == mac_created_platform_view);
 
@@ -343,7 +343,7 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
   }
 }
 
-TEST_CASE("MacPlatformViewsTraverseBetweenNativeTextFieldAndRuntimeFocus") {
+TEST_CASE("MacPlatformViewsTraverseBetweenHostedTextFieldAndRuntimeFocus") {
   @autoreleasepool {
     mac_created_focus_text_field = nil;
 
@@ -359,7 +359,7 @@ TEST_CASE("MacPlatformViewsTraverseBetweenNativeTextFieldAndRuntimeFocus") {
     REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.NativeRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
     HuxerUITestPlatformWindow* window =
         [[HuxerUITestPlatformWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                      styleMask:NSWindowStyleMaskBorderless
@@ -369,7 +369,7 @@ TEST_CASE("MacPlatformViewsTraverseBetweenNativeTextFieldAndRuntimeFocus") {
         [[HuxerUITestPlatformRootView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
     window->huxeruiPlatformViews = &platform_views;
     root->huxeruiPlatformViews = &platform_views;
-    root->huxeruiRuntime = &runtime.NativeRuntime();
+    root->huxeruiRuntime = &runtime.CoreRuntime();
     window.contentView = root;
     window.initialFirstResponder = root;
     REQUIRE([window makeFirstResponder:root]);
@@ -384,7 +384,7 @@ TEST_CASE("MacPlatformViewsTraverseBetweenNativeTextFieldAndRuntimeFocus") {
     REQUIRE(anchor != initial.semantic_frame->nodes.end());
     const SemanticNodeId anchor_id = anchor->id;
 
-    REQUIRE(runtime.NativeRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
+    REQUIRE(runtime.CoreRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE([window.firstResponder isKindOfClass:NSTextView.class]);
     REQUIRE(
@@ -401,7 +401,7 @@ TEST_CASE("MacPlatformViewsTraverseBetweenNativeTextFieldAndRuntimeFocus") {
     REQUIRE_FALSE(platform_views.Commit(root, forward.render_frame));
     REQUIRE(window.firstResponder == root);
 
-    REQUIRE(runtime.NativeRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
+    REQUIRE(runtime.CoreRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE([window.firstResponder isKindOfClass:NSTextView.class]);
 

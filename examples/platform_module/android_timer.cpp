@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr char native_timer_class[] = "org/huxerui/examples/platformmodule/NativeTimer";
+constexpr char platform_timer_class[] = "org/huxerui/examples/platformmodule/PlatformTimer";
 
 huxerui::PlatformError TimerError(std::string code, std::string message) {
   return {
@@ -77,11 +77,11 @@ struct AndroidTimerState : std::enable_shared_from_this<AndroidTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return {};
       }
       if (generation == static_cast<std::uint64_t>(std::numeric_limits<jlong>::max())) {
-        result(TimerError("example/timer-exhausted", "The native timer generation space is exhausted"));
+        result(TimerError("example/timer-exhausted", "The platform timer generation space is exhausted"));
         return {};
       }
       if (pending_start) {
@@ -141,7 +141,7 @@ struct AndroidTimerState : std::enable_shared_from_this<AndroidTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return;
       }
       if (pending_start) {
@@ -202,16 +202,16 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidTimer(
     JNIEnv* environment, jobject context, const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events
 ) {
   static_cast<void>(options);
-  huxerui::android::LocalRef<jclass> timer_class(environment, environment->FindClass(native_timer_class));
+  huxerui::android::LocalRef<jclass> timer_class(environment, environment->FindClass(platform_timer_class));
   if (!timer_class) {
     ClearJavaException(environment);
-    throw std::logic_error("HuxerUI example could not find the Android native timer class");
+    throw std::logic_error("HuxerUI example could not find the Android platform timer class");
   }
   const jmethodID constructor = environment->GetMethodID(timer_class.Get(), "<init>", "(Landroid/content/Context;J)V");
   const jmethodID start = environment->GetMethodID(timer_class.Get(), "start", "(JJ)V");
   const jmethodID cancel = environment->GetMethodID(timer_class.Get(), "cancel", "(J)V");
   const jmethodID stop = environment->GetMethodID(timer_class.Get(), "stop", "()V");
-  const jmethodID dispose_bridge = environment->GetMethodID(timer_class.Get(), "disposeNativeBridge", "()V");
+  const jmethodID dispose_bridge = environment->GetMethodID(timer_class.Get(), "disposePlatformBridge", "()V");
   if (constructor == nullptr || start == nullptr || cancel == nullptr || stop == nullptr || dispose_bridge == nullptr) {
     ClearJavaException(environment);
     throw std::logic_error("HuxerUI example Android timer methods do not match the native bridge");
@@ -230,12 +230,12 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidTimer(
   );
   if (!local_timer || environment->ExceptionCheck()) {
     ClearJavaException(environment);
-    throw std::logic_error("HuxerUI example could not create the Android native timer");
+    throw std::logic_error("HuxerUI example could not create the Android platform timer");
   }
   state->timer = environment->NewGlobalRef(local_timer.Get());
   if (state->timer == nullptr) {
     ClearJavaException(environment);
-    throw std::runtime_error("HuxerUI example could not retain the Android native timer");
+    throw std::runtime_error("HuxerUI example could not retain the Android platform timer");
   }
   state->start = start;
   state->cancel = cancel;
@@ -260,7 +260,7 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidTimer(
       state->Stop(std::move(result));
       return {};
     }
-    result(TimerError("example/unknown-method", "The native timer method is not supported"));
+    result(TimerError("example/unknown-method", "The platform timer method is not supported"));
     return {};
   };
   instance.dispose = [state] { state->Dispose(); };
@@ -283,7 +283,7 @@ void InstallTimer(RootContext& root) {
 } // namespace huxerui::example
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_examples_platformmodule_NativeTimer_nativeTick(JNIEnv*, jclass, jlong bridge, jlong generation) {
+Java_org_huxerui_examples_platformmodule_PlatformTimer_nativeTick(JNIEnv*, jclass, jlong bridge, jlong generation) {
   auto* state = reinterpret_cast<std::weak_ptr<AndroidTimerState>*>(static_cast<std::uintptr_t>(bridge));
   if (state != nullptr && generation > 0) {
     try {

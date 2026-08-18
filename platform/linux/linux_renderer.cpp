@@ -801,7 +801,7 @@ struct LinuxRenderer::State {
   EGLContext egl_context = EGL_NO_CONTEXT;
   bool egl_ready = false;
   bool gl_ready = false;
-  unsigned long native_visual_id = 0;
+  unsigned long x_visual_id = 0;
   bool use_bgra_upload = false;
   GLuint texture = 0;
   int texture_width = 0;
@@ -1391,7 +1391,7 @@ struct LinuxRenderer::State {
     egl_context = EGL_NO_CONTEXT;
     egl_ready = false;
     gl_ready = false;
-    native_visual_id = 0;
+    x_visual_id = 0;
     use_bgra_upload = false;
     texture = 0;
     texture_width = 0;
@@ -1512,7 +1512,7 @@ struct LinuxRenderer::State {
     return cached->surface;
   }
 
-  // Creates only the EGL display and picks a config; the native window does not
+  // Creates only the EGL display and picks a config; the X11 window does not
   // exist yet, so the surface and context are deferred to EnsureGl. The default
   // display is never used because it opens a second X connection on this thread.
   [[nodiscard]] bool InitializePresentation(Display* display) {
@@ -1594,7 +1594,7 @@ struct LinuxRenderer::State {
       }
       if (preferred_visual_id != 0 && candidate_visual_id == preferred_visual_id) {
         egl_config = candidate;
-        native_visual_id = candidate_visual_id;
+        x_visual_id = candidate_visual_id;
         return true;
       }
       if (fallback == nullptr) {
@@ -1604,7 +1604,7 @@ struct LinuxRenderer::State {
     }
     if (fallback != nullptr) {
       egl_config = fallback;
-      native_visual_id = fallback_visual_id;
+      x_visual_id = fallback_visual_id;
       return true;
     }
     return false;
@@ -1825,7 +1825,7 @@ struct LinuxRenderer::State {
     if (swap_result != EGL_TRUE) {
       const EGLint error = eglGetError();
       if (error == EGL_BAD_SURFACE || error == EGL_BAD_CONTEXT || error == EGL_BAD_NATIVE_WINDOW) {
-        // A lost or resized native window invalidates the surface; drop it so
+        // A lost or resized X11 window invalidates the surface; drop it so
         // the next Render recreates it, mirroring an out-of-date swap chain.
         static_cast<void>(eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
         if (egl_surface != EGL_NO_SURFACE) {
@@ -3066,12 +3066,12 @@ bool LinuxRenderer::PresentGl() {
 
 bool LinuxRenderer::HasPresentation() const noexcept {
   // egl_ready means a display and config were chosen, so the adapter can adopt
-  // the native visual id before the window is created.
+  // the X visual ID before the window is created.
   return state_->egl_ready;
 }
 
-unsigned long LinuxRenderer::NativeVisualId() const noexcept {
-  return state_->native_visual_id;
+unsigned long LinuxRenderer::XVisualId() const noexcept {
+  return state_->x_visual_id;
 }
 
 } // namespace huxerui::detail

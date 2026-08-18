@@ -44,7 +44,7 @@ enum class SystemBarContentBrightness {
 
 struct WindowTitleBarMetrics {
   float height = 0.0F;
-  // Platform-resolved logical reservations already account for native control placement and layout direction.
+  // Platform-resolved logical reservations already account for system control placement and layout direction.
   float left_inset = 0.0F;
   float right_inset = 0.0F;
   bool maximized = false;
@@ -65,9 +65,9 @@ struct WindowOptions {
   Size initial_size = {520.0F, 360.0F};
   // Root geometry remains stable for one Runtime; pages may still override SystemBarsAppearance independently.
   WindowContentMode content_mode = WindowContentMode::SafeArea;
-  // Native window chrome ownership remains stable for one Runtime.
+  // System window chrome ownership remains stable for one Runtime.
   WindowChromeMode chrome_mode = WindowChromeMode::System;
-  // Custom chrome uses this preferred logical height while preserving any larger native control minimum.
+  // Custom chrome uses this preferred logical height while preserving any larger system control minimum.
   float title_bar_height = 40.0F;
   // Accessibility labels for framework-rendered desktop caption controls.
   WindowCaptionLabels caption_labels;

@@ -457,10 +457,10 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
       RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     }
   } else {
-    const bool native_element_focused = std::ranges::any_of(state_->hosted, [](const auto& entry) {
+    const bool platform_view_focused = std::ranges::any_of(state_->hosted, [](const auto& entry) {
       return WebPlatformElementContainsFocus(entry.second->element.as_handle());
     });
-    if (native_element_focused) {
+    if (platform_view_focused) {
       state_->root.call<void>("focus", val::object());
     }
   }

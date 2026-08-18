@@ -401,13 +401,13 @@ private:
     const Window root = DefaultRootWindow(display_);
 
     // EGL window surfaces require a window whose visual matches the EGLConfig.
-    // Create the window with the renderer's native visual and colormap when EGL
+    // Create the window with the renderer's X visual and colormap when EGL
     // is available, and fall back to the default visual otherwise.
     XVisualInfo* presentation_visual = nullptr;
     int depth = DefaultDepth(display_, screen_);
-    if (renderer_.HasPresentation() && renderer_.NativeVisualId() != 0) {
+    if (renderer_.HasPresentation() && renderer_.XVisualId() != 0) {
       XVisualInfo visual_info_template{};
-      visual_info_template.visualid = static_cast<VisualID>(renderer_.NativeVisualId());
+      visual_info_template.visualid = static_cast<VisualID>(renderer_.XVisualId());
       int visual_count = 0;
       XVisualInfo* visuals = XGetVisualInfo(display_, VisualIDMask, &visual_info_template, &visual_count);
       if (visuals != nullptr) {
@@ -904,7 +904,7 @@ private:
       return;
     }
     suppress_pointer_ = false;
-    if (TryBeginNativeWindowOperation(event)) {
+    if (TryBeginWindowManagerOperation(event)) {
       suppress_pointer_ = true;
       return;
     }
@@ -914,7 +914,7 @@ private:
   }
 
   void HandleButtonRelease(const XButtonEvent& event) {
-    // The press began a native window operation, so the matching release belongs
+    // The press began a X11 window operation, so the matching release belongs
     // to the window manager and must not be forwarded to the runtime.
     if (suppress_pointer_) {
       suppress_pointer_ = false;
@@ -927,7 +927,7 @@ private:
     SendPointer(PointerEventType::Up, ClientPoint(event.x, event.y));
   }
 
-  bool TryBeginNativeWindowOperation(const XButtonEvent& event) {
+  bool TryBeginWindowManagerOperation(const XButtonEvent& event) {
     if (!custom_chrome_) {
       return false;
     }

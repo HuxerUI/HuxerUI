@@ -245,7 +245,7 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
       }
       request = next_request++;
       pending.emplace(request, PendingCall{std::move(completion), {}});
-      call = native.call;
+      call = implementation.call;
     }
 
     const std::weak_ptr<State> weak = weak_from_this();
@@ -340,8 +340,8 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
       events.clear();
       queued_events.clear();
       event_delivery_scheduled = false;
-      dispose = std::move(native.dispose);
-      native.call = {};
+      dispose = std::move(implementation.dispose);
+      implementation.call = {};
     }
     for (const auto& cancel : cancellations) {
       try {
@@ -493,7 +493,7 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
 
   UIThreadDispatcher dispatch_to_ui_thread;
   std::shared_ptr<detail::ExternalTextureSurface> texture_surface;
-  PlatformModuleFactory::Instance native;
+  PlatformModuleFactory::Instance implementation;
   std::mutex mutex;
   PlatformRequestId next_request = 1;
   bool open = true;
@@ -559,17 +559,17 @@ PlatformInstance PlatformModules::Open(std::string type, PlatformPayload options
   detail::BindExternalTextures(options, adapter_->external_texture_surface_);
   auto state =
       std::make_shared<PlatformInstance::State>(dispatch_to_ui_thread_, adapter_->external_texture_surface_);
-  PlatformModuleFactory::Instance native = adapter_->CreatePlatformModule(type, options, state->EventSink());
-  if (!native.call) {
-    if (native.dispose) {
+  PlatformModuleFactory::Instance implementation = adapter_->CreatePlatformModule(type, options, state->EventSink());
+  if (!implementation.call) {
+    if (implementation.dispose) {
       try {
-        native.dispose();
+        implementation.dispose();
       } catch (...) {
       }
     }
     throw std::logic_error("HuxerUI platform module factory must provide call");
   }
-  state->native = std::move(native);
+  state->implementation = std::move(implementation);
   return PlatformInstance(std::move(state));
 }
 

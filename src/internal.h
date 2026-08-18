@@ -418,7 +418,7 @@ struct ViewProperties {
   EdgeInsets padding;
   // This declaration selects which inherited safe-area edges measurement adds to the node's resolved padding.
   std::optional<SafeAreaPadding> safe_area_padding;
-  // This marker participates only in native window hit testing and has no layout, paint, or retained lifecycle state.
+  // This marker participates only in system window hit testing and has no layout, paint, or retained lifecycle state.
   bool window_drag_region = false;
   Frame frame;
   std::optional<Color> background;

@@ -417,7 +417,7 @@ struct Win32PlatformViews::State {
   UIThreadDispatcher dispatch;
   OverlayMessageHandler overlay_message_handler;
   float dpi_scale = 1.0F;
-  std::optional<std::uint64_t> native_focus_identity;
+  std::optional<std::uint64_t> platform_view_focus_identity;
   bool pending_focus_visible = false;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedView>> hosted;
   // Removed HWNDs stay behind the previous aperture until the replacement HuxerUI frame is presented.
@@ -464,14 +464,17 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
     }
   }
 
-  const std::optional<std::uint64_t> native_focus = state_->IdentityForWindow(GetFocus());
+  const std::optional<std::uint64_t> platform_view_focus = state_->IdentityForWindow(GetFocus());
   const bool focused_instance_removed =
-      native_focus.has_value() &&
-      (!retained.contains(*native_focus) ||
-       std::ranges::any_of(pending, [native_focus](const auto& entry) { return entry.first == *native_focus; }));
+      platform_view_focus.has_value() &&
+      (!retained.contains(*platform_view_focus) ||
+       std::ranges::any_of(
+           pending,
+           [platform_view_focus](const auto& entry) { return entry.first == *platform_view_focus; }
+       ));
   if (focused_instance_removed) {
     SetFocus(state_->root);
-    state_->native_focus_identity.reset();
+    state_->platform_view_focus_identity.reset();
   }
   for (auto& [identity, hosted] : pending) {
     const auto found = state_->hosted.find(identity);
@@ -519,7 +522,7 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
   } else if (current.has_value()) {
     SetFocus(state_->root);
   }
-  state_->native_focus_identity = state_->IdentityForWindow(GetFocus());
+  state_->platform_view_focus_identity = state_->IdentityForWindow(GetFocus());
   return !state_->hosted.empty() || !state_->retired.empty();
 }
 
@@ -570,11 +573,11 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
 
 void Win32PlatformViews::SynchronizeFocus(HWND focused) {
   const std::optional<std::uint64_t> identity = state_->IdentityForWindow(focused);
-  if (identity == state_->native_focus_identity) {
+  if (identity == state_->platform_view_focus_identity) {
     return;
   }
-  const std::optional<std::uint64_t> previous = state_->native_focus_identity;
-  state_->native_focus_identity = identity;
+  const std::optional<std::uint64_t> previous = state_->platform_view_focus_identity;
+  state_->platform_view_focus_identity = identity;
   if (identity.has_value()) {
     RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, state_->pending_focus_visible);
     state_->pending_focus_visible = false;

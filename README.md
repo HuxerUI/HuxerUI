@@ -4,7 +4,7 @@
 
 <p align="center"><strong>Declarative, native, cross-platform UI in modern C++.</strong></p>
 
-<p align="center">One runtime. Native integration. Shared application code.</p>
+<p align="center">One runtime. Platform integration. Shared application code.</p>
 
 <p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
 
@@ -12,7 +12,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Android, Linux, macO
 
 ## Why HuxerUI
 
-| Declarative C++ | Shared Runtime | Native Integration |
+| Declarative C++ | Shared Runtime | Platform Integration |
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, UIKit, AppKit, Win32, X11, or an Emscripten Canvas while preserving platform services. |
 
@@ -97,18 +97,18 @@ huxerui run windows
 huxerui run linux
 ```
 
-The CLI creates and validates source-controlled platform shells, including a native Xcode project for iOS, discovers Android and iOS devices, builds enabled Android, iOS Simulator or physical-device, Windows, macOS, Linux, and Web targets from compatible hosts, and launches development artifacts.
+The CLI creates and validates source-controlled platform shells, including an Xcode project for iOS, discovers Android and iOS devices, builds enabled Android, iOS Simulator or physical-device, Windows, macOS, Linux, and Web targets from compatible hosts, and launches development artifacts.
 The current CMake install exports a platform-specific SDK package, the CLI, host code generators, and built-in resources.
 Android, Linux, and Web CLI projects currently build against a source SDK checkout, while iOS accepts either a source checkout or a compatible installed SDK.
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
 The approved distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
-Versioned Windows, Linux, and macOS installers, native platform artifacts, and package commands remain staged work.
+Versioned Windows, Linux, and macOS installers, platform artifacts, and package commands remain staged work.
 
 See [Getting Started](docs/getting-started.md) for application setup, platform builds, CMake options, code generation, and example launch commands.
 
 ## Platform Support
 
-| Platform | Status | Native integration |
+| Platform | Status | Platform integration |
 |---|---|---|
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
 | Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM, optional Fcitx5 DBus preedit |
@@ -132,7 +132,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
 | [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, animation, layers, and typed presentation services |
 | [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform adapters |
-| [Platform Support](docs/platform-support.md) | Native backends and Runtime boundaries |
+| [Platform Support](docs/platform-support.md) | Platform backends and Runtime boundaries |
 | [Roadmap](docs/roadmap.md) | Framework, platform, SDK, and distribution work |
 
 ### Design documents
@@ -141,16 +141,16 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
-| [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, native replay, and invalidation |
+| [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
 | [App Resources, Images, and Localization Design](docs/design/resources.md) | Typed resources, Image, raw assets, packaging, locale, and formatted strings |
-| [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and native adapter contracts |
-| [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and native accessibility mapping |
+| [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and platform adapter contracts |
+| [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and platform accessibility mapping |
 | [Navigation Design](docs/design/navigation.md) | Page stacks, scoped controllers, transitions, Back routing, and future URL paths |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
-| [SDK, CLI, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and PlatformView |
+| [SDK, CLI, Platform Shell, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and PlatformView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |
 
 ## Examples
@@ -174,7 +174,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
 | `example_platform_module` | Android, iOS, Linux, macOS, Windows, and Web typed platform services, plus Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA ExternalTexture streams |
-| `example_platform_view` | Android, Apple, Web, and Windows native text input embedded in HuxerUI layout, state, events, and rendering order |
+| `example_platform_view` | Android, Apple, Web, and Windows `PlatformTextField` integration with HuxerUI layout, state, events, and rendering order |
 | `platform/android/example_runner` | Android example selection, platform integration, and application packaging |
 
 ## Architecture
@@ -186,10 +186,10 @@ declarative components and State
   -> MountedNode
   -> measure, layout, input, and animation
   -> RenderScene
-  -> native renderer
+  -> platform renderer
 ```
 
-The platform layer owns the native window or View, frame scheduling, input services, text services, and drawing surface. Shared application code does not depend on native UI objects.
+The platform layer owns the system window or host View, frame scheduling, input services, text services, and drawing surface. Shared application code does not depend on platform UI objects.
 
 Explore the complete runtime and extension model in [Architecture Design](docs/design/architecture.md).
 

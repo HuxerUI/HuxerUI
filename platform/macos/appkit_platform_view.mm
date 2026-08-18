@@ -139,7 +139,7 @@ Rect VisibleBounds(const PlatformViewPlacement& placement) {
   return placement.clip.has_value() ? placement.world_bounds.Intersection(*placement.clip) : placement.world_bounds;
 }
 
-NSRect NativeRect(Rect rect) {
+NSRect ToNSRect(Rect rect) {
   return NSMakeRect(rect.x, rect.y, std::max(0.0F, rect.width), std::max(0.0F, rect.height));
 }
 
@@ -156,7 +156,7 @@ void InvalidateView(NSView* view, const DamageRegion& damage) {
     if (rect.IsEmpty()) {
       continue;
     }
-    NSRect dirty_rect = [view convertRect:NativeRect(rect) fromView:view.superview];
+    NSRect dirty_rect = [view convertRect:ToNSRect(rect) fromView:view.superview];
     dirty_rect = NSIntersectionRect(dirty_rect, view.bounds);
     if (NSIsEmptyRect(dirty_rect)) {
       continue;
@@ -250,8 +250,8 @@ struct AppKitPlatformViews::State {
   void Place(HostedPlatformView& hosted, const PlatformViewPlacement& placement) {
     const Rect visible_bounds = VisibleBounds(placement);
     const bool hidden = !placement.visible || visible_bounds.IsEmpty();
-    const NSRect container_frame = NativeRect(visible_bounds);
-    const NSRect view_frame = NativeRect({
+    const NSRect container_frame = ToNSRect(visible_bounds);
+    const NSRect view_frame = ToNSRect({
         placement.world_bounds.x - visible_bounds.x,
         placement.world_bounds.y - visible_bounds.y,
         placement.world_bounds.width,
@@ -287,7 +287,7 @@ struct AppKitPlatformViews::State {
   __weak NSView* root = nil;
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
-  std::optional<std::uint64_t> native_focus_identity;
+  std::optional<std::uint64_t> platform_view_focus_identity;
   std::optional<std::pair<std::uint64_t, bool>> pending_focus_traversal;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
   std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
@@ -332,7 +332,7 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
                                          }));
   if (focused_instance_removed) {
     [root.window makeFirstResponder:root];
-    state_->native_focus_identity.reset();
+    state_->platform_view_focus_identity.reset();
   }
   for (auto& [identity, hosted] : pending) {
     state_->hosted.erase(identity);
@@ -405,23 +405,23 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
       if (current_responder_identity == focused_identity) {
         [root.window makeFirstResponder:root];
       }
-      state_->native_focus_identity.reset();
+      state_->platform_view_focus_identity.reset();
       RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if ([root.window makeFirstResponder:focused->second->view]) {
-        state_->native_focus_identity = focused_identity;
+        state_->platform_view_focus_identity = focused_identity;
       } else {
-        state_->native_focus_identity.reset();
+        state_->platform_view_focus_identity.reset();
         RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
       }
     } else {
-      state_->native_focus_identity = focused_identity;
+      state_->platform_view_focus_identity = focused_identity;
     }
   } else if (current_responder_identity.has_value()) {
     [root.window makeFirstResponder:root];
-    state_->native_focus_identity.reset();
+    state_->platform_view_focus_identity.reset();
   } else {
-    state_->native_focus_identity.reset();
+    state_->platform_view_focus_identity.reset();
   }
   for (const auto& [key, slice] : state_->slices) {
     static_cast<void>(key);
@@ -486,20 +486,20 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
   if (identity.has_value()) {
-    state_->native_focus_identity = identity;
+    state_->platform_view_focus_identity = identity;
     if (RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
       const bool focus_visible = state_->pending_focus_traversal.has_value();
       RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
     }
     return;
   }
-  const std::optional<std::uint64_t> previous_native_focus = state_->native_focus_identity;
-  state_->native_focus_identity.reset();
-  if (!previous_native_focus.has_value()) {
+  const std::optional<std::uint64_t> previous_platform_view_focus = state_->platform_view_focus_identity;
+  state_->platform_view_focus_identity.reset();
+  if (!previous_platform_view_focus.has_value()) {
     return;
   }
   const std::optional<std::uint64_t> focused = RuntimeAccess::FocusedPlatformView(*state_->runtime);
-  if (focused != previous_native_focus) {
+  if (focused != previous_platform_view_focus) {
     return;
   }
   if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
@@ -529,7 +529,7 @@ void AppKitPlatformViews::Shutdown() {
   state_->slices.clear();
   state_->hosted.clear();
   state_->base_slice.reset();
-  state_->native_focus_identity.reset();
+  state_->platform_view_focus_identity.reset();
   state_->pending_focus_traversal.reset();
   state_->frame = nullptr;
   state_->root = nil;

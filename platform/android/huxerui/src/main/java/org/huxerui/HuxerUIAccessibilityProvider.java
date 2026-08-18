@@ -229,7 +229,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         view.onInitializeAccessibilityNodeInfo(info);
         info.setClassName(HuxerUIView.class.getName());
         info.setPackageName(view.getContext().getPackageName());
-        // The native View owns keyboard input, but its synthetic semantic root is only a container for virtual nodes.
+        // The Android View owns keyboard input, but its synthetic semantic root is only a container for virtual nodes.
         info.setClickable(false);
         info.setFocusable(false);
         info.removeAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);

@@ -401,7 +401,7 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     return frame;
   }
 
-  HWND NativeHandle(std::uint64_t identity) const {
+  HWND PlatformViewHandle(std::uint64_t identity) const {
     std::scoped_lock lock(mutex);
     const auto found = platform_view_handles.find(identity);
     return found == platform_view_handles.end() ? nullptr : found->second;
@@ -425,13 +425,17 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     return result;
   }
 
-  HRESULT QueryNativeProvider(std::uint64_t identity, REFIID interface_id, void** provider) const {
-    return QueryWindowProvider(NativeHandle(identity), interface_id, provider);
+  HRESULT QueryPlatformViewProvider(std::uint64_t identity, REFIID interface_id, void** provider) const {
+    return QueryWindowProvider(PlatformViewHandle(identity), interface_id, provider);
   }
 
-  HRESULT
-  NativeElementFromPoint(std::uint64_t identity, double x, double y, IRawElementProviderFragment** provider) const {
-    HWND target = NativeHandle(identity);
+  HRESULT PlatformViewElementFromPoint(
+      std::uint64_t identity,
+      double x,
+      double y,
+      IRawElementProviderFragment** provider
+  ) const {
+    HWND target = PlatformViewHandle(identity);
     if (target == nullptr || !IsWindow(target)) {
       return UIA_E_ELEMENTNOTAVAILABLE;
     }
@@ -450,8 +454,8 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     return QueryWindowProvider(target, __uuidof(IRawElementProviderFragment), reinterpret_cast<void**>(provider));
   }
 
-  HRESULT NativeFocusedElement(std::uint64_t identity, IRawElementProviderFragment** provider) const {
-    const HWND root = NativeHandle(identity);
+  HRESULT FocusedPlatformViewElement(std::uint64_t identity, IRawElementProviderFragment** provider) const {
+    const HWND root = PlatformViewHandle(identity);
     if (root == nullptr || !IsWindow(root)) {
       return UIA_E_ELEMENTNOTAVAILABLE;
     }
@@ -573,7 +577,7 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
   HWND window = nullptr;
   DWORD ui_thread = GetCurrentThreadId();
   float dpi_scale = kDefaultDpiScale;
-  // Native handles are copied with the SemanticFrame so off-thread UI Automation queries never reach their owner.
+  // HWND values are copied with the SemanticFrame so off-thread UI Automation queries never reach their owner.
   std::unordered_map<std::uint64_t, HWND> platform_view_handles;
   std::shared_ptr<const SemanticFrame> frame;
   // The cache owns one COM reference; clients may retain additional references after a node is removed.
@@ -923,7 +927,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetEmbeddedFragmentRoots(SAFEAR
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   IRawElementProviderSimple* embedded = nullptr;
-  const HRESULT provider_result = state->QueryNativeProvider(
+  const HRESULT provider_result = state->QueryPlatformViewProvider(
       *node->platform_view_identity,
       __uuidof(IRawElementProviderSimple),
       reinterpret_cast<void**>(&embedded)
@@ -1031,7 +1035,7 @@ Win32SemanticProvider::ElementProviderFromPoint(double x, double y, IRawElementP
   }
   const SemanticNode* found_node = FindNode(*frame, *found);
   if (found_node != nullptr && found_node->platform_view_identity.has_value()) {
-    const HRESULT result = state->NativeElementFromPoint(*found_node->platform_view_identity, x, y, provider);
+    const HRESULT result = state->PlatformViewElementFromPoint(*found_node->platform_view_identity, x, y, provider);
     if (SUCCEEDED(result)) {
       return result;
     }
@@ -1058,7 +1062,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetFocus(IRawElementProviderFra
     return S_OK;
   }
   if (focused->platform_view_identity.has_value()) {
-    const HRESULT result = state->NativeFocusedElement(*focused->platform_view_identity, provider);
+    const HRESULT result = state->FocusedPlatformViewElement(*focused->platform_view_identity, provider);
     if (SUCCEEDED(result)) {
       return result;
     }

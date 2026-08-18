@@ -87,7 +87,7 @@ struct AndroidPlatformViews::State {
       ClearJavaException(environment);
       environment->DeleteGlobalRef(root);
       root = nullptr;
-      throw std::runtime_error("HuxerUI Android PlatformView host methods do not match the native backend");
+      throw std::runtime_error("HuxerUI Android PlatformView host methods do not match the platform backend");
     }
   }
 

@@ -3,7 +3,7 @@
 
 namespace huxerui::test {
 
-TEST_CASE("MacTitleBarMetricsReserveNativeControlsWithinTheViewport") {
+TEST_CASE("MacTitleBarMetricsReserveSystemControlsWithinTheViewport") {
   const WindowTitleBarMetrics preferred =
       detail::ResolveMacTitleBarMetrics(40.0F, 28.0F, {320.0F, 200.0F}, Rect{8.0F, 7.0F, 52.0F, 14.0F}, false);
   REQUIRE(preferred.height == 40.0F);
@@ -11,9 +11,9 @@ TEST_CASE("MacTitleBarMetricsReserveNativeControlsWithinTheViewport") {
   REQUIRE(preferred.right_inset == 0.0F);
   REQUIRE_FALSE(preferred.maximized);
 
-  const WindowTitleBarMetrics native_height =
+  const WindowTitleBarMetrics system_height =
       detail::ResolveMacTitleBarMetrics(12.0F, 28.0F, {320.0F, 200.0F}, Rect{8.0F, 7.0F, 52.0F, 14.0F}, false);
-  REQUIRE(native_height.height == 28.0F);
+  REQUIRE(system_height.height == 28.0F);
 
   const WindowTitleBarMetrics constrained =
       detail::ResolveMacTitleBarMetrics(40.0F, 28.0F, {40.0F, 16.0F}, Rect{8.0F, 7.0F, 52.0F, 14.0F}, true);

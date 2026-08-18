@@ -26,7 +26,7 @@ public:
         next_ == nullptr) {
       environment->DeleteGlobalRef(layout_);
       layout_ = nullptr;
-      throw std::runtime_error("HuxerUI Android text layout methods do not match the native backend");
+      throw std::runtime_error("HuxerUI Android text layout methods do not match the platform backend");
     }
   }
 

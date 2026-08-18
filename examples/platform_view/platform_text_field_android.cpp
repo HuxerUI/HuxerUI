@@ -1,4 +1,4 @@
-#include "native_text_field.h"
+#include "platform_text_field.h"
 
 #include <cstdint>
 #include <memory>
@@ -10,10 +10,11 @@
 
 namespace {
 
-constexpr const char* native_text_field_class = "org/huxerui/examples/platformview/NativeTextField";
+constexpr const char* platform_text_field_class = "org/huxerui/examples/platformview/PlatformTextField";
 
 void ApplyProperties(JNIEnv* environment, jobject view, const huxerui::PlatformPayload& properties) {
-  const std::string_view text = properties.AsObject().at(huxerui::example::native_text_field::text_property).AsString();
+  const std::string_view text =
+      properties.AsObject().at(huxerui::example::platform_text_field::text_property).AsString();
   huxerui::android::LocalRef<jclass> view_class(environment, environment->GetObjectClass(view));
   jmethodID apply_text = environment->GetMethodID(view_class.Get(), "applyControlledText", "(Ljava/lang/String;)V");
   huxerui::android::LocalRef<jstring> java_text = huxerui::android::Utf8ToJavaString(environment, text);
@@ -28,15 +29,15 @@ namespace huxerui::example {
 
 namespace {
 
-jobject CreateNativeTextField(
+jobject CreatePlatformTextField(
     JNIEnv* environment, jobject context, const PlatformPayload& properties, PlatformEventSink event_sink
 ) {
-  android::LocalRef<jclass> view_class(environment, environment->FindClass(native_text_field_class));
+  android::LocalRef<jclass> view_class(environment, environment->FindClass(platform_text_field_class));
   if (!view_class) {
     return nullptr;
   }
   jmethodID constructor = environment->GetMethodID(view_class.Get(), "<init>", "(Landroid/content/Context;)V");
-  jmethodID install_bridge = environment->GetMethodID(view_class.Get(), "installNativeBridge", "(J)V");
+  jmethodID install_bridge = environment->GetMethodID(view_class.Get(), "installPlatformBridge", "(J)V");
   if (constructor == nullptr || install_bridge == nullptr) {
     return nullptr;
   }
@@ -56,41 +57,41 @@ jobject CreateNativeTextField(
   return view;
 }
 
-void UpdateNativeTextField(JNIEnv* environment, jobject view, const PlatformPayload& properties) {
+void UpdatePlatformTextField(JNIEnv* environment, jobject view, const PlatformPayload& properties) {
   ApplyProperties(environment, view, properties);
 }
 
-void DisposeNativeTextField(JNIEnv* environment, jobject view) {
+void DisposePlatformTextField(JNIEnv* environment, jobject view) {
   android::LocalRef<jclass> view_class(environment, environment->GetObjectClass(view));
-  jmethodID dispose = environment->GetMethodID(view_class.Get(), "disposeNativeBridge", "()J");
+  jmethodID dispose = environment->GetMethodID(view_class.Get(), "disposePlatformBridge", "()J");
   jlong sink = dispose == nullptr ? 0 : environment->CallLongMethod(view, dispose);
   delete reinterpret_cast<PlatformEventSink*>(static_cast<std::uintptr_t>(sink));
 }
 
-android::PlatformViewFactory NativeTextFieldFactory() {
+android::PlatformViewFactory PlatformTextFieldFactory() {
   return {
-      .create = CreateNativeTextField,
-      .update = UpdateNativeTextField,
-      .dispose = DisposeNativeTextField,
+      .create = CreatePlatformTextField,
+      .update = UpdatePlatformTextField,
+      .dispose = DisposePlatformTextField,
   };
 }
 
 } // namespace
 
-void InstallNativeTextField(RootContext& root) {
-  root.Modules().Register(native_text_field::type, NativeTextFieldFactory());
+void InstallPlatformTextField(RootContext& root) {
+  root.Modules().Register(platform_text_field::type, PlatformTextFieldFactory());
 }
 
 } // namespace huxerui::example
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_examples_platformview_NativeTextField_nativeChanged(
+Java_org_huxerui_examples_platformview_PlatformTextField_nativeChanged(
     JNIEnv* environment, jclass, jlong sink, jstring value
 ) {
   auto* event_sink = reinterpret_cast<huxerui::PlatformEventSink*>(static_cast<std::uintptr_t>(sink));
   if (event_sink != nullptr) {
     (*event_sink)(
-        huxerui::example::NativeTextFieldEvents::Changed::Name,
+        huxerui::example::PlatformTextFieldEvents::Changed::Name,
         huxerui::PlatformPayload(huxerui::android::JavaStringToUtf8(environment, value))
     );
   }

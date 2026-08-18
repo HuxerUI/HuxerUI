@@ -62,7 +62,7 @@ float ScrollSign(UIAccessibilityScrollDirection direction, Axis axis) noexcept {
   }
 }
 
-NSString* NativeString(const std::string& value) {
+NSString* NSStringFromUtf8(const std::string& value) {
   if (value.empty()) {
     return nil;
   }
@@ -227,35 +227,35 @@ NSString* AccessibilityValue(const SemanticNode& node) {
     return nil;
   }
   std::vector<NSString*> parts;
-  if (NSString* value = NativeString(node.value)) {
+  if (NSString* value = NSStringFromUtf8(node.value)) {
     parts.push_back(value);
   } else if (NSString* range = RangeValue(node)) {
     parts.push_back(range);
   } else if (node.checked.has_value()) {
     parts.push_back(CheckedValue(*node.checked));
   }
-  if (NSString* state = NativeString(node.state_description)) {
+  if (NSString* state = NSStringFromUtf8(node.state_description)) {
     parts.push_back(state);
   }
   return JoinedStrings(parts);
 }
 
 NSString* AccessibilityLabel(const SemanticNode& node) {
-  if (NSString* label = NativeString(node.label)) {
+  if (NSString* label = NSStringFromUtf8(node.label)) {
     return label;
   }
   if (node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField) {
-    return NativeString(node.placeholder);
+    return NSStringFromUtf8(node.placeholder);
   }
   return nil;
 }
 
 NSString* AccessibilityHint(const SemanticNode& node) {
-  return JoinedStrings({NativeString(node.hint), NativeString(node.error)});
+  return JoinedStrings({NSStringFromUtf8(node.hint), NSStringFromUtf8(node.error)});
 }
 
 NSString* Announcement(const SemanticNode& node) {
-  return JoinedStrings({AccessibilityLabel(node), AccessibilityValue(node), NativeString(node.error)});
+  return JoinedStrings({AccessibilityLabel(node), AccessibilityValue(node), NSStringFromUtf8(node.error)});
 }
 
 bool StructureChanged(const SemanticFrame& previous, const SemanticFrame& current) {
@@ -357,7 +357,7 @@ void ConfigureNode(
   object.accessibilityLabel = expose_group_properties || !container ? AccessibilityLabel(node) : nil;
   object.accessibilityValue = expose_group_properties || !container ? AccessibilityValue(node) : nil;
   object.accessibilityHint = expose_group_properties || !container ? AccessibilityHint(node) : nil;
-  object.accessibilityIdentifier = NativeString(node.identifier);
+  object.accessibilityIdentifier = NSStringFromUtf8(node.identifier);
   object.accessibilityTraits = Traits(node, container);
   object.accessibilityContainerType = container ? ContainerType(node) : UIAccessibilityContainerTypeNone;
   object.accessibilityRespondsToUserInteraction = RespondsToUserInteraction(node);
@@ -395,7 +395,7 @@ void ConfigureNode(
   __weak HuxerUIAccessibilityNode* weak_object = object;
   for (const auto& [action_id, label] : node.custom_actions) {
     const std::uint64_t captured_action_id = action_id;
-    NSString* name = NativeString(label);
+    NSString* name = NSStringFromUtf8(label);
     if (name == nil) {
       continue;
     }

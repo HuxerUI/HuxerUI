@@ -50,7 +50,7 @@ struct Win32TextInput::State {
       const TextInputGeometry& geometry
   ) {
     static_cast<void>(configuration);
-    CancelNativeComposition();
+    CancelSystemComposition();
     text_input_session_id_ = session_id;
     text_input_state_ = state;
     ime_composing_ = state.composition.has_value();
@@ -68,7 +68,7 @@ struct Win32TextInput::State {
     ime_composing_ = false;
     pending_high_surrogate_ = 0;
     pending_ime_result_.clear();
-    CancelNativeComposition();
+    CancelSystemComposition();
   }
 
   TextInputGeometry QueryTextInputGeometry() const {
@@ -111,7 +111,7 @@ struct Win32TextInput::State {
     ImmReleaseContext(window_, context);
   }
 
-  void CancelNativeComposition() {
+  void CancelSystemComposition() {
     if (window_ == nullptr) {
       return;
     }

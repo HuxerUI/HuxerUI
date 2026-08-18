@@ -1,4 +1,4 @@
-#include "native_text_field.h"
+#include "platform_text_field.h"
 
 #include <cstdint>
 #include <limits>
@@ -36,21 +36,21 @@ std::uint32_t AllocateRoute() {
 }
 
 std::string_view TextProperty(const huxerui::PlatformPayload& properties) {
-  return properties.AsObject().at(huxerui::example::native_text_field::text_property).AsString();
+  return properties.AsObject().at(huxerui::example::platform_text_field::text_property).AsString();
 }
 
 // clang-format off
-EM_JS(emscripten::EM_VAL, CreateWebNativeTextField, (std::uint32_t route, const char* text), {
+EM_JS(emscripten::EM_VAL, CreateWebPlatformTextField, (std::uint32_t route, const char* text), {
   const input = document.createElement("input");
   input.type = "text";
-  input.placeholder = "Edit native text";
+  input.placeholder = "Edit PlatformView text";
   input.value = UTF8ToString(text);
   input.dataset.huxeruiExampleRoute = String(route);
   input.style.font = "16px system-ui, sans-serif";
   input.oninput = () => {
     const value = Module.stringToNewUTF8(input.value);
     try {
-      Module._huxerui_example_web_native_text_field_changed(route, value);
+      Module._huxerui_example_web_platform_text_field_changed(route, value);
     } finally {
       _free(value);
     }
@@ -58,7 +58,7 @@ EM_JS(emscripten::EM_VAL, CreateWebNativeTextField, (std::uint32_t route, const 
   return Emval.toHandle(input);
 });
 
-EM_JS(void, UpdateWebNativeTextField, (emscripten::EM_VAL handle, const char* text), {
+EM_JS(void, UpdateWebPlatformTextField, (emscripten::EM_VAL handle, const char* text), {
   const input = Emval.toValue(handle);
   if (!(input instanceof HTMLInputElement)) {
     throw new Error("HuxerUI Web PlatformView example lost its input element");
@@ -69,7 +69,7 @@ EM_JS(void, UpdateWebNativeTextField, (emscripten::EM_VAL handle, const char* te
   }
 });
 
-EM_JS(std::uint32_t, DisposeWebNativeTextField, (emscripten::EM_VAL handle), {
+EM_JS(std::uint32_t, DisposeWebPlatformTextField, (emscripten::EM_VAL handle), {
   const input = Emval.toValue(handle);
   if (!(input instanceof HTMLInputElement)) {
     return 0;
@@ -81,7 +81,7 @@ EM_JS(std::uint32_t, DisposeWebNativeTextField, (emscripten::EM_VAL handle), {
 });
 // clang-format on
 
-huxerui::web::PlatformViewFactory NativeTextFieldFactory() {
+huxerui::web::PlatformViewFactory PlatformTextFieldFactory() {
   return {
       .create =
           [](const huxerui::PlatformPayload& properties, huxerui::PlatformEventSink events) {
@@ -89,7 +89,7 @@ huxerui::web::PlatformViewFactory NativeTextFieldFactory() {
             EventRoutes().emplace(route, std::move(events));
             try {
               const std::string text{TextProperty(properties)};
-              return val::take_ownership(CreateWebNativeTextField(route, text.c_str()));
+              return val::take_ownership(CreateWebPlatformTextField(route, text.c_str()));
             } catch (...) {
               EventRoutes().erase(route);
               throw;
@@ -98,11 +98,11 @@ huxerui::web::PlatformViewFactory NativeTextFieldFactory() {
       .update =
           [](val element, const huxerui::PlatformPayload& properties) {
             const std::string text{TextProperty(properties)};
-            UpdateWebNativeTextField(element.as_handle(), text.c_str());
+            UpdateWebPlatformTextField(element.as_handle(), text.c_str());
           },
       .dispose =
           [](val element) {
-            const std::uint32_t route = DisposeWebNativeTextField(element.as_handle());
+            const std::uint32_t route = DisposeWebPlatformTextField(element.as_handle());
             if (route != 0) {
               EventRoutes().erase(route);
             }
@@ -113,21 +113,24 @@ huxerui::web::PlatformViewFactory NativeTextFieldFactory() {
 } // namespace
 
 extern "C" EMSCRIPTEN_KEEPALIVE void
-huxerui_example_web_native_text_field_changed(std::uint32_t route, const char* value) noexcept {
+huxerui_example_web_platform_text_field_changed(std::uint32_t route, const char* value) noexcept {
   const auto found = EventRoutes().find(route);
   if (found == EventRoutes().end() || value == nullptr) {
     return;
   }
   try {
-    found->second(huxerui::example::NativeTextFieldEvents::Changed::Name, huxerui::PlatformPayload(std::string(value)));
+    found->second(
+        huxerui::example::PlatformTextFieldEvents::Changed::Name,
+        huxerui::PlatformPayload(std::string(value))
+    );
   } catch (...) {
   }
 }
 
 namespace huxerui::example {
 
-void InstallNativeTextField(RootContext& root) {
-  root.Modules().Register(native_text_field::type, NativeTextFieldFactory());
+void InstallPlatformTextField(RootContext& root) {
+  root.Modules().Register(platform_text_field::type, PlatformTextFieldFactory());
 }
 
 } // namespace huxerui::example

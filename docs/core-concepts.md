@@ -2,7 +2,7 @@
 
 ## Views and components
 
-A component is a C++ function that returns a transient `View`. Calling a component describes the desired UI; it does not directly create a native widget. The runtime reconciles the resulting `ViewSpec` values with persistent `MountedNode` objects.
+A component is a C++ function that returns a transient `View`. Calling a component describes the desired UI; it does not directly create a platform widget. The runtime reconciles the resulting `ViewSpec` values with persistent `MountedNode` objects.
 
 Layout containers use braces to make parent-child structure visible, while leaf controls use constructors:
 
@@ -83,7 +83,7 @@ The complete shadow overflow participates in visibility and damage calculation.
 
 `ClipChildren{}` explicitly clips descendant drawing and pointer hit testing to the View bounds, using its `CornerRadius` when present. Clipping is opt-in, so transformed or overflowing children remain visible and interactive by default. A ScrollView additionally retains its content-viewport clip when `ClipChildren{}` contributes a separate rounded container clip.
 
-`CornerRadius` accepts either one radius or `CornerRadii` for independent corners. For example, `CornerRadius{CornerRadii::Top(28.0F)}` rounds only the top edge of a bottom sheet. Uniform corners keep the renderer's native rounded-rectangle command, while asymmetric corners use the shared Path command path without changing layout semantics.
+`CornerRadius` accepts either one radius or `CornerRadii` for independent corners. For example, `CornerRadius{CornerRadii::Top(28.0F)}` rounds only the top edge of a bottom sheet. Uniform corners keep the dedicated rounded-rectangle command, while asymmetric corners use the shared Path command path without changing layout semantics.
 
 Component-specific configuration remains on the component:
 
@@ -110,7 +110,7 @@ Controllers and events are methods because they bind behavior or an external han
 ## Canvas and Path drawing
 
 `Canvas` is a leaf View that records custom drawing through the same `PaintContext` used by built-in components and NodeExtensions.
-Its painter receives a content-local Size and draws from `(0, 0)` without depending on a native platform Canvas:
+Its painter receives a content-local Size and draws from `(0, 0)` without depending on a platform Canvas:
 
 ```cpp
 Canvas([](PaintContext& paint, Size size) {
@@ -129,7 +129,7 @@ Canvas([](PaintContext& paint, Size size) {
 Canvas has no intrinsic size and is not clipped automatically.
 Use `Frame`, `Grow`, or parent constraints for layout and explicit rectangle or Path clips when drawing must stay inside a shape.
 Clean Canvas PaintSequences are retained, while a changed painter or Canvas size rerecords only that node.
-See [Canvas and Path Design](design/canvas.md) for command semantics and native renderer ownership.
+See [Canvas and Path Design](design/canvas.md) for command semantics and platform renderer ownership.
 
 ## Typed events
 
@@ -191,9 +191,9 @@ component functions
   -> measure and layout
   -> hit testing and interaction
   -> RenderScene
-  -> native renderer
+  -> platform renderer
 ```
 
-The shared C++ runtime does not own Android Views, AppKit objects, or Win32 windows. Platform adapters translate native lifecycle, input, text, and drawing operations at the edge.
+The shared C++ runtime does not own Android Views, AppKit objects, or Win32 windows. Platform adapters translate system lifecycle, input, text, and drawing operations at the edge.
 
 For implementation details, see the [architecture design](design/architecture.md).

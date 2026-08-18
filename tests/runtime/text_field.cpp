@@ -1330,7 +1330,7 @@ TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
 
   Pointer(runtime, PointerEventType::Down, 34.0F);
   text_input.updated_states.clear();
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field->id,
       {SemanticActionKind::SetSelection, TextRange{0, 1}}
   ));
@@ -1350,7 +1350,7 @@ TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
   REQUIRE(text_field_value.Get().composition == TextRange{0, 1});
 
   text_input.restarted_sessions.clear();
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field->id,
       {SemanticActionKind::SetText, std::string("reset")}
   ));

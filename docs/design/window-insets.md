@@ -14,7 +14,7 @@ It covers Android, iOS, and the future OHOS adapter while preserving zero-inset 
 - Update viewport size and safe-area geometry atomically.
 - Apply changing insets during layout without recomposing the application tree.
 - Keep IME occlusion, display cutouts, system bars, and system gestures as distinct concepts.
-- Preserve one shared contract for full application windows and embedded native views.
+- Preserve one shared contract for full application windows and embedded PlatformViews.
 
 ## Non-goals
 
@@ -135,9 +135,9 @@ The existing native IME-avoidance policy may reduce its height before the metric
 `WindowMetrics::safe_area` is relative to that current viewport.
 When the IME covers the native bottom system area, the effective bottom safe inset is zero rather than being subtracted a second time.
 
-Each native adapter submits viewport and safe-area changes together on its UI thread.
+Each platform adapter submits viewport and safe-area changes together on its UI thread.
 Runtime validates that the viewport and every inset are finite and non-negative.
-Native adapters normalize transient or unsupported platform values before calling Runtime.
+Platform adapters normalize transient or unsupported platform values before calling Runtime.
 
 Desktop adapters pass zero safe-area insets.
 An embedded host that is already constrained to a native safe area passes zero rather than reporting and consuming the same insets again.
@@ -189,7 +189,7 @@ System-bar regions are painted by a Runtime-owned backplane beneath application 
 The backplane uses the resolved `SystemBarsAppearance`, so status and navigation regions remain themed even though ordinary application content does not enter them.
 
 This mode deliberately does not ask Android, iOS, or OHOS to crop the native HuxerUI surface.
-Keeping the complete native surface gives every platform the same rendering and system-bar-style ownership, including Android versions that enforce edge-to-edge native windows.
+Keeping the complete platform surface gives every platform the same rendering and system-bar-style ownership, including Android versions that enforce edge-to-edge system windows.
 
 The default mode is `SafeArea` because a bare application root remains usable without any extra declaration.
 
@@ -388,21 +388,21 @@ The shared Runtime owns:
 - appearance deduplication.
 - presentation safe bounds.
 
-Native adapters own:
+Platform adapters own:
 
-- Full native surface configuration.
+- Full platform surface configuration.
 - viewport and safe-area collection.
 - unit conversion.
 - IME occlusion conversion.
 - native status and navigation foreground application.
 - native lifecycle registration and cleanup.
 
-An embedded platform View may have no authority over its containing native window.
+An embedded PlatformView may have no authority over its containing system window.
 In that case the adapter reports geometry but the optional system-bar operation is a no-op unless its native owner installs a window delegate.
 
 ## Android mapping
 
-HuxerUIActivity configures an edge-to-edge native window consistently across the supported API range.
+HuxerUIActivity configures an edge-to-edge Android window consistently across the supported API range.
 `WindowContentMode::SafeArea` remains a shared Runtime layout policy rather than attempting to disable Android edge-to-edge behavior.
 
 On API 30 and later, HuxerUIView obtains system bars, display cutout, and IME Insets through their typed WindowInsets categories.
@@ -452,7 +452,7 @@ The safe area takes the maximum resolved obstruction on every physical edge.
 `AvoidAreaType.TYPE_KEYBOARD` belongs to the IME viewport path and is not merged into `safe_area`.
 System-bar foreground maps through `setWindowSystemBarProperties` in the ArkTS Window owner.
 
-Both HuxerUI content modes keep the native surface full-window for consistency.
+Both HuxerUI content modes keep the platform surface full-window for consistency.
 The shared Runtime simulates safe content in `SafeArea` mode and owns edge-to-edge layout in `EdgeToEdge` mode.
 
 ## Desktop and Web mapping

@@ -239,7 +239,7 @@ public:
       environment->ExceptionClear();
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
-      throw std::runtime_error("HuxerUI Android UI dispatcher method does not match the native backend");
+      throw std::runtime_error("HuxerUI Android UI dispatcher method does not match the platform backend");
     }
   }
 
@@ -412,7 +412,7 @@ private:
       environment->DeleteLocalRef(view_class);
       environment->DeleteGlobalRef(view_);
       view_ = nullptr;
-      throw std::runtime_error("HuxerUI Android view methods do not match the native backend");
+      throw std::runtime_error("HuxerUI Android view methods do not match the platform backend");
     }
 
     try {

@@ -5,27 +5,27 @@ Status: implemented foundation with staged shared-core completion and deferred p
 This document defines the implemented platform-neutral semantics foundation and records deferred component and platform coverage explicitly.
 
 Semantics is shared Runtime output.
-Components and applications declare meaning, Runtime resolves the committed semantic hierarchy, and platform adapters expose that hierarchy through native accessibility APIs.
+Components and applications declare meaning, Runtime resolves the committed semantic hierarchy, and platform adapters expose that hierarchy through platform accessibility APIs.
 Renderers do not infer semantics from pixels or PaintCommands.
 
 ## Goals
 
 - Give built-in and custom controls one shared model for roles, names, values, states, actions, focus, collections, and geometry.
 - Preserve the existing `View`, modifier, typed event, `NodeExtension`, Runtime, and PlatformAdapter boundaries.
-- Publish immutable committed data that native accessibility objects can retain safely after `BuildFrame()` returns.
-- Support self-drawn composite controls without creating fake MountedNodes or native Views.
+- Publish immutable committed data that platform accessibility objects can retain safely after `BuildFrame()` returns.
+- Support self-drawn composite controls without creating fake MountedNodes or platform Views.
 - Keep Runtime input focus, text-input ownership, and platform accessibility focus distinct.
 - Prevent TextField-owned secure content from entering committed semantics.
 - Keep the shared type and action surface closed, platform-neutral, and explicit about which coverage remains deferred.
 
 ## Non-goals
 
-The first implementation does not provide OCR, pixel-derived names, a DOM renderer, a native View for every HuxerUI View, or platform-specific accessibility properties in shared application code.
+The first implementation does not provide OCR, pixel-derived names, a DOM renderer, a platform View for every HuxerUI View, or platform-specific accessibility properties in shared application code.
 
 It does not expose raw ARIA attributes, Android class names, Apple accessibility traits, UI Automation control types, or AT-SPI interface names.
 
 PlatformView accessibility is a separate leaf-node integration.
-A PlatformView supplies or bridges its native subtree and suppresses an equivalent HuxerUI semantic subtree for that leaf.
+A PlatformView supplies or bridges its platform accessibility subtree and suppresses an equivalent HuxerUI semantic subtree for that leaf.
 
 ## Ownership
 
@@ -34,7 +34,7 @@ A PlatformView supplies or bridges its native subtree and suppresses an equivale
 | Components and application Views | Declare platform-neutral semantic properties |
 | NodeExtension | Contribute retained state, virtual semantic children, and semantic-only behavior |
 | Runtime | Resolve the hierarchy, identity, hard state, geometry, secure-data policy, and actions |
-| Platform accessibility adapter | Retain `SemanticFrame`, expose native objects, translate native actions, and issue native notifications |
+| Platform accessibility adapter | Retain `SemanticFrame`, expose platform objects, translate platform actions, and issue platform notifications |
 | Renderer | Render `RenderScene`; it does not construct semantics |
 
 The flow is:
@@ -45,7 +45,7 @@ component defaults
     + application Semantics overrides
     + Runtime focus, visibility, security, and geometry
         -> SemanticFrame
-        -> native accessibility hierarchy
+        -> platform accessibility hierarchy
         -> SemanticAction
         -> Runtime
 ```
@@ -319,7 +319,7 @@ The builder is valid only for the duration of `BuildSemantics()` and cannot be c
 SetOwner applies dynamic properties to the mounted owner's declaration.
 AddChild creates one flat virtual child with owner-local bounds.
 The action operations require an existing owner or child local ID and do not accept callbacks.
-It cannot publish a frame, insert native objects, or retain a MountedNode pointer.
+It cannot publish a frame, insert platform objects, or retain a MountedNode pointer.
 
 Runtime privately records the mounted owner, compatible extension handle, and local ID for each actionable semantic node.
 An action looks up that route again on the Runtime UI thread, so platforms and extensions never retain mounted pointers.
@@ -341,7 +341,7 @@ A virtualized item that is fully evicted retires its semantic node and invalidat
 VirtualList and VirtualGrid can restore application state slots from their saved item-state cache, but the cache does not preserve mounted or semantic identity.
 An item keeps its identity while its real MountedNode remains realized, including keyed movement and layout changes; returning after full eviction receives a new semantic ID.
 
-`SemanticNodeId` is not an application key, automation identifier, native object ID, or process-global handle.
+`SemanticNodeId` is not an application key, automation identifier, platform object ID, or process-global handle.
 The optional author `identifier` is mapped to native automation identifiers.
 
 ## SemanticFrame
@@ -408,29 +408,29 @@ It contains no pointer to MountedNode, ViewSpec, NodeExtension, RenderNode, or a
 
 `SemanticFrame` is immutable after publication.
 It represents the same reconciliation, layout, presentation, focus, and layer state as the surrounding `FrameCommit`.
-A platform adapter retains the shared pointer for as long as native queries may reference it.
+A platform adapter retains the shared pointer for as long as platform accessibility queries may reference it.
 
 ## PlatformView semantic bridge
 
-A PlatformView contributes one semantic anchor at its mounted position rather than converting its native accessibility descendants into SemanticNodes.
+A PlatformView contributes one semantic anchor at its mounted position rather than converting its platform accessibility descendants into SemanticNodes.
 An optional Runtime-owned platform-view identity marks anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
 The anchor carries the same stable PlatformView identity as `PlacePlatformViewCommand`, while its parent and sibling position come from ordinary semantic resolution.
 Visual `RenderComposition` order and accessibility traversal are derived from the same committed mounted tree but remain distinct outputs: paint-only decoration does not become accessible merely because it occupies a later render slice.
 
-The platform accessibility adapter resolves the anchor identity against the PlatformView instance from the same committed frame and exposes that native object's accessibility root at the anchor position.
-The anchor is a structural substitution point rather than an additional generic accessible object, so assistive technology encounters the native root once.
-It suppresses semantic descendants that would duplicate the native subtree, but HuxerUI semantic siblings before and after the anchor remain in their declared order.
-The bridge does not copy native labels, actions, selection, or editable content into shared Runtime state.
-Native accessibility queries and actions inside the subtree remain owned by the native object, while traversal into or out of the subtree returns through the HuxerUI anchor.
-PlatformPayload events notify typed application EventBindings and do not substitute for native accessibility queries or actions.
-Conversely, an accessibility action inside the native subtree is not mirrored as a platform-module event unless the native component independently emits that documented application event.
+The platform accessibility adapter resolves the anchor identity against the PlatformView instance from the same committed frame and exposes that platform object's accessibility root at the anchor position.
+The anchor is a structural substitution point rather than an additional generic accessible object, so assistive technology encounters the platform root once.
+It suppresses semantic descendants that would duplicate the platform subtree, but HuxerUI semantic siblings before and after the anchor remain in their declared order.
+The bridge does not copy platform labels, actions, selection, or editable content into shared Runtime state.
+Accessibility queries and actions inside the subtree remain owned by the platform object, while traversal into or out of the subtree returns through the HuxerUI anchor.
+PlatformPayload events notify typed application EventBindings and do not substitute for platform accessibility queries or actions.
+Conversely, an accessibility action inside the platform subtree is not mirrored as a platform-module event unless the platform component independently emits that documented application event.
 
 Applying a new frame updates composition and semantic bridge references before issuing accessibility structure notifications.
-Replacement or removal first makes the anchor unavailable to new queries, then invalidates retained native accessibility wrappers, and only then destroys the native PlatformView.
-A stale query fails safely against the newest committed identity instead of dereferencing a removed native object.
+Replacement or removal first makes the anchor unavailable to new queries, then invalidates retained platform accessibility wrappers, and only then destroys the PlatformView instance.
+A stale query fails safely against the newest committed identity instead of dereferencing a removed platform object.
 
 Android exposes the PlatformView as a real accessible child alongside provider-backed HuxerUI virtual nodes and preserves the anchor's sibling position.
-UIKit and AppKit insert the native accessibility root into their retained container-child order at the anchor.
+UIKit and AppKit insert the platform accessibility root into their retained container-child order at the anchor.
 Windows bridges a child HWND or provider fragment root at the matching UI Automation position.
 Web uses the real PlatformView DOM subtree at the corresponding semantic DOM position and does not create a duplicate hidden element for the anchor.
 
@@ -438,7 +438,7 @@ Runtime increments the nonzero revision and creates a new `SemanticFrame` only w
 A color-only render frame reuses the previous semantic frame.
 
 The first implementation does not publish a separate change-set type.
-An adapter compares retained frames internally when its native notification API benefits from finer updates.
+An adapter compares retained frames internally when its platform notification API benefits from finer updates.
 
 ## Actions
 
@@ -463,7 +463,7 @@ enum class SemanticActionKind {
 ```
 
 Checkbox, Switch, RadioButton, Tabs, segmented items, and navigation destinations use `Activate` rather than separate Toggle or Select actions.
-Their role and state let a native adapter expose the appropriate native toggle or selection pattern, while the explicitly advertised Activate action proves that Runtime behavior exists.
+Their role and state let a platform adapter expose the appropriate native toggle or selection pattern, while the explicitly advertised Activate action proves that Runtime behavior exists.
 
 `SemanticAction` uses one payload variant rather than one request class per action:
 
@@ -513,7 +513,7 @@ ShowOnScreen uses retained Runtime geometry rather than reconstructing a target 
 Runtime input focus is committed as node state.
 The Focus action follows the same focus path used by keyboard and pointer input and starts TextInput only when the target owns a TextInputClient.
 
-Platform accessibility focus remains native state.
+Platform accessibility focus remains platform state.
 Moving VoiceOver, TalkBack, Narrator, or another screen reader to a semantic node does not emit `ViewEvents::FocusChanged`, alter keyboard traversal, or start text input.
 
 Semantic modal isolation derives from the same topmost retained Layer focus trap used by keyboard and pointer focus.
@@ -549,7 +549,7 @@ An invalid UTF-8 value, out-of-range offset, surrogate split, disabled field, or
 Runtime observes TextInputClient state before and after a semantic edit and applies the same state validation, invalidation, and active-session synchronization rules used by native command batches.
 Content revisions invalidate layout, paint, semantics, and active native input state; selection-only revisions invalidate foreground paint, semantics, and active native input state without requiring a new input session.
 
-An ordinary TextField publishes its committed value and normalized selection for native accessibility editing.
+An ordinary TextField publishes its committed value and normalized selection for platform accessibility editing.
 Composition details remain in the existing bounded TextInputClient query path.
 
 A secure TextField frame never contains TextField-owned plaintext, selected text, surrounding text, composition text, clipboard content, or plaintext-derived state descriptions.
@@ -656,8 +656,8 @@ It does not create a Toast role, focus target, action, or announcement service.
 
 ## Platform mapping
 
-Each adapter retains the newest `SemanticFrame`; adapters with retained native accessibility objects cache them by SemanticNodeId.
-Native objects never retain MountedNode or NodeExtension pointers.
+Each adapter retains the newest `SemanticFrame`; adapters with retained platform accessibility objects cache them by SemanticNodeId.
+Platform objects never retain MountedNode or NodeExtension pointers.
 
 The Android, iOS, macOS, and Windows bridges are implemented.
 The remaining platform subsections define the intended adapter boundary, not current support.
@@ -666,42 +666,42 @@ The remaining platform subsections define the intended adapter boundary, not cur
 
 `HuxerUIView` exposes virtual descendants through `AccessibilityNodeProvider`.
 The shared semantic root maps to `AccessibilityNodeProvider.HOST_VIEW_ID`, while every non-root SemanticNodeId is converted exactly to a positive 32-bit virtual View ID.
-The native encoder rejects an identity above `jint` maximum instead of truncating it, and Android actions convert the virtual View ID directly back to SemanticNodeId for validation against the newest Runtime frame.
+The Android encoder rejects an identity above `jint` maximum instead of truncating it, and Android actions convert the virtual View ID directly back to SemanticNodeId for validation against the newest Runtime frame.
 This removes a second identity allocator, bidirectional maps, reuse policy, and retained mapping growth from the ordinary node path.
 Custom semantic action IDs remain a separate 64-bit namespace and receive stable provider-local Android action IDs for the host View lifetime.
 
-The native frame commit returns a versioned binary semantic snapshot only when the SemanticFrame revision changes.
+The Android frame commit returns a versioned binary semantic snapshot only when the SemanticFrame revision changes.
 `HuxerUIAccessibilityProvider` decodes that snapshot into immutable Java-owned nodes, answers hierarchy, text search, focus, geometry, state, collection, range, and action queries without JNI, and calls native code only to perform an action.
 The synthetic root contributes its children to the host View rather than appearing as another virtual descendant.
 Bounds remain logical and View-local in the shared frame; the provider converts them to parent-relative pixels and applies the complete View-to-global matrix for screen bounds.
 
 A PlatformView identity travels in the same version-one node record as its semantic anchor.
 The provider omits that virtual anchor and adds the corresponding real `PlatformViewContainer` alongside virtual children in the declared sibling order.
-The container is a non-focusable structural accessibility node whose parent points to the host or the matching virtual semantic parent; its native content retains its own Android accessibility behavior and descendants.
-Provider touch exploration yields to a frontmost native subtree, and mount, removal, or visibility changes publish one host-subtree change after the frame has synchronized native accessibility parents.
+The container is a non-focusable structural accessibility node whose parent points to the host or the matching virtual semantic parent; its Android View content retains its own accessibility behavior and descendants.
+Provider touch exploration yields to a frontmost PlatformView subtree, and mount, removal, or visibility changes publish one host-subtree change after the frame has synchronized platform accessibility parents.
 
 Roles map to the closest Android widget class, while checked, selected, expanded, editable, secure, range, collection, heading, live-region, invalid, and scrolling state use the corresponding AccessibilityNodeInfo contracts available on the current API level.
 Collections containing RadioButton children map to Android single-selection collections without adding a platform role to the shared semantic model.
 Secure fields never publish text or selection.
 Activate, Focus, SetText, SetSelection, SetValue, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and Custom actions return through `Runtime::PerformSemanticAction()` on the Android UI thread.
-Accessibility focus and explore-by-touch hover stay provider-owned; native input-focus requests call Runtime Focus and remain distinct from TalkBack focus.
+Accessibility focus and explore-by-touch hover stay provider-owned; Android input-focus requests call Runtime Focus and remain distinct from TalkBack focus.
 
 Committed-frame diffs emit subtree, focus, selection, text, text-selection, scroll, state, dialog, and live-region events.
 The provider retains the newest frame even while accessibility is disabled so enabling TalkBack does not require rebuilding shared semantics.
-Detaching the HuxerUIView clears provider focus, hover, custom-action, and snapshot state together with the native session.
+Detaching the HuxerUIView clears provider focus, hover, custom-action, and snapshot state together with the platform session.
 
 ### iOS
 
 The `HuxerUIView` host is neither an accessibility element nor a text-input responder and exposes an ordered `UIAccessibilityContainer` hierarchy.
-The bridge retains private UIKit elements by SemanticNodeId so compatible recomposition, geometry changes, and reparenting update native properties without replacing a surviving VoiceOver target.
+The bridge retains private UIKit elements by SemanticNodeId so compatible recomposition, geometry changes, and reparenting update UIKit properties without replacing a surviving VoiceOver target.
 Private non-element containers represent semantic groups only when UIKit gains structure from them, including collections, tab lists, lists, grids, grid cells, navigation landmarks, menus, and dialogs.
-ScrollView remains transparent in the UIKit hierarchy: its descendants attach to the nearest native container while scrolling still resolves through the committed semantic parent chain.
+ScrollView remains transparent in the UIKit hierarchy: its descendants attach to the nearest UIKit container while scrolling still resolves through the committed semantic parent chain.
 Focus on a structural container preserves the shared keyboard route without creating a separate spoken element; direct activation, expansion, collapse, or custom actions still create an element before the container's children.
 If a semantic node both owns an actionable element and contains descendants, the private container contains that one element followed by its semantic children; no spoken node is duplicated.
 
 The host maps Text and Heading to static text and header traits, Button and Link to their direct traits, Image to image, SearchField to search field, Slider to adjustable, and disabled or selected state to the corresponding UIKit traits.
 ShowOnScreen remains a navigation capability and does not by itself make a UIKit element report that it responds to user interaction.
-Checkbox and Switch use the native toggle trait when available and retain an iOS 13 fallback with button behavior and a checked value; RadioButton and Tab use button and selected behavior without treating checked state as an unrelated selection.
+Checkbox and Switch use the UIKit toggle trait when available and retain an iOS 13 fallback with button behavior and a checked value; RadioButton and Tab use button and selected behavior without treating checked state as an unrelated selection.
 TabList uses the non-element tab-bar contract.
 List and Navigation map to UIKit list and landmark container types, while Grid adopts the data-table protocols only when every logical item is represented by a queryable committed cell and otherwise remains a semantic group.
 Label, value, placeholder fallback, hint, error, identifier, range, and geometry come from the retained committed frame.
@@ -710,26 +710,26 @@ Secure TextField content, selection, and protected length remain absent rather t
 Activate, Focus, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and labeled custom actions return to `Runtime::PerformSemanticAction()` on the main thread.
 The default VoiceOver activation prefers Activate, otherwise chooses the currently valid Expand or Collapse action, and finally uses Focus for focusable fields.
 Adjustable callbacks route Increment and Decrement, the two-finger escape gesture routes Dismiss, and scrolling uses the committed axis and viewport extent of the nearest direction-compatible semantic scroll ancestor.
-SetText and SetSelection are not duplicated as custom accessibility actions: activating a TextField establishes the existing Runtime focus and a private non-accessible `UITextInput` view remains the only native editing service.
+SetText and SetSelection are not duplicated as custom accessibility actions: activating a TextField establishes the existing Runtime focus and a private non-accessible `UITextInput` view remains the only UIKit editing service.
 On iOS 18.1 and later, only the Runtime-focused TextField or SearchField exposes that view through `accessibilityTextInputResponder`; earlier versions still activate the same Runtime session and private first responder without making the application accessibility container a text input.
 
 VoiceOver focus stays UIKit-owned and never becomes Runtime input focus merely because an accessibility element became focused.
 An offscreen focused element may request ShowOnScreen without changing input focus.
-The bridge preserves the current UIKit element when its SemanticNodeId survives and issues conservative layout notifications only when the accessible hierarchy, role, collection structure, or native subtree changes.
+The bridge preserves the current UIKit element when its SemanticNodeId survives and issues conservative layout notifications only when the accessible hierarchy, role, collection structure, or PlatformView subtree changes.
 If the focused element disappears, UIKit remains responsible for choosing the next target from the new committed order; the bridge does not impose a platform-independent fallback.
 Completed semantic scrolling emits a page-scrolled notification only after a later frame confirms the offset change.
 Live-region announcements are diffed from committed frames, coalesced per commit, and use queued polite speech or interrupting assertive speech according to the APIs available on the deployment version.
 
-`UIKitPlatformViews` resolves a PlatformView semantic anchor to the registered native `UIView` after native composition has committed.
-The bridge inserts that view at the anchor's semantic sibling position and does not wrap or copy its native accessibility subtree.
-HuxerUI slice and clipping views remain non-elements, while the native view continues to own its labels, descendants, editing behavior, and actions.
-The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every native query observes one coherent frame.
+`UIKitPlatformViews` resolves a PlatformView semantic anchor to the registered `UIView` after PlatformView composition has committed.
+The bridge inserts that view at the anchor's semantic sibling position and does not wrap or copy its UIView accessibility subtree.
+HuxerUI slice and clipping views remain non-elements, while the PlatformView continues to own its labels, descendants, editing behavior, and actions.
+The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every platform query observes one coherent frame.
 
 ### macOS
 
 The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
 It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
-For a PlatformView anchor, it resolves the committed identity through the native host and substitutes the unignored native accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
+For a PlatformView anchor, it resolves the committed identity through the AppKit host and substitutes the unignored NSView accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
 The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
 AppKit calls and Runtime actions remain on the main thread.
 `NSTextInputClient` continues to own IME communication.
@@ -780,7 +780,7 @@ Scroll offset changes update scroll metrics, offscreen state, and realized virtu
 An extension changing unrelated paint and semantics requests both explicitly.
 
 Runtime builds semantics after final presentation geometry and text-input session refresh and before returning `FrameCommit`.
-It does not call native accessibility APIs while building.
+It does not call platform accessibility APIs while building.
 
 The initial Runtime always produces semantics.
 There is no enablement API or assistive-technology detection race.
@@ -792,12 +792,12 @@ Runtime construction and action dispatch run on the Runtime UI thread.
 NodeExtension semantic callbacks do not run concurrently with reconciliation, frame construction, or unmount.
 
 Native read-only queries use a retained immutable frame and do not call Runtime for names, children, states, or geometry.
-Native actions arriving during frame construction are queued or marshaled and cannot re-enter `BuildFrame()`.
+Platform actions arriving during frame construction are queued or marshaled and cannot re-enter `BuildFrame()`.
 
 ## Validation
 
 Caller-supplied invalid ranges, spans, heading levels, virtual-child bounds, and custom action labels throw `std::invalid_argument` with an English HuxerUI diagnostic.
-Duplicate local IDs, actions without a declared semantic item, and conflicting extension routes throw `std::logic_error`; stale native actions return false.
+Duplicate local IDs, actions without a declared semantic item, and conflicting extension routes throw `std::logic_error`; stale platform actions return false.
 Broader role-state and automation-identifier diagnostics remain deferred.
 
 ## Testing
@@ -829,7 +829,7 @@ Unavailable platforms and tools remain explicitly unverified.
 
 ## Shared-core completion sequence
 
-The shared work is delivered in bounded stages so each contract is validated before native adapters depend on it:
+The shared work is delivered in bounded stages so each contract is validated before platform adapters depend on it:
 
 - Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
 - Completed: scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
@@ -842,11 +842,11 @@ Android AccessibilityNodeProvider, UIKit, AppKit, and Windows UI Automation now 
 ## Delivery status
 
 - Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Android AccessibilityNodeProvider bridge, the iOS UIKit bridge, the macOS AppKit bridge including native anchor substitution, and the Windows UI Automation bridge are implemented.
-- Deferred: extend the native adapter sequence to Linux and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
+- Deferred: extend the platform adapter sequence to Linux and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
 - Deferred: add platform accessibility fixtures before advancing Web beyond technical preview.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.
-Each native adapter is validated on its platform; unavailable platforms remain unverified.
+Each platform adapter is validated on its platform; unavailable platforms remain unverified.
 
 ## Invariants
 
@@ -860,7 +860,7 @@ Each native adapter is validated on its platform; unavailable platforms remain u
 - Modal accessibility derives from retained Layer focus trapping, and virtual collection semantics never force eager View materialization.
 - One MountedNode may own stable flat virtual semantic children without fake Views.
 - Semantic identity is Runtime-local and never reused for unrelated content.
-- Input focus, text-input ownership, and native accessibility focus remain distinct.
-- Native objects retain SemanticFrame and SemanticNodeIds, never MountedNode or NodeExtension pointers.
-- Native actions are validated against the latest committed frame.
+- Input focus, text-input ownership, and platform accessibility focus remain distinct.
+- Platform objects retain SemanticFrame and SemanticNodeIds, never MountedNode or NodeExtension pointers.
+- Platform actions are validated against the latest committed frame.
 - Visual themes do not change component semantics.

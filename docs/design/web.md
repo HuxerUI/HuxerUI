@@ -53,7 +53,7 @@ Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand,
 
 ## Application startup
 
-Web compilation constructs the same static `Application` used by native targets. Its constructor registers the immutable root and `AppOptions`; Web does not create or require a native desktop `main()`.
+Web compilation constructs the same static `Application` used by the other targets. Its constructor registers the immutable root and `AppOptions`; Web does not create or require a desktop `main()`.
 
 The generated ES module exposes a synchronous mount operation that accepts a selector for an `HTMLElement` with no child nodes after module and font loading have completed. The adapter creates and owns one isolated composition root and its base Canvas inside that host. Broader startup configuration such as a resource base URL and page-integration policy remains deferred and does not belong in `AppOptions`.
 
@@ -96,7 +96,7 @@ The renderer applies the display scale at the Canvas boundary, so layout, pointe
 
 `RequestFrameAt()` coalesces immediate requests into one `requestAnimationFrame` callback. A future absolute deadline arms one browser timer; when the deadline becomes eligible, the timer requests an animation frame rather than building and presenting outside the browser rendering phase.
 
-The animation-frame callback builds one `FrameCommit`, presents its `RenderFrame`, then schedules `next_frame_deadline`. Re-entry is prevented with the same pending-build and pending-paint invariants used by native adapters.
+The animation-frame callback builds one `FrameCommit`, presents its `RenderFrame`, then schedules `next_frame_deadline`. Re-entry is prevented with the same pending-build and pending-paint invariants used by platform adapters.
 
 When a document becomes visible after animation frames were suspended, the Web integration requests a new frame. Runtime time remains monotonic, so retained animations advance to the current time rather than replaying every missed frame.
 
@@ -146,7 +146,7 @@ CSS `touch-action` belongs to browser integration policy. A full application sur
 
 WebTextInput creates one native `input` element and one `textarea` when the first editing session starts, then reuses them across single-line and multiline sessions. These elements are visually hidden from application rendering but remain focusable, editable browser controls.
 
-Input type, capitalization, action, multiline, secure entry, and autocorrection map to the closest browser attributes such as `type`, `inputmode`, `enterkeyhint`, `autocapitalize`, and `autocomplete`. Runtime does not start an editable native session for a read-only TextField.
+Input type, capitalization, action, multiline, secure entry, and autocorrection map to the closest browser attributes such as `type`, `inputmode`, `enterkeyhint`, `autocapitalize`, and `autocomplete`. Runtime does not start an editable platform session for a read-only TextField.
 
 The active element is positioned near Runtime's current caret geometry so native IME candidate UI and mobile keyboard behavior have a meaningful anchor. Position and selection are refreshed after Runtime state or geometry changes.
 
@@ -154,7 +154,7 @@ The active element is positioned near Runtime's current caret geometry so native
 
 WebTextInput retains the active text-input session identifier and a restart token. Every asynchronous or deferred event reads the current token before calling Runtime, while disposal and configuration restart invalidate stale events.
 
-Touch scrolling over a TextField does not focus the hidden input merely because a pointer started over editable content. Runtime first resolves the gesture as a tap and starts or requests the native session while still processing the trusted browser pointer event, allowing mobile keyboards to open without a second tap.
+Touch scrolling over a TextField does not focus the hidden input merely because a pointer started over editable content. Runtime first resolves the gesture as a tap and starts or requests the platform session while still processing the trusted browser pointer event, allowing mobile keyboards to open without a second tap.
 
 ## Clipboard
 
@@ -180,7 +180,7 @@ They call browser APIs through Emscripten, register the existing factory from an
 Modules that require JavaScript libraries express those link inputs through their own Emscripten target configuration; the HuxerUI module graph does not parse or reproduce JavaScript package metadata.
 
 The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
-Native result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
+Platform result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
 Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the module instance.
 
 The Web `example_platform_module` uses an Emscripten interval to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, and disposal through the same Timer Root Service as the native examples.
@@ -243,14 +243,14 @@ The integration observes document visibility, composition-root connection at sch
 
 Exceptions do not cross the JavaScript and C++ boundary. Exported operations catch C++ failures and preserve HuxerUI diagnostics. Mount failures are rejected, fatal session-dispatch failures dispose the failed session, and text-input dispatch failures remain contained at the input boundary. Invalid or stale session IDs are ignored without dereferencing destroyed state.
 
-`QueryProcessMetrics()` initially returns no value because browser process CPU and memory figures do not have the same reliable per-application semantics as native backends.
+`QueryProcessMetrics()` initially returns no value because browser process CPU and memory figures do not have the same reliable per-application semantics as desktop backends.
 
 ## Validation
 
 Web platform work requires:
 
 - A clean Emscripten configure and build in addition to an incremental build.
-- Public header and shared Runtime tests on available native hosts.
+- Public header and shared Runtime tests on available platform hosts.
 - Web compile coverage for every PaintCommand variant and application entry registration.
 - Browser tests for initial mount, disposal, resize, display-scale changes, frame coalescing, damage replay, pointer capture, Cancel, hover, wheel, keyboard, focus, and visibility restoration.
 - Text tests for ASCII, surrogate pairs, grapheme clusters, multiline wrapping, bidirectional text, selection, composition, secure input, submission actions, and session mismatch.

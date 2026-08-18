@@ -383,7 +383,7 @@ public:
     }
   }
 
-  void InvalidateNativeSurface() {
+  void InvalidateAppKitSurface() {
     if (view_ != nil) {
       [view_ setNeedsDisplay:YES];
     }
@@ -531,7 +531,7 @@ public:
   }
 
 private:
-  float NativeTitleBarHeight(Size viewport) const noexcept {
+  float SystemTitleBarHeight(Size viewport) const noexcept {
     if (window_ == nil || view_ == nil) {
       return 0.0F;
     }
@@ -540,7 +540,7 @@ private:
     return std::isfinite(height) ? std::clamp(height, 0.0F, viewport.height) : 0.0F;
   }
 
-  std::optional<Rect> NativeTitleBarControlBounds() const noexcept {
+  std::optional<Rect> SystemTitleBarControlBounds() const noexcept {
     if (window_ == nil || view_ == nil) {
       return std::nullopt;
     }
@@ -571,7 +571,7 @@ private:
     };
   }
 
-  void AlignNativeTitleBarControls(const Rect& control_bounds, float title_bar_height) {
+  void AlignSystemTitleBarControls(const Rect& control_bounds, float title_bar_height) {
     const float target_y = ResolveMacTitleBarControlOriginY(title_bar_height, control_bounds.height);
     const float delta_y = target_y - control_bounds.y;
     if (std::abs(delta_y) <= 0.01F) {
@@ -597,16 +597,16 @@ private:
     if (!custom_chrome_) {
       return std::nullopt;
     }
-    const std::optional<Rect> native_controls = NativeTitleBarControlBounds();
+    const std::optional<Rect> system_controls = SystemTitleBarControlBounds();
     const WindowTitleBarMetrics metrics = ResolveMacTitleBarMetrics(
         custom_title_bar_height_,
-        NativeTitleBarHeight(viewport),
+        SystemTitleBarHeight(viewport),
         viewport,
-        native_controls,
+        system_controls,
         window_ != nil && [window_ isZoomed]
     );
-    if (native_controls.has_value()) {
-      AlignNativeTitleBarControls(*native_controls, metrics.height);
+    if (system_controls.has_value()) {
+      AlignSystemTitleBarControls(*system_controls, metrics.height);
     }
     return metrics;
   }
@@ -794,7 +794,7 @@ int RunPlatformApplication(const Application& application) {
   [super viewDidChangeBackingProperties];
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->UpdateResourceConfiguration();
-    huxeruiAdapter->InvalidateNativeSurface();
+    huxeruiAdapter->InvalidateAppKitSurface();
     huxeruiAdapter->WindowGeometryChanged();
   }
 }

@@ -1,6 +1,6 @@
 # Getting Started
 
-HuxerUI applications use C++20 and share the same declarative UI code across Android, iOS, Linux, macOS, Windows, and Web. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each native backend owns its window or host view, text services, and rendering surface.
+HuxerUI applications use C++20 and share the same declarative UI code across Android, iOS, Linux, macOS, Windows, and Web. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each platform backend owns its window or host view, text services, and rendering surface.
 
 ## Requirements
 
@@ -182,7 +182,7 @@ huxerui build ios
 huxerui run ios --device <id>
 ```
 
-The native project owns its App target, Info.plist, launch screen, asset catalog, build configurations, signing, and shared scheme.
+The Xcode project owns its App target, Info.plist, launch screen, asset catalog, build configurations, signing, and shared scheme.
 Its build phase asks CMake for an architecture-correct application core containing the C++ application, generated scope code, generated resources, and HuxerUI static library.
 The resulting App Bundle remains a normal Xcode product and can be built, debugged, archived, and extended with native files in Xcode.
 
@@ -195,7 +195,7 @@ DEVELOPMENT_TEAM = YOUR_TEAM_ID
 `huxerui build` and `huxerui run` pass the detected SDK location to Xcode automatically. Generated projects never require a source-controlled machine-specific SDK path.
 The iOS backend targets iOS 13 or later. Development builds support Xcode automatic signing; archive export automation and a public embeddable UIView remain outside the current preview.
 
-Framework contributors can debug repository examples with the shared native project at `platform/ios/example_runner/HuxerUIExamples.xcodeproj`. It runs `example_ui_gallery` by default. Copy its `Config/Local.xcconfig.example` to the ignored `Config/Local.xcconfig` and change `HUXERUI_APP_TARGET` to select another `example_*` target without creating another Xcode project.
+Framework contributors can debug repository examples with the shared Xcode project at `platform/ios/example_runner/HuxerUIExamples.xcodeproj`. It runs `example_ui_gallery` by default. Copy its `Config/Local.xcconfig.example` to the ignored `Config/Local.xcconfig` and change `HUXERUI_APP_TARGET` to select another `example_*` target without creating another Xcode project.
 
 ## Project CLI
 
@@ -225,15 +225,15 @@ huxerui run web
 Use `--id <reverse-domain-id>` to set one exact cross-platform application identifier instead of the editable `com.example.<normalized-name>` default.
 `create module` writes a common CMake module and an ordinary application under `examples/preview`.
 Module names do not require a `huxerui-` prefix and may contain uppercase letters; the supplied directory name is preserved while common identifiers are normalized to lowercase snake case.
-Selecting Android also creates an independent Gradle library, selecting iOS creates a Swift Package, and selecting Linux creates the module's CMake-native `platform/linux/src` root. Android and iOS builds attach consumed native module packages to the preview application automatically.
+Selecting Android also creates an independent Gradle library, selecting iOS creates a Swift Package, and selecting Linux creates the module's CMake `platform/linux/src` root. Android and iOS builds attach consumed platform module packages to the preview application automatically.
 Running `doctor`, `build`, `run`, or `open ios` from a module root resolves to this ordinary Preview application; the same commands also work directly inside `examples/preview`.
 The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`, plus Linux sources under `platform/linux/src` when configuring for Linux.
 `doctor` discovers the nearest project from a nested directory, validates each platform shell, and checks host tools without changing the project.
 `devices` lists runnable Android devices, paired physical iOS devices, and booted iOS Simulators without requiring a project.
-`build` preserves native incremental output under `.huxerui/build`, while `run` builds and launches exactly one target platform. iOS Simulator and device builds use separate `ios-simulator` and `ios-device` directories. `xcodebuild` builds the source-controlled native project, `simctl` installs Simulator builds, and `devicectl` installs automatically signed physical-device builds.
-`huxerui open ios` records the ignored local SDK setting and opens `platform/ios/<target>.xcodeproj` without regenerating the native project.
+`build` preserves platform build output under `.huxerui/build`, while `run` builds and launches exactly one target platform. iOS Simulator and device builds use separate `ios-simulator` and `ios-device` directories. `xcodebuild` builds the source-controlled Xcode project, `simctl` installs Simulator builds, and `devicectl` installs automatically signed physical-device builds.
+`huxerui open ios` records the ignored local SDK setting and opens `platform/ios/<target>.xcodeproj` without regenerating the Xcode project.
 `run android` selects the only ready device automatically or requires `--device <id>` when several are available.
-For a fresh desktop build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence. `--generator` is rejected for Android and iOS because their native generators belong to Gradle and Xcode.
+For a fresh desktop build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence. `--generator` is rejected for Android and iOS because their platform generators belong to Gradle and Xcode.
 The CLI selects an explicit source checkout or installed prefix through `HUXERUI_HOME`, otherwise it locates a compatible SDK relative to its executable, and propagates the resolved home to native build tools.
 Android, Linux, and Web CLI projects currently require a source SDK. iOS accepts a source checkout or an installed SDK built for the selected Apple SDK and architectures.
 Android includes that checkout's Java Gradle library and configures the application root `CMakeLists.txt` directly for its native libraries and final HuxerUI resources, while Web compiles the framework and application together through Emscripten.
@@ -243,7 +243,7 @@ The generated Android shell uses a local Gradle wrapper when the project supplie
 These source-SDK restrictions are transitional rather than the public distribution contract.
 The approved model provides one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, module, and application resources.
 Formal Android, Apple, Linux, Windows, and Web artifacts, Windows, Linux, and macOS installers, and package commands are implemented in later phases.
-Their native integration contracts are defined in [SDK, CLI, Native Shell, and Module Design](design/sdk-cli.md).
+Their platform integration contracts are defined in [SDK, CLI, Platform Shell, and Module Design](design/sdk-cli.md).
 
 ## Run examples
 

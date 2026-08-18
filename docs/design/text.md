@@ -2,14 +2,14 @@
 
 Status: implemented
 
-This document defines the shared text values, measurement boundary, paint commands, and native resource ownership used by Text, TextField, Canvas, and text-oriented component libraries.
+This document defines the shared text values, measurement boundary, paint commands, and platform resource ownership used by Text, TextField, Canvas, and text-oriented component libraries.
 Localized string resolution and the root Locale Environment are defined in [App Resources, Images, and Localization Design](resources.md); applying the inherited Locale automatically to otherwise-unspecified text shaping remains deferred.
 
 ## Ownership
 
 The shared C++ layer owns platform-neutral font identity, text style, shaping intent, layout options, measured geometry, and retained paint commands.
-Platform adapters own native font resolution, shaping, paragraph layout, glyph drawing, and bounded native caches.
-Native font, glyph, layout, and brush objects never enter a View, PaintCommand, RenderScene, or application state value.
+Platform adapters own platform font resolution, shaping, paragraph layout, glyph drawing, and bounded platform caches.
+Platform font, glyph, layout, and brush objects never enter a View, PaintCommand, RenderScene, or application state value.
 
 `Font`, `TextStyle`, `TextShapingOptions`, and `TextLayoutOptions` compare by value.
 A value change therefore participates naturally in View reconciliation, layout invalidation, PaintSequence invalidation, and renderer cache lookup without a separate generation counter or manual invalidation API.
@@ -27,8 +27,8 @@ Font title = Font::Named("Inter", 28.0F)
 ```
 
 The family is system, monospace, or explicitly named.
-Size belongs to Font because native font metrics and shaped glyph advances depend on it.
-Weight and slant also belong to Font because they select the native face.
+Size belongs to Font because platform font metrics and shaped glyph advances depend on it.
+Weight and slant also belong to Font because they select the platform face.
 The platform may fall back when a requested named family or exact face is unavailable, but the declarative Font value remains unchanged.
 
 `TextStyle` combines the font with foreground color and composable decoration flags:
@@ -78,14 +78,14 @@ A finite `max_width` still constrains the reported paragraph width; it does not 
 Both modes report all resulting hard and automatic lines through `line_count`, `first_baseline`, and `last_baseline`.
 
 The active `PlatformAdapter` is exposed through a private root text-measurer service whose lifetime is owned by Runtime.
-Components can obtain it with `UseTextMeasurer()` without depending on PlatformAdapter or native types.
+Components can obtain it with `UseTextMeasurer()` without depending on PlatformAdapter or platform API types.
 Built-in layout and editing code use the same service contract directly through the host boundary.
-`TextMeasurer` calls occur synchronously on the Runtime and native host thread.
+`TextMeasurer` calls occur synchronously on the Runtime and platform host thread.
 Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition or layout operation.
 
 Measurement results are authoritative geometry.
 A caller that positions exact runs translates the returned run bounds to its chosen baseline and records both values.
-The renderer may reuse a native shaped object and query glyph internals required for replay, but it must not measure the text again to move, resize, wrap, or clip the supplied run.
+The renderer may reuse a platform-shaped object and query glyph internals required for replay, but it must not measure the text again to move, resize, wrap, or clip the supplied run.
 
 ## Paragraph and run commands
 
@@ -100,7 +100,7 @@ paint.DrawText(
 );
 ```
 
-Its rectangle is a layout constraint, so the renderer creates a native paragraph layout using the same TextStyle and TextLayoutOptions that were used for measurement.
+Its rectangle is a layout constraint, so the renderer creates a platform paragraph layout using the same TextStyle and TextLayoutOptions that were used for measurement.
 Wrapped paragraphs start at the top of the rectangle; an unwrapped paragraph is vertically centered while TextAlign controls each hard line's horizontal placement.
 When an unwrapped line is wider than the rectangle, Center and semantic trailing alignment may place its origin before the rectangle's leading edge; the rectangle clips the overflow without changing alignment.
 This path serves Text, buttons, labels, validation text, and other ordinary UI paragraphs.
@@ -128,17 +128,17 @@ This command supports editor lines, syntax spans, diagnostic text, and other cal
 `DrawTextCommand` remains necessary because paragraph layout and exact run replay have different ownership.
 Replacing it with runs would force ordinary components to implement wrapping and alignment themselves.
 
-## Native caches
+## Platform caches
 
-Native caches are private to one platform renderer or host view.
-A resolved-font or metrics key contains family kind and name, size, weight, and slant; a backend may omit size only when its cached native typeface is explicitly size independent.
+Platform caches are private to one platform renderer or host view.
+A resolved-font or metrics key contains family kind and name, size, weight, and slant; a backend may omit size only when its cached platform typeface is explicitly size independent.
 A paragraph or shaped-run key additionally contains text, shaping options, width, alignment, and wrapping.
-Color may be excluded when the native API applies it at draw time.
-Decoration remains in the key whenever it changes native layout state or the conservative visual bounds.
+Color may be excluded when the platform API applies it at draw time.
+Decoration remains in the key whenever it changes platform layout state or the conservative visual bounds.
 
 Caches are bounded keyed lookups rather than linear histories and use values rather than pointers into RenderScene.
 Changing a Font, TextStyle, text string, shaping option, or layout width naturally misses the old entry.
-Device-dependent resources are cleared when the native drawing device is recreated.
+Device-dependent resources are cleared when the platform drawing device is recreated.
 Host destruction releases all remaining entries.
 System font database changes may clear font-dependent entries at the platform boundary without invalidating shared Runtime state.
 
@@ -149,12 +149,12 @@ Secure TextField source text must not be retained in a global text or paragraph 
 ## TextField and selection
 
 TextField uses complete TextStyle values for editable text, placeholder text, and validation text.
-The native TextLayout created for editing supplies hit testing, caret rectangles, selection rectangles, and grapheme movement from the same style and layout options used to paint the field.
+The platform TextLayout created for editing supplies hit testing, caret rectangles, selection rectangles, and grapheme movement from the same style and layout options used to paint the field.
 IME geometry therefore derives from the committed TextLayout and the node's local-to-host transform rather than from a renderer-side measurement.
 
 Selection overlays remain Runtime-owned RenderNodes.
 Their labels use paragraph text commands and Theme-resolved TextStyle values.
-They do not introduce a second native text ownership path.
+They do not introduce a second platform text ownership path.
 
 ## Platform mapping
 
@@ -163,4 +163,4 @@ They do not introduce a second native text ownership path.
 - Windows keeps bounded DirectWrite font metrics, paragraph layout, and exact-run layout caches.
 
 All mappings consume logical coordinates and UTF-8 shared text at the host boundary.
-Native adapters perform their required UTF-16 or platform-string conversion locally.
+Platform adapters perform their required UTF-16 or platform-string conversion locally.

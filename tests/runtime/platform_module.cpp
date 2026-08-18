@@ -133,45 +133,45 @@ static_assert(detail::PlatformEventKey<TestPlatformModuleEvents::TextureChanged>
 static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::MissingDecoder>);
 static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::InvalidDecoder>);
 
-struct NativeCall {
+struct PlatformModuleCall {
   std::string method;
   PlatformPayload arguments;
   PlatformResultSink result;
   bool cancelled = false;
 };
 
-struct NativeState {
+struct PlatformModuleState {
   PlatformPayload options;
   PlatformEventSink events;
-  std::vector<std::shared_ptr<NativeCall>> calls;
+  std::vector<std::shared_ptr<PlatformModuleCall>> calls;
   int creates = 0;
   int cancellations = 0;
   int disposals = 0;
 };
 
-PlatformModuleFactory TestModuleFactory(const std::shared_ptr<NativeState>& native) {
+PlatformModuleFactory TestModuleFactory(const std::shared_ptr<PlatformModuleState>& module_state) {
   PlatformModuleFactory factory;
-  factory.create = [native](const PlatformPayload& options, PlatformEventSink events) {
-    ++native->creates;
-    native->options = options;
-    native->events = std::move(events);
+  factory.create = [module_state](const PlatformPayload& options, PlatformEventSink events) {
+    ++module_state->creates;
+    module_state->options = options;
+    module_state->events = std::move(events);
     PlatformModuleFactory::Instance instance;
-    instance.call = [native](std::string method, PlatformPayload arguments, PlatformResultSink result) {
-      auto call = std::make_shared<NativeCall>(NativeCall{
+    instance.call = [module_state](std::string method, PlatformPayload arguments, PlatformResultSink result) {
+      auto call = std::make_shared<PlatformModuleCall>(PlatformModuleCall{
           std::move(method),
           std::move(arguments),
           std::move(result),
           false,
       });
-      native->calls.push_back(call);
-      return [native, call] {
+      module_state->calls.push_back(call);
+      return [module_state, call] {
         if (!call->cancelled) {
           call->cancelled = true;
-          ++native->cancellations;
+          ++module_state->cancellations;
         }
       };
     };
-    instance.dispose = [native] { ++native->disposals; };
+    instance.dispose = [module_state] { ++module_state->disposals; };
     return instance;
   };
   return factory;
@@ -242,10 +242,13 @@ View PlatformModuleApp() {
   return Text("module");
 }
 
-AppOptions InstallTestModule(const std::shared_ptr<NativeState>& native, std::shared_ptr<TestService>& service) {
+AppOptions InstallTestModule(
+    const std::shared_ptr<PlatformModuleState>& module_state,
+    std::shared_ptr<TestService>& service
+) {
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([native, &service](RootContext& root) {
-    root.Modules().Register("test/Module", TestModuleFactory(native));
+  options.root_hooks.push_back([module_state, &service](RootContext& root) {
+    root.Modules().Register("test/Module", TestModuleFactory(module_state));
     PlatformInstance instance = root.Modules().Open("test/Module", PlatformPayload::Object{{"enabled", true}});
     service = std::make_shared<TestService>(std::move(instance));
     service->BindEvents();
@@ -254,10 +257,10 @@ AppOptions InstallTestModule(const std::shared_ptr<NativeState>& native, std::sh
   return options;
 }
 
-AppOptions InstallTextureOption(const std::shared_ptr<NativeState>& native, ExternalTexture texture) {
+AppOptions InstallTextureOption(const std::shared_ptr<PlatformModuleState>& module_state, ExternalTexture texture) {
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([native, texture = std::move(texture)](RootContext& root) {
-    root.Modules().Register("test/TextureModule", TestModuleFactory(native));
+  options.root_hooks.push_back([module_state, texture = std::move(texture)](RootContext& root) {
+    root.Modules().Register("test/TextureModule", TestModuleFactory(module_state));
     static_cast<void>(root.Modules().Open("test/TextureModule", PlatformPayload(texture)));
   });
   return options;
@@ -265,44 +268,44 @@ AppOptions InstallTextureOption(const std::shared_ptr<NativeState>& native, Exte
 
 void OpenTextureOnAnotherSurface(const ExternalTexture& texture) {
   TestPlatform platform;
-  const auto native = std::make_shared<NativeState>();
-  Runtime runtime(PlatformModuleApp, platform, InstallTextureOption(native, texture));
+  const auto module_state = std::make_shared<PlatformModuleState>();
+  Runtime runtime(PlatformModuleApp, platform, InstallTextureOption(module_state, texture));
   static_cast<void>(runtime);
 }
 
 TEST_CASE("PlatformInstanceDeliversTypedCallsAndEventsAsynchronously") {
   TestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
 
   REQUIRE(service != nullptr);
-  REQUIRE(native->creates == 1);
-  REQUIRE(native->options.AsObject().at("enabled").AsBoolean());
+  REQUIRE(module_state->creates == 1);
+  REQUIRE(module_state->options.AsObject().at("enabled").AsBoolean());
   REQUIRE_THROWS_AS(service->BindEvents(), std::invalid_argument);
 
   std::vector<PlatformResult<int>> results;
   const PlatformRequestId request =
       service->Double(7, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
   REQUIRE(request != 0);
-  REQUIRE(native->calls.size() == 1);
-  REQUIRE(native->calls.front()->method == "double");
-  REQUIRE(native->calls.front()->arguments.AsInteger() == 7);
+  REQUIRE(module_state->calls.size() == 1);
+  REQUIRE(module_state->calls.front()->method == "double");
+  REQUIRE(module_state->calls.front()->arguments.AsInteger() == 7);
 
-  native->calls.front()->result(PlatformPayload(14));
+  module_state->calls.front()->result(PlatformPayload(14));
   REQUIRE(results.empty());
   platform.RunPlatformModuleTasks();
   REQUIRE(results == std::vector<PlatformResult<int>>{14});
 
-  native->events("changed", PlatformPayload(1));
-  native->events("changed", PlatformPayload(2));
+  module_state->events("changed", PlatformPayload(1));
+  module_state->events("changed", PlatformPayload(2));
   REQUIRE(service->events.empty());
   platform.RunPlatformModuleTasks();
   REQUIRE(service->events == std::vector<int>{1, 2});
 
-  native->events("changed", PlatformPayload("invalid"));
-  native->events("", PlatformPayload(3));
-  native->events(std::string(1, static_cast<char>(0xFF)), PlatformPayload(4));
+  module_state->events("changed", PlatformPayload("invalid"));
+  module_state->events("", PlatformPayload(3));
+  module_state->events(std::string(1, static_cast<char>(0xFF)), PlatformPayload(4));
   platform.RunPlatformModuleTasks();
   REQUIRE(service->events == std::vector<int>{1, 2});
 
@@ -311,16 +314,16 @@ TEST_CASE("PlatformInstanceDeliversTypedCallsAndEventsAsynchronously") {
     ++throwing_completions;
     throw std::runtime_error("test completion failure");
   }));
-  native->calls.back()->result(PlatformPayload(16));
+  module_state->calls.back()->result(PlatformPayload(16));
   platform.RunPlatformModuleTasks();
   REQUIRE(throwing_completions == 1);
 }
 
 TEST_CASE("PlatformInstanceOrdersResultsAndRejectsCancelledOrDuplicateDelivery") {
   TestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
 
   std::vector<int> completion_order;
   const PlatformRequestId first =
@@ -332,13 +335,13 @@ TEST_CASE("PlatformInstanceOrdersResultsAndRejectsCancelledOrDuplicateDelivery")
   REQUIRE(first != second);
   REQUIRE(second != cancelled);
 
-  native->calls[1]->result(PlatformPayload(20));
-  native->calls[0]->result(PlatformPayload(10));
-  native->calls[0]->result(PlatformPayload(11));
+  module_state->calls[1]->result(PlatformPayload(20));
+  module_state->calls[0]->result(PlatformPayload(10));
+  module_state->calls[0]->result(PlatformPayload(11));
   REQUIRE(service->Cancel(cancelled));
   REQUIRE_FALSE(service->Cancel(cancelled));
-  REQUIRE(native->cancellations == 1);
-  native->calls[2]->result(PlatformPayload(30));
+  REQUIRE(module_state->cancellations == 1);
+  module_state->calls[2]->result(PlatformPayload(30));
 
   platform.RunPlatformModuleTasks();
   REQUIRE(completion_order == std::vector<int>{20, 10});
@@ -347,15 +350,15 @@ TEST_CASE("PlatformInstanceOrdersResultsAndRejectsCancelledOrDuplicateDelivery")
 
 TEST_CASE("PlatformInstanceConvertsErrorsAndInvalidTypedResults") {
   TestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
 
   std::vector<PlatformResult<int>> results;
   service->Double(1, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
   service->Double(2, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
-  native->calls[0]->result(PlatformError{"test/rejected", "Rejected by test module", {}});
-  native->calls[1]->result(PlatformPayload("invalid"));
+  module_state->calls[0]->result(PlatformError{"test/rejected", "Rejected by test module", {}});
+  module_state->calls[1]->result(PlatformPayload("invalid"));
   platform.RunPlatformModuleTasks();
 
   REQUIRE(results.size() == 2);
@@ -363,51 +366,51 @@ TEST_CASE("PlatformInstanceConvertsErrorsAndInvalidTypedResults") {
   REQUIRE(std::get<PlatformError>(results[1]).code == "huxerui/invalid-result");
 }
 
-TEST_CASE("PlatformInstanceMoveAndRootTeardownCloseNativeState") {
+TEST_CASE("PlatformInstanceMoveAndRootTeardownClosePlatformModuleState") {
   TestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
   {
-    Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+    Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
     REQUIRE(service->MoveRoundTrip());
     static_cast<void>(service->Double(1, [](PlatformResult<int>) {}));
-    REQUIRE(native->disposals == 0);
+    REQUIRE(module_state->disposals == 0);
     service.reset();
   }
 
-  REQUIRE(native->cancellations == 1);
-  REQUIRE(native->disposals == 1);
-  native->calls.front()->result(PlatformPayload(2));
-  native->events("changed", PlatformPayload(3));
+  REQUIRE(module_state->cancellations == 1);
+  REQUIRE(module_state->disposals == 1);
+  module_state->calls.front()->result(PlatformPayload(2));
+  module_state->events("changed", PlatformPayload(3));
   platform.RunPlatformModuleTasks();
-  REQUIRE(native->disposals == 1);
+  REQUIRE(module_state->disposals == 1);
 }
 
-TEST_CASE("PlatformAdapterCreatesNativePlatformModuleRegistration") {
+TEST_CASE("PlatformAdapterCreatesPlatformModuleRegistration") {
   ProjectingTestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([native, &service](RootContext& root) {
-    root.Modules().Register("test/NativeModule", TestPlatformModuleFactory{TestModuleFactory(native)});
+  options.root_hooks.push_back([module_state, &service](RootContext& root) {
+    root.Modules().Register("test/PlatformModule", TestPlatformModuleFactory{TestModuleFactory(module_state)});
     service = std::make_shared<TestService>(
-        root.Modules().Open("test/NativeModule", PlatformPayload::Object{{"native", true}})
+        root.Modules().Open("test/PlatformModule", PlatformPayload::Object{{"platform", true}})
     );
     root.Provide(service);
   });
   Runtime runtime(PlatformModuleApp, platform, std::move(options));
 
-  REQUIRE(native->creates == 1);
-  REQUIRE(native->options.AsObject().at("native").AsBoolean());
+  REQUIRE(module_state->creates == 1);
+  REQUIRE(module_state->options.AsObject().at("platform").AsBoolean());
   REQUIRE(service != nullptr);
 }
 
 TEST_CASE("PlatformModulesBindNestedExternalTexturePayloadsToOneSurface") {
   const ExternalTexture texture = MakeTestExternalTexture({32.0F, 18.0F});
-  const auto install = [texture](const std::shared_ptr<NativeState>& native) {
+  const auto install = [texture](const std::shared_ptr<PlatformModuleState>& module_state) {
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([texture, native](RootContext& root) {
-      root.Modules().Register("test/TextureModule", TestModuleFactory(native));
+    options.root_hooks.push_back([texture, module_state](RootContext& root) {
+      root.Modules().Register("test/TextureModule", TestModuleFactory(module_state));
       static_cast<void>(root.Modules().Open(
           "test/TextureModule",
           PlatformPayload::Object{{"textures", PlatformPayload::List{texture}}}
@@ -417,46 +420,46 @@ TEST_CASE("PlatformModulesBindNestedExternalTexturePayloadsToOneSurface") {
   };
 
   TestPlatform first_platform;
-  const auto first_native = std::make_shared<NativeState>();
-  Runtime first_runtime(PlatformModuleApp, first_platform, install(first_native));
-  REQUIRE(first_native->creates == 1);
+  const auto first_module_state = std::make_shared<PlatformModuleState>();
+  Runtime first_runtime(PlatformModuleApp, first_platform, install(first_module_state));
+  REQUIRE(first_module_state->creates == 1);
   REQUIRE(
-      first_native->options.AsObject().at("textures").AsList().front().AsExternalTexture() == texture
+      first_module_state->options.AsObject().at("textures").AsList().front().AsExternalTexture() == texture
   );
 
   TestPlatform other_platform;
-  const auto other_native = std::make_shared<NativeState>();
+  const auto other_module_state = std::make_shared<PlatformModuleState>();
   REQUIRE_THROWS_AS(
-      Runtime(PlatformModuleApp, other_platform, install(other_native)),
+      Runtime(PlatformModuleApp, other_platform, install(other_module_state)),
       std::logic_error
   );
-  REQUIRE(other_native->creates == 0);
+  REQUIRE(other_module_state->creates == 0);
 }
 
 TEST_CASE("PlatformInstanceBindsExternalTexturesAcrossCallsResultsAndEvents") {
   TestPlatform platform;
-  auto native = std::make_shared<NativeState>();
+  auto module_state = std::make_shared<PlatformModuleState>();
   std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(native, service));
+  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
 
   const ExternalTexture argument = MakeTestExternalTexture({32.0F, 18.0F});
   std::vector<PlatformResult<ExternalTexture>> results;
   static_cast<void>(service->Texture(argument, [&](PlatformResult<ExternalTexture> result) {
     results.push_back(std::move(result));
   }));
-  REQUIRE(native->calls.back()->arguments.AsExternalTexture() == argument);
+  REQUIRE(module_state->calls.back()->arguments.AsExternalTexture() == argument);
 
   REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(argument), std::logic_error);
 
   const ExternalTexture result = MakeTestExternalTexture({32.0F, 18.0F});
-  native->calls.back()->result(PlatformPayload(result));
+  module_state->calls.back()->result(PlatformPayload(result));
   REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(result), std::logic_error);
   platform.RunPlatformModuleTasks();
   REQUIRE(results.size() == 1);
   REQUIRE(std::get<ExternalTexture>(results.front()) == result);
 
   const ExternalTexture event = MakeTestExternalTexture({32.0F, 18.0F});
-  native->events("textureChanged", PlatformPayload(event));
+  module_state->events("textureChanged", PlatformPayload(event));
   REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(event), std::logic_error);
   platform.RunPlatformModuleTasks();
   REQUIRE(service->texture_events == std::vector<ExternalTexture>{event});

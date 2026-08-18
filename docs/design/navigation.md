@@ -538,7 +538,7 @@ framework-owned TextSelectionOverlay
 
 Runtime captures the selected consumer at Begin.
 Update, Cancel, and Commit target the same consumer rather than rerunning routing against a tree that may have changed during the gesture.
-If the captured mounted target disappears, Runtime ends the transaction safely without dereferencing stale state or unexpectedly falling through to a native window close.
+If the captured mounted target disappears, Runtime ends the transaction safely without dereferencing stale state or unexpectedly falling through to a system window close.
 
 NodeExtension gains a general Back capability instead of Runtime checking for a Navigation component type:
 

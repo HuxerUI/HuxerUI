@@ -62,11 +62,11 @@ struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return {};
       }
       if (generation == static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-        result(TimerError("example/timer-exhausted", "The native timer generation space is exhausted"));
+        result(TimerError("example/timer-exhausted", "The platform timer generation space is exhausted"));
         return {};
       }
     }
@@ -106,7 +106,7 @@ struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return;
       }
     }
@@ -255,7 +255,7 @@ huxerui::PlatformModuleFactory WindowsTimerFactory() {
         state->Stop(std::move(result));
         return {};
       }
-      result(TimerError("example/unknown-method", "The native timer method is not supported"));
+      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
       return {};
     };
     instance.dispose = [state] { state->Dispose(); };

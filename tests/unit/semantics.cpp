@@ -396,14 +396,14 @@ TEST_CASE("SemanticFramePublishesBuiltInComponentMeaningAndReusesUnchangedData")
   const SemanticNode& checkbox = FindSemanticNode(*first_frame, "Remember");
   REQUIRE(checkbox.checked == SemanticCheckedState::Checked);
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, std::monostate{}}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, std::monostate{}}));
   REQUIRE(semantic_button_clicks == 1);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       icon_button.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
   REQUIRE(semantic_icon_button_clicks == 1);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, 1.0}));
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(button.id, {SemanticActionKind::Activate, 1.0}));
 
   const FrameCommit& unchanged = runtime.BuildCommit();
   REQUIRE(unchanged.semantic_frame == first_frame);
@@ -448,12 +448,12 @@ TEST_CASE("SemanticActionsRouteToRetainedControlBehavior") {
     return node.role == SemanticRole::Slider;
   });
   REQUIRE(slider_node != runtime.LastCommit().semantic_frame->nodes.end());
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       slider_node->id,
       {SemanticActionKind::SetValue, 7.5}
   ));
   REQUIRE(semantic_slider_value.Get() == 7.5F);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       slider_node->id,
       {SemanticActionKind::SetValue, std::string("7.5")}
   ));
@@ -489,14 +489,14 @@ TEST_CASE("TabsPublishAStableAccessibleSelectionGroup") {
   REQUIRE(SemanticLabelCount(*before, "Activity") == 1);
   REQUIRE_FALSE(disabled.enabled);
   REQUIRE(disabled.actions == 0);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       disabled.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
 
   const SemanticNodeId overview_id = overview.id;
   const SemanticNodeId activity_id = activity.id;
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       activity.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -549,9 +549,9 @@ TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
 
   const SemanticNodeId day_id = day.id;
   const SemanticNodeId week_id = week.id;
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(day.id, {SemanticActionKind::Activate, std::monostate{}}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(day.id, {SemanticActionKind::Activate, std::monostate{}}));
   REQUIRE(semantic_segmented_button_changes == 0);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(week.id, {SemanticActionKind::Activate, std::monostate{}}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(week.id, {SemanticActionKind::Activate, std::monostate{}}));
   REQUIRE(semantic_segmented_button_changes == 1);
   REQUIRE(semantic_segmented_button_selection.Get() == 1);
 
@@ -573,7 +573,7 @@ TEST_CASE("SegmentedButtonPublishesStableRadioButtonItems") {
   REQUIRE_FALSE(disabled_week.enabled);
   REQUIRE(disabled_week.actions == 0);
   REQUIRE_FALSE(
-      disabled.NativeRuntime().PerformSemanticAction(disabled_week.id, {SemanticActionKind::Activate, std::monostate{}})
+      disabled.CoreRuntime().PerformSemanticAction(disabled_week.id, {SemanticActionKind::Activate, std::monostate{}})
   );
   REQUIRE(semantic_segmented_button_changes == 1);
 }
@@ -605,7 +605,7 @@ TEST_CASE("NavigationSelectorsPublishRealAccessibleItems") {
 
   const SemanticNodeId home_id = home.id;
   const SemanticNodeId library_id = library.id;
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       library.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -671,7 +671,7 @@ TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
   REQUIRE_FALSE(first.offscreen);
   REQUIRE(third.offscreen);
   REQUIRE((third.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) != 0);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       third.id,
       {SemanticActionKind::ShowOnScreen, std::monostate{}}
   ));
@@ -682,13 +682,13 @@ TEST_CASE("ScrollViewPublishesMetricsAndRoutesScrollAndShowOnScreen") {
   REQUIRE_FALSE(FindSemanticNode(*revealed, "Third").offscreen);
   REQUIRE(FindSemanticNode(*revealed, "First").offscreen);
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       revealed_scroll.id,
       {SemanticActionKind::Scroll, Point{0.0F, -20.0F}}
   ));
   const SemanticNode& scrolled = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView);
   REQUIRE(scrolled.scroll->offset == 40.0F);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       scrolled.id,
       {SemanticActionKind::Scroll, Point{20.0F, 0.0F}}
   ));
@@ -702,7 +702,7 @@ TEST_CASE("HorizontalScrollViewUsesHorizontalSemanticDeltas") {
   const SemanticNode& scroll = FindSemanticRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ScrollView);
   REQUIRE(scroll.scroll->axis == Axis::Horizontal);
   REQUIRE(scroll.scroll->maximum_offset == 80.0F);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       scroll.id,
       {SemanticActionKind::Scroll, Point{45.0F, 0.0F}}
   ));
@@ -729,7 +729,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
   REQUIRE(first.role == SemanticRole::Button);
   REQUIRE((first.collection_item ==
            SemanticCollectionItem{.index = 0, .row_index = 0, .column_index = 0}));
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       first.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -738,7 +738,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
   const SemanticNode& cached = FindSemanticNode(*before, "Item 3");
   REQUIRE(cached.offscreen);
   REQUIRE((cached.actions & SemanticActionMask(SemanticActionKind::ShowOnScreen)) != 0);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       cached.id,
       {SemanticActionKind::ShowOnScreen, std::monostate{}}
   ));
@@ -747,7 +747,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
 
   runtime.HandleScrollEvent(ScrollEvent{{50.0F, 20.0F}, 0.0F, 1000.0F});
   runtime.BuildCommit();
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       first.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -829,7 +829,7 @@ TEST_CASE("ShowOnScreenRevealsContentThroughNestedScrollContainers") {
 
   const SemanticNode& target = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Inner third");
   REQUIRE(target.offscreen);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       target.id,
       {SemanticActionKind::ShowOnScreen, std::monostate{}}
   ));
@@ -901,7 +901,7 @@ TEST_CASE("SecureTextFieldDoesNotPublishItsValue") {
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) != 0);
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) == 0);
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetText, std::string("changed")}
   ));
@@ -926,17 +926,17 @@ TEST_CASE("TextFieldPublishesUtf16SelectionAndRoutesAccessibleEditing") {
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) != 0);
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) != 0);
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetSelection, TextRange{1, 3}}
   ));
   REQUIRE(semantic_text_field_value.Get().selection.Range() == TextRange{1, 3});
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetSelection, TextRange{2, 3}}
   ));
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetText, std::string("longer")}
   ));
@@ -955,11 +955,11 @@ TEST_CASE("ReadOnlyTextFieldAllowsSelectionButRejectsAccessibleReplacement") {
   REQUIRE(field.read_only == true);
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetText)) == 0);
   REQUIRE((field.actions & SemanticActionMask(SemanticActionKind::SetSelection)) != 0);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetText, std::string("changed")}
   ));
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       field.id,
       {SemanticActionKind::SetSelection, TextRange{0, 4}}
   ));
@@ -976,7 +976,7 @@ TEST_CASE("SemanticBuilderPublishesStableVirtualChildrenAndRoutesActions") {
   const SemanticNode& child = FindSemanticNode(*first, "April");
   REQUIRE(child.role == SemanticRole::Button);
   REQUIRE(child.bounds == Rect{8.0F, 6.0F, 24.0F, 12.0F});
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       child.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -997,7 +997,7 @@ TEST_CASE("ReplacingSemanticExtensionInvalidatesVirtualIdentityAndActionRoute") 
   semantic_virtual_visible = false;
   const std::shared_ptr<const SemanticFrame> fallback = runtime.BuildCommit().semantic_frame;
   REQUIRE(FindSemanticNodeOrNull(*fallback, "April") == nullptr);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       first_id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -1005,7 +1005,7 @@ TEST_CASE("ReplacingSemanticExtensionInvalidatesVirtualIdentityAndActionRoute") 
   semantic_virtual_visible = true;
   const SemanticNode& replacement = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "April");
   REQUIRE(replacement.id != first_id);
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
       replacement.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -1023,7 +1023,7 @@ TEST_CASE("SemanticLifecycleHonorsVisibilityExclusionDisabledStateAndStaleAction
   const SemanticNodeId primary_id = primary.id;
   const SemanticNode& disabled = FindSemanticNode(*first, "Disabled");
   REQUIRE(disabled.actions == 0);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       disabled.id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));
@@ -1034,7 +1034,7 @@ TEST_CASE("SemanticLifecycleHonorsVisibilityExclusionDisabledStateAndStaleAction
   REQUIRE(FindSemanticNodeOrNull(*first, "Excluded") == nullptr);
   REQUIRE(FindSemanticNodeOrNull(*first, "Hidden") == nullptr);
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(primary_id, {SemanticActionKind::Focus, std::monostate{}}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(primary_id, {SemanticActionKind::Focus, std::monostate{}}));
   const SemanticNode& focused = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Primary");
   REQUIRE(focused.focused);
 
@@ -1043,7 +1043,7 @@ TEST_CASE("SemanticLifecycleHonorsVisibilityExclusionDisabledStateAndStaleAction
   const SemanticNode& replacement = FindSemanticNode(*replacement_frame, "Replacement");
   REQUIRE(replacement.id != primary_id);
   REQUIRE(FindSemanticNodeOrNull(*replacement_frame, "Primary") == nullptr);
-  REQUIRE_FALSE(runtime.NativeRuntime().PerformSemanticAction(
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       primary_id,
       {SemanticActionKind::Activate, std::monostate{}}
   ));

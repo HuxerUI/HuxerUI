@@ -365,7 +365,7 @@ Terminal soft-keyboard dismissal remains a platform responsibility. It does not 
 Secure entry uses the same state and command protocol. The retained `TextEditingValue` contains the real text, while TextField builds a separate single-line mask layout and draws one bullet per grapheme. Copy and Cut are disabled. Platform adapters prevent native surrounding-text and extracted-text queries from returning the value while preserving the internal context needed for command routing and composition. Secure and multiline configurations are mutually exclusive.
 
 The shared `SemanticFrame` follows the same privacy boundary.
-An ordinary TextField publishes its committed value, normalized UTF-16 selection, label, placeholder, validation state, focus, and supported SetText and SetSelection actions so native accessibility can edit and announce it.
+An ordinary TextField publishes its committed value, normalized UTF-16 selection, label, placeholder, validation state, focus, and supported SetText and SetSelection actions so platform accessibility can edit and announce it.
 These actions enter the retained TextField reducer and the same Runtime invalidation and active-session synchronization path as platform text input; they do not create a second editor protocol.
 A read-only field omits SetText but retains SetSelection, while a secure field may expose SetText but omits SetSelection.
 A secure TextField semantic frame never contains TextField-owned plaintext, selected text, surrounding text, composition text, clipboard content, or a plaintext-derived state description; Copy and Cut remain unavailable through the existing editing policy.
@@ -401,16 +401,16 @@ recompose same node and client
 
 move focus
     finish old client session
-    stop old native input
+    stop old platform input
     begin new session when the new node is editable
 
 unmount, disable, or make client read-only
     finish current composition
-    stop native input
+    stop platform input
 
-native control takes focus
+PlatformView takes focus
     stop HuxerUI text input
-    let the native control own the IME
+    let the PlatformView own the IME
 ```
 
 An asynchronous platform callback captures the session ID at entry. If focus or ownership changes before the callback reaches Runtime, it is rejected without accessing the former client.
@@ -1005,21 +1005,21 @@ XIM callback composition is rendered inline when the active input method adverti
 
 ## PlatformView focus
 
-An embedded native control and a HuxerUI TextInputClient cannot own the same host input session.
+An embedded PlatformView and a HuxerUI TextInputClient cannot own the same host input session.
 
-When input enters a native view:
+When input enters a PlatformView:
 
 - Runtime ends the active HuxerUI client session.
 - PlatformAdapter stops the HuxerUI input connection.
-- The native control receives native focus and owns its IME directly.
+- The platform control receives platform focus and owns its IME directly.
 
 When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
-Focus transfer resolves the PlatformView identity from the current committed `RenderComposition`; a delayed native focus notification for an obsolete identity is ignored.
-The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for native focus transfer and native input dispatch.
+Focus transfer resolves the PlatformView identity from the current committed `RenderComposition`; a delayed platform focus notification for an obsolete identity is ignored.
+The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for platform focus transfer and platform input dispatch.
 These focus and IME lifecycle messages are internal adapter coordination rather than PlatformPayload module events.
-A module may emit a typed application event describing a native focus change, but that event neither starts nor ends a HuxerUI text-input session.
-The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one native subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global native focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus, while hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
+A module may emit a typed application event describing a platform focus change, but that event neither starts nor ends a HuxerUI text-input session.
+The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one PlatformView subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global platform focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus, while hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
 This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
@@ -1110,7 +1110,7 @@ Runtime tests use a fake `PlatformTextInput` and cover:
 - Stale commands and context queries are rejected.
 - Unmount, disable, and read-only transitions stop input.
 - PlatformView focus closes the HuxerUI session.
-- Pointer caret placement occurs before native state synchronization.
+- Pointer caret placement occurs before platform state synchronization.
 - External value changes request update or restart as appropriate.
 - Key events do not duplicate committed text.
 - Candidate geometry includes node and presentation transforms.

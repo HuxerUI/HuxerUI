@@ -174,7 +174,7 @@ TEST_CASE("WindowAppearanceChangesDoNotRerecordApplicationPaint") {
   REQUIRE(platform.system_bar_brightness->first == SystemBarContentBrightness::Dark);
 }
 
-TEST_CASE("WindowTitleBarReservesNativeControlsWithoutRecomposition") {
+TEST_CASE("WindowTitleBarReservesSystemControlsWithoutRecomposition") {
   title_bar_compositions = 0;
   TestPlatform platform;
   Runtime runtime(WindowTitleBarApp, platform);
@@ -312,7 +312,7 @@ TEST_CASE("CustomWindowChromeProvidesStandardCaptionControls") {
   REQUIRE_FALSE(runtime.IsWindowDragRegion({277.0F, 16.0F}));
 }
 
-TEST_CASE("CustomWindowChromeCollapsesControlsWhenNativeMetricsDisappear") {
+TEST_CASE("CustomWindowChromeCollapsesControlsWhenPlatformMetricsDisappear") {
   TestPlatform platform;
   AppOptions options;
   options.show_debug_overlay = false;

@@ -7,10 +7,10 @@ It complements the mobile-oriented [Window Insets and System Bars Design](window
 
 ## Goals
 
-- Keep a complete platform-owned title bar when an application wants native window chrome.
-- Let an application fully define title-bar content and background without inheriting a partially native visual surface.
+- Keep a complete platform-owned title bar when an application wants system window chrome.
+- Let an application fully define title-bar content and background without inheriting a partially system-rendered visual surface.
 - Preserve platform-appropriate standard window controls in Custom mode.
-- Keep native window metadata available to task switching, window management, system menus, and accessibility.
+- Keep system window metadata available to task switching, window management, system menus, and accessibility.
 - Reuse mounted layout and pointer geometry for drag and native hit testing.
 - Provide convenient per-window commands without exposing platform window objects.
 - Keep one ownership model across Windows, macOS, and Linux client-side decorations.
@@ -29,9 +29,9 @@ The initial Custom implementation does not provide:
 
 ## Ownership model
 
-The native window title, application title-bar content, and standard window controls are separate concerns.
+The system window title, application title-bar content, and standard window controls are separate concerns.
 
-`AppOptions::window.title` remains native window metadata.
+`AppOptions::window.title` remains system window metadata.
 The platform uses it for the taskbar, application switcher, window manager, system menu, and accessibility even when no HuxerUI Text displays it.
 
 `WindowTitleBar` is application-defined content.
@@ -123,11 +123,11 @@ It is present only when application content occupies desktop title-bar space.
 
 `height` is the minimum logical title-bar extent.
 `left_inset` and `right_inset` reserve physical regions occupied by framework- or platform-managed standard controls.
-They deliberately do not use leading and trailing terminology because the adapter has already resolved native control placement and layout direction.
+They deliberately do not use leading and trailing terminology because the adapter has already resolved system control placement and layout direction.
 `maximized` is the platform-resolved placement state used by framework controls to select maximize or restore visuals.
 
 `WindowOptions::caption_labels` makes framework-rendered accessibility labels configurable and resource-aware without
-exposing native window objects.
+exposing system window objects.
 Empty fields resolve `window_minimize`, `window_maximize` or `window_restore` according to platform state, and `window_close` from the built-in `huxerui` resource domain; a non-empty `toggle_maximize` continues to override both maximize and restore states.
 The chrome mode, preferred height, and label sources remain stable for one Runtime, while resolved localized labels
 refresh with the Runtime resource configuration.
@@ -136,7 +136,7 @@ Runtime validates that title-bar values are finite, non-negative, and fit within
 Platform adapters normalize transient native values before calling `SetWindowMetrics()`.
 
 If a desktop adapter cannot implement Custom chrome correctly, it resolves the request to System and submits no title-bar metrics.
-It does not expose a third public mode or approximate native control geometry.
+It does not expose a third public mode or approximate system control geometry.
 Framework control nodes remain structurally stable but become disabled, semantically hidden, zero-sized, and paint-empty while control geometry is absent.
 
 ## WindowTitleBar
@@ -201,7 +201,7 @@ window.ToggleMaximize();
 window.Close();
 ```
 
-Commands request native window operations rather than mutating shared Runtime state directly.
+Commands request system window operations rather than mutating shared Runtime state directly.
 `Close()` follows the same native close-request path as a standard caption control.
 
 Framework caption controls use this same command boundary and do not call platform implementation helpers directly.
@@ -220,7 +220,7 @@ struct WindowDragRegion {
 `WindowTitleBar` applies this marker to itself.
 Applications may mark another mounted region explicitly.
 
-The native adapter queries committed geometry through:
+The platform adapter queries committed geometry through:
 
 ```cpp
 bool Runtime::IsWindowDragRegion(Point position) const;
@@ -265,7 +265,7 @@ Their geometry is DPI-aware, reaches the visible top and side edges, and is subm
 The resolved control height uses the larger of the DPI-aware system caption-button height and
 `AppOptions::window.title_bar_height`.
 Control width uses the larger of the DPI-aware system metric and the modern 46-DIP interaction width.
-The controls expose button semantics and native window actions through the same Runtime interaction path as other HuxerUI controls.
+The controls expose button semantics and system window actions through the same Runtime interaction path as other HuxerUI controls.
 The adapter submits the current maximized state with the geometry so the middle control changes between maximize and restore visuals without application recomposition.
 
 Native hit testing follows this order:
@@ -334,11 +334,11 @@ Android, iOS, Web, and future OHOS adapters submit no desktop title-bar metrics.
 They ignore the requested desktop chrome mode and preserve `WindowTitleBar` as ordinary application content.
 System bars and safe-area behavior continue to follow the separate window-insets contract.
 
-Embedded native host views also submit no title-bar metrics because their containing native window owns chrome.
+Embedded platform host views also submit no title-bar metrics because their containing system window owns chrome.
 
 ## Accessibility and system behavior
 
-Framework-rendered caption controls expose configurable button names, native actions, and button automation roles.
+Framework-rendered caption controls expose configurable button names, platform actions, and button automation roles.
 The maximize control uses a stable toggle action and label while its visual changes with the platform-resolved maximized state.
 
 Platform completion also audits:
@@ -357,7 +357,7 @@ The shared API exposes only `WindowChromeMode::System`, `WindowChromeMode::Custo
 The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
-macOS Custom mode uses full-size AppKit content, native traffic lights, converted left-side control geometry, native dragging, and native window commands.
+macOS Custom mode uses full-size AppKit content, AppKit traffic lights, converted left-side control geometry, AppKit dragging, and system window commands.
 Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, `_MOTIF_WM_HINTS` decoration removal, `_NET_WM_MOVERESIZE` drag and resize, EWMH and `XIconifyWindow` commands, and `PropertyNotify`-tracked maximized state.
 
 ## Testing
@@ -381,7 +381,7 @@ Manual Windows validation currently covers restored and maximized geometry, resi
 High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still require dedicated validation before release.
 
 macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
-Manual macOS validation remains required for native window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
+Manual macOS validation remains required for system window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
 Linux tests isolate metric resolution, resize-direction edge semantics including maximized skip and caption-bounds exclusion and viewport clamping, maximized-state atom detection, and frame-extents fallback.
 Manual Linux validation currently covers decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on KWin.
 

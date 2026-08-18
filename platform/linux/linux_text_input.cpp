@@ -607,7 +607,7 @@ struct LinuxTextInput::State {
     if (requested_session != session_id) {
       return;
     }
-    ResetNativeComposition();
+    ResetSystemComposition();
     configuration = config;
     secure = config.secure;
     text_input_state = state;
@@ -624,7 +624,7 @@ struct LinuxTextInput::State {
     if (requested_session != session_id) {
       return;
     }
-    ResetNativeComposition();
+    ResetSystemComposition();
     session_id = 0;
     configuration = {};
     secure = false;
@@ -1435,7 +1435,7 @@ struct LinuxTextInput::State {
     pending_spot_valid = failed_attribute != nullptr;
   }
 
-  void ResetNativeComposition() {
+  void ResetSystemComposition() {
 #if defined(HUXERUI_HAS_FCITX5_GCLIENT)
     if (FcitxAvailable() && Active() && !secure) {
       fcitx_g_client_reset(fcitx_client);

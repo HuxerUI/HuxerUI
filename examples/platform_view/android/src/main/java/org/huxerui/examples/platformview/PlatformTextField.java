@@ -5,8 +5,8 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.EditText;
 
-public final class NativeTextField extends EditText {
-    private long nativeEventSink;
+public final class PlatformTextField extends EditText {
+    private long platformEventSink;
     private boolean applyingControlledText;
     private final TextWatcher textWatcher = new TextWatcher() {
         @Override
@@ -17,21 +17,21 @@ public final class NativeTextField extends EditText {
 
         @Override
         public void afterTextChanged(Editable text) {
-            if (!applyingControlledText && nativeEventSink != 0L) {
-                nativeChanged(nativeEventSink, text.toString());
+            if (!applyingControlledText && platformEventSink != 0L) {
+                nativeChanged(platformEventSink, text.toString());
             }
         }
     };
 
-    public NativeTextField(Context context) {
+    public PlatformTextField(Context context) {
         super(context);
         setSingleLine(true);
-        setHint("Edit native text");
+        setHint("Edit PlatformView text");
         addTextChangedListener(textWatcher);
     }
 
-    public void installNativeBridge(long eventSink) {
-        nativeEventSink = eventSink;
+    public void installPlatformBridge(long eventSink) {
+        platformEventSink = eventSink;
     }
 
     public void applyControlledText(String value) {
@@ -44,10 +44,10 @@ public final class NativeTextField extends EditText {
         applyingControlledText = false;
     }
 
-    public long disposeNativeBridge() {
+    public long disposePlatformBridge() {
         removeTextChangedListener(textWatcher);
-        long result = nativeEventSink;
-        nativeEventSink = 0L;
+        long result = platformEventSink;
+        platformEventSink = 0L;
         return result;
     }
 

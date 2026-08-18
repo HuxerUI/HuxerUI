@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr char native_color_stream_class[] = "org/huxerui/examples/platformmodule/NativeColorStream";
+constexpr char platform_color_stream_class[] = "org/huxerui/examples/platformmodule/PlatformColorStream";
 
 huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
   return {
@@ -70,15 +70,15 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidColorStream(
     throw std::invalid_argument("HuxerUI example color stream options must be null");
   }
   static_cast<void>(events);
-  huxerui::android::LocalRef<jclass> producer_class(environment, environment->FindClass(native_color_stream_class));
+  huxerui::android::LocalRef<jclass> producer_class(environment, environment->FindClass(platform_color_stream_class));
   if (!producer_class) {
     ClearJavaException(environment);
-    throw std::logic_error("HuxerUI example could not find the Android native color stream class");
+    throw std::logic_error("HuxerUI example could not find the Android platform color stream class");
   }
   const jmethodID constructor =
       environment->GetMethodID(producer_class.Get(), "<init>", "(Landroid/content/Context;J)V");
   const jmethodID start = environment->GetMethodID(producer_class.Get(), "start", "()V");
-  const jmethodID dispose_bridge = environment->GetMethodID(producer_class.Get(), "disposeNativeBridge", "()V");
+  const jmethodID dispose_bridge = environment->GetMethodID(producer_class.Get(), "disposePlatformBridge", "()V");
   if (constructor == nullptr || start == nullptr || dispose_bridge == nullptr) {
     ClearJavaException(environment);
     throw std::logic_error("HuxerUI example Android color stream methods do not match the native bridge");
@@ -97,12 +97,12 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidColorStream(
   );
   if (!local_producer || environment->ExceptionCheck()) {
     ClearJavaException(environment);
-    throw std::logic_error("HuxerUI example could not create the Android native color stream");
+    throw std::logic_error("HuxerUI example could not create the Android platform color stream");
   }
   state->producer = environment->NewGlobalRef(local_producer.Get());
   if (state->producer == nullptr) {
     ClearJavaException(environment);
-    throw std::runtime_error("HuxerUI example could not retain the Android native color stream");
+    throw std::runtime_error("HuxerUI example could not retain the Android platform color stream");
   }
   state->start = start;
   state->dispose_bridge = dispose_bridge;
@@ -120,7 +120,7 @@ huxerui::PlatformModuleFactory::Instance CreateAndroidColorStream(
       return {};
     }
     result(
-        ColorStreamError("example/color-stream-method", "The native color stream method or payload is not supported")
+        ColorStreamError("example/color-stream-method", "The platform color stream method or payload is not supported")
     );
     return {};
   };
@@ -144,7 +144,7 @@ void InstallColorStream(RootContext& root) {
 } // namespace huxerui::example
 
 extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_examples_platformmodule_NativeColorStream_nativePublish(
+Java_org_huxerui_examples_platformmodule_PlatformColorStream_nativePublish(
     JNIEnv* environment, jclass, jlong bridge, jobject bitmap
 ) {
   auto* state = reinterpret_cast<std::weak_ptr<AndroidColorStreamState>*>(static_cast<std::uintptr_t>(bridge));

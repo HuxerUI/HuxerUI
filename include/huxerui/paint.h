@@ -60,7 +60,7 @@ struct DrawTextRunsCommand {
 
 struct DrawImageCommand {
   ImageAsset image;
-  // Source uses the image's logical coordinates; renderers apply ImageAsset::Scale() at the native boundary.
+  // Source uses the image's logical coordinates; renderers apply ImageAsset::Scale() at the platform boundary.
   Rect source;
   Rect destination;
   ImageSampling sampling = ImageSampling::Linear;

@@ -31,7 +31,7 @@ template <class Result> std::string ResultStatus(const PlatformResult<Result>& r
 View PlatformSpecificDemo() {
   auto color_stream = example::UseColorStream();
   auto stream_texture = UseState(ExternalTexture{});
-  auto stream_status = UseState<std::string>("The native stream has not been requested");
+  auto stream_status = UseState<std::string>("The platform stream has not been requested");
   View stream_preview = Text(stream_status.Get()).With(Frame{.height = 180.0F});
   if (stream_texture.Get().HasValue()) {
     stream_preview = Image(stream_texture.Get()).Fit(ImageFit::Cover).With(Frame{.height = 180.0F});
@@ -40,9 +40,9 @@ View PlatformSpecificDemo() {
 
   return Column {
     Text("ExternalTexture", TextRole::Title),
-    Text("The module returns one capability; native frames then bypass PlatformModule callbacks."),
-    Button("Load native color stream").OnClick([color_stream, stream_texture, stream_status] {
-      stream_status = "Waiting for the native texture";
+    Text("The module returns one capability; platform frames then bypass PlatformModule callbacks."),
+    Button("Load platform color stream").OnClick([color_stream, stream_texture, stream_status] {
+      stream_status = "Waiting for the platform texture";
       static_cast<void>(color_stream->Texture([stream_texture, stream_status](PlatformResult<ExternalTexture> result) {
         if (const auto* error = std::get_if<PlatformError>(&result)) {
           stream_status = error->message;
@@ -74,7 +74,7 @@ View PlatformModuleDemo() {
 
   return Column {
     Text("PlatformModule", TextRole::Title),
-    Text("A native timer sends typed results and events through a nonvisual root service."),
+    Text("A platform timer sends typed results and events through a nonvisual root service."),
     Text("Tick: " + std::to_string(tick.Get()), TextRole::Title),
     Text(status.Get(), TextRole::Label),
     Row {
@@ -83,7 +83,7 @@ View PlatformModuleDemo() {
         if (previous != 0) {
           static_cast<void>(timer->Cancel(previous));
         }
-        status = "Waiting for the first native tick";
+        status = "Waiting for the first platform tick";
         pending_start = timer->Start(
             500ms,
             [tick](std::uint64_t next) { tick = next; },

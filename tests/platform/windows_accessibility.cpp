@@ -53,7 +53,7 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
   REQUIRE(frame);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.NativeRuntime());
+  accessibility.SetRuntime(&runtime.CoreRuntime());
   accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);
@@ -98,7 +98,7 @@ TEST_CASE("Windows accessibility patterns route actions through Runtime") {
   REQUIRE(frame);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.NativeRuntime());
+  accessibility.SetRuntime(&runtime.CoreRuntime());
   accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);

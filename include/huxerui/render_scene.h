@@ -64,7 +64,7 @@ struct FrameCommit {
   // Couples the frame to present with the earliest follow-up build requested while producing it. The platform commits
   // the render frame before scheduling this absolute deadline, avoiding frame construction re-entry during a build.
   RenderFrame render_frame;
-  // Immutable semantic data may be retained by native accessibility objects across later Runtime commits.
+  // Immutable semantic data may be retained by platform accessibility objects across later Runtime commits.
   std::shared_ptr<const SemanticFrame> semantic_frame;
   // Absolute deadline in the platform adapter's monotonic clock.
   std::optional<double> next_frame_deadline;

@@ -384,13 +384,13 @@ EM_JS(
                       },
             true
         );
-        const releaseNativePointer = (event) => {
+        const releaseCapturedPointer = (event) => {
           if (session.activePointers.get(event.pointerId) === false) {
             session.activePointers.delete(event.pointerId);
           }
         };
-        listen(window, "pointerup", releaseNativePointer);
-        listen(window, "pointercancel", releaseNativePointer);
+        listen(window, "pointerup", releaseCapturedPointer);
+        listen(window, "pointercancel", releaseCapturedPointer);
         listen(
             root,
             "lostpointercapture",
@@ -762,7 +762,7 @@ public:
   }
 
   void Ready() {
-    native_ready_ = true;
+    platform_ready_ = true;
     if (const std::optional<double> deadline = frame_state_.TakeDeferred(true)) {
       Schedule(*deadline);
     } else {
@@ -771,7 +771,7 @@ public:
   }
 
   void Shutdown() noexcept {
-    native_ready_ = false;
+    platform_ready_ = false;
     if (platform_views_) {
       platform_views_->Shutdown();
       platform_views_.reset();
@@ -781,7 +781,7 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), native_ready_)) {
+    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), platform_ready_)) {
       Schedule(*scheduled);
     }
   }
@@ -850,7 +850,7 @@ public:
     const FrameCommit& commit = runtime_->BuildFrame();
     frame_state_.BeginPaint();
     platform_views_->Commit(commit.render_frame);
-    if (const std::optional<double> deadline = frame_state_.EndPaint(native_ready_)) {
+    if (const std::optional<double> deadline = frame_state_.EndPaint(platform_ready_)) {
       Schedule(*deadline);
     }
     if (commit.next_frame_deadline.has_value()) {
@@ -912,7 +912,7 @@ private:
   std::unique_ptr<WebPlatformViews> platform_views_;
   PlatformFrameState frame_state_;
   Size viewport_;
-  bool native_ready_ = false;
+  bool platform_ready_ = false;
 };
 
 class WebSession final {

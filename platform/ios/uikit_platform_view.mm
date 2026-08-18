@@ -158,7 +158,7 @@ Rect VisibleBounds(const PlatformViewPlacement& placement) {
   return placement.clip.has_value() ? placement.world_bounds.Intersection(*placement.clip) : placement.world_bounds;
 }
 
-CGRect NativeRect(Rect rect) {
+CGRect ToCGRect(Rect rect) {
   return CGRectMake(rect.x, rect.y, std::max(0.0F, rect.width), std::max(0.0F, rect.height));
 }
 
@@ -176,7 +176,7 @@ void InvalidateView(UIView* view, const DamageRegion& damage) {
     if (rect.IsEmpty()) {
       continue;
     }
-    CGRect dirty = CGRectIntersection(NativeRect(rect), view.bounds);
+    CGRect dirty = CGRectIntersection(ToCGRect(rect), view.bounds);
     if (CGRectIsEmpty(dirty)) {
       continue;
     }
@@ -272,8 +272,8 @@ struct UIKitPlatformViews::State {
   void Place(HostedPlatformView& hosted, const PlatformViewPlacement& placement) {
     const Rect visible_bounds = VisibleBounds(placement);
     const bool hidden = !placement.visible || visible_bounds.IsEmpty();
-    const CGRect container_frame = NativeRect(visible_bounds);
-    const CGRect view_frame = NativeRect({
+    const CGRect container_frame = ToCGRect(visible_bounds);
+    const CGRect view_frame = ToCGRect({
         placement.world_bounds.x - visible_bounds.x,
         placement.world_bounds.y - visible_bounds.y,
         placement.world_bounds.width,

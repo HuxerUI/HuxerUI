@@ -1,6 +1,6 @@
 # Incremental Layout and Rendering Design
 
-Status: shared Runtime pipeline implemented; native partial redraw implemented on macOS, Windows, and Linux
+Status: shared Runtime pipeline implemented; platform partial redraw implemented on macOS, Windows, and Linux
 
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
 It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
@@ -11,7 +11,7 @@ It intentionally removes the legacy absolute-frame and flat-DisplayList runtime 
 - Reuse drawing output for unchanged mounted nodes.
 - Move, clip, fade, and scroll retained content without recording its drawing commands again.
 - Keep component state machines, layout behavior, and rendering data in the shared C++ runtime.
-- Keep platform adapters limited to native lifecycle, scheduling, event conversion, text services, and scene rendering.
+- Keep platform adapters limited to platform lifecycle, scheduling, event conversion, text services, and scene rendering.
 - Establish one drawing path for built-in components, retained modifiers, and the `Canvas` component.
 - Support conservative damage tracking without requiring components to calculate host-view dirty rectangles.
 - Preserve deterministic behavior and make invalidation observable in focused tests.
@@ -35,7 +35,7 @@ An unchanged subtree reuses its measurement when its Constraints are equal, and 
 Clean PaintSequences are retained across frames; declarative paint input changes, size and focus changes, and explicit NodeExtension invalidation rerecord only the affected sequence.
 RenderNodes retain local opacity, and platform renderers composite each node's content, children, and foreground as one group while replaying source-color PaintSequences.
 Each PaintSequence has a recording revision, and Runtime compares a lightweight snapshot of the committed scene to derive frame damage without retaining duplicate commands.
-`TextField` prepares geometry-dependent scroll state before paint, so paint and native text-input queries only read committed geometry.
+`TextField` prepares geometry-dependent scroll state before paint, so paint and platform text-input queries only read committed geometry.
 `VirtualLayout` retains its committed realization and placements on clean frames.
 Viewport, source, constraints, and realized-child layout changes rerun its policy, while stable realized items reuse their cached measurements.
 
@@ -47,8 +47,8 @@ The implementation remains conservative in several areas:
 - Transform-only and opacity-only presentation changes retain PaintSequences.
 - Equality-comparable retained modifier values skip unchanged updates when their node inputs are also unchanged; other values update conservatively.
 - Geometry-dependent extensions prepare value snapshots after final presentation resolution and invalidate foreground paint only when those snapshots change.
-- macOS, Windows, and Linux invalidate conservative native update bounds derived from DamageRegion.
-- Android still calculates shared DamageRegion output, but the View backend invalidates and replays the full native surface because current Android View invalidation ignores dirty rectangles.
+- macOS, Windows, and Linux invalidate conservative platform update bounds derived from DamageRegion.
+- Android still calculates shared DamageRegion output, but the View backend invalidates and replays the full platform surface because current Android View invalidation ignores dirty rectangles.
 
 ## Current pipeline
 
@@ -72,24 +72,24 @@ The mounted tree and render scene have different responsibilities:
 | `MountedNode` | Reconciliation identity, retained behavior, state coordination, layout inputs, and invalidation |
 | Local layout geometry | Measured size and parent-relative placement |
 | `RenderNode` | Retained drawing records and presentation properties |
-| Platform renderer | Native resource resolution and scene traversal |
+| Platform renderer | Platform resource resolution and scene traversal |
 
 ## PlatformView composition foundation
 
-Status: shared placement and `RenderComposition` derivation implemented; macOS and Web retained slice surfaces, iOS retained native layers, Android same-Canvas slice replay, and Windows single-surface aperture composition implemented; remaining adapter work proposed
+Status: shared placement and `RenderComposition` derivation implemented; macOS and Web retained slice surfaces, iOS retained UIKit layers, Android same-Canvas slice replay, and Windows single-surface aperture composition implemented; remaining adapter work proposed
 
 PlatformView extends the retained scene without adding another Runtime output tree.
 Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
-The command contributes no pixels and marks the exact RenderScene paint position at which the native hierarchy participates.
+The command contributes no pixels and marks the exact RenderScene paint position at which the PlatformView hierarchy participates.
 
 One shared internal builder derives a `RenderComposition` from the committed scene before platform presentation.
 Adapters consume the result rather than duplicating traversal-order or state-boundary policy.
 Scene traversal accumulates the same transforms, clips, visibility, content, child, and foreground order used by raster replay.
-Each placement boundary closes the current nonempty HuxerUI render slice, emits the resolved native placement, and opens a following slice only when later drawing exists.
+Each placement boundary closes the current nonempty HuxerUI render slice, emits the resolved PlatformView placement, and opens a following slice only when later drawing exists.
 For `p` mounted PlatformViews, the composition therefore contains at most `p + 1` HuxerUI slices, while a scene without PlatformViews remains on the existing single-surface path.
 
 Slice construction references retained RenderNodes and PaintSequences rather than copying or rerecording their commands.
-A compatible macOS, iOS, or Web slice retains its native surface when its surrounding PlatformView boundaries and scene role remain stable.
+A compatible macOS, iOS, or Web slice retains its platform surface when its surrounding PlatformView boundaries and scene role remain stable.
 Android instead replays the committed command ranges into the host Canvas around ordinary child drawing.
 The Windows adapter retains the same ranges and ordering contract while traversing the scene once into one transparent DirectComposition surface; each placement becomes an ordered rectangular aperture exposing its child HWND below, and no surface is allocated per slice.
 The renderer enables that composition surface lazily on the first PlatformView and retains it for the rest of the window lifetime, so temporary unmounts do not rebuild the swap chain.
@@ -97,17 +97,17 @@ Visible removed child HWNDs retire only after the replacement surface is success
 Remaining adapters choose the platform-appropriate retained representation when implemented.
 Insertion, removal, or reordering invalidates only changed boundaries and the old and new visible bounds they affect at the shared composition level.
 The macOS and Web hosts intersect stable slice invalidation with the committed DamageRegion and escalate to a complete redraw only when sibling composition changes.
-Android retains shared DamageRegion calculation but currently invalidates its complete native View when a committed frame changes.
-A PlatformView property revision updates its native instance without marking unrelated HuxerUI PaintSequences dirty.
-EventBinding changes and incoming platform events do not change the property revision, while native visual invalidation requests presentation through the adapter without writing application State.
+Android retains shared DamageRegion calculation but currently invalidates its complete `HuxerUIView` when a committed frame changes.
+A PlatformView property revision updates its platform instance without marking unrelated HuxerUI PaintSequences dirty.
+EventBinding changes and incoming platform events do not change the property revision, while platform visual invalidation requests presentation through the adapter without writing application State.
 
-The RenderComposition is complete before native hierarchy mutation begins.
+The RenderComposition is complete before platform hierarchy mutation begins.
 Adapters apply view creation, property updates, bounds, clipping, visibility, sibling order, slice reuse, and removals as one platform-thread commit, then present damaged HuxerUI slices.
-Paint callbacks only replay the already committed slice assigned to them and never mutate native hierarchy.
-New native candidates remain inactive until they enter the committed hierarchy, while compatible factory updates apply in place and are not a rollback boundary.
+Paint callbacks only replay the already committed slice assigned to them and never mutate platform hierarchy.
+New PlatformView candidates remain inactive until they enter the committed hierarchy, while compatible factory updates apply in place and are not a rollback boundary.
 
 The first contract accepts translation, axis-aligned bounds, rectangular clipping, and visibility around PlatformView.
-A scene that would require rotation, path clipping, a group-opacity boundary spanning native and HuxerUI content, a backdrop filter, or another unsupported offscreen effect is rejected rather than flattened into a foreground or background plane.
+A scene that would require rotation, path clipping, a group-opacity boundary spanning PlatformView and HuxerUI content, a backdrop filter, or another unsupported offscreen effect is rejected rather than flattened into a foreground or background plane.
 ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing composition slices.
 
 There is one `RenderNode` per paintable mounted node.
@@ -141,7 +141,7 @@ They never assign host-view coordinates.
 Changing an ancestor's placement therefore does not invalidate descendant measurement or paint records.
 
 Window and screen coordinates are boundary queries.
-Hit testing, text-input geometry, accessibility, and native-view integration map a local point or rectangle through the current ancestor transform chain when they need those coordinates.
+Hit testing, text-input geometry, accessibility, and PlatformView integration map a local point or rectangle through the current ancestor transform chain when they need those coordinates.
 The runtime may cache resolved transforms for one committed scene revision, but resolved host-view frames are derived data rather than layout ownership.
 
 The public mounted-node geometry API should use unambiguous names:
@@ -155,7 +155,7 @@ Rect PresentationBounds() const;
 
 `Bounds()` is local.
 `LayoutOffset()` is parent-relative.
-`PresentationBounds()` is the transformed axis-aligned host-view logical bound intended for diagnostics and native-boundary queries.
+`PresentationBounds()` is the transformed axis-aligned host-view logical bound intended for diagnostics and platform-boundary queries.
 The ambiguous absolute `Frame()` contract is removed rather than retained as an alias.
 
 ## Layout ownership and caching
@@ -237,8 +237,8 @@ Invalidation outside frame construction requests a frame so callers cannot leave
 Runtime does not call platform scheduling while `BuildFrame()` is executing.
 Paint invalidation raised before recording is consumed by the current frame and does not create redundant follow-up work.
 Continuous or delayed work discovered during extension advancement is reported through `FrameResult` and merged into the `FrameCommit::next_frame_deadline` returned with the committed `RenderFrame`.
-The platform invalidates and presents native damage before scheduling that deadline.
-This keeps frame production, native painting, and the next wake-up as one ordered transaction without reentrant scheduling.
+The platform invalidates and presents platform damage before scheduling that deadline.
+This keeps frame production, platform painting, and the next wake-up as one ordered transaction without reentrant scheduling.
 
 ## Reconciliation and declarative diffs
 
@@ -318,8 +318,8 @@ An effective child clip can still make that descendant and therefore the clipped
 `PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, external textures, and proposed PlatformView placement boundaries.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
-Platform renderers traverse `RenderScene`, maintain the native transform and clip stacks, and replay only the records referenced by the scene.
-They may cache native text, brush, path, or image resources by record and command revision.
+Platform renderers traverse `RenderScene`, maintain the platform transform and clip stacks, and replay only the records referenced by the scene.
+They may cache platform text, brush, path, or image resources by record and command revision.
 
 ## PaintContext and pure paint
 
@@ -344,7 +344,7 @@ public:
 
 The exact public surface follows the available `PaintCommand` set.
 Paragraph text owns a layout rectangle, while exact text runs own an already measured visual bound and baseline origin.
-Renderers may shape a run into native glyphs but must not replace its supplied geometry with a second text measurement.
+Renderers may shape a run into platform glyphs but must not replace its supplied geometry with a second text measurement.
 `PaintContext` owns command balancing validation and records local bounds for damage calculation.
 It rejects non-finite geometry, colors, transforms, and negative dimensions, radii, or stroke widths at the recording boundary with `std::invalid_argument`.
 Arc start and sweep angles are expressed in radians.
@@ -365,7 +365,7 @@ Paint callbacks are pure:
 Geometry preparation that can change state occurs before paint.
 For example, `TextField` resolves text layout, caret geometry, selection geometry, and horizontal scroll adjustment after layout and before paint recording.
 If preparation changes a visual value, it marks the relevant paint record dirty.
-Text-input geometry is then mapped to the native coordinate system from the committed local geometry.
+Text-input geometry is then mapped to the platform coordinate system from the committed local geometry.
 
 ## NodeExtension invalidation
 
@@ -472,7 +472,7 @@ resolve and publish the immutable SemanticFrame
 record dirty content, foreground, and system-overlay PaintSequences
 compute conservative damage
 publish FrameCommit with the committed RenderFrame, SemanticFrame, and optional next deadline
-invalidate and present the native damage
+invalidate and present the platform damage
 schedule the returned deadline
 ```
 
@@ -512,7 +512,7 @@ Each PaintCommand contributes conservative visual bounds, including its stroke w
 Shadow commands include their resolved caster and complete blur overflow.
 Unknown or renderer-dependent overflow falls back to the host viewport.
 
-The Android View backend currently ignores regional damage at the native invalidation boundary and redraws the full surface.
+The Android View backend currently ignores regional damage at the platform invalidation boundary and redraws the full surface.
 The Linux backend restricts Cairo redraw to the damage bounds and presents the retained bitmap whole.
 Other future platform implementations may initially redraw the full surface.
 The shared runtime must still calculate and test damage correctly so a renderer can adopt partial redraw without changing component behavior.
@@ -566,13 +566,13 @@ Implemented stages:
 - Add layout input caches and conservative ancestor invalidation.
 - Add equality-aware retained modifier and layout-value diffs.
 - Retain clean virtual policy, realization, and placement state, and reuse stable item measurements while scrolling.
-- Consume DamageRegion as native update bounds on macOS and Windows, while Android uses the same committed scene with full View invalidation.
-- Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its native blur resources.
+- Consume DamageRegion as platform update bounds on macOS and Windows, while Android uses the same committed scene with full View invalidation.
+- Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its platform blur resources.
 - Record Canvas callbacks into retained PaintSequences and replay filled, stroked, clipped, and shadowed Paths through every renderer.
 
 The migration stages defined in this document are implemented.
 
-Page transitions and embedded native views should build on this foundation rather than introduce competing rendering or invalidation paths.
+Page transitions and embedded PlatformViews should build on this foundation rather than introduce competing rendering or invalidation paths.
 
 ## Validation
 

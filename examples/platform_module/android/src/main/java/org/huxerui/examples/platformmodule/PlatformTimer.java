@@ -8,20 +8,20 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-final class NativeTimer {
+final class PlatformTimer {
     private final ScheduledExecutorService executor;
-    private long nativeBridge;
+    private long jniBridge;
     private long generation;
     private ScheduledFuture<?> task;
 
-    NativeTimer(Context context, long nativeBridge) {
+    PlatformTimer(Context context, long jniBridge) {
         String threadName = "HuxerUI-" + Objects.requireNonNull(context).getPackageName() + "-Timer";
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, threadName);
             thread.setDaemon(true);
             return thread;
         });
-        this.nativeBridge = nativeBridge;
+        this.jniBridge = jniBridge;
     }
 
     synchronized void start(long intervalMilliseconds, long nextGeneration) {
@@ -44,15 +44,15 @@ final class NativeTimer {
         stopLocked();
     }
 
-    synchronized void disposeNativeBridge() {
+    synchronized void disposePlatformBridge() {
         stopLocked();
-        nativeBridge = 0L;
+        jniBridge = 0L;
         executor.shutdownNow();
     }
 
     private synchronized void tick(long scheduledGeneration) {
-        if (nativeBridge != 0L && generation == scheduledGeneration) {
-            nativeTick(nativeBridge, scheduledGeneration);
+        if (jniBridge != 0L && generation == scheduledGeneration) {
+            nativeTick(jniBridge, scheduledGeneration);
         }
     }
 

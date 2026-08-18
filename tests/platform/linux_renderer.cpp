@@ -240,7 +240,7 @@ TEST_CASE("LinuxRendererFreshInstanceHasNoPresentationState") {
   // this headlessly before creating an X window.
   detail::LinuxRenderer renderer;
   REQUIRE_FALSE(renderer.HasPresentation());
-  REQUIRE(renderer.NativeVisualId() == 0);
+  REQUIRE(renderer.XVisualId() == 0);
   renderer.Discard();
 }
 

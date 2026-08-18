@@ -9,14 +9,14 @@
 
 namespace huxerui::example {
 
-namespace native_text_field {
+namespace platform_text_field {
 
-inline constexpr char type[] = "example/NativeTextField";
+inline constexpr char type[] = "example/PlatformTextField";
 inline constexpr char text_property[] = "text";
 
-} // namespace native_text_field
+} // namespace platform_text_field
 
-struct NativeTextFieldEvents {
+struct PlatformTextFieldEvents {
   struct Changed : Event<std::string> {
     static constexpr char Name[] = "changed";
 
@@ -24,7 +24,7 @@ struct NativeTextFieldEvents {
   };
 };
 
-View NativeTextField(std::string value);
-void InstallNativeTextField(RootContext& root);
+View PlatformTextField(std::string value);
+void InstallPlatformTextField(RootContext& root);
 
 } // namespace huxerui::example

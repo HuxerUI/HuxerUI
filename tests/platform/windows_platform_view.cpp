@@ -45,16 +45,16 @@ struct WindowsPlatformViewEvents {
   };
 };
 
-struct NativeViewState {
+struct PlatformViewState {
   HWND edit = nullptr;
 };
 
 LRESULT CALLBACK PlatformViewTestProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
   static_cast<void>(w_param);
-  auto* state = reinterpret_cast<NativeViewState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+  auto* state = reinterpret_cast<PlatformViewState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
   if (message == WM_NCCREATE) {
     const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-    state = static_cast<NativeViewState*>(create->lpCreateParams);
+    state = static_cast<PlatformViewState*>(create->lpCreateParams);
     SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
   }
   switch (message) {
@@ -196,7 +196,7 @@ View WindowsPlatformViewApp() {
 HWND CreateWindowsPlatformView(HWND parent, const PlatformPayload& properties, PlatformEventSink event_sink) {
   ++windows_platform_view_creates;
   windows_platform_view_event_sink = std::move(event_sink);
-  auto state = std::make_unique<NativeViewState>();
+  auto state = std::make_unique<PlatformViewState>();
   HWND view = CreateWindowExW(
       WS_EX_CONTROLPARENT,
       kPlatformViewTestClass,
@@ -230,7 +230,7 @@ void UpdateWindowsPlatformView(HWND view, const PlatformPayload& properties) {
 
 void DisposeWindowsPlatformView(HWND view) {
   ++windows_platform_view_disposals;
-  auto* state = reinterpret_cast<NativeViewState*>(GetWindowLongPtrW(view, GWLP_USERDATA));
+  auto* state = reinterpret_cast<PlatformViewState*>(GetWindowLongPtrW(view, GWLP_USERDATA));
   SetWindowLongPtrW(view, GWLP_USERDATA, 0);
   delete state;
   windows_platform_view_root = nullptr;
@@ -245,7 +245,7 @@ windows::PlatformViewFactory WindowsPlatformViewFactory() {
   };
 }
 
-TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemountNativeViews") {
+TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   windows_platform_view_creates = 0;
   windows_platform_view_updates = 0;
   windows_platform_view_disposals = 0;
@@ -271,7 +271,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemountNativeViews") {
       GetModuleHandleW(nullptr),
       window.Handle(),
       *modules,
-      runtime.NativeRuntime(),
+      runtime.CoreRuntime(),
       [&pending_tasks](std::function<void()> task) { pending_tasks.push_back(std::move(task)); },
       [](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
         return DefWindowProcW(source, message, w_param, l_param);
@@ -303,13 +303,13 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemountNativeViews") {
   REQUIRE(windows_platform_view_event_value == 7);
 
   const HWND retained_root = windows_platform_view_root;
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
   const FrameCommit& focused = runtime.BuildCommit();
   REQUIRE(platform_views.Commit(focused.render_frame, 1.0F));
   REQUIRE(GetFocus() == windows_platform_view_edit);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.NativeRuntime());
+  accessibility.SetRuntime(&runtime.CoreRuntime());
   accessibility.SetWindow(window.Handle());
   accessibility.Commit(focused.semantic_frame, &platform_views);
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> semantic_root;

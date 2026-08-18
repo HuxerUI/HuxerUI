@@ -278,7 +278,7 @@ View LayoutDemo() {
           Tag("macOS", theme.colors.primary),
           Tag("Windows", Color::Rgb(130, 80, 223)),
           Tag("Declarative", theme.colors.error),
-          Tag("Native", theme.colors.primary),
+          Tag("Platform", theme.colors.primary),
           Tag("C++", Color::Rgb(26, 127, 55)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
       }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))

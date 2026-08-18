@@ -59,7 +59,7 @@ public final class HuxerUIView extends ViewGroup {
     private static final int POINTER_DEVICE_TOUCH = 1;
     private static final int POINTER_DEVICE_PEN = 2;
 
-    // These values form the JNI protocol decoded explicitly by the native adapter.
+    // These values form the JNI protocol decoded explicitly by the platform adapter.
     private static final int BACK_BEGIN = 0;
     private static final int BACK_UPDATE = 1;
     private static final int BACK_CANCEL = 2;
@@ -202,7 +202,7 @@ public final class HuxerUIView extends ViewGroup {
         requestFocus();
         if (nativeHandle == 0L) {
             nativeHandle = nativeCreate(this);
-            resizeNativeState(getWidth(), getHeight());
+            resizeRuntime(getWidth(), getHeight());
         }
         requestApplyInsets();
     }
@@ -240,7 +240,7 @@ public final class HuxerUIView extends ViewGroup {
     @Override
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
-        resizeNativeState(width, height);
+        resizeRuntime(width, height);
     }
 
     @Override
@@ -254,7 +254,7 @@ public final class HuxerUIView extends ViewGroup {
                     shadowRenderer.clear();
                     shadowRenderer = null;
                 }
-                resizeNativeState(getWidth(), getHeight());
+                resizeRuntime(getWidth(), getHeight());
             }
             nativeUpdateResourceConfiguration(nativeHandle, resourceLocale(), displayScale);
         }
@@ -303,7 +303,7 @@ public final class HuxerUIView extends ViewGroup {
                 safeInsetBottom = Math.max(safeInsetBottom, insets.getDisplayCutout().getSafeInsetBottom());
             }
         }
-        resizeNativeState(getWidth(), getHeight());
+        resizeRuntime(getWidth(), getHeight());
         return super.onApplyWindowInsets(insets);
     }
 
@@ -681,7 +681,7 @@ public final class HuxerUIView extends ViewGroup {
         return result.toByteArray();
     }
 
-    private void resizeNativeState(int width, int height) {
+    private void resizeRuntime(int width, int height) {
         if (nativeHandle == 0L) {
             return;
         }

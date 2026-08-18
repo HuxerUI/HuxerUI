@@ -131,7 +131,7 @@ void AndroidExternalTextureState::InitializeJni(JNIEnv* environment) {
   if (bitmap_get_width == nullptr || bitmap_get_height == nullptr || bitmap_get_generation == nullptr ||
       bitmap_is_recycled == nullptr) {
     environment->DeleteGlobalRef(bitmap_class);
-    throw std::runtime_error("HuxerUI android.graphics.Bitmap methods do not match the native backend");
+    throw std::runtime_error("HuxerUI android.graphics.Bitmap methods do not match the platform backend");
   }
   bitmap_class_ = bitmap_class;
   bitmap_get_width_ = bitmap_get_width;

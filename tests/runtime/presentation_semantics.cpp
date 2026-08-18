@@ -87,7 +87,7 @@ TEST_CASE("Dialog semantics isolate the application and honor dismiss requests")
   REQUIRE(FindSemanticNode(announced, "application semantics") == nullptr);
 
   REQUIRE(
-      runtime.NativeRuntime().PerformSemanticAction(dialog->id, SemanticAction{.kind = SemanticActionKind::Dismiss})
+      runtime.CoreRuntime().PerformSemanticAction(dialog->id, SemanticAction{.kind = SemanticActionKind::Dismiss})
   );
   REQUIRE(semantic_dismiss_requests == 1);
   const SemanticFrame& requested = SemanticFrameFrom(runtime.BuildCommit());
@@ -108,7 +108,7 @@ TEST_CASE("Exiting dialogs immediately leave input and semantic participation") 
   REQUIRE(dialog != nullptr);
   REQUIRE(HasAction(*dialog, SemanticActionKind::Dismiss));
   REQUIRE(
-      runtime.NativeRuntime().PerformSemanticAction(dialog->id, SemanticAction{.kind = SemanticActionKind::Dismiss})
+      runtime.CoreRuntime().PerformSemanticAction(dialog->id, SemanticAction{.kind = SemanticActionKind::Dismiss})
   );
 
   const SemanticFrame& exiting = SemanticFrameFrom(runtime.BuildCommit());
@@ -233,7 +233,7 @@ TEST_CASE("Menu semantics describe items and keep an expanded submenu in one mod
   REQUIRE(more->expanded == false);
   REQUIRE(HasAction(*more, SemanticActionKind::Expand));
 
-  REQUIRE(runtime.NativeRuntime().PerformSemanticAction(more->id, SemanticAction{.kind = SemanticActionKind::Expand}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(more->id, SemanticAction{.kind = SemanticActionKind::Expand}));
   const SemanticFrame& submenu_frame = SemanticFrameFrom(runtime.BuildCommit());
   REQUIRE(CountSemanticNodes(submenu_frame, SemanticRole::Menu) == 2);
   REQUIRE(FindSemanticNode(submenu_frame, "Checked") != nullptr);
@@ -244,7 +244,7 @@ TEST_CASE("Menu semantics describe items and keep an expanded submenu in one mod
   REQUIRE(HasAction(*more, SemanticActionKind::Collapse));
 
   REQUIRE(
-      runtime.NativeRuntime().PerformSemanticAction(more->id, SemanticAction{.kind = SemanticActionKind::Collapse})
+      runtime.CoreRuntime().PerformSemanticAction(more->id, SemanticAction{.kind = SemanticActionKind::Collapse})
   );
   const SemanticFrame& collapsed_frame = SemanticFrameFrom(runtime.BuildCommit());
   REQUIRE(CountSemanticNodes(collapsed_frame, SemanticRole::Menu) == 1);

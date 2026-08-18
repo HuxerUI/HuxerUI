@@ -141,7 +141,7 @@ huxerui::PlatformModuleFactory WebTimerFactory() {
         return {};
       }
 
-      result(TimerError("example/unknown-method", "The native timer method is not supported"));
+      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
       return {};
     };
     instance.dispose = [state] { state->Dispose(); };

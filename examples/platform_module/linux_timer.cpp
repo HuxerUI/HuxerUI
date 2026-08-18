@@ -61,7 +61,7 @@ struct LinuxTimerState : std::enable_shared_from_this<LinuxTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return {};
       }
       if (worker_failed) {
@@ -69,7 +69,7 @@ struct LinuxTimerState : std::enable_shared_from_this<LinuxTimerState> {
         return {};
       }
       if (generation == static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-        result(TimerError("example/timer-exhausted", "The native timer generation space is exhausted"));
+        result(TimerError("example/timer-exhausted", "The platform timer generation space is exhausted"));
         return {};
       }
       if (pending_start) {
@@ -118,7 +118,7 @@ struct LinuxTimerState : std::enable_shared_from_this<LinuxTimerState> {
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The native timer is closed"));
+        result(TimerError("example/timer-closed", "The platform timer is closed"));
         return;
       }
       if (pending_start) {
@@ -173,7 +173,7 @@ private:
   explicit LinuxTimerState(huxerui::PlatformEventSink event_sink) : events(std::move(event_sink)) {
     timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     if (timer_fd < 0) {
-      throw std::runtime_error("HuxerUI example could not create the Linux native timer");
+      throw std::runtime_error("HuxerUI example could not create the Linux platform timer");
     }
     stop_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     if (stop_fd < 0) {
@@ -351,7 +351,7 @@ huxerui::PlatformModuleFactory LinuxTimerFactory() {
         state->Stop(std::move(result));
         return {};
       }
-      result(TimerError("example/unknown-method", "The native timer method is not supported"));
+      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
       return {};
     };
     instance.dispose = [state] { state->Dispose(); };

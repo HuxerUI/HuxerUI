@@ -342,7 +342,7 @@ public:
     return runtime_.QueryTextInputPosition(session_id, point);
   }
 
-  huxerui::Runtime& NativeRuntime() noexcept {
+  huxerui::Runtime& CoreRuntime() noexcept {
     return runtime_;
   }
 

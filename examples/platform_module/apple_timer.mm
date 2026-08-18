@@ -79,7 +79,7 @@ huxerui::PlatformModuleFactory AppleTimerFactory() {
     instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
         -> std::function<void()> {
       if (!NSThread.isMainThread) {
-        result(TimerError("example/timer-thread", "The native timer must be used from the main thread"));
+        result(TimerError("example/timer-thread", "The platform timer must be used from the main thread"));
         return {};
       }
 
@@ -127,7 +127,7 @@ huxerui::PlatformModuleFactory AppleTimerFactory() {
         return {};
       }
 
-      result(TimerError("example/unknown-method", "The native timer method is not supported"));
+      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
       return {};
     };
     instance.dispose = [state] {
