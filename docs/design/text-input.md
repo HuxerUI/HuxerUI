@@ -1,6 +1,6 @@
 # Text Input and TextField Design
 
-Status: implemented foundation with Android, iOS, macOS, and Windows platform adapters
+Status: implemented foundation with Android, iOS, Linux, macOS, and Windows platform adapters
 
 This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformAdapter`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
@@ -983,6 +983,25 @@ The first Windows implementation uses IMM32:
 - Selection, deletion, and control keys continue through the key path where IMM32 does not provide a direct operation.
 
 TSF can replace or augment the adapter later without changing Runtime, TextInputClient, TextField, or SweetEditor integration.
+
+## Linux adapter
+
+The X11 host keeps XIM as the generic input-method fallback.
+When the process selects Fcitx and the optional `Fcitx5GClient` development package is available at build time, the adapter creates a Fcitx DBus input context because the default Fcitx XIM styles expose candidate placement without exposing application-rendered preedit callbacks.
+
+The Fcitx path:
+
+- Sends each key through a bounded-time asynchronous Fcitx request and returns declined or forwarded events to the shared direct-key path in event-loop order.
+- Keeps the XIM context unfocused while the non-secure Fcitx context owns focus so the two frontends cannot reset each other's composition.
+- Maps formatted preedit updates to `UpdateComposition`, converting the Fcitx UTF-8 byte cursor to the common UTF-16 offset space.
+- Maps committed strings to `CommitText` and clears local composition bookkeeping only after Runtime accepts the command.
+- Publishes bounded non-secure surrounding text in UTF-8 byte coordinates and maps adjacent Fcitx deletion requests to Unicode-code-point `DeleteSurrounding` commands.
+- Publishes the transformed caret rectangle in X11 root coordinates while leaving candidate rendering with Fcitx.
+- Integrates the GLib DBus sources into the X11 `poll()` wait set so input-method callbacks wake the event loop without periodic polling.
+- Bypasses both Fcitx and XIM for secure sessions, leaving direct key text and editing keys on the shared path and never publishing secure surrounding text.
+
+If the Fcitx client library is unavailable, the build remains supported and uses XIM.
+XIM callback composition is rendered inline when the active input method advertises `XIMPreeditCallbacks`; position and root styles retain their native candidate-window behavior.
 
 ## PlatformView focus
 

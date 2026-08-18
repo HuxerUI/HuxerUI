@@ -1,6 +1,9 @@
 #pragma once
 
+#include <poll.h>
+
 #include <memory>
+#include <vector>
 
 #include "linux_internal.h"
 
@@ -12,10 +15,20 @@ class Runtime;
 
 namespace huxerui::detail {
 
-// True for keys that must bypass the XIM composition path: editing,
-// navigation, shortcut, modifier, and unknown keys never produce composed
-// text and are routed to the focused view instead.
-[[nodiscard]] bool IsEditingKeySym(KeySym keysym) noexcept;
+enum class XimKeyEventResult {
+  Unhandled,
+  Consumed,
+  DispatchWithoutText,
+};
+
+struct LinuxDeferredKeyEvent {
+  XEvent event{};
+  XimKeyEventResult result = XimKeyEventResult::Unhandled;
+};
+
+// XIM sees every key first. Only explicit application shortcuts and bare
+// modifier events bypass lookup after the input method declines the event.
+[[nodiscard]] bool ShouldBypassXimLookup(KeySym keysym, unsigned int state) noexcept;
 
 class LinuxTextInput final : public PlatformTextInput {
 public:
@@ -34,7 +47,11 @@ public:
   [[nodiscard]] bool Composing() const noexcept;
   void SetFocus(bool focused);
   [[nodiscard]] XIC InputContext() const noexcept;
-  [[nodiscard]] bool HandleXKeyEvent(const XKeyEvent& event);
+  [[nodiscard]] bool FilterEvent(XEvent& event) noexcept;
+  [[nodiscard]] XimKeyEventResult HandleXKeyEvent(XEvent& event);
+  [[nodiscard]] int PreparePoll(std::vector<pollfd>& descriptors, int timeout_ms);
+  void DispatchPoll(const std::vector<pollfd>& descriptors, bool poll_succeeded) noexcept;
+  void TakeDeferredKeyEvents(std::vector<LinuxDeferredKeyEvent>& events);
 
   void Start(
       TextInputSessionId session_id,

@@ -11,6 +11,11 @@ function(huxerui_platform_configure)
     pkg_check_modules(HUXERUI_XRANDR REQUIRED IMPORTED_TARGET xrandr)
     pkg_check_modules(HUXERUI_EGL REQUIRED IMPORTED_TARGET egl)
     pkg_check_modules(HUXERUI_GLES2 REQUIRED IMPORTED_TARGET glesv2)
+    pkg_check_modules(HUXERUI_FCITX5_GCLIENT QUIET IMPORTED_TARGET Fcitx5GClient)
+
+    if(TARGET PkgConfig::HUXERUI_FCITX5_GCLIENT)
+        list(APPEND HUXERUI_PLATFORM_COMPILE_DEFINITIONS HUXERUI_HAS_FCITX5_GCLIENT=1)
+    endif()
 
     include(FetchContent)
     include(ExternalProject)
@@ -272,8 +277,14 @@ function(huxerui_platform_configure)
             ${HUXERUI_XRANDR_INCLUDE_DIRS}
             ${HUXERUI_EGL_INCLUDE_DIRS}
             ${HUXERUI_GLES2_INCLUDE_DIRS}
+            ${HUXERUI_FCITX5_GCLIENT_INCLUDE_DIRS}
             "${HUXERUI_LINUX_STAGE}/include"
             "${HUXERUI_LINUX_STAGE}/include/freetype2"
+            PARENT_SCOPE
+    )
+
+    set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS
+            ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS}
             PARENT_SCOPE
     )
 
@@ -287,6 +298,9 @@ function(huxerui_platform_configure)
         )
     endforeach()
     list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES m pthread dl)
+    if(TARGET PkgConfig::HUXERUI_FCITX5_GCLIENT)
+        list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES PkgConfig::HUXERUI_FCITX5_GCLIENT)
+    endif()
 
     set(HUXERUI_PLATFORM_LINK_LIBRARIES
             ${HUXERUI_PLATFORM_LINK_LIBRARIES}

@@ -55,6 +55,75 @@ TEST_CASE("LinuxMeasureRunProducesPositiveAdvance") {
   renderer.Discard();
 }
 
+TEST_CASE("LinuxTextLayoutHonorsExplicitDirection") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const std::unique_ptr<detail::TextLayout> left_to_right = renderer.CreateTextLayout(
+      "abc",
+      style,
+      200.0F,
+      {.shaping = {.direction = TextDirection::LeftToRight}, .wrap = TextWrap::NoWrap}
+  );
+  const std::unique_ptr<detail::TextLayout> right_to_left = renderer.CreateTextLayout(
+      "abc",
+      style,
+      200.0F,
+      {.shaping = {.direction = TextDirection::RightToLeft}, .wrap = TextWrap::NoWrap}
+  );
+  REQUIRE(left_to_right->CaretRect(0, TextAffinity::Downstream).x == 0.0F);
+  REQUIRE(left_to_right->CaretRect(3, TextAffinity::Downstream).x > 0.0F);
+  REQUIRE(right_to_left->CaretRect(0, TextAffinity::Downstream).x > 0.0F);
+  REQUIRE(right_to_left->CaretRect(3, TextAffinity::Downstream).x == 0.0F);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxWordWrappingPreservesUtf8ScalarBoundaries") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const float character_width = renderer.MeasureRun("\u4E16", style, {}).advance;
+  const TextLayoutMetrics metrics =
+      renderer.MeasureText("\u4E16\u754C", style, character_width + 0.1F, {.wrap = TextWrap::Word});
+  REQUIRE(metrics.line_count == 2);
+  const std::unique_ptr<detail::TextLayout> layout =
+      renderer.CreateTextLayout("\u4E16\u754C", style, character_width + 0.1F, {.wrap = TextWrap::Word});
+  REQUIRE(layout->NextCaretOffset(0) == 1);
+  REQUIRE(layout->NextCaretOffset(1) == 2);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxTextMeasurementPreservesTrailingEmptyLine") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const TextLayoutMetrics metrics = renderer.MeasureText("one\n", style, 200.0F, {.wrap = TextWrap::NoWrap});
+  REQUIRE(metrics.line_count == 2);
+  REQUIRE(metrics.last_baseline > metrics.first_baseline);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxTextDecorationContributesToRunBounds") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle plain{Font::System(14.0F), Color::Black()};
+  const TextStyle decorated{
+      Font::System(14.0F),
+      Color::Black(),
+      TextDecoration::Underline | TextDecoration::StrikeThrough,
+  };
+  const TextRunMetrics plain_metrics = renderer.MeasureRun("Decorated", plain, {});
+  const TextRunMetrics decorated_metrics = renderer.MeasureRun("Decorated", decorated, {});
+  REQUIRE(decorated_metrics.advance == plain_metrics.advance);
+  REQUIRE(decorated_metrics.visual_bounds.y <= plain_metrics.visual_bounds.y);
+  REQUIRE(decorated_metrics.visual_bounds.height >= plain_metrics.visual_bounds.height);
+  renderer.Discard();
+}
+
 TEST_CASE("LinuxMeasureTextReportsLineCountForNewlines") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();

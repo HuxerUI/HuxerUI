@@ -5,6 +5,7 @@
 #include <X11/keysym.h>
 
 #include <poll.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -130,11 +131,6 @@ int XErrorHandler(Display* display, XErrorEvent* error) {
 
 void ConfigureDetectableAutoRepeat(Display* display) noexcept {
   static_cast<void>(XkbSetDetectableAutoRepeat(display, 0, nullptr));
-}
-
-bool FilterInputEvent(const XEvent& event, Window window) noexcept {
-  XEvent filtered = event;
-  return XFilterEvent(&filtered, window) != 0;
 }
 
 std::string StripControlCharacters(std::string_view text) {
@@ -275,6 +271,37 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+      return std::nullopt;
+    }
+    std::uint64_t resident_pages = 0;
+    try {
+      std::ifstream statm("/proc/self/statm");
+      std::uint64_t total_pages = 0;
+      if (!(statm >> total_pages >> resident_pages)) {
+        return std::nullopt;
+      }
+      static_cast<void>(total_pages);
+    } catch (...) {
+      return std::nullopt;
+    }
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (page_size <= 0) {
+      return std::nullopt;
+    }
+    const auto timeval_seconds = [](const timeval& value) {
+      return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1'000'000.0;
+    };
+    return ProcessMetrics{
+        .cpu_time_seconds = timeval_seconds(usage.ru_utime) + timeval_seconds(usage.ru_stime),
+        .memory_usage_bytes = resident_pages * static_cast<std::uint64_t>(page_size),
+        .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
+    };
   }
 
   ResourceConfiguration Configuration() const override {
@@ -579,11 +606,12 @@ private:
         );
       }
 
-      std::array<pollfd, 2> descriptors{{
-          {.fd = connection, .events = POLLIN, .revents = 0},
-          {.fd = ui_dispatcher_->FileDescriptor(), .events = POLLIN, .revents = 0},
-      }};
-      const int poll_result = poll(descriptors.data(), descriptors.size(), timeout_ms);
+      poll_descriptors_.clear();
+      poll_descriptors_.push_back({.fd = connection, .events = POLLIN, .revents = 0});
+      poll_descriptors_.push_back({.fd = ui_dispatcher_->FileDescriptor(), .events = POLLIN, .revents = 0});
+      timeout_ms = text_input_.PreparePoll(poll_descriptors_, timeout_ms);
+      const int poll_result = poll(poll_descriptors_.data(), poll_descriptors_.size(), timeout_ms);
+      text_input_.DispatchPoll(poll_descriptors_, poll_result >= 0);
       if (poll_result < 0) {
         if (errno == EINTR) {
           continue;
@@ -594,7 +622,12 @@ private:
         break;
       }
 
-      if ((descriptors[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0) {
+      text_input_.TakeDeferredKeyEvents(deferred_key_events_);
+      for (LinuxDeferredKeyEvent& event : deferred_key_events_) {
+        DispatchDeferredKeyEvent(event);
+      }
+
+      if ((poll_descriptors_[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0) {
         try {
           ui_dispatcher_->RunPending();
         } catch (...) {
@@ -630,6 +663,9 @@ private:
   }
 
   void DispatchEvent(XEvent& event) {
+    if (text_input_.FilterEvent(event)) {
+      return;
+    }
     switch (event.type) {
     case ClientMessage:
       HandleClientMessage(event.xclient);
@@ -647,34 +683,22 @@ private:
       }
       break;
     case ButtonPress:
-      if (FilterInputEvent(event, window_)) {
-        return;
-      }
       HandleButtonPress(event.xbutton);
       break;
     case ButtonRelease:
-      if (FilterInputEvent(event, window_)) {
-        return;
-      }
       HandleButtonRelease(event.xbutton);
       break;
     case MotionNotify:
-      if (FilterInputEvent(event, window_)) {
-        return;
-      }
       HandleMotionNotify(event.xmotion);
       break;
     case LeaveNotify:
-      if (FilterInputEvent(event, window_)) {
-        return;
-      }
       HandleLeaveNotify(event.xcrossing);
       break;
     case KeyPress:
-      HandleKeyPress(event.xkey);
+      HandleKeyPress(event);
       break;
     case KeyRelease:
-      HandleKeyRelease(event.xkey);
+      HandleKeyRelease(event);
       break;
     case FocusIn:
       text_input_.SetFocus(true);
@@ -1006,23 +1030,44 @@ private:
     return count;
   }
 
-  void HandleKeyPress(const XKeyEvent& event) {
-    if (text_input_.HandleXKeyEvent(event)) {
+  void HandleKeyPress(XEvent& xevent) {
+    const XimKeyEventResult input_result = text_input_.HandleXKeyEvent(xevent);
+    if (input_result == XimKeyEventResult::Consumed) {
       return;
     }
+    DispatchKeyPress(xevent.xkey, input_result);
+  }
+
+  void DispatchKeyPress(XKeyEvent& event, XimKeyEventResult input_result) {
     const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
     const bool repeat = key_pressed_[event.keycode] != 0;
     key_pressed_[event.keycode] = 1;
-    SendKey(KeyEventType::Down, keysym, event.state, TranslateKeyText(event), repeat);
+    const std::string text =
+        input_result == XimKeyEventResult::DispatchWithoutText ? std::string{} : TranslateKeyText(event);
+    SendKey(KeyEventType::Down, keysym, event.state, text, repeat);
   }
 
-  void HandleKeyRelease(const XKeyEvent& event) {
-    if (text_input_.HandleXKeyEvent(event)) {
+  void HandleKeyRelease(XEvent& xevent) {
+    XKeyEvent& event = xevent.xkey;
+    key_pressed_[event.keycode] = 0;
+    if (text_input_.HandleXKeyEvent(xevent) == XimKeyEventResult::Consumed) {
       return;
     }
-    key_pressed_[event.keycode] = 0;
+    DispatchKeyRelease(event);
+  }
+
+  void DispatchKeyRelease(XKeyEvent& event) {
     const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
     SendKey(KeyEventType::Up, keysym, event.state, {}, false);
+  }
+
+  void DispatchDeferredKeyEvent(LinuxDeferredKeyEvent& deferred) {
+    if (deferred.event.type == KeyPress) {
+      DispatchKeyPress(deferred.event.xkey, deferred.result);
+    } else if (deferred.event.type == KeyRelease) {
+      key_pressed_[deferred.event.xkey.keycode] = 0;
+      DispatchKeyRelease(deferred.event.xkey);
+    }
   }
 
   std::string TranslateKeyText(const XKeyEvent& event) const {
@@ -1310,6 +1355,8 @@ private:
   std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
+  std::vector<pollfd> poll_descriptors_;
+  std::vector<LinuxDeferredKeyEvent> deferred_key_events_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   bool running_ = false;
