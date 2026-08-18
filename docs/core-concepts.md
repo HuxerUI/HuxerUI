@@ -194,6 +194,6 @@ component functions
   -> platform renderer
 ```
 
-The shared C++ runtime does not own Android Views, AppKit objects, or Win32 windows. Platform adapters translate system lifecycle, input, text, and drawing operations at the edge.
+The shared C++ runtime does not own Win32 windows, AppKit objects, or Android Views. Platform adapters translate system lifecycle, input, text, and drawing operations at the edge.
 
 For implementation details, see the [architecture design](design/architecture.md).

@@ -15,8 +15,8 @@ Current implementation status:
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
 - Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and platform accessibility bridges on Android, iOS, macOS, and Windows are implemented. Complete component semantics and the remaining platform adapters are follow-up work.
-- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent `CVPixelBuffer` sources and Core Image frame import, Android provides a `Bitmap` source and Canvas frame import, and Linux provides copied RGBA/BGRA pixel sources and Cairo frame import; Windows and Web producer and renderer paths remain proposed. Android, macOS, iOS, Web, and Windows provide owning-thread dispatch and PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Android, iOS, macOS, and Windows also attach PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Android, iOS, Linux, macOS, Windows, and Web provide nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and platform dependency projection preserve one shared Runtime and keep platform objects inside platform adapters and module implementations.
+- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and platform accessibility bridges on Windows, macOS, Android, and iOS are implemented. Complete component semantics and the remaining platform adapters are follow-up work.
+- Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent `CVPixelBuffer` sources and Core Image frame import, Linux provides copied RGBA/BGRA pixel sources and Cairo frame import, and Android provides a `Bitmap` source and Canvas frame import; Windows and Web producer and renderer paths remain proposed. Windows, macOS, Web, Android, and iOS provide owning-thread dispatch and PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Windows, macOS, Android, and iOS also attach PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Windows, macOS, Linux, Web, Android, and iOS provide nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, PlatformView hosting and matching bridges on the remaining platforms, remaining ExternalTexture phases, and platform dependency projection preserve one shared Runtime and keep platform objects inside platform adapters and module implementations.
 - General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
@@ -354,7 +354,7 @@ Runtime calls fixed node and modifier lifecycle functions. It does not contain b
 
 The retained scene and incremental invalidation architecture are defined in [Incremental Layout and Rendering Design](incremental-rendering.md).
 Local geometry, the scene boundary, PaintSequence reuse, transform and opacity presentation updates, retained ScrollView movement, layout and virtual-realization caching, equality-aware modifier and layout-value diffs, and precise shared-runtime damage are implemented.
-macOS and Windows consume shared DamageRegion output for platform partial redraw.
+Windows and macOS consume shared DamageRegion output for platform partial redraw.
 Android retains the same shared damage calculation and committed-scene path but currently invalidates its complete `HuxerUIView`.
 
 The semantics pipeline is a parallel Runtime output rather than a RenderScene branch.
@@ -364,7 +364,7 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; Android, iOS, Linux, and macOS ExternalTexture production and consumption implemented; production modules and remaining platform adapters proposed
+Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; macOS, Linux, Android, and iOS ExternalTexture production and consumption implemented; production modules and remaining platform adapters proposed
 
 Platform modules produce three integration forms:
 
@@ -408,7 +408,7 @@ The shared public surface stays focused as the phases land:
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
 - `<huxerui/external_texture.h>` owns the platform-neutral `ExternalTexture` consumer value; platform-specific headers own frame producers.
-- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; platform-specific `platform_view.h` headers own the Android, Apple, Web, and Windows visual factory contracts.
+- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android module sources; platform-specific `platform_view.h` headers own the Windows, Apple, Web, and Android visual factory contracts.
 
 There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
 Platform-neutral implemented headers are re-exported through `<huxerui/huxerui.h>`, while platform-specific factory and producer headers are included directly by platform module sources; ordinary applications normally see only a module's typed component and service headers.
@@ -435,7 +435,7 @@ Large or continuous media frames do not travel through PlatformPayload; only an 
 Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
 Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
 `PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-Visual registrations use the platform-specific `PlatformViewFactory` in the `android`, `ios`, `macos`, `web`, or `windows` namespace. Nonvisual C++ and Apple implementations use the platform-neutral `PlatformModuleFactory`, while Java-backed Android implementations use `android::PlatformModuleFactory` so the owning adapter can inject its retained Context and current UI-thread `JNIEnv`; another registry or registration-kind enum is unnecessary.
+Visual registrations use the platform-specific `PlatformViewFactory` in the `windows`, `macos`, `web`, `android`, or `ios` namespace. Nonvisual C++ and Apple implementations use the platform-neutral `PlatformModuleFactory`, while Java-backed Android implementations use `android::PlatformModuleFactory` so the owning adapter can inject its retained Context and current UI-thread `JNIEnv`; another registry or registration-kind enum is unnecessary.
 Registration callbacks remain in the platform adapter or platform module source and may use platform API types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
 `PlatformModules::Open()` owns instance protocol setup and delegates registration-specific creation to its `PlatformAdapter`. The default adapter path creates a platform-neutral factory, while an adapter override may recognize its own registration type before falling back. This keeps platform host dependencies in the adapter instead of adding a Context service, hidden opener, thread-local state, or process-global registry.
 The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
@@ -515,9 +515,9 @@ void InstallAudio(RootContext& root) {
 The resulting service owns the `PlatformInstance`, encodes typed calls, decodes results and events, and closes the instance from its destructor.
 An application-wide platform engine may remain shared behind several per-window instances, but each Runtime retains only its own identities, subscriptions, and typed services.
 The shared protocol and deterministic dispatcher fixture are implemented and tested.
-The macOS and iOS adapters configure asynchronous main-queue delivery, Android dispatches through its owning `HuxerUIView`, Linux wakes its X11 event loop through `eventfd`, Windows posts a private message to its owning application HWND, and Web queues work through the browser event loop.
+Windows posts a private message to its owning application HWND, macOS configures asynchronous main-queue delivery, Linux wakes its X11 event loop through `eventfd`, Web queues work through the browser event loop, Android dispatches through its owning `HuxerUIView`, and iOS configures asynchronous main-queue delivery.
 The Windows dispatcher accepts work before that HWND exists because Runtime installs RootHooks before the adapter creates its window, then schedules the queued batch when the window attaches; shutdown drops late platform callbacks without retaining the destroyed HWND.
-`example_platform_module` registers a Foundation timer on Apple platforms, a Java scheduled timer on Android, a `timerfd` timer on Linux, a thread-pool timer on Windows, and an Emscripten interval on Web behind one typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
+`example_platform_module` registers a thread-pool timer on Windows, a Foundation timer on Apple platforms, a `timerfd` timer on Linux, an Emscripten interval on Web, and a Java scheduled timer on Android behind one typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
 Other production adapters and concrete product modules remain proposed.
 
 ### PlatformView
@@ -614,12 +614,12 @@ Platform adapters preserve the same contract through platform-specific compositi
 
 | Platform | Composition strategy |
 | --- | --- |
-| Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
-| iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
-| macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
+| macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
 | Linux/X11 | The adapter uses ordered child windows with suitable ARGB composition or redirects platform child content through XComposite. A server without the required composition capability cannot host that PlatformView. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
+| Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
+| iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
 
 These strategies are conformance requirements, not application-selectable composition modes.
 A factory whose platform object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView type or unavailable adapter capability at the layer that detects it.
@@ -691,7 +691,7 @@ The Windows 7 compatibility renderer does not silently flatten PlatformViews int
 
 ### ExternalTexture
 
-Status: shared value, payload, Image, rendering command, scheduling, and damage implemented; Android, iOS, Linux, and macOS platform sources and frame import implemented; remaining platform sources phased below
+Status: shared value, payload, Image, rendering command, scheduling, and damage implemented; macOS, Linux, Android, and iOS platform sources and frame import implemented; remaining platform sources phased below
 
 `ExternalTexture` is a copyable platform-neutral consumer value representing one live visual source.
 It exposes fixed logical intrinsic size, stable identity equality, and validity, while its shared opaque state retains platform-owned frame production and lifetime data.
@@ -718,8 +718,8 @@ PlatformPayload and Image reject that empty value.
 A platform source is move-only and may be created before a Runtime or platform surface exists.
 Its `Texture()` operation returns the copyable consumer value, `Publish()` replaces the pending platform frame, and `Finish()` rejects later frames while preserving the last published frame for drawing.
 Source destruction performs the same terminal cleanup and is safe even when the texture was never bound to a surface.
-The implemented producer surfaces are `<huxerui/android/external_texture.h>`, `<huxerui/ios/external_texture.h>`, `<huxerui/linux/external_texture.h>`, and `<huxerui/macos/external_texture.h>`.
-Android accepts retained `android.graphics.Bitmap` frames through the publishing thread's `JNIEnv`, macOS and iOS accept `CVPixelBufferRef` frames, and Linux copies borrowed RGBA8888 or BGRA8888 pixels with explicit dimensions and row stride.
+The implemented producer surfaces are `<huxerui/macos/external_texture.h>`, `<huxerui/linux/external_texture.h>`, `<huxerui/android/external_texture.h>`, and `<huxerui/ios/external_texture.h>`.
+macOS and iOS accept `CVPixelBufferRef` frames, Linux copies borrowed RGBA8888 or BGRA8888 pixels with explicit dimensions and row stride, and Android accepts retained `android.graphics.Bitmap` frames through the publishing thread's `JNIEnv`.
 Each platform retains independent source state and renderer integration without widening the platform-neutral consumer representation.
 Future Windows and Web producers join the same contract through their own platform headers.
 
@@ -793,7 +793,7 @@ Implementation proceeds through reviewable stages:
 
 - The shared protocol has added `ExternalTexture`, the closed PlatformPayload kind, public-header coverage, and focused value and payload tests without adding a registry.
 - Shared rendering has added the Image input, DrawExternalTextureCommand, Runtime dependency snapshots, coalesced frame scheduling, damage invalidation, and explicit renderer command handling.
-- Android, iOS, Linux, and macOS supply independent platform sources, latest-frame mailboxes, renderer-owned caches, and platform module examples.
+- macOS, Linux, Android, and iOS supply independent platform sources, latest-frame mailboxes, renderer-owned caches, and platform module examples.
 - Windows and Web retain explicit unsupported diagnostics until their platform frame and renderer paths are implemented; each later backend preserves the same public contract.
 
 Every stage ends with focused tests, the affected current-host build, `git diff --check`, and owner review before the next stage begins.

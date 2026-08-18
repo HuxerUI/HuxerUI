@@ -659,8 +659,44 @@ It does not create a Toast role, focus target, action, or announcement service.
 Each adapter retains the newest `SemanticFrame`; adapters with retained platform accessibility objects cache them by SemanticNodeId.
 Platform objects never retain MountedNode or NodeExtension pointers.
 
-The Android, iOS, macOS, and Windows bridges are implemented.
+The Windows, macOS, Android, and iOS bridges are implemented.
 The remaining platform subsections define the intended adapter boundary, not current support.
+
+### Windows
+
+The HWND exposes a UI Automation fragment root with cached providers keyed by SemanticNodeId.
+Providers supply only the control patterns supported by committed role, state, and actions.
+Each provider freezes its COM interface set when created; a changed pattern shape replaces the cached provider while preserving the semantic RuntimeId.
+The initial mapping includes Invoke, Toggle, Value, RangeValue, Selection, SelectionItem, ExpandCollapse, ScrollItem, and Scroll.
+It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
+
+UI Automation may query off-thread.
+Providers answer read-only queries from a retained immutable `SemanticFrame` and marshal actions to the HWND thread before calling Runtime.
+Provider queries retain the owning frame while using a node pointer and never copy or retain mounted Runtime objects.
+Secure fields advertise password state but reject Value reads instead of exposing either their contents or an ambiguous empty value.
+TextField currently exposes Value rather than TextPattern because the semantic frame does not yet publish the native text-range geometry required for a correct `ITextRangeProvider` implementation.
+
+### macOS
+
+The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
+It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
+For a PlatformView anchor, it resolves the committed identity through the AppKit host and substitutes the unignored NSView accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
+The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
+AppKit calls and Runtime actions remain on the main thread.
+`NSTextInputClient` continues to own IME communication.
+
+### Linux
+
+The X11 adapter exposes roles, states, hierarchy, component geometry, actions, values, selection, text, and collections through AT-SPI over D-Bus.
+AT-SPI events follow committed revision changes, and actions return to the X11 Runtime thread.
+
+### Web
+
+The Web adapter maintains minimal semantic DOM associated with the Canvas.
+It maps meaningful nodes to native HTML semantics and uses ARIA only where HTML is insufficient.
+
+Semantic DOM is not a visual renderer and does not mirror every View.
+It coordinates browser focus with the hidden input and textarea so TextField does not create duplicate keyboard focus targets.
 
 ### Android
 
@@ -724,42 +760,6 @@ Live-region announcements are diffed from committed frames, coalesced per commit
 The bridge inserts that view at the anchor's semantic sibling position and does not wrap or copy its UIView accessibility subtree.
 HuxerUI slice and clipping views remain non-elements, while the PlatformView continues to own its labels, descendants, editing behavior, and actions.
 The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every platform query observes one coherent frame.
-
-### macOS
-
-The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
-It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
-For a PlatformView anchor, it resolves the committed identity through the AppKit host and substitutes the unignored NSView accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
-The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
-AppKit calls and Runtime actions remain on the main thread.
-`NSTextInputClient` continues to own IME communication.
-
-### Windows
-
-The HWND exposes a UI Automation fragment root with cached providers keyed by SemanticNodeId.
-Providers supply only the control patterns supported by committed role, state, and actions.
-Each provider freezes its COM interface set when created; a changed pattern shape replaces the cached provider while preserving the semantic RuntimeId.
-The initial mapping includes Invoke, Toggle, Value, RangeValue, Selection, SelectionItem, ExpandCollapse, ScrollItem, and Scroll.
-It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
-
-UI Automation may query off-thread.
-Providers answer read-only queries from a retained immutable `SemanticFrame` and marshal actions to the HWND thread before calling Runtime.
-Provider queries retain the owning frame while using a node pointer and never copy or retain mounted Runtime objects.
-Secure fields advertise password state but reject Value reads instead of exposing either their contents or an ambiguous empty value.
-TextField currently exposes Value rather than TextPattern because the semantic frame does not yet publish the native text-range geometry required for a correct `ITextRangeProvider` implementation.
-
-### Linux
-
-The X11 adapter exposes roles, states, hierarchy, component geometry, actions, values, selection, text, and collections through AT-SPI over D-Bus.
-AT-SPI events follow committed revision changes, and actions return to the X11 Runtime thread.
-
-### Web
-
-The Web adapter maintains minimal semantic DOM associated with the Canvas.
-It maps meaningful nodes to native HTML semantics and uses ARIA only where HTML is insufficient.
-
-Semantic DOM is not a visual renderer and does not mirror every View.
-It coordinates browser focus with the hidden input and textarea so TextField does not create duplicate keyboard focus targets.
 
 ### Future platforms
 
@@ -837,13 +837,13 @@ The shared work is delivered in bounded stages so each contract is validated bef
 - Completed: collection semantics derive VirtualList and VirtualGrid metadata from the committed VirtualLayoutResult without eagerly composing unrealized content.
 
 After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
-Android AccessibilityNodeProvider, UIKit, AppKit, and Windows UI Automation now consume that contract; Linux and Web mappings follow according to platform readiness.
+Windows UI Automation, AppKit, Android AccessibilityNodeProvider, and UIKit now consume that contract; Linux and Web mappings follow according to platform readiness.
 
 ## Delivery status
 
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Android AccessibilityNodeProvider bridge, the iOS UIKit bridge, the macOS AppKit bridge including native anchor substitution, and the Windows UI Automation bridge are implemented.
+- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Windows UI Automation bridge, the macOS AppKit bridge including native anchor substitution, the Android AccessibilityNodeProvider bridge, and the iOS UIKit bridge are implemented.
 - Deferred: extend the platform adapter sequence to Linux and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
-- Deferred: add platform accessibility fixtures before advancing Web beyond technical preview.
+- Deferred: add platform accessibility fixtures for Web.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.
 Each platform adapter is validated on its platform; unavailable platforms remain unverified.

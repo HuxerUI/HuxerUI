@@ -330,7 +330,7 @@ Client-side movement and resize use `xdg_toplevel` requests with the seat and se
 
 ## Other platforms
 
-Android, iOS, Web, and future OHOS adapters submit no desktop title-bar metrics.
+Web, Android, iOS, and future OHOS adapters submit no desktop title-bar metrics.
 They ignore the requested desktop chrome mode and preserve `WindowTitleBar` as ordinary application content.
 System bars and safe-area behavior continue to follow the separate window-insets contract.
 

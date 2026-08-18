@@ -1,8 +1,8 @@
 # Web Platform Design
 
-Status: technical preview
+Status: implemented
 
-This document defines the implemented HuxerUI Web preview and its target contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, accessibility, and delivery boundaries.
+This document defines the implemented HuxerUI Web backend and its target contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, accessibility, and delivery boundaries.
 
 ## Goals
 
@@ -19,14 +19,14 @@ The initial backend does not provide DOM rendering for ordinary Views, server-si
 
 The initial backend targets a composition-root-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
 
-The initial backend may run before the platform-neutral semantics tree is available, but it remains a technical preview rather than a complete accessible Web backend until equivalent browser semantics are emitted.
+The initial backend may run before the platform-neutral semantics tree is available, but equivalent browser semantics are still required for complete accessibility.
 
-## Current preview
+## Current implementation
 
 The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
-The preview has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
+The backend has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
 
 The current text layout is intentionally conservative and still requires broader complex-script, bidirectional, grapheme, and browser-consistency validation.
 Exact offscreen group-opacity compositing, clipboard operations outside native browser editing events, semantics and accessibility, embedded-page gesture arbitration, production serving and packaging, multi-browser automation, and real mobile-browser IME validation remain deferred.
@@ -76,7 +76,7 @@ Emscripten is selected through `EMSCRIPTEN` before native platform branches and 
 
 The Web platform configuration supplies Web sources, platform-owned application registration, required Emscripten link settings, JavaScript bridge code, and exported lifecycle operations. Web targets do not build the ordinary HuxerUI shared library by default.
 
-Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a macOS, Windows, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
+Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a Windows, macOS, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 
 The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, and local serving through `emrun`.
 The project-owned Web shell keeps its HTML and host-element mount code under `platform/web`, while the backend continues to avoid a parallel JavaScript component build system.
@@ -257,7 +257,7 @@ Web platform work requires:
 - Resource tests for preload completion, locale, density variants, missing payloads, asynchronous image readiness, cache lifetime, and repaint.
 - Focused rendering checks in Chromium, Firefox, and WebKit, with screenshot tests used as smoke coverage rather than the sole semantic assertion.
 - Manual mobile-browser validation for real keyboards and IMEs that automation cannot reproduce faithfully.
-- Accessibility validation before the backend status advances beyond technical preview.
+- Accessibility validation for the platform-neutral semantics tree and browser mapping.
 
 Unavailable browsers, operating systems, mobile IMEs, and accessibility tools are reported explicitly rather than treated as passing.
 
@@ -265,13 +265,13 @@ Unavailable browsers, operating systems, mobile IMEs, and accessibility tools ar
 
 The first milestone added Emscripten platform selection, platform-owned application registration, ES module mounting, Canvas sizing, frame scheduling, Canvas 2D replay, and generated example entry points.
 
-The second preview milestone added Pointer Events, wheel, keyboard, WebTextLayout, browser text input and composition events, resources, and asynchronous images.
+The second milestone added Pointer Events, wheel, keyboard, WebTextLayout, browser text input and composition events, resources, and asynchronous images.
 
-The third preview milestone added typed PlatformModule dispatch and DOM PlatformView hosting with retained Canvas slicing, controlled properties and events, input arbitration, and focus traversal.
+The third milestone added typed PlatformModule dispatch and DOM PlatformView hosting with retained Canvas slicing, controlled properties and events, input arbitration, and focus traversal.
 
 The next milestone hardens disposal, failures, locale and display changes, browser integration tests, release-size settings, and SDK or CLI serving and packaging.
 
-The backend remains a technical preview until the semantics tree and accessible browser mapping are available. Embedded-page gesture arbitration, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
+The semantics tree and accessible browser mapping, embedded-page gesture arbitration, PWA packaging, worker rendering, and alternative graphics backends remain independent later work.
 
 ## Invariants
 

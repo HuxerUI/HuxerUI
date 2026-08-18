@@ -158,9 +158,9 @@ They do not introduce a second platform text ownership path.
 
 ## Platform mapping
 
-- Android maps Font to cached Typeface values, keeps a bounded StaticLayout paragraph cache, and submits each exact-run batch through one JNI call for baseline-positioned Canvas replay.
-- macOS keeps bounded CoreText font, CTFrame paragraph, and CTLine exact-run caches.
 - Windows keeps bounded DirectWrite font metrics, paragraph layout, and exact-run layout caches.
+- macOS keeps bounded CoreText font, CTFrame paragraph, and CTLine exact-run caches.
+- Android maps Font to cached Typeface values, keeps a bounded StaticLayout paragraph cache, and submits each exact-run batch through one JNI call for baseline-positioned Canvas replay.
 
 All mappings consume logical coordinates and UTF-8 shared text at the host boundary.
 Platform adapters perform their required UTF-16 or platform-string conversion locally.

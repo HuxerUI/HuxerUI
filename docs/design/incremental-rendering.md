@@ -1,6 +1,6 @@
 # Incremental Layout and Rendering Design
 
-Status: shared Runtime pipeline implemented; platform partial redraw implemented on macOS, Windows, and Linux
+Status: shared Runtime pipeline implemented; platform partial redraw implemented on Windows, macOS, and Linux
 
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
 It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
@@ -47,7 +47,7 @@ The implementation remains conservative in several areas:
 - Transform-only and opacity-only presentation changes retain PaintSequences.
 - Equality-comparable retained modifier values skip unchanged updates when their node inputs are also unchanged; other values update conservatively.
 - Geometry-dependent extensions prepare value snapshots after final presentation resolution and invalidate foreground paint only when those snapshots change.
-- macOS, Windows, and Linux invalidate conservative platform update bounds derived from DamageRegion.
+- Windows, macOS, and Linux invalidate conservative platform update bounds derived from DamageRegion.
 - Android still calculates shared DamageRegion output, but the View backend invalidates and replays the full platform surface because current Android View invalidation ignores dirty rectangles.
 
 ## Current pipeline
@@ -76,7 +76,7 @@ The mounted tree and render scene have different responsibilities:
 
 ## PlatformView composition foundation
 
-Status: shared placement and `RenderComposition` derivation implemented; macOS and Web retained slice surfaces, iOS retained UIKit layers, Android same-Canvas slice replay, and Windows single-surface aperture composition implemented; remaining adapter work proposed
+Status: shared placement and `RenderComposition` derivation implemented; Windows single-surface aperture composition, macOS and Web retained slice surfaces, Android same-Canvas slice replay, and iOS retained UIKit layers implemented; remaining adapter work proposed
 
 PlatformView extends the retained scene without adding another Runtime output tree.
 Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
@@ -89,7 +89,7 @@ Each placement boundary closes the current nonempty HuxerUI render slice, emits 
 For `p` mounted PlatformViews, the composition therefore contains at most `p + 1` HuxerUI slices, while a scene without PlatformViews remains on the existing single-surface path.
 
 Slice construction references retained RenderNodes and PaintSequences rather than copying or rerecording their commands.
-A compatible macOS, iOS, or Web slice retains its platform surface when its surrounding PlatformView boundaries and scene role remain stable.
+A compatible macOS, Web, or iOS slice retains its platform surface when its surrounding PlatformView boundaries and scene role remain stable.
 Android instead replays the committed command ranges into the host Canvas around ordinary child drawing.
 The Windows adapter retains the same ranges and ordering contract while traversing the scene once into one transparent DirectComposition surface; each placement becomes an ordered rectangular aperture exposing its child HWND below, and no surface is allocated per slice.
 The renderer enables that composition surface lazily on the first PlatformView and retains it for the rest of the window lifetime, so temporary unmounts do not rebuild the swap chain.
@@ -566,7 +566,7 @@ Implemented stages:
 - Add layout input caches and conservative ancestor invalidation.
 - Add equality-aware retained modifier and layout-value diffs.
 - Retain clean virtual policy, realization, and placement state, and reuse stable item measurements while scrolling.
-- Consume DamageRegion as platform update bounds on macOS and Windows, while Android uses the same committed scene with full View invalidation.
+- Consume DamageRegion as platform update bounds on Windows and macOS, while Android uses the same committed scene with full View invalidation.
 - Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its platform blur resources.
 - Record Canvas callbacks into retained PaintSequences and replay filled, stroked, clipped, and shadowed Paths through every renderer.
 
@@ -593,4 +593,4 @@ Instrumentation used by these tests belongs in test support or internal debug co
 It is not part of the application API.
 
 Every adoption stage runs the full common test suite and all platform builds available on the development host.
-Scene-boundary changes require renderer audits for Android, iOS, macOS, Windows, and Web even when a platform cannot be built locally.
+Scene-boundary changes require renderer audits for Windows, macOS, Web, Android, and iOS even when a platform cannot be built locally.

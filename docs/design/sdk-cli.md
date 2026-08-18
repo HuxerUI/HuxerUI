@@ -9,15 +9,15 @@ The current implementation provides:
 - An installable platform-specific CMake package with canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
 - `huxerui_add_app`, installed host code generators, and generated application integration metadata.
 - A `huxerui` CLI with explicit application and module creation, `platform add`, `doctor`, `devices`, `build`, `run`, and `open ios`.
-- Source-controlled Android, iOS, Windows, macOS, Linux, and Web platform enablement, with the Linux runtime backend built directly through CMake.
-- Source-SDK Android, Linux, and Web integration, source- or installed-SDK iOS integration, and installed-SDK Windows and macOS builds.
+- Source-controlled Windows, macOS, Linux, Web, Android, and iOS platform enablement, with the Linux runtime backend built directly through CMake.
+- Installed-SDK Windows and macOS builds, source-SDK Linux, Web, and Android integration, and source- or installed-SDK iOS integration.
 - Android and iOS device discovery with deterministic device selection.
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, ordered resource packages, common module scaffolding, an application-based module preview, Android Gradle library attachment, and iOS Swift Package aggregation and attachment.
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
 
-Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Linux, ExternalTexture platform producers and renderer frame import on Windows and Web, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, macOS NSView hosting, iOS UIView hosting, Android View hosting with slice composition, Web HTMLElement hosting with retained Canvas slices, Windows child-HWND hosting with single-surface DirectComposition, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Android, iOS, Linux, macOS, Windows, and Web nonvisual timer reference integrations are implemented.
-The current Android, Linux, and Web CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
+Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Linux, ExternalTexture platform producers and renderer frame import on Windows and Web, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Apple `CVPixelBuffer`, Linux RGBA/BGRA, and Android `Bitmap` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, Windows child-HWND hosting with single-surface DirectComposition, macOS NSView hosting, Web HTMLElement hosting with retained Canvas slices, Android View hosting with slice composition, iOS UIView hosting, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Windows, macOS, Linux, Web, Android, and iOS nonvisual timer reference integrations are implemented.
+The current Linux, Web, and Android CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
 Where the current source-oriented CLI differs, this document identifies the transitional behavior explicitly instead of preserving it as a second architecture.
@@ -208,7 +208,7 @@ Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and alw
 
 Generated files are projections, not another source of truth.
 Desktop and Web builds use application artifact metadata emitted by the shared application helper.
-iOS uses build-result metadata emitted by its Xcode build phase, while Android reads Gradle's APK `output-metadata.json` so launch uses the final variant application ID and artifact name.
+Android reads Gradle's APK `output-metadata.json`, while iOS uses build-result metadata emitted by its Xcode build phase, so launch uses the final variant application ID and artifact name.
 Launch metadata remains build output rather than a duplicate project identity and is distinct from dependency discovery.
 
 When a platform package manager must attach source-backed module packages, CMake emits `.huxerui/generated/modules.json` from the resolved common module graph.
@@ -248,7 +248,7 @@ A platform list is comma-separated or `all`.
 ### Create and platform add
 
 ```bash
-huxerui create app hello_huxer --id dev.example.hello --platform android,windows
+huxerui create app hello_huxer --id dev.example.hello --platform windows,android
 cd hello_huxer
 huxerui platform add macos
 ```
@@ -300,7 +300,7 @@ The Web shell owns the HTML document and host-element mount code rather than hid
 ### Run
 
 `run` accepts exactly one enabled platform and performs a build before launch.
-Windows starts the executable, macOS opens the application bundle, Android installs and launches the generated APK, iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device, and Web delegates the generated HTML entry point to `emrun`.
+Windows starts the executable, macOS opens the application bundle, Web delegates the generated HTML entry point to `emrun`, Android installs and launches the generated APK, and iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device.
 
 For Android, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
@@ -347,13 +347,13 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 Platform build systems consume platform artifacts through their normal mechanisms:
 
 - Android uses a Maven AAR containing Java integration, JNI libraries, and Prefab metadata.
-- iOS and macOS may use signed XCFramework and Swift Package artifacts where platform-package integration is required.
+- macOS and iOS may use signed XCFramework and Swift Package artifacts where platform-package integration is required.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
 - Web uses an Emscripten-version-compatible SDK archive while configuring the application root through `emcmake`.
 
 Platform packages do not duplicate common application policy or introduce another runtime resource store.
 Android may substitute the repository Gradle library explicitly for source development, while installed and source CMake paths preserve the same canonical HuxerUI targets.
-The current implementation predates the complete release layout: Android, Linux, and Web require a source checkout, iOS accepts source or a compatible installed prefix, and Windows and macOS consume installed packages.
+The current implementation predates the complete release layout: Windows and macOS consume installed packages, Linux, Web, and Android require a source checkout, and iOS accepts source or a compatible installed prefix.
 The implementation phases replace these restrictions rather than preserving them as supported distribution modes.
 
 ### Installers
@@ -406,7 +406,7 @@ A driver owns:
 The interface deliberately contains only capabilities implemented by the current command surface.
 Package, clean, signing, and artifact collection operations should be added when those commands exist rather than anticipated as empty virtual methods.
 
-The current registry contains Android, iOS, Windows, macOS, Linux, and Web.
+The current registry contains Windows, macOS, Linux, Web, Android, and iOS.
 The registry is compiled into the CLI; it is not a dynamic extension mechanism.
 Adding a platform may split template storage or driver implementations when their size justifies it, but does not change project discovery or command parsing.
 
@@ -415,17 +415,6 @@ CMakeRC compiles that tree into the CLI, and the internal template loader render
 The installed CLI therefore remains a single executable and never searches the current directory, source checkout, or SDK for template files at runtime.
 These CLI templates are build-time tool resources and are independent of the application-facing `resources.bin` package.
 Empty scaffold files and directories remain explicit generator structure because an embedded filesystem cannot represent an empty directory.
-
-### Android
-
-The shell is a Gradle application with an `app` module.
-Gradle owns Android packaging, manifest merging, SDK selection, ABI variants, and APK output.
-CMake owns the common application target, code generation, common modules, and final HuxerUI resource generation.
-
-Published builds consume the HuxerUI AAR and its Prefab targets through normal Gradle dependency resolution.
-Source development substitutes the repository Android library explicitly while preserving the same Gradle and CMake target contract.
-The app module's `externalNativeBuild` points directly at the repository root `CMakeLists.txt`.
-There is no project-level `huxerui.cmake`, generated Android SDK configuration projection, or CMake-owned copy of Gradle configuration in the target architecture.
 
 ### Windows
 
@@ -447,6 +436,24 @@ The CLI driver runs on Linux hosts, configures and builds the root project, disc
 Linux-specific module C++ sources under `platform/linux/src` join the ordinary module target and therefore require no platform-package projection.
 Missing PlatformView, accessibility, or module capabilities are backend limitations to implement explicitly; they do not make Linux a future platform.
 
+### Web
+
+The shell supplies the browser-owned HTML document and empty host element used by the adapter-owned composition root.
+The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development.
+It does not define a parallel JavaScript component system or expose browsers as synthetic devices.
+Formal distribution uses an Emscripten-compatible SDK archive, and a source checkout remains an explicit override of the same root-project configuration.
+
+### Android
+
+The shell is a Gradle application with an `app` module.
+Gradle owns Android packaging, manifest merging, SDK selection, ABI variants, and APK output.
+CMake owns the common application target, code generation, common modules, and final HuxerUI resource generation.
+
+Published builds consume the HuxerUI AAR and its Prefab targets through normal Gradle dependency resolution.
+Source development substitutes the repository Android library explicitly while preserving the same Gradle and CMake target contract.
+The app module's `externalNativeBuild` points directly at the repository root `CMakeLists.txt`.
+There is no project-level `huxerui.cmake`, generated Android SDK configuration projection, or CMake-owned copy of Gradle configuration in the target architecture.
+
 ### iOS
 
 The shell is a source-controlled Xcode application project. It owns the Info.plist, launch screen, asset catalog, build configurations, shared scheme, product identifier, signing, Capabilities, platform sources, archive behavior, and final App Bundle.
@@ -456,13 +463,6 @@ On iOS, the application-core archive contains the static `Application` declarati
 iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_HOME` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding remain outside the current preview.
 
 `huxerui open ios` writes the resolved SDK location only to the ignored local Xcode configuration. Repository examples use one source-controlled platform runner whose `HUXERUI_APP_TARGET` build setting selects an `example_*` application core; adding an example does not add another Xcode project or platform application target.
-
-### Web
-
-The shell supplies the browser-owned HTML document and empty host element used by the adapter-owned composition root.
-The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development.
-It does not define a parallel JavaScript component system or expose browsers as synthetic devices.
-Formal distribution uses an Emscripten-compatible SDK archive, and a source checkout remains an explicit override of the same root-project configuration.
 
 ## Modules and platform integration
 
@@ -532,7 +532,7 @@ Platform-specific SDK levels, dependencies, permissions, capabilities, publishin
 Application creation retains the current all-platform default when `--platform` is omitted.
 Module creation without `--platform` creates only the common C++ module and common preview sources; it does not create empty platform packages.
 Each platform selected for a module creates the matching application shell below `examples/preview`.
-Android additionally creates an independent Gradle library under `platform/android`, iOS creates a Swift Package under `platform/ios`, and Linux and Windows create CMake source roots under `platform/<platform>/src`.
+Windows and Linux create CMake source roots under `platform/<platform>/src`, Android additionally creates an independent Gradle library under `platform/android`, and iOS creates a Swift Package under `platform/ios`.
 macOS and Web currently add only the Preview shell because no separate platform-package shape has been defined for them.
 `platform add` applies the same behavior after creation and refuses to overwrite either an existing platform package or Preview shell.
 Later commands obtain launch artifacts from the owning platform or CMake build output, while platform-package attachment uses the platform-neutral generated module graph.
@@ -683,7 +683,7 @@ The application platform CMake build includes the same root CMake project, so co
 The iOS CLI driver projects the same graph into one generated local Swift package aggregator below `.huxerui/generated/ios/modules` before building or opening Xcode.
 The source-controlled Xcode application references one stable aggregator product, so adding or removing modules does not rewrite the project file.
 The aggregator only composes module packages; application privacy text, entitlements, capabilities, signing, and final product policy stay in the Xcode shell.
-Linux, Windows, and Web module sources join the common target directly from their platform source roots, so those platforms do not need platform module projection.
+Windows, Linux, and Web module sources join the common target directly from their platform source roots, so those platforms do not need platform module projection.
 Web modules select C++ and Emscripten glue from their own CMake target and declare any JavaScript link inputs there; the CLI does not translate JavaScript package metadata into the common module graph.
 
 Runtime installation remains explicit C++ application policy.
@@ -745,7 +745,7 @@ The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed
 Platform-package attachment only makes a module's platform implementation available to the platform application target; the module's explicit RootHook still installs its factories and services without another runtime API or composition mode.
 A PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the platform object to a global foreground or background plane.
 Module-owned typed Root Services keep PlatformPayload codecs and string method names behind those services.
-The macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Android dispatches through its owning `HuxerUIView`, Linux uses an `eventfd`-backed X11 event-loop queue, Windows posts a coalesced private message to its application HWND, and Web queues work through the browser event loop. `example_platform_module` provides source-level Foundation, Java, Linux `timerfd`, Windows thread-pool timer, and Emscripten interval integrations behind one typed service. On Android, Apple platforms, and Linux it additionally returns an `ExternalTexture` from a typed service and publishes `Bitmap`, `CVPixelBuffer`, or copied RGBA frames without per-frame PlatformModule callbacks.
+Windows posts a coalesced private message to its application HWND, the macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Linux uses an `eventfd`-backed X11 event-loop queue, Web queues work through the browser event loop, and Android dispatches through its owning `HuxerUIView`. `example_platform_module` provides source-level Windows thread-pool timer, Foundation, Linux `timerfd`, Emscripten interval, and Java integrations behind one typed service. On Apple platforms, Linux, and Android it additionally returns an `ExternalTexture` from a typed service and publishes `CVPixelBuffer`, copied RGBA, or `Bitmap` frames without per-frame PlatformModule callbacks.
 
 Camera or video may still use PlatformView when a platform interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a platform input subtree.
@@ -768,8 +768,8 @@ The architecture is implemented through reviewable phases that keep generated pr
 - Documentation has replaced the source-SDK-oriented architecture with the single-SDK home, installer, resource, root-CMake, and module-graph contracts.
 - Platform build ownership has removed the Android configuration projection and platform wrapper CMake project, lets Gradle configure the application root directly, and reduces generated platform module data to `modules.json`.
 - Formal SDK home selection now provides `HUXERUI_HOME`, relocatable Windows and macOS installation validation, CLI self-discovery and child-process propagation, resource validation, and the same canonical public targets for installed and source use.
-- Future installer packaging will wrap the canonical install tree for Windows, Linux, and macOS, while platform releases will publish Android, Apple, desktop, and Web artifacts without adding another common package hierarchy.
-- Platform completion now projects the module graph into the iOS Swift package aggregator and lets Linux CLI applications and modules use the root CMake graph directly without broadening the common metadata contract.
+- Future installer packaging will wrap the canonical install tree for Windows, macOS, and Linux, while platform releases will publish desktop, Web, Android, and Apple artifacts without adding another common package hierarchy.
+- Platform completion lets Linux CLI applications and modules use the root CMake graph directly and projects the module graph into the iOS Swift package aggregator without broadening the common metadata contract.
 
 Each phase ends with its focused tests, a current-host build, packaging validation where applicable, `git diff --check`, and an owner review before the next phase begins.
 

@@ -1,6 +1,6 @@
 # Getting Started
 
-HuxerUI applications use C++20 and share the same declarative UI code across Android, iOS, Linux, macOS, Windows, and Web. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each platform backend owns its window or host view, text services, and rendering surface.
+HuxerUI applications use C++20 and share the same declarative UI code across Windows, macOS, Linux, Web, Android, and iOS. The platform-independent runtime owns state, recomposition, layout, input routing, and retained-scene generation; each platform backend owns its window or host view, text services, and rendering surface.
 
 ## Requirements
 
@@ -70,7 +70,7 @@ huxerui_add_app(my_app
 ```
 
 `huxerui_add_app()` creates the platform-appropriate application target, links HuxerUI, and enables scope code generation after all declared sources are known.
-CLI-generated projects select `platform/windows/main.cpp`, `platform/macos/main.cpp`, or `platform/linux/main.cpp` for the current desktop host; iOS owns the corresponding Objective-C++ entry, while Android and Web are hosted.
+CLI-generated projects select `platform/windows/main.cpp`, `platform/macos/main.cpp`, or `platform/linux/main.cpp` for the current desktop host; Web and Android are hosted, while iOS owns the corresponding Objective-C++ entry.
 Advanced embedded targets may still create their target directly and call `huxerui_enable_codegen()` after adding all sources.
 The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
 
@@ -208,7 +208,7 @@ cmake --build build --target huxerui_cli --parallel
 Create a project with source-controlled platform shells:
 
 ```bash
-huxerui create app hello_huxer --platform ios,windows,web
+huxerui create app hello_huxer --platform windows,web,ios
 cd hello_huxer
 huxerui platform add android
 huxerui doctor
@@ -225,7 +225,7 @@ huxerui run web
 Use `--id <reverse-domain-id>` to set one exact cross-platform application identifier instead of the editable `com.example.<normalized-name>` default.
 `create module` writes a common CMake module and an ordinary application under `examples/preview`.
 Module names do not require a `huxerui-` prefix and may contain uppercase letters; the supplied directory name is preserved while common identifiers are normalized to lowercase snake case.
-Selecting Android also creates an independent Gradle library, selecting iOS creates a Swift Package, and selecting Linux creates the module's CMake `platform/linux/src` root. Android and iOS builds attach consumed platform module packages to the preview application automatically.
+Selecting Linux creates the module's CMake `platform/linux/src` root, selecting Android also creates an independent Gradle library, and selecting iOS creates a Swift Package. Android and iOS builds attach consumed platform module packages to the preview application automatically.
 Running `doctor`, `build`, `run`, or `open ios` from a module root resolves to this ordinary Preview application; the same commands also work directly inside `examples/preview`.
 The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`, plus Linux sources under `platform/linux/src` when configuring for Linux.
 `doctor` discovers the nearest project from a nested directory, validates each platform shell, and checks host tools without changing the project.
@@ -235,14 +235,14 @@ The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files
 `run android` selects the only ready device automatically or requires `--device <id>` when several are available.
 For a fresh desktop build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence. `--generator` is rejected for Android and iOS because their platform generators belong to Gradle and Xcode.
 The CLI selects an explicit source checkout or installed prefix through `HUXERUI_HOME`, otherwise it locates a compatible SDK relative to its executable, and propagates the resolved home to native build tools.
-Android, Linux, and Web CLI projects currently require a source SDK. iOS accepts a source checkout or an installed SDK built for the selected Apple SDK and architectures.
+Linux, Web, and Android CLI projects currently require a source SDK. iOS accepts a source checkout or an installed SDK built for the selected Apple SDK and architectures.
 Android includes that checkout's Java Gradle library and configures the application root `CMakeLists.txt` directly for its native libraries and final HuxerUI resources, while Web compiles the framework and application together through Emscripten.
 Android SDK levels, the NDK version, ABIs, application identity, dependencies, and packaging policy remain entirely in the generated Gradle shell.
 The generated Android shell uses a local Gradle wrapper when the project supplies one and otherwise requires `gradle` on `PATH`.
 
 These source-SDK restrictions are transitional rather than the public distribution contract.
 The approved model provides one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, module, and application resources.
-Formal Android, Apple, Linux, Windows, and Web artifacts, Windows, Linux, and macOS installers, and package commands are implemented in later phases.
+Formal Windows, macOS, Linux, Web, Android, and iOS artifacts, Windows, macOS, and Linux installers, and package commands are implemented in later phases.
 Their platform integration contracts are defined in [SDK, CLI, Platform Shell, and Module Design](design/sdk-cli.md).
 
 ## Run examples

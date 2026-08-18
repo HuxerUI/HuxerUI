@@ -1,6 +1,6 @@
 # Text Input and TextField Design
 
-Status: implemented foundation with Android, iOS, Linux, macOS, and Windows platform adapters
+Status: implemented foundation with Windows, macOS, Linux, Android, and iOS platform adapters
 
 This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformAdapter`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
@@ -129,7 +129,7 @@ The model follows these rules:
 - Session identity and platform synchronization revisions are not part of `TextEditingValue`.
 - Invalid offsets, reversed ranges, and offsets inside a UTF-16 surrogate pair are rejected at protocol boundaries.
 
-UTF-16 offsets are an explicit interoperability choice. Android, Apple text input APIs, Windows input APIs, and SweetEditor already operate in this coordinate system. Keeping one offset convention prevents every adapter from inventing a different conversion policy.
+UTF-16 offsets are an explicit interoperability choice. Windows input APIs, Apple text input APIs, Android, and SweetEditor already operate in this coordinate system. Keeping one offset convention prevents every adapter from inventing a different conversion policy.
 
 Application code should not normally manipulate UTF-16 offsets directly. TextField and reusable text utilities provide validated range and movement operations.
 
@@ -1163,7 +1163,7 @@ src/text_field.cpp
 src/selection_area.cpp
 ```
 
-Platform adapters remain in their existing platform directories. Generic input behavior must not move into Android, Apple, or Windows helper libraries.
+Platform adapters remain in their existing platform directories. Generic input behavior must not move into Windows, Apple, or Android helper libraries.
 
 ## Implemented delivery
 
@@ -1188,7 +1188,7 @@ The usable control contains:
 - Bounded TextField-local undo and redo with composition grouping.
 - Static selection through `SelectionArea`.
 
-Android, iOS, macOS, and Windows now provide end-to-end native IME adapters.
+Windows, macOS, Android, and iOS now provide end-to-end native IME adapters.
 
 The extension milestone validates one non-TextField client through a SweetEditor bridge or equivalent fake document client.
 

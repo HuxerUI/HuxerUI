@@ -764,7 +764,7 @@ The public files are:
 `src/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
-Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Android, or Web.
+Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Web, or Android.
 
 A `navigation_internal.h` is justified only if multiple implementation files share a private contract that cannot remain behind NodeExtension or View declarations.
 Controller state alone does not justify another private header.

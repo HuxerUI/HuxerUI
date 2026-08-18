@@ -4,13 +4,13 @@ Status: initial implementation with ordered target resource merging
 
 This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Android, iOS, macOS, Windows, and Web, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, platform raster caches, and generated-assets wiring for the repository Android example runner.
+The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Windows, macOS, Web, Android, and iOS, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, platform raster caches, and generated-assets wiring for the repository Android example runner.
 Reusable installed-Android integration, inherited Locale shaping for ordinary application text, localized image discovery, and future platform adapters remain planned.
 
 ## Goals
 
 - Give application, framework, and module resources stable typed identities that do not expose platform paths or platform resource identifiers.
-- Package one resource model into Android assets, macOS application bundles, and Windows distributions.
+- Package one resource model into Windows distributions, macOS application bundles, and Android assets.
 - Support Image as a built-in View and image replay from Canvas without introducing another rendering surface.
 - Keep encoded image bytes available to application and module code while retaining platform decoding and bitmap caches in platform renderers.
 - Resolve localized strings through the existing Environment and root-service model.
@@ -240,16 +240,16 @@ Embedding or archive packing can be added later without changing ResourceId, Ima
 
 Target packaging maps the staging directory as follows:
 
+- Windows copies it beside the executable under `<executable-name>.resources` so multiple applications can share one output directory without colliding.
+- macOS copies it into `.app/Contents/Resources/HuxerUI`.
+- Linux copies it beside the executable under `<executable-name>.resources`.
+- Web preloads it into WASM-owned memory or a virtual filesystem before Runtime is created.
 - Android CMake builds generate one package per ABI, then a Gradle generated-assets task selects one deterministic
   package after platform builds complete and synchronizes it into APK assets.
   The repository example runner recompiles the built-in source package when Prefab does not expose the standalone SDK resource
   artifact, and its Gradle staging task fails the build rather than packaging an application without that final package.
-- macOS copies it into `.app/Contents/Resources/HuxerUI`.
-- Windows copies it beside the executable under `<executable-name>.resources` so multiple applications can share one output directory without colliding.
 - iOS copies it into the application bundle's reserved HuxerUI resources directory.
 - OHOS includes it in the HAP rawfile payload.
-- Linux copies it beside the executable under `<executable-name>.resources`.
-- Web preloads it into WASM-owned memory or a virtual filesystem before Runtime is created.
 
 Shared application code never uses Android `R` identifiers, `NSBundle` paths, or Win32 resource identifiers.
 Future backends likewise keep platform bundle handles, rawfile handles, installation paths, and browser URLs behind PlatformResources.
@@ -646,9 +646,9 @@ return Canvas([logo](PaintContext& paint, Size size) {
 
 Each renderer caches decoded platform images by the resolved immutable ImageAsset's private stable identity.
 
-- Android decodes with BitmapFactory and replays with `Canvas.drawBitmap`.
-- macOS decodes through ImageIO and replays a retained CGImage.
 - Windows decodes through WIC and creates a Direct2D bitmap.
+- macOS decodes through ImageIO and replays a retained CGImage.
+- Android decodes with BitmapFactory and replays with `Canvas.drawBitmap`.
 
 Android transfers encoded bytes to Java only on a bitmap-cache miss.
 Subsequent frames identify the same asset without recreating a byte array or decoding again.
@@ -657,10 +657,10 @@ Platform image caches use a 64 MiB decoded-byte LRU budget and remain renderer-o
 An individual decoded image larger than the budget is retained as the cache's sole entry so repeated frames do not
 decode it again; the next distinct image evicts it normally.
 Device loss clears Windows device-dependent bitmaps but does not invalidate ImageAsset, layout, or PaintSequence data.
-Destroying an Android View releases its Bitmap cache, and macOS cache entries use balanced Core Foundation ownership.
+macOS cache entries use balanced Core Foundation ownership, and destroying an Android View releases its Bitmap cache.
 macOS maps source and destination rectangles while drawing the retained full CGImage, avoiding a cropped CGImage allocation per command.
 
-The current Android, iOS, macOS, and Windows backends decode synchronously on the first cache miss.
+The current Windows, macOS, Android, and iOS backends decode synchronously on the first cache miss.
 The Web backend keeps asynchronous loading and failure state inside its renderer, draws no image while loading, and asks its PlatformAdapter to schedule a frame when decoding completes.
 
 A later preload service may warm platform caches without changing ImageAsset, Image, or DrawImageCommand.
@@ -669,18 +669,6 @@ A later preload service may warm platform caches without changing ImageAsset, Im
 
 The resource and image contracts treat supported platforms as an open-ended set.
 New backends implement PlatformResources and platform image replay without adding platform variants to shared application code.
-
-### iOS
-
-iOS reads the reserved resource directory from the application bundle and uses the same versioned index as macOS. The Xcode shell stages the package generated by the CMake application helper into that directory for Simulator and physical-device application bundles.
-ImageIO produces renderer-owned CGImage values, while the platform adapter reports system Locale and display scale through ResourceConfiguration.
-Security-scoped URLs are platform service inputs whose bytes may be converted to ImageAsset with FromEncoded; they are not package ResourceIds.
-
-### OHOS
-
-OHOS stages the resource index and payload into HAP rawfile storage.
-Its PlatformResources implementation owns resource-manager and rawfile lifetimes, converts reads into shared RawAsset storage, and never exposes platform handles to Runtime.
-The OHOS renderer owns decoded platform image values and platform cache release.
 
 ### Linux
 
@@ -700,6 +688,18 @@ The current PaintSequence remains valid because DrawImageCommand already retains
 
 Network fetches are not ResourceIds.
 Application or module code fetches bytes asynchronously, constructs ImageAsset with FromEncoded, updates controlled state, and lets ordinary recomposition replace the image.
+
+### iOS
+
+iOS reads the reserved resource directory from the application bundle and uses the same versioned index as macOS. The Xcode shell stages the package generated by the CMake application helper into that directory for Simulator and physical-device application bundles.
+ImageIO produces renderer-owned CGImage values, while the platform adapter reports system Locale and display scale through ResourceConfiguration.
+Security-scoped URLs are platform service inputs whose bytes may be converted to ImageAsset with FromEncoded; they are not package ResourceIds.
+
+### OHOS
+
+OHOS stages the resource index and payload into HAP rawfile storage.
+Its PlatformResources implementation owns resource-manager and rawfile lifetimes, converts reads into shared RawAsset storage, and never exposes platform handles to Runtime.
+The OHOS renderer owns decoded platform image values and platform cache release.
 
 ## Locale
 
@@ -914,9 +914,9 @@ The initial implementation has focused shared coverage for:
 - Ordered package input precedence, variant coexistence, repeated namespaces, stale payload removal, final-family validation, and payload-hash validation.
 
 Every renderer implements image decode, cropping, destination scaling, sampling, and bounded platform caches.
-Windows common builds and tests plus Android compilation are required for this implementation; macOS must be built on macOS before release.
+Windows common builds and tests, a macOS build on macOS, and Android compilation are required before release.
 
-Future platform and SDK work adds installed-package, ordered target integration, iOS archive export, OHOS, Linux, and Web release-packaging validation as those capabilities become available.
+Future platform and SDK work adds installed-package, ordered target integration, Linux and Web release-packaging validation, iOS archive export, and OHOS as those capabilities become available.
 
 ## Delivery sequence
 
@@ -925,7 +925,7 @@ The delivery sequence is:
 - Land this design and align SDK, Canvas, Text, and roadmap documentation.
 - Add ResourceId, typed keys, resource index generation, PlatformResources, AppResources, Locale, and package staging.
 - Add RawResource and RawAsset as the smallest byte-loading path and use it to validate the package boundary.
-- Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Android, iOS, macOS, and Windows platform decoders.
+- Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Windows, macOS, Android, and iOS platform decoders.
 - Add VectorAsset construction, compiled SVG resources, automatic ImageResource format detection, vector tint, and shared path replay.
 - Add StringResource formatting and locale fallback.
 - Extend `hapt` with exact namespace generation and ordered binary-index merging.

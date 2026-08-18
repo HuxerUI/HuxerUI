@@ -8,13 +8,13 @@
 
 <p align="center"><a href="docs/getting-started.md">Getting Started</a> · <a href="docs/core-concepts.md">Core Concepts</a> · <a href="docs/design/architecture.md">Architecture</a> · <a href="docs/roadmap.md">Roadmap</a></p>
 
-HuxerUI brings a functional, declarative UI model to C++20. Android, Linux, macOS, Windows, and the iOS and Web technical previews share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining platform-specific integration, text systems, and renderers.
+HuxerUI brings a functional, declarative UI model to C++20. Windows, macOS, Linux, Web, Android, and iOS share the same state, recomposition, layout, input, scrolling, text editing, animation, and retained-scene runtime while retaining platform-specific integration, text systems, and renderers.
 
 ## Why HuxerUI
 
 | Declarative C++ | Shared Runtime | Platform Integration |
 |---|---|---|
-| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Android View, UIKit, AppKit, Win32, X11, or an Emscripten Canvas while preserving platform services. |
+| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Win32, AppKit, X11, an Emscripten Canvas, Android View, or UIKit while preserving platform services. |
 
 HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationBar, NavigationPane, DrawerLayout, NavigationStack, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
@@ -88,7 +88,7 @@ ctest --test-dir build --output-on-failure
 Top-level builds also produce the `huxerui` CLI:
 
 ```bash
-huxerui create app hello_huxer --platform android,ios,windows,macos,linux,web
+huxerui create app hello_huxer --platform windows,macos,linux,web,android,ios
 huxerui doctor
 huxerui devices ios
 huxerui open ios
@@ -97,12 +97,12 @@ huxerui run windows
 huxerui run linux
 ```
 
-The CLI creates and validates source-controlled platform shells, including an Xcode project for iOS, discovers Android and iOS devices, builds enabled Android, iOS Simulator or physical-device, Windows, macOS, Linux, and Web targets from compatible hosts, and launches development artifacts.
+The CLI creates and validates source-controlled platform shells, including an Xcode project for iOS, discovers Android and iOS devices, builds enabled Windows, macOS, Linux, Web, Android, and iOS Simulator or physical-device targets from compatible hosts, and launches development artifacts.
 The current CMake install exports a platform-specific SDK package, the CLI, host code generators, and built-in resources.
-Android, Linux, and Web CLI projects currently build against a source SDK checkout, while iOS accepts either a source checkout or a compatible installed SDK.
+Linux, Web, and Android CLI projects currently build against a source SDK checkout, while iOS accepts either a source checkout or a compatible installed SDK.
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
 The approved distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
-Versioned Windows, Linux, and macOS installers, platform artifacts, and package commands remain staged work.
+Versioned Windows, macOS, and Linux installers, platform artifacts, and package commands remain staged work.
 
 See [Getting Started](docs/getting-started.md) for application setup, platform builds, CMake options, code generation, and example launch commands.
 
@@ -110,12 +110,12 @@ See [Getting Started](docs/getting-started.md) for application setup, platform b
 
 | Platform | Status | Platform integration |
 |---|---|---|
-| Android | Supported | View, Canvas, StaticLayout, InputConnection |
-| Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM, optional Fcitx5 DBus preedit |
-| iOS | Technical preview | UIKit, CoreGraphics, CoreText, UITextInput |
-| macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
 | Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
-| Web | Technical preview | Emscripten, WebAssembly, Canvas 2D, browser text input |
+| macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
+| Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM, optional Fcitx5 DBus preedit |
+| Web | Supported | Emscripten, WebAssembly, Canvas 2D, browser text input |
+| Android | Supported | View, Canvas, StaticLayout, InputConnection |
+| iOS | Supported | UIKit, CoreGraphics, CoreText, UITextInput |
 | OHOS | Planned | Shared Runtime with platform-specific adapters |
 
 See [Platform Support](docs/platform-support.md) for backend responsibilities and integration details.
@@ -173,8 +173,8 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
-| `example_platform_module` | Android, iOS, Linux, macOS, Windows, and Web typed platform services, plus Android `Bitmap`, Apple `CVPixelBuffer`, and Linux RGBA/BGRA ExternalTexture streams |
-| `example_platform_view` | Android, Apple, Web, and Windows `PlatformTextField` integration with HuxerUI layout, state, events, and rendering order |
+| `example_platform_module` | Windows, macOS, Linux, Web, Android, and iOS typed platform services, plus Linux RGBA/BGRA, Android `Bitmap`, and Apple `CVPixelBuffer` ExternalTexture streams |
+| `example_platform_view` | Windows, macOS, Web, Android, and iOS `PlatformTextField` integration with HuxerUI layout, state, events, and rendering order |
 | `platform/android/example_runner` | Android example selection, platform integration, and application packaging |
 
 ## Architecture

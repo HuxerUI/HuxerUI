@@ -498,6 +498,6 @@ Rules return valid, invalid, or pending results. Validation messages are StringV
 
 `TextInputAction::Next` submits and moves to the next focusable control without wrapping. `Done`, `Go`, `Search`, and `Send` submit through `OnSubmitted`; on mobile, terminal actions dismiss the soft keyboard. `Default` resolves to `Done` for single-line fields and `Newline` for multiline fields.
 
-Android, iOS, macOS, and Windows use the same text-input session and command protocol. Platform adapters handle native IME lifecycle and coordinate conversion while the C++ runtime owns controlled value synchronization, selection, composition, undo, redo, and submission.
+Windows, macOS, Android, and iOS use the same text-input session and command protocol. Platform adapters handle native IME lifecycle and coordinate conversion while the C++ runtime owns controlled value synchronization, selection, composition, undo, redo, and submission.
 
 For protocol and platform details, see the [text input design](design/text-input.md).

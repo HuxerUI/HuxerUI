@@ -96,9 +96,9 @@ Animated retained behavior continues to use NodeExtension frame callbacks and pa
 
 Platform renderers convert Path elements to platform geometry while preserving fill rules, stroke caps, joins, transforms, and clip balance:
 
-- Android uses `android.graphics.Path` and the host Canvas.
-- macOS uses Core Graphics paths.
 - Windows uses Direct2D path geometry.
+- macOS uses Core Graphics paths.
+- Android uses `android.graphics.Path` and the host Canvas.
 
 Path shadow masks reuse each backend's existing blur machinery.
 Platform geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
