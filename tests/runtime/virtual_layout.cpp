@@ -8,6 +8,7 @@ int built_in_grid_factory_calls = 0;
 int virtual_strip_measure_calls = 0;
 State<std::vector<int>> virtual_reorder_items;
 State<std::vector<int>> virtual_unkeyed_items;
+StateList<int> virtual_state_items;
 State<bool> variable_height_expanded;
 State<bool> variable_grid_height_expanded;
 State<bool> horizontal_virtual_list;
@@ -359,13 +360,8 @@ View StatefulHorizontalVirtualListApp() {
 }
 
 View VirtualStateListApp() {
-  auto items = UseState(
-      std::vector<int>{
-          7,
-          8,
-          9,
-      }
-  );
+  auto items = UseStateList<int>({7, 8, 9});
+  virtual_state_items = items;
   return VirtualList(items, [](int index) { return Text(std::to_string(index)).Key(index); }).ItemExtent(20.0F);
 }
 
@@ -572,6 +568,9 @@ TEST_CASE("TestVirtualListVirtualization") {
   state_runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& state_list = state_runtime.BuildFrame();
   REQUIRE(FirstText(state_list) == "7");
+
+  virtual_state_items.Insert(0, 6);
+  REQUIRE(FirstText(state_runtime.BuildFrame()) == "6");
 }
 
 TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
