@@ -19,6 +19,7 @@
 
 #include <huxerui/app.h>
 
+#include "ios_http_internal.h"
 #include "uikit_accessibility.h"
 #include "uikit_platform_view.h"
 #include "uikit_renderer.h"
@@ -475,6 +476,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateIosHttpTransport();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {

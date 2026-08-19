@@ -29,6 +29,10 @@ PlatformAdapter::~PlatformAdapter() {
   external_texture_surface_->Close();
 }
 
+std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
+  return {};
+}
+
 PlatformModuleFactory::Instance PlatformAdapter::CreatePlatformModule(
     std::string_view type, const PlatformPayload& options, PlatformEventSink events
 ) {

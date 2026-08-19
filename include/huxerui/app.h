@@ -30,6 +30,7 @@ struct ResourceConfiguration;
 
 namespace detail {
 class ExternalTextureSurface;
+class HttpTransport;
 class TaskScopeState;
 class TextLayout;
 } // namespace detail
@@ -112,6 +113,8 @@ public:
   }
 
 protected:
+  virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
+
   template <class Registration>
   [[nodiscard]] const Registration* FindPlatformModuleRegistration(std::string_view type) const {
     return platform_modules_->FindCompatible<Registration>(type);

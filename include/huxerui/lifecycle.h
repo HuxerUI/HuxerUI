@@ -22,8 +22,9 @@ public:
   LifecycleCleanup() = default;
 
   template <class Function>
-    requires std::move_constructible<std::decay_t<Function>> &&
-             std::same_as<std::invoke_result_t<std::decay_t<Function>&>, void>
+    requires(!std::same_as<std::remove_cvref_t<Function>, LifecycleCleanup> &&
+             std::move_constructible<std::decay_t<Function>> &&
+             std::same_as<std::invoke_result_t<std::decay_t<Function>&>, void>)
   explicit LifecycleCleanup(Function&& function)
       : function_(std::make_unique<Model<std::decay_t<Function>>>(std::forward<Function>(function))) {}
 

@@ -1,6 +1,7 @@
 function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/ios/ios_external_texture.mm"
+            "${HUXERUI_PROJECT_DIR}/platform/ios/ios_http.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_accessibility.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_adapter.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_platform_view.mm"

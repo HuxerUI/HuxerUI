@@ -25,6 +25,7 @@
 #include <huxerui/android/platform_module.h>
 
 #include "android_accessibility.h"
+#include "android_http_internal.h"
 #include "android_platform_view.h"
 #include "android_renderer.h"
 #include "android_text_layout.h"
@@ -994,6 +995,10 @@ public:
   }
 
 private:
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateAndroidHttpTransport(virtual_machine_, Environment());
+  }
+
   PlatformModuleFactory::Instance
   CreatePlatformModule(std::string_view type, const PlatformPayload& options, PlatformEventSink events) override {
     const auto* factory = FindPlatformModuleRegistration<android::PlatformModuleFactory>(type);

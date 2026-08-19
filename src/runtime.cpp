@@ -10,6 +10,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include <huxerui/http.h>
+
 namespace huxerui::detail {
 
 namespace {
@@ -989,6 +991,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
+  root.Provide(std::shared_ptr<HttpClient>(new HttpClient(platform.CreateHttpTransport())));
   InstallBuiltinPresentation(root);
   for (const RootHook& hook : application.options.root_hooks) {
     if (!hook) {

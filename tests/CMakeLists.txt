@@ -27,6 +27,7 @@ add_executable(huxerui_tests
         platform/android_text_input.cpp
         platform/web_text.cpp
         runtime/composition.cpp
+        runtime/http.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
         runtime/layout.cpp
@@ -146,6 +147,7 @@ set(HUXERUI_PUBLIC_HEADERS
         event.h
         external_texture.h
         geometry.h
+        http.h
         huxerui.h
         indication.h
         layer.h

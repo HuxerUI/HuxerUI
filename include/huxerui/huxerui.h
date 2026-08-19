@@ -8,6 +8,7 @@
 #include <huxerui/event.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/http.h>
 #include <huxerui/indication.h>
 #include <huxerui/layout.h>
 #include <huxerui/layer.h>

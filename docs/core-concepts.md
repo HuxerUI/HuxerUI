@@ -144,6 +144,37 @@ Lifecycle and EventBindings do not recognize Task types.
 Lifecycle setup explicitly launches work, dependency cleanup explicitly cancels the relevant TaskHandle, and ordinary `void` event handlers may call `Launch()` for scope-owned fire-and-forget work.
 See [Task and Structured Concurrency Design](design/tasks.md) for cancellation, exception, and platform contracts.
 
+## HTTP requests
+
+Runtime provides one typed HttpClient Root Service.
+HttpClient returns Task values, so a component uses its existing TaskScope for ownership and cancellation:
+
+```cpp
+auto http = UseService<HttpClient>();
+auto tasks = UseTaskScope();
+
+Button("Load").OnClick([=] {
+  tasks.Launch([=]() -> Task<void> {
+    HttpResult result = co_await http->Send({
+        .url = "https://api.example.com/value",
+        .headers = {{"Accept", "application/json"}},
+    });
+    if (result.HasResponse()) {
+      value = std::move(result).Response().body;
+    } else {
+      value = result.Error().message;
+    }
+  });
+});
+```
+
+HTTP 4xx and 5xx statuses remain HttpResponse values.
+Transport failures are explicit HttpError values, while Task cancellation stops the native request without resuming application code.
+Invalid portable request configuration still throws `std::invalid_argument` synchronously from `Send()`.
+The response body is a binary-safe in-memory byte string; JSON parsing, streaming, caching, and application retry policy remain separate concerns.
+The shared API and independent macOS, iOS, Android, and Web transports are currently implemented, while the other platform transports remain staged work.
+See [HTTP Client Design](design/http.md) for the complete ownership and platform contract.
+
 ## Node identity and keys
 
 Unkeyed siblings use position and node type as identity. This is appropriate for stable UI structures. Use a stable key when siblings can be inserted, removed, or reordered:

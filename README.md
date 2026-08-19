@@ -141,6 +141,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
 | [Task and Structured Concurrency Design](docs/design/tasks.md) | C++20 Task values, scope ownership, cancellation, and UI-thread resumption |
+| [HTTP Client Design](docs/design/http.md) | Typed requests, Task cancellation, UI-thread resumption, and platform transports |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
@@ -173,6 +174,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
+| `example_http` | macOS, iOS, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

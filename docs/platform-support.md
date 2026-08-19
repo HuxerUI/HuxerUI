@@ -2,14 +2,14 @@
 
 ## Supported backends
 
-| Platform | Application surface | Text layout | Rendering | Text input |
-|---|---|---|---|---|
-| Windows | Win32 | DirectWrite | Direct2D | Keyboard and IMM32 adapter |
-| macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient |
-| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM |
-| Web | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events |
-| Android | Android View | StaticLayout | Canvas | InputConnection and IME |
-| iOS | UIKit View | CoreText | CoreGraphics | UITextInput |
+| Platform | Application surface | Text layout | Rendering | Text input | HTTP |
+|---|---|---|---|---|---|
+| Windows | Win32 | DirectWrite | Direct2D | Keyboard and IMM32 adapter | Planned |
+| macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient | NSURLSession |
+| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM | Planned |
+| Web | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events | Fetch |
+| Android | Android View | StaticLayout | Canvas | InputConnection and IME | HttpURLConnection |
+| iOS | UIKit View | CoreText | CoreGraphics | UITextInput | NSURLSession |
 
 State, recomposition, node reconciliation, layout, hit testing, focus, scrolling, text editing behavior, and retained-scene generation remain in the shared C++ runtime.
 The shared Runtime publishes an immutable `SemanticFrame` with built-in semantics, secure TextField redaction, action routing, and NodeExtension virtual children.
@@ -49,6 +49,7 @@ Platform adapters translate density, platform coordinate systems, key events, po
 Full-window mobile adapters submit viewport and safe-area geometry atomically through `Runtime::SetWindowMetrics()` and apply the light or dark system-bar foreground resolved by Runtime.
 Desktop client areas submit zero insets.
 PlatformAdapter also implements the shared `TextMeasurer` service, resolving platform-neutral Font and TextStyle values through the platform text stack.
+Its optional private HttpTransport capability backs the built-in HttpClient Root Service without exposing native networking types or using PlatformModule payloads.
 They traverse the committed `RenderScene` in `commit.render_frame` and do not duplicate component state machines or layout behavior.
 `SemanticFrame` is a second committed Runtime output beside RenderFrame, not data reconstructed by a renderer or inferred from concrete components in a platform adapter.
 `PlatformAdapter::RequestFrameAt()` accepts an absolute monotonic deadline.
@@ -92,6 +93,7 @@ Windows 7 without Platform Update is not supported.
 ## macOS
 
 The macOS backend creates an AppKit window and View, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for AppKit selection, composition, and geometry queries. Scheduled callbacks and AppKit view-size changes commit Runtime work before invalidation, while `drawRect:` only presents the committed scene.
+It implements HttpClient through an ephemeral NSURLSession, returns complete in-memory responses, and cancels native data tasks when their owning HuxerUI Task is canceled.
 The adapter dispatches nonvisual `PlatformInstance` results and events asynchronously through the AppKit main queue, preserving the owning Runtime thread and preventing synchronous platform completion from reentering application callbacks.
 RootHook-installed macOS PlatformView factories create controlled NSViews under the per-surface `PlatformModules` registry. The adapter retains compatible PlatformView instances, applies property revisions, clips and positions them in logical coordinates, and alternates transparent HuxerUI slice views with platform containers in final `RenderComposition` order. Shared hit testing routes a point either to the frontmost HuxerUI interaction or to the PlatformView subtree without placing PlatformViews in a global foreground plane. AppKit first-responder changes synchronize the shared PlatformView focus leaf, and the accessibility bridge substitutes the unignored NSView accessibility root at its `SemanticFrame` anchor.
 Platform-specific module source includes `<huxerui/macos/platform_view.h>` and calls `root.Modules().Register(type, macos::PlatformViewFactory{...})` from its explicit RootHook. The factory creates an NSView from the complete initial `PlatformPayload`, optionally applies later complete-property updates, emits declared events through its `PlatformEventSink`, and may release module-owned platform state from its dispose callback.
@@ -133,6 +135,7 @@ Canvas 2D replays the shared `RenderScene`, while browser Pointer Events, wheel 
 Web module sources use the existing platform-neutral `PlatformModuleFactory` from C++ and Emscripten glue rather than a second JavaScript registry; the Web `example_platform_module` registers an interval-backed Timer through the same typed Root Service used by the other platforms.
 `web::ExternalTextureSource` accepts open WebCodecs `VideoFrame` values on the browser main thread, synchronously clones each publication into a latest-wins mailbox, and leaves ownership of the original frame with the caller. Canvas acquires one coherent frame per browser animation frame even when PlatformViews divide rendering into several Canvas slices, retains the last acquired frame, and closes replaced or inactive frames. This path does not add a texture registry or claim zero-copy. The same module example returns that texture capability once and then publishes generated frames without per-frame PlatformModule calls.
 RootHook-installed `web::PlatformViewFactory` registrations return detached `HTMLElement` values through Emscripten. The adapter retains compatible elements, applies controlled property revisions, clips and positions them in logical coordinates, and alternates DOM containers with base and transparent Canvas slices in final `RenderComposition` order. Root-capture hit arbitration and focus synchronization preserve the PlatformView boundary between browser interaction and shared Runtime input. The Web `example_platform_view` hosts a controlled `PlatformTextField` through this path. Browser accessibility substitution remains deferred with the wider Web semantics bridge.
+HttpClient uses browser Fetch, buffers complete responses, and aborts canceled or timed-out operations through AbortController. Browser CORS, forbidden-header, credential, and response-header visibility policies remain authoritative; HuxerUI does not add a proxy or a permissive request mode.
 
 Configure and build all examples with a modern Emscripten toolchain:
 
@@ -150,7 +153,7 @@ Serve the generated files rather than opening the HTML directly:
 python3 -m http.server 8000 --directory cmake-build-web/bin
 ```
 
-For example, open `http://127.0.0.1:8000/example_ui_gallery.html`.
+For example, open `http://127.0.0.1:8000/example_ui_gallery.html` or `http://127.0.0.1:8000/example_http.html`.
 Each example produces an HTML entry point, an ES module, a WebAssembly module, and resource data when the target packages resources.
 
 CLI applications can generate and run a source-controlled Web shell directly:
@@ -195,6 +198,7 @@ The application JNI library is named `huxerui_app`. Loading it constructs the ap
 `HuxerUIActivity` owns a lifecycle-bound Back callback and forwards Back to the shared Runtime. Applications using this full-screen Activity set `android:enableOnBackInvokedCallback="true"` on their manifest `application` element, as the example runner does. Android 14 and later forward predictive Back start, progress, cancel, and commit phases; Android 13 forwards Commit; older versions use `onBackPressed()` for the same Commit path. When Runtime does not consume Commit, the Activity calls its overridable `onUnhandledBack()` fallback, which finishes the Activity with transition by default. An embedded integration owns registration itself, may call `HuxerUIView.handleBack()`, and continues its platform fallback only when that method returns `false`.
 
 Coordinates remain density independent. The Android integration maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
+It implements HttpClient through HttpURLConnection on a bounded Java worker executor, buffers complete responses, enforces the shared request deadline, and disconnects native requests when their owning HuxerUI Task is canceled. Applications retain authority over declaring the `INTERNET` permission; the framework library does not inject it.
 
 RootHook-installed Android PlatformView factories create controlled Views under the per-surface `PlatformModules` registry. `HuxerUIView` is a ViewGroup that retains compatible PlatformView instances, applies complete property revisions, clips and positions them in logical coordinates, and alternates HuxerUI Canvas slices with ordinary child drawing in final `RenderComposition` order. Platform-specific module source includes `<huxerui/android/platform_view.h>` and registers an `android::PlatformViewFactory`; `<huxerui/android/jni.h>` supplies move-only local references and checked UTF-8, Java String, and byte-array conversion without adding a Java View or module base class. The Android `example_platform_view` target uses this path to host a controlled EditText. SurfaceView subtrees are rejected because they cannot preserve this Canvas and child-drawing order. Shared hit testing routes touch, hover, and wheel input to the frontmost HuxerUI or PlatformView target. Android View focus changes, Runtime-driven focus, Tab traversal, IME dismissal, and accessibility traversal remain synchronized across that boundary. The accessibility provider replaces each PlatformView semantic anchor with the real Android View subtree at the same sibling position.
 
@@ -213,6 +217,7 @@ Debug process metrics use `getrusage`, `Debug.getPss()`, and the online processo
 ## iOS
 
 The iOS backend creates a UIKit window and safe-area-constrained HuxerUI View, measures text with CoreText, and replays the shared RenderScene through an independent CoreGraphics renderer. CADisplayLink schedules Runtime commits before UIKit invalidation, while `drawRect:` presents only the committed frame.
+It implements HttpClient through an iOS-owned ephemeral NSURLSession, returns complete in-memory responses, and cancels native data tasks when their owning HuxerUI Task is canceled.
 
 Multi-touch, Apple Pencil, indirect pointer, hardware keyboard, clipboard, locale, display scale, keyboard viewport, and packaged-resource events cross one UIKit adapter boundary. A dedicated UITextInput implementation maps UIKit UTF-16 positions, selection, marked text, actions, and caret geometry to the shared text-input session and revision protocol. UIKit does not own a second editing value.
 

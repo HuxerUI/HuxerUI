@@ -25,6 +25,7 @@
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
+#include "macos_http_internal.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
@@ -446,6 +447,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateMacHttpTransport();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {

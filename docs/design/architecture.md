@@ -249,6 +249,10 @@ The Task model does not add Runtime branches to State, EventBindings, Lifecycle 
 
 The complete public and execution contract is defined in [Task and Structured Concurrency Design](tasks.md).
 
+The built-in HttpClient Root Service is the first platform asynchronous API built directly on Task.
+It uses one private HttpTransport capability from PlatformAdapter, preserves HTTP values in shared C++, and resumes native completions through the owning Task execution without routing requests through PlatformModule.
+The complete request, cancellation, error, and backend contract is defined in [HTTP Client Design](http.md).
+
 ## NodeExtension lifecycle
 
 `NodeExtension` operates directly on a controlled public `MountedNode`. There is no separate `ModifierHost` and no context object for every phase.
