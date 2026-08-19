@@ -7,7 +7,11 @@ huxerui_add_example(
 target_sources(example_platform_module PRIVATE timer.cpp)
 
 if (WIN32)
-    target_sources(example_platform_module PRIVATE windows_timer.cpp)
+    target_sources(example_platform_module PRIVATE
+            color_stream.cpp
+            windows_color_stream.cpp
+            windows_timer.cpp
+    )
 elseif (ANDROID)
     target_sources(example_platform_module PRIVATE
             android_color_stream.cpp

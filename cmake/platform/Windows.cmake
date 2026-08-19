@@ -15,6 +15,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_external_texture.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"

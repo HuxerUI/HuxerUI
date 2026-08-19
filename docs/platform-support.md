@@ -75,6 +75,9 @@ Debug process metrics use process times, working-set counters, and the system lo
 Nonvisual Windows modules register the platform-neutral `PlatformModuleFactory` from CMake sources under `platform/windows/src`.
 Platform results and events enter a FIFO owned by the adapter and wake its UI thread through a coalesced private window message; work emitted before HWND creation waits until attachment, and shutdown discards late callbacks.
 The Windows `example_platform_module` implementation uses a thread-pool timer behind the same typed Timer Root Service used by Apple platforms, Linux, and Android.
+`windows::ExternalTextureSource` accepts borrowed, untagged sRGB RGBA8888 or BGRA8888 pixel spans with explicit dimensions and row stride from any producer thread.
+Publish copies straight-alpha pixels into a bounded latest-wins premultiplied BGRA mailbox, and the Direct2D renderer retains and updates one bitmap per active source while preserving its last CPU frame across device recreation.
+This bounded path does not claim zero-copy or direct shared-D3D texture import; the Windows platform module example uses it for the same generated color stream demonstrated by the other backends.
 RootHook-installed `windows::PlatformViewFactory` registrations create same-process, same-thread child HWNDs inside framework clipping containers.
 When a committed scene contains PlatformViews, one premultiplied DirectComposition surface replays every retained HuxerUI slice and clears ordered rectangular apertures that expose those child windows; no surface is allocated per slice.
 The input overlay arbitrates each hit through Runtime, focus and Tab traversal cross the PlatformView boundary through the shared identity, and UI Automation attaches the HWND provider beneath its semantic anchor.

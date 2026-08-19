@@ -173,7 +173,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |
-| `example_platform_module` | Windows, macOS, Linux, Web, Android, and iOS typed platform services, plus Linux RGBA/BGRA, WebCodecs `VideoFrame`, Android `Bitmap`, and Apple `CVPixelBuffer` ExternalTexture streams |
+| `example_platform_module` | Windows, macOS, Linux, Web, Android, and iOS typed platform services, plus Windows/Linux RGBA/BGRA, WebCodecs `VideoFrame`, Android `Bitmap`, and Apple `CVPixelBuffer` ExternalTexture streams |
 | `example_platform_view` | Windows, macOS, Web, Android, and iOS `PlatformTextField` integration with HuxerUI layout, state, events, and rendering order |
 | `platform/android/example_runner` | Android example selection, platform integration, and application packaging |
 

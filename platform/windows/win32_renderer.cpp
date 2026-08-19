@@ -14,6 +14,8 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -26,6 +28,7 @@
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
+#include "win32_external_texture_internal.h"
 #include "win32_internal.h"
 
 namespace huxerui::detail {
@@ -276,6 +279,14 @@ struct Win32Renderer::State {
     std::uint64_t identity = 0;
     std::size_t byte_size = 0;
     ComPtr<ID2D1Bitmap1> bitmap;
+  };
+
+  struct CachedExternalTexture {
+    std::weak_ptr<Win32ExternalTextureState> source;
+    // The CPU frame outlives device resources so a reset can rebuild its Direct2D bitmap without another publish.
+    std::optional<Win32ExternalTextureFrame> frame;
+    ComPtr<ID2D1Bitmap1> bitmap;
+    std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
   };
 
   struct FontHash {
@@ -1055,11 +1066,34 @@ struct Win32Renderer::State {
     shadow_context_.Reset();
   }
 
+  void ResetExternalTextureBitmaps() noexcept {
+    for (CachedExternalTexture& entry : external_textures_) {
+      entry.bitmap.Reset();
+    }
+  }
+
+  void BeginExternalTextureFrame() {
+    if (external_texture_draw_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
+      external_texture_draw_epoch_ = 0;
+      for (CachedExternalTexture& entry : external_textures_) {
+        entry.draw_epoch = std::numeric_limits<std::uint64_t>::max();
+      }
+    } else {
+      ++external_texture_draw_epoch_;
+    }
+
+    std::erase_if(external_textures_, [](const CachedExternalTexture& entry) {
+      const std::shared_ptr<Win32ExternalTextureState> source = entry.source.lock();
+      return !source || !source->IsActive();
+    });
+  }
+
   void DiscardDeviceResources() noexcept {
     clip_stack_.clear();
     transform_stack_.clear();
     DiscardSizeDependentResources();
     DiscardShadowResources();
+    ResetExternalTextureBitmaps();
     path_geometries_.clear();
     images_.clear();
     image_cache_bytes_ = 0;
@@ -1123,6 +1157,7 @@ struct Win32Renderer::State {
     const Rect client_bounds = Win32PixelRectToDips(client, DpiScale());
     clip_stack_.clear();
     transform_stack_.clear();
+    BeginExternalTextureFrame();
     device_context_->SetTarget(scene_target_.Get());
     device_context_->BeginDraw();
     device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -1390,9 +1425,95 @@ struct Win32Renderer::State {
     );
   }
 
+  void UploadExternalTextureFrame(CachedExternalTexture& cached, const Win32ExternalTextureFrame& frame) {
+    const std::span<const std::byte> pixels = frame.Pixels();
+    const auto pitch = static_cast<UINT32>(frame.BytesPerRow());
+    if (cached.bitmap) {
+      const D2D1_SIZE_U size = cached.bitmap->GetPixelSize();
+      if (size.width == static_cast<UINT32>(frame.PixelWidth()) &&
+          size.height == static_cast<UINT32>(frame.PixelHeight())) {
+        ThrowIfFailed(
+            cached.bitmap->CopyFromMemory(nullptr, pixels.data(), pitch),
+            "HuxerUI could not update the Windows external texture bitmap"
+        );
+        return;
+      }
+    }
+
+    const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_NONE,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        kDipsPerInch,
+        kDipsPerInch
+    );
+    ComPtr<ID2D1Bitmap1> bitmap;
+    ThrowIfFailed(
+        device_context_->CreateBitmap(
+            D2D1::SizeU(static_cast<UINT32>(frame.PixelWidth()), static_cast<UINT32>(frame.PixelHeight())),
+            pixels.data(),
+            pitch,
+            &properties,
+            bitmap.GetAddressOf()
+        ),
+        "HuxerUI could not create the Windows external texture bitmap"
+    );
+    cached.bitmap = std::move(bitmap);
+  }
+
+  ID2D1Bitmap1* ExternalTextureBitmapFor(const ExternalTexture& texture) {
+    const std::shared_ptr<Win32ExternalTextureState> source =
+        std::dynamic_pointer_cast<Win32ExternalTextureState>(ExternalTextureState::From(texture));
+    if (!source) {
+      throw std::logic_error("HuxerUI external texture does not contain a Windows pixel frame source");
+    }
+    auto cached = std::ranges::find_if(external_textures_, [&source](const CachedExternalTexture& entry) {
+      return entry.source.lock() == source;
+    });
+    if (cached == external_textures_.end()) {
+      external_textures_.push_back({.source = source});
+      cached = external_textures_.end() - 1;
+    }
+    if (cached->draw_epoch == external_texture_draw_epoch_) {
+      return cached->bitmap.Get();
+    }
+    cached->draw_epoch = external_texture_draw_epoch_;
+
+    std::optional<Win32ExternalTextureFrame> pending = source->AcquireLatestFrame();
+    if (pending.has_value()) {
+      UploadExternalTextureFrame(*cached, *pending);
+      cached->frame = std::move(*pending);
+    } else if (!cached->bitmap && cached->frame.has_value()) {
+      UploadExternalTextureFrame(*cached, *cached->frame);
+    }
+    return cached->bitmap.Get();
+  }
+
   void RenderCommand(const DrawExternalTextureCommand& command) {
-    static_cast<void>(command);
-    throw std::logic_error("HuxerUI Windows external textures are not implemented yet");
+    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
+      return;
+    }
+    ID2D1Bitmap1* bitmap = ExternalTextureBitmapFor(command.texture);
+    if (bitmap == nullptr) {
+      return;
+    }
+    const Size intrinsic_size = command.texture.IntrinsicSize();
+    const D2D1_SIZE_U pixel_size = bitmap->GetPixelSize();
+    const float scale_x = static_cast<float>(pixel_size.width) / intrinsic_size.width;
+    const float scale_y = static_cast<float>(pixel_size.height) / intrinsic_size.height;
+    const D2D1_RECT_F source = D2D1::RectF(
+        command.source.x * scale_x,
+        command.source.y * scale_y,
+        (command.source.x + command.source.width) * scale_x,
+        (command.source.y + command.source.height) * scale_y
+    );
+    device_context_->DrawBitmap(
+        bitmap,
+        ToD2DRect(command.destination),
+        command.opacity,
+        command.sampling == ImageSampling::Nearest ? D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
+                                                   : D2D1_INTERPOLATION_MODE_LINEAR,
+        source
+    );
   }
 
   ComPtr<ID2D1StrokeStyle>
@@ -1962,6 +2083,8 @@ struct Win32Renderer::State {
   std::vector<CachedPathGeometry> path_geometries_;
   std::vector<CachedImage> images_;
   std::size_t image_cache_bytes_ = 0;
+  std::vector<CachedExternalTexture> external_textures_;
+  std::uint64_t external_texture_draw_epoch_ = 0;
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
@@ -1982,6 +2105,7 @@ void Win32Renderer::Initialize() {
 
 void Win32Renderer::Discard() noexcept {
   state_->DiscardDeviceResources();
+  state_->external_textures_.clear();
   state_->platform_composition_ = false;
   state_->paragraphs_.clear();
   state_->text_runs_.clear();

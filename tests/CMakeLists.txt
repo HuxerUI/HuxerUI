@@ -68,10 +68,13 @@ endif ()
 
 if (WIN32)
     target_sources(huxerui_tests PRIVATE
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/color_stream.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
+            "${HUXERUI_PROJECT_DIR}/examples/platform_module/windows_color_stream.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/windows_timer.cpp"
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
+            platform/windows_external_texture.cpp
             platform/windows_platform_module.cpp
             platform/windows_platform_view.cpp
             platform/windows_renderer.cpp
@@ -174,7 +177,10 @@ set(HUXERUI_PUBLIC_HEADERS
 )
 
 if (WIN32)
-    list(APPEND HUXERUI_PUBLIC_HEADERS windows/platform_view.h)
+    list(APPEND HUXERUI_PUBLIC_HEADERS
+            windows/external_texture.h
+            windows/platform_view.h
+    )
 endif ()
 
 if (APPLE)
