@@ -38,6 +38,8 @@ View Counter() {
 
 Each mounted scope owns its own `UseState()` table. State identity combines the source call site with the occurrence of that call during the current composition. A state change invalidates subscribed scopes and multiple writes before the next frame are coalesced.
 
+`State<T>` supports value assignment, `Update()`, arithmetic compound assignments (`+=`, `-=`, `*=`, `/=`, and `%=`), bitwise and shift compound assignments (`&=`, `|=`, `^=`, `<<=`, and `>>=`), and prefix or postfix increment and decrement when the corresponding operations are available for `T`. Copyable, assignable values update transactionally and skip invalidation when they are equality-comparable and the result is unchanged. Move-only or non-assignable values update in place and conservatively invalidate subscribed scopes after a successful mutation. Postfix increment and decrement require a copyable value and return a `T` snapshot containing the value before the mutation.
+
 `StateList<T>` is the corresponding shared handle for an observable mutable sequence. `UseStateList<T>()` creates an empty list, while `UseStateList(range)` and the initializer-list overload copy or move initial values from an input range:
 
 ```cpp

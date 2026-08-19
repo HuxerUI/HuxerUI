@@ -117,9 +117,14 @@ public:
 
   template <class Function> void Update(Function&& function) const {
     EnsureValid();
-    T next = cell_->value;
-    std::forward<Function>(function)(next);
-    Write(std::move(next));
+    if constexpr (std::copy_constructible<T> && std::assignable_from<T&, T>) {
+      T next = cell_->value;
+      std::forward<Function>(function)(next);
+      Write(std::move(next));
+    } else {
+      std::forward<Function>(function)(cell_->value);
+      CommitMutation();
+    }
   }
 
   [[nodiscard]] bool IsValid() const noexcept {
@@ -142,14 +147,123 @@ public:
     return *this;
   }
 
+  template <class U>
+  const State& operator-=(U&& value) const
+    requires requires(T& current, U&& delta) { current -= std::forward<U>(delta); }
+  {
+    Update([&](T& current) { current -= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator*=(U&& value) const
+    requires requires(T& current, U&& factor) { current *= std::forward<U>(factor); }
+  {
+    Update([&](T& current) { current *= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator/=(U&& value) const
+    requires requires(T& current, U&& divisor) { current /= std::forward<U>(divisor); }
+  {
+    Update([&](T& current) { current /= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator%=(U&& value) const
+    requires requires(T& current, U&& divisor) { current %= std::forward<U>(divisor); }
+  {
+    Update([&](T& current) { current %= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator&=(U&& value) const
+    requires requires(T& current, U&& mask) { current &= std::forward<U>(mask); }
+  {
+    Update([&](T& current) { current &= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator|=(U&& value) const
+    requires requires(T& current, U&& mask) { current |= std::forward<U>(mask); }
+  {
+    Update([&](T& current) { current |= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator^=(U&& value) const
+    requires requires(T& current, U&& mask) { current ^= std::forward<U>(mask); }
+  {
+    Update([&](T& current) { current ^= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator<<=(U&& value) const
+    requires requires(T& current, U&& count) { current <<= std::forward<U>(count); }
+  {
+    Update([&](T& current) { current <<= std::forward<U>(value); });
+    return *this;
+  }
+
+  template <class U>
+  const State& operator>>=(U&& value) const
+    requires requires(T& current, U&& count) { current >>= std::forward<U>(count); }
+  {
+    Update([&](T& current) { current >>= std::forward<U>(value); });
+    return *this;
+  }
+
   const State& operator++() const
-    requires requires(T value) { ++value; }
+    requires requires(T& value) { ++value; }
   {
     Update([](T& value) { ++value; });
     return *this;
   }
 
+  T operator++(int) const
+    requires std::copy_constructible<T> && requires(T& value) { ++value; }
+  {
+    return UpdateAndReturnPrevious([](T& value) { ++value; });
+  }
+
+  const State& operator--() const
+    requires requires(T& value) { --value; }
+  {
+    Update([](T& value) { --value; });
+    return *this;
+  }
+
+  T operator--(int) const
+    requires std::copy_constructible<T> && requires(T& value) { --value; }
+  {
+    return UpdateAndReturnPrevious([](T& value) { --value; });
+  }
+
 private:
+  template <class Function> T UpdateAndReturnPrevious(Function&& function) const {
+    EnsureValid();
+    T previous = cell_->value;
+    std::forward<Function>(function)(cell_->value);
+    if constexpr (std::equality_comparable<T>) {
+      if (previous == cell_->value) {
+        return previous;
+      }
+    }
+    CommitMutation();
+    return previous;
+  }
+
+  void CommitMutation() const {
+    ++cell_->version;
+    detail::NotifyState(cell_);
+  }
+
   void Write(T value) const {
     EnsureValid();
     if constexpr (std::equality_comparable<T>) {
@@ -158,8 +272,7 @@ private:
       }
     }
     cell_->value = std::move(value);
-    ++cell_->version;
-    detail::NotifyState(cell_);
+    CommitMutation();
   }
 
   void EnsureValid() const {

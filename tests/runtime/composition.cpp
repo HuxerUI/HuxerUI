@@ -23,6 +23,136 @@ StateList<int> unobserved_state_list;
 int state_list_compositions = 0;
 int unobserved_state_list_compositions = 0;
 
+State<int> operator_state;
+int operator_state_compositions = 0;
+
+struct AddableStateValue {
+  int value = 0;
+
+  bool operator==(const AddableStateValue&) const = default;
+
+  friend AddableStateValue operator+(const AddableStateValue& left, int right) {
+    return {left.value + right};
+  }
+};
+
+struct SubtractAssignableStateValue {
+  int value = 0;
+
+  bool operator==(const SubtractAssignableStateValue&) const = default;
+
+  SubtractAssignableStateValue& operator-=(int delta) {
+    value -= delta;
+    return *this;
+  }
+};
+
+struct NonAssignableStateValue {
+  NonAssignableStateValue() = default;
+  NonAssignableStateValue(const NonAssignableStateValue&) = default;
+  NonAssignableStateValue(NonAssignableStateValue&&) = default;
+  NonAssignableStateValue& operator=(const NonAssignableStateValue&) = delete;
+  NonAssignableStateValue& operator=(NonAssignableStateValue&&) = delete;
+
+  NonAssignableStateValue& operator-=(int) {
+    return *this;
+  }
+
+  NonAssignableStateValue& operator++() {
+    return *this;
+  }
+};
+
+struct CopyCountedStateValue {
+  static inline int copies = 0;
+
+  int value = 0;
+
+  CopyCountedStateValue() = default;
+  explicit CopyCountedStateValue(int initial) : value(initial) {}
+  CopyCountedStateValue(const CopyCountedStateValue& other) : value(other.value) {
+    ++copies;
+  }
+  CopyCountedStateValue(CopyCountedStateValue&&) noexcept = default;
+  CopyCountedStateValue& operator=(const CopyCountedStateValue&) = default;
+  CopyCountedStateValue& operator=(CopyCountedStateValue&&) noexcept = default;
+
+  bool operator==(const CopyCountedStateValue&) const = default;
+
+  CopyCountedStateValue& operator++() {
+    ++value;
+    return *this;
+  }
+};
+
+enum class StateFlags : std::uint8_t {
+  First = 1U,
+  Second = 2U,
+};
+
+constexpr StateFlags operator|(StateFlags left, StateFlags right) {
+  return static_cast<StateFlags>(static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right));
+}
+
+constexpr StateFlags& operator|=(StateFlags& left, StateFlags right) {
+  left = left | right;
+  return left;
+}
+
+State<std::string> string_operator_state;
+State<StateFlags> flags_operator_state;
+State<AddableStateValue> custom_operator_state;
+State<SubtractAssignableStateValue> compound_operator_state;
+State<std::unique_ptr<int>> move_only_operator_state;
+State<CopyCountedStateValue> copy_counted_operator_state;
+
+template <class T>
+concept CompleteStateOperatorSurface = requires(const State<T>& state, T operand) {
+  { state += operand } -> std::same_as<const State<T>&>;
+  { state -= operand } -> std::same_as<const State<T>&>;
+  { state *= operand } -> std::same_as<const State<T>&>;
+  { state /= operand } -> std::same_as<const State<T>&>;
+  { state %= operand } -> std::same_as<const State<T>&>;
+  { state &= operand } -> std::same_as<const State<T>&>;
+  { state |= operand } -> std::same_as<const State<T>&>;
+  { state ^= operand } -> std::same_as<const State<T>&>;
+  { state <<= operand } -> std::same_as<const State<T>&>;
+  { state >>= operand } -> std::same_as<const State<T>&>;
+  { ++state } -> std::same_as<const State<T>&>;
+  { state++ } -> std::same_as<T>;
+  { --state } -> std::same_as<const State<T>&>;
+  { state-- } -> std::same_as<T>;
+};
+
+template <class T>
+concept StateSupportsModuloAssignment = requires(const State<T>& state, T operand) { state %= operand; };
+
+template <class T>
+concept StateSupportsSubtractAssignment = requires(const State<T>& state) { state -= 1; };
+
+template <class T>
+concept StateSupportsPrefixIncrement = requires(const State<T>& state) { ++state; };
+
+template <class T>
+concept StateSupportsPostfixIncrement = requires(const State<T>& state) { state++; };
+
+template <class T>
+concept SupportsBinarySubtract = requires(const T& value) { value - 1; };
+
+static_assert(CompleteStateOperatorSurface<int>);
+static_assert(requires(const State<AddableStateValue>& state) { state += 1; });
+static_assert(requires(const State<StateFlags>& state) { state |= StateFlags::Second; });
+static_assert(StateSupportsSubtractAssignment<SubtractAssignableStateValue>);
+static_assert(!SupportsBinarySubtract<SubtractAssignableStateValue>);
+static_assert(StateSupportsSubtractAssignment<NonAssignableStateValue>);
+static_assert(StateSupportsPrefixIncrement<NonAssignableStateValue>);
+static_assert(StateSupportsPostfixIncrement<NonAssignableStateValue>);
+static_assert(StateSupportsPostfixIncrement<CopyCountedStateValue>);
+static_assert(!std::copy_constructible<std::unique_ptr<int>>);
+static_assert(!StateSupportsModuloAssignment<std::string>);
+static_assert(std::assignable_from<State<int>&, const State<int>&>);
+static_assert(std::assignable_from<State<int>&, State<int>>);
+
 struct ParameterizedEnvironmentValue {
   int value = 0;
 
@@ -160,6 +290,30 @@ View CounterApp() {
   }
       .With(huxerui::Spacing{4.0F});
 }
+
+View StateOperatorApp() {
+  ++operator_state_compositions;
+  operator_state = UseState(8);
+  return Text(std::to_string(operator_state.Get()));
+}
+
+View StateOperatorTypesApp() {
+  string_operator_state = UseState(std::string{"base"});
+  flags_operator_state = UseState(StateFlags::First);
+  custom_operator_state = UseState(AddableStateValue{3});
+  compound_operator_state = UseState(SubtractAssignableStateValue{10});
+  return Text(
+      string_operator_state.Get() + ":" + std::to_string(static_cast<std::uint8_t>(flags_operator_state.Get())) + ":" +
+      std::to_string(custom_operator_state.Get().value) + ":" + std::to_string(compound_operator_state.Get().value)
+  );
+}
+
+View MoveOnlyStateOperatorApp() {
+  move_only_operator_state = UseState(std::make_unique<int>(5));
+  copy_counted_operator_state = UseState(CopyCountedStateValue{8});
+  return Text(
+      std::to_string(*move_only_operator_state.Get()) + ":" + std::to_string(copy_counted_operator_state.Get().value)
+  );
 
 View StateListApp() {
   ++state_list_compositions;
@@ -435,6 +589,111 @@ TEST_CASE("TestUseStateAndStateUpdate") {
   REQUIRE(FirstText(updated) == "2");
   REQUIRE(runtime.RootNode()->identity == root_identity);
 }
+
+TEST_CASE("TestStateOperatorsUseTheEqualityAwareWritePath") {
+  operator_state = State<int>{};
+  operator_state_compositions = 0;
+
+  TestPlatform platform;
+  Runtime runtime{StateOperatorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE(FirstText(runtime.BuildFrame()) == "8");
+  REQUIRE(operator_state_compositions == 1);
+
+  int expected_compositions = 1;
+  auto mutate_and_expect = [&](auto&& mutation, int expected) {
+    const int requested_frames = platform.requested_frames;
+    std::forward<decltype(mutation)>(mutation)();
+    REQUIRE(platform.requested_frames == requested_frames + 1);
+    REQUIRE(FirstText(runtime.BuildFrame()) == std::to_string(expected));
+    ++expected_compositions;
+    REQUIRE(operator_state_compositions == expected_compositions);
+  };
+
+  mutate_and_expect([] { operator_state += 2; }, 10);
+  mutate_and_expect([] { operator_state -= 3; }, 7);
+  mutate_and_expect([] { operator_state *= 6; }, 42);
+  mutate_and_expect([] { operator_state /= 2; }, 21);
+  mutate_and_expect([] { operator_state %= 5; }, 1);
+  mutate_and_expect([] { operator_state |= 8; }, 9);
+  mutate_and_expect([] { operator_state &= 10; }, 8);
+  mutate_and_expect([] { operator_state ^= 3; }, 11);
+  mutate_and_expect([] { operator_state <<= 1; }, 22);
+  mutate_and_expect([] { operator_state >>= 2; }, 5);
+  mutate_and_expect([] { static_cast<void>(++operator_state); }, 6);
+
+  int previous = 0;
+  mutate_and_expect([&] { previous = operator_state++; }, 7);
+  REQUIRE(previous == 6);
+
+  mutate_and_expect([] { static_cast<void>(--operator_state); }, 6);
+  mutate_and_expect([&] { previous = operator_state--; }, 5);
+  REQUIRE(previous == 6);
+
+  const int requested_frames = platform.requested_frames;
+  operator_state += 0;
+  REQUIRE(platform.requested_frames == requested_frames);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "5");
+  REQUIRE(operator_state_compositions == 15);
+
+  State<int> empty;
+  REQUIRE_THROWS_AS(empty -= 1, std::logic_error);
+  REQUIRE_THROWS_AS(empty++, std::logic_error);
+}
+
+TEST_CASE("TestStateOperatorsSupportStringEnumAndCustomValues") {
+  string_operator_state = State<std::string>{};
+  flags_operator_state = State<StateFlags>{};
+  custom_operator_state = State<AddableStateValue>{};
+  compound_operator_state = State<SubtractAssignableStateValue>{};
+
+  TestPlatform platform;
+  Runtime runtime{StateOperatorTypesApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE(FirstText(runtime.BuildFrame()) == "base:1:3:10");
+
+  int requested_frames = platform.requested_frames;
+  string_operator_state += "-next";
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "base-next:1:3:10");
+
+  requested_frames = platform.requested_frames;
+  flags_operator_state |= StateFlags::Second;
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "base-next:3:3:10");
+
+  requested_frames = platform.requested_frames;
+  custom_operator_state += 4;
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "base-next:3:7:10");
+
+  requested_frames = platform.requested_frames;
+  compound_operator_state -= 4;
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "base-next:3:7:6");
+}
+
+TEST_CASE("TestStateUpdateSupportsMoveOnlyValuesAndPostfixCopiesOnce") {
+  move_only_operator_state = State<std::unique_ptr<int>>{};
+  copy_counted_operator_state = State<CopyCountedStateValue>{};
+
+  TestPlatform platform;
+  Runtime runtime{MoveOnlyStateOperatorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE(FirstText(runtime.BuildFrame()) == "5:8");
+
+  int requested_frames = platform.requested_frames;
+  move_only_operator_state.Update([](std::unique_ptr<int>& value) { *value = 13; });
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "13:8");
+
+  CopyCountedStateValue::copies = 0;
+  requested_frames = platform.requested_frames;
+  const CopyCountedStateValue previous = copy_counted_operator_state++;
+  REQUIRE(previous.value == 8);
+  REQUIRE(CopyCountedStateValue::copies == 1);
+  REQUIRE(platform.requested_frames == requested_frames + 1);
+  REQUIRE(FirstText(runtime.BuildFrame()) == "13:9");
 
 TEST_CASE("TestStateListMutatesInPlaceAndInvalidatesObservedScopes") {
   observed_state_list = {};
@@ -858,7 +1117,7 @@ TEST_CASE("TestRepeatedUseStateCallSite") {
   REQUIRE(root->children[0]->text == "0");
   REQUIRE(root->children[1]->text == "0");
   REQUIRE(root->children[2]->text == "0");
-
+  
   InvokeClick(*root->children[1]);
   runtime.BuildFrame();
 
