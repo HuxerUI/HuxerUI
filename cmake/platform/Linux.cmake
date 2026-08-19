@@ -11,6 +11,12 @@ function(huxerui_platform_configure)
     pkg_check_modules(HUXERUI_XRANDR REQUIRED IMPORTED_TARGET xrandr)
     pkg_check_modules(HUXERUI_EGL REQUIRED IMPORTED_TARGET egl)
     pkg_check_modules(HUXERUI_GLES2 REQUIRED IMPORTED_TARGET glesv2)
+    pkg_check_modules(HUXERUI_LIBSOUP QUIET IMPORTED_TARGET libsoup-3.0>=3.0)
+    if(NOT TARGET PkgConfig::HUXERUI_LIBSOUP)
+        message(FATAL_ERROR
+                "HuxerUI Linux HTTP requires the system libsoup 3 development package (minimum 3.0). "
+                "Install libsoup-3.0-dev on Debian/Ubuntu, libsoup3-devel on Fedora, or libsoup3 on Arch Linux.")
+    endif()
     pkg_check_modules(HUXERUI_FCITX5_GCLIENT QUIET IMPORTED_TARGET Fcitx5GClient)
 
     if(TARGET PkgConfig::HUXERUI_FCITX5_GCLIENT)
@@ -267,6 +273,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_external_texture.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/linux/linux_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_text_input.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_ui_dispatcher.cpp"
@@ -278,6 +285,7 @@ function(huxerui_platform_configure)
             ${HUXERUI_XRANDR_INCLUDE_DIRS}
             ${HUXERUI_EGL_INCLUDE_DIRS}
             ${HUXERUI_GLES2_INCLUDE_DIRS}
+            ${HUXERUI_LIBSOUP_INCLUDE_DIRS}
             ${HUXERUI_FCITX5_GCLIENT_INCLUDE_DIRS}
             "${HUXERUI_LINUX_STAGE}/include"
             "${HUXERUI_LINUX_STAGE}/include/freetype2"
@@ -311,6 +319,7 @@ function(huxerui_platform_configure)
             PkgConfig::HUXERUI_XRANDR
             PkgConfig::HUXERUI_EGL
             PkgConfig::HUXERUI_GLES2
+            PkgConfig::HUXERUI_LIBSOUP
             PARENT_SCOPE
     )
 endfunction()

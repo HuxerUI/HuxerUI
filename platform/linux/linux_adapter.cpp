@@ -32,6 +32,7 @@
 
 #include <huxerui/app.h>
 
+#include "linux_http_internal.h"
 #include "linux_renderer.h"
 #include "linux_text_input.h"
 #include "linux_ui_dispatcher.h"
@@ -271,6 +272,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateLinuxHttpTransport();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {

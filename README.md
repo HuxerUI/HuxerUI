@@ -79,6 +79,8 @@ huxerui_add_app(my_app
 
 Build the repository on macOS or Linux:
 
+Linux requires system development packages, including libsoup 3, to be installed before CMake configuration; see [Getting Started](docs/getting-started.md#build-the-repository) for distribution-specific commands.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
@@ -174,7 +176,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
-| `example_http` | Windows, macOS, iOS, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
+| `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

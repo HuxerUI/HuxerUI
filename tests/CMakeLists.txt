@@ -100,6 +100,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
             platform/linux_damage.cpp
             platform/linux_external_texture.cpp
+            platform/linux_http.cpp
             platform/linux_platform_module.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp

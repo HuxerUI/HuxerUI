@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | Windows | Win32 | DirectWrite | Direct2D | Keyboard and IMM32 adapter | Planned |
 | macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient | NSURLSession |
-| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM | Planned |
+| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM | libsoup 3 |
 | Web | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events | Fetch |
 | Android | Android View | StaticLayout | Canvas | InputConnection and IME | HttpURLConnection |
 | iOS | UIKit View | CoreText | CoreGraphics | UITextInput | NSURLSession |
@@ -123,7 +123,10 @@ Publish validates and copies each frame into a bounded latest-wins mailbox, conv
 The Cairo renderer acquires one coherent frame per physical draw, retains the last acquired frame, applies Image cropping, sampling, transforms, clipping, and opacity, and releases inactive cache entries.
 This path is bounded and does not claim zero-copy or direct DMA-BUF import.
 The Linux `example_platform_module` registers a platform-neutral timer factory backed by `timerfd` and a background RGBA color stream, exposing the same typed Root Services and disposal behavior as the other supported platform implementations.
-System dependencies are resolved through pkg-config for X11, Xext, XKB common, XRandR, EGL, and OpenGL ES 2; source-checkout builds fetch the pinned graphics, text, image, and compression libraries used by the renderer.
+HttpClient uses one libsoup 3 Session on a dedicated GLib network thread, preserving connection reuse, redirects, system proxy configuration, and the system TLS trust store without adding network descriptors to the X11 event loop.
+Requests and responses remain complete in-memory values, GCancellable backs Task cancellation, and a GLib timeout source enforces the complete request deadline.
+X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download them.
+Source-checkout builds fetch only the pinned graphics, text, image, and compression libraries used by the renderer.
 Following the Windows and macOS distribution model, Linux host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
 The current Linux CLI path uses a source SDK checkout. A relocatable installed Linux SDK remains release-packaging work because its static dependency closure must be packaged without build-tree paths.

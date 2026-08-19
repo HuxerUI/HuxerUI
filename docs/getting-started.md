@@ -139,13 +139,43 @@ ctest --test-dir build --output-on-failure
 
 Linux:
 
+Linux system and build dependencies must be installed before configuring the project; CMake does not download them.
+The following commands install the required compiler, build tools, X11/EGL libraries, and libsoup 3 development files on common distributions.
+
+Debian or Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install build-essential cmake git pkg-config meson ninja-build gperf nasm \
+    libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev \
+    libegl1-mesa-dev libgles2-mesa-dev libsoup-3.0-dev
+```
+
+Fedora:
+
+```bash
+sudo dnf install gcc-c++ cmake git pkgconf-pkg-config meson ninja-build gperf nasm \
+    libX11-devel libXext-devel libxkbcommon-devel libXrandr-devel \
+    libglvnd-devel libsoup3-devel
+```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel cmake git pkgconf meson ninja gperf nasm \
+    libx11 libxext libxkbcommon libxrandr libglvnd libsoup3
+```
+
+`libsoup-3.0` is a required system dynamic library and is not part of HuxerUI's fetched static dependency stack.
+The selected package must provide `libsoup-3.0.pc`, the headers, and the shared library; GLib/GIO and TLS support are installed through its distribution dependencies.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The Linux backend resolves X11, Xext, XKB common, XRandR, EGL, and OpenGL ES 2 through pkg-config.
+The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, and libsoup 3 packages through pkg-config.
 Source-checkout builds fetch the pinned Cairo, FreeType, HarfBuzz, fontconfig, pixman, libpng, libjpeg, zlib, and expat stack and require the upstream build tools reported by CMake.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
 
