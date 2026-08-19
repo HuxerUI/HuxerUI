@@ -41,6 +41,7 @@ struct MountedNode;
 class ScrollConnection;
 class IndicationState;
 class AppResources;
+class TaskDelayScheduler;
 struct WindowState;
 class WindowService;
 
@@ -1223,6 +1224,7 @@ struct Runtime::State {
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
   std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
   std::vector<std::shared_ptr<detail::TaskScopeState>> retired_task_scopes_;
+  std::shared_ptr<detail::TaskDelayScheduler> task_delay_scheduler_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
   Size committed_viewport_;

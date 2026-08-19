@@ -975,6 +975,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
       application.options.viewport_breakpoints,
       std::move(window)
   );
+  state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
   RootContext root{
@@ -1094,7 +1095,7 @@ void Runtime::DiscardLifecycleCommits() noexcept {
 }
 
 std::shared_ptr<detail::TaskScopeState> Runtime::CreateTaskScope() {
-  return detail::MakeTaskScopeState(state_->platform_->ui_thread_dispatcher_);
+  return detail::MakeTaskScopeState(state_->platform_->ui_thread_dispatcher_, state_->task_delay_scheduler_);
 }
 
 void Runtime::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept {
@@ -1320,6 +1321,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     frame.delta_time = 0.0;
   }
   frame.delta_time = std::clamp(frame.delta_time, 0.0, 0.25);
+  detail::AdvanceTaskDelays(state_->task_delay_scheduler_, frame.timestamp);
   state_->previous_frame_timestamp_ = frame.timestamp;
   state_->frame_requested_ = false;
   // Application and LayerStack composition are independent so transient presentation never executes the root factory.

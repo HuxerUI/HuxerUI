@@ -10,6 +10,7 @@ The public model consists of:
 - `TaskScope`, a copyable handle to a structured concurrency scope.
 - `TaskHandle`, a copyable cancellation handle for one launched task.
 - `UseTaskScope()`, a composition function that returns the TaskScope owned by the current `RecomposeScope`.
+- `Delay()`, a lazy UI-affine minimum-duration suspension.
 
 The model does not add `UseTask()`, `UseAsync()`, a generic `AsyncResult<T>`, Task-aware Lifecycle overloads, or Task-aware event handlers.
 State remains synchronous and does not dispatch writes between threads.
@@ -43,6 +44,8 @@ public:
 };
 
 TaskScope UseTaskScope();
+
+[[nodiscard]] Task<void> Delay(std::chrono::duration<double> duration);
 ```
 
 `Task<T>` accepts non-cv, non-reference object value types and `void`.
@@ -73,6 +76,26 @@ HuxerUI awaitables bind their suspended coroutine to the launched execution.
 They may perform work on another thread, but completion queues the resume through the execution's UI dispatcher.
 A third-party awaitable that resumes its coroutine directly does not gain this guarantee and must provide its own UI-thread handoff.
 
+## Delays
+
+Delay returns Task<void> rather than exposing another public awaiter type.
+It accepts standard chrono durations, and `<huxerui/task.h>` exports the standard duration literal operators into the huxerui namespace so applications that use that namespace may write `Delay(3ms)` and `Delay(3s)` directly.
+The explicit `std::chrono::duration<double>` form remains available.
+
+The duration is a minimum wait rather than a precise wakeup guarantee.
+Negative, non-finite, and NaN durations throw `std::invalid_argument` synchronously when Delay is called.
+Zero remains asynchronous and resumes in a later UI scheduling cycle.
+Delay uses the PlatformAdapter monotonic clock, so wall-clock and time-zone changes do not affect it.
+
+Runtime owns one deadline-ordered delay queue shared by all TaskScopes in that Runtime.
+Registering an earlier deadline requests one platform wakeup through the existing `RequestFrameAt()` contract.
+At the beginning of that frame, Runtime removes every due registration before resuming their Task executions on the UI thread; a resumed task that awaits `Delay(0ms)` therefore cannot run that second continuation in the same batch.
+Any remaining earliest deadline schedules the next wakeup.
+This produces no continuously active frames, platform-specific Task implementation, background thread, or public timer service.
+
+Delay is aligned with the UI frame scheduler and may resume on the next available display frame after its deadline.
+It is appropriate for UI feedback, retry backoff, polling, and presentation lifetime, but not for audio, video, sampling, or other high-precision timing.
+
 ## Scope ownership
 
 UseTaskScope requires an active composition and does not allocate an ordered state slot.
@@ -101,6 +124,9 @@ Destroying the root coroutine frame recursively destroys nested Task frames and 
 A HuxerUI awaiter owns its underlying cancellation operation in its suspended state.
 Destroying that awaiter cancels or detaches the platform request, and a late completion observes the expired execution and is ignored.
 Cancellation is not represented by an exception and does not resume application code.
+
+A suspended Delay owns one removable queue registration.
+TaskHandle cancellation, TaskScope closure, and Runtime teardown destroy its awaiter and remove that registration before it can resume application code.
 
 Canceling one TaskHandle does not cancel sibling tasks in the same TaskScope.
 Closing TaskScope cancels every active child.
@@ -166,12 +192,12 @@ PlatformAdapter retains the UIThreadDispatcher already supplied by every support
 No new platform callback, event protocol, or platform-specific Task implementation is introduced.
 
 Windows continues to use its private window message, Apple platforms use the main dispatch queue, Linux uses its event-loop dispatcher, Web uses the browser event loop, and Android uses its owning HuxerUIView dispatcher.
-The Task runtime only depends on the platform-neutral enqueue contract.
+Delay additionally reuses PlatformAdapter's existing monotonic `Now()` and absolute `RequestFrameAt()` contracts, so every platform receives the same scheduling and cancellation model without another timer boundary.
 
 Future HuxerUI asynchronous APIs may return Task values or provide HuxerUI awaitables that resume through the bound execution.
 They do not change TaskScope ownership, State semantics, Lifecycle, or EventBindings.
 
 ## Validation
 
-Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, and invalid handles.
-The independent `example_task` demonstrates scope-owned launch, explicit Lifecycle cancellation, direct State updates, and fire-and-forget event launch through public API.
+Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, and Delay cancellation.
+The independent `example_task` demonstrates scope-owned launch, cancellable Delay, explicit Lifecycle cancellation, direct State updates, and fire-and-forget event launch through public API.

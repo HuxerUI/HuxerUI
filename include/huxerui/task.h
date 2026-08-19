@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <concepts>
 #include <coroutine>
 #include <exception>
@@ -11,6 +12,13 @@
 #include <utility>
 
 namespace huxerui {
+
+using std::chrono_literals::operator""h;
+using std::chrono_literals::operator""min;
+using std::chrono_literals::operator""ms;
+using std::chrono_literals::operator""ns;
+using std::chrono_literals::operator""s;
+using std::chrono_literals::operator""us;
 
 namespace detail {
 
@@ -328,5 +336,7 @@ private:
 };
 
 TaskScope UseTaskScope();
+
+[[nodiscard]] Task<void> Delay(std::chrono::duration<double> duration);
 
 } // namespace huxerui

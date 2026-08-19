@@ -2,6 +2,7 @@
 
 #include <coroutine>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -101,6 +102,12 @@ Task<int> FailingTaskValue() {
 Task<void> DirectTask(int* starts) {
   ++*starts;
   co_return;
+}
+
+Task<void> DelayedStateTask(State<int> state, std::thread::id* resumed_thread) {
+  co_await Delay(3ms);
+  *resumed_thread = std::this_thread::get_id();
+  state = 7;
 }
 
 Task<void> SuspendedTask(std::shared_ptr<ManualSuspensionState> suspension, int* completions = nullptr) {
@@ -203,6 +210,95 @@ TEST_CASE("TaskScopeLaunchIsLazyAndComposesNestedTaskValuesAndExceptions") {
   REQUIRE(direct_starts == 1);
   REQUIRE(factory_starts == 1);
   REQUIRE(task_value.Get() == 42);
+}
+
+TEST_CASE("DelayIsLazyAndResumesAfterItsDeadlineOnTheOwningUIThread") {
+  captured_task_scope = {};
+  task_value = State<int>{};
+  TestPlatform platform;
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const std::thread::id ui_thread = std::this_thread::get_id();
+
+  std::thread::id resumed_thread;
+  Task<void> delayed = DelayedStateTask(task_value, &resumed_thread);
+  REQUIRE(platform.requested_deadlines.empty());
+
+  captured_task_scope.Launch(std::move(delayed));
+  REQUIRE(platform.requested_deadlines.empty());
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.requested_deadlines.back() == Catch::Approx(0.003));
+
+  platform.AdvanceTime(0.002);
+  runtime.BuildFrame();
+  REQUIRE(task_value.Get() == 0);
+
+  platform.AdvanceTime(0.001);
+  runtime.BuildFrame();
+  REQUIRE(task_value.Get() == 7);
+  REQUIRE(resumed_thread == ui_thread);
+}
+
+TEST_CASE("DelayOrdersDeadlinesAndDefersZeroDurationChains") {
+  captured_task_scope = {};
+  TestPlatform platform;
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  std::vector<int> completions;
+
+  captured_task_scope.Launch([&completions]() -> Task<void> {
+    co_await Delay(3s);
+    completions.push_back(3);
+  });
+  captured_task_scope.Launch([&completions]() -> Task<void> {
+    co_await Delay(3ms);
+    completions.push_back(1);
+    co_await Delay(0ms);
+    completions.push_back(2);
+  });
+  platform.RunPlatformModuleTasks();
+
+  platform.AdvanceTime(0.003);
+  runtime.BuildFrame();
+  REQUIRE(completions == std::vector<int>{1});
+
+  runtime.BuildFrame();
+  REQUIRE(completions == std::vector<int>{1, 2});
+
+  platform.AdvanceTime(2.997);
+  runtime.BuildFrame();
+  REQUIRE(completions == std::vector<int>{1, 2, 3});
+}
+
+TEST_CASE("DelayCancellationPreventsLaterResumption") {
+  captured_task_scope = {};
+  TestPlatform platform;
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  int completions = 0;
+
+  TaskHandle delayed = captured_task_scope.Launch([&completions]() -> Task<void> {
+    co_await Delay(3s);
+    ++completions;
+  });
+  platform.RunPlatformModuleTasks();
+  delayed.Cancel();
+
+  platform.AdvanceTime(3.0);
+  runtime.BuildFrame();
+  REQUIRE(completions == 0);
+}
+
+TEST_CASE("DelayRejectsInvalidDurations") {
+  REQUIRE_THROWS_AS(Delay(std::chrono::duration<double>{-1.0}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      Delay(std::chrono::duration<double>{std::numeric_limits<double>::infinity()}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Delay(std::chrono::duration<double>{std::numeric_limits<double>::quiet_NaN()}),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("TaskHandleCancellationIsIndividualAndIgnoredHandlesRemainScopeOwned") {

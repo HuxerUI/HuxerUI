@@ -6,9 +6,19 @@
 #include <huxerui/platform_module.h>
 #include <huxerui/task.h>
 
-namespace huxerui::detail {
+namespace huxerui {
 
-std::shared_ptr<TaskScopeState> MakeTaskScopeState(UIThreadDispatcher dispatcher);
+class PlatformAdapter;
+
+namespace detail {
+
+class TaskDelayScheduler;
+
+std::shared_ptr<TaskDelayScheduler> MakeTaskDelayScheduler(PlatformAdapter& platform);
+void AdvanceTaskDelays(const std::shared_ptr<TaskDelayScheduler>& scheduler, double timestamp);
+
+std::shared_ptr<TaskScopeState>
+MakeTaskScopeState(UIThreadDispatcher dispatcher, std::shared_ptr<TaskDelayScheduler> delay_scheduler);
 void CloseTaskScope(const std::shared_ptr<TaskScopeState>& scope) noexcept;
 void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept;
 
@@ -18,4 +28,6 @@ std::weak_ptr<TaskExecution> TaskExecutionFor(std::coroutine_handle<Promise> cor
   return coroutine.promise().Execution();
 }
 
-} // namespace huxerui::detail
+} // namespace detail
+
+} // namespace huxerui

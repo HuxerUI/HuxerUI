@@ -10,6 +10,7 @@ using UserId = int;
 class UserService {
 public:
   Task<std::string> LoadName(UserId user_id) {
+    co_await Delay(500ms);
     co_return user_id == 1 ? "Ada Lovelace" : "Grace Hopper";
   }
 };

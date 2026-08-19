@@ -136,6 +136,20 @@ Launch queues the first resume on the owning UI thread and retains the task even
 TaskHandle destruction does not cancel; `Cancel()` stops that task, while successful scope unmount and Runtime teardown cancel every remaining child in the TaskScope.
 Compatible recomposition and keyed movement retain the same scope and tasks.
 
+`Delay()` is a lazy Task that suspends for at least a standard chrono duration and resumes on the owning UI thread:
+
+```cpp
+tasks.Launch([=]() -> Task<void> {
+  loading = true;
+  co_await Delay(300ms);
+  loading = false;
+});
+```
+
+The standard duration literals are available through the huxerui namespace.
+Delay is aligned with the UI frame scheduler, remains asynchronous for `0ms`, and is canceled with its owning Task without an exception or later State write.
+It is intended for UI timing and retry delays rather than high-precision media or sampling work.
+
 HuxerUI awaitables may finish work on another thread but resume their coroutine through the owning UI dispatcher.
 Task code may therefore update State directly before suspension and after a HuxerUI awaitable resumes it.
 State itself does not dispatch between threads, and arbitrary third-party awaitables must provide their own UI-thread handoff.
