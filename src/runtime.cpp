@@ -1,6 +1,7 @@
 #include "internal.h"
 #include "external_texture_internal.h"
 #include "resource_internal.h"
+#include "task_internal.h"
 #include "text_input_internal.h"
 #include "window_internal.h"
 
@@ -1018,6 +1019,7 @@ Runtime::~Runtime() {
     cleanup.Run();
   }
   state_->retired_lifecycle_cleanups_.clear();
+  CommitTaskScopes();
   state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
@@ -1086,6 +1088,28 @@ void Runtime::DiscardLifecycleCommits() noexcept {
     }
   }
   state_->lifecycle_commits_.clear();
+}
+
+std::shared_ptr<detail::TaskScopeState> Runtime::CreateTaskScope() {
+  return detail::MakeTaskScopeState(state_->platform_->ui_thread_dispatcher_);
+}
+
+void Runtime::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept {
+  if (!scope) {
+    return;
+  }
+  try {
+    state_->retired_task_scopes_.push_back(scope);
+  } catch (...) {
+    detail::CloseTaskScope(scope);
+  }
+}
+
+void Runtime::CommitTaskScopes() noexcept {
+  for (const std::shared_ptr<detail::TaskScopeState>& scope : state_->retired_task_scopes_) {
+    detail::CloseTaskScope(scope);
+  }
+  state_->retired_task_scopes_.clear();
 }
 
 void Runtime::SetWindowMetrics(WindowMetrics metrics) {
@@ -1317,6 +1341,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
     CommitLifecycles();
+    CommitTaskScopes();
     state_->frame_commit_.next_frame_deadline =
         state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
     record_debug_commit();
@@ -1425,6 +1450,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     RequestFrameAfter(*next_wakeup);
   }
   CommitLifecycles();
+  CommitTaskScopes();
   state_->frame_commit_.next_frame_deadline =
       state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
   record_debug_commit();

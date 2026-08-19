@@ -73,23 +73,20 @@ The application root has an implicit scope. Mark a reusable stateful component w
 View AccountStatus(std::string account_id) {
   auto service = UseService<AccountService>();
 
-  Lifecycle(
-      [service, account_id] {
-        auto subscription = service->Subscribe(account_id);
-        return [subscription = std::move(subscription)]() noexcept {
-          subscription.Cancel();
-        };
-      },
-      account_id
-  );
+  Lifecycle([service, account_id] {
+    auto subscription = service->Subscribe(account_id);
+    return [subscription = std::move(subscription)] {
+      subscription.Cancel();
+    };
+  }, account_id);
 
   return Text("Connected");
 }
 ```
 
-The setup callable runs after a successful frame commit and may return either a non-throwing cleanup callable or `void`.
+The setup callable runs after a successful frame commit and may return either a `void` cleanup callable or `void`.
 The cleanup runs before setup restarts, when a successful composition omits the declaration, when the owning scope unmounts, or when Runtime shuts down.
-Setup exceptions propagate from `Runtime::BuildFrame()`; cleanup callables must be nothrow-invocable so teardown remains deterministic.
+Setup exceptions propagate from `Runtime::BuildFrame()`; a cleanup exception terminates the process at Runtime's non-throwing teardown boundary.
 
 Dependencies follow the setup callable and may be `State<T>`, `StateList<T>`, or ordinary copyable equality-comparable values.
 State handles compare cell identity and version, while ordinary values compare their captured values.
@@ -103,6 +100,49 @@ State reads performed later inside setup do not create composition subscriptions
 
 Lifecycle is not a modifier.
 Modifiers and `NodeExtension` own behavior attached to a particular mounted node, while `Lifecycle()` owns component-level external setup and cleanup.
+
+## Tasks
+
+`Task<T>` is a lazy move-only C++20 coroutine result, while `TaskScope` starts and owns `Task<void>` children for one composition scope:
+
+```cpp
+[[huxerui::scope]]
+View UserName(UserId user_id, std::shared_ptr<UserService> service) {
+  auto tasks = UseTaskScope();
+  auto name = UseState(std::string{"Loading..."});
+
+  Lifecycle([=] {
+    TaskHandle request = tasks.Launch([=]() -> Task<void> {
+      name = co_await service->LoadName(user_id);
+    });
+
+    return [request] {
+      request.Cancel();
+    };
+  }, user_id);
+
+  return Column {
+    Text(name),
+    Button("Reload").OnClick([=] {
+      tasks.Launch([=]() -> Task<void> {
+        name = co_await service->LoadName(user_id);
+      });
+    }),
+  };
+}
+```
+
+Launch queues the first resume on the owning UI thread and retains the task even when its returned TaskHandle is ignored.
+TaskHandle destruction does not cancel; `Cancel()` stops that task, while successful scope unmount and Runtime teardown cancel every remaining child in the TaskScope.
+Compatible recomposition and keyed movement retain the same scope and tasks.
+
+HuxerUI awaitables may finish work on another thread but resume their coroutine through the owning UI dispatcher.
+Task code may therefore update State directly before suspension and after a HuxerUI awaitable resumes it.
+State itself does not dispatch between threads, and arbitrary third-party awaitables must provide their own UI-thread handoff.
+
+Lifecycle and EventBindings do not recognize Task types.
+Lifecycle setup explicitly launches work, dependency cleanup explicitly cancels the relevant TaskHandle, and ordinary `void` event handlers may call `Launch()` for scope-owned fire-and-forget work.
+See [Task and Structured Concurrency Design](design/tasks.md) for cancellation, exception, and platform contracts.
 
 ## Node identity and keys
 

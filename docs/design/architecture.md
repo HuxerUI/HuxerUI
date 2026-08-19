@@ -230,11 +230,24 @@ Composition records declarations without invoking application callbacks.
 After reconciliation, layout, semantics, RenderScene generation, and damage calculation succeed, Runtime cleans changed and retired declarations in reverse composition order and then runs new setups in declaration order.
 Failed composition discards pending declarations without disturbing active resources.
 State writes from setup or cleanup schedule a subsequent frame rather than re-entering composition.
-Cleanup callables are nothrow-invocable; setup exceptions retain the Runtime's normal `BuildFrame()` propagation behavior.
+Lifecycle accepts ordinary `void` cleanup callables, while its internal cleanup boundary remains non-throwing.
+Setup exceptions retain the Runtime's normal `BuildFrame()` propagation behavior, and an escaping cleanup exception terminates the process.
 
 Virtual item caching preserves State slots only.
 Evicting a mounted virtual scope therefore runs cleanup, while realizing it again restores State and runs a new setup.
 Runtime teardown destroys mounted scopes and drains lifecycle cleanup before releasing Root Services.
+
+## Structured task scope
+
+`UseTaskScope()` returns the lazily created `TaskScope` owned by the current RecomposeScope without allocating an ordered composition slot.
+The scope retains launched `Task<void>` executions across compatible recomposition and keyed movement.
+Successful scope retirement queues TaskScope closure for the same commit boundary as Lifecycle retirement, while failed composition leaves active tasks unchanged.
+
+Runtime performs retired Lifecycle cleanup before closing the corresponding TaskScopes, then releases Root Services and platform state.
+TaskScope uses the owning PlatformAdapter's existing UIThreadDispatcher for initial execution and HuxerUI awaitable resumption.
+The Task model does not add Runtime branches to State, EventBindings, Lifecycle declarations, or concrete asynchronous services.
+
+The complete public and execution contract is defined in [Task and Structured Concurrency Design](tasks.md).
 
 ## NodeExtension lifecycle
 
@@ -364,6 +377,7 @@ resolve and publish SemanticFrame
 record dirty PaintSequences
 compute damage
 commit composition Lifecycle cleanup and setup
+close retired composition TaskScopes
 return FrameCommit with RenderFrame and an optional absolute deadline
 invalidate and present platform damage
 schedule the returned deadline
@@ -1715,6 +1729,7 @@ The current extension points are:
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
 | Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
 | Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
+| Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, and `TaskScope::Launch()` |
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `IndicationSpec` and `NodeExtension` |

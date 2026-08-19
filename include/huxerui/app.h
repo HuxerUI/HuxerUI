@@ -30,6 +30,7 @@ struct ResourceConfiguration;
 
 namespace detail {
 class ExternalTextureSurface;
+class TaskScopeState;
 class TextLayout;
 } // namespace detail
 
@@ -125,6 +126,7 @@ protected:
   }
 
 private:
+  UIThreadDispatcher ui_thread_dispatcher_;
   std::shared_ptr<detail::ExternalTextureSurface> external_texture_surface_;
   std::unique_ptr<PlatformModules> platform_modules_;
 
@@ -254,6 +256,9 @@ private:
   void RetireLifecycles(detail::RecomposeScope& scope) noexcept;
   void CommitLifecycles();
   void DiscardLifecycleCommits() noexcept;
+  std::shared_ptr<detail::TaskScopeState> CreateTaskScope();
+  void RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept;
+  void CommitTaskScopes() noexcept;
   void EnsureRootStructure();
   void ReconcileWindowControls();
   void CommitWindowAppearance();

@@ -21,8 +21,9 @@ std::vector<const Application*>& Applications() {
 } // namespace
 
 PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
-    : external_texture_surface_(std::make_shared<detail::ExternalTextureSurface>(*this, dispatch_to_ui_thread)),
-      platform_modules_(new PlatformModules(*this, std::move(dispatch_to_ui_thread))) {}
+    : ui_thread_dispatcher_(std::move(dispatch_to_ui_thread)),
+      external_texture_surface_(std::make_shared<detail::ExternalTextureSurface>(*this, ui_thread_dispatcher_)),
+      platform_modules_(new PlatformModules(*this, ui_thread_dispatcher_)) {}
 
 PlatformAdapter::~PlatformAdapter() {
   external_texture_surface_->Close();

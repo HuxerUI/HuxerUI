@@ -29,6 +29,7 @@
 #include <huxerui/platform_view.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
+#include <huxerui/task.h>
 #include <huxerui/view.h>
 
 #include "geometry_internal.h"
@@ -940,6 +941,7 @@ public:
   void AbortComposition() noexcept;
   void Observe(const std::shared_ptr<StateCellBase>& cell);
   void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
+  TaskScope Tasks();
   void Invalidate();
   void SetEventBindings(EventBindings bindings);
 
@@ -983,6 +985,7 @@ private:
   std::unordered_map<CompositionSlotKey, std::size_t, CompositionSlotKeyHash> pending_lifecycle_indices_;
   std::unordered_map<CompositionSlotKey, std::uint32_t, CompositionSlotKeyHash> lifecycle_occurrences_;
   bool lifecycle_commit_pending_ = false;
+  std::shared_ptr<TaskScopeState> task_scope_;
   std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> dependencies_;
   std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> pending_dependencies_;
   std::unordered_map<StateCellBase*, std::uint64_t> observed_versions_;
@@ -1002,6 +1005,7 @@ public:
   std::shared_ptr<StateCellBase>
   UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
   void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
+  TaskScope Tasks();
   [[nodiscard]] std::shared_ptr<EventHub> Events() const noexcept;
   [[nodiscard]] const std::shared_ptr<const Environment>& CurrentEnvironment() const noexcept {
     return environment_;
@@ -1218,6 +1222,7 @@ struct Runtime::State {
   std::unique_ptr<detail::MountedNode> mounted_root_;
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
   std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
+  std::vector<std::shared_ptr<detail::TaskScopeState>> retired_task_scopes_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
   Size committed_viewport_;

@@ -41,6 +41,7 @@ add_executable(huxerui_tests
         runtime/resources.cpp
         runtime/scrolling.cpp
         runtime/selection_area.cpp
+        runtime/task.cpp
         runtime/text_field.cpp
         runtime/text_input.cpp
         runtime/tooltip.cpp
@@ -162,6 +163,7 @@ set(HUXERUI_PUBLIC_HEADERS
         scroll.h
         semantics.h
         state.h
+        task.h
         text.h
         text_input.h
         theme.h

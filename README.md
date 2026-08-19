@@ -127,7 +127,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Document | Contents |
 |---|---|
 | [Getting Started](docs/getting-started.md) | First app, CMake setup, builds, and examples |
-| [Core Concepts](docs/core-concepts.md) | Views, scopes, state, keys, events, modifiers, and Environment |
+| [Core Concepts](docs/core-concepts.md) | Views, scopes, state, Lifecycle, Tasks, keys, events, modifiers, and Environment |
 | [Layout and Scrolling](docs/layout-and-scrolling.md) | Constraints, ScrollView, controllers, virtualization, and custom layout |
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
 | [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, animation, layers, and typed presentation services |
@@ -140,6 +140,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Document | Contents |
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
+| [Task and Structured Concurrency Design](docs/design/tasks.md) | C++20 Task values, scope ownership, cancellation, and UI-thread resumption |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
@@ -171,6 +172,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_navigation` | Page stacks, selection navigation, start and end drawers, Back routing, and transitions |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
+| `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "task_internal.h"
+
 namespace huxerui::detail {
 
 namespace {
@@ -33,6 +35,7 @@ RecomposeScope::~RecomposeScope() {
     }
   }
   runtime_->RetireLifecycles(*this);
+  runtime_->RetireTaskScope(std::move(task_scope_));
 }
 
 void RecomposeScope::BeginComposition() {
@@ -144,6 +147,13 @@ void RecomposeScope::RegisterLifecycle(LifecycleSetup setup, std::vector<Lifecyc
   key.occurrence = lifecycle_occurrences_[key]++;
   pending_lifecycle_indices_.emplace(key, pending_lifecycle_declarations_.size());
   pending_lifecycle_declarations_.push_back({std::move(key), std::move(setup), std::move(dependencies)});
+}
+
+TaskScope RecomposeScope::Tasks() {
+  if (!task_scope_) {
+    task_scope_ = runtime_->CreateTaskScope();
+  }
+  return TaskScope(task_scope_);
 }
 
 void RecomposeScope::PrepareLifecycleCommit() {
@@ -286,6 +296,10 @@ Composer::UseState(std::type_index type, const std::source_location& location, s
 
 void Composer::RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies) {
   scope_->RegisterLifecycle(std::move(setup), std::move(dependencies));
+}
+
+TaskScope Composer::Tasks() {
+  return scope_->Tasks();
 }
 
 std::shared_ptr<EventHub> Composer::Events() const noexcept {

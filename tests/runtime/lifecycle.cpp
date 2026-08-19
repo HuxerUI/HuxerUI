@@ -41,7 +41,7 @@ View LifecycleStateApp() {
   Lifecycle(
       [] {
         ++lifecycle_setups;
-        return []() noexcept { ++lifecycle_cleanups; };
+        return [] { ++lifecycle_cleanups; };
       },
       lifecycle_dependency
   );

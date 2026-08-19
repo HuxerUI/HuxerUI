@@ -22,10 +22,8 @@ public:
   LifecycleCleanup() = default;
 
   template <class Function>
-    requires(
-        std::move_constructible<std::decay_t<Function>> &&
-        std::is_nothrow_invocable_r_v<void, std::decay_t<Function>&>
-    )
+    requires std::move_constructible<std::decay_t<Function>> &&
+             std::same_as<std::invoke_result_t<std::decay_t<Function>&>, void>
   explicit LifecycleCleanup(Function&& function)
       : function_(std::make_unique<Model<std::decay_t<Function>>>(std::forward<Function>(function))) {}
 
@@ -67,7 +65,7 @@ template <class Function>
 concept LifecycleSetupFunction = std::move_constructible<Function> && std::invocable<Function&> &&
                                  (std::is_void_v<std::invoke_result_t<Function&>> ||
                                   (std::move_constructible<std::invoke_result_t<Function&>> &&
-                                   std::is_nothrow_invocable_r_v<void, std::invoke_result_t<Function&>&>));
+                                   std::same_as<std::invoke_result_t<std::invoke_result_t<Function&>&>, void>));
 
 class LifecycleSetup {
 public:
