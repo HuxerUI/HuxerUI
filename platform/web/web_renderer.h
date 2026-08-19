@@ -23,6 +23,7 @@ public:
   void SetViewport(Size viewport, float display_scale);
   void Invalidate() noexcept;
   [[nodiscard]] bool TakeInvalidation() noexcept;
+  void BeginFrame();
 
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
@@ -44,10 +45,12 @@ public:
   );
 
 private:
+  struct CachedExternalTexture;
   struct CommandRange;
 
   [[nodiscard]] const WebTextLayout&
   ParagraphFor(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
+  [[nodiscard]] const emscripten::val* FrameFor(const ExternalTexture& texture);
   void DrawTarget(
       const emscripten::val& canvas,
       const RenderFrame& frame,
@@ -79,9 +82,11 @@ private:
   emscripten::val canvas_;
   emscripten::val context_;
   std::vector<std::unique_ptr<WebTextLayout>> paragraph_cache_;
+  std::vector<std::unique_ptr<CachedExternalTexture>> external_textures_;
   Size viewport_;
   float display_scale_ = 1.0F;
   std::uintptr_t session_id_ = 0;
+  std::uint64_t external_texture_draw_epoch_ = 0;
   bool force_redraw_ = true;
 };
 

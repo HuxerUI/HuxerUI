@@ -26,7 +26,11 @@ elseif (APPLE)
             "-framework Foundation"
     )
 elseif (EMSCRIPTEN)
-    target_sources(example_platform_module PRIVATE web_timer.cpp)
+    target_sources(example_platform_module PRIVATE
+            color_stream.cpp
+            web_color_stream.cpp
+            web_timer.cpp
+    )
 elseif (UNIX AND NOT APPLE)
     target_sources(example_platform_module PRIVATE
             color_stream.cpp

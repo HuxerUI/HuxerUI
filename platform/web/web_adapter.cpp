@@ -849,6 +849,7 @@ public:
     }
     const FrameCommit& commit = runtime_->BuildFrame();
     frame_state_.BeginPaint();
+    renderer_.BeginFrame();
     platform_views_->Commit(commit.render_frame);
     if (const std::optional<double> deadline = frame_state_.EndPaint(platform_ready_)) {
       Schedule(*deadline);

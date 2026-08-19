@@ -23,7 +23,7 @@ The initial backend may run before the platform-neutral semantics tree is availa
 
 ## Current implementation
 
-The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, WebCodecs ExternalTexture production, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The backend has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -41,6 +41,7 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 | WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted host element |
 | WebPlatformAdapter | Monotonic time, frame requests, UI-thread dispatch, viewport coordination, and browser service capabilities |
 | WebRenderer | RenderScene traversal, Canvas state, damage replay, path conversion, image decode entries, and renderer caches |
+| Web ExternalTexture source | Main-thread WebCodecs `VideoFrame` validation, cloning, latest-frame ownership, and finish state |
 | WebPlatformViews | DOM factory lifecycle, retained Canvas slices, placement, ordering, hit arbitration, and focus synchronization |
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | Native input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
@@ -116,6 +117,24 @@ Decoded images are asynchronous browser values. WebRenderer assigns an internal 
 
 WebGPU, Skia, or another renderer may later implement the same RenderScene contract. None requires changes to View, Canvas, PaintCommand, Runtime, or application source.
 
+## ExternalTexture
+
+Web modules include `<huxerui/web/external_texture.h>` and create a move-only `web::ExternalTextureSource` with one immutable logical intrinsic size.
+`Texture()` exposes the existing copyable platform-neutral capability, `Publish()` accepts only an open WebCodecs `VideoFrame`, and `Finish()` idempotently rejects later publication while preserving the last pending or acquired image.
+No numeric identity, JavaScript registry, PlatformModule subtype, or additional payload kind is introduced.
+
+Publishing synchronously clones the supplied `VideoFrame`, so the caller retains ownership and may close its original as soon as `Publish()` returns.
+A newer publication closes and replaces the previous pending clone.
+The clone may share its underlying media resource according to WebCodecs lifetime rules, but Canvas import or browser color conversion may copy; the backend does not promise zero-copy.
+Because `emscripten::val` is thread-affine, source construction, publication, finish, and destruction are browser-main-thread operations rather than worker-safe producer APIs.
+
+At the start of each browser animation-frame commit, WebRenderer advances one external-texture acquisition epoch and drops caches whose sources are no longer committed as active.
+The first draw of a source during that epoch acquires its newest pending clone, closes the replaced cached frame, and retains the new frame for later redraws.
+All Canvas slices in one `RenderComposition` share the same epoch, so content split around PlatformViews cannot display different producer frames in one physical presentation.
+Logical source rectangles map through `VideoFrame.displayWidth` and `displayHeight` before Canvas `drawImage`, while Image continues to own fit, alignment, clipping, transforms, sampling, and opacity.
+
+The Web `example_platform_module` creates an unattached Canvas, wraps its generated frames in `VideoFrame`, returns one ExternalTexture capability through the existing typed ColorStream service, and publishes later frames without per-frame module callbacks.
+
 ## Text layout and drawing
 
 WebTextLayout implements the existing synchronous TextLayout contract and uses UTF-16 offsets, matching browser string and selection coordinates.
@@ -183,7 +202,7 @@ The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the brow
 Platform result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
 Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the module instance.
 
-The Web `example_platform_module` uses an Emscripten interval to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, and disposal through the same Timer Root Service as the native examples.
+The Web `example_platform_module` uses Emscripten intervals to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, disposal, and ExternalTexture publication through the same Timer and ColorStream Root Services as the native examples.
 
 ## PlatformView composition
 

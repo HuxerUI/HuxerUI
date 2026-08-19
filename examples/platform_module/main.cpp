@@ -1,6 +1,6 @@
 #include "timer.h"
 
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__linux__)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__EMSCRIPTEN__) || defined(__linux__)
 #include "color_stream.h"
 #define HUXERUI_EXAMPLE_COLOR_STREAM 1
 #endif

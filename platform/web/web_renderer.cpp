@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
@@ -19,6 +20,7 @@
 #include "shadow_internal.h"
 #include "text_input_internal.h"
 #include "text_layout_internal.h"
+#include "web_external_texture_internal.h"
 #include "web_text_internal.h"
 
 namespace huxerui::detail {
@@ -684,6 +686,16 @@ private:
   std::vector<Line> lines_;
 };
 
+struct WebRenderer::CachedExternalTexture {
+  ~CachedExternalTexture() {
+    CloseWebVideoFrame(frame);
+  }
+
+  std::weak_ptr<WebExternalTextureState> source;
+  val frame = val::undefined();
+  std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
+};
+
 WebRenderer::WebRenderer(std::uintptr_t session_id, val canvas)
     : canvas_(std::move(canvas)), context_(canvas_.call<val>("getContext", std::string("2d"))),
       session_id_(session_id) {
@@ -708,6 +720,49 @@ void WebRenderer::Invalidate() noexcept {
 
 bool WebRenderer::TakeInvalidation() noexcept {
   return std::exchange(force_redraw_, false);
+}
+
+void WebRenderer::BeginFrame() {
+  if (external_texture_draw_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
+    external_texture_draw_epoch_ = 0;
+    for (const std::unique_ptr<CachedExternalTexture>& entry : external_textures_) {
+      entry->draw_epoch = std::numeric_limits<std::uint64_t>::max();
+    }
+  } else {
+    ++external_texture_draw_epoch_;
+  }
+
+  std::erase_if(external_textures_, [](const std::unique_ptr<CachedExternalTexture>& entry) {
+    const std::shared_ptr<WebExternalTextureState> source = entry->source.lock();
+    return !source || !source->IsActive();
+  });
+}
+
+const val* WebRenderer::FrameFor(const ExternalTexture& texture) {
+  const std::shared_ptr<WebExternalTextureState> source =
+      std::dynamic_pointer_cast<WebExternalTextureState>(ExternalTextureState::From(texture));
+  if (!source) {
+    throw std::logic_error("HuxerUI external texture does not contain a Web VideoFrame source");
+  }
+  auto cached = std::find_if(external_textures_.begin(), external_textures_.end(), [&source](const auto& entry) {
+    return entry->source.lock() == source;
+  });
+  if (cached == external_textures_.end()) {
+    auto entry = std::make_unique<CachedExternalTexture>();
+    entry->source = source;
+    external_textures_.push_back(std::move(entry));
+    cached = std::prev(external_textures_.end());
+  }
+  CachedExternalTexture& entry = **cached;
+  if (entry.draw_epoch != external_texture_draw_epoch_) {
+    entry.draw_epoch = external_texture_draw_epoch_;
+    val pending = source->AcquireLatestFrame();
+    if (!pending.isNull() && !pending.isUndefined()) {
+      CloseWebVideoFrame(entry.frame);
+      entry.frame = std::move(pending);
+    }
+  }
+  return entry.frame.isNull() || entry.frame.isUndefined() ? nullptr : &entry.frame;
 }
 
 const WebTextLayout& WebRenderer::ParagraphFor(
@@ -930,8 +985,34 @@ void WebRenderer::RenderCommand(const DrawImageCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const DrawExternalTextureCommand& command) {
-  static_cast<void>(command);
-  throw std::logic_error("HuxerUI Web external textures are not implemented yet");
+  const val* frame = FrameFor(command.texture);
+  if (frame == nullptr) {
+    return;
+  }
+  const float frame_width = NumberProperty(*frame, "displayWidth", 0.0F);
+  const float frame_height = NumberProperty(*frame, "displayHeight", 0.0F);
+  const Size intrinsic_size = command.texture.IntrinsicSize();
+  if (frame_width <= 0.0F || frame_height <= 0.0F || intrinsic_size.width <= 0.0F || intrinsic_size.height <= 0.0F) {
+    return;
+  }
+  const float scale_x = frame_width / intrinsic_size.width;
+  const float scale_y = frame_height / intrinsic_size.height;
+  context_.call<void>("save");
+  context_.set("globalAlpha", context_["globalAlpha"].as<double>() * command.opacity);
+  context_.set("imageSmoothingEnabled", command.sampling == ImageSampling::Linear);
+  context_.call<void>(
+      "drawImage",
+      *frame,
+      command.source.x * scale_x,
+      command.source.y * scale_y,
+      command.source.width * scale_x,
+      command.source.height * scale_y,
+      command.destination.x,
+      command.destination.y,
+      command.destination.width,
+      command.destination.height
+  );
+  context_.call<void>("restore");
 }
 
 void WebRenderer::RenderCommand(const DrawCircleCommand& command) {

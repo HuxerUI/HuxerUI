@@ -86,7 +86,7 @@ if (WIN32)
     )
 endif ()
 
-if (UNIX AND NOT APPLE)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/linux_timer.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
@@ -99,6 +99,12 @@ if (UNIX AND NOT APPLE)
     )
     target_include_directories(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
+    )
+endif ()
+
+if (EMSCRIPTEN)
+    target_sources(huxerui_tests PRIVATE
+            platform/web_external_texture.cpp
     )
 endif ()
 
@@ -179,10 +185,13 @@ if (APPLE)
 endif ()
 
 if (EMSCRIPTEN)
-    list(APPEND HUXERUI_PUBLIC_HEADERS web/platform_view.h)
+    list(APPEND HUXERUI_PUBLIC_HEADERS
+            web/external_texture.h
+            web/platform_view.h
+    )
 endif ()
 
-if (UNIX AND NOT APPLE)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND HUXERUI_PUBLIC_HEADERS
             linux/external_texture.h
     )
