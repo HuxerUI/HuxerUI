@@ -38,6 +38,28 @@ View Counter() {
 
 Each mounted scope owns its own `UseState()` table. State identity combines the source call site with the occurrence of that call during the current composition. A state change invalidates subscribed scopes and multiple writes before the next frame are coalesced.
 
+`StateList<T>` is the corresponding shared handle for an observable mutable sequence. `UseStateList<T>()` creates an empty list, while `UseStateList(range)` and the initializer-list overload copy or move initial values from an input range:
+
+```cpp
+auto tasks = UseStateList<std::string>({
+    "Review",
+    "Publish",
+});
+
+return Column {
+  ForEach(tasks, [](const std::string& task) {
+    return Text(task).Key(task);
+  }),
+  Button("Add").OnClick([tasks] {
+    tasks.PushBack("Follow up");
+  }),
+};
+```
+
+Reading the size, an element, or an iterator subscribes the current scope. `PushBack()`, `Insert()`, `Set()`, `Erase()`, `Move()`, `PopBack()`, and `Clear()` mutate the retained sequence directly and coalesce scope invalidation without copying and comparing a complete `std::vector` through `State<std::vector<T>>`.
+
+`StateList` does not bypass declarative composition or assign identity to its elements. A scope that enumerates the list recomposes after a mutation, and dynamic stateful children still require stable semantic keys so reconciliation preserves the correct mounted state.
+
 The application root has an implicit scope. Mark a reusable stateful component with `[[huxerui::scope]]`; stateless functions do not need a scope.
 
 ## Node identity and keys

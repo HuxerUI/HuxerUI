@@ -1,14 +1,21 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <concepts>
 #include <cstdint>
+#include <initializer_list>
+#include <iterator>
 #include <memory>
+#include <ranges>
 #include <source_location>
 #include <stdexcept>
+#include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace huxerui {
 
@@ -36,6 +43,45 @@ public:
 
   T value;
 };
+
+template <class T> class StateListCell final : public StateCellBase {
+public:
+  explicit StateListCell(std::vector<T> initial) : values(std::move(initial)) {}
+
+  [[nodiscard]] std::type_index Type() const noexcept override {
+    return typeid(StateListCell<T>);
+  }
+
+  std::vector<T> values;
+};
+
+template <std::ranges::input_range Range>
+  requires(
+      (std::is_lvalue_reference_v<Range&&> &&
+       std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>>) ||
+      (!std::is_lvalue_reference_v<Range&&> &&
+       std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_rvalue_reference_t<Range>>)
+  )
+std::vector<std::ranges::range_value_t<Range>> CollectStateListValues(Range&& range) {
+  using Value = std::ranges::range_value_t<Range>;
+  std::vector<Value> values;
+  if constexpr (std::ranges::sized_range<Range>) {
+    values.reserve(static_cast<std::size_t>(std::ranges::size(range)));
+  }
+  if constexpr (std::is_lvalue_reference_v<Range&&>) {
+    for (auto&& value : range) {
+      values.emplace_back(value);
+    }
+  } else {
+    auto iterator = std::ranges::begin(range);
+    const auto end = std::ranges::end(range);
+    while (iterator != end) {
+      values.emplace_back(std::ranges::iter_move(iterator));
+      ++iterator;
+    }
+  }
+  return values;
+}
 
 void ObserveState(const std::shared_ptr<StateCellBase>& cell);
 void NotifyState(const std::shared_ptr<StateCellBase>& cell);
@@ -125,16 +171,184 @@ private:
   std::shared_ptr<detail::StateCell<T>> cell_;
 };
 
+template <class T> class StateList {
+public:
+  using ValueType = T;
+  using ConstIterator = typename std::vector<T>::const_iterator;
+
+  StateList() = default;
+
+  explicit StateList(std::shared_ptr<detail::StateListCell<T>> cell) : cell_(std::move(cell)) {}
+
+  StateList(const StateList&) = default;
+  StateList(StateList&&) noexcept = default;
+  StateList& operator=(const StateList&) = default;
+  StateList& operator=(StateList&&) noexcept = default;
+
+  [[nodiscard]] bool IsValid() const noexcept {
+    return static_cast<bool>(cell_);
+  }
+
+  [[nodiscard]] std::size_t Size() const {
+    Observe();
+    return cell_->values.size();
+  }
+
+  [[nodiscard]] bool Empty() const {
+    Observe();
+    return cell_->values.empty();
+  }
+
+  [[nodiscard]] const T& At(std::size_t index) const {
+    Observe();
+    EnsureIndex(index);
+    return cell_->values[index];
+  }
+
+  [[nodiscard]] const T& operator[](std::size_t index) const {
+    return At(index);
+  }
+
+  [[nodiscard]] ConstIterator begin() const {
+    Observe();
+    return cell_->values.cbegin();
+  }
+
+  [[nodiscard]] ConstIterator end() const {
+    Observe();
+    return cell_->values.cend();
+  }
+
+  void PushBack(T value) const {
+    EnsureValid();
+    cell_->values.push_back(std::move(value));
+    NotifyChanged();
+  }
+
+  void Insert(std::size_t index, T value) const {
+    EnsureValid();
+    if (index > cell_->values.size()) {
+      throw std::out_of_range("HuxerUI StateList insertion index is out of range");
+    }
+    cell_->values.insert(cell_->values.begin() + static_cast<std::ptrdiff_t>(index), std::move(value));
+    NotifyChanged();
+  }
+
+  void Set(std::size_t index, T value) const {
+    EnsureValid();
+    EnsureIndex(index);
+    if constexpr (std::equality_comparable<T>) {
+      if (cell_->values[index] == value) {
+        return;
+      }
+    }
+    cell_->values[index] = std::move(value);
+    NotifyChanged();
+  }
+
+  void Erase(std::size_t index) const {
+    EnsureValid();
+    EnsureIndex(index);
+    cell_->values.erase(cell_->values.begin() + static_cast<std::ptrdiff_t>(index));
+    NotifyChanged();
+  }
+
+  void Move(std::size_t from, std::size_t to) const {
+    EnsureValid();
+    EnsureIndex(from);
+    EnsureIndex(to);
+    if (from == to) {
+      return;
+    }
+    const auto begin = cell_->values.begin();
+    const auto source = begin + static_cast<std::ptrdiff_t>(from);
+    const auto destination = begin + static_cast<std::ptrdiff_t>(to);
+    if (from < to) {
+      std::rotate(source, source + 1, destination + 1);
+    } else {
+      std::rotate(destination, source, source + 1);
+    }
+    NotifyChanged();
+  }
+
+  void PopBack() const {
+    EnsureValid();
+    if (cell_->values.empty()) {
+      throw std::out_of_range("HuxerUI StateList cannot pop an empty list");
+    }
+    cell_->values.pop_back();
+    NotifyChanged();
+  }
+
+  void Clear() const {
+    EnsureValid();
+    if (cell_->values.empty()) {
+      return;
+    }
+    cell_->values.clear();
+    NotifyChanged();
+  }
+
+private:
+  void Observe() const {
+    EnsureValid();
+    detail::ObserveState(cell_);
+  }
+
+  void NotifyChanged() const {
+    ++cell_->version;
+    detail::NotifyState(cell_);
+  }
+
+  void EnsureValid() const {
+    if (!cell_) {
+      throw std::logic_error("HuxerUI StateList is invalid");
+    }
+  }
+
+  void EnsureIndex(std::size_t index) const {
+    if (index >= cell_->values.size()) {
+      throw std::out_of_range("HuxerUI StateList index is out of range");
+    }
+  }
+
+  std::shared_ptr<detail::StateListCell<T>> cell_;
+};
+
+namespace detail {
+
+template <class T> StateList<T> UseStateListValues(std::vector<T> initial, const std::source_location& location) {
+  auto candidate = std::make_shared<StateListCell<T>>(std::move(initial));
+  auto cell = UseStateCell(typeid(StateListCell<T>), location, std::move(candidate));
+  return StateList<T>{std::static_pointer_cast<StateListCell<T>>(std::move(cell))};
+}
+
+} // namespace detail
+
 template <class T>
 State<std::decay_t<T>> UseState(T&& initial, const std::source_location& location = std::source_location::current()) {
   using Value = std::decay_t<T>;
   auto candidate = std::make_shared<detail::StateCell<Value>>(std::forward<T>(initial));
   auto cell = detail::UseStateCell(typeid(Value), location, std::move(candidate));
-  auto typed_cell = std::dynamic_pointer_cast<detail::StateCell<Value>>(cell);
-  if (!typed_cell) {
-    throw std::logic_error("UseState() value type changed at the same call site");
-  }
-  return State<Value>{std::move(typed_cell)};
+  return State<Value>{std::static_pointer_cast<detail::StateCell<Value>>(std::move(cell))};
+}
+
+template <class T> StateList<T> UseStateList(const std::source_location& location = std::source_location::current()) {
+  return detail::UseStateListValues<T>({}, location);
+}
+
+template <std::ranges::input_range Range>
+  requires requires(Range&& range) { detail::CollectStateListValues(std::forward<Range>(range)); }
+StateList<std::ranges::range_value_t<Range>>
+UseStateList(Range&& initial, const std::source_location& location = std::source_location::current()) {
+  using Value = std::ranges::range_value_t<Range>;
+  return detail::UseStateListValues<Value>(detail::CollectStateListValues(std::forward<Range>(initial)), location);
+}
+
+template <class T>
+StateList<T>
+UseStateList(std::initializer_list<T> initial, const std::source_location& location = std::source_location::current()) {
+  return detail::UseStateListValues<T>(std::vector<T>(initial), location);
 }
 
 } // namespace huxerui

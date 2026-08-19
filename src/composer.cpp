@@ -153,7 +153,7 @@ std::shared_ptr<StateCellBase> RecomposeScope::UseState(
   auto found = pending_state_slots_.slots.find(key);
   if (found != pending_state_slots_.slots.end()) {
     if (found->second->Type() != type) {
-      throw std::logic_error("UseState() value type changed at the same call site");
+      throw std::logic_error("HuxerUI state kind or value type changed at the same call site");
     }
     return found->second;
   }

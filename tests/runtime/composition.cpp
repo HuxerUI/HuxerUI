@@ -17,6 +17,11 @@ int extension_destroys = 0;
 TextMeasurer* observed_text_measurer = nullptr;
 ViewportClass observed_viewport_class = ViewportClass::Compact;
 int viewport_compositions = 0;
+StateList<std::string> observed_state_list;
+StateList<int> empty_state_list;
+StateList<int> unobserved_state_list;
+int state_list_compositions = 0;
+int unobserved_state_list_compositions = 0;
 
 struct ParameterizedEnvironmentValue {
   int value = 0;
@@ -154,6 +159,30 @@ View CounterApp() {
       },
   }
       .With(huxerui::Spacing{4.0F});
+}
+
+View StateListApp() {
+  ++state_list_compositions;
+  auto items = UseStateList(std::vector<std::string>{
+      "Alpha",
+      "Bravo",
+  });
+  observed_state_list = items;
+  return Column {
+    ForEach(items, [](const std::string& item) { return Text(item).Key(item); }),
+  };
+}
+
+View EmptyStateListApp() {
+  auto items = UseStateList<int>();
+  empty_state_list = items;
+  return Text::Format("{}", items.Size());
+}
+
+View UnobservedStateListApp() {
+  ++unobserved_state_list_compositions;
+  unobserved_state_list = UseStateList<int>({1, 2});
+  return Text("Stable");
 }
 
 View CopyOnWriteApp() {
@@ -405,6 +434,83 @@ TEST_CASE("TestUseStateAndStateUpdate") {
   const FlattenedScene& updated = runtime.BuildFrame();
   REQUIRE(FirstText(updated) == "2");
   REQUIRE(runtime.RootNode()->identity == root_identity);
+}
+
+TEST_CASE("TestStateListMutatesInPlaceAndInvalidatesObservedScopes") {
+  observed_state_list = {};
+  state_list_compositions = 0;
+
+  TestPlatform platform;
+  Runtime runtime{StateListApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(state_list_compositions == 1);
+  REQUIRE(observed_state_list.Size() == 2);
+  REQUIRE(observed_state_list[0] == "Alpha");
+  REQUIRE(observed_state_list[1] == "Bravo");
+
+  StateList<std::string> copy = observed_state_list;
+  copy.PushBack("Charlie");
+  copy.Insert(1, "Inserted");
+  copy.Set(2, "Updated");
+  copy.Move(3, 0);
+  copy.Erase(2);
+  copy.PopBack();
+
+  REQUIRE(observed_state_list.Size() == 2);
+  REQUIRE(observed_state_list[0] == "Charlie");
+  REQUIRE(observed_state_list[1] == "Alpha");
+
+  runtime.BuildFrame();
+  REQUIRE(state_list_compositions == 2);
+  const auto* root = runtime.RootNode();
+  REQUIRE(root->children.size() == 2);
+  REQUIRE(root->children[0]->text == "Charlie");
+  REQUIRE(root->children[1]->text == "Alpha");
+
+  copy.Set(0, "Charlie");
+  copy.Move(0, 0);
+  runtime.BuildFrame();
+  REQUIRE(state_list_compositions == 2);
+
+  copy.Clear();
+  runtime.BuildFrame();
+  REQUIRE(state_list_compositions == 3);
+  REQUIRE(runtime.RootNode()->children.empty());
+  REQUIRE(copy.Empty());
+
+  copy.Clear();
+  REQUIRE_THROWS_AS(copy.At(0), std::out_of_range);
+  REQUIRE_THROWS_AS(copy.Insert(1, "invalid"), std::out_of_range);
+  REQUIRE_THROWS_AS(copy.PopBack(), std::out_of_range);
+}
+
+TEST_CASE("TestStateListSupportsEmptyInitializationAndOnlyTracksReads") {
+  empty_state_list = {};
+  unobserved_state_list = {};
+  unobserved_state_list_compositions = 0;
+
+  TestPlatform platform;
+  Runtime empty_runtime{EmptyStateListApp, platform};
+  empty_runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  REQUIRE(FirstText(empty_runtime.BuildFrame()) == "0");
+  REQUIRE(empty_state_list.Empty());
+
+  Runtime unobserved_runtime{UnobservedStateListApp, platform};
+  unobserved_runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  unobserved_runtime.BuildFrame();
+  REQUIRE(unobserved_state_list_compositions == 1);
+  REQUIRE(unobserved_state_list.Size() == 2);
+
+  unobserved_state_list.PushBack(3);
+  unobserved_runtime.BuildFrame();
+  REQUIRE(unobserved_state_list_compositions == 1);
+
+  StateList<int> invalid;
+  REQUIRE_FALSE(invalid.IsValid());
+  REQUIRE_THROWS_AS(invalid.Size(), std::logic_error);
+  REQUIRE_THROWS_AS(invalid.PushBack(1), std::logic_error);
 }
 
 TEST_CASE("TestViewportClassRecomposesOnlyAcrossConfiguredBreakpoints") {
