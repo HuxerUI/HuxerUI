@@ -2,8 +2,7 @@
 
 ## Status
 
-The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent Windows, macOS, iOS, Android, and Web backends are implemented.
-Linux transport remains staged platform work.
+The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent Windows, macOS, iOS, Linux, Android, and Web backends are implemented.
 
 ## Goals
 
@@ -182,7 +181,9 @@ Closing the request handle is the single cancellation path, and callback context
 A private thread-pool deadline covers the complete operation rather than restarting for each WinHTTP phase.
 Windows 10 and later use the operating system automatic proxy configuration, while Windows 7 compatibility builds retain WinHTTP's default proxy mode.
 The backend disables persistent cookies, requests native gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
-The planned Linux backend uses the libcurl multi interface integrated with the X11 event loop.
+The Linux backend uses one libsoup 3 Session on a dedicated GLib network thread, preserving system proxy and trust-store behavior without entering the X11 event loop.
+It buffers responses through the asynchronous send-and-read API, enforces the complete request deadline with a GLib timeout source, and cancels requests through GCancellable.
+The distribution-provided libsoup 3 development package and its GLib/GIO dependencies are manually installed system dependencies rather than FetchContent inputs.
 Adding another platform implements HttpTransport without changing HttpClient or Task.
 
 Platform application projects retain authority over permissions and security policy.
@@ -199,4 +200,5 @@ Future streaming or file-transfer APIs should remain separate operations instead
 Shared tests use a deterministic fake HttpTransport to verify request preservation, response delivery, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
 Each platform phase adds its implementation to the corresponding platform build and validates that platform without claiming unexecuted backends.
 Windows transport tests use a deterministic loopback server to verify native request and response conversion plus the complete-operation deadline.
-`example_http` provides the Windows, macOS, iOS, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.
+Linux transport tests use a deterministic loopback server to verify binary bodies, repeated headers, redirects, errors, cancellation, deadlines, races, and shutdown.
+`example_http` provides the Windows, macOS, iOS, Linux, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.
