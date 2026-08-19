@@ -174,7 +174,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
-| `example_http` | macOS, iOS, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
+| `example_http` | Windows, macOS, iOS, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

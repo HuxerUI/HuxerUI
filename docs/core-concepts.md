@@ -186,7 +186,7 @@ HTTP 4xx and 5xx statuses remain HttpResponse values.
 Transport failures are explicit HttpError values, while Task cancellation stops the native request without resuming application code.
 Invalid portable request configuration still throws `std::invalid_argument` synchronously from `Send()`.
 The response body is a binary-safe in-memory byte string; JSON parsing, streaming, caching, and application retry policy remain separate concerns.
-The shared API and independent macOS, iOS, Android, and Web transports are currently implemented, while the other platform transports remain staged work.
+The shared API and independent Windows, macOS, iOS, Android, and Web transports are currently implemented, while the Linux transport remains staged work.
 See [HTTP Client Design](design/http.md) for the complete ownership and platform contract.
 
 ## Node identity and keys

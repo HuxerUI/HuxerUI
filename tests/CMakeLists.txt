@@ -78,6 +78,7 @@ if (WIN32)
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
             platform/windows_external_texture.cpp
+            platform/windows_http.cpp
             platform/windows_platform_module.cpp
             platform/windows_platform_view.cpp
             platform/windows_renderer.cpp
@@ -86,6 +87,7 @@ if (WIN32)
     target_include_directories(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
+    target_link_libraries(huxerui_tests PRIVATE ws2_32)
     target_compile_definitions(huxerui_tests PRIVATE
             NOMINMAX
             WIN32_LEAN_AND_MEAN

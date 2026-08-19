@@ -2,8 +2,8 @@
 
 ## Status
 
-The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent macOS, iOS, Android, and Web backends are implemented.
-Windows and Linux transports remain staged platform work.
+The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent Windows, macOS, iOS, Android, and Web backends are implemented.
+Linux transport remains staged platform work.
 
 ## Goals
 
@@ -176,7 +176,12 @@ iOS has an independent NSURLSession implementation in its platform directory wit
 The Android backend uses HttpURLConnection on a bounded worker executor, enforces the complete request deadline, and disconnects a canceled request.
 The Web backend uses Fetch on the browser main thread, buffers the response through `arrayBuffer()`, and aborts canceled or timed-out requests through AbortController.
 It preserves browser redirect, same-origin credential, CORS, forbidden-header, and response-header visibility rules rather than weakening them in generated glue.
-The planned Windows backend uses asynchronous WinHTTP request handles.
+The Windows backend uses one asynchronous WinHTTP session per Runtime and one request handle per Send call.
+WinHTTP callbacks advance send, response, and buffered-read phases without occupying a framework worker thread.
+Closing the request handle is the single cancellation path, and callback context remains alive until WinHTTP reports `HANDLE_CLOSING`.
+A private thread-pool deadline covers the complete operation rather than restarting for each WinHTTP phase.
+Windows 10 and later use the operating system automatic proxy configuration, while Windows 7 compatibility builds retain WinHTTP's default proxy mode.
+The backend disables persistent cookies, requests native gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
 The planned Linux backend uses the libcurl multi interface integrated with the X11 event loop.
 Adding another platform implements HttpTransport without changing HttpClient or Task.
 
@@ -193,4 +198,5 @@ Future streaming or file-transfer APIs should remain separate operations instead
 
 Shared tests use a deterministic fake HttpTransport to verify request preservation, response delivery, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
 Each platform phase adds its implementation to the corresponding platform build and validates that platform without claiming unexecuted backends.
-`example_http` provides the macOS, iOS, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.
+Windows transport tests use a deterministic loopback server to verify native request and response conversion plus the complete-operation deadline.
+`example_http` provides the Windows, macOS, iOS, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.

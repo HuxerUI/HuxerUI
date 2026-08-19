@@ -27,6 +27,7 @@
 #include "resource_internal.h"
 #include "text_layout_internal.h"
 #include "win32_accessibility.h"
+#include "win32_http_internal.h"
 #include "win32_internal.h"
 #include "win32_platform_view.h"
 #include "win32_renderer.h"
@@ -410,6 +411,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateWin32HttpTransport();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
