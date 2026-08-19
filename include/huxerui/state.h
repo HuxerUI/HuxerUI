@@ -22,6 +22,7 @@ namespace huxerui {
 namespace detail {
 
 class RecomposeScope;
+struct LifecycleDependencyAccess;
 
 class StateCellBase {
 public:
@@ -246,6 +247,8 @@ public:
   }
 
 private:
+  friend struct detail::LifecycleDependencyAccess;
+
   template <class Function> T UpdateAndReturnPrevious(Function&& function) const {
     EnsureValid();
     T previous = cell_->value;
@@ -403,6 +406,8 @@ public:
   }
 
 private:
+  friend struct detail::LifecycleDependencyAccess;
+
   void Observe() const {
     EnsureValid();
     detail::ObserveState(cell_);

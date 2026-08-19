@@ -11,6 +11,7 @@
 #include <huxerui/indication.h>
 #include <huxerui/layout.h>
 #include <huxerui/layer.h>
+#include <huxerui/lifecycle.h>
 #include <huxerui/modifier.h>
 #include <huxerui/navigation.h>
 #include <huxerui/paint.h>

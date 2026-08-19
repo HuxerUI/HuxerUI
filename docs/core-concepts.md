@@ -64,6 +64,46 @@ Reading the size, an element, or an iterator subscribes the current scope. `Push
 
 The application root has an implicit scope. Mark a reusable stateful component with `[[huxerui::scope]]`; stateless functions do not need a scope.
 
+## Lifecycle
+
+`Lifecycle()` attaches an external resource lifetime to the current composition scope rather than to a returned View:
+
+```cpp
+[[huxerui::scope]]
+View AccountStatus(std::string account_id) {
+  auto service = UseService<AccountService>();
+
+  Lifecycle(
+      [service, account_id] {
+        auto subscription = service->Subscribe(account_id);
+        return [subscription = std::move(subscription)]() noexcept {
+          subscription.Cancel();
+        };
+      },
+      account_id
+  );
+
+  return Text("Connected");
+}
+```
+
+The setup callable runs after a successful frame commit and may return either a non-throwing cleanup callable or `void`.
+The cleanup runs before setup restarts, when a successful composition omits the declaration, when the owning scope unmounts, or when Runtime shuts down.
+Setup exceptions propagate from `Runtime::BuildFrame()`; cleanup callables must be nothrow-invocable so teardown remains deterministic.
+
+Dependencies follow the setup callable and may be `State<T>`, `StateList<T>`, or ordinary copyable equality-comparable values.
+State handles compare cell identity and version, while ordinary values compare their captured values.
+Changing any dependency performs cleanup followed by setup; an unchanged recomposition retains the active resource.
+Multiple dependency writes before a frame coalesce into one restart using the latest committed declaration.
+
+`Lifecycle()` has the same current-scope and call-site occurrence identity model as `UseState()`.
+Changing the returned root View does not restart it, keyed movement preserves it, and failed composition does not run setup or cleanup.
+A helper without its own scope contributes lifecycle declarations to its caller; mark a reusable component with `[[huxerui::scope]]` when it requires an independent lifetime.
+State reads performed later inside setup do not create composition subscriptions, so every value that should restart the resource must be listed explicitly.
+
+Lifecycle is not a modifier.
+Modifiers and `NodeExtension` own behavior attached to a particular mounted node, while `Lifecycle()` owns component-level external setup and cleanup.
+
 ## Node identity and keys
 
 Unkeyed siblings use position and node type as identity. This is appropriate for stable UI structures. Use a stable key when siblings can be inserted, removed, or reordered:

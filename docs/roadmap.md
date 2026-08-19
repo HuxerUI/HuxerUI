@@ -1,6 +1,6 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, responsive viewport classes, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on Windows and macOS, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, Tabs, selection navigation, shared accessibility semantics for controls, presentation, scrolling, destination selection, and virtual collections, Windows UI Automation, macOS AppKit, Android AccessibilityNodeProvider, and iOS UIKit bridges, application drawers, navigation stacks and predictive Back, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, typed nonvisual platform modules on Windows, macOS, Linux, Web, Android, and iOS, installable platform-specific CMake targets, CLI project generation, diagnostics, Android and iOS device discovery, and Windows, macOS, Linux, Web, Android, and iOS platform build, launch, and backend integration.
+The current foundation includes shared state and recomposition, composition-scoped Lifecycle, responsive viewport classes, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on Windows and macOS, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, Tabs, selection navigation, shared accessibility semantics for controls, presentation, scrolling, destination selection, and virtual collections, Windows UI Automation, macOS AppKit, Android AccessibilityNodeProvider, and iOS UIKit bridges, application drawers, navigation stacks and predictive Back, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, typed nonvisual platform modules on Windows, macOS, Linux, Web, Android, and iOS, installable platform-specific CMake targets, CLI project generation, diagnostics, Android and iOS device discovery, and Windows, macOS, Linux, Web, Android, and iOS platform build, launch, and backend integration.
 
 Runtime foundation work:
 
@@ -9,7 +9,6 @@ Runtime foundation work:
 
 Framework capability work:
 
-- Composition-scoped effects with post-commit setup and cleanup semantics
 - Plural messages and inherited Locale text shaping for ordinary text content
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
 - Shape and path-based clipping modifiers

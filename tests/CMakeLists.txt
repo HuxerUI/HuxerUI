@@ -30,6 +30,7 @@ add_executable(huxerui_tests
         runtime/interaction.cpp
         runtime/layers.cpp
         runtime/layout.cpp
+        runtime/lifecycle.cpp
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
         runtime/platform_module.cpp
@@ -148,6 +149,7 @@ set(HUXERUI_PUBLIC_HEADERS
         indication.h
         layer.h
         layout.h
+        lifecycle.h
         modifier.h
         navigation.h
         paint.h

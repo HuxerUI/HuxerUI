@@ -25,6 +25,7 @@
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
 #include <huxerui/indication.h>
+#include <huxerui/lifecycle.h>
 #include <huxerui/platform_view.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
@@ -558,22 +559,34 @@ struct ViewSpec {
 
 std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory);
 
-struct StateSlotKey {
+struct CompositionSlotKey {
   std::string file;
   std::string function;
   std::uint32_t line = 0;
   std::uint32_t column = 0;
   std::uint32_t occurrence = 0;
 
-  bool operator==(const StateSlotKey&) const = default;
+  bool operator==(const CompositionSlotKey&) const = default;
 };
 
-struct StateSlotKeyHash {
-  std::size_t operator()(const StateSlotKey& key) const noexcept;
+struct CompositionSlotKeyHash {
+  std::size_t operator()(const CompositionSlotKey& key) const noexcept;
 };
 
 struct StateSlotStorage {
-  std::unordered_map<StateSlotKey, std::shared_ptr<StateCellBase>, StateSlotKeyHash> slots;
+  std::unordered_map<CompositionSlotKey, std::shared_ptr<StateCellBase>, CompositionSlotKeyHash> slots;
+};
+
+struct LifecycleSlot {
+  std::vector<LifecycleDependency> dependencies;
+  LifecycleCleanup cleanup;
+  bool retained_for_commit = false;
+};
+
+struct LifecycleDeclaration {
+  CompositionSlotKey key;
+  LifecycleSetup setup;
+  std::vector<LifecycleDependency> dependencies;
 };
 
 struct VirtualItemState {
@@ -926,6 +939,7 @@ public:
   void EndComposition();
   void AbortComposition() noexcept;
   void Observe(const std::shared_ptr<StateCellBase>& cell);
+  void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
   void Invalidate();
   void SetEventBindings(EventBindings bindings);
 
@@ -949,6 +963,11 @@ public:
   }
 
 private:
+  void PrepareLifecycleCommit();
+  void CommitLifecycleCleanups() noexcept;
+  void CommitLifecycleSetups();
+  void DiscardLifecycleCommit() noexcept;
+
   Runtime* runtime_;
   std::uint64_t id_;
   bool dirty_ = true;
@@ -956,12 +975,20 @@ private:
   bool invalidated_during_composition_ = false;
   StateSlotStorage state_slots_;
   StateSlotStorage pending_state_slots_;
-  std::unordered_set<StateSlotKey, StateSlotKeyHash> touched_state_slots_;
-  std::unordered_map<StateSlotKey, std::uint32_t, StateSlotKeyHash> state_slot_occurrences_;
+  std::unordered_set<CompositionSlotKey, CompositionSlotKeyHash> touched_state_slots_;
+  std::unordered_map<CompositionSlotKey, std::uint32_t, CompositionSlotKeyHash> state_slot_occurrences_;
+  std::unordered_map<CompositionSlotKey, LifecycleSlot, CompositionSlotKeyHash> lifecycle_slots_;
+  std::vector<CompositionSlotKey> lifecycle_order_;
+  std::vector<LifecycleDeclaration> pending_lifecycle_declarations_;
+  std::unordered_map<CompositionSlotKey, std::size_t, CompositionSlotKeyHash> pending_lifecycle_indices_;
+  std::unordered_map<CompositionSlotKey, std::uint32_t, CompositionSlotKeyHash> lifecycle_occurrences_;
+  bool lifecycle_commit_pending_ = false;
   std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> dependencies_;
   std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> pending_dependencies_;
   std::unordered_map<StateCellBase*, std::uint64_t> observed_versions_;
   std::shared_ptr<EventHub> event_hub_ = std::make_shared<EventHub>();
+
+  friend class huxerui::Runtime;
 };
 
 class Composer {
@@ -974,6 +1001,7 @@ public:
   void Observe(const std::shared_ptr<StateCellBase>& cell);
   std::shared_ptr<StateCellBase>
   UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
+  void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
   [[nodiscard]] std::shared_ptr<EventHub> Events() const noexcept;
   [[nodiscard]] const std::shared_ptr<const Environment>& CurrentEnvironment() const noexcept {
     return environment_;
@@ -1188,6 +1216,8 @@ struct Runtime::State {
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::shared_ptr<detail::WindowService> window_service_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
+  std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
+  std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
   FrameCommit frame_commit_;
   detail::RenderSceneSnapshot committed_scene_snapshot_;
   Size committed_viewport_;

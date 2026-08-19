@@ -170,6 +170,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_tabs` | Controlled Tabs, disabled items, theme policies, and viewport classes |
 | `example_navigation` | Page stacks, selection navigation, start and end drawers, Back routing, and transitions |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
+| `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

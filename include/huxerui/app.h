@@ -250,6 +250,10 @@ private:
   void InvalidateLayerPlacement(LayerId id);
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
+  void QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope);
+  void RetireLifecycles(detail::RecomposeScope& scope) noexcept;
+  void CommitLifecycles();
+  void DiscardLifecycleCommits() noexcept;
   void EnsureRootStructure();
   void ReconcileWindowControls();
   void CommitWindowAppearance();

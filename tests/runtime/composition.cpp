@@ -314,6 +314,7 @@ View MoveOnlyStateOperatorApp() {
   return Text(
       std::to_string(*move_only_operator_state.Get()) + ":" + std::to_string(copy_counted_operator_state.Get().value)
   );
+}
 
 View StateListApp() {
   ++state_list_compositions;
@@ -694,6 +695,7 @@ TEST_CASE("TestStateUpdateSupportsMoveOnlyValuesAndPostfixCopiesOnce") {
   REQUIRE(CopyCountedStateValue::copies == 1);
   REQUIRE(platform.requested_frames == requested_frames + 1);
   REQUIRE(FirstText(runtime.BuildFrame()) == "13:9");
+}
 
 TEST_CASE("TestStateListMutatesInPlaceAndInvalidatesObservedScopes") {
   observed_state_list = {};

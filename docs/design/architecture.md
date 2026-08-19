@@ -214,6 +214,28 @@ public:
 
 The framework detects `Glow::Extension`, creates the node extension, and dispatches typed updates without requiring the modifier to expose descriptor or type-erasure details.
 
+## Composition lifecycle
+
+`Lifecycle(setup, dependencies...)` declares post-commit external setup and cleanup in the current `RecomposeScope`.
+It is a composition function rather than a modifier because component lifetime follows scope identity, not the identity or kind of one returned root View.
+The application root uses its implicit scope, ordinary helper functions contribute to their caller's scope, and `[[huxerui::scope]]` establishes an independent reusable lifetime.
+
+Lifecycle identity combines the current scope, source location, and occurrence at that location.
+Dependencies are listed last and accept State, StateList, or ordinary copyable equality-comparable values.
+State dependencies subscribe the scope and compare cell identity plus version; ordinary dependencies compare captured values.
+An unchanged declaration retains its active cleanup, while a changed dependency cleans up the old setup before starting the new declaration.
+A successfully omitted declaration cleans up, and scope teardown cleans active declarations in reverse declaration order.
+
+Composition records declarations without invoking application callbacks.
+After reconciliation, layout, semantics, RenderScene generation, and damage calculation succeed, Runtime cleans changed and retired declarations in reverse composition order and then runs new setups in declaration order.
+Failed composition discards pending declarations without disturbing active resources.
+State writes from setup or cleanup schedule a subsequent frame rather than re-entering composition.
+Cleanup callables are nothrow-invocable; setup exceptions retain the Runtime's normal `BuildFrame()` propagation behavior.
+
+Virtual item caching preserves State slots only.
+Evicting a mounted virtual scope therefore runs cleanup, while realizing it again restores State and runs a new setup.
+Runtime teardown destroys mounted scopes and drains lifecycle cleanup before releasing Root Services.
+
 ## NodeExtension lifecycle
 
 `NodeExtension` operates directly on a controlled public `MountedNode`. There is no separate `ModifierHost` and no context object for every phase.
@@ -341,6 +363,7 @@ refresh the text-input session
 resolve and publish SemanticFrame
 record dirty PaintSequences
 compute damage
+commit composition Lifecycle cleanup and setup
 return FrameCommit with RenderFrame and an optional absolute deadline
 invalidate and present platform damage
 schedule the returned deadline
@@ -1691,6 +1714,7 @@ The current extension points are:
 | Custom layout | `Layout<Derived>`, `LayoutContext`, `LayoutResult` |
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
 | Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
+| Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `IndicationSpec` and `NodeExtension` |
@@ -1732,6 +1756,7 @@ The implemented pipeline coordinates mounted geometry, extension painting, Runti
 The current design does not introduce:
 
 - `ModifierHost`.
+- A Lifecycle modifier or node-bound component effect.
 - A context class for every modifier lifecycle phase.
 - Runtime branches for ScrollBar, Ripple, Dialog, or concrete animations.
 - `OverlayBehavior`.

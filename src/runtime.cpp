@@ -1011,12 +1011,81 @@ Runtime::~Runtime() {
   state_->hovered_extensions_.clear();
   state_->layer_controller_.Disconnect();
   state_->window_service_->Disconnect();
+  DiscardLifecycleCommits();
   state_->mounted_root_.reset();
+  state_->root_scope_.reset();
+  for (detail::LifecycleCleanup& cleanup : state_->retired_lifecycle_cleanups_) {
+    cleanup.Run();
+  }
+  state_->retired_lifecycle_cleanups_.clear();
   state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
   state_->root_services_.clear();
+}
+
+void Runtime::QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope) {
+  state_->lifecycle_commits_.push_back(scope);
+}
+
+void Runtime::RetireLifecycles(detail::RecomposeScope& scope) noexcept {
+  for (auto key = scope.lifecycle_order_.rbegin(); key != scope.lifecycle_order_.rend(); ++key) {
+    auto slot = scope.lifecycle_slots_.find(*key);
+    if (slot == scope.lifecycle_slots_.end()) {
+      continue;
+    }
+    try {
+      state_->retired_lifecycle_cleanups_.push_back(std::move(slot->second.cleanup));
+    } catch (...) {
+      slot->second.cleanup.Run();
+    }
+  }
+  scope.lifecycle_slots_.clear();
+  scope.lifecycle_order_.clear();
+}
+
+void Runtime::CommitLifecycles() {
+  std::vector<std::weak_ptr<detail::RecomposeScope>> commits = std::move(state_->lifecycle_commits_);
+  state_->lifecycle_commits_.clear();
+
+  try {
+    for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
+      if (auto active = scope.lock()) {
+        active->PrepareLifecycleCommit();
+      }
+    }
+    for (detail::LifecycleCleanup& cleanup : state_->retired_lifecycle_cleanups_) {
+      cleanup.Run();
+    }
+    state_->retired_lifecycle_cleanups_.clear();
+    for (auto scope = commits.rbegin(); scope != commits.rend(); ++scope) {
+      if (auto active = scope->lock()) {
+        active->CommitLifecycleCleanups();
+      }
+    }
+    for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
+      if (auto active = scope.lock()) {
+        active->CommitLifecycleSetups();
+      }
+    }
+  } catch (...) {
+    for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
+      if (auto active = scope.lock()) {
+        active->DiscardLifecycleCommit();
+      }
+    }
+    throw;
+  }
+}
+
+void Runtime::DiscardLifecycleCommits() noexcept {
+  for (const std::weak_ptr<detail::RecomposeScope>& scope : state_->lifecycle_commits_) {
+    if (auto active = scope.lock()) {
+      active->DiscardLifecycleCommit();
+    }
+  }
+  state_->lifecycle_commits_.clear();
 }
 
 void Runtime::SetWindowMetrics(WindowMetrics metrics) {
@@ -1182,6 +1251,7 @@ const FrameCommit& Runtime::BuildFrame() {
   try {
     return BuildFrame({timestamp, delta_time});
   } catch (...) {
+    DiscardLifecycleCommits();
     state_->building_frame_ = false;
     state_->frame_requested_ = false;
     throw;
@@ -1246,6 +1316,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->platform_->external_texture_surface_);
     state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
+    CommitLifecycles();
     state_->frame_commit_.next_frame_deadline =
         state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
     record_debug_commit();
@@ -1353,6 +1424,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   } else if (next_wakeup.has_value()) {
     RequestFrameAfter(*next_wakeup);
   }
+  CommitLifecycles();
   state_->frame_commit_.next_frame_deadline =
       state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
   record_debug_commit();
