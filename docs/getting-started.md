@@ -146,7 +146,7 @@ Debian or Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install build-essential cmake git pkg-config meson ninja-build gperf nasm \
+sudo apt-get install build-essential cmake git pkg-config meson ninja-build gperf nasm libglib2.0-dev \
     libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev \
     libegl1-mesa-dev libgles2-mesa-dev libsoup-3.0-dev
 ```
@@ -154,7 +154,7 @@ sudo apt-get install build-essential cmake git pkg-config meson ninja-build gper
 Fedora:
 
 ```bash
-sudo dnf install gcc-c++ cmake git pkgconf-pkg-config meson ninja-build gperf nasm \
+sudo dnf install gcc-c++ cmake git pkgconf-pkg-config meson ninja-build gperf nasm glib2-devel \
     libX11-devel libXext-devel libxkbcommon-devel libXrandr-devel \
     libglvnd-devel libsoup3-devel
 ```
@@ -163,11 +163,11 @@ Arch Linux:
 
 ```bash
 sudo pacman -S --needed base-devel cmake git pkgconf meson ninja gperf nasm \
-    libx11 libxext libxkbcommon libxrandr libglvnd libsoup3
+    libx11 libxext libxkbcommon libxrandr libglvnd glib2 libsoup3
 ```
 
-`libsoup-3.0` is a required system dynamic library and is not part of HuxerUI's fetched static dependency stack.
-The selected package must provide `libsoup-3.0.pc`, the headers, and the shared library; GLib/GIO and TLS support are installed through its distribution dependencies.
+`gio-2.0` and `libsoup-3.0` are required system dynamic libraries and are not part of HuxerUI's fetched static dependency stack.
+The selected packages must provide their pkg-config metadata, headers, and shared libraries; TLS support is installed through the distribution dependencies.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -175,7 +175,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, and libsoup 3 packages through pkg-config.
+The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 packages through pkg-config.
 Source-checkout builds fetch the pinned Cairo, FreeType, HarfBuzz, fontconfig, pixman, libpng, libjpeg, zlib, and expat stack and require the upstream build tools reported by CMake.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
 

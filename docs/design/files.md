@@ -4,8 +4,7 @@
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
 The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, bounded platform asynchronous executor, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
-The Windows, macOS, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
-The Linux picker/reference transport remains proposed.
+The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
 
 ## Goals
 
@@ -554,7 +553,14 @@ Temporary data uses `<XDG_RUNTIME_DIR>/<executable-name>` only when the runtime 
 Otherwise it uses `<system-temporary-directory>/huxerui-<effective-uid>/<executable-name>` and requires both created children to remain owner-only directories.
 An unsafe existing fallback directory fails initialization rather than being reused.
 Renaming the executable selects different storage, and executable files with the same name share one per-user application directory.
-Its proposed picker transport prefers the desktop portal for active selection.
+Its picker transport uses `org.freedesktop.portal.FileChooser` through GDBus on a dedicated GLib main-context thread and reports both capabilities as unavailable when the session bus or portal service cannot be reached.
+The current X11 window is encoded as `x11:<hex-xid>` for the portal parent, or as an empty parent before the window is ready.
+One unpredictable handle token is used per request, the predicted Request path is subscribed before the method call, and a backend-returned legacy path replaces that subscription when necessary.
+Task cancellation completes the transport operation immediately and closes the portal Request so Runtime-level picker serialization can advance without waiting for a Response that will not arrive after Close.
+Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
+Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared bounded native file executor.
+Saving reports success only after the source file has been copied over the portal-confirmed destination.
+This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
 
 Web maps application-private storage through the browser filesystem design below and has no executable directory.
 Its picker transport uses browser file handles when available and an input-element fallback for opening; unsupported save capabilities remain visible through the capability contract.
@@ -682,6 +688,9 @@ Shared local-file tests use isolated temporary directories to cover empty and no
 Shared fake picker and reference tests cover single and multiple selection, active and queued cancellation, unsupported capabilities, filter validation, serialized presentation, grant retention, import and replacement, and UI-thread resumption.
 Each platform picker phase adds revoked-access, Runtime-teardown, platform dismissal, and grant-cleanup coverage appropriate to that platform.
 
+Linux picker integration tests use `GTestDBus` with a private bus and fake `org.freedesktop.portal.Desktop` service.
+They cover capability probing, X11 parenting, filter and suggested-name wire values, predicted and returned Request handles, success and failure responses, URI validation, cancellation with Request.Close, late responses, metadata, reference I/O, and completed save copies without displaying desktop UI.
+
 Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, platform picker mapping, platform failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
 
 Web storage validation should additionally cover initial restoration before Runtime mounting, persistence across page reloads, temporary-data loss across reloads, isolation between two storage keys on one origin, rejection of synchronous persistent mutation without an in-memory change, serialized asynchronous persistence, IndexedDB failure mapping, cancellation, Runtime teardown, and reuse of one initialized mount by multiple Runtime instances.
@@ -689,4 +698,3 @@ Web storage validation should additionally cover initial restoration before Runt
 ## Remaining delivery sequence
 
 - Expand Web browser integration coverage for persistence failure, storage eviction, and multiple sessions without changing the shared file contract.
-- Implement the Linux picker adapter without expanding the shared contract into application activation, directory selection, persistent grants, drag-and-drop, or clipboard APIs.

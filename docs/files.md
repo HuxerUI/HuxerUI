@@ -2,7 +2,7 @@
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
 The current application-directory implementation supports Windows, macOS, Linux, iOS, Android, and Web.
-The shared `FileReference` and `FilePicker` contract and its Windows, macOS, iOS, Android, and Web platform adapters are available; the Linux picker adapter remains staged work.
+The shared `FileReference` and `FilePicker` contract and its Windows, macOS, Linux, iOS, Android, and Web platform adapters are available.
 
 ## Application directories
 
@@ -139,6 +139,11 @@ Selected `content://` values remain inside `FileReference`, require no broad sto
 On Windows, opening and saving use the system file dialogs owned by the HuxerUI window.
 Selected filesystem paths remain private to `FileReference`; reads, imports, replacements, and save copies run on the bounded platform file executor instead of blocking the UI thread.
 Extensions and MIME types are translated into advisory system filters, while unsupported MIME mappings widen the filter rather than hiding valid files.
+
+On Linux, opening and saving use `org.freedesktop.portal.FileChooser` on the session D-Bus without a GTK or Qt fallback.
+The adapter supplies the current X11 window identifier when available, retains returned `file://` locations privately inside `FileReference`, and performs reads, imports, replacements, and save copies on the shared bounded file executor.
+If the session bus or xdg-desktop-portal service is unavailable, both picker capability predicates return `false` while local `FileSystem` access remains available.
+Canceling an active Task closes the corresponding portal Request so the next serialized picker operation can begin.
 
 On Web, opening prefers the File System Access API and falls back to a transient `<input type="file">` where that API is unavailable.
 Handle-backed references can report write support, while input-backed references remain read-only; both can be read or imported into application storage.
