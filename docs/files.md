@@ -2,6 +2,7 @@
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
 The current implementation supports macOS, Linux, iOS, Android, and Web; the Windows directory mapping remains staged work.
+The shared `FileReference` and `FilePicker` contract and its macOS, iOS, Android, and Web platform adapters are available; Windows and Linux picker adapters remain staged work.
 
 ## Application directories
 
@@ -95,6 +96,48 @@ View SettingsStatus() {
 
 Canceling the owning `TaskHandle`, retiring its `TaskScope`, or destroying the Runtime prevents a late filesystem completion from resuming application code.
 An underlying storage operation that cannot be interrupted may still finish after cancellation.
+
+## External files and pickers
+
+`FileReference` retains platform-granted access to one external file without exposing a native path or pretending that the file belongs to the application sandbox.
+It is copyable, provides display metadata, and supports asynchronous reads, import into a local `File`, and write-back when `CanWrite()` is true.
+
+Runtime always installs one `FilePicker` Root Service.
+Applications inspect its capabilities because platform picker adapters are introduced independently:
+
+```cpp
+auto picker = UseService<FilePicker>();
+auto tasks = UseTaskScope();
+
+if (picker->CanOpenFiles()) {
+  tasks.Launch([picker]() -> Task<void> {
+    std::optional<FileReference> selected = co_await picker->OpenFileAsync({
+        .name = "Text",
+        .extensions = {"txt"},
+        .content_types = {"text/plain"},
+    });
+    if (selected) {
+      FileResult<std::string> text = co_await selected->ReadStringAsync();
+    }
+  });
+}
+```
+
+Extensions omit the leading dot, and content types use exact MIME strings, `type/*`, or `*/*`.
+Every extension and content type in the filter is accepted as part of one union; an empty filter permits all files.
+Malformed filters and suggested filenames throw `std::invalid_argument` before opening native UI.
+User cancellation and unavailable platform capability produce `std::nullopt`, an empty vector, or `false` according to the requested operation.
+Only one picker is presented per Runtime; concurrent calls wait in request order, and Task cancellation detaches application continuation while asking the platform to dismiss an active picker when possible.
+
+On Android, `HuxerUIActivity` supplies the Storage Access Framework launcher automatically.
+An application embedding `HuxerUIView` in its own Activity installs a `HuxerUIView.FilePickerLauncher` and forwards the corresponding Activity result through `dispatchFilePickerResult()`; until it does so, the picker capability predicates return `false`.
+Selected `content://` values remain inside `FileReference`, require no broad storage permission, and are not persisted across application launches by this initial API.
+
+On Web, opening prefers the File System Access API and falls back to a transient `<input type="file">` where that API is unavailable.
+Handle-backed references can report write support, while input-backed references remain read-only; both can be read or imported into application storage.
+`CanSaveFiles()` is true only when the browser provides `showSaveFilePicker()` and writable file handles because an ordinary download cannot report the shared save result reliably.
+Picker calls must begin directly in a click or equivalent user event before another `co_await` consumes the browser's transient user activation.
+Web grants remain session scoped and are not persisted to IndexedDB.
 
 ## Web storage identity
 

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -17,10 +18,18 @@
 
 namespace huxerui {
 
+class FileReference;
+class Runtime;
 class FileSystem;
 
 namespace detail {
+class FilePickerController;
+class FilePickerTransport;
+class FileReferenceState;
+struct FileReferenceMetadata;
 struct FileSystemPaths;
+[[nodiscard]] FileReference
+MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
 [[nodiscard]] std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths);
 } // namespace detail
 
@@ -173,6 +182,75 @@ public:
 
 private:
   std::string path_;
+};
+
+class FileReference final {
+public:
+  FileReference(const FileReference&) = default;
+  FileReference(FileReference&&) noexcept = default;
+  FileReference& operator=(const FileReference&) = default;
+  FileReference& operator=(FileReference&&) noexcept = default;
+  ~FileReference();
+
+  [[nodiscard]] std::string Name() const;
+  [[nodiscard]] std::optional<std::uint64_t> Size() const;
+  [[nodiscard]] std::optional<std::string> ContentType() const;
+  [[nodiscard]] bool CanWrite() const noexcept;
+
+  [[nodiscard]] Task<FileResult<std::vector<std::byte>>> ReadBytesAsync() const;
+  [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
+  [[nodiscard]] Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
+  [[nodiscard]] Task<bool> ReplaceWithAsync(File source) const;
+
+private:
+  FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state);
+
+  std::string name_;
+  std::optional<std::uint64_t> size_;
+  std::optional<std::string> content_type_;
+  bool can_write_ = false;
+  std::shared_ptr<detail::FileReferenceState> state_;
+
+  friend FileReference
+  detail::MakeFileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state);
+};
+
+struct FilePickerFilter {
+  std::string name;
+  std::vector<std::string> extensions;
+  std::vector<std::string> content_types;
+};
+
+struct SaveFileOptions {
+  std::string suggested_name;
+  FilePickerFilter filter;
+};
+
+class FilePicker final {
+public:
+  ~FilePicker();
+
+  FilePicker(const FilePicker&) = delete;
+  FilePicker& operator=(const FilePicker&) = delete;
+  FilePicker(FilePicker&&) = delete;
+  FilePicker& operator=(FilePicker&&) = delete;
+
+  [[nodiscard]] bool CanOpenFiles() const noexcept;
+  [[nodiscard]] bool CanSaveFiles() const noexcept;
+
+  [[nodiscard]] Task<std::optional<FileReference>> OpenFileAsync(FilePickerFilter filter = {}) const;
+  [[nodiscard]] Task<std::vector<FileReference>> OpenFilesAsync(FilePickerFilter filter = {}) const;
+  [[nodiscard]] Task<bool> SaveFileAsync(File source, SaveFileOptions options = {}) const;
+
+private:
+  FilePicker(
+      std::shared_ptr<detail::FilePickerTransport> transport,
+      std::function<void(std::function<void()>)> dispatch_to_ui_thread
+  );
+
+  std::shared_ptr<detail::FilePickerController> controller_;
+
+  friend class Runtime;
 };
 
 struct AppDirectories {

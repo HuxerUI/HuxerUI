@@ -996,6 +996,10 @@ public:
   }
 
 private:
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateAndroidFilePickerTransport(virtual_machine_, Environment(), view_, context_);
+  }
+
   std::shared_ptr<FileSystem> CreateFileSystem() override {
     return CreateAndroidFileSystem(Environment(), context_);
   }

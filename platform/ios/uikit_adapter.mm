@@ -483,6 +483,10 @@ public:
     return CreateIosFileSystem();
   }
 
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateIosFilePickerTransport([this] { return view_controller_; });
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateIosHttpTransport();
   }

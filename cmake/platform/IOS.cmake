@@ -2,6 +2,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/ios/ios_external_texture.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file.mm"
+            "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file_picker.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/ios_http.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_accessibility.mm"
             "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_adapter.mm"
@@ -22,8 +23,10 @@ function(huxerui_platform_configure)
             "-framework CoreVideo"
             "-framework Foundation"
             "-framework ImageIO"
+            "-framework MobileCoreServices"
             "-framework QuartzCore"
             "-framework UIKit"
+            "-weak_framework UniformTypeIdentifiers"
             PARENT_SCOPE
     )
 endfunction()

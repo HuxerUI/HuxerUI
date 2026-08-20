@@ -829,6 +829,10 @@ public:
     return CreateWebHttpTransport();
   }
 
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateWebFilePickerTransport();
+  }
+
   std::shared_ptr<FileSystem> CreateFileSystem() override {
     return CreateWebFileSystem();
   }

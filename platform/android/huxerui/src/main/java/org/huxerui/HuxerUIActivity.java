@@ -1,6 +1,7 @@
 package org.huxerui;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -26,6 +27,19 @@ public class HuxerUIActivity extends Activity {
         configureEdgeToEdgeWindow();
         contentView = new HuxerUIView(this);
         contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
+        contentView.setFilePickerLauncher(new HuxerUIView.FilePickerLauncher() {
+            @SuppressWarnings("deprecation")
+            @Override
+            public void launch(Intent intent, int requestCode) {
+                startActivityForResult(intent, requestCode);
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public void cancel(int requestCode) {
+                finishActivity(requestCode);
+            }
+        });
         setContentView(contentView);
         setSystemBarsContentBrightness(HuxerUIView.SYSTEM_BAR_CONTENT_DARK, HuxerUIView.SYSTEM_BAR_CONTENT_DARK);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -47,6 +61,15 @@ public class HuxerUIActivity extends Activity {
         finishAfterTransition();
     }
 
+    @SuppressWarnings("deprecation")
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (contentView != null && contentView.dispatchFilePickerResult(requestCode, resultCode, data)) {
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
     @Override
     protected void onDestroy() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
@@ -58,6 +81,7 @@ public class HuxerUIActivity extends Activity {
             backCallback = null;
         }
         if (contentView != null) {
+            contentView.setFilePickerLauncher(null);
             contentView.setSystemBarsController(null);
         }
         contentView = null;

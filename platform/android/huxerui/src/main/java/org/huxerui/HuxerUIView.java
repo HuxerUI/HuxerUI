@@ -3,6 +3,7 @@ package org.huxerui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Bitmap;
@@ -95,6 +96,12 @@ public final class HuxerUIView extends ViewGroup {
         void setContentBrightness(int statusBar, int navigationBar);
     }
 
+    public interface FilePickerLauncher {
+        void launch(Intent intent, int requestCode);
+
+        void cancel(int requestCode);
+    }
+
     private static final float SCROLL_STEP = 48.0F;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -115,6 +122,7 @@ public final class HuxerUIView extends ViewGroup {
     private final float[] transformValues = new float[9];
     private final int[] screenLocation = new int[2];
     private final HuxerUIAccessibilityProvider accessibilityProvider;
+    private final HuxerUIFilePicker filePicker;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
     private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
@@ -157,6 +165,7 @@ public final class HuxerUIView extends ViewGroup {
     private int safeInsetRight;
     private int safeInsetBottom;
     private SystemBarsController systemBarsController;
+    private FilePickerLauncher filePickerLauncher;
     private long[] platformComposition = EMPTY_PLATFORM_COMPOSITION;
     private boolean nativeDrawing;
     private boolean applyingPlatformViewFocus;
@@ -182,6 +191,7 @@ public final class HuxerUIView extends ViewGroup {
     public HuxerUIView(Context context, AttributeSet attributes, int defaultStyleAttribute) {
         super(context, attributes, defaultStyleAttribute);
         accessibilityProvider = new HuxerUIAccessibilityProvider(this);
+        filePicker = new HuxerUIFilePicker(this);
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -191,6 +201,40 @@ public final class HuxerUIView extends ViewGroup {
 
     void setSystemBarsController(SystemBarsController controller) {
         systemBarsController = controller;
+    }
+
+    public void setFilePickerLauncher(FilePickerLauncher launcher) {
+        if (filePickerLauncher == launcher) {
+            return;
+        }
+        filePicker.cancelActive();
+        filePickerLauncher = launcher;
+    }
+
+    public boolean dispatchFilePickerResult(int requestCode, int resultCode, Intent data) {
+        return filePicker.dispatchResult(requestCode, resultCode, data);
+    }
+
+    FilePickerLauncher filePickerLauncher() {
+        return filePickerLauncher;
+    }
+
+    boolean canOpenFiles() {
+        return filePickerLauncher != null;
+    }
+
+    boolean canSaveFiles() {
+        return filePickerLauncher != null;
+    }
+
+    HuxerUIFilePicker.Operation prepareOpenFiles(
+            long nativeHandle, String[] extensions, String[] contentTypes, boolean multiple) {
+        return filePicker.prepareOpen(nativeHandle, extensions, contentTypes, multiple);
+    }
+
+    HuxerUIFilePicker.Operation prepareSaveFile(
+            long nativeHandle, String sourcePath, String suggestedName, String[] extensions, String[] contentTypes) {
+        return filePicker.prepareSave(nativeHandle, sourcePath, suggestedName, extensions, contentTypes);
     }
 
     @Override

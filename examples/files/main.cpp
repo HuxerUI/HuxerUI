@@ -1,7 +1,9 @@
 #include <huxerui/huxerui.h>
 
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace huxerui;
 
@@ -10,6 +12,14 @@ struct FileOperationState {
   std::string status {"Ready"};
   std::string detail {"Write, append, read, or delete the example file."};
 };
+
+FilePickerFilter TextFileFilter() {
+  return {
+      .name = "Text files",
+      .extensions = {"txt", "md", "json"},
+      .content_types = {"text/*", "application/json"},
+  };
+}
 
 View DirectoryPath(std::string label, const File& directory) {
   const ThemeSpec& theme = UseTheme();
@@ -23,6 +33,7 @@ View DirectoryPath(std::string label, const File& directory) {
 
 [[huxerui::scope]] View FilesContent() {
   auto files = UseService<FileSystem>();
+  auto picker = UseService<FilePicker>();
   auto tasks = UseTaskScope();
   auto content = UseState(TextEditingValue::FromText("Hello from HuxerUI."));
   auto operation = UseState(FileOperationState{});
@@ -108,6 +119,74 @@ View DirectoryPath(std::string label, const File& directory) {
                 false,
                 succeeded ? "Delete complete" : "Delete failed",
                 succeeded ? "The file is absent." : "The local delete could not be completed."
+              };
+            });
+          }),
+        }.With(
+            Spacing(theme.spacing.small),
+            CrossAlign(CrossAxisAlignment::Center)
+        ),
+      }.With(
+          Padding(theme.spacing.large),
+          Spacing(theme.spacing.medium),
+          Background(theme.colors.surface_container_low),
+          CornerRadius(theme.shapes.medium)
+      ),
+      Column {
+        Text("External files", TextRole::Title),
+        Text(
+            "FilePicker returns FileReference capabilities without exposing provider URLs as application-local "
+            "paths."
+        ),
+        Flow {
+          Button("Open text file").With(Enabled(!operation->busy && picker->CanOpenFiles())).OnClick([=] {
+            operation = {true, "Opening", "Waiting for a text file selection..."};
+            tasks.Launch([=]() -> Task<void> {
+              std::optional<FileReference> selected = co_await picker->OpenFileAsync(TextFileFilter());
+              if (!selected) {
+                operation = {false, "Open canceled", "No external file was selected."};
+                co_return;
+              }
+              FileResult<std::string> result = co_await selected->ReadStringAsync();
+              if (!result.Succeeded()) {
+                operation = {false, "Read failed", result.Error().message};
+                co_return;
+              }
+              content = TextEditingValue::FromText(std::move(result).Value());
+              operation = {false, "External file opened", selected->Name()};
+            });
+          }),
+          Button("Open several").With(Enabled(!operation->busy && picker->CanOpenFiles())).OnClick([=] {
+            operation = {true, "Opening", "Waiting for multiple text file selections..."};
+            tasks.Launch([=]() -> Task<void> {
+              std::vector<FileReference> selected = co_await picker->OpenFilesAsync(TextFileFilter());
+              operation = {
+                false,
+                selected.empty() ? "Open canceled" : "External files selected",
+                selected.empty() ? "No external files were selected."
+                                 : std::to_string(selected.size()) + " file references received."
+              };
+            });
+          }),
+          Button("Save editor text").With(Enabled(!operation->busy && picker->CanSaveFiles())).OnClick([=] {
+            operation = {true, "Preparing export", "Writing the editor text to the local example file..."};
+            tasks.Launch([=, value = content->text]() -> Task<void> {
+              if (!co_await example_file.WriteStringAsync(value)) {
+                operation = {false, "Export failed", "The local source file could not be prepared."};
+                co_return;
+              }
+              const bool saved = co_await picker->SaveFileAsync(
+                  example_file,
+                  {
+                      .suggested_name = "example.txt",
+                      .filter = TextFileFilter(),
+                  }
+              );
+              operation = {
+                false,
+                saved ? "Export complete" : "Export canceled or failed",
+                saved ? "The editor text was saved to the selected location."
+                      : "The save was canceled or could not be completed."
               };
             });
           }),

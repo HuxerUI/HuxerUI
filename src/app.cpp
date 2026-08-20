@@ -33,6 +33,10 @@ std::shared_ptr<FileSystem> PlatformAdapter::CreateFileSystem() {
   return {};
 }
 
+std::shared_ptr<detail::FilePickerTransport> PlatformAdapter::CreateFilePickerTransport() {
+  return {};
+}
+
 std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
   return {};
 }

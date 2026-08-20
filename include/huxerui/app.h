@@ -27,11 +27,13 @@
 namespace huxerui {
 
 class FileSystem;
+class FilePicker;
 class PlatformResources;
 struct ResourceConfiguration;
 
 namespace detail {
 class ExternalTextureSurface;
+class FilePickerTransport;
 class HttpTransport;
 class TaskScopeState;
 class TextLayout;
@@ -116,6 +118,7 @@ public:
 
 protected:
   virtual std::shared_ptr<FileSystem> CreateFileSystem();
+  virtual std::shared_ptr<detail::FilePickerTransport> CreateFilePickerTransport();
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
 
   template <class Registration>

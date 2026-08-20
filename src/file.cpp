@@ -724,7 +724,13 @@ std::string ResolveChild(std::string_view path, std::string_view child) {
   return ChildPath(path, child);
 }
 
-FileResult<std::string> DecodeUtf8(FileResult<std::vector<std::byte>> bytes) {
+} // namespace
+
+bool IsValidFileUtf8(std::string_view text) noexcept {
+  return IsValidUtf8(text);
+}
+
+FileResult<std::string> DecodeFileUtf8(FileResult<std::vector<std::byte>> bytes) {
   if (!bytes.Succeeded()) {
     return FileResult<std::string>(std::move(bytes).Error());
   }
@@ -742,8 +748,6 @@ FileResult<std::string> DecodeUtf8(FileResult<std::vector<std::byte>> bytes) {
   }
   return FileResult<std::string>(std::move(text));
 }
-
-} // namespace
 
 std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths) {
   File data(paths.data_directory);
@@ -859,7 +863,7 @@ Task<FileResult<std::vector<std::byte>>> File::ReadBytesAsync() const {
 }
 
 FileResult<std::string> File::ReadString() const {
-  return detail::DecodeUtf8(ReadBytes());
+  return detail::DecodeFileUtf8(ReadBytes());
 }
 
 Task<FileResult<std::string>> File::ReadStringAsync() const {

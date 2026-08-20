@@ -3,6 +3,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_external_texture.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_file.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"

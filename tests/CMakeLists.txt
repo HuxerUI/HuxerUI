@@ -31,6 +31,7 @@ add_executable(huxerui_tests
         runtime/animation.cpp
         runtime/composition.cpp
         runtime/file.cpp
+        runtime/file_picker.cpp
         runtime/http.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
@@ -61,6 +62,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
             platform/macos_platform_module.mm
             platform/macos_platform_view.mm
             platform/macos_external_texture.mm
+            platform/macos_file_picker.mm
             platform/macos_text_input.mm
             platform/macos_window_chrome.cpp
     )

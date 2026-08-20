@@ -454,6 +454,10 @@ public:
     return CreateMacFileSystem();
   }
 
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateMacFilePickerTransport([this] { return window_; });
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateMacHttpTransport();
   }

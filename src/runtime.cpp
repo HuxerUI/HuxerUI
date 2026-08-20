@@ -1001,6 +1001,9 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
   if (std::shared_ptr<FileSystem> file_system = platform.CreateFileSystem()) {
     root.Provide(std::move(file_system));
   }
+  root.Provide(
+      std::shared_ptr<FilePicker>(new FilePicker(platform.CreateFilePickerTransport(), platform.ui_thread_dispatcher_))
+  );
   root.Provide(std::shared_ptr<HttpClient>(new HttpClient(platform.CreateHttpTransport())));
   InstallBuiltinPresentation(root);
   for (const RootHook& hook : application.options.root_hooks) {
