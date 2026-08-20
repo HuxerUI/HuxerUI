@@ -142,6 +142,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Document | Contents |
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
+| [Animation and Scene Transition Design](docs/design/animation.md) | Timing, retained motion, synchronized properties, and frozen-scene transitions |
 | [Task and Structured Concurrency Design](docs/design/tasks.md) | C++20 Task values, scope ownership, cancellation, and UI-thread resumption |
 | [HTTP Client Design](docs/design/http.md) | Typed requests, Task cancellation, UI-thread resumption, and platform transports |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |

@@ -78,8 +78,14 @@ Point Scale(Point value, float factor) noexcept {
 }
 
 AnimationSpec ContinuationAnimation(AnimationSpec animation, float from, float to) {
+  const float remaining = std::clamp(std::abs(to - from), 0.0F, 1.0F);
+  if (remaining <= 0.0F) {
+    return SnapSpec{};
+  }
   if (auto* tween = std::get_if<TweenSpec>(&animation)) {
-    tween->duration *= std::clamp(std::abs(to - from), 0.0F, 1.0F);
+    tween->duration *= remaining;
+  } else if (const auto* keyframes = std::get_if<KeyframeSpec>(&animation)) {
+    animation = KeyframeSpec(keyframes->Duration() * remaining, keyframes->Keyframes());
   }
   return animation;
 }
@@ -104,10 +110,9 @@ public:
     }
   }
 
-  void UpdateStyle(NavigationStyle style, bool reduced_motion) {
+  void UpdateStyle(NavigationStyle style) {
     CheckThread();
     style_ = std::move(style);
-    reduced_motion_ = reduced_motion;
   }
 
   void Push(std::function<View()> page) {
@@ -160,10 +165,6 @@ public:
 
   [[nodiscard]] const NavigationStyle& Style() const noexcept {
     return style_;
-  }
-
-  [[nodiscard]] bool ReducedMotion() const noexcept {
-    return reduced_motion_;
   }
 
   [[nodiscard]] std::uint64_t Revision() const noexcept {
@@ -369,7 +370,6 @@ private:
   std::uint64_t next_operation_id_ = 1;
   std::uint64_t revision_ = 1;
   std::optional<std::uint64_t> queued_predictive_pop_id_;
-  bool reduced_motion_ = false;
 };
 
 namespace {
@@ -529,7 +529,6 @@ const ModifierDescriptor& NavigationPageModifier::Descriptor() {
 struct NavigationContainerModifier {
   std::shared_ptr<NavigationState> state;
   NavigationStyle style;
-  bool reduced_motion = false;
   std::uint64_t revision = 0;
 
   static const ModifierDescriptor& Descriptor();
@@ -547,7 +546,6 @@ public:
     static_cast<void>(node);
     state_ = modifier.state;
     style_ = modifier.style;
-    reduced_motion_ = modifier.reduced_motion;
     if (revision_ != modifier.revision) {
       revision_ = modifier.revision;
       animation_initialized_ = false;
@@ -571,18 +569,18 @@ public:
       const NavigationMotion motion = style_.motion.value_or(NavigationMotion{});
       AnimationSpec animation = transition.kind == NavigationOperationKind::Pop ? motion.pop : motion.push;
       animation = ContinuationAnimation(std::move(animation), transition.progress, transition.target);
-      progress_.Update(transition.target, style_.motion.has_value() ? animation : AnimationSpec{SnapSpec{}});
+      progress_.AnimateTo(transition.target, style_.motion.has_value() ? animation : AnimationSpec{SnapSpec{}});
       animation_initialized_ = true;
     }
 
-    const bool running = progress_.Advance(frame.timestamp, frame.delta_time, reduced_motion_);
+    const MotionAdvanceResult result = progress_.Advance(frame);
     state_->SetTransitionProgress(progress_.Value());
-    if (!running && progress_.Value() == transition.target) {
+    if (!result.needs_frame && !result.wake_after.has_value() && progress_.Value() == transition.target) {
       state_->FinishTransition();
       animation_initialized_ = false;
       return {true, std::nullopt};
     }
-    return {running, std::nullopt};
+    return {result.needs_frame, result.wake_after};
   }
 
   bool OnBack(huxerui::MountedNode& node, const BackEvent& event) override {
@@ -609,9 +607,8 @@ public:
 private:
   std::shared_ptr<NavigationState> state_;
   NavigationStyle style_;
-  AnimatedValue<float> progress_;
+  MotionController progress_;
   std::uint64_t revision_ = 0;
-  bool reduced_motion_ = false;
   bool animation_initialized_ = false;
 };
 
@@ -678,8 +675,7 @@ View NavigationStack(std::function<View()> root) {
     state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
     state->UpdateRoot(root);
     const NavigationStyle style = UseEnvironment<NavigationStyle>();
-    const bool reduced_motion = UseTheme().motion.reduced_motion;
-    state->UpdateStyle(style, reduced_motion);
+    state->UpdateStyle(style);
 
     std::vector<View> pages;
     pages.reserve(state->Entries().size());
@@ -695,7 +691,7 @@ View NavigationStack(std::function<View()> root) {
       );
     }
 
-    detail::NavigationContainerModifier container{state, style, reduced_motion, state->Revision()};
+    detail::NavigationContainerModifier container{state, style, state->Revision()};
     View stack = detail::NavigationStackLayout {std::move(pages)}
                      .LayoutValue<detail::NavigationStateValue>(state)
                      .With(ClipChildren{}, std::move(container));

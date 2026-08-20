@@ -402,16 +402,16 @@ public:
     if (target_pending_) {
       const double duration = kind_ == ToggleVisualKind::RadioButton ? radio_button_style_.animation_duration
                                                                      : switch_style_.animation_duration;
-      progress_.Update(checked_ ? 1.0F : 0.0F, TweenSpec{duration});
+      progress_.AnimateTo(checked_ ? 1.0F : 0.0F, TweenSpec{duration});
       target_pending_ = false;
     }
-    progress_.Advance(frame.timestamp, frame.delta_time);
+    const MotionAdvanceResult result = progress_.Advance(frame);
     if (progress_.Value() != previous_progress) {
       InvalidatePaint();
     }
     return {
-        .needs_frame = progress_.IsRunning(),
-        .wake_after = std::nullopt,
+        .needs_frame = result.needs_frame,
+        .wake_after = result.wake_after,
     };
   }
 
@@ -556,7 +556,7 @@ private:
   RadioButtonStyle radio_button_style_;
   SwitchStyle switch_style_;
   VectorAsset checkmark_;
-  detail::AnimatedValue<float> progress_;
+  MotionController progress_;
   bool checked_ = false;
   bool initialized_ = false;
   bool target_pending_ = false;
@@ -928,8 +928,8 @@ public:
     static_cast<void>(node);
     const float previous_x = indicator_x_.Value();
     const float previous_width = indicator_width_.Value();
-    static_cast<void>(indicator_x_.Advance(frame.timestamp, frame.delta_time));
-    static_cast<void>(indicator_width_.Advance(frame.timestamp, frame.delta_time));
+    const MotionAdvanceResult x_result = indicator_x_.Advance(frame);
+    const MotionAdvanceResult width_result = indicator_width_.Advance(frame);
     if (indicator_x_.Value() != previous_x || indicator_width_.Value() != previous_width) {
       InvalidatePaint();
     }
@@ -938,8 +938,8 @@ public:
       reveal_offset_.reset();
     }
     return {
-        .needs_frame = geometry_update_pending_ || indicator_x_.IsRunning() || indicator_width_.IsRunning(),
-        .wake_after = std::nullopt,
+        .needs_frame = geometry_update_pending_ || x_result.needs_frame || width_result.needs_frame,
+        .wake_after = detail::EarliestWakeAfter(x_result.wake_after, width_result.wake_after),
     };
   }
 
@@ -969,8 +969,8 @@ public:
     } else if (indicator_x_.Target() != target_x || indicator_width_.Target() != target_width) {
       if (animate_geometry_update_ && style_.indicator_animation_duration > 0.0) {
         const TweenSpec animation{style_.indicator_animation_duration};
-        indicator_x_.Update(target_x, animation);
-        indicator_width_.Update(target_width, animation);
+        indicator_x_.AnimateTo(target_x, animation);
+        indicator_width_.AnimateTo(target_width, animation);
       } else {
         indicator_x_.Set(target_x);
         indicator_width_.Set(target_width);
@@ -1082,8 +1082,8 @@ private:
     return std::nullopt;
   }
 
-  detail::AnimatedValue<float> indicator_x_;
-  detail::AnimatedValue<float> indicator_width_;
+  MotionController indicator_x_;
+  MotionController indicator_width_;
   std::vector<bool> enabled_items_;
   TabsStyle style_;
   ScrollController scroll_controller_;
@@ -1466,14 +1466,14 @@ public:
     static_cast<void>(node);
     const float previous_width = thumb_width_.Value();
     const float previous_height = thumb_height_.Value();
-    thumb_width_.Advance(frame.timestamp, frame.delta_time);
-    thumb_height_.Advance(frame.timestamp, frame.delta_time);
+    const MotionAdvanceResult width_result = thumb_width_.Advance(frame);
+    const MotionAdvanceResult height_result = thumb_height_.Advance(frame);
     if (thumb_width_.Value() != previous_width || thumb_height_.Value() != previous_height) {
       InvalidatePaint();
     }
     return {
-        .needs_frame = thumb_width_.IsRunning() || thumb_height_.IsRunning(),
-        .wake_after = std::nullopt,
+        .needs_frame = width_result.needs_frame || height_result.needs_frame,
+        .wake_after = detail::EarliestWakeAfter(width_result.wake_after, height_result.wake_after),
     };
   }
 
@@ -1743,14 +1743,14 @@ private:
       return;
     }
     const TweenSpec animation{style_.animation_duration};
-    thumb_width_.Update(target_width, animation);
-    thumb_height_.Update(target_height, animation);
+    thumb_width_.AnimateTo(target_width, animation);
+    thumb_height_.AnimateTo(target_height, animation);
   }
 
   SliderStyle style_;
   detail::EventBindings event_bindings_;
-  detail::AnimatedValue<float> thumb_width_;
-  detail::AnimatedValue<float> thumb_height_;
+  MotionController thumb_width_;
+  MotionController thumb_height_;
   std::optional<std::int64_t> pointer_id_;
   std::optional<float> step_;
   float value_ = 0.0F;

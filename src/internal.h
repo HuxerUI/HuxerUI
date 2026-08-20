@@ -4,8 +4,6 @@
 #include <any>
 #include <array>
 #include <atomic>
-#include <cmath>
-#include <concepts>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -180,7 +178,6 @@ struct LayerTransitionState {
   bool target_visible = true;
   // A transition attached to content that is already visible starts settled and is retained only for its later exit.
   bool enter_on_mount = true;
-  bool reduced_motion = false;
   float hidden_opacity = 0.0F;
   AnimationSpec enter = TweenSpec{.duration = 0.2};
   AnimationSpec exit = TweenSpec{.duration = 0.14};
@@ -242,112 +239,15 @@ struct LayerEntry {
   std::shared_ptr<LayerTransitionState> transition;
 };
 
-template <std::floating_point T> class AnimatedValue {
-public:
-  AnimatedValue() noexcept = default;
-
-  explicit AnimatedValue(T value) noexcept {
-    Set(value);
+inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std::optional<double> second) noexcept {
+  if (!first.has_value()) {
+    return second;
   }
-
-  [[nodiscard]] T Value() const noexcept {
-    return value_;
+  if (!second.has_value()) {
+    return first;
   }
-  [[nodiscard]] T Target() const noexcept {
-    return target_;
-  }
-  [[nodiscard]] bool IsRunning() const noexcept {
-    return running_;
-  }
-
-  void Set(T value) noexcept {
-    value_ = value;
-    start_ = value;
-    target_ = value;
-    velocity_ = {};
-    initialized_ = true;
-    pending_ = false;
-    running_ = false;
-  }
-
-  void Update(T target, AnimationSpec animation) {
-    if (!initialized_) {
-      Set(target);
-      animation_ = std::move(animation);
-      return;
-    }
-    animation_ = std::move(animation);
-    if (target == target_ && !pending_) {
-      return;
-    }
-    target_ = target;
-    pending_ = true;
-  }
-
-  bool Advance(double timestamp, double delta_time, bool reduced_motion = false) noexcept {
-    if (pending_) {
-      pending_ = false;
-      if (reduced_motion || std::holds_alternative<SnapSpec>(animation_)) {
-        Set(target_);
-        return false;
-      }
-      start_ = value_;
-      start_time_ = timestamp;
-      running_ = true;
-    }
-    if (!running_) {
-      return false;
-    }
-
-    if (const auto* tween = std::get_if<TweenSpec>(&animation_)) {
-      if (!std::isfinite(tween->duration) || tween->duration <= 0.0) {
-        Set(target_);
-        return false;
-      }
-      const double progress = std::clamp((timestamp - start_time_) / tween->duration, 0.0, 1.0);
-      double eased = progress;
-      if (tween->easing == Easing::EaseIn) {
-        eased = progress * progress * progress;
-      } else if (tween->easing == Easing::EaseOut) {
-        const double inverse = 1.0 - progress;
-        eased = 1.0 - inverse * inverse * inverse;
-      }
-      value_ = static_cast<T>(start_ + (target_ - start_) * static_cast<T>(eased));
-      if (progress >= 1.0) {
-        Set(target_);
-      }
-      return running_;
-    }
-
-    const auto& spring = std::get<SpringSpec>(animation_);
-    if (!std::isfinite(spring.stiffness) || spring.stiffness <= 0.0F || !std::isfinite(spring.damping_ratio) ||
-        spring.damping_ratio < 0.0F) {
-      Set(target_);
-      return false;
-    }
-    const T step = static_cast<T>(std::clamp(delta_time, 0.0, 1.0 / 30.0));
-    const T stiffness = static_cast<T>(spring.stiffness);
-    const T damping = static_cast<T>(2.0F * std::sqrt(spring.stiffness) * spring.damping_ratio);
-    const T acceleration = stiffness * (target_ - value_) - damping * velocity_;
-    velocity_ += acceleration * step;
-    value_ += velocity_ * step;
-    if (std::abs(target_ - value_) < static_cast<T>(0.001) && std::abs(velocity_) < static_cast<T>(0.001)) {
-      Set(target_);
-    }
-    return running_;
-  }
-
-private:
-  AnimationSpec animation_ = SnapSpec{};
-  T value_{};
-  T start_{};
-  T target_{};
-  T velocity_{};
-  double start_time_ = 0.0;
-  bool initialized_ = false;
-  bool pending_ = false;
-  bool running_ = false;
-};
+  return std::min(*first, *second);
+}
 
 struct ScrollItemRequest {
   std::size_t index;
@@ -717,6 +617,8 @@ struct MountedNode final : public huxerui::MountedNode {
   std::unique_ptr<VirtualNodeState> virtual_state;
   std::vector<NodeExtensionEntry> extensions;
   std::shared_ptr<const Environment> environment;
+  // Cached when the immutable Environment is applied so animation frames do not repeatedly copy and resolve ThemeSpec.
+  bool reduced_motion = false;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool enabled = true;
@@ -816,10 +718,6 @@ protected:
   }
 };
 
-struct PlatformViewPaintAccess {
-  static void Paint(const MountedNode& node, PaintContext& context);
-};
-
 struct RenderSlice {
   std::optional<std::uint64_t> preceding_platform_view;
   std::optional<std::uint64_t> following_platform_view;
@@ -836,6 +734,10 @@ struct PlatformViewPlacement {
   bool visible = false;
 
   bool operator==(const PlatformViewPlacement&) const = default;
+};
+
+struct PlatformViewPaintAccess {
+  static void Paint(const MountedNode& node, PaintContext& context);
 };
 
 using RenderCompositionLayer = std::variant<RenderSlice, PlatformViewPlacement>;
@@ -870,7 +772,65 @@ struct RenderNodeSnapshot {
   bool visible = false;
 };
 
-using RenderSceneSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapshot>;
+// Retains committed geometry and revisions for damage comparison, not visual scene content.
+using RenderDamageSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapshot>;
+
+struct FrozenScene {
+  static PaintSequence CopyPaintSequence(const PaintSequence& source);
+
+  const RenderNode* root = nullptr;
+  std::vector<std::unique_ptr<RenderNode>> nodes;
+};
+
+std::shared_ptr<FrozenScene> FreezeRenderScene(const RenderNode* root);
+bool RenderSceneHasPlatformViews(const RenderNode* root);
+
+enum class SceneTransitionKind {
+  Fade,
+  CircularReveal,
+};
+
+struct SceneTransitionRequest {
+  SceneTransitionKind kind = SceneTransitionKind::Fade;
+  AnimationSpec animation = TweenSpec{};
+  double delay = 0.0;
+  Point origin;
+};
+
+struct SceneTransitionAnchorState {
+  void Mount();
+  void Unmount() noexcept;
+  void UpdateBounds(Rect bounds) noexcept;
+  [[nodiscard]] std::optional<Point> Center() const noexcept;
+
+  std::optional<Rect> bounds;
+  bool mounted = false;
+};
+
+class SceneTransitionService {
+public:
+  explicit SceneTransitionService(Runtime& runtime) : runtime_(&runtime) {}
+
+  [[nodiscard]] std::shared_ptr<SceneTransitionAnchorState> CreateAnchor() const;
+  void Run(SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion) const;
+  void Disconnect() noexcept;
+
+private:
+  Runtime* runtime_;
+};
+
+struct ActiveSceneTransition {
+  SceneTransitionRequest request;
+  std::shared_ptr<FrozenScene> frozen;
+  MotionController progress{0.0F};
+  Size viewport;
+  RenderNode composite;
+  RenderNode old_wrapper;
+  RenderNode new_wrapper;
+};
+
+const RenderNode*
+ComposeSceneTransition(ActiveSceneTransition& transition, const RenderNode* live_root, float progress);
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
@@ -1205,7 +1165,8 @@ struct Runtime::State {
       std::shared_ptr<detail::WindowState> window
   )
       : root_factory_(root_factory), platform_(platform), viewport_breakpoints_(viewport_breakpoints),
-        window_(std::move(window)), root_scope_(std::move(root_scope)), layer_controller_(std::move(layer_controller)) {}
+        window_(std::move(window)), root_scope_(std::move(root_scope)),
+        layer_controller_(std::move(layer_controller)) {}
 
   RootFactory root_factory_;
   PlatformAdapter* platform_;
@@ -1220,13 +1181,15 @@ struct Runtime::State {
   std::shared_ptr<detail::AppResources> app_resources_;
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::shared_ptr<detail::WindowService> window_service_;
+  std::shared_ptr<detail::SceneTransitionService> scene_transition_service_;
+  std::optional<detail::ActiveSceneTransition> scene_transition_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
   std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
   std::vector<std::shared_ptr<detail::TaskScopeState>> retired_task_scopes_;
   std::shared_ptr<detail::TaskDelayScheduler> task_delay_scheduler_;
   FrameCommit frame_commit_;
-  detail::RenderSceneSnapshot committed_scene_snapshot_;
+  detail::RenderDamageSnapshot committed_scene_snapshot_;
   Size committed_viewport_;
   bool has_committed_scene_snapshot_ = false;
   bool application_dirty_ = true;
@@ -1311,13 +1274,13 @@ void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay =
 DamageRegion ComputeDamageRegion(
     const RenderNode* root,
     Size viewport,
-    RenderSceneSnapshot& committed_scene,
+    RenderDamageSnapshot& committed_scene,
     Size& committed_viewport,
     bool& has_committed_scene,
     const std::shared_ptr<ExternalTextureSurface>& texture_surface
 );
 void DeactivateExternalTextures(
-    RenderSceneSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    RenderDamageSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
 );
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);

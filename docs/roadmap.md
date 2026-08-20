@@ -13,7 +13,7 @@ Framework capability work:
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
 - Shape and path-based clipping modifiers
 - Event capture, bubbling, and explicit pointer capture
-- Saveable state, keyframe and decay animation, and overscroll effects
+- Saveable state, decay animation, ordinary View lifecycle transitions, and overscroll effects
 - Complete component, modal, collection, navigation, virtualization, and platform adapter coverage for the implemented `SemanticFrame` foundation following the [Semantics and Accessibility Design](design/semantics.md)
 
 SDK, platform integration, and distribution work:
@@ -30,6 +30,7 @@ SDK, platform integration, and distribution work:
 The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and PlatformView expansion.
 App resources and Image follow the ownership, packaging, caching, and localization constraints in [App Resources, Images, and Localization Design](design/resources.md).
 Page stacks, transition ownership, Back routing, and future URL-backed paths follow the [Navigation Design](design/navigation.md).
+Retained timing, synchronized presentation properties, and explicit frozen-scene transitions follow the [Animation and Scene Transition Design](design/animation.md).
 Accessibility proceeds from shared semantic declarations and the immutable `SemanticFrame` through component defaults before platform adapters.
 SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before PlatformView modules and versioned distribution.
 

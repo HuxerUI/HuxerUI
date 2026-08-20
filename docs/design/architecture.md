@@ -13,11 +13,11 @@ Current implementation status:
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
-- Tween and spring animated Offset, Opacity, Scale, and Rotation values, state-overlay indication, and multi-pointer ripple indication are implemented.
+- Named and cubic timing curves, tween, spring, keyframe, and delayed or repeated playback execute through one retained MotionController. Offset, Opacity, Scale, Rotation, synchronized Transition projection, explicit frozen-scene transitions, state-overlay indication, and multi-pointer ripple indication reuse that foundation.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
 - Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and platform accessibility bridges on Windows, macOS, Android, and iOS are implemented. Complete component semantics and the remaining platform adapters are follow-up work.
 - Compile-time module acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent `CVPixelBuffer` sources and Core Image frame import, Windows and Linux provide copied RGBA/BGRA pixel sources and Direct2D or Cairo frame import, Android provides a `Bitmap` source and Canvas frame import, and Web provides a WebCodecs `VideoFrame` source and Canvas frame import. Windows, macOS, Web, Android, and iOS provide owning-thread dispatch and PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual modules. Windows, macOS, Android, and iOS also attach PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Windows, macOS, Linux, Web, Android, and iOS provide nonvisual timer reference integrations behind one typed Root Service. Applications install module RootHooks explicitly. Production nonvisual modules, PlatformView hosting and matching bridges on the remaining platforms, and platform dependency projection preserve one shared Runtime and keep platform objects inside platform adapters and module implementations.
-- General View exit transitions, keyframes, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
+- General View exit transitions, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
 
@@ -845,87 +845,13 @@ Every stage ends with focused tests, the affected current-host build, `git diff 
 
 ## Animation model
 
-Animation is separated into motion parameters and animated modifier values. Visibility transitions are deferred.
+Animation separates immutable timing policy, retained scalar execution, synchronized presentation projection, component motion, and explicit whole-scene transitions. The complete contract is defined in [Animation and Scene Transition Design](animation.md).
 
-### AnimationSpec
+`AnimationSpec` is a value and does not own runtime state. `MotionController` retains scalar value, target, velocity, delay, repetition, and time. `Animated<T>` remains the declarative target accepted by presentation modifiers, while `Transition` projects one retained progress value onto several presentation properties that must remain synchronized. Advancing either form updates mounted presentation state without recomposing the component.
 
-`AnimationSpec` describes how a value moves:
+Explicit scene transitions freeze only committed render data. The new mounted tree becomes authoritative for input, focus, text input, semantics, and window appearance immediately; the frozen old scene has no logical lifecycle.
 
-```cpp
-using AnimationSpec = std::variant<
-    SnapSpec,
-    TweenSpec,
-    SpringSpec>;
-```
-
-Keyframes, decay animation, and visibility transitions remain follow-up work.
-
-Examples:
-
-```cpp
-TweenSpec{
-    .duration = 0.2,
-    .easing = Easing::EaseOut,
-};
-```
-
-```cpp
-SpringSpec{
-    .stiffness = 320.0F,
-    .damping_ratio = 0.82F,
-};
-```
-
-`AnimationSpec` is a value. It is not a modifier and does not own runtime state.
-
-`TweenSpec` supports linear interpolation, cubic ease-in, and cubic ease-out. Ease-in begins at zero speed, ease-out ends at zero speed, and their endpoint slopes can be matched to a linear segment when a motion needs a sustained cruising phase.
-
-### Animated modifier values
-
-`AnimateTo()` combines a target with an animation description:
-
-```cpp
-template <class T>
-struct Animated {
-  T target;
-  AnimationSpec animation;
-};
-```
-
-Modifiers can accept either immediate or animated values:
-
-```cpp
-return Panel().With(
-    Offset{
-        AnimateTo(
-            target_offset,
-            SpringSpec{
-                .stiffness = 320.0F,
-                .damping_ratio = 0.82F,
-            }),
-    },
-    Opacity{
-        AnimateTo(
-            visible ? 1.0F : 0.0F,
-            TweenSpec{
-                .duration = 0.2,
-            }),
-    },
-    Scale{
-        AnimateTo(
-            visible ? 1.0F : 0.92F,
-            SpringSpec{}),
-    },
-    Rotation{
-        AnimateTo(
-            selected ? 8.0F : 0.0F,
-            TweenSpec{.duration = 0.2}),
-    });
-```
-
-The current value, velocity, start time, and target are stored in the compatible `NodeExtension`. Retargeting starts from the current presentation value. Advancing an animation does not recompose the component. Scale and Rotation default to the View center, use a normalized `TransformOrigin`, and share their transform with descendant drawing, clipping, foreground extensions, and pointer hit testing without changing Measure or Layout.
-
-### Deferred transition model
+### Deferred View lifecycle transition model
 
 `TransitionSpec` is a proposed insertion and removal model, not a current public API:
 
@@ -961,7 +887,7 @@ run the exit transition
 unmount after completion
 ```
 
-Dialog, BottomSheet, Menu, and Toast apply this lifecycle to Layer entries through a shared internal transition state when their active style enables motion. They reuse `AnimationSpec`, `AnimatedValue`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
+Dialog, BottomSheet, Menu, and Toast apply this lifecycle to Layer entries through a shared internal transition state when their active style enables motion. They reuse `AnimationSpec`, `MotionController`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
 
 ### Reduced motion
 

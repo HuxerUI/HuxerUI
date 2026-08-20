@@ -63,7 +63,7 @@ private:
       std::shared_ptr<const Environment> environment
   );
   std::shared_ptr<LayerTransitionState> ReconcileTransition(
-      LayerId id, const std::optional<PresentationMotion>& motion, bool reduced_motion
+      LayerId id, const std::optional<PresentationMotion>& motion
   );
   ViewFactory PresentedContent(
       ViewFactory content,
@@ -457,22 +457,22 @@ public:
           bottom_sheet_drag_->dismiss_requested = false;
           bottom_sheet_drag_->dismissed = bottom_sheet_drag_->dismiss && bottom_sheet_drag_->dismiss();
           if (!bottom_sheet_drag_->dismissed) {
-            drag_offset_.Update(0.0F, bottom_sheet_drag_->settle);
+            drag_offset_.AnimateTo(0.0F, bottom_sheet_drag_->settle);
           }
         } else {
-          drag_offset_.Update(0.0F, bottom_sheet_drag_->settle);
+          drag_offset_.AnimateTo(0.0F, bottom_sheet_drag_->settle);
         }
       }
     }
     if (target_visible_ != state_->target_visible) {
       target_visible_ = state_->target_visible;
-      progress_.Update(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
+      progress_.AnimateTo(target_visible_ ? 1.0F : 0.0F, target_visible_ ? state_->enter : state_->exit);
     }
 
     auto& mounted = static_cast<detail::MountedNode&>(node);
-    const bool running = progress_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
-    const bool drag_running =
-        bottom_sheet_drag_ && drag_offset_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
+    const MotionAdvanceResult progress_result = progress_.Advance(frame);
+    const MotionAdvanceResult drag_result = bottom_sheet_drag_ ? drag_offset_.Advance(frame)
+                                                               : MotionAdvanceResult{};
     const float progress = progress_.Value();
     if (motion_.initial_scale != 1.0F) {
       const float scale_value = motion_.initial_scale + (1.0F - motion_.initial_scale) * progress;
@@ -502,7 +502,10 @@ public:
           mounted.presentation.local_transform
       );
     }
-    return {running || drag_running, std::nullopt};
+    return {
+        progress_result.needs_frame || drag_result.needs_frame,
+        detail::EarliestWakeAfter(progress_result.wake_after, drag_result.wake_after),
+    };
   }
 
 private:
@@ -512,8 +515,8 @@ private:
   Point slide_direction_;
   TransformOrigin origin_;
   bool slide_by_content_extent_ = false;
-  detail::AnimatedValue<float> progress_;
-  detail::AnimatedValue<float> drag_offset_;
+  MotionController progress_;
+  MotionController drag_offset_;
   std::uint64_t drag_revision_ = 0;
   bool initialized_ = false;
   bool target_visible_ = false;
@@ -524,7 +527,7 @@ const detail::ModifierDescriptor& PresentationContentMotion::Descriptor() {
 }
 
 std::shared_ptr<detail::LayerTransitionState> PresentationTransition(
-    const std::optional<PresentationMotion>& motion, bool reduced_motion, bool enter_on_mount = true
+    const std::optional<PresentationMotion>& motion, bool enter_on_mount = true
 ) {
   if (!motion.has_value()) {
     return {};
@@ -532,7 +535,6 @@ std::shared_ptr<detail::LayerTransitionState> PresentationTransition(
   return std::make_shared<detail::LayerTransitionState>(detail::LayerTransitionState{
       .target_visible = true,
       .enter_on_mount = enter_on_mount,
-      .reduced_motion = reduced_motion,
       .hidden_opacity = 0.0F,
       .enter = motion->enter,
       .exit = motion->exit,
@@ -541,14 +543,11 @@ std::shared_ptr<detail::LayerTransitionState> PresentationTransition(
 }
 
 void UpdatePresentationTransition(
-    const std::shared_ptr<detail::LayerTransitionState>& transition,
-    const PresentationMotion& motion,
-    bool reduced_motion
+    const std::shared_ptr<detail::LayerTransitionState>& transition, const PresentationMotion& motion
 ) {
   transition->hidden_opacity = 0.0F;
   transition->enter = motion.enter;
   transition->exit = motion.exit;
-  transition->reduced_motion = reduced_motion;
 }
 
 CrossAxisAlignment ResolveCrossAlignment(HorizontalAlignment alignment) noexcept {
@@ -609,14 +608,12 @@ void ValidateDialogStyle(const DialogStyle& style) {
   }
 }
 
-std::shared_ptr<detail::LayerTransitionState>
-BottomSheetTransition(const BottomSheetStyle& style, bool reduced_motion) {
+std::shared_ptr<detail::LayerTransitionState> BottomSheetTransition(const BottomSheetStyle& style) {
   return PresentationTransition(
       PresentationMotion{
           .enter = style.enter,
           .exit = style.exit,
-      },
-      reduced_motion
+      }
   );
 }
 
@@ -2050,11 +2047,9 @@ LayerId detail::ToastService::Show(
   if (detail::IsEmptyStringVariantLiteral(message)) {
     throw std::invalid_argument("HuxerUI toast message must not be empty");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const ToastStyle style = ResolveToastStyle(environment);
   ValidateToastStyle(style);
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      PresentationTransition(style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   auto id = std::make_shared<LayerId>(0);
   std::weak_ptr<ToastService> service = weak_from_this();
   detail::LayerPlacement placement;
@@ -2188,17 +2183,17 @@ bool DialogHandle::Dismiss(LayerId id) const {
 }
 
 std::shared_ptr<detail::LayerTransitionState> detail::DialogService::ReconcileTransition(
-    LayerId id, const std::optional<PresentationMotion>& motion, bool reduced_motion
+    LayerId id, const std::optional<PresentationMotion>& motion
 ) {
   if (!motion.has_value()) {
     return {};
   }
   std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
   if (transition) {
-    UpdatePresentationTransition(transition, *motion, reduced_motion);
+    UpdatePresentationTransition(transition, *motion);
     return transition;
   }
-  transition = PresentationTransition(motion, reduced_motion, false);
+  transition = PresentationTransition(motion, false);
   return transition;
 }
 
@@ -2232,11 +2227,9 @@ LayerId detail::DialogService::Show(
   if (detail::IsEmptyStringVariantLiteral(message)) {
     throw std::invalid_argument("HuxerUI dialog message must not be empty");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      PresentationTransition(style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
@@ -2283,11 +2276,9 @@ LayerId detail::DialogService::Show(
   if (!content) {
     throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      PresentationTransition(style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
@@ -2322,7 +2313,6 @@ bool detail::DialogService::Update(LayerId id, ViewFactory content, std::shared_
   if (!content) {
     throw std::invalid_argument("HuxerUI dialog content factory must not be empty");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
   std::optional<LayerOptions> layer_options = layers_.EntryOptions(id);
@@ -2330,8 +2320,7 @@ bool detail::DialogService::Update(LayerId id, ViewFactory content, std::shared_
     return false;
   }
   layer_options->barrier_color = style.scrim;
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      ReconcileTransition(id, style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = ReconcileTransition(id, style.motion);
   const bool dismissible = layer_options->cancel_policy == LayerCancelPolicy::Dismiss;
   return layers_.UpdateCaptured(
       id,
@@ -2346,12 +2335,10 @@ bool detail::DialogService::Update(LayerId id, ViewFactory content, std::shared_
 bool detail::DialogService::Update(
     LayerId id, ViewFactory content, const DialogOptions& options, std::shared_ptr<const Environment> environment
 ) {
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
   LayerOptions layer_options = DialogLayerOptions(options, style.scrim);
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      ReconcileTransition(id, style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = ReconcileTransition(id, style.motion);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
   return layers_.UpdateCaptured(
       id,
@@ -2403,11 +2390,9 @@ LayerId detail::BottomSheetService::Show(
   if (!content) {
     throw std::invalid_argument("HuxerUI bottom sheet content factory must not be empty");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const BottomSheetStyle style = ResolveBottomSheetStyle(environment);
   ValidateBottomSheetStyle(style);
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      BottomSheetTransition(style, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = BottomSheetTransition(style);
   const bool dismissible = options.dismiss_on_cancel || ShowsBottomSheetDragHandle(style);
   auto id_value = std::make_shared<LayerId>(0);
   std::function<bool()> request_dismiss;
@@ -2598,7 +2583,6 @@ LayerId detail::MenuService::ShowLevel(
     bool submenu
 ) {
   ValidateEntries(entries);
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
   const MenuStyle style = ResolveMenuStyle(environment);
   ValidateMenuStyle(style);
   if (options.width.has_value() && (!std::isfinite(*options.width) || *options.width <= 0.0F)) {
@@ -2610,8 +2594,7 @@ LayerId detail::MenuService::ShowLevel(
   const Point offset = options.offset;
   const std::optional<float> width = options.width;
   const bool dismissible = options.dismiss_on_cancel;
-  const std::shared_ptr<detail::LayerTransitionState> transition =
-      PresentationTransition(style.motion, theme.motion.reduced_motion);
+  const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   if (submenu) {
     chain->DismissFrom(depth);
   }

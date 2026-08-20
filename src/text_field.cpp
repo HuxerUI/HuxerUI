@@ -799,7 +799,7 @@ public:
 
   bool AdvanceLabel(const FrameInfo& frame, bool& paint_changed) {
     const float previous = label_progress_.Value();
-    const bool running = label_progress_.Advance(frame.timestamp, frame.delta_time);
+    const bool running = label_progress_.Advance(frame).needs_frame;
     paint_changed = label_progress_.Value() != previous;
     return running;
   }
@@ -2148,7 +2148,12 @@ private:
 
   void UpdateLabelTarget(bool focused) {
     const float target = !label_.empty() && (focused || !editing_.value.text.empty()) ? 1.0F : 0.0F;
-    label_progress_.Update(target, TweenSpec{style_.label_animation_duration});
+    if (!label_progress_initialized_) {
+      label_progress_.Set(target);
+      label_progress_initialized_ = true;
+    } else {
+      label_progress_.AnimateTo(target, TweenSpec{style_.label_animation_duration});
+    }
   }
 
   void RequestCaretReveal() noexcept {
@@ -2193,13 +2198,14 @@ private:
   std::optional<Point> pending_touch_origin_;
   std::optional<float> preferred_caret_x_;
   std::optional<double> caret_epoch_;
-  detail::AnimatedValue<float> label_progress_;
+  MotionController label_progress_;
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
   float text_layout_width_ = std::numeric_limits<float>::infinity();
   float validation_text_layout_width_ = std::numeric_limits<float>::infinity();
   bool initialized_ = false;
+  bool label_progress_initialized_ = false;
   bool caret_reset_pending_ = true;
   bool caret_visible_ = true;
   bool caret_reveal_pending_ = true;

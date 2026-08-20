@@ -1003,13 +1003,13 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 }
 
 TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
-  huxerui::detail::AnimatedValue<float> animated{0.0F};
-  animated.Update(1.0F, TweenSpec{0.2, Easing::EaseOut});
-  REQUIRE(animated.Advance(1.0, 0.0));
+  MotionController animated{0.0F};
+  animated.AnimateTo(1.0F, TweenSpec{0.2, Easing::EaseOut});
+  REQUIRE(animated.Advance({1.0, 0.0}).needs_frame);
   REQUIRE(animated.IsRunning());
-  REQUIRE(animated.Advance(1.1, 0.1));
+  REQUIRE(animated.Advance({1.1, 0.1}).needs_frame);
   REQUIRE(std::abs(animated.Value() - 0.875F) < 0.001F);
-  REQUIRE(!animated.Advance(1.21, 0.11));
+  REQUIRE(!animated.Advance({1.21, 0.11}).needs_frame);
   REQUIRE(animated.Value() == 1.0F);
 
   drag_item_clicks = 0;
@@ -1085,17 +1085,17 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
 }
 
 TEST_CASE("TestEaseInTweenStartsSlowlyAndReachesItsTarget") {
-  huxerui::detail::AnimatedValue<float> animated{0.0F};
-  animated.Update(1.0F, TweenSpec{1.0, Easing::EaseIn});
+  MotionController animated{0.0F};
+  animated.AnimateTo(1.0F, TweenSpec{1.0, Easing::EaseIn});
 
-  REQUIRE(animated.Advance(2.0, 0.0));
-  REQUIRE(animated.Advance(2.25, 0.25));
+  REQUIRE(animated.Advance({2.0, 0.0}).needs_frame);
+  REQUIRE(animated.Advance({2.25, 0.25}).needs_frame);
   REQUIRE(animated.Value() == Catch::Approx(0.015625F));
-  REQUIRE(animated.Advance(2.5, 0.25));
+  REQUIRE(animated.Advance({2.5, 0.25}).needs_frame);
   REQUIRE(animated.Value() == Catch::Approx(0.125F));
-  REQUIRE(animated.Advance(2.75, 0.25));
+  REQUIRE(animated.Advance({2.75, 0.25}).needs_frame);
   REQUIRE(animated.Value() == Catch::Approx(0.421875F));
-  REQUIRE_FALSE(animated.Advance(3.0, 0.25));
+  REQUIRE_FALSE(animated.Advance({3.0, 0.25}).needs_frame);
   REQUIRE(animated.Value() == 1.0F);
 }
 

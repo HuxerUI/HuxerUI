@@ -20,7 +20,10 @@
 
 namespace huxerui {
 
+class PaintContext;
+
 namespace detail {
+struct FrozenScene;
 struct PlatformViewPaintAccess;
 } // namespace detail
 
@@ -241,8 +244,6 @@ using PaintCommand = std::variant<
     PopTransformCommand,
     PlacePlatformViewCommand>;
 
-class PaintContext;
-
 class PaintSequence {
 public:
   [[nodiscard]] const std::vector<PaintCommand>& Commands() const noexcept {
@@ -268,6 +269,7 @@ private:
   bool has_external_texture_commands_ = false;
 
   friend class PaintContext;
+  friend struct detail::FrozenScene;
 };
 
 class PaintContext {

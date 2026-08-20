@@ -10,7 +10,52 @@
 
 namespace huxerui::detail {
 
+PaintSequence FrozenScene::CopyPaintSequence(const PaintSequence& source) {
+  PaintSequence copy = source;
+  std::erase_if(copy.commands_, [](const PaintCommand& command) {
+    return std::holds_alternative<PlacePlatformViewCommand>(command);
+  });
+  return copy;
+}
+
 namespace {
+
+RenderNode* FreezeRenderNode(const RenderNode& source, FrozenScene& scene, std::uint64_t& next_identity) {
+  auto frozen = std::make_unique<RenderNode>();
+  RenderNode* const result = frozen.get();
+  frozen->id = next_identity--;
+  frozen->offset = source.offset;
+  frozen->transform = source.transform;
+  frozen->opacity = source.opacity;
+  frozen->child_clips = source.child_clips;
+  frozen->children_transform = source.children_transform;
+  frozen->content = FrozenScene::CopyPaintSequence(source.content);
+  frozen->foreground = FrozenScene::CopyPaintSequence(source.foreground);
+  frozen->visible = source.visible;
+  frozen->revision = source.revision;
+  scene.nodes.push_back(std::move(frozen));
+  result->children.reserve(source.children.size());
+  for (const RenderNode* child : source.children) {
+    if (child != nullptr) {
+      result->children.push_back(FreezeRenderNode(*child, scene, next_identity));
+    }
+  }
+  return result;
+}
+
+bool RenderNodeHasPlatformViews(const RenderNode& node) {
+  const auto sequence_has_platform_view = [](const PaintSequence& sequence) {
+    return std::any_of(sequence.Commands().begin(), sequence.Commands().end(), [](const PaintCommand& command) {
+      return std::holds_alternative<PlacePlatformViewCommand>(command);
+    });
+  };
+  if (sequence_has_platform_view(node.content) || sequence_has_platform_view(node.foreground)) {
+    return true;
+  }
+  return std::any_of(node.children.begin(), node.children.end(), [](const RenderNode* child) {
+    return child != nullptr && RenderNodeHasPlatformViews(*child);
+  });
+}
 
 float AlignOffset(float available, float extent, HorizontalAlignment alignment) noexcept {
   if (alignment == HorizontalAlignment::End) {
@@ -260,7 +305,7 @@ std::optional<Rect> SnapshotRenderNode(
     const RenderNode& node,
     const Transform2D& inherited_transform,
     const std::optional<Rect>& inherited_clip,
-    RenderSceneSnapshot& snapshot,
+    RenderDamageSnapshot& snapshot,
     const std::shared_ptr<ExternalTextureSurface>& texture_surface
 ) {
   RenderNodeSnapshot node_snapshot;
@@ -268,7 +313,6 @@ std::optional<Rect> SnapshotRenderNode(
   node_snapshot.foreground_revision = node.foreground.Revision();
   node_snapshot.visible = node.visible;
   node_snapshot.opacity = node.opacity;
-  node_snapshot.world_clip = inherited_clip;
   node_snapshot.child_clips = node.child_clips;
 
   node_snapshot.children.reserve(node.children.size());
@@ -281,6 +325,7 @@ std::optional<Rect> SnapshotRenderNode(
   const Transform2D local_transform = ComposeTransform(TranslationTransform(node.offset), node.transform);
   node_snapshot.world_transform = ComposeTransform(inherited_transform, local_transform);
   node_snapshot.world_children_transform = ComposeTransform(node_snapshot.world_transform, node.children_transform);
+  node_snapshot.world_clip = inherited_clip;
   if (!node.visible) {
     snapshot.insert_or_assign(node.id, std::move(node_snapshot));
     return std::nullopt;
@@ -289,14 +334,14 @@ std::optional<Rect> SnapshotRenderNode(
   SnapshotExternalTextures(
       node.content,
       node_snapshot.world_transform,
-      inherited_clip,
+      node_snapshot.world_clip,
       node_snapshot.external_textures,
       texture_surface
   );
   SnapshotExternalTextures(
       node.foreground,
       node_snapshot.world_transform,
-      inherited_clip,
+      node_snapshot.world_clip,
       node_snapshot.external_textures,
       texture_surface
   );
@@ -306,7 +351,7 @@ std::optional<Rect> SnapshotRenderNode(
   own_bounds = UnionBounds(std::move(own_bounds), node.foreground.Bounds());
   if (own_bounds.has_value()) {
     own_bounds = TransformBounds(node_snapshot.world_transform, *own_bounds);
-    own_bounds = ClipBounds(std::move(own_bounds), inherited_clip);
+    own_bounds = ClipBounds(std::move(own_bounds), node_snapshot.world_clip);
   }
   if (own_bounds.has_value()) {
     node_snapshot.own_bounds = *own_bounds;
@@ -399,7 +444,7 @@ void AddExternalTextureDamage(
   }
 }
 
-std::unordered_set<ExternalTextureState*> ExternalTextureStates(const RenderSceneSnapshot& scene) {
+std::unordered_set<ExternalTextureState*> ExternalTextureStates(const RenderDamageSnapshot& scene) {
   std::unordered_set<ExternalTextureState*> states;
   for (const auto& [id, node] : scene) {
     static_cast<void>(id);
@@ -411,8 +456,8 @@ std::unordered_set<ExternalTextureState*> ExternalTextureStates(const RenderScen
 }
 
 void UpdateExternalTextureActivity(
-    const RenderSceneSnapshot& previous,
-    const RenderSceneSnapshot& current,
+    const RenderDamageSnapshot& previous,
+    const RenderDamageSnapshot& current,
     const std::shared_ptr<ExternalTextureSurface>& texture_surface
 ) {
   const std::unordered_set<ExternalTextureState*> previous_states = ExternalTextureStates(previous);
@@ -673,6 +718,20 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
 
 } // namespace
 
+std::shared_ptr<FrozenScene> FreezeRenderScene(const RenderNode* root) {
+  auto frozen = std::make_shared<FrozenScene>();
+  if (root == nullptr) {
+    return frozen;
+  }
+  std::uint64_t next_identity = 0xEFFFFFFFFFFFFFFFULL;
+  frozen->root = FreezeRenderNode(*root, *frozen, next_identity);
+  return frozen;
+}
+
+bool RenderSceneHasPlatformViews(const RenderNode* root) {
+  return root != nullptr && RenderNodeHasPlatformViews(*root);
+}
+
 void ResolvePresentationTree(MountedNode& node) {
   ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F);
 }
@@ -684,7 +743,7 @@ void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay) 
 DamageRegion ComputeDamageRegion(
     const RenderNode* root,
     Size viewport,
-    RenderSceneSnapshot& committed_scene,
+    RenderDamageSnapshot& committed_scene,
     Size& committed_viewport,
     bool& has_committed_scene,
     const std::shared_ptr<ExternalTextureSurface>& texture_surface
@@ -695,7 +754,7 @@ DamageRegion ComputeDamageRegion(
       viewport.width,
       viewport.height,
   };
-  RenderSceneSnapshot current_scene;
+  RenderDamageSnapshot current_scene;
   if (root != nullptr) {
     SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene, texture_surface);
   }
@@ -753,7 +812,7 @@ DamageRegion ComputeDamageRegion(
 }
 
 void DeactivateExternalTextures(
-    RenderSceneSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    RenderDamageSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
 ) {
   for (ExternalTextureState* state : ExternalTextureStates(committed_scene)) {
     state->SetActive(texture_surface, false);

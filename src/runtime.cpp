@@ -6,11 +6,10 @@
 #include "window_internal.h"
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <stdexcept>
 
 #include <huxerui/http.h>
+#include <huxerui/theme.h>
 
 namespace huxerui::detail {
 
@@ -158,30 +157,33 @@ public:
     }
     if (target_visible_ != state_->target_visible) {
       target_visible_ = state_->target_visible;
-      opacity_.Update(target_visible_ ? 1.0F : state_->hidden_opacity, target_visible_ ? state_->enter : state_->exit);
+      opacity_.AnimateTo(
+          target_visible_ ? 1.0F : state_->hidden_opacity,
+          target_visible_ ? state_->enter : state_->exit
+      );
       if (target_visible_) {
         completion_sent_ = false;
       }
     }
 
     auto& mounted = static_cast<MountedNode&>(node);
-    const bool running = opacity_.Advance(frame.timestamp, frame.delta_time, state_->reduced_motion);
+    const MotionAdvanceResult result = opacity_.Advance(frame);
     mounted.presentation.local_opacity *= opacity_.Value();
-    if (!running && target_visible_) {
+    if (!result.needs_frame && !result.wake_after.has_value() && target_visible_) {
       state_->enter_on_mount = false;
     }
-    if (!running && !target_visible_ && !completion_sent_) {
+    if (!result.needs_frame && !result.wake_after.has_value() && !target_visible_ && !completion_sent_) {
       completion_sent_ = true;
       if (state_->on_exit_complete) {
         state_->on_exit_complete();
       }
     }
-    return {running, std::nullopt};
+    return {result.needs_frame, result.wake_after};
   }
 
 private:
   std::shared_ptr<LayerTransitionState> state_;
-  AnimatedValue<float> opacity_;
+  MotionController opacity_;
   bool initialized_ = false;
   bool target_visible_ = false;
   bool completion_sent_ = false;
@@ -643,6 +645,7 @@ void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
   mounted.event_bindings = incoming.event_bindings;
   mounted.activation = incoming.activation;
   mounted.environment = incoming.environment;
+  mounted.reduced_motion = ResolveThemeSpec(incoming.environment).motion.reduced_motion;
   mounted.pointer_events_enabled = incoming.pointer_events_enabled;
   mounted.local_enabled = incoming.local_enabled;
   mounted.focusable = incoming.focusable;
@@ -992,6 +995,8 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
+  state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*this);
+  root.Provide(state_->scene_transition_service_);
   root.Provide(std::shared_ptr<HttpClient>(new HttpClient(platform.CreateHttpTransport())));
   InstallBuiltinPresentation(root);
   for (const RootHook& hook : application.options.root_hooks) {
@@ -1016,6 +1021,7 @@ Runtime::~Runtime() {
   state_->hovered_extensions_.clear();
   state_->layer_controller_.Disconnect();
   state_->window_service_->Disconnect();
+  state_->scene_transition_service_->Disconnect();
   DiscardLifecycleCommits();
   state_->mounted_root_.reset();
   state_->root_scope_.reset();
@@ -1439,7 +1445,26 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       state_->mounted_root_->bounds,
       &state_->text_selection_overlay_.render_node
   );
-  state_->frame_commit_.render_frame.scene.root = &state_->mounted_root_->render_node;
+  const RenderNode* scene_root = &state_->mounted_root_->render_node;
+  const bool scene_transition_was_active = state_->scene_transition_.has_value();
+  if (state_->scene_transition_.has_value()) {
+    ActiveSceneTransition& transition = *state_->scene_transition_;
+    if (transition.viewport != state_->window_->metrics.viewport) {
+      state_->scene_transition_.reset();
+    } else {
+      const MotionAdvanceResult result = transition.progress.Advance(frame);
+      needs_frame = needs_frame || result.needs_frame;
+      if (result.wake_after.has_value() && (!next_wakeup.has_value() || *result.wake_after < *next_wakeup)) {
+        next_wakeup = result.wake_after;
+      }
+      if (!transition.progress.IsRunning()) {
+        state_->scene_transition_.reset();
+      } else {
+        scene_root = ComposeSceneTransition(transition, scene_root, transition.progress.Value());
+      }
+    }
+  }
+  state_->frame_commit_.render_frame.scene.root = scene_root;
   state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
       state_->frame_commit_.render_frame.scene.root,
       state_->window_->metrics.viewport,
@@ -1448,6 +1473,10 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       state_->has_committed_scene_snapshot_,
       state_->platform_->external_texture_surface_
   );
+  if (scene_transition_was_active) {
+    state_->frame_commit_.render_frame.damage.full = true;
+    state_->frame_commit_.render_frame.damage.rects.clear();
+  }
   ++state_->frame_commit_.render_frame.revision;
   if (needs_frame) {
     RequestFrame();
@@ -1867,13 +1896,17 @@ bool Runtime::UpdateNodeExtensions(
 
   node.presentation.local_transform = {};
   node.presentation.local_opacity = 1.0F;
+  FrameInfo node_frame = frame;
+  if (!node.extensions.empty()) {
+    node_frame.reduced_motion = node_frame.reduced_motion || node.reduced_motion;
+  }
   bool subtree_has_extensions = false;
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
     }
     subtree_has_extensions = true;
-    const NodeExtension::FrameResult result = entry.extension->OnFrame(node, frame);
+    const NodeExtension::FrameResult result = entry.extension->OnFrame(node, node_frame);
     needs_frame = needs_frame || result.needs_frame;
     if (result.wake_after.has_value() && (!next_wakeup.has_value() || *result.wake_after < *next_wakeup)) {
       next_wakeup = *result.wake_after;
@@ -2321,8 +2354,8 @@ void Runtime::ComposeLayers() {
     std::vector<View> layer_children;
     layer_children.reserve(ordered.size());
     for (const LayerEntry& entry : ordered) {
-      auto environment = entry.environment ? entry.environment : state_->root_environment_;
-      View content = Scope([factory = entry.content, environment = std::move(environment)]() mutable {
+      const auto environment = entry.environment ? entry.environment : state_->root_environment_;
+      View content = Scope([factory = entry.content, environment]() mutable {
         Composer::EnvironmentGuard guard{environment};
         return factory();
       });
@@ -2344,6 +2377,9 @@ void Runtime::ComposeLayers() {
                            .exiting = exiting,
                            .semantic_modal_group = entry.semantic_modal_group,
                        });
+      // Layer wrappers live under the Runtime root, but their behavior must observe the environment captured at
+      // presentation time just like their content does.
+      layer.spec_->environment = environment;
       if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::Constrain) {
         layer = std::move(layer).With(SafeAreaPadding{});
       } else if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::ExtendBottom) {

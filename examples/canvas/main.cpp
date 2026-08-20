@@ -1,10 +1,8 @@
 #include <huxerui/huxerui.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
 #include <numbers>
 #include <optional>
 
@@ -57,82 +55,6 @@ Path LeftSemicirclePath(Point center, float radius) {
           {center.x, center.y + radius}
       )
       .Close();
-}
-
-struct PhaseDriver;
-
-class PhaseDriverExtension final : public NodeExtension {
-public:
-  PhaseDriverExtension(MountedNode& node, const PhaseDriver& modifier);
-
-  void Update(MountedNode& node, const PhaseDriver& modifier);
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override;
-
-private:
-  void AdvancePhase(double timestamp);
-
-  State<std::uint64_t> step_;
-  std::array<double, 3> durations_{1.0, 1.0, 1.0};
-  bool enabled_ = false;
-  std::optional<double> next_phase_at_;
-};
-
-struct PhaseDriver {
-  using Extension = PhaseDriverExtension;
-
-  State<std::uint64_t> step;
-  std::array<double, 3> durations{1.0, 1.0, 1.0};
-  bool enabled = true;
-};
-
-PhaseDriverExtension::PhaseDriverExtension(MountedNode& node, const PhaseDriver& modifier) {
-  Update(node, modifier);
-}
-
-void PhaseDriverExtension::Update(MountedNode& node, const PhaseDriver& modifier) {
-  static_cast<void>(node);
-  if (enabled_ != modifier.enabled || durations_ != modifier.durations) {
-    next_phase_at_.reset();
-  }
-  step_ = modifier.step;
-  durations_ = modifier.durations;
-  enabled_ = modifier.enabled;
-}
-
-void PhaseDriverExtension::AdvancePhase(double timestamp) {
-  const std::uint64_t next_step = step_.Get() + 1;
-  step_ = next_step;
-  next_phase_at_ = timestamp + durations_[(next_step - 1) % durations_.size()];
-}
-
-NodeExtension::FrameResult PhaseDriverExtension::OnFrame(MountedNode& node, const FrameInfo& frame) {
-  static_cast<void>(node);
-  if (!enabled_ || !step_.IsValid()) {
-    next_phase_at_.reset();
-    return {};
-  }
-
-  if (!next_phase_at_.has_value()) {
-    AdvancePhase(frame.timestamp);
-    return {
-        .needs_frame = true,
-        .wake_after = *next_phase_at_ - frame.timestamp,
-    };
-  }
-
-  const double remaining = *next_phase_at_ - frame.timestamp;
-  if (remaining > 0.0) {
-    return {
-        .needs_frame = false,
-        .wake_after = remaining,
-    };
-  }
-
-  AdvancePhase(frame.timestamp);
-  return {
-      .needs_frame = true,
-      .wake_after = *next_phase_at_ - frame.timestamp,
-  };
 }
 
 void PaintTaiji(PaintContext& paint, Size size, const ColorScheme& colors) {
@@ -237,87 +159,77 @@ void PaintPathStudy(PaintContext& paint, Size size, const ColorScheme& colors) {
 constexpr double taiji_acceleration_duration = 3.0;
 constexpr double taiji_cruise_duration = 2.5;
 constexpr double taiji_deceleration_duration = 3.0;
+constexpr double taiji_cycle_duration =
+    taiji_acceleration_duration + taiji_cruise_duration + taiji_deceleration_duration;
 constexpr float taiji_acceleration_rotation = 1440.0F;
 constexpr float taiji_cruise_rotation = 3600.0F;
 constexpr float taiji_cycle_rotation = 6480.0F;
 
-struct TaijiMotion {
-  float target = 0.0F;
-  AnimationSpec animation = SnapSpec{};
-};
-
-TaijiMotion ResolveTaijiMotion(std::uint64_t step) {
-  if (step == 0) {
-    return {};
-  }
-
-  const std::uint64_t completed_cycles = (step - 1) / 3;
-  const std::uint64_t phase = (step - 1) % 3;
-  const float cycle_start = static_cast<float>(completed_cycles) * taiji_cycle_rotation;
-  if (phase == 0) {
-    return {
-        cycle_start + taiji_acceleration_rotation,
-        TweenSpec{.duration = taiji_acceleration_duration, .easing = Easing::EaseIn},
-    };
-  }
-  if (phase == 1) {
-    return {
-        cycle_start + taiji_acceleration_rotation + taiji_cruise_rotation,
-        TweenSpec{.duration = taiji_cruise_duration, .easing = Easing::Linear},
-    };
-  }
-  return {
-      cycle_start + taiji_cycle_rotation,
-      TweenSpec{.duration = taiji_deceleration_duration, .easing = Easing::EaseOut},
+KeyframeSpec TaijiAnimation() {
+  return KeyframeSpec{
+      taiji_cycle_duration,
+      {
+          {0.0F, 0.0F, Easing::EaseIn},
+          {
+              static_cast<float>(taiji_acceleration_duration / taiji_cycle_duration),
+              taiji_acceleration_rotation / taiji_cycle_rotation,
+              Easing::Linear,
+          },
+          {
+              static_cast<float>(
+                  (taiji_acceleration_duration + taiji_cruise_duration) / taiji_cycle_duration
+              ),
+              (taiji_acceleration_rotation + taiji_cruise_rotation) / taiji_cycle_rotation,
+              Easing::EaseOut,
+          },
+          {1.0F, 1.0F, Easing::Linear},
+      },
   };
 }
 
 [[huxerui::scope]]
 View TaijiEffect() {
   const ThemeSpec& theme = UseTheme();
-  auto step = UseState(std::uint64_t{0});
-  const bool animated = !theme.motion.reduced_motion;
+  auto started = UseState(false);
+  Lifecycle([started] { started = true; });
+  const bool animated = started.Get() && !theme.motion.reduced_motion;
   const ColorScheme colors = theme.colors;
-  const TaijiMotion motion = ResolveTaijiMotion(step.Get());
+  const Animated<float> rotation = animated
+                                        ? AnimateTo(
+                                              taiji_cycle_rotation,
+                                              TaijiAnimation(),
+                                              AnimationPlayback{.iterations = std::nullopt}
+                                          )
+                                        : AnimateTo(0.0F, SnapSpec{});
 
   return Canvas([colors](PaintContext& paint, Size size) { PaintTaiji(paint, size, colors); })
       .With(
           Grow(),
-          Rotation(Animated<float>{motion.target, motion.animation}),
-          PhaseDriver{
-              .step = step,
-              .durations = {
-                  taiji_acceleration_duration,
-                  taiji_cruise_duration,
-                  taiji_deceleration_duration,
-              },
-              .enabled = animated,
-          }
+          Rotation(rotation)
       );
 }
 
 [[huxerui::scope]]
 View OrbitEffect() {
   const ThemeSpec& theme = UseTheme();
-  auto cycle = UseState(std::uint64_t{0});
-  const bool animated = !theme.motion.reduced_motion;
+  auto started = UseState(false);
+  Lifecycle([started] { started = true; });
+  const bool animated = started.Get() && !theme.motion.reduced_motion;
   const ColorScheme colors = theme.colors;
-  const float target_rotation = static_cast<float>(cycle.Get()) * -120.0F;
-  const bool pulse = cycle.Get() % 2 != 0;
+  const AnimationPlayback loop{.iterations = std::nullopt};
+  const AnimationPlayback pulse{.iterations = std::nullopt, .repeat_mode = RepeatMode::Reverse};
 
   return Canvas([colors](PaintContext& paint, Size size) { PaintOrbit(paint, size, colors); })
       .With(
           Grow(),
-          Rotation(AnimateTo(target_rotation, SpringSpec{.stiffness = 30.0F, .damping_ratio = 0.76F})),
-          Scale(AnimateTo(
-              animated ? (pulse ? 1.035F : 0.965F) : 1.0F,
-              TweenSpec{.duration = 0.9, .easing = Easing::EaseOut}
-          )),
-          PhaseDriver{
-              .step = cycle,
-              .durations = {1.05, 1.05, 1.05},
-              .enabled = animated,
-          }
+          Rotation(
+              animated ? AnimateTo(-360.0F, TweenSpec{3.15, Easing::Linear}, loop)
+                       : AnimateTo(0.0F, SnapSpec{})
+          ),
+          Scale(
+              animated ? AnimateTo(1.035F, TweenSpec{1.05, Easing::EaseInOut}, pulse)
+                       : AnimateTo(1.0F, SnapSpec{})
+          )
       );
 }
 

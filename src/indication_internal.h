@@ -41,8 +41,8 @@ public:
 
 private:
   IndicationSpec spec_ = StateOverlayIndication{};
-  AnimatedValue<float> opacity_{0.0F};
-  AnimatedValue<float> hover_opacity_{0.0F};
+  MotionController opacity_{0.0F};
+  MotionController hover_opacity_{0.0F};
   std::unordered_set<std::int64_t> pressed_pointers_;
   std::vector<IndicationRippleState> ripples_;
   bool hovered_ = false;

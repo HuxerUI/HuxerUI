@@ -774,7 +774,7 @@ public:
     } else if (!interactive_ && target_visible_ != target_visible) {
       target_visible_ = target_visible;
       if (IsModal()) {
-        progress_.Update(target_visible ? 1.0F : 0.0F, Motion(target_visible));
+        progress_.AnimateTo(target_visible ? 1.0F : 0.0F, Motion(target_visible));
       } else {
         progress_.Set(target_visible ? 1.0F : 0.0F);
       }
@@ -789,7 +789,7 @@ public:
       mounted.trap_focus = false;
       return {focus_changed, std::nullopt};
     }
-    const bool running = progress_.Advance(frame.timestamp, frame.delta_time);
+    const MotionAdvanceResult result = progress_.Advance(frame);
     if (configuration_.presentation) {
       configuration_.presentation->progress = progress_.Value();
     }
@@ -797,7 +797,7 @@ public:
     const bool trap_focus = target_visible || progress_.Value() > 0.001F;
     const bool focus_changed = mounted.trap_focus != trap_focus;
     mounted.trap_focus = trap_focus;
-    return {running || focus_changed, std::nullopt};
+    return {result.needs_frame || focus_changed, result.wake_after};
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
@@ -846,19 +846,19 @@ public:
       if (outside_press_) {
         EmitOpenChanged(node, false);
         target_visible_ = false;
-        progress_.Update(0.0F, Motion(false));
+        progress_.AnimateTo(0.0F, Motion(false));
       } else if (dragging_) {
         const bool next_open = progress_.Value() >= 0.5F;
         EmitOpenChanged(node, next_open);
         target_visible_ = next_open;
-        progress_.Update(next_open ? 1.0F : 0.0F, Motion(next_open));
+        progress_.AnimateTo(next_open ? 1.0F : 0.0F, Motion(next_open));
       }
       ResetPointer();
       return PointerResult::Handled;
     }
     if (event.type == PointerEventType::Cancel) {
       target_visible_ = TargetVisible();
-      progress_.Update(target_visible_ ? 1.0F : 0.0F, Motion(target_visible_));
+      progress_.AnimateTo(target_visible_ ? 1.0F : 0.0F, Motion(target_visible_));
       ResetPointer();
       return PointerResult::Handled;
     }
@@ -884,13 +884,13 @@ public:
       return true;
     case BackPhase::Cancel:
       interactive_ = false;
-      progress_.Update(1.0F, Motion(true));
+      progress_.AnimateTo(1.0F, Motion(true));
       return true;
     case BackPhase::Commit:
       interactive_ = false;
       EmitOpenChanged(node, false);
       target_visible_ = false;
-      progress_.Update(0.0F, Motion(false));
+      progress_.AnimateTo(0.0F, Motion(false));
       return true;
     }
     return false;
@@ -950,7 +950,7 @@ private:
   }
 
   DrawerOverlayConfiguration configuration_;
-  detail::AnimatedValue<float> progress_;
+  MotionController progress_;
   std::optional<std::int64_t> pointer_id_;
   float drag_origin_ = 0.0F;
   float drag_origin_progress_ = 0.0F;

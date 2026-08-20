@@ -465,7 +465,7 @@ One retained extension owns the authoritative transition progress:
 
 ```text
 NavigationTransitionExtension
-    advances or seeks one AnimatedValue<float>
+    advances or seeks one MotionController
         -> source NavigationPageExtension
         applies source transform and opacity
         -> destination NavigationPageExtension

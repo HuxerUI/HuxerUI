@@ -9,6 +9,7 @@ include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
 file(TO_CMAKE_PATH "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE)
 add_executable(huxerui_tests
         tests_main.cpp
+        unit/animation.cpp
         support/builtin_resources.cpp
         unit/application.cpp
         unit/external_texture.cpp
@@ -26,6 +27,7 @@ add_executable(huxerui_tests
         "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp/android_accessibility.cpp"
         platform/android_text_input.cpp
         platform/web_text.cpp
+        runtime/animation.cpp
         runtime/composition.cpp
         runtime/http.cpp
         runtime/interaction.cpp

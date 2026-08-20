@@ -99,13 +99,13 @@ bool IndicationState::Advance(const FrameInfo& frame) {
   if (const auto* overlay = std::get_if<StateOverlayIndication>(&spec_)) {
     if (overlay_target_pending_) {
       const bool visible = hovered_ || !pressed_pointers_.empty();
-      opacity_.Update(
+      opacity_.AnimateTo(
           visible ? 1.0F : 0.0F,
           TweenSpec{visible ? overlay->fade_in_duration : overlay->fade_out_duration}
       );
       overlay_target_pending_ = false;
     }
-    needs_frame = opacity_.Advance(frame.timestamp, frame.delta_time);
+    needs_frame = opacity_.Advance(frame).needs_frame;
     if (!opacity_.IsRunning() && opacity_.Value() <= 0.0F) {
       released_visual_ = false;
     }
@@ -113,11 +113,11 @@ bool IndicationState::Advance(const FrameInfo& frame) {
 
   if (std::holds_alternative<RippleIndication>(spec_)) {
     const auto& ripple_spec = std::get<RippleIndication>(spec_);
-    hover_opacity_.Update(
+    hover_opacity_.AnimateTo(
         hovered_ ? 1.0F : 0.0F,
         TweenSpec{hovered_ ? ripple_spec.hover_fade_in_duration : ripple_spec.hover_fade_out_duration}
     );
-    needs_frame = hover_opacity_.Advance(frame.timestamp, frame.delta_time) || needs_frame;
+    needs_frame = hover_opacity_.Advance(frame).needs_frame || needs_frame;
     overlay_target_pending_ = false;
     for (IndicationRippleState& ripple : ripples_) {
       if (!ripple.started_at.has_value()) {

@@ -313,15 +313,27 @@ View ToolValue(const char* label, const char* value) {
   }.With(CrossAlign(CrossAxisAlignment::Center));
 }
 
+[[huxerui::scope]]
 View GalleryToolsContent(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
   const ThemeSpec& theme = UseTheme();
+  auto family_transition = UseSceneTransition();
+  auto brightness_transition = UseSceneTransition();
   return Column {
     Text("Tools", TextRole::Title),
     Text("Appearance", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
     SegmentedButton({"Material", "Flat"}, theme_family)
-        .OnChanged([theme_family](std::size_t index) { theme_family = index; }),
+        .OnChanged([family_transition, theme_family](std::size_t index) {
+          family_transition.Run(CircularRevealSceneTransition{}, [theme_family, index] { theme_family = index; });
+        })
+        .With(family_transition.Anchor()),
     Switch(dark_mode ? "Dark mode" : "Light mode", dark_mode)
-        .OnChanged([dark_mode](bool enabled) { dark_mode = enabled; }),
+        .OnChanged([brightness_transition, dark_mode](bool enabled) {
+          brightness_transition.Run(
+              CircularRevealSceneTransition{},
+              [dark_mode, enabled] { dark_mode = enabled; }
+          );
+        })
+        .With(brightness_transition.Anchor()),
     Divider(),
     Text("Context", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
     ToolValue("Page", PageName(selected_page)),

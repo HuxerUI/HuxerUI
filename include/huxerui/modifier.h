@@ -24,6 +24,8 @@ struct SemanticAction;
 struct FrameInfo {
   double timestamp = 0.0;
   double delta_time = 0.0;
+  // Resolved for the current mounted node before its extensions run.
+  bool reduced_motion = false;
 
   bool operator==(const FrameInfo&) const = default;
 };

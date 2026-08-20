@@ -70,7 +70,7 @@ public:
       initialized_ = true;
     }
     if (activity_pending_) {
-      opacity_.Update(1.0F, TweenSpec{style_.fade_in_duration});
+      opacity_.AnimateTo(1.0F, TweenSpec{style_.fade_in_duration});
       hide_deadline_ = frame.timestamp + style_.fade_out_delay;
       activity_pending_ = false;
     }
@@ -81,16 +81,16 @@ public:
 
     const bool held = hovered_ || pointer_dragging_ || scroll_dragging_;
     if (held) {
-      opacity_.Update(1.0F, TweenSpec{style_.fade_in_duration});
+      opacity_.AnimateTo(1.0F, TweenSpec{style_.fade_in_duration});
     } else if (frame.timestamp >= hide_deadline_) {
-      opacity_.Update(0.0F, TweenSpec{style_.fade_out_duration});
+      opacity_.AnimateTo(0.0F, TweenSpec{style_.fade_out_duration});
     }
 
-    opacity_.Advance(frame.timestamp, frame.delta_time);
-    if (opacity_.IsRunning()) {
+    const MotionAdvanceResult opacity_result = opacity_.Advance(frame);
+    if (opacity_result.needs_frame) {
       return finish({
           true,
-          std::nullopt,
+          opacity_result.wake_after,
       });
     }
     if (!held && opacity_.Value() > 0.0F && frame.timestamp < hide_deadline_) {
@@ -219,7 +219,7 @@ public:
 
 private:
   ScrollBarStyle style_;
-  detail::AnimatedValue<float> opacity_{1.0F};
+  MotionController opacity_{1.0F};
   double hide_deadline_ = 0.0;
   bool initialized_ = false;
   bool activity_pending_ = false;

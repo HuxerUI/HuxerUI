@@ -5,6 +5,7 @@
 #endif
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -146,6 +147,8 @@ struct NodeExtensionHandle;
 struct MountedNode;
 struct PointerSession;
 struct RuntimeAccess;
+struct SceneTransitionRequest;
+class SceneTransitionService;
 struct ViewSpec;
 class RecomposeScope;
 class ScrollConnection;
@@ -253,6 +256,9 @@ private:
   void InvalidateLayers();
   void DeactivateLayerInput(LayerId id);
   void InvalidateLayerPlacement(LayerId id);
+  void BeginSceneTransition(
+      detail::SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion
+  );
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
   void QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope);
@@ -283,6 +289,7 @@ private:
 
   friend class LayerController;
   friend class detail::RecomposeScope;
+  friend class detail::SceneTransitionService;
   friend class detail::ScrollConnection;
   friend class detail::VirtualMeasureSession;
   friend struct detail::RuntimeAccess;

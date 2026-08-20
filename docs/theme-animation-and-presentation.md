@@ -70,6 +70,8 @@ An explicit `Indication` modifier can replace the default interaction visual for
 
 ## Presentation animation
 
+The retained timing, controller, synchronized property, and whole-scene contracts are defined in the [Animation and Scene Transition Design](design/animation.md).
+
 `Offset`, `Opacity`, `Scale`, and `Rotation` accept immediate values or `AnimateTo()` targets:
 
 ```cpp
