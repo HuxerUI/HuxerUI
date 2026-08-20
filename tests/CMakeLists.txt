@@ -213,6 +213,7 @@ endif ()
 if (EMSCRIPTEN)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             web/external_texture.h
+            web/navigation.h
             web/platform_view.h
     )
 endif ()

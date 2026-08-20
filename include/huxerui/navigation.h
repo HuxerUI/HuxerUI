@@ -41,15 +41,24 @@ struct NavigationRouteDescriptor {
   std::function<View()> factory;
 };
 
+// Logical history intent is independent from the retained page transitions resolved by NavigationState.
+enum class NavigationHistoryAction {
+  Push,
+  Pop,
+  Replace,
+};
+
 struct NavigationRouteBinding {
   std::type_index route_type{typeid(void)};
   std::shared_ptr<void> path_state;
+  std::shared_ptr<void> history_commit;
   std::function<bool()> request_pop;
 };
 
 struct NavigationAccess {
   std::weak_ptr<NavigationState> state;
   std::shared_ptr<void> path_state;
+  std::shared_ptr<void> history_commit;
 };
 
 View BuildRoutedNavigationStack(
@@ -338,6 +347,90 @@ private:
   friend class RouteNavigationController<Route>;
 };
 
+namespace detail {
+
+template <NavigationRouteValue Route>
+using NavigationHistoryCommit = std::function<void(NavigationHistoryAction, NavigationPath<Route>)>;
+
+template <NavigationRouteValue Route, class RootFactory, class Resolver>
+  requires ViewFactoryFor<RootFactory> && std::copy_constructible<std::decay_t<Resolver>> &&
+           requires(std::decay_t<Resolver>& resolver, const Route& route) {
+             { std::invoke(resolver, route) } -> std::convertible_to<View>;
+           }
+View BuildTypedNavigationStack(
+    RootFactory&& root,
+    State<NavigationPath<Route>> path,
+    Resolver&& resolver,
+    std::shared_ptr<NavigationHistoryCommit<Route>> history_commit
+) {
+  const auto callable_is_empty = []<class Callable>(const Callable& callable) {
+    if constexpr (std::is_pointer_v<Callable>) {
+      return callable == nullptr;
+    } else if constexpr (requires { static_cast<bool>(callable); }) {
+      return !static_cast<bool>(callable);
+    }
+    return false;
+  };
+  if (callable_is_empty(root)) {
+    throw std::invalid_argument("HuxerUI navigation root factory must not be empty");
+  }
+  if (callable_is_empty(resolver)) {
+    throw std::invalid_argument("HuxerUI navigation destination resolver must not be empty");
+  }
+  if (!path.IsValid()) {
+    throw std::invalid_argument("HuxerUI navigation path state must not be empty");
+  }
+  std::function<View()> root_factory = BindViewFactory(std::forward<RootFactory>(root));
+  using StoredResolver = std::decay_t<Resolver>;
+  StoredResolver stored_resolver(std::forward<Resolver>(resolver));
+
+  return Scope(
+      [path,
+       root_factory = std::move(root_factory),
+       resolver = std::move(stored_resolver),
+       history_commit = std::move(history_commit)]() mutable -> View {
+        auto shared_resolver = std::make_shared<StoredResolver>(resolver);
+        const NavigationPath<Route>& current_path = path.Get();
+        std::vector<NavigationRouteDescriptor> routes;
+        routes.reserve(current_path.Size());
+        for (const Route& route : current_path.Routes()) {
+          auto value = std::make_shared<Route>(route);
+          routes.push_back({
+              value,
+              [](const void* first, const void* second) {
+                return *static_cast<const Route*>(first) == *static_cast<const Route*>(second);
+              },
+              [shared_resolver, value]() mutable -> View { return std::invoke(*shared_resolver, *value); },
+          });
+        }
+
+        NavigationRouteBinding binding{
+            .route_type = typeid(Route),
+            .path_state = std::make_shared<State<NavigationPath<Route>>>(path),
+            .history_commit = history_commit,
+            .request_pop = [path, history_commit] {
+              const NavigationPath<Route>& current_path = path.Get();
+              if (current_path.Empty()) {
+                return false;
+              }
+              std::vector<Route> routes(current_path.Routes().begin(), current_path.Routes().end());
+              routes.pop_back();
+              NavigationPath<Route> next(std::move(routes));
+              if (history_commit && *history_commit) {
+                (*history_commit)(NavigationHistoryAction::Pop, std::move(next));
+              } else {
+                path = std::move(next);
+              }
+              return true;
+            },
+        };
+        return BuildRoutedNavigationStack(root_factory, std::move(routes), std::move(binding));
+      }
+  );
+}
+
+} // namespace detail
+
 template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseNavigation();
 
 template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseRootNavigation();
@@ -348,9 +441,9 @@ public:
 
   void Push(Route route) const {
     RequireConnected();
-    path_.Update([route = std::move(route)](NavigationPath<Route>& path) mutable {
-      path.routes_.push_back(std::move(route));
-    });
+    NavigationPath<Route> next = path_.Get();
+    next.routes_.push_back(std::move(route));
+    Commit(detail::NavigationHistoryAction::Push, std::move(next));
   }
 
   bool Pop() const {
@@ -360,7 +453,9 @@ public:
     if (path_.Get().routes_.empty()) {
       return false;
     }
-    path_.Update([](NavigationPath<Route>& path) { path.routes_.pop_back(); });
+    NavigationPath<Route> next = path_.Get();
+    next.routes_.pop_back();
+    Commit(detail::NavigationHistoryAction::Pop, std::move(next));
     return true;
   }
 
@@ -369,14 +464,14 @@ public:
     if (path_.Get().routes_.empty()) {
       throw std::logic_error("HuxerUI routed navigation cannot replace its fixed root");
     }
-    path_.Update([route = std::move(route)](NavigationPath<Route>& path) mutable {
-      path.routes_.back() = std::move(route);
-    });
+    NavigationPath<Route> next = path_.Get();
+    next.routes_.back() = std::move(route);
+    Commit(detail::NavigationHistoryAction::Replace, std::move(next));
   }
 
   void SetPath(NavigationPath<Route> path) const {
     RequireConnected();
-    path_ = std::move(path);
+    Commit(detail::NavigationHistoryAction::Replace, std::move(path));
   }
 
   [[nodiscard]] bool CanPop() const {
@@ -388,8 +483,20 @@ public:
   }
 
 private:
-  RouteNavigationController(std::weak_ptr<detail::NavigationState> state, State<NavigationPath<Route>> path)
-      : state_(std::move(state)), path_(std::move(path)) {}
+  RouteNavigationController(
+      std::weak_ptr<detail::NavigationState> state,
+      State<NavigationPath<Route>> path,
+      std::shared_ptr<detail::NavigationHistoryCommit<Route>> history_commit
+  )
+      : state_(std::move(state)), path_(std::move(path)), history_commit_(std::move(history_commit)) {}
+
+  void Commit(detail::NavigationHistoryAction action, NavigationPath<Route> path) const {
+    if (history_commit_ && *history_commit_) {
+      (*history_commit_)(action, std::move(path));
+      return;
+    }
+    path_ = std::move(path);
+  }
 
   void RequireConnected() const {
     if (!detail::CheckNavigationAccess(state_)) {
@@ -399,6 +506,7 @@ private:
 
   std::weak_ptr<detail::NavigationState> state_;
   State<NavigationPath<Route>> path_;
+  std::shared_ptr<detail::NavigationHistoryCommit<Route>> history_commit_;
 
   friend RouteNavigationController<Route> UseNavigation<Route>();
   friend RouteNavigationController<Route> UseRootNavigation<Route>();
@@ -452,59 +560,12 @@ template <detail::NavigationRouteValue Route, class RootFactory, class Resolver>
              { std::invoke(resolver, route) } -> std::convertible_to<View>;
            }
 View NavigationStack(RootFactory&& root, State<NavigationPath<Route>> path, Resolver&& resolver) {
-  const auto callable_is_empty = []<class Callable>(const Callable& callable) {
-    if constexpr (std::is_pointer_v<Callable>) {
-      return callable == nullptr;
-    } else if constexpr (requires { static_cast<bool>(callable); }) {
-      return !static_cast<bool>(callable);
-    }
-    return false;
-  };
-  if (callable_is_empty(root)) {
-    throw std::invalid_argument("HuxerUI navigation root factory must not be empty");
-  }
-  if (callable_is_empty(resolver)) {
-    throw std::invalid_argument("HuxerUI navigation destination resolver must not be empty");
-  }
-  if (!path.IsValid()) {
-    throw std::invalid_argument("HuxerUI navigation path state must not be empty");
-  }
-  std::function<View()> root_factory = detail::BindViewFactory(std::forward<RootFactory>(root));
-  using StoredResolver = std::decay_t<Resolver>;
-  StoredResolver stored_resolver(std::forward<Resolver>(resolver));
-
-  return Scope([path, root_factory = std::move(root_factory), resolver = std::move(stored_resolver)]() mutable -> View {
-    auto shared_resolver = std::make_shared<StoredResolver>(resolver);
-    const NavigationPath<Route>& current_path = path.Get();
-    std::vector<detail::NavigationRouteDescriptor> routes;
-    routes.reserve(current_path.Size());
-    for (const Route& route : current_path.Routes()) {
-      auto value = std::make_shared<Route>(route);
-      routes.push_back({
-          value,
-          [](const void* first, const void* second) {
-            return *static_cast<const Route*>(first) == *static_cast<const Route*>(second);
-          },
-          [shared_resolver, value]() mutable -> View { return std::invoke(*shared_resolver, *value); },
-      });
-    }
-
-    detail::NavigationRouteBinding binding{
-        .route_type = typeid(Route),
-        .path_state = std::make_shared<State<NavigationPath<Route>>>(path),
-        .request_pop = [path] {
-          const NavigationPath<Route>& current_path = path.Get();
-          if (current_path.Empty()) {
-            return false;
-          }
-          std::vector<Route> routes(current_path.Routes().begin(), current_path.Routes().end());
-          routes.pop_back();
-          path = NavigationPath<Route>(std::move(routes));
-          return true;
-        },
-    };
-    return detail::BuildRoutedNavigationStack(root_factory, std::move(routes), std::move(binding));
-  });
+  return detail::BuildTypedNavigationStack(
+      std::forward<RootFactory>(root),
+      std::move(path),
+      std::forward<Resolver>(resolver),
+      std::shared_ptr<detail::NavigationHistoryCommit<Route>>{}
+  );
 }
 
 NavigationController UseNavigation();
@@ -518,6 +579,7 @@ template <detail::NavigationRouteValue Route> RouteNavigationController<Route> U
   return RouteNavigationController<Route>{
       std::move(access.state),
       *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
+      std::static_pointer_cast<detail::NavigationHistoryCommit<Route>>(std::move(access.history_commit)),
   };
 }
 
@@ -531,6 +593,7 @@ template <detail::NavigationRouteValue Route> RouteNavigationController<Route> U
   return RouteNavigationController<Route>{
       std::move(access.state),
       *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
+      std::static_pointer_cast<detail::NavigationHistoryCommit<Route>>(std::move(access.history_commit)),
   };
 }
 

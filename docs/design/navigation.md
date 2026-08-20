@@ -1,9 +1,9 @@
 # Navigation Design
 
-Status: factory and typed routed navigation implemented; activation and Web URL bridges proposed
+Status: factory navigation, typed routed navigation, and Web URL history implemented; activation proposed
 
-This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing.
-It also defines the implemented typed route-path foundation and the proposed external application activation, browser URL, and restoration bridges.
+This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, Back routing, typed route paths, and Web URL history.
+It also defines the proposed external application activation and restoration bridges.
 
 The first implementation is intentionally factory-driven and imperative at the navigation boundary.
 The routed extension preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
@@ -929,13 +929,33 @@ The Web integration owns browser mechanics:
 - Application Push maps to `history.pushState()`.
 - Application Replace maps to `history.replaceState()`.
 - An arbitrary `SetPath()` maps to `history.replaceState()` unless application policy explicitly starts a new browser history entry.
-- `popstate` decodes the browser location and updates the controlled path without echoing another history mutation.
+- `popstate` and same-document hash changes decode the browser location and update the controlled path without echoing another history mutation.
 - Initial mount decodes the current URL before the first destination is committed.
 - Reload reconstructs only serializable route entries and application state.
 
+The explicit Web surface lives in `<huxerui/web/navigation.h>` and keeps the shared stack signature as its prefix:
+
+```cpp
+return web::BrowserNavigationStack(
+    AppShell,
+    path,
+    ResolveAppRoute,
+    AppRouteCodec{}
+);
+```
+
+The adapter initializes the controlled path from the current location before building its routed stack.
+If `Decode` rejects the initial or a later browser location, the adapter restores the last accepted canonical location; on initial mount the application-provided path is the fallback.
+`Encode` returns a same-document path, query, fragment, or same-origin URL suitable for the Browser History API.
+Direct writes to `State<NavigationPath<Route>>` use `replaceState()`, while only `RouteNavigationController::Push()` starts a new browser history entry.
+Controller Pop uses `history.back()` when the current entry was created by the same adapter from the requested parent path and otherwise replaces the current entry, so popping an initial deep link does not leave the application accidentally.
+
+One `BrowserNavigationStack` may own a browser document's History at a time.
+Mounting another session whose root also declares `BrowserNavigationStack` is rejected; additional sessions in that document use ordinary `NavigationStack` values.
+
 Browser History must not be exposed through PlatformAdapter because it is application navigation policy rather than a renderer, text, clipboard, or frame-scheduling capability.
-A focused Web navigation bridge observes routed-controller operations and controlled path replacement without introducing JavaScript types into shared headers.
-It tags a path update originating from `popstate` internally so that committing the corresponding frame does not write the same location back to browser history.
+A focused Web navigation bridge supplies the routed controller's typed history-commit policy without introducing JavaScript types into shared headers.
+The policy commits the accepted canonical browser location and the corresponding controlled State update as one operation, while direct State writes remain replace-only synchronization.
 
 Nested URL routes may resolve to an application-owned aggregate containing a selected top-level destination and one or more nested path values.
 URL segment nesting does not force every visual component function to become a NavigationStack, and responsive layout changes do not alter the route solely because the same destination moves between panes.
@@ -959,6 +979,7 @@ The public files are:
 - `include/huxerui/event.h` for BackEvent and ViewEvents::BackRequested.
 - `include/huxerui/modifier.h` for the general NodeExtension Back capability.
 - `include/huxerui/navigation.h` for top app bars, page stacks, the typed path and routed controller, destination selectors, drawers, and their Theme styles.
+- `include/huxerui/web/navigation.h` for the typed route-codec and Browser History adapter.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
 `src/navigation.cpp` owns controller state, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
@@ -1047,11 +1068,17 @@ The shared foundation now includes:
 - Add NavigationPath, routed NavigationStack, RouteNavigationController, path reconciliation, and focused shared tests.
 - Add nearest and root routed-controller resolution through the parent-linked navigation Environment.
 
-The remaining integration phases are:
+The Web integration now includes:
+
+- Decode the initial browser location before resolving the first routed destination.
+- Map controller Push, Replace, Pop, and SetPath to browser History without making URL state authoritative beside NavigationPath.
+- Apply Back and Forward locations without echoing another browser-history mutation.
+- Demonstrate hash-based canonical URLs in the Web navigation example.
+
+The remaining integration phase is:
 
 - Define the application activation and window-session boundary, then deliver Open URL and Open Files activations on each supported platform.
-- Add the Web route codec and Browser History bridge with feedback suppression.
-- Extend the navigation example with activation simulation and URL round trips when those bridges are implemented.
+- Extend the navigation example with activation simulation when that bridge is implemented.
 
 Saveable application state, an iOS interactive gesture, split navigation, navigation results, and shared-element transitions remain separate later milestones built on the same resolved-entry engine.
 

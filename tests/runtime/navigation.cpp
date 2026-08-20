@@ -28,6 +28,7 @@ std::optional<RouteNavigationController<TestRoute>> routed_root_navigation;
 std::optional<State<NavigationPath<TestRoute>>> routed_path;
 std::optional<State<int>> routed_resolver_version;
 std::vector<std::pair<std::string, int>> routed_page_tokens;
+std::vector<std::pair<detail::NavigationHistoryAction, NavigationPath<TestRoute>>> routed_history_actions;
 int next_routed_page_token = 0;
 
 constexpr Color navigation_bounds_color = Color::Rgb(36, 114, 168);
@@ -274,6 +275,17 @@ View RoutedNavigationApp() {
   return NavigationStack(RoutedRootPage, path, RoutedDestination);
 }
 
+View CommittedRoutedNavigationApp() {
+  auto path = UseState(NavigationPath<TestRoute>{});
+  routed_path = path;
+  auto history_commit = std::make_shared<detail::NavigationHistoryCommit<TestRoute>>();
+  *history_commit = [path](detail::NavigationHistoryAction action, NavigationPath<TestRoute> next_path) mutable {
+    routed_history_actions.emplace_back(action, next_path);
+    path = std::move(next_path);
+  };
+  return detail::BuildTypedNavigationStack(RoutedRootPage, path, RoutedDestination, std::move(history_commit));
+}
+
 View DeepRoutedNavigationApp() {
   auto path = UseState(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Details"}}});
   routed_path = path;
@@ -342,6 +354,7 @@ void ResetNavigationTestState() {
   routed_path.reset();
   routed_resolver_version.reset();
   routed_page_tokens.clear();
+  routed_history_actions.clear();
   next_routed_page_token = 0;
 }
 
@@ -799,6 +812,40 @@ TEST_CASE("RoutedNavigationPredictiveBackMutatesThePathOnlyOnCommit") {
   REQUIRE(routed_path->Get().Empty());
   SettleNavigation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "Routed root"));
+}
+
+TEST_CASE("RoutedNavigationCommitsControllerHistoryActions") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(CommittedRoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  routed_navigation->Push(TestRoute{"Article"});
+  REQUIRE(
+      routed_history_actions.back() == std::pair{
+                                           detail::NavigationHistoryAction::Push,
+                                           NavigationPath<TestRoute>{{TestRoute{"Article"}}},
+                                       }
+  );
+  routed_navigation->Replace(TestRoute{"Details"});
+  REQUIRE(
+      routed_history_actions.back() == std::pair{
+                                           detail::NavigationHistoryAction::Replace,
+                                           NavigationPath<TestRoute>{{TestRoute{"Details"}}},
+                                       }
+  );
+  REQUIRE(routed_navigation->Pop());
+  REQUIRE(
+      routed_history_actions.back() == std::pair{detail::NavigationHistoryAction::Pop, NavigationPath<TestRoute>{}}
+  );
+  routed_navigation->SetPath(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Article"}}});
+  REQUIRE(
+      routed_history_actions.back() == std::pair{
+                                           detail::NavigationHistoryAction::Replace,
+                                           NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Article"}}},
+                                       }
+  );
 }
 
 TEST_CASE("RoutedUseRootNavigationSkipsTheNearestCompatibleStack") {

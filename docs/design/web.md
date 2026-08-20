@@ -15,7 +15,7 @@ This document defines the implemented HuxerUI Web backend and its target contrac
 
 ## Non-goals
 
-The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, browser navigation integration, or PWA packaging.
+The initial backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, or PWA packaging.
 
 The initial backend targets a composition-root-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
 
@@ -23,7 +23,7 @@ The initial backend may run before the platform-neutral semantics tree is availa
 
 ## Current implementation
 
-The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, WebCodecs ExternalTexture production, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, IndexedDB-backed application storage, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, WebCodecs ExternalTexture production, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, typed URL routing through Browser History, preloaded resources, IndexedDB-backed application storage, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The backend has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -45,11 +45,14 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 | WebPlatformViews | DOM factory lifecycle, retained Canvas slices, placement, ordering, hit arbitration, and focus synchronization |
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | Native input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
+| BrowserNavigationStack | Application route-codec binding, canonical URL synchronization, browser History operations, and Back or Forward feedback suppression |
 | WebResources | Synchronous reads from resources loaded before Runtime creation and current locale and display scale |
 | Web file storage | IDBFS restoration, stable application identity, serial asynchronous operations, explicit persistence completion, and MEMFS temporary data |
 | ES module integration | Storage initialization, host lookup, composition-root creation, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
 
 There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted host element. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
+Browser History is document-global, so at most one mounted `BrowserNavigationStack` owns URL synchronization.
+Mounting another session whose root also declares `BrowserNavigationStack` is rejected; additional sessions in that document use ordinary routed stacks.
 
 Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand, or application state. JavaScript identifies sessions with validated numeric IDs rather than retaining raw C++ object pointers as application-visible values.
 

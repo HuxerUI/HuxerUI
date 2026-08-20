@@ -153,7 +153,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [App Resources, Images, and Localization Design](docs/design/resources.md) | Typed resources, Image, raw assets, packaging, locale, and formatted strings |
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and platform adapter contracts |
 | [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and platform accessibility mapping |
-| [Navigation Design](docs/design/navigation.md) | Page stacks, scoped controllers, transitions, Back routing, and future URL paths |
+| [Navigation Design](docs/design/navigation.md) | Page stacks, typed routes, scoped controllers, transitions, Back routing, and Web URL history |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
@@ -175,7 +175,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_presentation` | Toast, Dialog, BottomSheet, Popup, and Menu presentation |
 | `example_theme` | Material, Flat, nested themes, and style precedence |
 | `example_tabs` | Controlled Tabs, disabled items, theme policies, and viewport classes |
-| `example_navigation` | Page stacks, selection navigation, start and end drawers, Back routing, and transitions |
+| `example_navigation` | Factory and typed page stacks, Back routing, transitions, and Web URL history |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |

@@ -61,6 +61,7 @@ struct NavigationEnvironmentEntry {
   std::weak_ptr<NavigationState> state;
   std::optional<std::type_index> route_type;
   std::shared_ptr<void> path_state;
+  std::shared_ptr<void> history_commit;
 };
 
 struct NavigationEnvironmentNode {
@@ -971,6 +972,7 @@ View BuildRoutedNavigationStack(
           .state = state,
           .route_type = binding.route_type,
           .path_state = std::move(binding.path_state),
+          .history_commit = std::move(binding.history_commit),
       }
   );
 }
@@ -984,7 +986,7 @@ NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type,
   NavigationAccess found;
   for (auto node = environment.current; node; node = node->parent) {
     if (matches(node->entry)) {
-      found = {node->entry.state, node->entry.path_state};
+      found = {node->entry.state, node->entry.path_state, node->entry.history_commit};
       if (!outermost) {
         break;
       }
@@ -1060,7 +1062,16 @@ View NavigationStack(std::function<View()> root) {
     state->UpdateRoot(root);
     NavigationStyle style = UseEnvironment<NavigationStyle>();
     state->UpdateStyle(style);
-    return detail::BuildNavigationView(state, std::move(style), detail::NavigationEnvironmentEntry{.state = state});
+    return detail::BuildNavigationView(
+        state,
+        std::move(style),
+        detail::NavigationEnvironmentEntry{
+            .state = state,
+            .route_type = std::nullopt,
+            .path_state = nullptr,
+            .history_commit = nullptr,
+        }
+    );
   });
 }
 

@@ -29,7 +29,7 @@ SDK, platform integration, and distribution work:
 
 The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and PlatformView expansion.
 App resources and Image follow the ownership, packaging, caching, and localization constraints in [App Resources, Images, and Localization Design](design/resources.md).
-Page stacks, transition ownership, Back routing, and future URL-backed paths follow the [Navigation Design](design/navigation.md).
+Page stacks, transition ownership, Back routing, typed route paths, and Web URL history follow the [Navigation Design](design/navigation.md).
 Retained timing, synchronized presentation properties, and explicit frozen-scene transitions follow the [Animation and Scene Transition Design](design/animation.md).
 Accessibility proceeds from shared semantic declarations and the immutable `SemanticFrame` through component defaults before platform adapters.
 SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before PlatformView modules and versioned distribution.

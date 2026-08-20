@@ -1,6 +1,16 @@
 #include <huxerui/huxerui.h>
 
+#include <charconv>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <variant>
+#include <vector>
+
+#ifdef __EMSCRIPTEN__
+#include <huxerui/web/navigation.h>
+#endif
 
 using namespace huxerui;
 
@@ -167,21 +177,23 @@ View ResolveDemoRoute(const DemoRoute& route) {
   return RoutedArticlePage(std::get<ArticleRoute>(route));
 }
 
-View RoutedRootPage() {
+View RoutedRootContent(std::optional<NavigationController> factory_navigation) {
   const ThemeSpec& theme = UseTheme();
-  const NavigationController factory_navigation = UseRootNavigation();
   const RouteNavigationController<DemoRoute> route_navigation = UseNavigation<DemoRoute>();
+  Views actions;
+  if (factory_navigation) {
+    const NavigationController navigation = *factory_navigation;
+    actions.Add(Button("Back to factory navigation").OnClick([navigation] { navigation.Pop(); }));
+  }
+  actions.Add(Button("Push shelf 7").OnClick([route_navigation] { route_navigation.Push(ShelfRoute{7}); }));
+  actions.Add(Button("Open deep path").OnClick([route_navigation] {
+    route_navigation.SetPath(NavigationPath<DemoRoute>{{ShelfRoute{7}, ArticleRoute{42}}});
+  }));
   return Column {
     Text("Typed routed navigation", TextRole::Title),
     Text("NavigationPath is application-owned history suitable for deep links and restoration."),
     Text::Format("Routed depth: {}", route_navigation.Depth()),
-    Flow {
-      Button("Back to factory navigation").OnClick([factory_navigation] { factory_navigation.Pop(); }),
-      Button("Push shelf 7").OnClick([route_navigation] { route_navigation.Push(ShelfRoute{7}); }),
-      Button("Open deep path").OnClick([route_navigation] {
-        route_navigation.SetPath(NavigationPath<DemoRoute>{{ShelfRoute{7}, ArticleRoute{42}}});
-      }),
-    }.With(Spacing(theme.spacing.small)),
+    Flow {std::move(actions)}.With(Spacing(theme.spacing.small)),
   }.With(
       Padding(theme.spacing.extra_large),
       Spacing(theme.spacing.medium),
@@ -189,13 +201,99 @@ View RoutedRootPage() {
   );
 }
 
+View StandaloneRoutedRootPage() {
+  return RoutedRootContent(std::nullopt);
+}
+
+View NestedRoutedRootPage() {
+  return RoutedRootContent(UseRootNavigation());
+}
+
+#ifdef __EMSCRIPTEN__
+
+struct DemoRouteCodec {
+  std::optional<NavigationPath<DemoRoute>> Decode(std::string_view location) const {
+    const std::size_t fragment = location.find('#');
+    if (fragment == std::string_view::npos) {
+      return std::nullopt;
+    }
+    location.remove_prefix(fragment + 1);
+    if (!location.starts_with("/navigation")) {
+      return std::nullopt;
+    }
+    location.remove_prefix(std::string_view{"/navigation"}.size());
+
+    std::vector<DemoRoute> routes;
+    while (!location.empty()) {
+      if (!location.starts_with('/')) {
+        return std::nullopt;
+      }
+      location.remove_prefix(1);
+      const std::size_t separator = location.find('/');
+      const std::string_view kind = location.substr(0, separator);
+      if (separator == std::string_view::npos) {
+        return std::nullopt;
+      }
+      location.remove_prefix(separator + 1);
+      const std::size_t value_end = location.find('/');
+      const std::string_view value_text = location.substr(0, value_end);
+      int value = 0;
+      const auto [end, error] = std::from_chars(value_text.data(), value_text.data() + value_text.size(), value);
+      if (error != std::errc{} || end != value_text.data() + value_text.size()) {
+        return std::nullopt;
+      }
+      if (kind == "shelf") {
+        routes.emplace_back(ShelfRoute{value});
+      } else if (kind == "article") {
+        routes.emplace_back(ArticleRoute{value});
+      } else {
+        return std::nullopt;
+      }
+      location = value_end == std::string_view::npos ? std::string_view{} : location.substr(value_end);
+    }
+    return NavigationPath<DemoRoute>(std::move(routes));
+  }
+
+  std::string Encode(const NavigationPath<DemoRoute>& path) const {
+    std::string location = "#/navigation";
+    for (const DemoRoute& route : path.Routes()) {
+      std::visit(
+          [&location](const auto& value) {
+            using Route = std::decay_t<decltype(value)>;
+            if constexpr (std::same_as<Route, ShelfRoute>) {
+              location += "/shelf/" + std::to_string(value.shelf);
+            } else {
+              location += "/article/" + std::to_string(value.article);
+            }
+          },
+          route
+      );
+    }
+    return location;
+  }
+};
+
+#endif
+
+View RoutedNavigationContent(State<NavigationPath<DemoRoute>> path) {
+#ifdef __EMSCRIPTEN__
+  return web::BrowserNavigationStack(StandaloneRoutedRootPage, path, ResolveDemoRoute, DemoRouteCodec{});
+#else
+  return NavigationStack(NestedRoutedRootPage, path, ResolveDemoRoute);
+#endif
+}
+
 [[huxerui::scope]] View RoutedNavigationDemo() {
   auto path = UseState(NavigationPath<DemoRoute>{});
-  return NavigationStack(RoutedRootPage, path, ResolveDemoRoute);
+  return RoutedNavigationContent(path);
 }
 
 View App() {
+#ifdef __EMSCRIPTEN__
+  return MaterialTheme(RoutedNavigationDemo);
+#else
   return MaterialTheme(FactoryNavigationDemo);
+#endif
 }
 
 const Application application{
