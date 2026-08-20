@@ -32,6 +32,7 @@
 
 #include <huxerui/app.h>
 
+#include "linux_file_internal.h"
 #include "linux_http_internal.h"
 #include "linux_renderer.h"
 #include "linux_text_input.h"
@@ -272,6 +273,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<FileSystem> CreateFileSystem() override {
+    return CreateLinuxFileSystem();
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
@@ -587,15 +592,7 @@ private:
     if (const char* override_dir = std::getenv("HUXERUI_RESOURCES_DIR")) {
       return std::filesystem::path(override_dir);
     }
-    std::string executable_path;
-    executable_path.resize(4096);
-    const std::size_t length =
-        static_cast<std::size_t>(readlink("/proc/self/exe", executable_path.data(), executable_path.size()));
-    if (length == std::string::npos || length >= executable_path.size()) {
-      throw std::logic_error("HuxerUI Linux executable path could not be resolved");
-    }
-    executable_path.resize(length);
-    std::filesystem::path resource_root(executable_path);
+    std::filesystem::path resource_root(ResolveLinuxExecutablePath());
     resource_root.replace_extension(".resources");
     return resource_root;
   }

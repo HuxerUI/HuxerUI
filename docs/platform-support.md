@@ -114,6 +114,8 @@ The Linux backend creates an X11 window, measures text with FreeType and HarfBuz
 Partial Runtime damage limits Cairo redraw to the affected pixel bounds; the retained bitmap is then presented whole or as damaged rows, matching the Windows cost model of a retained scene bitmap plus swap-chain presentation.
 Canvas Paths map to Cairo path geometry for fill, stroke, clipping, and blurred shadow masks.
 Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), locale and `Xft.dpi` changes update the Runtime resource configuration, and libpng/libjpeg decoding produces Cairo bitmap cache entries with a bounded byte budget.
+FileSystem uses the executable filename as its application identity, maps durable and cache files through `XDG_DATA_HOME` and `XDG_CACHE_HOME` with standard home-directory fallbacks, and obtains the executable directory from `/proc/self/exe` rather than the working directory.
+Temporary files use an owner-only application child under a valid `XDG_RUNTIME_DIR`, or an owner-only `huxerui-<uid>` subtree of the system temporary directory when the runtime directory is unavailable or unsafe.
 
 Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
 Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.

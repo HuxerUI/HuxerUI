@@ -273,6 +273,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_external_texture.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/linux/linux_file.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_text_input.cpp"

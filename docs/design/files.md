@@ -533,7 +533,13 @@ It uses the Storage Access Framework for active selection.
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.
 It uses the native file dialogs for active selection.
 
-Linux follows XDG data and cache locations, prefers an application child of `XDG_RUNTIME_DIR` for temporary files with a safe temporary fallback, and resolves the executable directory independently of the process working directory.
+Linux uses the UTF-8 filename resolved from `/proc/self/exe` as its application identity and resolves the executable directory from that same path independently of the process working directory.
+Durable data uses `$XDG_DATA_HOME/<executable-name>` or `$HOME/.local/share/<executable-name>`, while cache data uses `$XDG_CACHE_HOME/<executable-name>` or `$HOME/.cache/<executable-name>`.
+Relative, empty, or invalid UTF-8 XDG paths are ignored.
+Temporary data uses `<XDG_RUNTIME_DIR>/<executable-name>` only when the runtime root is an owner-only directory belonging to the effective user.
+Otherwise it uses `<system-temporary-directory>/huxerui-<effective-uid>/<executable-name>` and requires both created children to remain owner-only directories.
+An unsafe existing fallback directory fails initialization rather than being reused.
+Renaming the executable selects different storage, and executable files with the same name share one per-user application directory.
 It prefers the desktop portal for active selection.
 
 Web maps application-private storage through the browser filesystem design below and has no executable directory.
