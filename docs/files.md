@@ -1,7 +1,7 @@
 # Files and Application Storage
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
-The current implementation supports macOS, iOS, and Android; the same public API and other platform directory mappings are staged work.
+The current implementation supports macOS, iOS, Android, and Web; Windows and Linux directory mappings remain staged work.
 
 ## Application directories
 
@@ -61,8 +61,12 @@ if (content.Succeeded()) {
 }
 ```
 
+On Web, synchronous reads and temporary-directory mutations use the restored virtual filesystem normally.
+Mutations under `data_directory` or `cache_directory` must use their `Async` variants because success is reported only after browser persistence completes.
+
 UI-owned work should use explicitly named asynchronous methods.
-They execute on a bounded filesystem executor and resume the owning HuxerUI Task on its UI thread:
+Native platforms execute them on a bounded filesystem executor, while Web serializes them through the browser event loop and waits for persistent-storage completion when required.
+Every platform resumes the owning HuxerUI Task on its UI thread:
 
 ```cpp
 [[huxerui::scope]]
@@ -84,7 +88,22 @@ View SettingsStatus() {
 ```
 
 Canceling the owning `TaskHandle`, retiring its `TaskScope`, or destroying the Runtime prevents a late filesystem completion from resuming application code.
-An operating-system operation that cannot be interrupted may still finish in the background.
+An underlying storage operation that cannot be interrupted may still finish after cancellation.
+
+## Web storage identity
+
+A Web shell supplies one stable application storage key when creating the Emscripten module:
+
+```js
+const module = await createHuxerUIApp({
+  huxeruiStorageKey: "com.example.app",
+});
+```
+
+Generated CLI applications use their project identifier, and repository examples use their bundle identifier.
+Changing the key selects another isolated browser database, so custom shells keep it stable across deployments.
+Data and cache use IndexedDB-backed IDBFS, temporary files use volatile MEMFS, and `executable_directory` is absent.
+Browser quota, eviction, private-browsing policy, and user storage controls remain authoritative.
 
 ## Results and mutation outcomes
 

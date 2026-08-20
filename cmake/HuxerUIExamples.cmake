@@ -35,6 +35,7 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
         if (EMSCRIPTEN)
             set_target_properties(${target_name} PROPERTIES SUFFIX ".mjs")
             set(HUXERUI_WEB_MODULE_FILE "${target_name}.mjs")
+            set(HUXERUI_WEB_STORAGE_KEY "${bundle_identifier}")
             configure_file(
                     "${HUXERUI_PROJECT_DIR}/platform/web/example.html.in"
                     "${CMAKE_CURRENT_BINARY_DIR}/${target_name}.html"

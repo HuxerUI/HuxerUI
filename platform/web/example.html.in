@@ -24,7 +24,9 @@
   <script type="module">
     import createHuxerUIApp from "./@HUXERUI_WEB_MODULE_FILE@";
 
-    const module = await createHuxerUIApp();
+    const module = await createHuxerUIApp({
+      huxeruiStorageKey: "@HUXERUI_WEB_STORAGE_KEY@",
+    });
     await document.fonts.ready;
     const session = module.mountHuxerUI("#huxerui-root");
     if (!session) {

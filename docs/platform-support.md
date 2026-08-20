@@ -139,6 +139,7 @@ Web module sources use the existing platform-neutral `PlatformModuleFactory` fro
 `web::ExternalTextureSource` accepts open WebCodecs `VideoFrame` values on the browser main thread, synchronously clones each publication into a latest-wins mailbox, and leaves ownership of the original frame with the caller. Canvas acquires one coherent frame per browser animation frame even when PlatformViews divide rendering into several Canvas slices, retains the last acquired frame, and closes replaced or inactive frames. This path does not add a texture registry or claim zero-copy. The same module example returns that texture capability once and then publishes generated frames without per-frame PlatformModule calls.
 RootHook-installed `web::PlatformViewFactory` registrations return detached `HTMLElement` values through Emscripten. The adapter retains compatible elements, applies controlled property revisions, clips and positions them in logical coordinates, and alternates DOM containers with base and transparent Canvas slices in final `RenderComposition` order. Root-capture hit arbitration and focus synchronization preserve the PlatformView boundary between browser interaction and shared Runtime input. The Web `example_platform_view` hosts a controlled `PlatformTextField` through this path. Browser accessibility substitution remains deferred with the wider Web semantics bridge.
 HttpClient uses browser Fetch, buffers complete responses, and aborts canceled or timed-out operations through AbortController. Browser CORS, forbidden-header, credential, and response-header visibility policies remain authoritative; HuxerUI does not add a proxy or a permissive request mode.
+FileSystem restores one application-specific IDBFS mount before Runtime creation, publishes persistent data and cache directories with a volatile MEMFS temporary directory, and omits an executable directory. Generated shells supply a stable project identifier as `huxeruiStorageKey`. Persistent mutations are serialized through the browser event loop and complete only after explicit IndexedDB synchronization; synchronous mutation remains available only outside the persistent subtree.
 
 Configure and build all examples with a modern Emscripten toolchain:
 
@@ -156,7 +157,7 @@ Serve the generated files rather than opening the HTML directly:
 python3 -m http.server 8000 --directory cmake-build-web/bin
 ```
 
-For example, open `http://127.0.0.1:8000/example_ui_gallery.html` or `http://127.0.0.1:8000/example_http.html`.
+For example, open `http://127.0.0.1:8000/example_ui_gallery.html`, `http://127.0.0.1:8000/example_http.html`, or `http://127.0.0.1:8000/example_files.html`.
 Each example produces an HTML entry point, an ES module, a WebAssembly module, and resource data when the target packages resources.
 
 CLI applications can generate and run a source-controlled Web shell directly:

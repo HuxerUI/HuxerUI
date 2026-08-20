@@ -34,8 +34,8 @@ View DirectoryPath(std::string label, const File& directory) {
     Column {
       Text("Files and application storage", TextRole::Title),
       Text(
-          "FileSystem provides application-owned directories. Asynchronous File operations run away from the UI "
-          "thread and resume on the owning TaskScope."
+          "FileSystem provides application-owned directories. Asynchronous File operations resume on the owning "
+          "TaskScope after platform storage completes."
       ),
       Column {
         Text("Application directories", TextRole::Title),

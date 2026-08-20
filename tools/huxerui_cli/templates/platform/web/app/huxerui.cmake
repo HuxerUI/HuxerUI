@@ -5,6 +5,7 @@ function(huxerui_configure_web_app target_name)
 
     set_target_properties(${target_name} PROPERTIES SUFFIX ".mjs")
     set(HUXERUI_WEB_MODULE_FILE "${target_name}.mjs")
+    set(HUXERUI_WEB_STORAGE_KEY "@PROJECT_ID@")
     set(HUXERUI_WEB_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/huxerui-web")
     file(MAKE_DIRECTORY "${HUXERUI_WEB_GENERATED_DIRECTORY}")
     configure_file(

@@ -10,4 +10,16 @@ include("${CMAKE_CURRENT_LIST_DIR}/HuxerUITargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
 
+if (EMSCRIPTEN AND TARGET HuxerUI::huxerui_static)
+    set_property(TARGET HuxerUI::huxerui_static APPEND PROPERTY
+            INTERFACE_LINK_OPTIONS
+            --pre-js
+            "${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js"
+    )
+    set_property(TARGET HuxerUI::huxerui_static APPEND PROPERTY
+            INTERFACE_LINK_DEPENDS
+            "${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js"
+    )
+endif ()
+
 check_required_components(HuxerUI)

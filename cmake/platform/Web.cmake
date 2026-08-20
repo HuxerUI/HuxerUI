@@ -2,6 +2,7 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_SOURCE_FILES
             "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_external_texture.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/web/web_file.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"
@@ -19,7 +20,10 @@ function(huxerui_platform_configure)
     set(HUXERUI_PLATFORM_LINK_OPTIONS
             --bind
             --no-entry
+            "$<BUILD_INTERFACE:--pre-js>"
+            "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
             -fexceptions
+            -lidbfs.js
             "-sMODULARIZE=1"
             "-sEXPORT_ES6=1"
             "-sEXPORT_NAME=createHuxerUIApp"

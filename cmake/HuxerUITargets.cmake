@@ -77,6 +77,12 @@ function(huxerui_configure_public_target target_name)
     target_compile_options(${target_name} INTERFACE ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS})
     target_link_libraries(${target_name} PRIVATE ${HUXERUI_PLATFORM_LINK_LIBRARIES})
     target_link_options(${target_name} INTERFACE ${HUXERUI_PLATFORM_LINK_OPTIONS})
+    if (EMSCRIPTEN)
+        set_property(TARGET ${target_name} APPEND PROPERTY
+                INTERFACE_LINK_DEPENDS
+                "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
+        )
+    endif ()
 
     if (WIN32)
         get_target_property(HUXERUI_TARGET_TYPE ${target_name} TYPE)

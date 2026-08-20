@@ -126,6 +126,11 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUITargets.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
+install(FILES
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_file.js"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+        RENAME HuxerUIWebFileSystem.js
+)
 install(DIRECTORY "${HUXERUI_PROJECT_DIR}/cmake/platform"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )

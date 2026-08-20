@@ -27,6 +27,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
+#include "web_file.h"
 #include "web_http_internal.h"
 #include "web_platform_view.h"
 #include "web_renderer.h"
@@ -826,6 +827,10 @@ public:
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateWebHttpTransport();
+  }
+
+  std::shared_ptr<FileSystem> CreateFileSystem() override {
+    return CreateWebFileSystem();
   }
 
   void Resize(float width, float height, float display_scale) {

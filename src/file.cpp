@@ -2,7 +2,9 @@
 
 #include <cerrno>
 #include <chrono>
+#if !defined(__EMSCRIPTEN__)
 #include <condition_variable>
+#endif
 #include <coroutine>
 #include <cstdint>
 #include <deque>
@@ -15,7 +17,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <system_error>
+#if !defined(__EMSCRIPTEN__)
 #include <thread>
+#endif
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -28,6 +33,27 @@ namespace huxerui::detail {
 namespace {
 
 namespace fs = std::filesystem;
+
+#if defined(__EMSCRIPTEN__)
+bool& WebPersistentMutationAllowed() {
+  static bool allowed = false;
+  return allowed;
+}
+
+class WebPersistentMutationScope final {
+public:
+  explicit WebPersistentMutationScope(bool allowed) : previous_(WebPersistentMutationAllowed()) {
+    WebPersistentMutationAllowed() = allowed;
+  }
+
+  ~WebPersistentMutationScope() {
+    WebPersistentMutationAllowed() = previous_;
+  }
+
+private:
+  bool previous_;
+};
+#endif
 
 bool IsValidUtf8(std::string_view text) noexcept {
   for (std::size_t index = 0; index < text.size();) {
@@ -232,6 +258,24 @@ bool IsDirectory(std::string_view path) {
   return !error && directory;
 }
 
+bool CanMutate(std::string_view path) noexcept {
+#if defined(__EMSCRIPTEN__)
+  return WebPersistentMutationAllowed() || !IsWebPersistentFilePath(path);
+#else
+  static_cast<void>(path);
+  return true;
+#endif
+}
+
+bool RequiresPersistence(std::string_view path) noexcept {
+#if defined(__EMSCRIPTEN__)
+  return IsWebPersistentFilePath(path);
+#else
+  static_cast<void>(path);
+  return false;
+#endif
+}
+
 FileResult<FileInfo> Stat(std::string_view path) {
   const fs::path native = NativePath(path);
   std::error_code error;
@@ -314,6 +358,9 @@ FileResult<std::vector<std::byte>> ReadBytes(std::string_view path) {
 }
 
 bool WriteBytes(std::string_view path, std::span<const std::byte> bytes, bool append) {
+  if (!CanMutate(path)) {
+    return false;
+  }
   errno = 0;
   std::ofstream stream(NativePath(path), std::ios::binary | std::ios::out | (append ? std::ios::app : std::ios::trunc));
   if (!stream) {
@@ -369,6 +416,9 @@ bool CreateDirectory(std::string_view path, bool recursive) {
   if (!error && fs::exists(status)) {
     return fs::is_directory(status);
   }
+  if (!CanMutate(path)) {
+    return false;
+  }
   error.clear();
   const bool created = recursive ? fs::create_directories(native, error) : fs::create_directory(native, error);
   return !error && (created || fs::is_directory(native, error));
@@ -410,6 +460,9 @@ bool Delete(std::string_view path, bool recursive) {
   if (error) {
     return false;
   }
+  if (!CanMutate(path)) {
+    return false;
+  }
   if (!recursive || fs::is_symlink(status)) {
     return fs::remove(native, error) && !error;
   }
@@ -421,6 +474,9 @@ bool Delete(std::string_view path, bool recursive) {
 }
 
 bool Copy(std::string_view source, std::string_view destination, bool overwrite) {
+  if (!CanMutate(destination)) {
+    return false;
+  }
   std::error_code error;
   if (!fs::is_regular_file(NativePath(source), error) || error) {
     return false;
@@ -430,6 +486,9 @@ bool Copy(std::string_view source, std::string_view destination, bool overwrite)
 }
 
 bool Move(std::string_view source, std::string_view destination, bool overwrite) {
+  if (!CanMutate(source) || !CanMutate(destination)) {
+    return false;
+  }
   const fs::path native_destination = NativePath(destination);
   std::error_code error;
   if (!overwrite && fs::exists(native_destination, error)) {
@@ -441,6 +500,8 @@ bool Move(std::string_view source, std::string_view destination, bool overwrite)
   fs::rename(NativePath(source), native_destination, error);
   return !error;
 }
+
+#if !defined(__EMSCRIPTEN__)
 
 class FileExecutor final {
 public:
@@ -505,10 +566,13 @@ private:
   bool stopping_ = false;
 };
 
+#endif
+
 template <class Result>
 class FileOperationState final : public std::enable_shared_from_this<FileOperationState<Result>> {
 public:
-  explicit FileOperationState(std::function<Result()> operation) : operation_(std::move(operation)) {}
+  FileOperationState(std::function<Result()> operation, bool persist)
+      : operation_(std::move(operation)), persist_(persist) {}
 
   void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
     {
@@ -517,7 +581,11 @@ public:
       continuation_ = continuation;
     }
     const std::shared_ptr<FileOperationState> self = this->shared_from_this();
+#if defined(__EMSCRIPTEN__)
+    EnqueueWebFileOperation([self](std::function<void()> completion) { self->Run(std::move(completion)); });
+#else
     FileExecutor::Instance().Submit([self] { self->Run(); });
+#endif
   }
 
   Result TakeResult() {
@@ -539,15 +607,55 @@ public:
   }
 
 private:
+#if defined(__EMSCRIPTEN__)
+  void Run(std::function<void()> completion) noexcept {
+#else
   void Run() noexcept {
+#endif
     std::optional<Result> result;
     std::exception_ptr exception;
     try {
+#if defined(__EMSCRIPTEN__)
+      WebPersistentMutationScope mutation_scope(persist_);
+#endif
       result.emplace(operation_());
     } catch (...) {
       exception = std::current_exception();
     }
 
+#if defined(__EMSCRIPTEN__)
+    if (persist_) {
+      const std::shared_ptr<FileOperationState> self = this->shared_from_this();
+      try {
+        PersistWebFileSystem([self, result = std::move(result), exception, completion](bool persisted) mutable {
+          if constexpr (std::is_same_v<Result, bool>) {
+            if (result.has_value()) {
+              *result = *result && persisted;
+            }
+          }
+          self->Finish(std::move(result), exception);
+          completion();
+        });
+      } catch (...) {
+        if constexpr (std::is_same_v<Result, bool>) {
+          if (result.has_value()) {
+            *result = false;
+          }
+        }
+        Finish(std::move(result), std::current_exception());
+        completion();
+      }
+      return;
+    }
+#endif
+
+    Finish(std::move(result), exception);
+#if defined(__EMSCRIPTEN__)
+    completion();
+#endif
+  }
+
+  void Finish(std::optional<Result> result, std::exception_ptr exception) noexcept {
     std::weak_ptr<TaskExecution> execution;
     std::coroutine_handle<> continuation;
     {
@@ -572,12 +680,13 @@ private:
   std::optional<Result> result_;
   std::exception_ptr exception_;
   bool canceled_ = false;
+  bool persist_ = false;
 };
 
 template <class Result> class FileOperationAwaiter final {
 public:
-  explicit FileOperationAwaiter(std::function<Result()> operation)
-      : state_(std::make_shared<FileOperationState<Result>>(std::move(operation))) {}
+  FileOperationAwaiter(std::function<Result()> operation, bool persist)
+      : state_(std::make_shared<FileOperationState<Result>>(std::move(operation), persist)) {}
 
   FileOperationAwaiter(const FileOperationAwaiter&) = delete;
   FileOperationAwaiter& operator=(const FileOperationAwaiter&) = delete;
@@ -606,8 +715,8 @@ private:
   std::shared_ptr<FileOperationState<Result>> state_;
 };
 
-template <class Result> Task<Result> RunFileOperation(std::function<Result()> operation) {
-  co_return co_await FileOperationAwaiter<Result>(std::move(operation));
+template <class Result> Task<Result> RunFileOperation(std::function<Result()> operation, bool persist = false) {
+  co_return co_await FileOperationAwaiter<Result>(std::move(operation), persist);
 }
 
 std::string ResolveChild(std::string_view path, std::string_view child) {
@@ -762,9 +871,11 @@ bool File::WriteBytes(std::span<const std::byte> bytes) const {
 }
 
 Task<bool> File::WriteBytesAsync(std::vector<std::byte> bytes) const {
-  return detail::RunFileOperation<bool>([file = *this, bytes = std::move(bytes)] {
-    return file.WriteBytes(std::span<const std::byte>(bytes));
-  });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, bytes = std::move(bytes)] { return file.WriteBytes(std::span<const std::byte>(bytes)); },
+      persist
+  );
 }
 
 bool File::WriteString(std::string_view value) const {
@@ -774,7 +885,11 @@ bool File::WriteString(std::string_view value) const {
 
 Task<bool> File::WriteStringAsync(std::string value) const {
   detail::ValidateUtf8(value, "file text");
-  return detail::RunFileOperation<bool>([file = *this, value = std::move(value)] { return file.WriteString(value); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, value = std::move(value)] { return file.WriteString(value); },
+      persist
+  );
 }
 
 bool File::AppendBytes(std::span<const std::byte> bytes) const {
@@ -782,9 +897,11 @@ bool File::AppendBytes(std::span<const std::byte> bytes) const {
 }
 
 Task<bool> File::AppendBytesAsync(std::vector<std::byte> bytes) const {
-  return detail::RunFileOperation<bool>([file = *this, bytes = std::move(bytes)] {
-    return file.AppendBytes(std::span<const std::byte>(bytes));
-  });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, bytes = std::move(bytes)] { return file.AppendBytes(std::span<const std::byte>(bytes)); },
+      persist
+  );
 }
 
 bool File::AppendString(std::string_view value) const {
@@ -794,7 +911,11 @@ bool File::AppendString(std::string_view value) const {
 
 Task<bool> File::AppendStringAsync(std::string value) const {
   detail::ValidateUtf8(value, "file text");
-  return detail::RunFileOperation<bool>([file = *this, value = std::move(value)] { return file.AppendString(value); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, value = std::move(value)] { return file.AppendString(value); },
+      persist
+  );
 }
 
 FileResult<std::vector<File>> File::ListChildren() const {
@@ -820,7 +941,8 @@ bool File::CreateDirectory() const {
 }
 
 Task<bool> File::CreateDirectoryAsync() const {
-  return detail::RunFileOperation<bool>([file = *this] { return file.CreateDirectory(); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>([file = *this] { return file.CreateDirectory(); }, persist);
 }
 
 bool File::CreateDirectories() const {
@@ -828,7 +950,8 @@ bool File::CreateDirectories() const {
 }
 
 Task<bool> File::CreateDirectoriesAsync() const {
-  return detail::RunFileOperation<bool>([file = *this] { return file.CreateDirectories(); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>([file = *this] { return file.CreateDirectories(); }, persist);
 }
 
 bool File::Delete() const {
@@ -836,7 +959,8 @@ bool File::Delete() const {
 }
 
 Task<bool> File::DeleteAsync() const {
-  return detail::RunFileOperation<bool>([file = *this] { return file.Delete(); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>([file = *this] { return file.Delete(); }, persist);
 }
 
 bool File::DeleteRecursively() const {
@@ -844,7 +968,8 @@ bool File::DeleteRecursively() const {
 }
 
 Task<bool> File::DeleteRecursivelyAsync() const {
-  return detail::RunFileOperation<bool>([file = *this] { return file.DeleteRecursively(); });
+  const bool persist = detail::RequiresPersistence(path_);
+  return detail::RunFileOperation<bool>([file = *this] { return file.DeleteRecursively(); }, persist);
 }
 
 bool File::CopyTo(const File& destination, bool overwrite) const {
@@ -852,9 +977,11 @@ bool File::CopyTo(const File& destination, bool overwrite) const {
 }
 
 Task<bool> File::CopyToAsync(File destination, bool overwrite) const {
-  return detail::RunFileOperation<bool>([file = *this, destination = std::move(destination), overwrite] {
-    return file.CopyTo(destination, overwrite);
-  });
+  const bool persist = detail::RequiresPersistence(destination.path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, destination = std::move(destination), overwrite] { return file.CopyTo(destination, overwrite); },
+      persist
+  );
 }
 
 bool File::MoveTo(const File& destination, bool overwrite) const {
@@ -862,9 +989,11 @@ bool File::MoveTo(const File& destination, bool overwrite) const {
 }
 
 Task<bool> File::MoveToAsync(File destination, bool overwrite) const {
-  return detail::RunFileOperation<bool>([file = *this, destination = std::move(destination), overwrite] {
-    return file.MoveTo(destination, overwrite);
-  });
+  const bool persist = detail::RequiresPersistence(path_) || detail::RequiresPersistence(destination.path_);
+  return detail::RunFileOperation<bool>(
+      [file = *this, destination = std::move(destination), overwrite] { return file.MoveTo(destination, overwrite); },
+      persist
+  );
 }
 
 FileSystem::FileSystem(AppDirectories directories) : directories_(std::move(directories)) {}

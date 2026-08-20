@@ -2,7 +2,7 @@
 
 Status: implemented
 
-This document defines the implemented HuxerUI Web backend and its target contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, accessibility, and delivery boundaries.
+This document defines the implemented HuxerUI Web backend and its target contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, application storage, accessibility, and delivery boundaries.
 
 ## Goals
 
@@ -23,7 +23,7 @@ The initial backend may run before the platform-neutral semantics tree is availa
 
 ## Current implementation
 
-The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, WebCodecs ExternalTexture production, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, and asynchronous ImageBitmap decoding.
+The current implementation includes Emscripten platform selection, automatic `Application` registration, ES module mounting and disposal, composition-root and Canvas sizing, frame scheduling, asynchronous PlatformModule result and event dispatch, DOM PlatformView hosting with exact RenderComposition ordering, WebCodecs ExternalTexture production, Canvas 2D replay for every current PaintCommand variant, Pointer Events, wheel and keyboard conversion, synchronous Canvas-backed text layout, controlled browser text input and composition events, preloaded resources, IndexedDB-backed application storage, and asynchronous ImageBitmap decoding.
 
 Repository examples generate directly runnable HTML, ES module, WebAssembly, and optional resource data artifacts.
 The backend has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
@@ -46,7 +46,8 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as native 
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | Native input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
 | WebResources | Synchronous reads from resources loaded before Runtime creation and current locale and display scale |
-| ES module integration | Host lookup, composition-root creation, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
+| Web file storage | IDBFS restoration, stable application identity, serial asynchronous operations, explicit persistence completion, and MEMFS temporary data |
+| ES module integration | Storage initialization, host lookup, composition-root creation, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
 
 There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted host element. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
 
@@ -56,11 +57,22 @@ Browser objects never enter shared headers, ViewSpec, MountedNode, PaintCommand,
 
 Web compilation constructs the same static `Application` used by the other targets. Its constructor registers the immutable root and `AppOptions`; Web does not create or require a desktop `main()`.
 
-The generated ES module exposes a synchronous mount operation that accepts a selector for an `HTMLElement` with no child nodes after module and font loading have completed. The adapter creates and owns one isolated composition root and its base Canvas inside that host. Broader startup configuration such as a resource base URL and page-integration policy remains deferred and does not belong in `AppOptions`.
+The generated ES module exposes a synchronous mount operation that accepts a selector for an `HTMLElement` with no child nodes after module, application storage, and font loading have completed. The adapter creates and owns one isolated composition root and its base Canvas inside that host. Broader startup configuration such as a resource base URL and page-integration policy remains deferred and does not belong in `AppOptions`.
+
+The shell passes one stable Web storage identity to the module factory:
+
+```js
+const module = await createHuxerUIApp({
+  huxeruiStorageKey: "com.example.app",
+});
+```
+
+Generated shells derive it from the project or example identifier.
+It remains host configuration rather than entering `AppOptions`.
 
 Startup occurs in this order:
 
-- Instantiate the Emscripten module and complete packaged-resource preload into the virtual filesystem.
+- Instantiate the Emscripten module, mount its application-specific IDBFS subtree, restore IndexedDB contents, create data, cache, and temporary directories, and complete packaged-resource preload into the virtual filesystem.
 - Await `document.fonts.ready` in the JavaScript entry point.
 - Resolve the target host, create its composition root and base Canvas, and create WebPlatformAdapter and Runtime from the uniquely registered Application.
 - Create the JavaScript session record and install browser observers and event listeners.
@@ -75,7 +87,7 @@ The initial distribution contains an HTML entry point when requested by SDK tool
 
 Emscripten is selected through `EMSCRIPTEN` before native platform branches and configures `cmake/platform/Web.cmake`.
 
-The Web platform configuration supplies Web sources, platform-owned application registration, required Emscripten link settings, JavaScript bridge code, and exported lifecycle operations. Web targets do not build the ordinary HuxerUI shared library by default.
+The Web platform configuration supplies Web sources, platform-owned application registration, IDBFS initialization, required Emscripten link settings, JavaScript bridge code, and exported lifecycle operations. Web targets do not build the ordinary HuxerUI shared library by default.
 
 Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a Windows, macOS, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 

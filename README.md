@@ -180,7 +180,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
-| `example_files` | macOS, iOS, and Android application directories, UTF-8 local files, asynchronous operations, and Task resumption |
+| `example_files` | macOS, iOS, Android, and Web application directories, UTF-8 local files, asynchronous operations, persistence, and Task resumption |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

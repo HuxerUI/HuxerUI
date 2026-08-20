@@ -3,8 +3,8 @@
 ## Status
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
-The shared `File`, `FileInfo`, `FileResult<T>`, and `FileSystem` surface, bounded asynchronous executor, Runtime service integration, macOS, iOS, and Android local implementations, and focused example are implemented.
-Application-directory mappings for Windows, Linux, and Web, along with `FileReference` and `FilePicker`, remain proposed.
+The shared `File`, `FileInfo`, `FileResult<T>`, and `FileSystem` surface, bounded native asynchronous executor, Runtime service integration, macOS, iOS, Android, and Web local implementations, and focused example are implemented.
+Application-directory mappings for Windows and Linux, `FileReference`, and `FilePicker` remain proposed.
 
 ## Goals
 
@@ -488,10 +488,11 @@ Lexical operations and the three convenience status predicates are synchronous o
 Operations that may transfer data, enumerate directories, or mutate storage provide an explicitly named `Async` counterpart.
 
 Native asynchronous work uses a bounded shared filesystem executor rather than creating one thread per operation.
-A future platform with a genuine asynchronous local-storage API may integrate that capability explicitly instead of inheriting an unused provider contract.
+Web uses the browser event loop and its persistent-storage completion callback instead of creating workers or inheriting an unused provider contract.
 
 An asynchronous call validates caller-owned values before returning its lazy Task.
-Once awaited from a launched HuxerUI Task, it performs filesystem work away from the UI thread and resumes through the owning `TaskExecution` and `UIThreadDispatcher`.
+Once awaited from a launched HuxerUI Task, native implementations perform filesystem work away from the UI thread, while Web schedules it through the browser event loop.
+Every implementation resumes through the owning `TaskExecution` and `UIThreadDispatcher`.
 Code after `co_await` may therefore update State directly.
 
 Canceling the owning `TaskHandle`, retiring its TaskScope, or destroying Runtime detaches the continuation.
@@ -535,9 +536,94 @@ It uses the native file dialogs for active selection.
 Linux follows XDG data and cache locations, prefers an application child of `XDG_RUNTIME_DIR` for temporary files with a safe temporary fallback, and resolves the executable directory independently of the process working directory.
 It prefers the desktop portal for active selection.
 
-Web requires a separate staged design because durable browser storage is asynchronous and has no executable directory.
-The common header and result semantics remain portable, but the implementation must not claim durable success for a synchronous in-memory write before browser persistence completes.
+Web maps application-private storage through the browser filesystem design below and has no executable directory.
 The picker uses browser file handles when available and an input-element fallback for opening; unsupported save capabilities remain visible through the capability contract.
+
+## Web application storage
+
+The Web implementation preserves the existing `File`, `FileSystem`, and explicitly named asynchronous operations without adding a browser-specific public file type, provider interface, or mount API.
+It uses Emscripten's synchronous virtual filesystem for local path behavior and IDBFS for application-private persistence.
+The browser File System Access API remains part of the future `FileReference` and `FilePicker` implementation because a user-granted external handle is not an application-private local path.
+
+### Storage identity and directories
+
+Each Web application supplies one stable storage key through its JavaScript shell:
+
+```js
+const module = await createHuxerUIApp({
+  huxeruiStorageKey: "com.example.app",
+});
+
+const session = module.mountHuxerUI("#huxerui-root");
+```
+
+Generated CLI shells derive this value from the project identifier, and repository examples use their configured bundle identifier.
+Custom shells provide it explicitly.
+The value is host-owned storage identity and does not enter `AppOptions`, the shared `Application` declaration, or C++ module payloads.
+The implementation rejects a missing or invalid key instead of deriving one from a URL, output filename, or document title whose later change would make existing data appear lost.
+
+The encoded key selects one application-specific IDBFS mount and one temporary subtree:
+
+```text
+/huxerui/<storage-key>/
+    data/
+    cache/
+
+/tmp/huxerui/<storage-key>/
+```
+
+`data_directory` maps to the persistent `data` child, `cache_directory` maps to the persistent but reconstructible `cache` child, and `temporary_directory` maps to MEMFS under `/tmp`.
+`executable_directory` is `std::nullopt`, and `CurrentDirectory()` continues to report the Emscripten process working directory rather than inventing an executable location.
+Data and cache share one IDBFS mount so restoration and persistence have one ordering domain.
+Browser quota, storage eviction, private-browsing policy, and user storage controls remain authoritative; HuxerUI does not request durable-storage permission automatically or promise that cache data cannot be evicted.
+
+### Initialization and Runtime ownership
+
+Web storage is initialized once per Emscripten module before any HuxerUI Runtime may mount.
+A Web pre-initialization script validates the storage key, mounts IDBFS, restores IndexedDB contents with `FS.syncfs(true)`, creates the application directories, and releases an Emscripten run dependency only after restoration completes.
+The module factory therefore does not resolve and `mountHuxerUI()` cannot construct application UI while persistent files are still absent from the virtual filesystem.
+
+Every Runtime in the same module receives a `FileSystem` Root Service using the already initialized directories.
+Runtime creation never mounts, restores, or clears IDBFS again, so several host elements share the application storage without introducing per-window databases or races.
+
+If storage initialization fails, Runtime mounting fails with a clear HuxerUI diagnostic.
+The implementation does not silently publish a volatile `FileSystem`, because reporting successful durable writes that disappear after reload would violate the application-directory contract.
+
+### Synchronous operation policy
+
+Status queries, metadata, reads, and directory enumeration may execute synchronously against the fully restored virtual filesystem.
+Synchronous mutation remains available for paths in MEMFS, including `temporary_directory`, because the documented result requires only the in-memory operation to finish.
+
+A synchronous operation that would mutate the persistent data or cache subtree returns `false` without first changing the virtual filesystem.
+This applies to writing, appending, directory creation, deletion, copying into persistent storage, and moving when either the source or destination is persistent.
+The restriction is enforced in the shared local-operation path using the persistent root owned by the Web file implementation rather than repeated independently across Web adapter methods.
+It preserves the existing `bool` contract: success is never reported before IndexedDB persistence can complete.
+
+### Asynchronous execution and persistence
+
+Web does not enable Emscripten pthreads, create a worker-backed filesystem, or require cross-origin isolation for local file operations.
+It replaces the native filesystem executor with one module-owned serial queue scheduled through the browser event loop.
+Virtual filesystem access still runs on the browser main thread and may briefly occupy that thread; documentation must not claim that Web file work executes on a background thread.
+
+An asynchronous persistent mutation performs the virtual filesystem operation and then explicitly calls `FS.syncfs(false)`.
+Its Task completes with `true` only after both stages succeed.
+Temporary mutations complete after their virtual filesystem operation, while asynchronous reads and queries resume after their queued operation finishes.
+The queue retains a persistent mutation until its synchronization callback returns before starting the next operation, preventing overlapping IDBFS snapshots from reordering writes.
+
+IDBFS automatic persistence is not the Task completion mechanism because it does not expose the result of the particular durable operation to that Task.
+Explicit synchronization keeps storage failures observable through the existing `bool` or `FileResult<T>` outcome without adding a Web-specific result type.
+After a persistent mutation has begun, the implementation attempts synchronization even when a compound virtual operation reports failure because part of that operation may already have changed the mounted tree.
+The initial implementation does not add an in-memory rollback transaction for partially completed filesystem operations.
+
+Canceling the owning Task detaches its continuation but does not discard an operation or synchronization already in progress.
+The queue may finish that work to preserve filesystem ordering, while retired application code is never resumed.
+This matches the native rule that an uninterruptible filesystem operation may complete after cancellation.
+
+### Internal boundary
+
+The Web implementation uses narrow internal scheduling, persistent-root classification, synchronization, and `FileSystem` construction functions shared by `src/file.cpp` and `platform/web/web_file.cpp`.
+It does not introduce a public or private polymorphic `FileBackend`, a second service registry, a PlatformModule instance, or Web-only methods on `File`.
+Emscripten glue owns IDBFS mounting and synchronization, the Web adapter publishes the initialized application directories, and the shared file implementation retains path validation, operation semantics, Task cancellation, and result mapping.
 
 ## Integration with existing APIs
 
@@ -560,12 +646,14 @@ Picker and reference tests cover single and multiple selection, cancellation, un
 
 Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, native picker mapping, native failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
 
+Web storage validation should additionally cover initial restoration before Runtime mounting, persistence across page reloads, temporary-data loss across reloads, isolation between two storage keys on one origin, rejection of synchronous persistent mutation without an in-memory change, serialized asynchronous persistence, IndexedDB failure mapping, cancellation, Runtime teardown, and reuse of one initialized mount by multiple Runtime instances.
+
 ## Delivery sequence
 
 - Land this design and keep all capabilities marked proposed.
 - Add the public values, lexical behavior, focused shared tests, umbrella/header checks, and documentation without claiming unsupported platforms.
 - Implement and exercise macOS, iOS, and Android application-directory discovery and local I/O through their native shells.
 - Add Windows and Linux directory discovery and Unicode/path integration through their platform adapters.
-- Design Web persistence separately against the same public contract before claiming browser support.
+- Expand Web browser integration coverage for persistence failure, storage eviction, and multiple sessions without changing the shared file contract.
 - Add `FileReference`, `FilePicker`, and fake-service tests after the local-file contract is stable.
 - Implement picker adapters one platform at a time without expanding the first phase into application activation, directory selection, persistent grants, drag-and-drop, or clipboard APIs.
