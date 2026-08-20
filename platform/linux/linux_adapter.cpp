@@ -33,6 +33,7 @@
 #include <huxerui/app.h>
 
 #include "linux_file_internal.h"
+#include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
 #include "linux_renderer.h"
 #include "linux_text_input.h"
@@ -277,6 +278,10 @@ public:
 
   std::shared_ptr<FileSystem> CreateFileSystem() override {
     return CreateLinuxFileSystem();
+  }
+
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateLinuxFilePickerTransport([this] { return static_cast<unsigned long>(window_); });
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {

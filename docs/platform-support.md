@@ -119,6 +119,9 @@ Canvas Paths map to Cairo path geometry for fill, stroke, clipping, and blurred 
 Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), locale and `Xft.dpi` changes update the Runtime resource configuration, and libpng/libjpeg decoding produces Cairo bitmap cache entries with a bounded byte budget.
 FileSystem uses the executable filename as its application identity, maps durable and cache files through `XDG_DATA_HOME` and `XDG_CACHE_HOME` with standard home-directory fallbacks, and obtains the executable directory from `/proc/self/exe` rather than the working directory.
 Temporary files use an owner-only application child under a valid `XDG_RUNTIME_DIR`, or an owner-only `huxerui-<uid>` subtree of the system temporary directory when the runtime directory is unavailable or unsafe.
+FilePicker uses `org.freedesktop.portal.FileChooser` on the session D-Bus and passes the current X11 window as an `x11:<hex-xid>` parent when available.
+Portal `file://` results remain private inside FileReference, while reads, imports, replacements, and completed save copies reuse the shared bounded file executor.
+The picker capabilities are unavailable when the session bus or xdg-desktop-portal service cannot be reached; the backend does not fall back to GTK or Qt dialogs.
 
 Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
 Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
@@ -130,7 +133,7 @@ This path is bounded and does not claim zero-copy or direct DMA-BUF import.
 The Linux `example_platform_module` registers a platform-neutral timer factory backed by `timerfd` and a background RGBA color stream, exposing the same typed Root Services and disposal behavior as the other supported platform implementations.
 HttpClient uses one libsoup 3 Session on a dedicated GLib network thread, preserving connection reuse, redirects, system proxy configuration, and the system TLS trust store without adding network descriptors to the X11 event loop.
 Requests and responses remain complete in-memory values, GCancellable backs Task cancellation, and a GLib timeout source enforces the complete request deadline.
-X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download them.
+X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download them.
 Source-checkout builds fetch only the pinned graphics, text, image, and compression libraries used by the renderer.
 Following the Windows and macOS distribution model, Linux host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.

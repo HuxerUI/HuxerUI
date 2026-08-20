@@ -57,6 +57,10 @@ MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceS
 [[nodiscard]] FileResult<std::string> DecodeFileUtf8(FileResult<std::vector<std::byte>> bytes);
 [[nodiscard]] bool IsValidFileUtf8(std::string_view text) noexcept;
 
+#if !defined(__EMSCRIPTEN__)
+void EnqueueFileOperation(std::function<void()> operation);
+#endif
+
 #if defined(__EMSCRIPTEN__)
 [[nodiscard]] bool IsWebPersistentFilePath(std::string_view path) noexcept;
 void EnqueueWebFileOperation(std::function<void(std::function<void()>)> operation);

@@ -108,6 +108,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             platform/linux_damage.cpp
             platform/linux_external_texture.cpp
             platform/linux_file.cpp
+            platform/linux_file_picker.cpp
             platform/linux_http.cpp
             platform/linux_platform_module.cpp
             platform/linux_renderer.cpp
@@ -117,6 +118,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
+    target_link_libraries(huxerui_tests PRIVATE PkgConfig::HUXERUI_GIO)
 endif ()
 
 if (EMSCRIPTEN)

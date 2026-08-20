@@ -11,6 +11,7 @@ function(huxerui_platform_configure)
     pkg_check_modules(HUXERUI_XRANDR REQUIRED IMPORTED_TARGET xrandr)
     pkg_check_modules(HUXERUI_EGL REQUIRED IMPORTED_TARGET egl)
     pkg_check_modules(HUXERUI_GLES2 REQUIRED IMPORTED_TARGET glesv2)
+    pkg_check_modules(HUXERUI_GIO REQUIRED IMPORTED_TARGET gio-2.0)
     pkg_check_modules(HUXERUI_LIBSOUP QUIET IMPORTED_TARGET libsoup-3.0>=3.0)
     if(NOT TARGET PkgConfig::HUXERUI_LIBSOUP)
         message(FATAL_ERROR
@@ -274,6 +275,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_external_texture.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_file.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/linux/linux_file_picker.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_renderer.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/linux/linux_text_input.cpp"
@@ -320,6 +322,7 @@ function(huxerui_platform_configure)
             PkgConfig::HUXERUI_XRANDR
             PkgConfig::HUXERUI_EGL
             PkgConfig::HUXERUI_GLES2
+            PkgConfig::HUXERUI_GIO
             PkgConfig::HUXERUI_LIBSOUP
             PARENT_SCOPE
     )
