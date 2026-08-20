@@ -6,6 +6,7 @@
 #include <condition_variable>
 #endif
 #include <coroutine>
+#include <cwchar>
 #include <cstdint>
 #include <deque>
 #include <exception>
@@ -21,7 +22,6 @@
 #include <thread>
 #endif
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -140,7 +140,7 @@ void ValidateRelativePath(std::string_view path) {
   }
 }
 
-fs::path NativePath(std::string_view path) {
+fs::path PlatformPath(std::string_view path) {
   return fs::path(std::u8string(
       reinterpret_cast<const char8_t*>(path.data()),
       reinterpret_cast<const char8_t*>(path.data() + path.size())
@@ -195,7 +195,7 @@ std::error_code StreamError() {
 
 std::string NormalizePath(std::string_view path) {
   std::error_code error;
-  fs::path absolute = fs::absolute(NativePath(path), error);
+  fs::path absolute = fs::absolute(PlatformPath(path), error);
   if (error) {
     throw std::runtime_error(OperationError("path resolution", error).message);
   }
@@ -212,49 +212,49 @@ std::string CurrentDirectoryPath() {
 }
 
 std::string Name(std::string_view path) {
-  return PublicPath(NativePath(path).filename());
+  return PublicPath(PlatformPath(path).filename());
 }
 
 std::string Stem(std::string_view path) {
-  return PublicPath(NativePath(path).stem());
+  return PublicPath(PlatformPath(path).stem());
 }
 
 std::string Extension(std::string_view path) {
-  return PublicPath(NativePath(path).extension());
+  return PublicPath(PlatformPath(path).extension());
 }
 
 std::optional<std::string> ParentPath(std::string_view path) {
-  const fs::path native = NativePath(path);
-  const fs::path parent = native.parent_path().lexically_normal();
-  if (parent.empty() || parent == native) {
+  const fs::path platform_path = PlatformPath(path);
+  const fs::path parent = platform_path.parent_path().lexically_normal();
+  if (parent.empty() || parent == platform_path) {
     return std::nullopt;
   }
   return PublicPath(parent);
 }
 
 std::string ChildPath(std::string_view path, std::string_view name) {
-  return PublicPath((NativePath(path) / NativePath(name)).lexically_normal());
+  return PublicPath((PlatformPath(path) / PlatformPath(name)).lexically_normal());
 }
 
 std::string ResolvePath(std::string_view path, std::string_view relative_path) {
-  return PublicPath((NativePath(path) / NativePath(relative_path)).lexically_normal());
+  return PublicPath((PlatformPath(path) / PlatformPath(relative_path)).lexically_normal());
 }
 
 bool Exists(std::string_view path) {
   std::error_code error;
-  const bool exists = fs::exists(NativePath(path), error);
+  const bool exists = fs::exists(PlatformPath(path), error);
   return !error && exists;
 }
 
 bool IsFile(std::string_view path) {
   std::error_code error;
-  const bool regular = fs::is_regular_file(NativePath(path), error);
+  const bool regular = fs::is_regular_file(PlatformPath(path), error);
   return !error && regular;
 }
 
 bool IsDirectory(std::string_view path) {
   std::error_code error;
-  const bool directory = fs::is_directory(NativePath(path), error);
+  const bool directory = fs::is_directory(PlatformPath(path), error);
   return !error && directory;
 }
 
@@ -277,9 +277,9 @@ bool RequiresPersistence(std::string_view path) noexcept {
 }
 
 FileResult<FileInfo> Stat(std::string_view path) {
-  const fs::path native = NativePath(path);
+  const fs::path platform_path = PlatformPath(path);
   std::error_code error;
-  const fs::file_status status = fs::status(native, error);
+  const fs::file_status status = fs::status(platform_path, error);
   if (error) {
     return Failure<FileInfo>("metadata query", error);
   }
@@ -290,7 +290,7 @@ FileResult<FileInfo> Stat(std::string_view path) {
   FileInfo info;
   if (fs::is_regular_file(status)) {
     info.type = FileType::File;
-    const std::uintmax_t size = fs::file_size(native, error);
+    const std::uintmax_t size = fs::file_size(platform_path, error);
     if (error) {
       return Failure<FileInfo>("size query", error);
     }
@@ -302,7 +302,7 @@ FileResult<FileInfo> Stat(std::string_view path) {
     info.type = FileType::Directory;
   }
 
-  const fs::file_time_type modified = fs::last_write_time(native, error);
+  const fs::file_time_type modified = fs::last_write_time(platform_path, error);
   if (!error) {
     info.modified_at = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
         modified - fs::file_time_type::clock::now() + std::chrono::system_clock::now()
@@ -312,9 +312,9 @@ FileResult<FileInfo> Stat(std::string_view path) {
 }
 
 FileResult<std::vector<std::byte>> ReadBytes(std::string_view path) {
-  const fs::path native = NativePath(path);
+  const fs::path platform_path = PlatformPath(path);
   std::error_code error;
-  const fs::file_status status = fs::status(native, error);
+  const fs::file_status status = fs::status(platform_path, error);
   if (error) {
     return Failure<std::vector<std::byte>>("read", error);
   }
@@ -328,7 +328,7 @@ FileResult<std::vector<std::byte>> ReadBytes(std::string_view path) {
     return Failure<std::vector<std::byte>>(FileErrorCode::Unsupported, "HuxerUI cannot read this file type");
   }
 
-  const std::uintmax_t size = fs::file_size(native, error);
+  const std::uintmax_t size = fs::file_size(platform_path, error);
   if (error) {
     return Failure<std::vector<std::byte>>("size query", error);
   }
@@ -339,7 +339,7 @@ FileResult<std::vector<std::byte>> ReadBytes(std::string_view path) {
   }
 
   errno = 0;
-  std::ifstream stream(native, std::ios::binary);
+  std::ifstream stream(platform_path, std::ios::binary);
   if (!stream) {
     return Failure<std::vector<std::byte>>("open for reading", StreamError());
   }
@@ -362,7 +362,10 @@ bool WriteBytes(std::string_view path, std::span<const std::byte> bytes, bool ap
     return false;
   }
   errno = 0;
-  std::ofstream stream(NativePath(path), std::ios::binary | std::ios::out | (append ? std::ios::app : std::ios::trunc));
+  std::ofstream stream(
+      PlatformPath(path),
+      std::ios::binary | std::ios::out | (append ? std::ios::app : std::ios::trunc)
+  );
   if (!stream) {
     return false;
   }
@@ -377,9 +380,9 @@ bool WriteBytes(std::string_view path, std::span<const std::byte> bytes, bool ap
 }
 
 FileResult<std::vector<std::string>> ListChildren(std::string_view path) {
-  const fs::path native = NativePath(path);
+  const fs::path platform_path = PlatformPath(path);
   std::error_code error;
-  const fs::file_status status = fs::status(native, error);
+  const fs::file_status status = fs::status(platform_path, error);
   if (error) {
     return Failure<std::vector<std::string>>("directory enumeration", error);
   }
@@ -397,7 +400,7 @@ FileResult<std::vector<std::string>> ListChildren(std::string_view path) {
   }
 
   std::vector<std::string> children;
-  fs::directory_iterator current(native, error);
+  fs::directory_iterator current(platform_path, error);
   const fs::directory_iterator end;
   while (!error && current != end) {
     children.push_back(PublicPath(current->path().lexically_normal()));
@@ -410,9 +413,9 @@ FileResult<std::vector<std::string>> ListChildren(std::string_view path) {
 }
 
 bool CreateDirectory(std::string_view path, bool recursive) {
-  const fs::path native = NativePath(path);
+  const fs::path platform_path = PlatformPath(path);
   std::error_code error;
-  const fs::file_status status = fs::status(native, error);
+  const fs::file_status status = fs::status(platform_path, error);
   if (!error && fs::exists(status)) {
     return fs::is_directory(status);
   }
@@ -420,13 +423,14 @@ bool CreateDirectory(std::string_view path, bool recursive) {
     return false;
   }
   error.clear();
-  const bool created = recursive ? fs::create_directories(native, error) : fs::create_directory(native, error);
-  return !error && (created || fs::is_directory(native, error));
+  const bool created =
+      recursive ? fs::create_directories(platform_path, error) : fs::create_directory(platform_path, error);
+  return !error && (created || fs::is_directory(platform_path, error));
 }
 
 struct ProtectedRoots {
   std::mutex mutex;
-  std::unordered_set<std::string> paths;
+  std::vector<fs::path> paths;
 };
 
 ProtectedRoots& ApplicationRoots() {
@@ -434,26 +438,75 @@ ProtectedRoots& ApplicationRoots() {
   return roots;
 }
 
+std::optional<fs::path> ComparablePath(std::string_view path) noexcept {
+  // Resolve intermediate links before comparison so aliases cannot bypass application-directory protection.
+  try {
+    std::error_code error;
+    fs::path comparable = fs::weakly_canonical(PlatformPath(path), error);
+    if (error) {
+      return std::nullopt;
+    }
+    return comparable.lexically_normal();
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+bool SamePathComponent(const fs::path& first, const fs::path& second) noexcept {
+#if defined(_WIN32)
+  return _wcsicmp(first.c_str(), second.c_str()) == 0;
+#else
+  return first == second;
+#endif
+}
+
+bool IsAncestorOrEqual(const fs::path& ancestor, const fs::path& descendant) noexcept {
+  auto ancestor_component = ancestor.begin();
+  auto descendant_component = descendant.begin();
+  while (ancestor_component != ancestor.end() && descendant_component != descendant.end()) {
+    if (!SamePathComponent(*ancestor_component, *descendant_component)) {
+      return false;
+    }
+    ++ancestor_component;
+    ++descendant_component;
+  }
+  return ancestor_component == ancestor.end();
+}
+
 void ProtectRoot(std::string_view path) {
+  const std::optional<fs::path> comparable = ComparablePath(path);
+  if (!comparable.has_value()) {
+    throw std::runtime_error("HuxerUI application file directory could not be protected");
+  }
   ProtectedRoots& roots = ApplicationRoots();
   std::scoped_lock lock(roots.mutex);
-  roots.paths.insert(std::string(path));
+  if (std::none_of(roots.paths.begin(), roots.paths.end(), [&comparable](const fs::path& current) {
+        return IsAncestorOrEqual(current, *comparable) && IsAncestorOrEqual(*comparable, current);
+      })) {
+    roots.paths.push_back(*comparable);
+  }
 }
 
 bool IsProtected(std::string_view path) {
-  const fs::path native = NativePath(path).lexically_normal();
-  if (native == native.root_path()) {
+  const std::optional<fs::path> comparable = ComparablePath(path);
+  if (!comparable.has_value()) {
+    return true;
+  }
+  if (*comparable == comparable->root_path()) {
     return true;
   }
   ProtectedRoots& roots = ApplicationRoots();
   std::scoped_lock lock(roots.mutex);
-  return roots.paths.contains(std::string(path));
+  // Deleting an ancestor would remove its protected descendants just as surely as deleting a root directly.
+  return std::any_of(roots.paths.begin(), roots.paths.end(), [&comparable](const fs::path& protected_root) {
+    return IsAncestorOrEqual(*comparable, protected_root);
+  });
 }
 
 bool Delete(std::string_view path, bool recursive) {
-  const fs::path native = NativePath(path);
+  const fs::path platform_path = PlatformPath(path);
   std::error_code error;
-  const fs::file_status status = fs::symlink_status(native, error);
+  const fs::file_status status = fs::symlink_status(platform_path, error);
   if ((!error && !fs::exists(status)) || error == std::errc::no_such_file_or_directory) {
     return true;
   }
@@ -463,14 +516,17 @@ bool Delete(std::string_view path, bool recursive) {
   if (!CanMutate(path)) {
     return false;
   }
-  if (!recursive || fs::is_symlink(status)) {
-    return fs::remove(native, error) && !error;
+  if (fs::is_symlink(status)) {
+    return fs::remove(platform_path, error) && !error;
   }
   if (IsProtected(path)) {
     return false;
   }
-  static_cast<void>(fs::remove_all(native, error));
-  return !error && !fs::exists(native, error);
+  if (!recursive) {
+    return fs::remove(platform_path, error) && !error;
+  }
+  static_cast<void>(fs::remove_all(platform_path, error));
+  return !error && !fs::exists(platform_path, error);
 }
 
 bool Copy(std::string_view source, std::string_view destination, bool overwrite) {
@@ -478,26 +534,26 @@ bool Copy(std::string_view source, std::string_view destination, bool overwrite)
     return false;
   }
   std::error_code error;
-  if (!fs::is_regular_file(NativePath(source), error) || error) {
+  if (!fs::is_regular_file(PlatformPath(source), error) || error) {
     return false;
   }
   const fs::copy_options options = overwrite ? fs::copy_options::overwrite_existing : fs::copy_options::none;
-  return fs::copy_file(NativePath(source), NativePath(destination), options, error) && !error;
+  return fs::copy_file(PlatformPath(source), PlatformPath(destination), options, error) && !error;
 }
 
 bool Move(std::string_view source, std::string_view destination, bool overwrite) {
   if (!CanMutate(source) || !CanMutate(destination)) {
     return false;
   }
-  const fs::path native_destination = NativePath(destination);
+  const fs::path platform_destination = PlatformPath(destination);
   std::error_code error;
-  if (!overwrite && fs::exists(native_destination, error)) {
+  if (!overwrite && fs::exists(platform_destination, error)) {
     return false;
   }
   if (error) {
     return false;
   }
-  fs::rename(NativePath(source), native_destination, error);
+  fs::rename(PlatformPath(source), platform_destination, error);
   return !error;
 }
 
@@ -729,6 +785,12 @@ std::string ResolveChild(std::string_view path, std::string_view child) {
 bool IsValidFileUtf8(std::string_view text) noexcept {
   return IsValidUtf8(text);
 }
+
+#if !defined(__EMSCRIPTEN__)
+void EnqueueFileOperation(std::function<void()> operation) {
+  FileExecutor::Instance().Submit(std::move(operation));
+}
+#endif
 
 FileResult<std::string> DecodeFileUtf8(FileResult<std::vector<std::byte>> bytes) {
   if (!bytes.Succeeded()) {

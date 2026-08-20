@@ -1,8 +1,8 @@
 # Files and Application Storage
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
-The current implementation supports macOS, Linux, iOS, Android, and Web; the Windows directory mapping remains staged work.
-The shared `FileReference` and `FilePicker` contract and its macOS, iOS, Android, and Web platform adapters are available; Windows and Linux picker adapters remain staged work.
+The current application-directory implementation supports Windows, macOS, Linux, iOS, Android, and Web.
+The shared `FileReference` and `FilePicker` contract and its Windows, macOS, iOS, Android, and Web platform adapters are available; the Linux picker adapter remains staged work.
 
 ## Application directories
 
@@ -30,6 +30,9 @@ Data uses `$XDG_DATA_HOME/<executable-name>` or `$HOME/.local/share/<executable-
 Temporary data uses a private `$XDG_RUNTIME_DIR/<executable-name>` when available, otherwise HuxerUI creates `<system-temporary-directory>/huxerui-<uid>/<executable-name>` with owner-only access.
 Renaming the executable selects different application storage, while independently installed executables with the same filename share these per-user locations.
 `executable_directory` is resolved from `/proc/self/exe` rather than the process working directory.
+
+On Windows, the executable filename identifies an application root under the current user's Local App Data directory.
+The `data`, `cache`, and `temporary` children remain distinct protected roots, and `executable_directory` is resolved from the running process rather than the working directory.
 
 ## Paths
 
@@ -72,7 +75,7 @@ On Web, synchronous reads and temporary-directory mutations use the restored vir
 Mutations under `data_directory` or `cache_directory` must use their `Async` variants because success is reported only after browser persistence completes.
 
 UI-owned work should use explicitly named asynchronous methods.
-Native platforms execute them on a bounded filesystem executor, while Web serializes them through the browser event loop and waits for persistent-storage completion when required.
+Non-Web platforms execute them on a bounded filesystem executor, while Web serializes them through the browser event loop and waits for persistent-storage completion when required.
 Every platform resumes the owning HuxerUI Task on its UI thread:
 
 ```cpp
@@ -99,7 +102,7 @@ An underlying storage operation that cannot be interrupted may still finish afte
 
 ## External files and pickers
 
-`FileReference` retains platform-granted access to one external file without exposing a native path or pretending that the file belongs to the application sandbox.
+`FileReference` retains platform-granted access to one external file without exposing a platform path or pretending that the file belongs to the application sandbox.
 It is copyable, provides display metadata, and supports asynchronous reads, import into a local `File`, and write-back when `CanWrite()` is true.
 
 Runtime always installs one `FilePicker` Root Service.
@@ -125,13 +128,17 @@ if (picker->CanOpenFiles()) {
 
 Extensions omit the leading dot, and content types use exact MIME strings, `type/*`, or `*/*`.
 Every extension and content type in the filter is accepted as part of one union; an empty filter permits all files.
-Malformed filters and suggested filenames throw `std::invalid_argument` before opening native UI.
+Malformed filters and suggested filenames throw `std::invalid_argument` before opening platform UI.
 User cancellation and unavailable platform capability produce `std::nullopt`, an empty vector, or `false` according to the requested operation.
 Only one picker is presented per Runtime; concurrent calls wait in request order, and Task cancellation detaches application continuation while asking the platform to dismiss an active picker when possible.
 
 On Android, `HuxerUIActivity` supplies the Storage Access Framework launcher automatically.
 An application embedding `HuxerUIView` in its own Activity installs a `HuxerUIView.FilePickerLauncher` and forwards the corresponding Activity result through `dispatchFilePickerResult()`; until it does so, the picker capability predicates return `false`.
 Selected `content://` values remain inside `FileReference`, require no broad storage permission, and are not persisted across application launches by this initial API.
+
+On Windows, opening and saving use the system file dialogs owned by the HuxerUI window.
+Selected filesystem paths remain private to `FileReference`; reads, imports, replacements, and save copies run on the bounded platform file executor instead of blocking the UI thread.
+Extensions and MIME types are translated into advisory system filters, while unsupported MIME mappings widen the filter rather than hiding valid files.
 
 On Web, opening prefers the File System Access API and falls back to a transient `<input type="file">` where that API is unavailable.
 Handle-backed references can report write support, while input-backed references remain read-only; both can be read or imported into application storage.

@@ -27,6 +27,7 @@
 #include "resource_internal.h"
 #include "text_layout_internal.h"
 #include "win32_accessibility.h"
+#include "win32_file_internal.h"
 #include "win32_http_internal.h"
 #include "win32_internal.h"
 #include "win32_platform_view.h"
@@ -411,6 +412,14 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<FileSystem> CreateFileSystem() override {
+    return CreateWin32FileSystem();
+  }
+
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateWin32FilePickerTransport([this] { return window_; }, ui_dispatcher_.Bind());
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {

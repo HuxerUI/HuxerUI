@@ -84,6 +84,7 @@ if (WIN32)
             platform/windows_accessibility.cpp
             platform/windows_damage.cpp
             platform/windows_external_texture.cpp
+            platform/windows_file.cpp
             platform/windows_http.cpp
             platform/windows_platform_module.cpp
             platform/windows_platform_view.cpp

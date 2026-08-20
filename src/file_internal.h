@@ -61,6 +61,8 @@ MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceS
 [[nodiscard]] bool IsWebPersistentFilePath(std::string_view path) noexcept;
 void EnqueueWebFileOperation(std::function<void(std::function<void()>)> operation);
 void PersistWebFileSystem(std::function<void(bool)> completion);
+#else
+void EnqueueFileOperation(std::function<void()> operation);
 #endif
 
 } // namespace huxerui::detail

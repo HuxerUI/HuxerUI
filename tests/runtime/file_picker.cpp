@@ -262,6 +262,9 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
 
   REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.extensions = {"txt"}}), std::invalid_argument);
   REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.name = "Text", .extensions = {".txt"}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.name = "Text", .extensions = {"t;xt"}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.name = "Text", .extensions = {"t*xt"}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.name = "Text", .extensions = {"t?xt"}}), std::invalid_argument);
   REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.name = "Text", .content_types = {"text"}}), std::invalid_argument);
   REQUIRE_THROWS_AS(
       file_picker->OpenFileAsync({.name = "Text", .content_types = {"te*xt/plain"}}),
@@ -286,7 +289,7 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
   REQUIRE(platform.transport->save_calls.empty());
 }
 
-TEST_CASE("FilePickerSerializesNativePresentationAndResumesOnTheUIThread") {
+TEST_CASE("FilePickerSerializesPlatformPresentationAndResumesOnTheUIThread") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
   Runtime runtime(FilePickerApp, platform);
@@ -334,7 +337,7 @@ TEST_CASE("FilePickerSerializesNativePresentationAndResumesOnTheUIThread") {
   REQUIRE(saved_file);
 }
 
-TEST_CASE("CancelingFilePickerRequestsPreservesNativePresentationOrder") {
+TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
   Runtime runtime(FilePickerApp, platform);

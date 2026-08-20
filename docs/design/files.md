@@ -3,9 +3,9 @@
 ## Status
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
-The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, bounded native asynchronous executor, Runtime service integration, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
-The macOS, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
-The Windows application-directory mapping and the Windows and Linux picker/reference transports remain proposed.
+The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, bounded platform asynchronous executor, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
+The Windows, macOS, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
+The Linux picker/reference transport remains proposed.
 
 ## Goals
 
@@ -26,7 +26,7 @@ The initial implementation does not provide a public `FileSystem` subclassing co
 It also does not persist picker grants across process launches or add drag-and-drop, clipboard, recent-file, or share-sheet APIs.
 Those capabilities may reuse `FileReference` later without expanding the initial picker contract.
 
-Open With, native file associations, share intents, application activation, window selection, and multi-window document routing are outside this design.
+Open With, platform file associations, share intents, application activation, window selection, and multi-window document routing are outside this design.
 They require one application-level activation contract rather than a file-specific View event.
 
 Android `content://` values, Apple security-scoped URLs, browser file handles, and other granted external capabilities are not local paths.
@@ -109,7 +109,7 @@ public:
 
 `Path()` returns a normalized absolute UTF-8 path.
 Windows output uses `/` as the public separator while preserving drive and UNC roots.
-The Windows implementation converts that representation to a native UTF-16 path before I/O.
+The Windows implementation converts that representation to a platform UTF-16 path before I/O.
 
 `Name()`, `Stem()`, and `Extension()` operate lexically on the final path segment.
 `Parent()` and `ParentPath()` return `std::nullopt` for a filesystem root.
@@ -301,7 +301,7 @@ The API does not introduce an `ExistingFilePolicy` enum for that binary choice.
 The initial `CopyTo()` copies one ordinary file and does not recursively copy directories.
 A later directory-copy operation should be named separately so a seemingly small call cannot hide an unbounded traversal.
 
-`MoveTo()` uses the local filesystem's native move operation and returns `false` when it cannot complete that operation.
+`MoveTo()` uses the local filesystem's platform move operation and returns `false` when it cannot complete that operation.
 It does not silently turn a cross-device move into copy followed by deletion.
 
 ## Application directories
@@ -345,7 +345,7 @@ HuxerUI does not provide a process-wide working-directory mutation because it wo
 Application storage must use the semantic application directories rather than depend on a launcher's working directory.
 
 The application directories are created and validated before the service is published.
-Platform shells determine their application identity from native bundle, package, or executable metadata rather than adding another identifier to the static `Application` declaration.
+Platform shells determine their application identity from bundle, package, or executable metadata rather than adding another identifier to the static `Application` declaration.
 
 The initial API does not expose a cross-platform Documents directory.
 User-visible documents and granted external locations use the separate `FileReference` and `FilePicker` contracts below rather than an unrestricted local path.
@@ -388,7 +388,7 @@ An expired or revoked grant reports `NotFound` or `PermissionDenied` through the
 `ImportToAsync()` streams the referenced content into a local `File` and requires the destination parent to exist.
 It replaces an existing destination only when `overwrite` is `true`.
 `ReplaceWithAsync()` writes a local file back through the original platform grant and returns `false` when `CanWrite()` is false or the operation fails.
-Neither operation exposes a native path or silently grants broader access.
+Neither operation exposes a platform path or silently grants broader access.
 
 Each value retains shared private platform state.
 Copying a value retains the grant, and destruction of the last copy releases process-scoped resources such as Apple security-scope access, Android provider state, or a browser handle.
@@ -396,7 +396,7 @@ The initial API does not serialize references or promise that a grant remains va
 
 ## File picker
 
-The picker uses compact cross-platform filters and keeps native presentation and permission handling in the platform adapter:
+The picker uses compact cross-platform filters and keeps platform presentation and permission handling in the platform adapter:
 
 ```cpp
 struct FilePickerFilter {
@@ -433,21 +433,21 @@ Separating `OpenFileAsync()` and `OpenFilesAsync()` keeps result cardinality vis
 
 Extensions omit the leading dot, and content types use exact MIME strings, `type/*`, or `*/*`.
 One filter represents the union of every listed extension and content type because only some desktop pickers can expose several user-selectable filter groups.
-An empty filter permits all files; a configured filter requires a non-empty display name for native pickers that show one.
-The filter is advisory because native pickers differ in their filtering support; application code still validates selected content.
-Malformed filters or suggested names throw `std::invalid_argument` before native presentation.
+An empty filter permits all files; a configured filter requires a non-empty display name for platform pickers that show one.
+The filter is advisory because platform pickers differ in their filtering support; application code still validates selected content.
+Malformed filters or suggested names throw `std::invalid_argument` before platform presentation.
 
 User cancellation is an ordinary outcome, not an error.
 Single selection returns `std::nullopt`, multiple selection returns an empty vector, and saving returns `false` when the user cancels.
 An unsupported or failed platform operation produces the same empty or false outcome in the initial compact API; capability predicates let applications avoid presenting unavailable actions.
 
-`SaveFileAsync()` streams from a local `File` to the destination selected by the native picker.
-The native interface owns overwrite confirmation, so the common operation does not add another overwrite argument.
+`SaveFileAsync()` streams from a local `File` to the destination selected by the platform picker.
+The platform interface owns overwrite confirmation, so the common operation does not add another overwrite argument.
 Saving bytes or strings directly is outside the initial surface; code may write an application temporary file and save that file explicitly.
 
 Only one picker presentation may be active for a Runtime.
 Concurrent requests are serialized in call order.
-Task cancellation attempts to dismiss the native picker when supported and otherwise detaches the continuation; Runtime destruction cancels queued requests and releases their retained state.
+Task cancellation attempts to dismiss the platform picker when supported and otherwise detaches the continuation; Runtime destruction cancels queued requests and releases their retained state.
 
 ## Application activation boundary
 
@@ -458,16 +458,16 @@ Delivering them to the currently committed Root View would assign application an
 The file API therefore defines no `FileEvents`, root callback, cold-start queue, or Runtime dispatch operation.
 `FileReference` remains suitable as the file capability carried by a future general application-activation value, but this design does not define when or where that value is delivered.
 
-A later application activation and window-session design owns the complete route from native activation to an application-selected Runtime:
+A later application activation and window-session design owns the complete route from platform activation to an application-selected Runtime:
 
 ```text
-Native application activation
+Platform application activation
     -> application activation policy
     -> create or select a window session
     -> construct the target Runtime with its launch context
 ```
 
-Native application metadata remains owned by the shell: Android intent filters, Apple document types and URL declarations, Windows associations, Linux desktop MIME declarations, and Web application handlers are not moved into `AppOptions`, CMake, or the file API.
+Platform application metadata remains owned by the shell: Android intent filters, Apple document types and URL declarations, Windows associations, Linux desktop MIME declarations, and Web application handlers are not moved into `AppOptions`, CMake, or the file API.
 
 ## Runtime and local ownership
 
@@ -486,11 +486,11 @@ An archive or virtual filesystem requires a separate deliberate public design ra
 Lexical operations and the three convenience status predicates are synchronous only.
 Operations that may transfer data, enumerate directories, or mutate storage provide an explicitly named `Async` counterpart.
 
-Native asynchronous work uses a bounded shared filesystem executor rather than creating one thread per operation.
+Non-Web platform asynchronous work uses a bounded shared filesystem executor rather than creating one thread per operation.
 Web uses the browser event loop and its persistent-storage completion callback instead of creating workers or inheriting an unused provider contract.
 
 An asynchronous call validates caller-owned values before returning its lazy Task.
-Once awaited from a launched HuxerUI Task, native implementations perform filesystem work away from the UI thread, while Web schedules it through the browser event loop.
+Once awaited from a launched HuxerUI Task, platform implementations perform filesystem work away from the UI thread, while Web schedules it through the browser event loop.
 Every implementation resumes through the owning `TaskExecution` and `UIThreadDispatcher`.
 Code after `co_await` may therefore update State directly.
 
@@ -507,7 +507,7 @@ The API never interprets it through the process locale or Windows ANSI code page
 
 The Windows implementation converts UTF-8 to UTF-16 once at its boundary and uses wide-character Win32 APIs.
 It supports drive roots, UNC paths, non-ASCII names, emoji, and long paths without calling `std::filesystem::path::string()` for public conversion.
-Internal Windows code may use `std::filesystem::path` constructed from a native wide path, but that type is not the public HuxerUI file identity.
+Internal Windows code may use `std::filesystem::path` constructed from a platform wide path, but that type is not the public HuxerUI file identity.
 
 Windows input accepts `/` and `\` as separators.
 Normalized public output uses `/` while preserving the root and filename text exactly except for lexical normalization.
@@ -518,7 +518,7 @@ Filesystem-specific case folding, symbolic-link resolution, and permission check
 
 ## Platform mapping
 
-macOS maps durable data to Application Support, cache data to Caches, temporary data to the native temporary directory, and the executable location to the application executable directory.
+macOS maps durable data to Application Support, cache data to Caches, temporary data to the platform temporary directory, and the executable location to the application executable directory.
 Its picker transport presents `NSOpenPanel` and `NSSavePanel`, maps the union filter through UTType where possible, and retains security-scoped URL access inside `FileReference` when required.
 Reads, imports, and replacements use coordinated file access off the UI thread, while cancellation dismisses active panels and detaches work that cannot be interrupted safely.
 
@@ -528,7 +528,7 @@ Its picker transport presents `UIDocumentPickerViewController`, maps union filte
 External reads, imports, and replacements use coordinated file access off the main thread.
 Saving exports a copy of the local source, stages a temporary copy only when the suggested filename differs, and removes that staging directory after completion or cancellation.
 
-Android obtains the durable and cache roots from the application Context, creates an application-owned temporary child under the cache root, and exposes the native-library directory as a read-only executable location.
+Android obtains the durable and cache roots from the application Context, creates an application-owned temporary child under the cache root, and exposes the packaged C++ library directory as a read-only executable location.
 These private locations require no broad storage permission.
 Its picker transport uses `ACTION_OPEN_DOCUMENT` for single and multiple selection and `ACTION_CREATE_DOCUMENT` for saving without requesting broad storage permission.
 Extensions are mapped through `MimeTypeMap` when possible; an unrecognized extension deliberately widens the advisory filter rather than hiding a valid document.
@@ -541,7 +541,11 @@ An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its o
 Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `false` while local `FileSystem` access remains available.
 
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.
-Its proposed picker transport uses the native file dialogs for active selection.
+Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection.
+Filters map extension values directly and exact MIME types through the Windows registry; wildcard or unknown MIME mappings deliberately widen the system filter rather than excluding valid documents.
+Selected filesystem paths remain private to `FileReference`, and metadata reports the filename, size, registered MIME type when available, and basic write capability.
+Reads, imports, replacements, and save copies reuse the bounded platform file executor while dialog presentation and cancellation stay on the existing UI dispatcher.
+The adapter does not request persistent grants, expose platform paths publicly, or add a second Windows-specific file abstraction.
 
 Linux uses the UTF-8 filename resolved from `/proc/self/exe` as its application identity and resolves the executable directory from that same path independently of the process working directory.
 Durable data uses `$XDG_DATA_HOME/<executable-name>` or `$HOME/.local/share/<executable-name>`, while cache data uses `$XDG_CACHE_HOME/<executable-name>` or `$HOME/.cache/<executable-name>`.
@@ -568,12 +572,12 @@ When that API is unavailable, the adapter creates a transient `<input type="file
 Both paths support single and multiple selection, metadata, asynchronous reads, and import into application-local storage.
 
 `CanSaveFiles()` is true only when `showSaveFilePicker()` and writable file handles are available.
-The adapter does not treat an anchor download as successful picker output because a download cannot report native cancellation, overwrite choice, or completed replacement through the shared `bool` result.
+The adapter does not treat an anchor download as successful picker output because a download cannot report platform cancellation, overwrite choice, or completed replacement through the shared `bool` result.
 Saving streams the selected local Emscripten file only after the browser returns a destination handle and reports success after the writable stream closes.
 
 Browser picker presentation requires transient user activation.
 Application code starts the picker directly from a click or equivalent event and does not place `Delay()`, HTTP work, or another suspension before `OpenFileAsync()`, `OpenFilesAsync()`, or `SaveFileAsync()`.
-A browser dialog cannot generally be dismissed by script, so Task cancellation detaches the HuxerUI continuation while the transport waits for the native picker to settle before advancing the shared presentation queue.
+A browser dialog cannot generally be dismissed by script, so Task cancellation detaches the HuxerUI continuation while the transport waits for the platform picker to settle before advancing the shared presentation queue.
 
 Handle and browser `File` lifetimes follow the corresponding `FileReference` and remain session scoped.
 This phase does not persist granted handles in IndexedDB or add browser-specific permission methods to the public API.
@@ -635,7 +639,7 @@ It preserves the existing `bool` contract: success is never reported before Inde
 ### Asynchronous execution and persistence
 
 Web does not enable Emscripten pthreads, create a worker-backed filesystem, or require cross-origin isolation for local file operations.
-It replaces the native filesystem executor with one module-owned serial queue scheduled through the browser event loop.
+It replaces the platform filesystem executor with one module-owned serial queue scheduled through the browser event loop.
 Virtual filesystem access still runs on the browser main thread and may briefly occupy that thread; documentation must not claim that Web file work executes on a background thread.
 
 An asynchronous persistent mutation performs the virtual filesystem operation and then explicitly calls `FS.syncfs(false)`.
@@ -650,7 +654,7 @@ The initial implementation does not add an in-memory rollback transaction for pa
 
 Canceling the owning Task detaches its continuation but does not discard an operation or synchronization already in progress.
 The queue may finish that work to preserve filesystem ordering, while retired application code is never resumed.
-This matches the native rule that an uninterruptible filesystem operation may complete after cancellation.
+This matches the platform rule that an uninterruptible filesystem operation may complete after cancellation.
 
 ### Internal boundary
 
@@ -676,14 +680,13 @@ Shared lexical tests cover UTF-8, roots, relative construction, parent traversal
 Shared local-file tests use isolated temporary directories to cover empty and non-empty reads, UTF-8 validation, enumeration, metadata, writing, appending, directory creation, deletion protection, copy and move overwrite behavior, Task cancellation, Runtime teardown, and UI-thread resumption.
 
 Shared fake picker and reference tests cover single and multiple selection, active and queued cancellation, unsupported capabilities, filter validation, serialized presentation, grant retention, import and replacement, and UI-thread resumption.
-Each native picker phase adds revoked-access, Runtime-teardown, native dismissal, and grant-cleanup coverage appropriate to that platform.
+Each platform picker phase adds revoked-access, Runtime-teardown, platform dismissal, and grant-cleanup coverage appropriate to that platform.
 
-Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, native picker mapping, native failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
+Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, platform picker mapping, platform failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
 
 Web storage validation should additionally cover initial restoration before Runtime mounting, persistence across page reloads, temporary-data loss across reloads, isolation between two storage keys on one origin, rejection of synchronous persistent mutation without an in-memory change, serialized asynchronous persistence, IndexedDB failure mapping, cancellation, Runtime teardown, and reuse of one initialized mount by multiple Runtime instances.
 
 ## Remaining delivery sequence
 
-- Add Windows directory discovery and Unicode/path integration through its platform adapter.
 - Expand Web browser integration coverage for persistence failure, storage eviction, and multiple sessions without changing the shared file contract.
-- Implement Windows and Linux picker adapters without expanding the shared contract into application activation, directory selection, persistent grants, drag-and-drop, or clipboard APIs.
+- Implement the Linux picker adapter without expanding the shared contract into application activation, directory selection, persistent grants, drag-and-drop, or clipboard APIs.

@@ -16,6 +16,8 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_adapter.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_external_texture.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file.cpp"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file_picker.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_http.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_platform_view.cpp"
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
@@ -42,6 +44,7 @@ function(huxerui_platform_configure)
             ole32
             oleaut32
             psapi
+            shell32
             uiautomationcore
             user32
             winhttp

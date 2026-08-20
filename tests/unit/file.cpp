@@ -172,9 +172,25 @@ TEST_CASE("FileSystemCreatesAndProtectsApplicationDirectories") {
   REQUIRE(directories.temporary_directory.IsDirectory());
   REQUIRE_FALSE(directories.data_directory.DeleteRecursively());
   REQUIRE_FALSE(directories.cache_directory.DeleteRecursively());
+  REQUIRE_FALSE(directories.temporary_directory.Delete());
   REQUIRE_FALSE(directories.temporary_directory.DeleteRecursively());
   REQUIRE_FALSE(root.DeleteRecursively());
   REQUIRE(file_system->CurrentDirectory() == File(Utf8Path(fs::current_path())));
+}
+
+TEST_CASE("FileSystemProtectsAncestorsOfApplicationDirectories") {
+  TemporaryDirectory temporary;
+  File root(temporary.Path());
+  File application_root = root.Child("application");
+  std::shared_ptr<FileSystem> file_system = detail::MakeFileSystem({
+      .data_directory = application_root.Child("data").Path(),
+      .cache_directory = application_root.Child("cache").Path(),
+      .temporary_directory = application_root.Child("temporary").Path(),
+  });
+
+  REQUIRE(file_system->Directories().data_directory.IsDirectory());
+  REQUIRE_FALSE(application_root.DeleteRecursively());
+  REQUIRE(application_root.IsDirectory());
 }
 
 } // namespace huxerui::test

@@ -73,6 +73,8 @@ Direct2D Shadow effects consume cached rounded-rectangle masks while color, opac
 Canvas Paths map to Direct2D path geometry for fill, stroke, geometric clipping, and blurred shadow masks.
 Packaged resources are read from the executable-specific `<name>.resources` directory, locale and DPI changes proactively update the Runtime resource configuration, and WIC decoding produces device-dependent Direct2D bitmap cache entries.
 Debug process metrics use process times, working-set counters, and the system logical processor count.
+FileSystem derives its application identity from the executable filename and exposes protected `data`, `cache`, and `temporary` children under the current user's Local App Data directory.
+FilePicker uses the system open and save dialogs, retains selected paths behind `FileReference`, and executes external reads and copies through the shared bounded file executor while dialog presentation and cancellation remain on the UI thread.
 Nonvisual Windows modules register the platform-neutral `PlatformModuleFactory` from CMake sources under `platform/windows/src`.
 Platform results and events enter a FIFO owned by the adapter and wake its UI thread through a coalesced private window message; work emitted before HWND creation waits until attachment, and shutdown discards late callbacks.
 The Windows `example_platform_module` implementation uses a thread-pool timer behind the same typed Timer Root Service used by Apple platforms, Linux, and Android.

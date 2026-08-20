@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +42,55 @@ inline std::string WideToUtf8(std::wstring_view text) {
   }
   std::string result(static_cast<std::size_t>(output_size), '\0');
   WideCharToMultiByte(CP_UTF8, 0, text.data(), input_size, result.data(), output_size, nullptr, nullptr);
+  return result;
+}
+
+inline std::optional<std::wstring> StrictUtf8ToWide(std::string_view text) {
+  if (text.empty()) {
+    return std::wstring{};
+  }
+  if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return std::nullopt;
+  }
+  const int input_size = static_cast<int>(text.size());
+  const int output_size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size, nullptr, 0);
+  if (output_size <= 0) {
+    return std::nullopt;
+  }
+  std::wstring result(static_cast<std::size_t>(output_size), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size, result.data(), output_size) !=
+      output_size) {
+    return std::nullopt;
+  }
+  return result;
+}
+
+inline std::optional<std::string> StrictWideToUtf8(std::wstring_view text) {
+  if (text.empty()) {
+    return std::string{};
+  }
+  if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return std::nullopt;
+  }
+  const int input_size = static_cast<int>(text.size());
+  const int output_size =
+      WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), input_size, nullptr, 0, nullptr, nullptr);
+  if (output_size <= 0) {
+    return std::nullopt;
+  }
+  std::string result(static_cast<std::size_t>(output_size), '\0');
+  if (WideCharToMultiByte(
+          CP_UTF8,
+          WC_ERR_INVALID_CHARS,
+          text.data(),
+          input_size,
+          result.data(),
+          output_size,
+          nullptr,
+          nullptr
+      ) != output_size) {
+    return std::nullopt;
+  }
   return result;
 }
 

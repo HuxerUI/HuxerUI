@@ -67,26 +67,6 @@ bool EqualsAsciiCaseInsensitive(std::string_view first, std::string_view second)
   return true;
 }
 
-std::optional<std::wstring> StrictUtf8ToWide(std::string_view text) {
-  if (text.empty()) {
-    return std::wstring{};
-  }
-  if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-    return std::nullopt;
-  }
-  const int input_size = static_cast<int>(text.size());
-  const int output_size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size, nullptr, 0);
-  if (output_size <= 0) {
-    return std::nullopt;
-  }
-  std::wstring result(static_cast<std::size_t>(output_size), L'\0');
-  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size, result.data(), output_size) !=
-      output_size) {
-    return std::nullopt;
-  }
-  return result;
-}
-
 std::string WinHttpErrorMessage(DWORD error) {
   return "HuxerUI Windows HTTP request failed with WinHTTP error " + std::to_string(error);
 }

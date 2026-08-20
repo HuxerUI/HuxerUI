@@ -19,13 +19,9 @@ add_subdirectory(http)
 add_subdirectory(canvas)
 add_subdirectory(image)
 add_subdirectory(window_chrome)
-
-if (APPLE OR ANDROID OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_subdirectory(files)
-endif ()
+add_subdirectory(files)
+add_subdirectory(platform_module)
 
 if (WIN32 OR APPLE OR ANDROID OR EMSCRIPTEN)
     add_subdirectory(platform_view)
 endif ()
-
-add_subdirectory(platform_module)

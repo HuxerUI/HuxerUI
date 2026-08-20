@@ -89,9 +89,10 @@ void ValidateFilter(const FilePickerFilter& filter) {
   for (const std::string& extension : filter.extensions) {
     if (extension.empty() || extension.front() == '.' || !IsValidFileUtf8(extension) ||
         extension.find('\0') != std::string::npos || extension.find('/') != std::string::npos ||
-        extension.find('\\') != std::string::npos) {
+        extension.find('\\') != std::string::npos || extension.find(';') != std::string::npos ||
+        extension.find('*') != std::string::npos || extension.find('?') != std::string::npos) {
       throw std::invalid_argument(
-          "HuxerUI file picker extension must be valid UTF-8 without a leading dot or path separator"
+          "HuxerUI file picker extension must be valid UTF-8 without a leading dot, path separator, or wildcard"
       );
     }
   }
