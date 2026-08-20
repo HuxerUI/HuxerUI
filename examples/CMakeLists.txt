@@ -20,7 +20,7 @@ add_subdirectory(canvas)
 add_subdirectory(image)
 add_subdirectory(window_chrome)
 
-if (APPLE AND NOT IOS)
+if (APPLE OR ANDROID)
     add_subdirectory(files)
 endif ()
 

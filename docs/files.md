@@ -1,7 +1,7 @@
 # Files and Application Storage
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
-The first implementation supports macOS; the same public API and other platform directory mappings are staged work.
+The current implementation supports macOS, iOS, and Android; the same public API and other platform directory mappings are staged work.
 
 ## Application directories
 

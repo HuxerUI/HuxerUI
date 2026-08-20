@@ -25,6 +25,7 @@
 #include <huxerui/android/platform_module.h>
 
 #include "android_accessibility.h"
+#include "android_file_internal.h"
 #include "android_http_internal.h"
 #include "android_platform_view.h"
 #include "android_renderer.h"
@@ -995,6 +996,10 @@ public:
   }
 
 private:
+  std::shared_ptr<FileSystem> CreateFileSystem() override {
+    return CreateAndroidFileSystem(Environment(), context_);
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateAndroidHttpTransport(virtual_machine_, Environment());
   }

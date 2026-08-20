@@ -3,8 +3,8 @@
 ## Status
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
-The shared `File`, `FileInfo`, `FileResult<T>`, and `FileSystem` surface, bounded asynchronous executor, Runtime service integration, macOS local implementation, and focused example are implemented.
-Application-directory mappings for iOS, Android, Windows, Linux, and Web, along with `FileReference` and `FilePicker`, remain proposed.
+The shared `File`, `FileInfo`, `FileResult<T>`, and `FileSystem` surface, bounded asynchronous executor, Runtime service integration, macOS, iOS, and Android local implementations, and focused example are implemented.
+Application-directory mappings for Windows, Linux, and Web, along with `FileReference` and `FilePicker`, remain proposed.
 
 ## Goals
 
@@ -525,7 +525,7 @@ iOS independently maps durable data to Application Support, cache data to Caches
 Its executable directory is read-only and is never used as a replacement for packaged HuxerUI resources.
 It uses the document picker for active selection.
 
-Android obtains the durable and cache roots from the application Context, creates an application-owned temporary child under the cache root, and does not expose a native-library directory as an executable directory.
+Android obtains the durable and cache roots from the application Context, creates an application-owned temporary child under the cache root, and exposes the native-library directory as a read-only executable location.
 These private locations require no broad storage permission.
 It uses the Storage Access Framework for active selection.
 
@@ -564,8 +564,7 @@ Each platform phase verifies its application-directory mapping, Unicode conversi
 
 - Land this design and keep all capabilities marked proposed.
 - Add the public values, lexical behavior, focused shared tests, umbrella/header checks, and documentation without claiming unsupported platforms.
-- Implement and exercise macOS application-directory discovery and local I/O on the current host.
-- Add iOS and Android application-directory discovery and local I/O independently through their native shells.
+- Implement and exercise macOS, iOS, and Android application-directory discovery and local I/O through their native shells.
 - Add Windows and Linux directory discovery and Unicode/path integration through their platform adapters.
 - Design Web persistence separately against the same public contract before claiming browser support.
 - Add `FileReference`, `FilePicker`, and fake-service tests after the local-file contract is stable.
