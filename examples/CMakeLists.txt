@@ -20,7 +20,7 @@ add_subdirectory(canvas)
 add_subdirectory(image)
 add_subdirectory(window_chrome)
 
-if (APPLE OR ANDROID OR EMSCRIPTEN)
+if (APPLE OR ANDROID OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(files)
 endif ()
 

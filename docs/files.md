@@ -1,7 +1,7 @@
 # Files and Application Storage
 
 HuxerUI represents local paths with `File` and publishes application-owned directories through the Runtime-installed `FileSystem` Root Service.
-The current implementation supports macOS, iOS, Android, and Web; Windows and Linux directory mappings remain staged work.
+The current implementation supports macOS, Linux, iOS, Android, and Web; the Windows directory mapping remains staged work.
 
 ## Application directories
 
@@ -23,6 +23,12 @@ File export_file(directories.temporary_directory, "export.bin");
 
 `CurrentDirectory()` reports the process working directory and is not an application storage location.
 Application data should not depend on the directory from which a launcher happened to start the process.
+
+On Linux, the executable filename identifies the application directory.
+Data uses `$XDG_DATA_HOME/<executable-name>` or `$HOME/.local/share/<executable-name>`, and cache uses `$XDG_CACHE_HOME/<executable-name>` or `$HOME/.cache/<executable-name>`.
+Temporary data uses a private `$XDG_RUNTIME_DIR/<executable-name>` when available, otherwise HuxerUI creates `<system-temporary-directory>/huxerui-<uid>/<executable-name>` with owner-only access.
+Renaming the executable selects different application storage, while independently installed executables with the same filename share these per-user locations.
+`executable_directory` is resolved from `/proc/self/exe` rather than the process working directory.
 
 ## Paths
 
