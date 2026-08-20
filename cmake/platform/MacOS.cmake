@@ -6,6 +6,7 @@ function(huxerui_platform_configure)
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_renderer.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/appkit_text_input.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/macos_external_texture.mm"
+            "${HUXERUI_PROJECT_DIR}/platform/macos/macos_file.mm"
             "${HUXERUI_PROJECT_DIR}/platform/macos/macos_http.mm"
             PARENT_SCOPE
     )

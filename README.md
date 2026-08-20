@@ -133,6 +133,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Layout and Scrolling](docs/layout-and-scrolling.md) | Constraints, ScrollView, controllers, virtualization, and custom layout |
 | [Components and Input](docs/components-and-input.md) | Controls, focus, selection, TextField, validation, and IME behavior |
 | [Theme, Animation, and Presentation](docs/theme-animation-and-presentation.md) | Themes, styles, animation, layers, and typed presentation services |
+| [Files and Application Storage](docs/files.md) | Local files, application directories, errors, and asynchronous I/O |
 | [Extending HuxerUI](docs/extending-huxerui.md) | Custom layouts, modifiers, NodeExtension, root services, and platform adapters |
 | [Platform Support](docs/platform-support.md) | Platform backends and Runtime boundaries |
 | [Roadmap](docs/roadmap.md) | Framework, platform, SDK, and distribution work |
@@ -145,6 +146,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Animation and Scene Transition Design](docs/design/animation.md) | Timing, retained motion, synchronized properties, and frozen-scene transitions |
 | [Task and Structured Concurrency Design](docs/design/tasks.md) | C++20 Task values, scope ownership, cancellation, and UI-thread resumption |
 | [HTTP Client Design](docs/design/http.md) | Typed requests, Task cancellation, UI-thread resumption, and platform transports |
+| [File and Application Storage Design](docs/design/files.md) | Local files, application directories, external references, file pickers, and Task-based I/O |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
@@ -178,6 +180,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
+| `example_files` | macOS application directories, UTF-8 local files, asynchronous operations, and Task resumption |
 | `example_canvas` | Tabbed Canvas effects, retained transforms, paths, clipping, and shadows |
 | `example_image` | Raster variants, compiled SVG resources, VectorAsset tint, localized strings, and Image fitting |
 | `example_window_chrome` | Application-defined desktop title-bar content with platform-appropriate window controls |

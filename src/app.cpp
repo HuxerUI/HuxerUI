@@ -29,6 +29,10 @@ PlatformAdapter::~PlatformAdapter() {
   external_texture_surface_->Close();
 }
 
+std::shared_ptr<FileSystem> PlatformAdapter::CreateFileSystem() {
+  return {};
+}
+
 std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
   return {};
 }

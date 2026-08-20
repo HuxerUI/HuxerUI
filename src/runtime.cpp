@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <huxerui/file.h>
 #include <huxerui/http.h>
 #include <huxerui/theme.h>
 
@@ -997,6 +998,9 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
   root.Provide(state_->window_service_);
   state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*this);
   root.Provide(state_->scene_transition_service_);
+  if (std::shared_ptr<FileSystem> file_system = platform.CreateFileSystem()) {
+    root.Provide(std::move(file_system));
+  }
   root.Provide(std::shared_ptr<HttpClient>(new HttpClient(platform.CreateHttpTransport())));
   InstallBuiltinPresentation(root);
   for (const RootHook& hook : application.options.root_hooks) {

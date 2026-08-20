@@ -13,6 +13,7 @@ add_executable(huxerui_tests
         support/builtin_resources.cpp
         unit/application.cpp
         unit/external_texture.cpp
+        unit/file.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp
@@ -29,6 +30,7 @@ add_executable(huxerui_tests
         platform/web_text.cpp
         runtime/animation.cpp
         runtime/composition.cpp
+        runtime/file.cpp
         runtime/http.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
@@ -151,6 +153,7 @@ set(HUXERUI_PUBLIC_HEADERS
         environment.h
         event.h
         external_texture.h
+        file.h
         geometry.h
         http.h
         huxerui.h

@@ -7,6 +7,7 @@
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/external_texture.h>
+#include <huxerui/file.h>
 #include <huxerui/geometry.h>
 #include <huxerui/http.h>
 #include <huxerui/indication.h>

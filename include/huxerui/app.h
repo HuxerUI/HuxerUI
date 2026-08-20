@@ -26,6 +26,7 @@
 
 namespace huxerui {
 
+class FileSystem;
 class PlatformResources;
 struct ResourceConfiguration;
 
@@ -114,6 +115,7 @@ public:
   }
 
 protected:
+  virtual std::shared_ptr<FileSystem> CreateFileSystem();
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
 
   template <class Registration>

@@ -25,6 +25,7 @@
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
+#include "macos_file_internal.h"
 #include "macos_http_internal.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
@@ -447,6 +448,10 @@ public:
 
   PlatformResources* Resources() noexcept override {
     return this;
+  }
+
+  std::shared_ptr<FileSystem> CreateFileSystem() override {
+    return CreateMacFileSystem();
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
