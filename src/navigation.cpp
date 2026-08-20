@@ -25,6 +25,7 @@ enum class NavigationOperationKind {
   Push,
   Pop,
   Replace,
+  SetPath,
 };
 
 struct NavigationEntry {
@@ -32,10 +33,16 @@ struct NavigationEntry {
   std::function<View()> factory;
 };
 
+struct RealizedNavigationRoute {
+  NavigationRouteDescriptor descriptor;
+  std::uint64_t entry_id = 0;
+};
+
 struct NavigationOperation {
   std::uint64_t id = 0;
   NavigationOperationKind kind = NavigationOperationKind::Pop;
   std::function<View()> factory;
+  std::vector<NavigationRouteDescriptor> route_path;
   bool ready_to_start = true;
 };
 
@@ -47,10 +54,22 @@ struct NavigationTransition {
   float target = 1.0F;
   bool interactive = false;
   bool complete_operation = true;
+  std::vector<std::uint64_t> retire_ids;
+};
+
+struct NavigationEnvironmentEntry {
+  std::weak_ptr<NavigationState> state;
+  std::optional<std::type_index> route_type;
+  std::shared_ptr<void> path_state;
+};
+
+struct NavigationEnvironmentNode {
+  NavigationEnvironmentEntry entry;
+  std::shared_ptr<const NavigationEnvironmentNode> parent;
 };
 
 struct NavigationEnvironment {
-  std::weak_ptr<NavigationState> state;
+  std::shared_ptr<const NavigationEnvironmentNode> current;
 
   static NavigationEnvironment Default() {
     return {};
@@ -97,6 +116,20 @@ public:
   explicit NavigationState(std::function<View()> root)
       : owner_thread_(std::this_thread::get_id()), entries_{{1, std::move(root)}} {}
 
+  NavigationState(
+      std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
+  )
+      : owner_thread_(std::this_thread::get_id()), entries_{{1, std::move(root)}}, requested_routes_(std::move(routes)),
+        request_route_pop_(std::move(binding.request_pop)), route_type_(binding.route_type) {
+    ValidateRoutePath(requested_routes_);
+    realized_routes_.reserve(requested_routes_.size());
+    for (const NavigationRouteDescriptor& route : requested_routes_) {
+      const std::uint64_t id = next_entry_id_++;
+      entries_.push_back({id, route.factory});
+      realized_routes_.push_back({route, id});
+    }
+  }
+
   void Connect(std::function<void()> invalidate) {
     CheckThread();
     invalidate_ = std::move(invalidate);
@@ -115,23 +148,74 @@ public:
     style_ = std::move(style);
   }
 
+  void UpdateRouteBinding(NavigationRouteBinding binding) {
+    CheckThread();
+    if (!route_type_.has_value()) {
+      throw std::logic_error("HuxerUI factory navigation cannot accept a route binding");
+    }
+    if (binding.route_type != *route_type_) {
+      throw std::logic_error("HuxerUI routed NavigationStack route type changed without replacing the stack");
+    }
+    request_route_pop_ = std::move(binding.request_pop);
+  }
+
+  void SynchronizeRoutePath(std::vector<NavigationRouteDescriptor> routes) {
+    CheckThread();
+    if (!route_type_.has_value()) {
+      throw std::logic_error("HuxerUI factory navigation cannot synchronize a route path");
+    }
+    ValidateRoutePath(routes);
+
+    if (expected_route_pop_) {
+      if (IsSinglePop(requested_routes_, routes) && transition_.has_value() &&
+          transition_->kind == NavigationOperationKind::Pop) {
+        requested_routes_ = std::move(routes);
+        if (!realized_routes_.empty()) {
+          realized_routes_.pop_back();
+        }
+        expected_route_pop_ = false;
+        RefreshRealizedRouteFactories(requested_routes_);
+        return;
+      }
+      expected_route_pop_ = false;
+    }
+
+    if (SameRoutePath(requested_routes_, routes)) {
+      requested_routes_ = std::move(routes);
+      RefreshRealizedRouteFactories(requested_routes_);
+      return;
+    }
+
+    requested_routes_ = std::move(routes);
+    std::erase_if(pending_, [](const NavigationOperation& operation) {
+      return operation.kind == NavigationOperationKind::SetPath;
+    });
+    if (!SameRealizedRoutePath(realized_routes_, requested_routes_)) {
+      EnqueueOperation(NavigationOperationKind::SetPath, {}, requested_routes_);
+    }
+    RefreshRealizedRouteFactories(requested_routes_);
+    StartNextOperation();
+  }
+
   void Push(std::function<View()> page) {
     CheckThread();
+    EnsureFactoryMode();
     ValidateFactory(page);
-    ++logical_depth_;
-    EnqueueOperation(NavigationOperationKind::Push, std::move(page));
+    ++factory_depth_;
+    EnqueueOperation(NavigationOperationKind::Push, std::move(page), {});
     StartNextOperation();
     Invalidate();
   }
 
   bool Pop() {
     CheckThread();
-    if (logical_depth_ <= 1) {
+    EnsureFactoryMode();
+    if (factory_depth_ <= 1) {
       return false;
     }
     // Logical history changes when the command is accepted; render entries leave after their queued transition.
-    --logical_depth_;
-    EnqueueOperation(NavigationOperationKind::Pop, {});
+    --factory_depth_;
+    EnqueueOperation(NavigationOperationKind::Pop, {}, {});
     StartNextOperation();
     Invalidate();
     return true;
@@ -139,20 +223,21 @@ public:
 
   void Replace(std::function<View()> page) {
     CheckThread();
+    EnsureFactoryMode();
     ValidateFactory(page);
-    EnqueueOperation(NavigationOperationKind::Replace, std::move(page));
+    EnqueueOperation(NavigationOperationKind::Replace, std::move(page), {});
     StartNextOperation();
     Invalidate();
   }
 
   [[nodiscard]] bool CanPop() const {
     CheckThread();
-    return logical_depth_ > 1;
+    return factory_depth_ > 1;
   }
 
   [[nodiscard]] std::size_t Depth() const {
     CheckThread();
-    return logical_depth_;
+    return factory_depth_;
   }
 
   [[nodiscard]] const std::vector<NavigationEntry>& Entries() const noexcept {
@@ -183,18 +268,21 @@ public:
 
   [[nodiscard]] bool BeginPredictivePop() {
     CheckThread();
-    if (logical_depth_ <= 1) {
+    if (route_type_.has_value()) {
+      return BeginRoutedPredictivePop();
+    }
+    if (factory_depth_ <= 1) {
       return false;
     }
     // Reserve the logical Pop at Begin so later commands keep their order even before the gesture commits.
-    --logical_depth_;
+    --factory_depth_;
     if (transition_.has_value() || !pending_.empty()) {
-      queued_predictive_pop_id_ = EnqueueOperation(NavigationOperationKind::Pop, {}, false);
+      queued_predictive_pop_id_ = EnqueueOperation(NavigationOperationKind::Pop, {}, {}, false);
       Invalidate();
       return true;
     }
     if (entries_.size() <= 1) {
-      ++logical_depth_;
+      ++factory_depth_;
       return false;
     }
     transition_ = NavigationTransition{
@@ -205,6 +293,7 @@ public:
         .target = 0.0F,
         .interactive = true,
         .complete_operation = false,
+        .retire_ids = {entries_.back().id},
     };
     ++revision_;
     Invalidate();
@@ -213,6 +302,9 @@ public:
 
   [[nodiscard]] bool UpdatePredictivePop(float progress) {
     CheckThread();
+    if (route_type_.has_value() && queued_routed_predictive_pop_) {
+      return true;
+    }
     if (queued_predictive_pop_id_.has_value()) {
       return true;
     }
@@ -225,6 +317,20 @@ public:
 
   [[nodiscard]] bool CancelPredictivePop() {
     CheckThread();
+    if (route_type_.has_value()) {
+      if (queued_routed_predictive_pop_) {
+        queued_routed_predictive_pop_ = false;
+        return true;
+      }
+      if (!transition_.has_value() || !transition_->interactive) {
+        return false;
+      }
+      transition_->interactive = false;
+      transition_->target = 0.0F;
+      transition_->complete_operation = false;
+      ++revision_;
+      return true;
+    }
     if (queued_predictive_pop_id_.has_value()) {
       const auto operation = std::ranges::find(pending_, *queued_predictive_pop_id_, &NavigationOperation::id);
       if (operation == pending_.end()) {
@@ -233,7 +339,7 @@ public:
       }
       pending_.erase(operation);
       queued_predictive_pop_id_.reset();
-      ++logical_depth_;
+      ++factory_depth_;
       StartNextOperation();
       Invalidate();
       return true;
@@ -241,7 +347,7 @@ public:
     if (!transition_.has_value() || !transition_->interactive) {
       return false;
     }
-    ++logical_depth_;
+    ++factory_depth_;
     transition_->interactive = false;
     transition_->target = 0.0F;
     transition_->complete_operation = false;
@@ -251,6 +357,26 @@ public:
 
   [[nodiscard]] bool CommitPredictivePop() {
     CheckThread();
+    if (route_type_.has_value()) {
+      if (queued_routed_predictive_pop_) {
+        queued_routed_predictive_pop_ = false;
+        return RequestRoutedPop();
+      }
+      if (!transition_.has_value() || !transition_->interactive) {
+        return RequestRoutedPop();
+      }
+      expected_route_pop_ = true;
+      if (!RequestRoutedPop()) {
+        expected_route_pop_ = false;
+        return false;
+      }
+      transition_->interactive = false;
+      transition_->target = 1.0F;
+      transition_->complete_operation = true;
+      ++revision_;
+      Invalidate();
+      return true;
+    }
     if (queued_predictive_pop_id_.has_value()) {
       const auto operation = std::ranges::find(pending_, *queued_predictive_pop_id_, &NavigationOperation::id);
       if (operation == pending_.end()) {
@@ -288,10 +414,8 @@ public:
     const NavigationTransition completed = *transition_;
     transition_.reset();
     if (completed.complete_operation) {
-      if (completed.kind == NavigationOperationKind::Pop) {
-        EraseEntry(completed.source_id);
-      } else if (completed.kind == NavigationOperationKind::Replace) {
-        EraseEntry(completed.source_id);
+      for (const std::uint64_t id : completed.retire_ids) {
+        EraseEntry(id);
       }
     }
     ++revision_;
@@ -299,10 +423,62 @@ public:
     Invalidate();
   }
 
+  void CheckAccess() const {
+    CheckThread();
+  }
+
 private:
   static void ValidateFactory(const std::function<View()>& factory) {
     if (!factory) {
       throw std::invalid_argument("HuxerUI navigation page factory must not be empty");
+    }
+  }
+
+  static void ValidateRoutePath(const std::vector<NavigationRouteDescriptor>& routes) {
+    for (const NavigationRouteDescriptor& route : routes) {
+      if (!route.value || route.equals == nullptr || !route.factory) {
+        throw std::invalid_argument("HuxerUI navigation route descriptor is incomplete");
+      }
+    }
+  }
+
+  static bool SameRoute(const NavigationRouteDescriptor& first, const NavigationRouteDescriptor& second) {
+    return first.equals != nullptr && second.equals != nullptr && first.equals(first.value.get(), second.value.get());
+  }
+
+  static bool SameRoutePath(
+      const std::vector<NavigationRouteDescriptor>& first, const std::vector<NavigationRouteDescriptor>& second
+  ) {
+    return first.size() == second.size() && std::ranges::equal(first, second, [](const auto& left, const auto& right) {
+             return SameRoute(left, right);
+           });
+  }
+
+  static bool SameRealizedRoutePath(
+      const std::vector<RealizedNavigationRoute>& first, const std::vector<NavigationRouteDescriptor>& second
+  ) {
+    return first.size() == second.size() &&
+           std::ranges::equal(first, second, [](const RealizedNavigationRoute& left, const auto& right) {
+             return SameRoute(left.descriptor, right);
+           });
+  }
+
+  static bool IsSinglePop(
+      const std::vector<NavigationRouteDescriptor>& first, const std::vector<NavigationRouteDescriptor>& second
+  ) {
+    return first.size() == second.size() + 1 &&
+           std::ranges::equal(
+               first.begin(),
+               first.begin() + static_cast<std::ptrdiff_t>(second.size()),
+               second.begin(),
+               second.end(),
+               [](const auto& left, const auto& right) { return SameRoute(left, right); }
+           );
+  }
+
+  void EnsureFactoryMode() const {
+    if (route_type_.has_value()) {
+      throw std::logic_error("HuxerUI routed navigation cannot accept a page factory operation");
     }
   }
 
@@ -318,26 +494,92 @@ private:
     }
   }
 
-  std::uint64_t
-  EnqueueOperation(NavigationOperationKind kind, std::function<View()> factory, bool ready_to_start = true) {
+  bool BeginRoutedPredictivePop() {
+    if (requested_routes_.empty()) {
+      return false;
+    }
+    if (transition_.has_value() || !pending_.empty()) {
+      queued_routed_predictive_pop_ = true;
+      return true;
+    }
+    if (realized_routes_.empty()) {
+      return false;
+    }
+    const std::uint64_t source_id = realized_routes_.back().entry_id;
+    const std::uint64_t destination_id =
+        realized_routes_.size() > 1 ? realized_routes_[realized_routes_.size() - 2].entry_id : initial_root_id_;
+    transition_ = NavigationTransition{
+        .kind = NavigationOperationKind::Pop,
+        .source_id = source_id,
+        .destination_id = destination_id,
+        .progress = 0.0F,
+        .target = 0.0F,
+        .interactive = true,
+        .complete_operation = false,
+        .retire_ids = {source_id},
+    };
+    ++revision_;
+    Invalidate();
+    return true;
+  }
+
+  bool RequestRoutedPop() {
+    if (!request_route_pop_ || requested_routes_.empty()) {
+      return false;
+    }
+    return request_route_pop_();
+  }
+
+  void RefreshRealizedRouteFactories(const std::vector<NavigationRouteDescriptor>& routes) {
+    const std::size_t shared = std::min(realized_routes_.size(), routes.size());
+    for (std::size_t index = 0; index < shared; ++index) {
+      if (!SameRoute(realized_routes_[index].descriptor, routes[index])) {
+        break;
+      }
+      realized_routes_[index].descriptor = routes[index];
+      const auto entry = std::ranges::find(entries_, realized_routes_[index].entry_id, &NavigationEntry::id);
+      if (entry != entries_.end()) {
+        entry->factory = routes[index].factory;
+      }
+    }
+  }
+
+  std::uint64_t EnqueueOperation(
+      NavigationOperationKind kind,
+      std::function<View()> factory,
+      std::vector<NavigationRouteDescriptor> route_path,
+      bool ready_to_start = true
+  ) {
     const std::uint64_t id = next_operation_id_++;
-    pending_.push_back({id, kind, std::move(factory), ready_to_start});
+    pending_.push_back({id, kind, std::move(factory), std::move(route_path), ready_to_start});
     return id;
   }
 
   void StartNextOperation() {
-    if (transition_.has_value() || pending_.empty() || !pending_.front().ready_to_start) {
-      return;
+    while (!transition_.has_value() && !pending_.empty() && pending_.front().ready_to_start) {
+      NavigationOperation operation = std::move(pending_.front());
+      pending_.pop_front();
+      if (operation.kind == NavigationOperationKind::SetPath) {
+        StartRoutePath(std::move(operation.route_path));
+      } else {
+        StartFactoryOperation(std::move(operation));
+      }
     }
-    NavigationOperation operation = std::move(pending_.front());
-    pending_.pop_front();
+  }
+
+  void StartFactoryOperation(NavigationOperation operation) {
     const std::uint64_t source_id = entries_.back().id;
     std::uint64_t destination_id = 0;
+    std::vector<std::uint64_t> retire_ids;
     if (operation.kind == NavigationOperationKind::Push || operation.kind == NavigationOperationKind::Replace) {
       destination_id = next_entry_id_++;
       entries_.push_back({destination_id, std::move(operation.factory)});
+      if (operation.kind == NavigationOperationKind::Replace) {
+        retire_ids.push_back(source_id);
+      }
     } else {
       destination_id = entries_[entries_.size() - 2].id;
+      retire_ids.push_back(source_id);
     }
     transition_ = NavigationTransition{
         .kind = operation.kind,
@@ -347,6 +589,60 @@ private:
         .target = 1.0F,
         .interactive = false,
         .complete_operation = true,
+        .retire_ids = std::move(retire_ids),
+    };
+    ++revision_;
+  }
+
+  void StartRoutePath(std::vector<NavigationRouteDescriptor> routes) {
+    if (SameRealizedRoutePath(realized_routes_, routes)) {
+      RefreshRealizedRouteFactories(routes);
+      return;
+    }
+
+    std::size_t shared = 0;
+    const std::size_t shared_limit = std::min(realized_routes_.size(), routes.size());
+    while (shared < shared_limit && SameRoute(realized_routes_[shared].descriptor, routes[shared])) {
+      ++shared;
+    }
+
+    RefreshRealizedRouteFactories(routes);
+    std::vector<RealizedNavigationRoute> next_routes(
+        realized_routes_.begin(),
+        realized_routes_.begin() + static_cast<std::ptrdiff_t>(shared)
+    );
+    std::vector<std::uint64_t> retire_ids;
+    retire_ids.reserve(realized_routes_.size() - shared);
+    for (auto route = realized_routes_.begin() + static_cast<std::ptrdiff_t>(shared); route != realized_routes_.end();
+         ++route) {
+      retire_ids.push_back(route->entry_id);
+    }
+    const std::uint64_t source_id = realized_routes_.empty() ? initial_root_id_ : realized_routes_.back().entry_id;
+
+    for (std::size_t index = shared; index < routes.size(); ++index) {
+      const std::uint64_t id = next_entry_id_++;
+      entries_.push_back({id, routes[index].factory});
+      next_routes.push_back({routes[index], id});
+    }
+
+    const std::uint64_t destination_id = next_routes.empty() ? initial_root_id_ : next_routes.back().entry_id;
+    NavigationOperationKind kind = NavigationOperationKind::Replace;
+    if (shared == realized_routes_.size() && routes.size() > realized_routes_.size()) {
+      kind = NavigationOperationKind::Push;
+    } else if (shared == routes.size() && routes.size() < realized_routes_.size()) {
+      kind = NavigationOperationKind::Pop;
+    }
+
+    realized_routes_ = std::move(next_routes);
+    transition_ = NavigationTransition{
+        .kind = kind,
+        .source_id = source_id,
+        .destination_id = destination_id,
+        .progress = 0.0F,
+        .target = 1.0F,
+        .interactive = false,
+        .complete_operation = true,
+        .retire_ids = std::move(retire_ids),
     };
     ++revision_;
   }
@@ -365,11 +661,18 @@ private:
   std::optional<NavigationTransition> transition_;
   NavigationStyle style_;
   std::function<void()> invalidate_;
-  std::size_t logical_depth_ = 1;
+  std::size_t factory_depth_ = 1;
   std::uint64_t next_entry_id_ = 2;
   std::uint64_t next_operation_id_ = 1;
   std::uint64_t revision_ = 1;
   std::optional<std::uint64_t> queued_predictive_pop_id_;
+  // The controlled NavigationPath remains authoritative; these snapshots only reconcile retained visual entries.
+  std::vector<NavigationRouteDescriptor> requested_routes_;
+  std::vector<RealizedNavigationRoute> realized_routes_;
+  std::function<bool()> request_route_pop_;
+  std::optional<std::type_index> route_type_;
+  bool expected_route_pop_ = false;
+  bool queued_routed_predictive_pop_ = false;
 };
 
 namespace {
@@ -616,7 +919,88 @@ const ModifierDescriptor& NavigationContainerModifier::Descriptor() {
   return ModifierDescriptorFor<NavigationContainerModifier, NavigationContainerExtension, true>();
 }
 
+View BuildNavigationView(
+    const std::shared_ptr<NavigationState>& state, NavigationStyle style, NavigationEnvironmentEntry environment_entry
+) {
+  NavigationEnvironment environment = UseEnvironment<NavigationEnvironment>();
+  environment.current = std::make_shared<NavigationEnvironmentNode>(NavigationEnvironmentNode{
+      .entry = std::move(environment_entry),
+      .parent = std::move(environment.current),
+  });
+
+  std::vector<View> pages;
+  pages.reserve(state->Entries().size());
+  for (const NavigationEntry& entry : state->Entries()) {
+    View page = ProvideEnvironment(environment, [factory = entry.factory] { return factory(); });
+    pages.push_back(
+        Stack{
+            std::move(page),
+        }
+            .LayoutValue<NavigationEntryIdValue>(entry.id)
+            .With(NavigationPageModifier{state, entry.id})
+            .Key(entry.id)
+    );
+  }
+
+  NavigationContainerModifier container{state, style, state->Revision()};
+  return NavigationStackLayout {std::move(pages)}.LayoutValue<NavigationStateValue>(state).With(
+      ClipChildren{},
+      std::move(container)
+  );
+}
+
 } // namespace
+
+View BuildRoutedNavigationStack(
+    std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
+) {
+  auto state_holder = UseState(std::make_shared<NavigationState>(root, routes, binding));
+  auto revision = UseState<std::uint64_t>(0);
+  const std::shared_ptr<NavigationState> state = state_holder.Get();
+  static_cast<void>(revision.Get());
+  state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
+  state->UpdateRoot(std::move(root));
+  state->UpdateRouteBinding(binding);
+  state->SynchronizeRoutePath(std::move(routes));
+  NavigationStyle style = UseEnvironment<NavigationStyle>();
+  state->UpdateStyle(style);
+  return BuildNavigationView(
+      state,
+      std::move(style),
+      NavigationEnvironmentEntry{
+          .state = state,
+          .route_type = binding.route_type,
+          .path_state = std::move(binding.path_state),
+      }
+  );
+}
+
+NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type, bool outermost) {
+  const NavigationEnvironment environment = UseEnvironment<NavigationEnvironment>();
+  const auto matches = [route_type](const NavigationEnvironmentEntry& entry) {
+    return entry.route_type == route_type && !entry.state.expired();
+  };
+
+  NavigationAccess found;
+  for (auto node = environment.current; node; node = node->parent) {
+    if (matches(node->entry)) {
+      found = {node->entry.state, node->entry.path_state};
+      if (!outermost) {
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+bool CheckNavigationAccess(const std::weak_ptr<NavigationState>& state) {
+  const std::shared_ptr<NavigationState> shared = state.lock();
+  if (!shared) {
+    return false;
+  }
+  shared->CheckAccess();
+  return true;
+}
 
 } // namespace huxerui::detail
 
@@ -674,37 +1058,26 @@ View NavigationStack(std::function<View()> root) {
     static_cast<void>(revision.Get());
     state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
     state->UpdateRoot(root);
-    const NavigationStyle style = UseEnvironment<NavigationStyle>();
+    NavigationStyle style = UseEnvironment<NavigationStyle>();
     state->UpdateStyle(style);
-
-    std::vector<View> pages;
-    pages.reserve(state->Entries().size());
-    for (const detail::NavigationEntry& entry : state->Entries()) {
-      View page =
-          ProvideEnvironment(detail::NavigationEnvironment{state}, [factory = entry.factory] { return factory(); });
-      pages.push_back(
-          Stack {
-            std::move(page),
-          }.LayoutValue<detail::NavigationEntryIdValue>(entry.id)
-              .With(detail::NavigationPageModifier{state, entry.id})
-              .Key(entry.id)
-      );
-    }
-
-    detail::NavigationContainerModifier container{state, style, state->Revision()};
-    View stack = detail::NavigationStackLayout {std::move(pages)}
-                     .LayoutValue<detail::NavigationStateValue>(state)
-                     .With(ClipChildren{}, std::move(container));
-    return stack;
+    return detail::BuildNavigationView(state, std::move(style), detail::NavigationEnvironmentEntry{.state = state});
   });
 }
 
 NavigationController UseNavigation() {
-  const std::weak_ptr<detail::NavigationState> state = UseEnvironment<detail::NavigationEnvironment>().state;
-  if (state.expired()) {
+  detail::NavigationAccess access = detail::FindNavigationAccess(std::nullopt, false);
+  if (access.state.expired()) {
     throw std::logic_error("HuxerUI UseNavigation() requires an enclosing NavigationStack");
   }
-  return NavigationController{state};
+  return NavigationController{std::move(access.state)};
+}
+
+NavigationController UseRootNavigation() {
+  detail::NavigationAccess access = detail::FindNavigationAccess(std::nullopt, true);
+  if (access.state.expired()) {
+    throw std::logic_error("HuxerUI UseRootNavigation() requires an enclosing NavigationStack");
+  }
+  return NavigationController{std::move(access.state)};
 }
 
 } // namespace huxerui

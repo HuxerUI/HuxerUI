@@ -1,10 +1,16 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
+#include <typeindex>
+#include <typeinfo>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -25,6 +31,32 @@ namespace huxerui {
 namespace detail {
 class NavigationState;
 struct NavigationItemAccess;
+
+template <class Route>
+concept NavigationRouteValue = std::copy_constructible<Route> && std::equality_comparable<Route>;
+
+struct NavigationRouteDescriptor {
+  std::shared_ptr<const void> value;
+  bool (*equals)(const void* first, const void* second) = nullptr;
+  std::function<View()> factory;
+};
+
+struct NavigationRouteBinding {
+  std::type_index route_type{typeid(void)};
+  std::shared_ptr<void> path_state;
+  std::function<bool()> request_pop;
+};
+
+struct NavigationAccess {
+  std::weak_ptr<NavigationState> state;
+  std::shared_ptr<void> path_state;
+};
+
+View BuildRoutedNavigationStack(
+    std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
+);
+NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type, bool outermost);
+bool CheckNavigationAccess(const std::weak_ptr<NavigationState>& state);
 } // namespace detail
 
 struct NavigationMotion {
@@ -142,11 +174,7 @@ struct DrawerStyle {
 
 class TopAppBar final : public Layout<TopAppBar> {
 public:
-  explicit TopAppBar(
-      StringVariant title,
-      std::optional<View> leading = std::nullopt,
-      std::vector<View> actions = {}
-  );
+  explicit TopAppBar(StringVariant title, std::optional<View> leading = std::nullopt, std::vector<View> actions = {});
   TopAppBar(StringVariant title, std::optional<View> leading, std::initializer_list<View> actions)
       : TopAppBar(std::move(title), std::move(leading), std::vector<View>(actions)) {}
 
@@ -282,6 +310,100 @@ private:
   static Construction Build(View content, std::optional<StartDrawer> start, std::optional<EndDrawer> end);
 };
 
+template <detail::NavigationRouteValue Route> class RouteNavigationController;
+
+template <detail::NavigationRouteValue Route> class NavigationPath final {
+public:
+  NavigationPath() = default;
+  NavigationPath(std::initializer_list<Route> routes) : routes_(routes) {}
+  explicit NavigationPath(std::vector<Route> routes) : routes_(std::move(routes)) {}
+
+  [[nodiscard]] bool Empty() const noexcept {
+    return routes_.empty();
+  }
+
+  [[nodiscard]] std::size_t Size() const noexcept {
+    return routes_.size();
+  }
+
+  [[nodiscard]] std::span<const Route> Routes() const noexcept {
+    return routes_;
+  }
+
+  bool operator==(const NavigationPath&) const = default;
+
+private:
+  std::vector<Route> routes_;
+
+  friend class RouteNavigationController<Route>;
+};
+
+template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseNavigation();
+
+template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseRootNavigation();
+
+template <detail::NavigationRouteValue Route> class RouteNavigationController final {
+public:
+  RouteNavigationController() = default;
+
+  void Push(Route route) const {
+    RequireConnected();
+    path_.Update([route = std::move(route)](NavigationPath<Route>& path) mutable {
+      path.routes_.push_back(std::move(route));
+    });
+  }
+
+  bool Pop() const {
+    if (!detail::CheckNavigationAccess(state_)) {
+      return false;
+    }
+    if (path_.Get().routes_.empty()) {
+      return false;
+    }
+    path_.Update([](NavigationPath<Route>& path) { path.routes_.pop_back(); });
+    return true;
+  }
+
+  void Replace(Route route) const {
+    RequireConnected();
+    if (path_.Get().routes_.empty()) {
+      throw std::logic_error("HuxerUI routed navigation cannot replace its fixed root");
+    }
+    path_.Update([route = std::move(route)](NavigationPath<Route>& path) mutable {
+      path.routes_.back() = std::move(route);
+    });
+  }
+
+  void SetPath(NavigationPath<Route> path) const {
+    RequireConnected();
+    path_ = std::move(path);
+  }
+
+  [[nodiscard]] bool CanPop() const {
+    return detail::CheckNavigationAccess(state_) && !path_.Get().Empty();
+  }
+
+  [[nodiscard]] std::size_t Depth() const {
+    return detail::CheckNavigationAccess(state_) ? path_.Get().Size() + 1 : 0;
+  }
+
+private:
+  RouteNavigationController(std::weak_ptr<detail::NavigationState> state, State<NavigationPath<Route>> path)
+      : state_(std::move(state)), path_(std::move(path)) {}
+
+  void RequireConnected() const {
+    if (!detail::CheckNavigationAccess(state_)) {
+      throw std::logic_error("HuxerUI routed navigation controller is disconnected");
+    }
+  }
+
+  std::weak_ptr<detail::NavigationState> state_;
+  State<NavigationPath<Route>> path_;
+
+  friend RouteNavigationController<Route> UseNavigation<Route>();
+  friend RouteNavigationController<Route> UseRootNavigation<Route>();
+};
+
 class NavigationController {
 public:
   NavigationController() = default;
@@ -313,6 +435,7 @@ private:
 
   friend View NavigationStack(std::function<View()> root);
   friend NavigationController UseNavigation();
+  friend NavigationController UseRootNavigation();
 };
 
 View NavigationStack(std::function<View()> root);
@@ -323,6 +446,92 @@ View NavigationStack(Factory&& root, Arguments&&... arguments) {
   return NavigationStack(detail::BindViewFactory(std::forward<Factory>(root), std::forward<Arguments>(arguments)...));
 }
 
+template <detail::NavigationRouteValue Route, class RootFactory, class Resolver>
+  requires detail::ViewFactoryFor<RootFactory> && std::copy_constructible<std::decay_t<Resolver>> &&
+           requires(std::decay_t<Resolver>& resolver, const Route& route) {
+             { std::invoke(resolver, route) } -> std::convertible_to<View>;
+           }
+View NavigationStack(RootFactory&& root, State<NavigationPath<Route>> path, Resolver&& resolver) {
+  const auto callable_is_empty = []<class Callable>(const Callable& callable) {
+    if constexpr (std::is_pointer_v<Callable>) {
+      return callable == nullptr;
+    } else if constexpr (requires { static_cast<bool>(callable); }) {
+      return !static_cast<bool>(callable);
+    }
+    return false;
+  };
+  if (callable_is_empty(root)) {
+    throw std::invalid_argument("HuxerUI navigation root factory must not be empty");
+  }
+  if (callable_is_empty(resolver)) {
+    throw std::invalid_argument("HuxerUI navigation destination resolver must not be empty");
+  }
+  if (!path.IsValid()) {
+    throw std::invalid_argument("HuxerUI navigation path state must not be empty");
+  }
+  std::function<View()> root_factory = detail::BindViewFactory(std::forward<RootFactory>(root));
+  using StoredResolver = std::decay_t<Resolver>;
+  StoredResolver stored_resolver(std::forward<Resolver>(resolver));
+
+  return Scope([path, root_factory = std::move(root_factory), resolver = std::move(stored_resolver)]() mutable -> View {
+    auto shared_resolver = std::make_shared<StoredResolver>(resolver);
+    const NavigationPath<Route>& current_path = path.Get();
+    std::vector<detail::NavigationRouteDescriptor> routes;
+    routes.reserve(current_path.Size());
+    for (const Route& route : current_path.Routes()) {
+      auto value = std::make_shared<Route>(route);
+      routes.push_back({
+          value,
+          [](const void* first, const void* second) {
+            return *static_cast<const Route*>(first) == *static_cast<const Route*>(second);
+          },
+          [shared_resolver, value]() mutable -> View { return std::invoke(*shared_resolver, *value); },
+      });
+    }
+
+    detail::NavigationRouteBinding binding{
+        .route_type = typeid(Route),
+        .path_state = std::make_shared<State<NavigationPath<Route>>>(path),
+        .request_pop = [path] {
+          const NavigationPath<Route>& current_path = path.Get();
+          if (current_path.Empty()) {
+            return false;
+          }
+          std::vector<Route> routes(current_path.Routes().begin(), current_path.Routes().end());
+          routes.pop_back();
+          path = NavigationPath<Route>(std::move(routes));
+          return true;
+        },
+    };
+    return detail::BuildRoutedNavigationStack(root_factory, std::move(routes), std::move(binding));
+  });
+}
+
 NavigationController UseNavigation();
+NavigationController UseRootNavigation();
+
+template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseNavigation() {
+  detail::NavigationAccess access = detail::FindNavigationAccess(typeid(Route), false);
+  if (access.state.expired() || !access.path_state) {
+    throw std::logic_error("HuxerUI UseNavigation<Route>() requires an enclosing compatible routed NavigationStack");
+  }
+  return RouteNavigationController<Route>{
+      std::move(access.state),
+      *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
+  };
+}
+
+template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseRootNavigation() {
+  detail::NavigationAccess access = detail::FindNavigationAccess(typeid(Route), true);
+  if (access.state.expired() || !access.path_state) {
+    throw std::logic_error(
+        "HuxerUI UseRootNavigation<Route>() requires an enclosing compatible routed NavigationStack"
+    );
+  }
+  return RouteNavigationController<Route>{
+      std::move(access.state),
+      *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
+  };
+}
 
 } // namespace huxerui

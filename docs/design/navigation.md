@@ -1,11 +1,12 @@
 # Navigation Design
 
-Status: implemented
+Status: factory and typed routed navigation implemented; activation and Web URL bridges proposed
 
-This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing, together with the extension boundary for future URL-backed navigation.
+This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, and Back routing.
+It also defines the implemented typed route-path foundation and the proposed external application activation, browser URL, and restoration bridges.
 
 The first implementation is intentionally factory-driven and imperative at the navigation boundary.
-It preserves a separate extension point for a future controlled, serializable navigation path without introducing route registries, URL concepts, or platform types into the shared Runtime.
+The routed extension preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
 
 ## Goals
 
@@ -17,18 +18,18 @@ It preserves a separate extension point for a future controlled, serializable na
 - Support reduced motion and deterministic animation tests through the existing AnimationSpec model.
 - Cancel input, focus, and text-input work when a page stops accepting interaction.
 - Define a platform-neutral predictive Back transaction that Android can drive immediately and other platforms can adopt when their host integration owns an equivalent gesture.
-- Preserve a direct path to browser URLs, deep links, and saveable navigation state through a future controlled route path.
+- Add a typed controlled route path for browser URLs, deep links, restoration, and externally selected destinations without replacing the factory API.
 - Provide an explicit theme-owned TopAppBar without coupling its actions to page history or menu presentation.
 - Provide theme-owned NavigationBar and NavigationPane selectors without coupling selection to page history.
 - Provide controlled StartDrawer and EndDrawer content inside ordinary application layout.
 
 ## Non-goals
 
-The initial implementation does not provide:
+Factory navigation does not provide:
 
 - Named routes, string route tables, URI matching, or a destination registry.
 - A public `Page`, `Route`, or `NavigationEntry` base class.
-- A serializable or type-erased NavigationPath.
+- A serializable or type-erased path inferred from retained factories.
 - Automatic synthesis of application bars, titles, Back buttons, overflow menus, or master-detail page composition.
 - Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
 - Shared-element, hero, container-transform, or cross-page layout animation.
@@ -84,7 +85,7 @@ Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing b
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
 They are controlled selection views: the selected index enters through construction and a requested index leaves through the typed event.
 They do not create pages, retain destination history, or assume that selecting an item always replaces visible content.
-An application may use the selection to switch sibling content, select a tab-owned NavigationStack, or update a future URL-backed route path.
+An application may use the selection to switch sibling content, select a tab-owned NavigationStack, or update a typed route path.
 
 NavigationBar lays destinations along the horizontal axis.
 NavigationPane lays them vertically, supports compact icon-only and expanded icon-and-label presentation, and scrolls when its destinations exceed the viewport.
@@ -166,6 +167,7 @@ private:
 
   friend View NavigationStack(std::function<View()> root);
   friend NavigationController UseNavigation();
+  friend NavigationController UseRootNavigation();
 };
 
 View NavigationStack(std::function<View()> root);
@@ -174,6 +176,7 @@ template <class Factory, class... Arguments>
 View NavigationStack(Factory&& root, Arguments&&... arguments);
 
 NavigationController UseNavigation();
+NavigationController UseRootNavigation();
 
 } // namespace huxerui
 ```
@@ -191,6 +194,7 @@ Controller operations run on the Runtime UI thread and do not add cross-thread s
 
 `UseNavigation()` resolves the nearest NavigationStack from the current Environment.
 Calling it outside a NavigationStack throws `std::logic_error` with an English HuxerUI diagnostic.
+`UseRootNavigation()` resolves the outermost compatible factory stack in the same inherited navigation chain.
 
 ## Basic use
 
@@ -642,7 +646,7 @@ View AppContent() {
 }
 ```
 
-Applications that need history to survive a structural replacement hoist the authoritative domain selection or future controlled NavigationPath above that branch.
+Applications that need history to survive a structural replacement hoist the authoritative domain selection or controlled NavigationPath above that branch.
 A future NavigationSplitView is a separate adaptive container rather than a behavior switch inside NavigationStack.
 
 Tabs also remain independent.
@@ -659,58 +663,240 @@ Composition-scoped effects define setup and cleanup around actual mounted lifeti
 If applications later need to pause work while a retained page is covered, a read-only navigation activity value may be exposed through Environment and observed by an effect.
 It must not turn navigation callbacks into a second lifecycle system.
 
-## Future controlled path
+## Typed routed navigation
+
+Status: implemented
 
 Factory navigation is convenient but cannot represent browser URLs, deep links, restoration, or externally controlled history.
-The internal architecture must therefore separate logical route data from resolved render entries from its first implementation:
+Typed routed navigation adds a data source above the existing resolved-entry engine instead of adding another navigator:
 
 ```text
-navigation source
-    factory command or future route path
-        -> page resolver
-        -> resolved entry identity and page factory
-        -> shared mounting, transition, interaction, and Back engine
+factory command                 controlled NavigationPath<Route>
+       |                                      |
+       `------------------ navigation source -'
+                              |
+                    destination resolver
+                              |
+                     resolved entry identity
+                              |
+        shared mounting, transition, interaction, and Back engine
 ```
 
-The initial factory API is one navigation source.
-A future typed path supplies lightweight, equality-comparable, and serializable route values plus an application destination resolver.
+The terms have distinct meanings:
 
-A possible future shape is:
+- A Route is an application-defined value that identifies one destination and its minimum parameters.
+- A NavigationPath is the authoritative ordered route value for one routed stack.
+- A destination resolver is an application function that converts a Route into an ordinary View declaration.
+- A resolved navigation entry is a private mounted instance with an internal identity, retained scope, and page factory.
+
+HuxerUI does not add a public Scene, Screen, Page, Route, Destination, or NavigationEntry base class.
+Scene already denotes render and whole-scene transition data, while Screen incorrectly implies that every navigation container fills a native window.
+Applications may use Screen or Page in their own component function names without adding either concept to the framework type system.
+
+### Route values
+
+A routed application defines lightweight value types and normally closes its route set with `std::variant`:
 
 ```cpp
+struct ArticleRoute {
+  ArticleId article_id;
+
+  bool operator==(const ArticleRoute&) const = default;
+};
+
+struct SettingsRoute {
+  bool operator==(const SettingsRoute&) const = default;
+};
+
 using AppRoute = std::variant<
-    HomeRoute,
     ArticleRoute,
     SettingsRoute
 >;
+```
 
-return NavigationStack<AppRoute>(
+The shared navigation contract requires Route to be copy-constructible and equality-comparable.
+It does not require a framework base class, runtime type name, string identifier, hash, reflection, or built-in serialization protocol.
+
+Applications that use URLs or restoration keep route values serializable by policy.
+Routes should contain stable identifiers, enums, and small configuration values rather than domain object graphs, callbacks, Views, FileReference values, or platform handles.
+An application resolves a stable identifier through its own model or document session when the destination composes.
+
+### NavigationPath
+
+The public value is:
+
+```cpp
+template <class Route>
+class NavigationPath {
+public:
+  NavigationPath() = default;
+  NavigationPath(std::initializer_list<Route> routes);
+  explicit NavigationPath(std::vector<Route> routes);
+
+  [[nodiscard]] bool Empty() const noexcept;
+  [[nodiscard]] std::size_t Size() const noexcept;
+  [[nodiscard]] std::span<const Route> Routes() const noexcept;
+
+  bool operator==(const NavigationPath&) const = default;
+};
+```
+
+The fixed root page is not an element of NavigationPath.
+An empty path displays only that root, and each route element adds one destination above it.
+The path stores no View factory, internal entry identifier, transition state, mounted state, or platform value.
+
+NavigationPath is a concrete typed value rather than a type-erased heterogeneous container.
+An application that needs heterogeneous destinations uses one explicit `std::variant`, preserving compile-time knowledge of its complete route set.
+
+### Routed NavigationStack
+
+A routed stack receives a root factory, application-owned State, and one total destination resolver:
+
+```cpp
+auto path = UseState(NavigationPath<AppRoute>{});
+
+return NavigationStack(
+    AppShell,
     path,
-    HomePage,
-    [](const AppRoute& route) -> View {
-      return std::visit(
-          Overloaded{
-              [](const HomeRoute&) -> View {
-                return HomePage();
-              },
-              [](const ArticleRoute& value) -> View {
-                return ArticlePage(value.article_id);
-              },
-              [](const SettingsRoute&) -> View {
-                return SettingsPage();
-              },
-          },
-          route
-      );
-    }
+    ResolveAppRoute
 );
 ```
 
-This snippet documents the ownership boundary rather than committing the exact future template API.
-The route value remains application-defined instead of requiring a HuxerUI Route inheritance hierarchy.
+The resolver remains ordinary application code:
 
-The future controlled path must define reconciliation identity, duplicate routes, path replacement, invalid route values, destination resolution failures, saveable encoding, and operation results before becoming public.
-It can coexist with factory entries, but a nonserializable factory entry cannot claim URL or restoration identity.
+```cpp
+View ResolveAppRoute(const AppRoute& route) {
+  return std::visit(
+      [](const auto& value) -> View {
+        using Route = std::decay_t<decltype(value)>;
+
+        if constexpr (std::same_as<Route, ArticleRoute>) {
+          return ArticlePage(value.article_id);
+        } else {
+          return SettingsPage();
+        }
+      },
+      route
+  );
+}
+```
+
+The application resolver is the single route-to-View mapping.
+HuxerUI does not duplicate it in a process-global route registry, string route table, per-page registration modifier, or Runtime callback map.
+Large applications may delegate branches of the resolver to feature modules while assembling the closed AppRoute type and top-level resolver in the application target.
+
+The resolver and each route value are retained by value and invoked inside the destination entry's independent page scope.
+When the routed NavigationStack recomposes with an equal path and an updated compatible resolver, existing entry identifiers and page scopes remain stable while their retained factories use the latest resolver value.
+The resolver therefore follows the same copy-safety requirements as other delayed HuxerUI View factories and does not capture references whose lifetime ends before a later recomposition.
+
+Destination resolution is total for every accepted route value.
+URL parsing, authorization redirects, and malformed parameter handling occur before a route enters the path.
+Missing domain content is ordinary destination state and may render an application-owned unavailable or not-found page.
+
+### One authoritative path
+
+The `State<NavigationPath<Route>>` supplied by the application is the only logical history for a routed stack.
+A routed controller mutates that State rather than a private logical stack.
+The private NavigationState retains non-authoritative requested and realized descriptor snapshots, resolved entries, internal identities, queued visual operations, and transition state needed to reconcile the controlled value without discarding exiting pages early.
+Controller `Depth()` is therefore the path size plus the fixed root entry, while `CanPop()` is true exactly when the path is non-empty.
+
+The routed controller surface is:
+
+```cpp
+template <class Route>
+class RouteNavigationController {
+public:
+  void Push(Route route) const;
+  bool Pop() const;
+  void Replace(Route route) const;
+  void SetPath(NavigationPath<Route> path) const;
+
+  [[nodiscard]] bool CanPop() const;
+  [[nodiscard]] std::size_t Depth() const;
+};
+
+template <class Route>
+RouteNavigationController<Route> UseNavigation();
+```
+
+The concrete controller type is normally inferred with `auto`, while the existing non-template `NavigationController` and `UseNavigation()` continue to serve factory stacks.
+This avoids turning the existing controller into a `NavigationController<void>` specialization or accepting arbitrary route types through runtime type checks.
+Because the root is fixed and absent from the path, `Replace()` requires a non-empty path and throws `std::logic_error` when only the root is visible.
+
+A NavigationStack is either factory-driven or route-driven for its complete mounted lifetime.
+A routed stack rejects factory Push and Replace operations, and a factory stack does not claim a NavigationPath.
+Mixing the two entry sources in one stack would make the public path unable to describe the actual history.
+
+### Path reconciliation and identity
+
+The stack compares the previous and next route sequences by their longest equal prefix:
+
+- Appending one value resolves as Push.
+- Removing the last value resolves as Pop.
+- Replacing only the final value resolves as Replace.
+- Changing an earlier value or several values resolves as a path replacement.
+- Initial construction resolves the complete path before the first committed page and does not animate through intermediate destinations.
+
+Resolved entries in the equal prefix retain their private identifiers, page scopes, mounted state, scroll state, and PaintSequences.
+The changed suffix receives new monotonic entry identifiers.
+Route equality expresses route-data equality and never becomes a MountedNode key directly.
+
+Duplicate equal routes are valid.
+Their sequence positions resolve to distinct private entries, so pushing the same ArticleRoute twice creates two independent page scopes even though both route values compare equal.
+
+A single Push, Pop, or Replace uses the existing themed transition and operation queue.
+An arbitrary path replacement commits the final topology as one replacement operation rather than visually replaying every intermediate route.
+Browser Back or Forward that removes or appends one suffix element retains ordinary Pop or Push motion.
+
+### Nested and root navigation
+
+UseNavigation() continues to resolve the nearest enclosing factory stack.
+UseNavigation<Route>() resolves the nearest enclosing routed stack with the requested Route type.
+Nested stacks remain independent owners and do not share history merely because their routes use the same C++ type.
+
+Cross-feature navigation sometimes intentionally targets the outer application stack.
+The explicit operations are:
+
+```cpp
+UseRootNavigation();
+UseRootNavigation<AppRoute>();
+```
+
+Root means the outermost compatible stack in the current Runtime's inherited navigation chain.
+It is not a process global, does not cross windows, and does not search a string-keyed registry.
+The private navigation Environment therefore becomes a parent-linked chain of weak stack states rather than a single overwritten state.
+
+Code that needs a particular sibling or locally owned stack receives its controller explicitly.
+The routed extension does not add NavigationId, named stacks, UseNavigationByName, or a general service locator.
+
+NavigationBar, NavigationPane, Tabs, and responsive multi-pane structures remain selection and layout mechanisms rather than implicit stack operations.
+Each top-level destination may retain an independent nested NavigationPath.
+A deep link may update the selected destination and its associated path atomically, while an application-wide route may use the root controller for a cross-feature full-page transition.
+
+## Application activation integration
+
+Open With, document URL contexts, share intents, and equivalent requests are application activations rather than navigation commands or FilePicker results.
+The application activation boundary defined by the [Files Design](files.md#application-activation-boundary) selects or creates a window session before delivering an activation to that session's Runtime.
+
+```text
+platform application activation
+    -> application activation policy
+    -> create or select a window session
+    -> session activation queue
+    -> application document or domain service
+    -> stable route parameters
+    -> root NavigationPath update
+```
+
+An initial activation must be available before the first root composition so the application can construct its initial route path without briefly committing the default page.
+An activation received by an existing session is delivered on that Runtime's UI thread.
+The application decides whether it pushes into the existing history, replaces the path, opens another window, imports content, or rejects the request.
+
+A passive file activation carries FileReference capability values only to the application activation policy or its document service.
+The application establishes a document session and places a stable DocumentId in the route rather than embedding FileReference in a URL-backed or restorable path.
+
+Navigation does not add FileEvents, inspect platform intent types, select windows, or retain an activation queue.
+Those responsibilities belong to the application and window-session design, while NavigationPath remains the destination state consumed after policy has run.
 
 ## Web URL integration
 
@@ -725,19 +911,34 @@ browser URL and history state
 ```
 
 The application owns conversion between URLs and typed route values because only the application knows parameter validation, canonical URLs, authorization redirects, and missing-content policy.
+The codec is an application value or pair of callables rather than a virtual framework registry:
+
+```cpp
+struct AppRouteCodec {
+  std::optional<NavigationPath<AppRoute>> Decode(std::string_view location) const;
+  std::string Encode(const NavigationPath<AppRoute>& path) const;
+};
+```
+
+Decode validates path segments, query values, and fragments before constructing typed routes.
+Encode produces the canonical browser location for one accepted path.
+An empty Decode result invokes application fallback policy such as a not-found destination, redirect, or default path; NavigationStack never receives a malformed route value.
 
 The Web integration owns browser mechanics:
 
 - Application Push maps to `history.pushState()`.
 - Application Replace maps to `history.replaceState()`.
+- An arbitrary `SetPath()` maps to `history.replaceState()` unless application policy explicitly starts a new browser history entry.
 - `popstate` decodes the browser location and updates the controlled path without echoing another history mutation.
 - Initial mount decodes the current URL before the first destination is committed.
 - Reload reconstructs only serializable route entries and application state.
 
 Browser History must not be exposed through PlatformAdapter because it is application navigation policy rather than a renderer, text, clipboard, or frame-scheduling capability.
-A focused Web navigation bridge may use the future controlled-path contract without introducing JavaScript types into shared headers.
+A focused Web navigation bridge observes routed-controller operations and controlled path replacement without introducing JavaScript types into shared headers.
+It tags a path update originating from `popstate` internally so that committing the corresponding frame does not write the same location back to browser history.
 
-Nested URL routes may resolve to nested path values or a branch of route values, but URL segment nesting does not force every visual component function to become a NavigationStack.
+Nested URL routes may resolve to an application-owned aggregate containing a selected top-level destination and one or more nested path values.
+URL segment nesting does not force every visual component function to become a NavigationStack, and responsive layout changes do not alter the route solely because the same destination moves between panes.
 
 ## Failure and lifetime behavior
 
@@ -757,10 +958,10 @@ The public files are:
 
 - `include/huxerui/event.h` for BackEvent and ViewEvents::BackRequested.
 - `include/huxerui/modifier.h` for the general NodeExtension Back capability.
-- `include/huxerui/navigation.h` for top app bars, page stacks, destination selectors, drawers, and their Theme styles.
+- `include/huxerui/navigation.h` for top app bars, page stacks, the typed path and routed controller, destination selectors, drawers, and their Theme styles.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
-`src/navigation.cpp` owns controller state, entry resolution, NavigationStack layout, retained page modifiers, and page motion.
+`src/navigation.cpp` owns controller state, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
 `src/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
@@ -810,6 +1011,19 @@ Interaction tests verify:
 
 Back tests verify the complete order among TextSelectionOverlay, Layer entries, BackRequested, nested NavigationStacks, and platform fallback.
 
+Typed routed-navigation tests additionally verify:
+
+- Empty, single-route, duplicate-route, and heterogeneous variant paths.
+- `Push()`, `Pop()`, `Replace()`, and arbitrary `SetPath()` reconciliation.
+- Longest-equal-prefix retention and changed-suffix replacement.
+- Stable page state within an equal prefix and independent identity for duplicate equal routes.
+- One application-owned path as the logical source of truth while private render entries outlive an exit transition.
+- Initial deep paths committing their final destination without replaying intermediate transitions.
+- A routed stack rejecting factory operations and a factory stack exposing no route path.
+- Nearest and root controller lookup through nested stacks, including nested stacks with the same Route type.
+- Controller disconnection without retaining Runtime, mounted nodes, or a resolver cycle.
+- Total destination resolution and propagation of resolver composition failures through the existing frame exception boundary.
+
 Platform validation includes:
 
 - Android API 34 Begin, Update, Cancel, and Commit JNI and Java mapping.
@@ -819,13 +1033,27 @@ Platform validation includes:
 - Windows, macOS, and Web Escape Commit behavior.
 - Available platform builds after shared Back API changes.
 
-Future URL integration requires browser tests for initial deep links, Push, Replace, Back, Forward, reload, invalid URLs, duplicate routes, nested routes, and suppression of history-update feedback loops.
+Web URL integration requires browser tests for initial deep links, `Push()`, `Replace()`, `SetPath()`, Back, Forward, reload, invalid URLs, canonical encoding, duplicate routes, nested route projections, and suppression of history-update feedback loops.
+Application activation integration requires platform tests for cold-start delivery before first composition, warm delivery on the selected Runtime UI thread, session selection, Open With file capability lifetime, and rejection or routing policy without a committed Root View callback.
 
 ## Delivery sequence
 
-The initial navigation surface delivers TopAppBar, NavigationStack, NavigationController, retained entries, serialized programmatic transitions, Theme motion, generic Back routing, predictive Back on Android API 34, Commit-only fallback paths, and a dedicated navigation example.
+The implemented navigation surface delivers TopAppBar, NavigationStack, NavigationController, retained entries, serialized programmatic transitions, Theme motion, generic Back routing, predictive Back on Android API 34, Commit-only fallback paths, and a dedicated navigation example.
 
-The controlled path, saveable state, Web URL bridge, iOS interactive gesture, split navigation, and shared-element transitions remain later milestones built on the same resolved-entry engine.
+The routed extension is delivered in ownership-sized phases.
+The shared foundation now includes:
+
+- Separate navigation sources from private resolved entries without changing factory behavior.
+- Add NavigationPath, routed NavigationStack, RouteNavigationController, path reconciliation, and focused shared tests.
+- Add nearest and root routed-controller resolution through the parent-linked navigation Environment.
+
+The remaining integration phases are:
+
+- Define the application activation and window-session boundary, then deliver Open URL and Open Files activations on each supported platform.
+- Add the Web route codec and Browser History bridge with feedback suppression.
+- Extend the navigation example with activation simulation and URL round trips when those bridges are implemented.
+
+Saveable application state, an iOS interactive gesture, split navigation, navigation results, and shared-element transitions remain separate later milestones built on the same resolved-entry engine.
 
 ## Invariants
 
@@ -834,6 +1062,11 @@ The controlled path, saveable state, Web URL bridge, iOS interactive gesture, sp
 - A page is an ordinary View factory with an independent keyed RecomposeScope.
 - NavigationController resolves the nearest scoped stack and does not own Runtime or mounted nodes.
 - The stack scope is the only strong owner of controller state.
+- A routed stack has exactly one application-owned NavigationPath as its logical history.
+- Factory and routed entries never coexist in one NavigationStack.
+- Route values contain destination data, while private entry identifiers define mounted page identity.
+- A destination resolver is application-owned and total; Runtime owns no route registry or route-type branch.
+- Nearest and root lookup remain scoped to one inherited navigation chain and never become process-global lookup.
 - Entry identifiers, not factory identity or unkeyed position, define mounted page identity.
 - Covered entries retain state but do not receive input or contribute visible damage.
 - Only the active page or active transition pair participates in navigation layout.
@@ -844,5 +1077,6 @@ The controlled path, saveable state, Web URL bridge, iOS interactive gesture, sp
 - Explicit Pop is an authorized operation and does not invoke BackRequested recursively.
 - Navigation does not automatically restore TextField focus or reopen IME.
 - Factory entries make no serialization, URL, or restoration claim.
-- Future route paths resolve into the same private page-entry engine rather than creating another navigator.
+- Route paths resolve into the same private page-entry engine rather than creating another navigator.
+- Application activation chooses a window session before it requests route state and never targets an arbitrary committed View.
 - Browser URL policy remains outside shared Runtime and PlatformAdapter.

@@ -237,6 +237,36 @@ TopAppBarStyle owns the container background, title style, fixed content height,
 Material uses a 64-unit surface container and Flat uses a denser 48-unit surface; neither theme adds a static shadow.
 Slot Views retain their own component styles, so an application may explicitly color a leading IconButton when its design differs from the ordinary action color.
 
+## NavigationStack
+
+NavigationStack retains page state, serializes themed transitions, and routes Back to the deepest active stack.
+Factory navigation is convenient for local flows:
+
+```cpp
+View DetailPage() {
+  auto navigation = UseNavigation();
+  return Button("Close").OnClick([navigation] { navigation.Pop(); });
+}
+
+View AppContent() {
+  return NavigationStack(HomePage);
+}
+```
+
+Use a controlled NavigationPath when history must be represented as application data for deep links, restoration, or browser integration:
+
+```cpp
+using AppRoute = std::variant<ArticleRoute, SettingsRoute>;
+
+auto path = UseState(NavigationPath<AppRoute>{});
+
+return NavigationStack(HomePage, path, ResolveAppRoute);
+```
+
+Inside a routed destination, `UseNavigation<AppRoute>()` returns a RouteNavigationController that mutates the supplied path.
+`UseRootNavigation()` and `UseRootNavigation<AppRoute>()` explicitly target the outermost compatible stack in the current Runtime; ordinary `UseNavigation` always selects the nearest compatible stack.
+The fixed root is not stored in NavigationPath, so an empty path displays only the root and cannot be replaced through the routed controller.
+
 ## NavigationBar and NavigationPane
 
 NavigationBar and NavigationPane are controlled destination selectors.

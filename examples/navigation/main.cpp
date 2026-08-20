@@ -1,129 +1,24 @@
 #include <huxerui/huxerui.h>
 
-#include <cstddef>
-#include <optional>
-#include <vector>
+#include <variant>
 
 using namespace huxerui;
 
-VectorAsset HomeIcon() {
-  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
-    builder.StrokePath(
-        Path{}.MoveTo({2.5F, 9.0F}).LineTo({10.0F, 2.5F}).LineTo({17.5F, 9.0F}),
-        Color::Black(),
-        2.0F,
-        StrokeCap::Round,
-        StrokeJoin::Round
-    );
-    builder.StrokePath(
-        Path{}.MoveTo({5.0F, 8.0F}).LineTo({5.0F, 17.0F}).LineTo({15.0F, 17.0F}).LineTo({15.0F, 8.0F}),
-        Color::Black(),
-        2.0F,
-        StrokeCap::Round,
-        StrokeJoin::Round
-    );
-  });
-  return icon;
-}
+View RoutedNavigationDemo();
+View FactoryDetailsPage(int section);
+View FactoryFinalPage();
+View FactoryReplacementPage();
 
-VectorAsset LibraryIcon() {
-  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
-    builder.FillPath(Path::RoundedRect({2.5F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
-    builder.FillPath(Path::RoundedRect({8.0F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
-    builder.FillPath(Path::RoundedRect({13.5F, 3.0F, 4.0F, 14.0F}, CornerRadii{1.5F}), Color::Black());
-  });
-  return icon;
-}
-
-VectorAsset SettingsIcon() {
-  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
-    builder.StrokePath(
-        Path{}
-            .MoveTo({2.0F, 5.0F})
-            .LineTo({18.0F, 5.0F})
-            .MoveTo({2.0F, 10.0F})
-            .LineTo({18.0F, 10.0F})
-            .MoveTo({2.0F, 15.0F})
-            .LineTo({18.0F, 15.0F}),
-        Color::Black(),
-        2.0F,
-        StrokeCap::Round
-    );
-    builder.FillPath(Path::RoundedRect({5.0F, 3.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
-    builder.FillPath(Path::RoundedRect({12.0F, 8.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
-    builder.FillPath(Path::RoundedRect({7.0F, 13.0F, 4.0F, 4.0F}, CornerRadii{2.0F}), Color::Black());
-  });
-  return icon;
-}
-
-VectorAsset MenuIcon() {
-  static const VectorAsset icon = VectorAsset::Create({20.0F, 20.0F}, [](VectorBuilder& builder) {
-    for (float y : {5.0F, 10.0F, 15.0F}) {
-      builder.StrokePath(
-          Path{}.MoveTo({2.0F, y}).LineTo({18.0F, y}),
-          Color::Black(),
-          2.0F,
-          StrokeCap::Round
-      );
-    }
-  });
-  return icon;
-}
-
-View DetailsPage(int section);
-
-View HomePage() {
+View FactoryRootPage() {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
   return Column {
-    Text("Navigation", TextRole::Title),
-    Text("Pages retain their local state while another page covers them."),
-    Button("Open details").OnClick([navigation] { navigation.Push(DetailsPage, 2); }),
-  }.With(
-      Padding(theme.spacing.extra_large),
-      Spacing(theme.spacing.medium),
-      Background(theme.colors.background)
-  );
-}
-
-View FinalPage() {
-  const ThemeSpec& theme = UseTheme();
-  const NavigationController navigation = UseNavigation();
-  return Column {
-    Text("Final page", TextRole::Title),
+    Text("Factory navigation", TextRole::Title),
+    Text("Page factories keep arbitrary arguments and mounted state inside a local navigation flow."),
     Text::Format("Stack depth: {}", navigation.Depth()),
-    Button("Back to details").OnClick([navigation] { navigation.Pop(); }),
-    Button("Replace this page").OnClick([navigation] {
-      navigation.Replace([] {
-        const ThemeSpec& replaced_theme = UseTheme();
-        const NavigationController replaced_navigation = UseNavigation();
-        return Column {
-          Text("Replacement page", TextRole::Title),
-          Button("Back home").OnClick([replaced_navigation] { replaced_navigation.Pop(); }),
-        }.With(
-            Padding(replaced_theme.spacing.extra_large),
-            Spacing(replaced_theme.spacing.medium),
-            Background(replaced_theme.colors.background)
-        );
-      });
-    }),
-  }.With(
-      Padding(theme.spacing.extra_large),
-      Spacing(theme.spacing.medium),
-      Background(theme.colors.background)
-  );
-}
-
-View DetailsPage(int section) {
-  const ThemeSpec& theme = UseTheme();
-  const NavigationController navigation = UseNavigation();
-  return Column {
-    Text("Details", TextRole::Title),
-    Text::Format("Section: {}", section),
-    Text::Format("Stack depth: {}", navigation.Depth()),
-    Row {
-      Button("Back").OnClick([navigation] { navigation.Pop(); }),
-      Button("Continue").OnClick([navigation] { navigation.Push(FinalPage); }),
+    Flow {
+      Button("Open details").OnClick([navigation] { navigation.Push(FactoryDetailsPage, 2); }),
+      Button("Open routed navigation").OnClick([navigation] { navigation.Push(RoutedNavigationDemo); }),
     }.With(Spacing(theme.spacing.small)),
   }.With(
       Padding(theme.spacing.extra_large),
@@ -132,11 +27,17 @@ View DetailsPage(int section) {
   );
 }
 
-View LibraryPage() {
+View FactoryDetailsPage(int section) {
   const ThemeSpec& theme = UseTheme();
+  const NavigationController navigation = UseNavigation();
   return Column {
-    Text("Library", TextRole::Title),
-    Text("Destination selection is controlled independently from page history."),
+    Text("Factory details", TextRole::Title),
+    Text::Format("Section: {}", section),
+    Text::Format("Stack depth: {}", navigation.Depth()),
+    Flow {
+      Button("Back").OnClick([navigation] { navigation.Pop(); }),
+      Button("Continue").OnClick([navigation] { navigation.Push(FactoryFinalPage); }),
+    }.With(Spacing(theme.spacing.small)),
   }.With(
       Padding(theme.spacing.extra_large),
       Spacing(theme.spacing.medium),
@@ -144,11 +45,16 @@ View LibraryPage() {
   );
 }
 
-View SettingsPage() {
+View FactoryFinalPage() {
   const ThemeSpec& theme = UseTheme();
+  const NavigationController navigation = UseNavigation();
   return Column {
-    Text("Settings", TextRole::Title),
-    Text("Applications decide which content a NavigationBar or NavigationPane selects."),
+    Text("Factory final page", TextRole::Title),
+    Text::Format("Stack depth: {}", navigation.Depth()),
+    Flow {
+      Button("Back to details").OnClick([navigation] { navigation.Pop(); }),
+      Button("Replace page").OnClick([navigation] { navigation.Replace(FactoryReplacementPage); }),
+    }.With(Spacing(theme.spacing.small)),
   }.With(
       Padding(theme.spacing.extra_large),
       Spacing(theme.spacing.medium),
@@ -156,82 +62,140 @@ View SettingsPage() {
   );
 }
 
-View DestinationContent(std::size_t destination) {
-  switch (destination) {
-  case 1:
-    return LibraryPage();
-  case 2:
-    return SettingsPage();
-  default:
-    return NavigationStack(HomePage);
-  }
+View FactoryReplacementPage() {
+  const ThemeSpec& theme = UseTheme();
+  const NavigationController navigation = UseNavigation();
+  return Column {
+    Text("Factory replacement", TextRole::Title),
+    Text("Replace changes the top page without rebuilding the retained prefix."),
+    Button("Back to details").OnClick([navigation] { navigation.Pop(); }),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
 }
 
-View NavigationDemo() {
+View FactoryNavigationDemo() {
+  return NavigationStack(FactoryRootPage);
+}
+
+struct ShelfRoute {
+  int shelf = 0;
+
+  bool operator==(const ShelfRoute&) const = default;
+};
+
+struct ArticleRoute {
+  int article = 0;
+
+  bool operator==(const ArticleRoute&) const = default;
+};
+
+using DemoRoute = std::variant<ShelfRoute, ArticleRoute>;
+
+View RoutedArticleNotesPage(int article) {
   const ThemeSpec& theme = UseTheme();
-  const ViewportClass viewport_class = UseViewportClass();
-  auto destination = UseState<std::size_t>(0);
-  auto start_open = UseState(false);
-  auto end_open = UseState(false);
-
-  const auto destinations = [] {
-    return std::vector<NavigationItem>{
-        NavigationItem(HomeIcon(), "Home"),
-        NavigationItem(LibraryIcon(), "Library"),
-        NavigationItem(SettingsIcon(), "Settings"),
-    };
-  };
-
-  std::optional<View> leading;
-  if (viewport_class == ViewportClass::Compact) {
-    leading = IconButton(MenuIcon(), "Open navigation")
-                  .OnClick([start_open, end_open] {
-                    end_open = false;
-                    start_open = true;
-                  });
-  }
-  std::vector<View> actions;
-  if (viewport_class != ViewportClass::Expanded) {
-    actions.push_back(IconButton(SettingsIcon(), "Open tools").OnClick([start_open, end_open, viewport_class] {
-      if (viewport_class == ViewportClass::Compact) {
-        start_open = false;
-      }
-      end_open = true;
-    }));
-  }
-
-  return DrawerLayout {
-    Column {
-      TopAppBar("Navigation", std::move(leading), std::move(actions)),
-      DestinationContent(destination.Get()).With(Grow()),
-      NavigationBar(destinations(), destination).OnChanged([destination](std::size_t index) {
-        destination = index;
+  const NavigationController local_navigation = UseNavigation();
+  const RouteNavigationController<DemoRoute> route_navigation = UseRootNavigation<DemoRoute>();
+  return Column {
+    Text("Local article notes", TextRole::Title),
+    Text::Format("Article {} owns this nested factory page.", article),
+    Flow {
+      Button("Back to article").OnClick([local_navigation] { local_navigation.Pop(); }),
+      Button("Back to route root").OnClick([route_navigation] {
+        route_navigation.SetPath(NavigationPath<DemoRoute>{});
       }),
-    }.With(Background(theme.colors.background), CrossAlign(CrossAxisAlignment::Stretch)),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
 
-    StartDrawer {
-      Column {
-        Text("Destinations", TextRole::Title).With(Padding(theme.spacing.medium)),
-        NavigationPane(destinations(), destination, true)
-            .OnChanged([destination, start_open](std::size_t index) {
-              destination = index;
-              start_open = false;
-            }),
-      }.With(CrossAlign(CrossAxisAlignment::Stretch))
-    }.Open(start_open).OnOpenChanged([start_open](bool open) { start_open = open; }),
+View RoutedArticleOverviewPage(int article) {
+  const ThemeSpec& theme = UseTheme();
+  const NavigationController local_navigation = UseNavigation();
+  const RouteNavigationController<DemoRoute> route_navigation = UseRootNavigation<DemoRoute>();
+  return Column {
+    Text::Format(TextRole::Title, "Article {}", article),
+    Text::Format("Routed depth: {}", route_navigation.Depth()),
+    Text("This route contains a nested factory stack while retaining access to the outer routed stack."),
+    Flow {
+      Button("Open local notes").OnClick([local_navigation, article] {
+        local_navigation.Push(RoutedArticleNotesPage, article);
+      }),
+      Button("Back to shelf").OnClick([route_navigation] { route_navigation.Pop(); }),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
 
-    EndDrawer {
-      Column {
-        Text("Tools", TextRole::Title),
-        Text("EndDrawer owns app content and follows the same controlled open state."),
-        Button("Close").OnClick([end_open] { end_open = false; }),
-      }.With(Padding(theme.spacing.large), Spacing(theme.spacing.medium))
-    }.Open(end_open).OnOpenChanged([end_open](bool open) { end_open = open; }),
-  };
+View RoutedArticlePage(const ArticleRoute& route) {
+  return NavigationStack(RoutedArticleOverviewPage, route.article);
+}
+
+View RoutedShelfPage(const ShelfRoute& route) {
+  const ThemeSpec& theme = UseTheme();
+  const RouteNavigationController<DemoRoute> navigation = UseNavigation<DemoRoute>();
+  return Column {
+    Text::Format(TextRole::Title, "Shelf {}", route.shelf),
+    Text::Format("Routed depth: {}", navigation.Depth()),
+    Text("Equal route prefixes retain their mounted page state."),
+    Flow {
+      Button("Back").OnClick([navigation] { navigation.Pop(); }),
+      Button("Open article 42").OnClick([navigation] { navigation.Push(ArticleRoute{42}); }),
+      Button("Replace shelf").OnClick([navigation, shelf = route.shelf] {
+        navigation.Replace(ShelfRoute{shelf + 1});
+      }),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+View ResolveDemoRoute(const DemoRoute& route) {
+  if (const auto* shelf = std::get_if<ShelfRoute>(&route)) {
+    return RoutedShelfPage(*shelf);
+  }
+  return RoutedArticlePage(std::get<ArticleRoute>(route));
+}
+
+View RoutedRootPage() {
+  const ThemeSpec& theme = UseTheme();
+  const NavigationController factory_navigation = UseRootNavigation();
+  const RouteNavigationController<DemoRoute> route_navigation = UseNavigation<DemoRoute>();
+  return Column {
+    Text("Typed routed navigation", TextRole::Title),
+    Text("NavigationPath is application-owned history suitable for deep links and restoration."),
+    Text::Format("Routed depth: {}", route_navigation.Depth()),
+    Flow {
+      Button("Back to factory navigation").OnClick([factory_navigation] { factory_navigation.Pop(); }),
+      Button("Push shelf 7").OnClick([route_navigation] { route_navigation.Push(ShelfRoute{7}); }),
+      Button("Open deep path").OnClick([route_navigation] {
+        route_navigation.SetPath(NavigationPath<DemoRoute>{{ShelfRoute{7}, ArticleRoute{42}}});
+      }),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+[[huxerui::scope]] View RoutedNavigationDemo() {
+  auto path = UseState(NavigationPath<DemoRoute>{});
+  return NavigationStack(RoutedRootPage, path, ResolveDemoRoute);
 }
 
 View App() {
-  return MaterialTheme(NavigationDemo);
+  return MaterialTheme(FactoryNavigationDemo);
 }
 
 const Application application{

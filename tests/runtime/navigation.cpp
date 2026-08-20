@@ -14,7 +14,21 @@ int root_page_token = 0;
 std::vector<int> repeated_page_tokens;
 std::optional<NavigationController> outer_navigation;
 std::optional<NavigationController> inner_navigation;
+std::optional<NavigationController> root_navigation;
 std::optional<LayerController> navigation_layers;
+
+struct TestRoute {
+  std::string name;
+
+  bool operator==(const TestRoute&) const = default;
+};
+
+std::optional<RouteNavigationController<TestRoute>> routed_navigation;
+std::optional<RouteNavigationController<TestRoute>> routed_root_navigation;
+std::optional<State<NavigationPath<TestRoute>>> routed_path;
+std::optional<State<int>> routed_resolver_version;
+std::vector<std::pair<std::string, int>> routed_page_tokens;
+int next_routed_page_token = 0;
 
 constexpr Color navigation_bounds_color = Color::Rgb(36, 114, 168);
 
@@ -87,6 +101,23 @@ const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std:
     }
   }
   return nullptr;
+}
+
+int LatestRoutedPageToken(std::string_view name) {
+  const auto found =
+      std::ranges::find_if(routed_page_tokens.rbegin(), routed_page_tokens.rend(), [name](const auto& entry) {
+        return entry.first == name;
+      });
+  return found == routed_page_tokens.rend() ? 0 : found->second;
+}
+
+int UseRoutedPageToken(std::string_view name) {
+  auto token = UseState(++next_routed_page_token);
+  const auto found = std::ranges::find(routed_page_tokens, token.Get(), &std::pair<std::string, int>::second);
+  if (found == routed_page_tokens.end()) {
+    routed_page_tokens.emplace_back(name, token.Get());
+  }
+  return token.Get();
 }
 
 View RootPage() {
@@ -173,7 +204,7 @@ View RepeatedNavigationApp() {
 
 View BoundedNavigationApp() {
   return BoundedNavigationLayout {
-    NavigationStack(RootPage).With(Background(navigation_bounds_color)),
+      NavigationStack(RootPage).With(Background(navigation_bounds_color)),
   };
 }
 
@@ -194,6 +225,7 @@ View ReducedMotionNavigationApp() {
 
 View InnerRootPage() {
   inner_navigation = UseNavigation();
+  root_navigation = UseRootNavigation();
   return Text("Inner root");
 }
 
@@ -216,6 +248,82 @@ View NestedNavigationApp() {
   return NavigationStack(OuterRootPage);
 }
 
+View RoutedRootPage() {
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  return Text("Routed root");
+}
+
+View RoutedDestination(const TestRoute& route) {
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  const int token = UseRoutedPageToken(route.name);
+  return Text("Route " + route.name + " " + std::to_string(token));
+}
+
+View RoutedVersionedDestination(const TestRoute& route, int version) {
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  const int token = UseRoutedPageToken(route.name);
+  return Text("Route " + route.name + " version " + std::to_string(version) + " " + std::to_string(token));
+}
+
+View RoutedNavigationApp() {
+  auto path = UseState(NavigationPath<TestRoute>{});
+  routed_path = path;
+  return NavigationStack(RoutedRootPage, path, RoutedDestination);
+}
+
+View DeepRoutedNavigationApp() {
+  auto path = UseState(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Details"}}});
+  routed_path = path;
+  return NavigationStack(RoutedRootPage, path, RoutedDestination);
+}
+
+View UpdatingRoutedResolverApp() {
+  auto path = UseState(NavigationPath<TestRoute>{{TestRoute{"Article"}}});
+  auto version = UseState(1);
+  routed_path = path;
+  routed_resolver_version = version;
+  const int current_version = version.Get();
+  return NavigationStack(RoutedRootPage, path, [current_version](const TestRoute& route) {
+    return RoutedVersionedDestination(route, current_version);
+  });
+}
+
+View MissingRoutedNavigationApp() {
+  static_cast<void>(UseNavigation<TestRoute>());
+  return Text("unreachable");
+}
+
+View NestedRoutedRootPage() {
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  return Text("Nested routed root");
+}
+
+View NestedRoutedDestination(const TestRoute& route) {
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  return Text("Nested route " + route.name);
+}
+
+View RoutedDestinationWithNestedStack(const TestRoute& route) {
+  if (route.name == "Nested") {
+    auto nested_path = UseState(NavigationPath<TestRoute>{});
+    return NavigationStack(NestedRoutedRootPage, nested_path, NestedRoutedDestination);
+  }
+  routed_navigation = UseNavigation<TestRoute>();
+  routed_root_navigation = UseRootNavigation<TestRoute>();
+  return Text("Outer route " + route.name);
+}
+
+View NestedRoutedNavigationApp() {
+  auto path = UseState(NavigationPath<TestRoute>{});
+  routed_path = path;
+  return NavigationStack(RoutedRootPage, path, RoutedDestinationWithNestedStack);
+}
+
 void ResetNavigationTestState() {
   navigation.reset();
   detail_compositions = 0;
@@ -227,7 +335,14 @@ void ResetNavigationTestState() {
   repeated_page_tokens.clear();
   outer_navigation.reset();
   inner_navigation.reset();
+  root_navigation.reset();
   navigation_layers.reset();
+  routed_navigation.reset();
+  routed_root_navigation.reset();
+  routed_path.reset();
+  routed_resolver_version.reset();
+  routed_page_tokens.clear();
+  next_routed_page_token = 0;
 }
 
 void SettleNavigation(TestPlatform& platform, Runtime& runtime) {
@@ -508,6 +623,239 @@ TEST_CASE("NestedNavigationConsumesBackAtTheDeepestStack") {
   SettleNavigation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "Outer root"));
   REQUIRE(outer_navigation->Depth() == 1);
+}
+
+TEST_CASE("UseRootNavigationTargetsTheOutermostCompatibleFactoryStack") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NestedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(outer_navigation.has_value());
+  outer_navigation->Push(NestedNavigationPage);
+  SettleNavigation(platform, runtime);
+  REQUIRE(inner_navigation.has_value());
+  REQUIRE(root_navigation.has_value());
+
+  root_navigation->Replace(FinalPage);
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Final page"));
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Inner root"));
+}
+
+TEST_CASE("RoutedNavigationKeepsTheControlledPathAuthoritative") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(RoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Routed root"));
+  REQUIRE(routed_navigation.has_value());
+  REQUIRE(routed_path.has_value());
+  REQUIRE(routed_navigation->Depth() == 1);
+
+  routed_navigation->Push(TestRoute{"Article"});
+  REQUIRE(routed_navigation->Depth() == 2);
+  REQUIRE(routed_path->Get() == NavigationPath<TestRoute>{{TestRoute{"Article"}}});
+  SettleNavigation(platform, runtime);
+  const int first_article_token = LatestRoutedPageToken("Article");
+  REQUIRE(first_article_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Article " + std::to_string(first_article_token)));
+
+  routed_navigation->Push(TestRoute{"Article"});
+  SettleNavigation(platform, runtime);
+  REQUIRE(routed_page_tokens.size() == 2);
+  REQUIRE(routed_page_tokens[0].second != routed_page_tokens[1].second);
+
+  REQUIRE(routed_navigation->Pop());
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Article " + std::to_string(first_article_token)));
+
+  routed_navigation->Replace(TestRoute{"Settings"});
+  SettleNavigation(platform, runtime);
+  const int settings_token = LatestRoutedPageToken("Settings");
+  REQUIRE(settings_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Settings " + std::to_string(settings_token)));
+
+  routed_navigation->SetPath(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Details"}}});
+  REQUIRE(routed_navigation->Depth() == 3);
+  SettleNavigation(platform, runtime);
+  const int details_token = LatestRoutedPageToken("Details");
+  REQUIRE(details_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Details " + std::to_string(details_token)));
+  REQUIRE(routed_path->Get() == NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Details"}}});
+
+  REQUIRE(routed_navigation->Pop());
+  SettleNavigation(platform, runtime);
+  const int library_token = LatestRoutedPageToken("Library");
+  REQUIRE(library_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Library " + std::to_string(library_token)));
+}
+
+TEST_CASE("RoutedNavigationReconcilesExternalPathChangesByEqualPrefix") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(RoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(routed_path.has_value());
+
+  *routed_path = NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"First"}}};
+  SettleNavigation(platform, runtime);
+  const int first_token = LatestRoutedPageToken("First");
+  REQUIRE(first_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route First " + std::to_string(first_token)));
+  const int library_token = LatestRoutedPageToken("Library");
+
+  *routed_path = NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Second"}}};
+  SettleNavigation(platform, runtime);
+  const int second_token = LatestRoutedPageToken("Second");
+  REQUIRE(second_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Second " + std::to_string(second_token)));
+  REQUIRE(LatestRoutedPageToken("Library") == library_token);
+  REQUIRE(FindMountedText(*runtime.RootNode(), "Route Library " + std::to_string(library_token)) != nullptr);
+}
+
+TEST_CASE("RoutedNavigationCoalescesPendingPathChangesDuringTransitions") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(RoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  routed_navigation->Push(TestRoute{"First"});
+  runtime.BuildFrame();
+  const int first_token = LatestRoutedPageToken("First");
+  REQUIRE(first_token != 0);
+  routed_navigation->SetPath(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Discarded"}}});
+  runtime.BuildFrame();
+  routed_navigation->SetPath(NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Final"}}});
+  runtime.BuildFrame();
+
+  SettleNavigation(platform, runtime);
+  SettleNavigation(platform, runtime);
+  const int final_token = LatestRoutedPageToken("Final");
+  REQUIRE(final_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Final " + std::to_string(final_token)));
+  REQUIRE(routed_path->Get() == NavigationPath<TestRoute>{{TestRoute{"Library"}, TestRoute{"Final"}}});
+  REQUIRE(LatestRoutedPageToken("Discarded") == 0);
+  REQUIRE(FindMountedText(*runtime.RootNode(), "Route First " + std::to_string(first_token)) == nullptr);
+}
+
+TEST_CASE("RoutedNavigationRefreshesResolverWithoutReplacingEqualRouteEntries") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(UpdatingRoutedResolverApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  runtime.BuildFrame();
+  const int article_token = LatestRoutedPageToken("Article");
+  REQUIRE(article_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Article version 1 " + std::to_string(article_token)));
+  REQUIRE(routed_resolver_version.has_value());
+
+  *routed_resolver_version = 2;
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(ContainsText(updated, "Route Article version 2 " + std::to_string(article_token)));
+  REQUIRE(LatestRoutedPageToken("Article") == article_token);
+}
+
+TEST_CASE("RoutedNavigationCommitsInitialDeepPathsWithoutIntermediateTransitions") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(DeepRoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  const FlattenedScene& initial = runtime.BuildFrame();
+  const int details_token = LatestRoutedPageToken("Details");
+  REQUIRE(details_token != 0);
+  REQUIRE(ContainsText(initial, "Route Details " + std::to_string(details_token)));
+  REQUIRE_FALSE(ContainsText(initial, "Routed root"));
+  REQUIRE(routed_navigation->Depth() == 3);
+}
+
+TEST_CASE("RoutedNavigationPredictiveBackMutatesThePathOnlyOnCommit") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(RoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  routed_navigation->Push(TestRoute{"Article"});
+  SettleNavigation(platform, runtime);
+
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.6F}));
+  REQUIRE(routed_path->Get() == NavigationPath<TestRoute>{{TestRoute{"Article"}}});
+  REQUIRE(runtime.HandleBack({BackPhase::Cancel, 0.0F}));
+  SettleNavigation(platform, runtime);
+  const int article_token = LatestRoutedPageToken("Article");
+  REQUIRE(article_token != 0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Route Article " + std::to_string(article_token)));
+
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.8F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Commit, 1.0F}));
+  REQUIRE(routed_path->Get().Empty());
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Routed root"));
+}
+
+TEST_CASE("RoutedUseRootNavigationSkipsTheNearestCompatibleStack") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NestedRoutedNavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(routed_navigation.has_value());
+
+  routed_navigation->Push(TestRoute{"Nested"});
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Nested routed root"));
+  REQUIRE(routed_navigation.has_value());
+  REQUIRE(routed_root_navigation.has_value());
+
+  routed_navigation->Push(TestRoute{"Inner"});
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Nested route Inner"));
+
+  routed_root_navigation->Push(TestRoute{"Outer"});
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Outer route Outer"));
+  REQUIRE(routed_path->Get() == NavigationPath<TestRoute>{{TestRoute{"Nested"}, TestRoute{"Outer"}}});
+}
+
+TEST_CASE("RoutedNavigationControllersValidateRootReplacementAndDisconnect") {
+  ResetNavigationTestState();
+  const State<NavigationPath<TestRoute>> empty_state;
+  const std::function<View(const TestRoute&)> resolver = RoutedDestination;
+  REQUIRE_THROWS_AS(NavigationStack(std::function<View()>{}, empty_state, resolver), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      NavigationStack(RoutedRootPage, empty_state, std::function<View(const TestRoute&)>{}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(NavigationStack(RoutedRootPage, empty_state, resolver), std::invalid_argument);
+
+  RouteNavigationController<TestRoute> retained;
+  {
+    TestPlatform platform;
+    Runtime runtime(RoutedNavigationApp, platform);
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    runtime.BuildFrame();
+    retained = *routed_navigation;
+    REQUIRE_THROWS_AS(retained.Replace(TestRoute{"Invalid"}), std::logic_error);
+  }
+
+  REQUIRE(retained.Depth() == 0);
+  REQUIRE_FALSE(retained.CanPop());
+  REQUIRE_FALSE(retained.Pop());
+  REQUIRE_THROWS_AS(retained.Push(TestRoute{"Disconnected"}), std::logic_error);
+  REQUIRE_THROWS_AS(retained.SetPath(NavigationPath<TestRoute>{}), std::logic_error);
+
+  TestPlatform platform;
+  Runtime missing_runtime(MissingRoutedNavigationApp, platform);
+  missing_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE_THROWS_AS(missing_runtime.BuildFrame(), std::logic_error);
 }
 
 TEST_CASE("PassThroughLayerContentDoesNotInterceptApplicationBack") {

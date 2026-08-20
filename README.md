@@ -16,7 +16,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Windows, macOS, Linu
 |---|---|---|
 | Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Win32, AppKit, X11, an Emscripten Canvas, Android View, or UIKit while preserving platform services. |
 
-HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationBar, NavigationPane, DrawerLayout, NavigationStack, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
+HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationBar, NavigationPane, DrawerLayout, factory and typed routed NavigationStack flows, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
 ## Quick Start
 
