@@ -4,6 +4,7 @@ project(huxerui_android_example_runner LANGUAGES CXX)
 if (NOT HUXERUI_ROOT_DIR)
     message(FATAL_ERROR "HUXERUI_ROOT_DIR is required")
 endif ()
+file(TO_CMAKE_PATH "${HUXERUI_ROOT_DIR}" HUXERUI_ROOT_DIR)
 find_package(HuxerUI REQUIRED CONFIG)
 
 set(HUXERUI_PROJECT_DIR "${HUXERUI_ROOT_DIR}")
