@@ -1,0 +1,163 @@
+name: SDK Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate tag and version
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          cmake
+          -DSOURCE_DIRECTORY=${{ github.workspace }}
+          -DRELEASE_TAG=${RELEASE_TAG}
+          -DOUTPUT_FILE=${GITHUB_OUTPUT}
+          -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
+
+  build:
+    name: Build ${{ matrix.system }} ${{ matrix.architecture }}
+    needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-15
+            system: macos
+            architecture: arm64
+            generator: TGZ
+            extension: tar.gz
+          - runner: macos-15-intel
+            system: macos
+            architecture: x86_64
+            generator: TGZ
+            extension: tar.gz
+          - runner: windows-2022
+            system: windows
+            architecture: x86_64
+            generator: ZIP
+            extension: zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >-
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_BUILD_CLI=ON
+          -DHUXERUI_BUILD_EXAMPLES=OFF
+          -DHUXERUI_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: >-
+          cpack
+          --config build/CPackConfig.cmake
+          -C Release
+          -G ${{ matrix.generator }}
+          -B release-assets
+      - name: Test packaged Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SDK_ARCHIVE: ${{ github.workspace }}\release-assets\huxerui-sdk-${{ needs.validate.outputs.version }}-windows-x86_64.zip
+          SDK_PREFIX: ${{ runner.temp }}\HuxerUI SDK
+        run: |
+          $oldHome = [Environment]::GetEnvironmentVariable("HUXERUI_HOME", "User")
+          $oldPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          $installer = Join-Path $env:GITHUB_WORKSPACE "install.ps1"
+          $cli = Join-Path $env:SDK_PREFIX "bin\huxerui.exe"
+          try {
+              & pwsh -NoProfile -File $installer -Archive $env:SDK_ARCHIVE -Prefix $env:SDK_PREFIX -Yes
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cli -PathType Leaf)) {
+                  throw "Windows SDK installation failed"
+              }
+              $selectedHome = [Environment]::GetEnvironmentVariable("HUXERUI_HOME", "User")
+              if (-not [string]::Equals($selectedHome, $env:SDK_PREFIX, [System.StringComparison]::OrdinalIgnoreCase)) {
+                  throw "Windows SDK installation did not select HUXERUI_HOME"
+              }
+              $versionOutput = & $cli --version
+              if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^huxerui [0-9]+\.[0-9]+\.[0-9]+$') {
+                  throw "Installed Windows SDK CLI did not run"
+              }
+              & pwsh -NoProfile -File $installer -Uninstall -Prefix $env:SDK_PREFIX -Yes
+              if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $env:SDK_PREFIX)) {
+                  throw "Windows SDK uninstall failed"
+              }
+          } finally {
+              [Environment]::SetEnvironmentVariable("HUXERUI_HOME", $oldHome, "User")
+              [Environment]::SetEnvironmentVariable("Path", $oldPath, "User")
+              if (Test-Path -LiteralPath $env:SDK_PREFIX) {
+                  Remove-Item -LiteralPath $env:SDK_PREFIX -Recurse -Force
+              }
+          }
+      - name: Upload SDK archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-${{ matrix.system }}-${{ matrix.architecture }}
+          path: |
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-${{ matrix.system }}-${{ matrix.architecture }}.${{ matrix.extension }}
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-${{ matrix.system }}-${{ matrix.architecture }}.${{ matrix.extension }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download SDK archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sdk-*
+          path: release-assets
+          merge-multiple: true
+      - name: Add installers
+        run: cp install.sh install.ps1 release-assets/
+      - name: Validate release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          cmake
+          -DSOURCE_DIRECTORY=${{ github.workspace }}
+          -DRELEASE_TAG=${RELEASE_TAG}
+          -DASSET_DIRECTORY=${{ github.workspace }}/release-assets
+          -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          gh release create "${RELEASE_TAG}" release-assets/* \
+            --draft \
+            --generate-notes \
+            --title "HuxerUI ${RELEASE_VERSION}" \
+            --verify-tag
+          gh release edit "${RELEASE_TAG}" --draft=false

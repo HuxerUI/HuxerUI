@@ -363,6 +363,60 @@ if (TARGET huxerui_cli AND (WIN32 OR APPLE))
     )
 endif ()
 
+if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
+    if (WIN32)
+        set(HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY "$ENV{TEMP}")
+    elseif (DEFINED ENV{TMPDIR} AND NOT "$ENV{TMPDIR}" STREQUAL "")
+        set(HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY "$ENV{TMPDIR}")
+    else ()
+        set(HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY "/tmp")
+    endif ()
+    add_test(NAME HuxerUISdkArchiveTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DBUILD_DIRECTORY=${PROJECT_BINARY_DIR}"
+                    "-DBUILD_CONFIG=$<CONFIG>"
+                    "-DWORK_DIRECTORY=${HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY}"
+                    "-DCPACK_COMMAND=${CMAKE_CPACK_COMMAND}"
+                    "-DPACKAGE_FILE_NAME=${HUXERUI_SDK_PACKAGE_FILE_NAME}"
+                    "-DPACKAGE_GENERATOR=${HUXERUI_SDK_PACKAGE_GENERATOR}"
+                    "-DPACKAGE_EXTENSION=${HUXERUI_SDK_PACKAGE_EXTENSION}"
+                    "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
+                    "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+                    "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+                    "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
+                    "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_archive.cmake"
+    )
+    set_tests_properties(HuxerUISdkArchiveTests PROPERTIES RUN_SERIAL TRUE)
+
+    add_test(NAME HuxerUISdkReleaseTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                    "-DWORK_DIRECTORY=${HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY}"
+                    "-DVALIDATOR_PATH=${HUXERUI_PROJECT_DIR}/cmake/ValidateSdkRelease.cmake"
+                    "-DPROJECT_VERSION=${PROJECT_VERSION}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_release.cmake"
+    )
+
+    if (APPLE)
+        add_test(NAME HuxerUISdkInstallerTests
+                COMMAND "${CMAKE_COMMAND}"
+                        "-DBUILD_DIRECTORY=${PROJECT_BINARY_DIR}"
+                        "-DBUILD_CONFIG=$<CONFIG>"
+                        "-DWORK_DIRECTORY=${HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY}"
+                        "-DCPACK_COMMAND=${CMAKE_CPACK_COMMAND}"
+                        "-DPACKAGE_FILE_NAME=${HUXERUI_SDK_PACKAGE_FILE_NAME}"
+                        "-DPACKAGE_GENERATOR=${HUXERUI_SDK_PACKAGE_GENERATOR}"
+                        "-DPACKAGE_EXTENSION=${HUXERUI_SDK_PACKAGE_EXTENSION}"
+                        "-DINSTALLER_PATH=${HUXERUI_PROJECT_DIR}/install.sh"
+                        "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
+                        "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_installer.cmake"
+        )
+        set_tests_properties(HuxerUISdkInstallerTests PROPERTIES RUN_SERIAL TRUE)
+    endif ()
+endif ()
+
 add_executable(huxerui_module_tests
         tests_main.cpp
         runtime/modules.cpp

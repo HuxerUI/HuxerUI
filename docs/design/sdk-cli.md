@@ -15,9 +15,12 @@ The current implementation provides:
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, ordered resource packages, common module scaffolding, an application-based module preview, Android Gradle library attachment, and iOS Swift Package aggregation and attachment.
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
+- Versioned Windows and macOS SDK archives with canonical names, SHA-256 checksums, the project license, and only the matching host tools.
+- SDK-only macOS shell and Windows PowerShell installers with custom prefixes, checksum verification, environment selection, repeatable upgrades, and owned uninstall behavior.
+- Tag-driven SDK release automation that validates the project version, builds every supported host archive, verifies the complete asset set, and publishes through the official repository.
 
-Versioned SDK distribution and installers, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Linux, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Apple `CVPixelBuffer`, Windows and Linux RGBA/BGRA, WebCodecs `VideoFrame`, and Android `Bitmap` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, Windows child-HWND hosting with single-surface DirectComposition, macOS NSView hosting, Web HTMLElement hosting with retained Canvas slices, Android View hosting with slice composition, iOS UIView hosting, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Windows, macOS, Linux, Web, Android, and iOS nonvisual timer reference integrations are implemented.
-The current Linux, Web, and Android CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, but versioned distribution archives, relocatable Linux dependencies, and export automation are not implemented.
+Native installers, external environment setup, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Linux, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Apple `CVPixelBuffer`, Windows and Linux RGBA/BGRA, WebCodecs `VideoFrame`, and Android `Bitmap` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, Windows child-HWND hosting with single-surface DirectComposition, macOS NSView hosting, Web HTMLElement hosting with retained Canvas slices, Android View hosting with slice composition, iOS UIView hosting, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Windows, macOS, Linux, Web, Android, and iOS nonvisual timer reference integrations are implemented.
+The current Linux, Web, and Android CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, while relocatable Linux dependencies and export automation are not implemented.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
 Where the current source-oriented CLI differs, this document identifies the transitional behavior explicitly instead of preserving it as a second architecture.
@@ -32,6 +35,8 @@ Where the current source-oriented CLI differs, this document identifies the tran
 - The CLI orchestrates CMake and platform tools; it does not replace Gradle, Xcode, Emscripten, or another platform build system.
 - Platform drivers are private CLI implementation, not a public plugin ABI.
 - A formal release provides one versioned HuxerUI SDK whose layout keeps host-executed tools distinct from target libraries without exposing separate SDK products.
+- SDK installers install and select only the HuxerUI SDK; they do not acquire external platform toolchains.
+- `huxerui setup` may acquire missing external platform prerequisites, while `huxerui doctor` remains the shared read-only source of environment diagnostics.
 - Source checkout use is an override of the same SDK contract, not a separate integration model.
 - HuxerUI built-in resources, module resources, and application resources produce one ordered final `resources.bin` per application.
 - Generated module topology contains only ordered module targets and resolved source roots; it never mirrors platform configuration.
@@ -51,6 +56,7 @@ HuxerUI CLI
   project and shell creation
   SDK and tool discovery
   platform validation
+  explicit external environment setup
   platform build and launch orchestration
 
 HuxerUI SDK
@@ -268,6 +274,28 @@ Inside a project it also validates required common files, unknown platform direc
 
 Checks are scoped to requested platforms.
 A missing Android toolchain does not make a Windows-only diagnostic fail.
+Host environment diagnosis and project-shell diagnosis remain separate operations even when one `doctor` invocation reports both.
+Environment diagnosis owns tool discovery, versions, executable paths, licenses, and actionable remediation; project diagnosis owns repository structure and generated or source-controlled shell validity.
+The same environment diagnosis is reused by `setup` before and after any installation, so the two commands cannot disagree about readiness.
+
+### Setup (proposed)
+
+```text
+huxerui setup <platform-list> [--yes]
+```
+
+`setup` installs or configures missing external prerequisites for an explicitly requested comma-separated platform list.
+It never defaults to every platform; a user who wants that scope must pass `all` explicitly.
+The command first runs the same read-only environment diagnosis as `doctor`, prints the exact planned changes and their owning package managers or official distribution channels, and requests confirmation unless `--yes` is present.
+It is idempotent: satisfied requirements remain untouched, and a successful run ends by repeating diagnosis for every requested platform.
+
+Platform prerequisites continue to use their official ownership mechanisms.
+For example, Android SDK and NDK components use Android tooling, Web requirements use the Emscripten toolchain's supported installation path, and Windows requirements use supported Microsoft installers or package sources.
+Dependencies that require manual interaction, account acceptance, platform licensing, or system UI are opened or reported with an actionable official path instead of being simulated by the CLI.
+`setup` reports the environment as incomplete until the corresponding `doctor` checks pass.
+
+`setup` does not install, select, upgrade, or remove HuxerUI itself.
+That remains the responsibility of the SDK installer and avoids a recursive dependency in which the installed CLI owns its own installation.
 
 ### Devices
 
@@ -359,6 +387,28 @@ The implementation phases replace these restrictions rather than preserving them
 ### Installers
 
 The canonical install rules produce one relocatable SDK tree, and thin platform installers place that tree, expose its `bin` directory, and remove only state they own during uninstall.
+The repository provides `install.sh` for published macOS archives and `install.ps1` for Windows archives.
+These scripts install a selected HuxerUI SDK release, persist `HUXERUI_HOME`, expose `HUXERUI_HOME/bin` on `PATH`, and support repeatable upgrade or uninstall without modifying unrelated profile content.
+They may download and verify an official HuxerUI SDK archive, but they never download a compiler, CMake, Java, Android SDK or NDK, Emscripten, Xcode, Visual Studio, signing identity, or another platform prerequisite.
+Native packages may later provide the same SDK-only behavior through operating-system installation mechanisms.
+
+```text
+install.sh [--version <version>] [--prefix <path>] [--profile <path>] [--archive <path>] [--yes]
+install.sh --uninstall [--prefix <path>] [--profile <path>] [--yes]
+
+install.ps1 [-Version <version>] [-Prefix <path>] [-Archive <path>] [-Yes]
+install.ps1 -Uninstall [-Prefix <path>] [-Yes]
+```
+
+Without an explicit version, an installer resolves the latest release from `https://github.com/HuxerUI/HuxerUI`.
+An explicit archive enables offline installation and tests but still requires its adjacent CPack-generated `.sha256` file.
+macOS defaults to `~/Library/Developer/HuxerUI`, Windows defaults to `%LOCALAPPDATA%\HuxerUI`, and an explicit prefix replaces that default without changing the SDK layout.
+Publication uses a sibling staging directory and preserves the prior valid SDK until the new SDK and environment selection succeed.
+Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
+A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
+The release workflow builds macOS arm64, macOS x86_64, and Windows x86_64 independently, runs each host's complete configured tests, and transfers only the expected archives and checksums to the publication job.
+That job adds both installer entry points, verifies the exact asset set and every checksum, creates a draft GitHub Release, and makes it public only after all assets upload successfully.
+An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
 The planned release forms are:
 
 - A signed Windows MSI, installed under `C:\Program Files\HuxerUI` by default, which sets `HUXERUI_HOME`, adds `%HUXERUI_HOME%\bin` to `Path`, and broadcasts the environment change.
@@ -367,7 +417,7 @@ The planned release forms are:
 
 CMake install rules are the single file-layout source of truth.
 CPack may wrap those rules with WiX, productbuild, DEB, RPM, and portable archive generators, while signing, notarization, and release publication remain CI responsibilities.
-Installers do not edit application projects, download platform toolchains, or silently select an Android SDK, NDK, Xcode installation, compiler, or signing identity.
+Installers do not edit application projects, run `huxerui setup`, download platform toolchains, or silently select an Android SDK, NDK, Xcode installation, compiler, or signing identity.
 
 ### Built-in resources
 
@@ -398,13 +448,16 @@ A driver owns:
 
 - Its stable platform identifier.
 - Current-host capability.
-- Required tools and shell diagnostics.
+- Required tools, host environment diagnosis, and shell diagnostics.
+- Proposed setup planning and execution for the platform prerequisites it owns.
 - Source-controlled shell templates.
 - Build and run command construction.
 - Optional device discovery.
 
 The interface deliberately contains only capabilities implemented by the current command surface.
-Package, clean, signing, and artifact collection operations should be added when those commands exist rather than anticipated as empty virtual methods.
+Setup capabilities are added with the `setup` command rather than through a parallel environment-provider hierarchy.
+Shared CLI code coordinates confirmation, process execution, and final diagnosis, while each existing driver owns platform-specific requirements and official installation commands.
+Package, clean, signing, and artifact collection operations should likewise be added when those commands exist rather than anticipated as empty virtual methods.
 
 The current registry contains Windows, macOS, Linux, Web, Android, and iOS.
 The registry and shared command helpers remain in the CLI platform core, while each driver implementation owns one platform-specific source file.
@@ -768,14 +821,20 @@ The architecture is implemented through reviewable phases that keep generated pr
 - Documentation has replaced the source-SDK-oriented architecture with the single-SDK home, installer, resource, root-CMake, and module-graph contracts.
 - Platform build ownership has removed the Android configuration projection and platform wrapper CMake project, lets Gradle configure the application root directly, and reduces generated platform module data to `modules.json`.
 - Formal SDK home selection now provides `HUXERUI_HOME`, relocatable Windows and macOS installation validation, CLI self-discovery and child-process propagation, resource validation, and the same canonical public targets for installed and source use.
-- Future installer packaging will wrap the canonical install tree for Windows, macOS, and Linux, while platform releases will publish desktop, Web, Android, and Apple artifacts without adding another common package hierarchy.
 - Platform completion lets Linux CLI applications and modules use the root CMake graph directly and projects the module graph into the iOS Swift package aggregator without broadening the common metadata contract.
+- SDK packaging now produces versioned Windows and macOS archives and checksums around the canonical install tree, installs the project license, and excludes tools for unrelated hosts and architectures.
+- SDK-only `install.sh` and `install.ps1` entry points now verify local or downloaded archives, support custom prefixes, update only their owned environment state, and roll back failed upgrades.
+- SDK distribution now validates version tags, builds macOS arm64, macOS x86_64, and Windows x86_64 archives independently, and publishes the complete verified asset set through a draft-first official GitHub Release.
+- Environment diagnosis then factors the existing `doctor` checks into reusable common and per-driver results without changing its read-only public behavior.
+- The `setup` command then adds shared planning, confirmation, `--yes`, execution, and post-install diagnosis around those results without introducing another provider abstraction.
+- Platform setup implementations then cover Android, Web, Apple, Windows, and Linux in reviewable host-specific phases, using official acquisition paths and retaining explicit manual completion where automation is unavailable.
+- Native installer packaging may subsequently wrap the same SDK tree for Windows, macOS, and Linux, while platform releases publish desktop, Web, Android, and Apple artifacts without adding another common package hierarchy.
 
 Each phase ends with its focused tests, a current-host build, packaging validation where applicable, `git diff --check`, and an owner review before the next phase begins.
 
 ## Future commands and platforms
 
-`package`, `clean`, versioned SDK installers, and artifact collection remain future work.
+`package`, `clean`, environment setup, and artifact collection remain future work.
 They should extend the existing ownership model:
 
 - `package` invokes the source-controlled platform shell's release path and collects user-facing output under `dist`.
@@ -793,6 +852,9 @@ No future command may silently skip an explicitly requested platform or claim an
 - Platform process failures retain their command and exit code without hiding platform logs.
 - Process invocation passes argument arrays and does not route ordinary commands through a shell.
 - Windows batch tools are handled explicitly and reject unsafe expansion characters.
+- `setup` displays every intended external change before execution unless the user explicitly supplies `--yes`.
+- `setup` uses official package sources or platform tools, preserves their diagnostics, and never reports success before the shared read-only checks pass.
+- Manual installers, license acceptance, account login, signing, and other interactive platform requirements remain visible incomplete actions rather than inferred success.
 - Generated metadata contains no credentials or signing keys.
 - Git modules must use full commit SHA revisions for reproducible builds.
 - A clean checkout plus the selected SDK and platform toolchains reproduces generated integration metadata.
@@ -805,11 +867,16 @@ The current workflow is covered by:
 - CLI Android shell tests for root-CMake configuration, Gradle-owned platform values, source SDK selection, module attachment, and application launch identity.
 - CMake module validation for URL policy, full commit revisions, unambiguous origins, predeclared targets, ordered module graph roots and resources, and explicit runtime Root Service installation.
 - Installed Windows and macOS consumer tests that install the SDK, run the installed CLI, create a project, and build it without source-tree lookup.
+- SDK archive tests that verify checksums, the canonical extracted layout, host-tool isolation, and executable-relative CLI discovery.
+- macOS installer tests that cover custom paths, profile preservation, repeat installation, failed-upgrade rollback, invalid checksums, unrelated directories, and uninstall.
+- SDK release tests that reject invalid version tags, incomplete or unexpected asset sets, and mismatched archive checksums before publication.
 - Existing common, header, code-generation, platform, and example builds.
 
 Platform work must additionally validate every affected platform toolchain available on the development host and report unavailable platforms explicitly.
 The Android migration must verify that Gradle configures the root CMake project directly and that no SDK, NDK, ABI, identifier, or dependency policy is copied through generated CMake metadata.
 Formal SDK validation must install a relocatable SDK, resolve it through both executable location and `HUXERUI_HOME`, build a clean generated consumer, merge the matching built-in resource package, exercise the source override through the same public targets, and inspect each available installer without mutating unrelated environment state.
+Installer tests must use isolated installation prefixes and environment/profile fixtures, and verify that uninstall removes only installer-owned files and entries.
+Setup tests must use controlled tool discovery and process execution fixtures, verify plan and confirmation behavior, and prove that post-install success is derived from the same diagnostics as `doctor` rather than from command exit status alone.
 
 ## Invariants
 

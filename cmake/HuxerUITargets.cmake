@@ -226,27 +226,34 @@ function(huxerui_configure_targets)
     set(HUXERUI_BUILTIN_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" PARENT_SCOPE)
 endfunction()
 
-function(huxerui_resolve_host_tool tool_name output_variable)
-    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" HUXERUI_HOST_SYSTEM)
-    if (HUXERUI_HOST_SYSTEM STREQUAL "darwin")
-        set(HUXERUI_HOST_SYSTEM "macos")
-    elseif (NOT HUXERUI_HOST_SYSTEM STREQUAL "windows"
-            AND NOT HUXERUI_HOST_SYSTEM STREQUAL "linux")
+function(_huxerui_resolve_host output_system output_architecture)
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" host_system)
+    if (host_system STREQUAL "darwin")
+        set(host_system "macos")
+    elseif (NOT host_system STREQUAL "windows"
+            AND NOT host_system STREQUAL "linux")
         message(FATAL_ERROR
                 "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_NAME}"
         )
     endif ()
 
-    string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" HUXERUI_HOST_ARCHITECTURE)
-    if (HUXERUI_HOST_ARCHITECTURE MATCHES "^(amd64|x64|x86_64)$")
-        set(HUXERUI_HOST_ARCHITECTURE "x86_64")
-    elseif (HUXERUI_HOST_ARCHITECTURE MATCHES "^(aarch64|arm64)$")
-        set(HUXERUI_HOST_ARCHITECTURE "arm64")
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" host_architecture)
+    if (host_architecture MATCHES "^(amd64|x64|x86_64)$")
+        set(host_architecture "x86_64")
+    elseif (host_architecture MATCHES "^(aarch64|arm64)$")
+        set(host_architecture "arm64")
     else ()
         message(FATAL_ERROR
                 "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_PROCESSOR}"
         )
     endif ()
+
+    set(${output_system} "${host_system}" PARENT_SCOPE)
+    set(${output_architecture} "${host_architecture}" PARENT_SCOPE)
+endfunction()
+
+function(huxerui_resolve_host_tool tool_name output_variable)
+    _huxerui_resolve_host(HUXERUI_HOST_SYSTEM HUXERUI_HOST_ARCHITECTURE)
 
     set(HUXERUI_HOST_TOOL_SUFFIX)
     if (HUXERUI_HOST_SYSTEM STREQUAL "windows")
