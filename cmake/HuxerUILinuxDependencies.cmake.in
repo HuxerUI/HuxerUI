@@ -1,0 +1,42 @@
+include(CMakeFindDependencyMacro)
+
+if (TARGET HuxerUI::linux_dependencies)
+    return()
+endif ()
+
+find_dependency(PkgConfig)
+pkg_check_modules(HUXERUI_SDK_X11 REQUIRED IMPORTED_TARGET x11)
+pkg_check_modules(HUXERUI_SDK_XEXT REQUIRED IMPORTED_TARGET xext)
+pkg_check_modules(HUXERUI_SDK_XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+pkg_check_modules(HUXERUI_SDK_XRANDR REQUIRED IMPORTED_TARGET xrandr)
+pkg_check_modules(HUXERUI_SDK_EGL REQUIRED IMPORTED_TARGET egl)
+pkg_check_modules(HUXERUI_SDK_GLES2 REQUIRED IMPORTED_TARGET glesv2)
+pkg_check_modules(HUXERUI_SDK_GIO REQUIRED IMPORTED_TARGET gio-2.0)
+pkg_check_modules(HUXERUI_SDK_LIBSOUP REQUIRED IMPORTED_TARGET libsoup-3.0>=3.0)
+
+set(_HUXERUI_LINUX_DEPENDENCIES)
+foreach (_HUXERUI_LINUX_ARCHIVE IN ITEMS cairo fontconfig harfbuzz freetype png16 jpeg expat z pixman-1)
+    string(REPLACE "-" "_" _HUXERUI_LINUX_TARGET "${_HUXERUI_LINUX_ARCHIVE}")
+    set(_HUXERUI_LINUX_TARGET "HuxerUI::linux_${_HUXERUI_LINUX_TARGET}")
+    add_library("${_HUXERUI_LINUX_TARGET}" STATIC IMPORTED)
+    set_target_properties("${_HUXERUI_LINUX_TARGET}" PROPERTIES
+            IMPORTED_LOCATION
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/huxerui/deps/lib${_HUXERUI_LINUX_ARCHIVE}.a"
+    )
+    list(APPEND _HUXERUI_LINUX_DEPENDENCIES "${_HUXERUI_LINUX_TARGET}")
+endforeach ()
+
+if (@HUXERUI_LINUX_FCITX5_ENABLED@)
+    pkg_check_modules(HUXERUI_SDK_FCITX5_GCLIENT REQUIRED IMPORTED_TARGET Fcitx5GClient)
+    list(APPEND _HUXERUI_LINUX_DEPENDENCIES PkgConfig::HUXERUI_SDK_FCITX5_GCLIENT)
+endif ()
+
+add_library(HuxerUI::linux_dependencies INTERFACE IMPORTED)
+set_target_properties(HuxerUI::linux_dependencies PROPERTIES
+        INTERFACE_LINK_LIBRARIES
+        "${_HUXERUI_LINUX_DEPENDENCIES};m;pthread;dl;PkgConfig::HUXERUI_SDK_X11;PkgConfig::HUXERUI_SDK_XEXT;PkgConfig::HUXERUI_SDK_XKBCOMMON;PkgConfig::HUXERUI_SDK_XRANDR;PkgConfig::HUXERUI_SDK_EGL;PkgConfig::HUXERUI_SDK_GLES2;PkgConfig::HUXERUI_SDK_GIO;PkgConfig::HUXERUI_SDK_LIBSOUP"
+)
+
+unset(_HUXERUI_LINUX_ARCHIVE)
+unset(_HUXERUI_LINUX_DEPENDENCIES)
+unset(_HUXERUI_LINUX_TARGET)

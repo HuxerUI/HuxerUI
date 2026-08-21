@@ -1,3 +1,4 @@
+include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 
 # Platform APIs stay system dynamic libraries. The graphics/text stack is
@@ -19,14 +20,17 @@ if (NOT TARGET PkgConfig::HUXERUI_LIBSOUP)
 endif ()
 pkg_check_modules(HUXERUI_FCITX5_GCLIENT QUIET IMPORTED_TARGET Fcitx5GClient)
 
+set(HUXERUI_LINUX_FCITX5_ENABLED FALSE)
 if (TARGET PkgConfig::HUXERUI_FCITX5_GCLIENT)
+    set(HUXERUI_LINUX_FCITX5_ENABLED TRUE)
     list(APPEND HUXERUI_PLATFORM_COMPILE_DEFINITIONS HUXERUI_HAS_FCITX5_GCLIENT=1)
 endif ()
 
 include(FetchContent)
 include(ExternalProject)
 
-# Official CMake projects are added with FetchContent_MakeAvailable.
+# Official CMake projects are added with EXCLUDE_FROM_ALL so their upstream
+# install rules do not leak unrelated files into the SDK.
 FetchContent_Declare(zlib GIT_REPOSITORY https://github.com/madler/zlib.git GIT_TAG v1.3.2 GIT_SHALLOW TRUE)
 # libexpat keeps its CMakeLists.txt in an expat/ subdirectory.
 FetchContent_Declare(expat
@@ -103,10 +107,31 @@ set(HB_BUILD_VECTOR OFF CACHE BOOL "" FORCE)
 set(HB_BUILD_GPU OFF CACHE BOOL "" FORCE)
 
 # libpng resolves zlib through FindZLIB; hand the module the fetched build.
-FetchContent_MakeAvailable(zlib)
+if (POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif ()
+FetchContent_GetProperties(zlib)
+if (NOT zlib_POPULATED)
+    FetchContent_Populate(zlib)
+    add_subdirectory("${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}" EXCLUDE_FROM_ALL)
+endif ()
 set(ZLIB_LIBRARY "${zlib_BINARY_DIR}/libz.a" CACHE FILEPATH "" FORCE)
 set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE PATH "" FORCE)
-FetchContent_MakeAvailable(expat libpng freetype harfbuzz)
+foreach (HUXERUI_FETCHED_CMAKE_DEPENDENCY IN ITEMS expat libpng freetype harfbuzz)
+    FetchContent_GetProperties(${HUXERUI_FETCHED_CMAKE_DEPENDENCY})
+    if (NOT ${HUXERUI_FETCHED_CMAKE_DEPENDENCY}_POPULATED)
+        FetchContent_Populate(${HUXERUI_FETCHED_CMAKE_DEPENDENCY})
+        if (HUXERUI_FETCHED_CMAKE_DEPENDENCY STREQUAL "expat")
+            add_subdirectory("${expat_SOURCE_DIR}/expat" "${expat_BINARY_DIR}" EXCLUDE_FROM_ALL)
+        else ()
+            add_subdirectory(
+                    "${${HUXERUI_FETCHED_CMAKE_DEPENDENCY}_SOURCE_DIR}"
+                    "${${HUXERUI_FETCHED_CMAKE_DEPENDENCY}_BINARY_DIR}"
+                    EXCLUDE_FROM_ALL
+            )
+        endif ()
+    endif ()
+endforeach ()
 # libpng appends a Debug postfix to its archive name. The fetched
 # libraries build as Release, but the staging target records their
 # outputs through the parent build type, so the postfix would leave a
@@ -164,12 +189,17 @@ add_custom_target(huxerui_linux_stage_cmake_deps
         COMMAND ${CMAKE_COMMAND} --install "${libpng_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} --install "${freetype_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} --install "${harfbuzz_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HUXERUI_LINUX_STAGE}/include/harfbuzz"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${harfbuzz_SOURCE_DIR}/src/hb-ft.h"
+                "${HUXERUI_LINUX_STAGE}/include/harfbuzz/hb-ft.h"
         BYPRODUCTS
                 "${HUXERUI_LINUX_STAGE}/lib/libz.a"
                 "${HUXERUI_LINUX_STAGE}/lib/libexpat.a"
                 "${HUXERUI_LINUX_STAGE}/lib/libpng16.a"
                 "${HUXERUI_LINUX_STAGE}/lib/libfreetype.a"
                 "${HUXERUI_LINUX_STAGE}/lib/libharfbuzz.a"
+                "${HUXERUI_LINUX_STAGE}/include/harfbuzz/hb-ft.h"
         DEPENDS zlibstatic expat png_static freetype harfbuzz
 )
 
@@ -236,11 +266,25 @@ ExternalProject_Add(huxerui_fontconfig
                 --buildtype=release --default-library=static --wrap-mode=nodownload
                 -Ddoc=disabled -Dtools=disabled -Dtests=disabled
                 -Dnls=disabled -Dcache-build=disabled -Dxml-backend=expat
+                -Dbaseconfig-dir=/etc/fonts -Dconfig-dir=/etc/fonts/conf.d
+                -Dtemplate-dir=/usr/share/fontconfig/conf.avail
+                -Dcache-dir=/var/cache/fontconfig -Dxml-dir=/usr/share/xml/fontconfig
                 -Dprefix=${HUXERUI_LINUX_STAGE} -Dlibdir=lib -Db_staticpic=true
                 ${HUXERUI_MESON_CROSS_ARGS}
                 <BINARY_DIR> <SOURCE_DIR>
         BUILD_COMMAND ${HUXERUI_MESON_PKGCONFIG_ENV} ${HUXERUI_MESON} compile -C <BINARY_DIR>
-        INSTALL_COMMAND ${HUXERUI_MESON_PKGCONFIG_ENV} ${HUXERUI_MESON} install -C <BINARY_DIR>
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E env
+                "DESTDIR=${CMAKE_CURRENT_BINARY_DIR}/fontconfig-install-root"
+                ${HUXERUI_MESON_PKGCONFIG_ENV} ${HUXERUI_MESON} install -C <BINARY_DIR>
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_BINARY_DIR}/fontconfig-install-root${HUXERUI_LINUX_STAGE}/include/fontconfig"
+                "${HUXERUI_LINUX_STAGE}/include/fontconfig"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/fontconfig-install-root${HUXERUI_LINUX_STAGE}/lib/libfontconfig.a"
+                "${HUXERUI_LINUX_STAGE}/lib/libfontconfig.a"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/fontconfig-install-root${HUXERUI_LINUX_STAGE}/lib/pkgconfig/fontconfig.pc"
+                "${HUXERUI_LINUX_STAGE}/lib/pkgconfig/fontconfig.pc"
         BUILD_BYPRODUCTS "${HUXERUI_LINUX_STAGE}/lib/libfontconfig.a"
         DEPENDS huxerui_linux_stage_cmake_deps
 )
@@ -269,6 +313,26 @@ add_custom_target(huxerui_linux_deps
 # The core object library is created after platform configuration; defer
 # the dependency until the directory has finished configuring.
 cmake_language(DEFER CALL add_dependencies huxerui_core_objects huxerui_linux_deps)
+
+foreach (HUXERUI_LINUX_ARCHIVE IN ITEMS cairo fontconfig harfbuzz freetype png16 jpeg expat z pixman-1)
+    install(FILES "${HUXERUI_LINUX_STAGE}/lib/lib${HUXERUI_LINUX_ARCHIVE}.a"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
+endforeach ()
+install(FILES "${zlib_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/zlib")
+install(FILES "${expat_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/expat")
+install(FILES "${libpng_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libpng")
+install(FILES "${libjpeg-turbo_SOURCE_DIR}/LICENSE.md"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libjpeg-turbo")
+install(FILES "${freetype_SOURCE_DIR}/LICENSE.TXT" "${freetype_SOURCE_DIR}/docs/FTL.TXT"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/freetype")
+install(FILES "${harfbuzz_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/harfbuzz")
+install(FILES "${pixman_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/pixman")
+install(FILES "${fontconfig_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/fontconfig")
+install(FILES
+        "${cairo_SOURCE_DIR}/COPYING"
+        "${cairo_SOURCE_DIR}/COPYING-LGPL-2.1"
+        "${cairo_SOURCE_DIR}/COPYING-MPL-1.1"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/cairo")
 
 set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
