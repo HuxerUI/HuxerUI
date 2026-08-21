@@ -1,3 +1,6 @@
+// CMake before 4.1 can mistake the Windows SDK GUID equality operator for a DLL export named "==".
+#define _NO_SYS_GUID_OPERATOR_EQ_
+
 #include "win32_accessibility.h"
 
 #include <oleauto.h>
@@ -633,29 +636,30 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::QueryInterface(REFIID iid, void
     return E_INVALIDARG;
   }
   *object = nullptr;
-  if (iid == __uuidof(IUnknown) || iid == __uuidof(IRawElementProviderSimple)) {
+  if (IsEqualIID(iid, __uuidof(IUnknown)) || IsEqualIID(iid, __uuidof(IRawElementProviderSimple))) {
     *object = static_cast<IRawElementProviderSimple*>(this);
-  } else if (iid == __uuidof(IRawElementProviderFragment)) {
+  } else if (IsEqualIID(iid, __uuidof(IRawElementProviderFragment))) {
     *object = static_cast<IRawElementProviderFragment*>(this);
-  } else if (iid == __uuidof(IRawElementProviderFragmentRoot) && HasInterface(interfaces_, kFragmentRootInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IRawElementProviderFragmentRoot)) &&
+             HasInterface(interfaces_, kFragmentRootInterface)) {
     *object = static_cast<IRawElementProviderFragmentRoot*>(this);
-  } else if (iid == __uuidof(IInvokeProvider) && HasInterface(interfaces_, kInvokeInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IInvokeProvider)) && HasInterface(interfaces_, kInvokeInterface)) {
     *object = static_cast<IInvokeProvider*>(this);
-  } else if (iid == __uuidof(IToggleProvider) && HasInterface(interfaces_, kToggleInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IToggleProvider)) && HasInterface(interfaces_, kToggleInterface)) {
     *object = static_cast<IToggleProvider*>(this);
-  } else if (iid == __uuidof(IValueProvider) && HasInterface(interfaces_, kValueInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IValueProvider)) && HasInterface(interfaces_, kValueInterface)) {
     *object = static_cast<IValueProvider*>(this);
-  } else if (iid == __uuidof(IRangeValueProvider) && HasInterface(interfaces_, kRangeValueInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IRangeValueProvider)) && HasInterface(interfaces_, kRangeValueInterface)) {
     *object = static_cast<IRangeValueProvider*>(this);
-  } else if (iid == __uuidof(ISelectionItemProvider) && HasInterface(interfaces_, kSelectionItemInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(ISelectionItemProvider)) && HasInterface(interfaces_, kSelectionItemInterface)) {
     *object = static_cast<ISelectionItemProvider*>(this);
-  } else if (iid == __uuidof(ISelectionProvider) && HasInterface(interfaces_, kSelectionInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(ISelectionProvider)) && HasInterface(interfaces_, kSelectionInterface)) {
     *object = static_cast<ISelectionProvider*>(this);
-  } else if (iid == __uuidof(IExpandCollapseProvider) && HasInterface(interfaces_, kExpandCollapseInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IExpandCollapseProvider)) && HasInterface(interfaces_, kExpandCollapseInterface)) {
     *object = static_cast<IExpandCollapseProvider*>(this);
-  } else if (iid == __uuidof(IScrollItemProvider) && HasInterface(interfaces_, kScrollItemInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IScrollItemProvider)) && HasInterface(interfaces_, kScrollItemInterface)) {
     *object = static_cast<IScrollItemProvider*>(this);
-  } else if (iid == __uuidof(IScrollProvider) && HasInterface(interfaces_, kScrollInterface)) {
+  } else if (IsEqualIID(iid, __uuidof(IScrollProvider)) && HasInterface(interfaces_, kScrollInterface)) {
     *object = static_cast<IScrollProvider*>(this);
   }
   if (*object == nullptr) {

@@ -425,6 +425,8 @@ Publication uses a sibling staging directory and preserves the prior valid SDK u
 Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
 A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
 The release workflow first builds the reusable Android and Web target artifacts, then builds macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 SDK archives independently, runs each host's configured tests, and transfers only the expected archives and checksums to the publication job.
+Repository-local `scripts/package_sdk.ps1` and `scripts/package_sdk.sh` provide the corresponding one-command developer workflow.
+They always build Android and Web artifacts internally before packaging the current host SDK; intermediate artifact paths are implementation details rather than public parameters.
 That job adds both installer entry points, verifies the exact asset set and every checksum, creates or reuses the tag's GitHub Release as a draft, and makes it public only after all assets upload successfully.
 An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
 The planned release forms are:

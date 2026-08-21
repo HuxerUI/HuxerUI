@@ -366,6 +366,23 @@ if (TARGET huxerui_cli AND (WIN32 OR APPLE OR (UNIX AND NOT APPLE AND NOT EMSCRI
     )
 endif ()
 
+if (WIN32)
+    find_program(HUXERUI_POWERSHELL_COMMAND NAMES pwsh powershell)
+    if (HUXERUI_POWERSHELL_COMMAND)
+        add_test(NAME HuxerUISdkPackageScriptTests
+                COMMAND "${HUXERUI_POWERSHELL_COMMAND}"
+                        -NoProfile
+                        -ExecutionPolicy Bypass
+                        -File "${HUXERUI_PROJECT_DIR}/scripts/package_sdk.ps1"
+                        -Help
+        )
+    endif ()
+elseif (UNIX AND NOT EMSCRIPTEN)
+    add_test(NAME HuxerUISdkPackageScriptTests
+            COMMAND sh "${HUXERUI_PROJECT_DIR}/scripts/package_sdk.sh" --help
+    )
+endif ()
+
 if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
     if (WIN32)
         set(HUXERUI_SDK_ARCHIVE_WORK_DIRECTORY "$ENV{TEMP}")

@@ -108,6 +108,18 @@ Each SDK includes Android Java and ABI artifacts plus the pinned Emscripten Web 
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
 The distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
 
+Build a complete SDK archive for the current host, including Android and Web target artifacts, with the repository packaging script:
+
+```powershell
+.\scripts\package_sdk.ps1
+```
+
+```bash
+sh scripts/package_sdk.sh
+```
+
+The scripts require the current platform toolchain, Android SDK and NDK, Java, and the pinned Emscripten version.
+
 See [Getting Started](docs/getting-started.md) for application setup, platform builds, CMake options, code generation, and example launch commands.
 
 ## Platform Support

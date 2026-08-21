@@ -278,6 +278,23 @@ The generated Android shell includes a Gradle 8.13 wrapper pinned to the officia
 The relocatable SDK is selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, module, and application resources.
 Its platform integration contracts are defined in [SDK, CLI, Platform Shell, and Module Design](design/sdk-cli.md).
 
+## Package the SDK from source
+
+The repository packaging scripts build the Android AAR and ABI libraries, build the pinned Web static library, build the current host SDK, and produce one complete CPack archive:
+
+```powershell
+.\scripts\package_sdk.ps1
+```
+
+```bash
+sh scripts/package_sdk.sh
+```
+
+The default build directory is `build/sdk`, the default output directory is `release-assets`, and the default configuration is `Release`.
+Use `-Help` or `--help` to inspect optional build-directory, output-directory, configuration, and parallelism arguments.
+The scripts require the current host compiler, CMake and CPack, Java, the Android SDK and configured NDK, and Emscripten 4.0.19.
+Android and Web artifacts are private intermediates under the SDK build directory and are not public script inputs.
+
 ## Run examples
 
 On macOS:
