@@ -30,9 +30,10 @@ android {
         if (huxeruiBuildNative) {
             externalNativeBuild {
                 cmake {
+                    targets "huxerui", "huxerui_static"
                     arguments "-DANDROID_STL=${huxeruiStl}",
                             "-DHUXERUI_BUILD_SHARED=ON",
-                            "-DHUXERUI_BUILD_STATIC=OFF",
+                            "-DHUXERUI_BUILD_STATIC=ON",
                             "-DHUXERUI_BUILD_TESTS=OFF",
                             "-DHUXERUI_BUILD_EXAMPLES=OFF"
                 }

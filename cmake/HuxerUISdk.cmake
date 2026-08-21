@@ -1,0 +1,132 @@
+include_guard(GLOBAL)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT "" CACHE PATH "Prebuilt Android and Web SDK artifacts")
+set(HUXERUI_WEB_EMSCRIPTEN_VERSION "4.0.19")
+
+if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
+        AND HUXERUI_BUILD_CLI
+        AND (WIN32 OR (APPLE AND NOT IOS) OR (UNIX AND NOT APPLE AND NOT EMSCRIPTEN)))
+    _huxerui_resolve_host(HUXERUI_SDK_HOST_SYSTEM HUXERUI_SDK_HOST_ARCHITECTURE)
+    set(HUXERUI_SDK_PACKAGE_FILE_NAME
+            "huxerui-sdk-${PROJECT_VERSION}-${HUXERUI_SDK_HOST_SYSTEM}-${HUXERUI_SDK_HOST_ARCHITECTURE}"
+    )
+    if (WIN32)
+        set(HUXERUI_SDK_PACKAGE_GENERATOR "ZIP")
+        set(HUXERUI_SDK_PACKAGE_EXTENSION "zip")
+    else ()
+        set(HUXERUI_SDK_PACKAGE_GENERATOR "TGZ")
+        set(HUXERUI_SDK_PACKAGE_EXTENSION "tar.gz")
+    endif ()
+endif ()
+
+set(HUXERUI_INSTALL_TARGETS)
+if (TARGET ${HUXERUI_SHARED_LIB_NAME})
+    list(APPEND HUXERUI_INSTALL_TARGETS ${HUXERUI_SHARED_LIB_NAME})
+endif ()
+if (TARGET ${HUXERUI_STATIC_LIB_NAME})
+    list(APPEND HUXERUI_INSTALL_TARGETS ${HUXERUI_STATIC_LIB_NAME})
+endif ()
+
+if (HUXERUI_INSTALL_TARGETS)
+    install(TARGETS ${HUXERUI_INSTALL_TARGETS}
+            EXPORT HuxerUIImportedTargets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif ()
+
+install(DIRECTORY "${HUXERUI_PUBLIC_HEADER_DIR}"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+install(DIRECTORY "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/resources"
+)
+install(FILES "${HUXERUI_PROJECT_DIR}/LICENSE" DESTINATION ".")
+
+set(HUXERUI_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/HuxerUI")
+configure_package_config_file(
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
+        INSTALL_DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+)
+
+install(EXPORT HuxerUIImportedTargets
+        FILE HuxerUIImportedTargets.cmake
+        NAMESPACE HuxerUI::
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUICodegen.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIModules.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResourceBuild.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+)
+install(FILES
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_file.js"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+        RENAME HuxerUIWebFileSystem.js
+)
+
+if (HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
+    set(HUXERUI_ANDROID_ARTIFACT_ROOT "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/android")
+    set(HUXERUI_WEB_ARTIFACT_ROOT
+            "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
+    )
+    foreach (HUXERUI_REQUIRED_PLATFORM_ARTIFACT IN ITEMS
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/HuxerUI.aar"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui.so"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui_static.a"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui.so"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui_static.a"
+            "${HUXERUI_WEB_ARTIFACT_ROOT}/libhuxerui.a"
+    )
+        if (NOT EXISTS "${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")
+            message(FATAL_ERROR "HuxerUI SDK platform artifact is missing: ${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")
+        endif ()
+    endforeach ()
+    install(DIRECTORY "${HUXERUI_ANDROID_ARTIFACT_ROOT}/"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/platform/android"
+    )
+    install(DIRECTORY "${HUXERUI_WEB_ARTIFACT_ROOT}/"
+            DESTINATION
+            "${CMAKE_INSTALL_DATADIR}/huxerui/platform/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
+    )
+endif ()
+
+_huxerui_resolve_host(HUXERUI_INSTALL_HOST_SYSTEM HUXERUI_INSTALL_HOST_ARCHITECTURE)
+install(DIRECTORY
+        "${HUXERUI_PROJECT_DIR}/tools/prebuilt/${HUXERUI_INSTALL_HOST_SYSTEM}/${HUXERUI_INSTALL_HOST_ARCHITECTURE}/"
+        DESTINATION
+        "${CMAKE_INSTALL_DATADIR}/huxerui/tools/${HUXERUI_INSTALL_HOST_SYSTEM}/${HUXERUI_INSTALL_HOST_ARCHITECTURE}"
+        USE_SOURCE_PERMISSIONS
+        PATTERN ".DS_Store" EXCLUDE
+)
+
+if (HUXERUI_SDK_PACKAGE_FILE_NAME)
+    set(CPACK_PACKAGE_NAME "HuxerUI SDK")
+    set(CPACK_PACKAGE_VENDOR "HuxerUI")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/HuxerUI/HuxerUI")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HuxerUI cross-platform application development SDK")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_FILE_NAME "${HUXERUI_SDK_PACKAGE_FILE_NAME}")
+    set(CPACK_PACKAGE_CHECKSUM "SHA256")
+    set(CPACK_RESOURCE_FILE_LICENSE "${HUXERUI_PROJECT_DIR}/LICENSE")
+    set(CPACK_GENERATOR "${HUXERUI_SDK_PACKAGE_GENERATOR}")
+    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+    set(CPACK_MONOLITHIC_INSTALL ON)
+    include(CPack)
+endif ()

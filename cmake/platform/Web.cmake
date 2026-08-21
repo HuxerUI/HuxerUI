@@ -1,38 +1,32 @@
-function(huxerui_platform_configure)
-    set(HUXERUI_PLATFORM_SOURCE_FILES
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_external_texture.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_file.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_http.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_navigation.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"
-            "${HUXERUI_PROJECT_DIR}/platform/web/web_text_input.cpp"
-            PARENT_SCOPE
-    )
-    set(HUXERUI_PLATFORM_COMPILE_OPTIONS
-            -fexceptions
-            PARENT_SCOPE
-    )
-    set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS
-            -fexceptions
-            PARENT_SCOPE
-    )
-    set(HUXERUI_PLATFORM_LINK_OPTIONS
-            --bind
-            --no-entry
-            "$<BUILD_INTERFACE:--pre-js>"
-            "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
-            -fexceptions
-            -lidbfs.js
-            "-sMODULARIZE=1"
-            "-sEXPORT_ES6=1"
-            "-sEXPORT_NAME=createHuxerUIApp"
-            "-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8"
-            "-sENVIRONMENT=web"
-            "-sALLOW_MEMORY_GROWTH=1"
-            "-sNO_EXIT_RUNTIME=1"
-            PARENT_SCOPE
-    )
-endfunction()
+set(HUXERUI_PLATFORM_SOURCE_FILES
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_external_texture.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_file.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_http.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_navigation.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_text_input.cpp"
+)
+set(HUXERUI_PLATFORM_COMPILE_OPTIONS
+        -fexceptions
+)
+set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS
+        -fexceptions
+)
+set(HUXERUI_PLATFORM_LINK_OPTIONS
+        --bind
+        --no-entry
+        "$<BUILD_INTERFACE:--pre-js>"
+        "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
+        -fexceptions
+        -lidbfs.js
+        "-sMODULARIZE=1"
+        "-sEXPORT_ES6=1"
+        "-sEXPORT_NAME=createHuxerUIApp"
+        "-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8"
+        "-sENVIRONMENT=web"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sNO_EXIT_RUNTIME=1"
+)

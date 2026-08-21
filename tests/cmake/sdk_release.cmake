@@ -14,6 +14,7 @@ set(ARCHIVE_NAMES
         "huxerui-sdk-${PROJECT_VERSION}-macos-arm64.tar.gz"
         "huxerui-sdk-${PROJECT_VERSION}-macos-x86_64.tar.gz"
         "huxerui-sdk-${PROJECT_VERSION}-windows-x86_64.zip"
+        "huxerui-sdk-${PROJECT_VERSION}-linux-x86_64.tar.gz"
 )
 foreach (archive_name IN LISTS ARCHIVE_NAMES)
     file(WRITE "${ASSET_DIRECTORY}/${archive_name}" "${archive_name}\n")

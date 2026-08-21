@@ -8,20 +8,20 @@ The current implementation provides:
 
 - An installable platform-specific CMake package with canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
 - `huxerui_add_app`, installed host code generators, and generated application integration metadata.
-- A `huxerui` CLI with explicit application and module creation, `platform add`, `doctor`, `devices`, `build`, `run`, and `open ios`.
+- A `huxerui` CLI with explicit application and module creation, `platform add`, `doctor`, `setup`, `devices`, `build`, `run`, `package`, and `open ios`.
 - Source-controlled Windows, macOS, Linux, Web, Android, and iOS platform enablement, with the Linux runtime backend built directly through CMake.
-- Installed-SDK Windows and macOS builds, source-SDK Linux, Web, and Android integration, and source- or installed-SDK iOS integration.
+- Installed-SDK Windows, macOS, Linux, Web, and Android builds plus source- or installed-SDK iOS integration.
 - Android and iOS device discovery with deterministic device selection.
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, ordered resource packages, common module scaffolding, an application-based module preview, Android Gradle library attachment, and iOS Swift Package aggregation and attachment.
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
-- `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
+- `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows, macOS, and Linux installed-SDK validation.
 - Shared read-only environment diagnosis with stable requirement identities, host availability, and resolved executable paths.
-- Versioned Windows and macOS SDK archives with canonical names, SHA-256 checksums, the project license, and only the matching host tools.
-- SDK-only macOS shell and Windows PowerShell installers with custom prefixes, checksum verification, environment selection, repeatable upgrades, and owned uninstall behavior.
+- Versioned Windows, macOS, and Linux SDK archives with canonical names, SHA-256 checksums, the project license, matching host tools, Android target artifacts, and an Emscripten 4.0.19 Web library.
+- SDK-only macOS and Linux shell installers plus the Windows PowerShell installer, with custom prefixes, checksum verification, environment selection, repeatable upgrades, and owned uninstall behavior.
 - Tag-driven SDK release automation that validates the project version, builds every supported host archive, verifies the complete asset set, and publishes through the official repository.
 
-Native installers, external environment setup, `package` and `clean` commands, production nonvisual modules, PlatformView hosting on Linux, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Apple `CVPixelBuffer`, Windows and Linux RGBA/BGRA, WebCodecs `VideoFrame`, and Android `Bitmap` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, Windows child-HWND hosting with single-surface DirectComposition, macOS NSView hosting, Web HTMLElement hosting with retained Canvas slices, Android View hosting with slice composition, iOS UIView hosting, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Windows, macOS, Linux, Web, Android, and iOS nonvisual timer reference integrations are implemented.
-The current Linux, Web, and Android CLI paths require a source SDK checkout. iOS can consume a locally installed compatible SDK, while relocatable Linux dependencies and export automation are not implemented.
+Native installers, `clean`, production nonvisual modules, PlatformView hosting on Linux, iOS device distribution, and OHOS remain proposed. The shared `PlatformPayload`, its closed `ExternalTexture` capability kind, the platform-neutral `ExternalTexture` value, Image and paint integration, retained frame scheduling and damage, Apple `CVPixelBuffer`, Windows and Linux RGBA/BGRA, WebCodecs `VideoFrame`, and Android `Bitmap` sources and renderer frame import, nonvisual `PlatformInstance` protocol, low-level PlatformView leaf, placement command, unified registry and event routes, `RenderComposition` derivation, platform UI-thread dispatch, Windows child-HWND hosting with single-surface DirectComposition, macOS NSView hosting, Web HTMLElement hosting with retained Canvas slices, Android View hosting with slice composition, iOS UIView hosting, shared hit testing, focus traversal, IME coordination, platform accessibility attachment, Android and iOS module package attachment, and Windows, macOS, Linux, Web, Android, and iOS nonvisual timer reference integrations are implemented.
+Android consumes a Java-only AAR and ABI-specific shared library from an installed SDK, Web consumes a static archive built by the pinned Emscripten version, and source checkouts remain an override of those canonical targets.
 Generated projects use the shared `resources/images`, `resources/strings`, and `resources/raw` layout, and CMake preserves ordered resource roots for the application target.
 The approved distribution architecture below is the contract for the next implementation phases.
 Where the current source-oriented CLI differs, this document identifies the transitional behavior explicitly instead of preserving it as a second architecture.
@@ -183,7 +183,8 @@ huxerui_add_app(hello_huxer
 )
 ```
 
-The SDK owns the public `HuxerUIConfig.cmake`, application helpers, host tools, built-in resource location, public headers, and the target-platform libraries present in that SDK form.
+The SDK owns the public `HuxerUIConfig.cmake`, application, module, code-generation, and resource helpers, host tools, built-in resource location, public headers, and the target-platform libraries present in that SDK form.
+Source-build target and platform configuration remains private to the repository and is not installed into the consumer package.
 `HuxerUIConfig.cmake` is the only public CMake package and exposes only the canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
 Platform package managers may carry platform libraries and integration code, but they do not introduce a second public HuxerUI package or a forwarding target hierarchy.
 The CLI or source-controlled platform shell supplies the resolved SDK location to CMake; application source does not encode an SDK archive layout.
@@ -195,6 +196,7 @@ An in-tree source override creates the same canonical targets and loads the same
 - Links a canonical HuxerUI target.
 - Enables scope code generation after all declared sources are known.
 - Registers the optional resource root.
+- Accepts an optional `RESOURCE_OUTPUT_DIRECTORY` for a platform shell that owns final package staging.
 - Applies bundle metadata supplied by the application.
 - Emits minimal application artifact metadata consumed by CLI launch commands.
 
@@ -315,13 +317,14 @@ Desktop builds configure the root CMake project and then build it.
 Fresh desktop builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
 `--generator` applies only to CMake-owned desktop and Web builds. Android and iOS reject it because Gradle and Xcode own their platform build generators.
 
-iOS builds invoke the source-controlled Xcode project. A build without `--device` uses the generic Simulator destination; selecting a Simulator or physical device uses its Xcode destination identifier, and a physical-device build allows automatic provisioning updates. The App target invokes CMake to produce a destination-specific application core and links it into the bundle.
+iOS builds invoke the source-controlled Xcode project. A build without `--device` uses the generic Simulator destination; selecting a Simulator or physical device uses its Xcode destination identifier, and a physical-device build allows automatic provisioning updates. The App target invokes CMake through source-controlled scripts to produce a destination-specific application core, links it into the bundle, and stages its resources.
 
 Android builds invoke the source-controlled Gradle shell, whose `externalNativeBuild` configures the repository root `CMakeLists.txt` directly.
 Gradle owns the application namespace, application identifier, compile and target SDK versions, minimum SDK, NDK version, ABI filters, dependencies, manifest merging, signing, and APK output.
 The application attaches each consumed module's `platform/android` Gradle library in module-graph order.
-Before Gradle starts, the CLI incrementally configures the same root project with `HUXERUI_MODULE_GRAPH_ONLY=ON` to refresh only the platform-neutral module graph needed during Gradle settings evaluation. This mode records the declared application and module relationships without configuring a host platform backend, creating a native application target, compiling sources, or scheduling resources. Its dedicated build directory retains its own generator and is independent of Gradle, Xcode, and platform build directories.
+Before Gradle starts, the CLI incrementally configures the same root project with `HUXERUI_MODULE_GRAPH_ONLY=ON` to refresh only the platform-neutral module graph needed during Gradle settings evaluation. This mode records the declared application and module relationships without enabling a native language, configuring a host platform backend, creating a native application target, compiling sources, or scheduling resources. Its dedicated build directory is independent of Gradle, Xcode, and platform build directories.
 The ABI-specific C++ build remains exclusively owned by Gradle's root-project `externalNativeBuild` invocation.
+Each ABI writes its merged HuxerUI package to an explicit variant-owned resource directory. Gradle selects the first built configured ABI and performs the one required copy into generated assets without inspecting private `.cxx` directories or comparing timestamps.
 The generated shell includes the source-controlled Gradle 8.13 wrapper, pins the official binary distribution by URL and SHA-256 checksum, and invokes only its local `gradlew` or `gradlew.bat`.
 Gradle itself therefore does not need to be installed separately; the Java runtime remains a host prerequisite.
 
@@ -335,6 +338,13 @@ Windows starts the executable, macOS opens the application bundle, Web delegates
 
 For Android, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
+
+### Package
+
+`package <platform-list>` builds Release output unless `--profile` is explicit, then asks each platform driver for its user-facing artifacts.
+The shared command validates every declared source and relative destination, replaces only `dist/<platform>`, and copies files or bundles without inferring platform-specific filenames.
+Windows collects the executable, resource directory, and adjacent runtime DLLs; macOS and iOS collect their bundles; Linux collects the executable and resource directory; Android collects the APK; Web collects the target-prefixed HTML, JavaScript, WebAssembly, and related output files.
+An explicitly requested unsupported platform or missing artifact fails the command instead of producing a partial success message.
 
 ## SDK selection and distribution
 
@@ -354,6 +364,12 @@ HUXERUI_HOME/
   lib/
     cmake/HuxerUI/
   share/huxerui/
+    platform/
+      android/
+        HuxerUI.aar
+        <abi>/libhuxerui.so
+        <abi>/libhuxerui_static.a
+      web/emscripten-4.0.19/libhuxerui.a
     resources/
     tools/<host>/<architecture>/
 ```
@@ -377,20 +393,19 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 
 Platform build systems consume platform artifacts through their normal mechanisms:
 
-- Android uses a Maven AAR containing Java integration, JNI libraries, and Prefab metadata.
+- Android uses a Java-only AAR plus ABI-specific shared and static libraries imported by the installed CMake package.
 - macOS and iOS may use signed XCFramework and Swift Package artifacts where platform-package integration is required.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
-- Web uses an Emscripten-version-compatible SDK archive while configuring the application root through `emcmake`.
+- Web uses the Emscripten 4.0.19 static library from the selected SDK while configuring the application root through `emcmake`.
 
 Platform packages do not duplicate common application policy or introduce another runtime resource store.
 Android may substitute the repository Gradle library explicitly for source development, while installed and source CMake paths preserve the same canonical HuxerUI targets.
-The current implementation predates the complete release layout: Windows and macOS consume installed packages, Linux, Web, and Android require a source checkout, and iOS accepts source or a compatible installed prefix.
-The implementation phases replace these restrictions rather than preserving them as supported distribution modes.
+Windows, macOS, Linux, Web, and Android consume the installed package through the same canonical CMake targets, while iOS accepts source or a compatible installed prefix.
 
 ### Installers
 
 The canonical install rules produce one relocatable SDK tree, and thin platform installers place that tree, expose its `bin` directory, and remove only state they own during uninstall.
-The repository provides `install.sh` for published macOS archives and `install.ps1` for Windows archives.
+The repository provides `install.sh` for published macOS and Linux archives and `install.ps1` for Windows archives.
 These scripts install a selected HuxerUI SDK release, persist `HUXERUI_HOME`, expose `HUXERUI_HOME/bin` on `PATH`, and support repeatable upgrade or uninstall without modifying unrelated profile content.
 They may download and verify an official HuxerUI SDK archive, but they never download a compiler, CMake, Java, Android SDK or NDK, Emscripten, Xcode, Visual Studio, signing identity, or another platform prerequisite.
 Native packages may later provide the same SDK-only behavior through operating-system installation mechanisms.
@@ -405,11 +420,11 @@ install.ps1 -Uninstall [-Prefix <path>] [-Yes]
 
 Without an explicit version, an installer resolves the latest release from `https://github.com/HuxerUI/HuxerUI`.
 An explicit archive enables offline installation and tests but still requires its adjacent CPack-generated `.sha256` file.
-macOS defaults to `~/Library/Developer/HuxerUI`, Windows defaults to `%LOCALAPPDATA%\HuxerUI`, and an explicit prefix replaces that default without changing the SDK layout.
+macOS defaults to `~/Library/Developer/HuxerUI`, Linux defaults to `~/.local/share/HuxerUI`, Windows defaults to `%LOCALAPPDATA%\HuxerUI`, and an explicit prefix replaces that default without changing the SDK layout.
 Publication uses a sibling staging directory and preserves the prior valid SDK until the new SDK and environment selection succeed.
 Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
 A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
-The release workflow builds macOS arm64, macOS x86_64, and Windows x86_64 independently, runs each host's complete configured tests, and transfers only the expected archives and checksums to the publication job.
+The release workflow first builds the reusable Android and Web target artifacts, then builds macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 SDK archives independently, runs each host's configured tests, and transfers only the expected archives and checksums to the publication job.
 That job adds both installer entry points, verifies the exact asset set and every checksum, creates or reuses the tag's GitHub Release as a draft, and makes it public only after all assets upload successfully.
 An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
 The planned release forms are:
@@ -455,12 +470,13 @@ A driver owns:
 - Proposed setup planning and execution for the platform prerequisites it owns.
 - Source-controlled shell templates.
 - Build and run command construction.
+- Platform artifact discovery for packaging.
 - Optional device discovery.
 
 The interface deliberately contains only capabilities implemented by the current command surface.
 Setup capabilities are added with the `setup` command rather than through a parallel environment-provider hierarchy.
 Shared CLI code coordinates confirmation, process execution, and final diagnosis, while each existing driver owns platform-specific requirements and official installation commands.
-Package, clean, signing, and artifact collection operations should likewise be added when those commands exist rather than anticipated as empty virtual methods.
+Clean and signing operations should likewise be added when those commands exist rather than anticipated as empty virtual methods.
 
 The current registry contains Windows, macOS, Linux, Web, Android, and iOS.
 The registry and shared command helpers remain in the CLI platform core, while each driver implementation owns one platform-specific source file.
@@ -505,7 +521,7 @@ The shell is a Gradle application with an `app` module.
 Gradle owns Android packaging, manifest merging, SDK selection, ABI variants, and APK output.
 CMake owns the common application target, code generation, common modules, and final HuxerUI resource generation.
 
-Published builds consume the HuxerUI AAR and its Prefab targets through normal Gradle dependency resolution.
+Published builds consume the Java-only HuxerUI AAR through Gradle and the ABI-specific shared library through the canonical CMake target.
 Source development substitutes the repository Android library explicitly while preserving the same Gradle and CMake target contract.
 The app module's `externalNativeBuild` points directly at the repository root `CMakeLists.txt`.
 There is no project-level `huxerui.cmake`, generated Android SDK configuration projection, or CMake-owned copy of Gradle configuration in the target architecture.
@@ -823,24 +839,24 @@ The architecture is implemented through reviewable phases that keep generated pr
 
 - Documentation has replaced the source-SDK-oriented architecture with the single-SDK home, installer, resource, root-CMake, and module-graph contracts.
 - Platform build ownership has removed the Android configuration projection and platform wrapper CMake project, lets Gradle configure the application root directly, and reduces generated platform module data to `modules.json`.
-- Formal SDK home selection now provides `HUXERUI_HOME`, relocatable Windows and macOS installation validation, CLI self-discovery and child-process propagation, resource validation, and the same canonical public targets for installed and source use.
+- Formal SDK home selection now provides `HUXERUI_HOME`, relocatable Windows, macOS, and Linux installation validation, CLI self-discovery and child-process propagation, resource validation, and the same canonical public targets for installed and source use.
 - Platform completion lets Linux CLI applications and modules use the root CMake graph directly and projects the module graph into the iOS Swift package aggregator without broadening the common metadata contract.
-- SDK packaging now produces versioned Windows and macOS archives and checksums around the canonical install tree, installs the project license, and excludes tools for unrelated hosts and architectures.
+- SDK packaging now produces versioned Windows, macOS, and Linux archives and checksums around the canonical install tree, installs the project license, excludes tools for unrelated hosts and architectures, and embeds reusable Android and Web target artifacts.
 - SDK-only `install.sh` and `install.ps1` entry points now verify local or downloaded archives, support custom prefixes, update only their owned environment state, and roll back failed upgrades.
-- SDK distribution now validates version tags, builds macOS arm64, macOS x86_64, and Windows x86_64 archives independently, and publishes the complete verified asset set through a draft-first official GitHub Release.
+- SDK distribution now validates version tags, builds Android and Web target artifacts once, embeds them into independent macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 archives, and publishes the complete verified asset set through a draft-first official GitHub Release.
 - Environment diagnosis now factors the existing `doctor` checks into reusable common and per-driver results, reports resolved executable paths, and keeps project-shell validation separate without changing its read-only behavior.
 - The `setup` command then adds shared planning, confirmation, `--yes`, execution, and post-install diagnosis around those results without introducing another provider abstraction.
 - Platform setup implementations then cover Android, Web, Apple, Windows, and Linux in reviewable host-specific phases, using official acquisition paths and retaining explicit manual completion where automation is unavailable.
+- Platform packaging now performs release builds and copies only driver-declared artifacts into isolated `dist/<platform>` directories.
 - Native installer packaging may subsequently wrap the same SDK tree for Windows, macOS, and Linux, while platform releases publish desktop, Web, Android, and Apple artifacts without adding another common package hierarchy.
 
 Each phase ends with its focused tests, a current-host build, packaging validation where applicable, `git diff --check`, and an owner review before the next phase begins.
 
 ## Future commands and platforms
 
-`package`, `clean`, environment setup, and artifact collection remain future work.
+`clean` and additional distribution formats remain future work.
 They should extend the existing ownership model:
 
-- `package` invokes the source-controlled platform shell's release path and collects user-facing output under `dist`.
 - `clean` removes only driver-owned generated and build output.
 - SDK selection uses standard CMake and platform-package compatibility plus user-level tool selection, not project-local hidden state.
 - iOS device distribution and a future OHOS backend extend platform integration without changing the common application model.
@@ -867,11 +883,11 @@ No future command may silently skip an explicitly requested platform or claim an
 The current workflow is covered by:
 
 - CLI project, shell, diagnostics, device parsing, process execution, and command-construction tests.
-- CLI Android shell tests for root-CMake configuration, Gradle-owned platform values, source SDK selection, module attachment, and application launch identity.
+- CLI Android shell tests for root-CMake configuration, Gradle-owned platform values, source or installed SDK selection, module attachment, application launch identity, and artifact collection.
 - CMake module validation for URL policy, full commit revisions, unambiguous origins, predeclared targets, ordered module graph roots and resources, and explicit runtime Root Service installation.
-- Installed Windows and macOS consumer tests that install the SDK, run the installed CLI, create a project, and build it without source-tree lookup.
-- SDK archive tests that verify checksums, the canonical extracted layout, host-tool isolation, and executable-relative CLI discovery.
-- macOS installer tests that cover custom paths, profile preservation, repeat installation, failed-upgrade rollback, invalid checksums, unrelated directories, and uninstall.
+- Installed Windows, macOS, and Linux consumer tests that install the SDK, run the installed CLI, create a project, and build it without source-tree lookup.
+- SDK archive tests that verify checksums, the canonical extracted layout, embedded Android and Web artifacts, host-tool isolation, and executable-relative CLI discovery.
+- macOS and Linux installer tests that cover custom paths, profile preservation, repeat installation, failed-upgrade rollback, invalid checksums, unrelated directories, and uninstall.
 - SDK release tests that reject invalid version tags, incomplete or unexpected asset sets, and mismatched archive checksums before publication.
 - Existing common, header, code-generation, platform, and example builds.
 

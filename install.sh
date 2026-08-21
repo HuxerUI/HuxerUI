@@ -109,7 +109,7 @@ Darwin)
   host_system="macos"
   ;;
 Linux)
-  fail "Linux SDK archives are not published yet"
+  host_system="linux"
   ;;
 *)
   fail "unsupported operating system: $(uname -s)"
@@ -130,7 +130,11 @@ esac
 
 [ -n "${HOME:-}" ] || fail "HOME is not configured"
 if [ -z "$prefix" ]; then
-  prefix="$HOME/Library/Developer/HuxerUI"
+  if [ "$host_system" = "macos" ]; then
+    prefix="$HOME/Library/Developer/HuxerUI"
+  else
+    prefix="$HOME/.local/share/HuxerUI"
+  fi
 fi
 if [ -z "$profile" ]; then
   case "${SHELL:-}" in
@@ -334,7 +338,11 @@ if [ -z "$expected_checksum" ] || [ -z "$checksum_name" ] || [ -n "$checksum_ext
   fail "archive checksum is malformed: $checksum_path"
 fi
 [ "$checksum_name" = "$archive_name" ] || fail "archive checksum names a different file: $checksum_name"
-actual_checksum=$(shasum -a 256 "$archive" | awk '{ print $1 }')
+if command -v shasum >/dev/null 2>&1; then
+  actual_checksum=$(shasum -a 256 "$archive" | awk '{ print $1 }')
+else
+  actual_checksum=$(sha256sum "$archive" | awk '{ print $1 }')
+fi
 [ "$actual_checksum" = "$expected_checksum" ] || fail "archive checksum does not match: $archive_name"
 
 archive_root=${archive_name%.tar.gz}

@@ -4,22 +4,58 @@ set(HUXERUI_HOST_TOOL_ROOT "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxeru
 set_and_check(HUXERUI_BUILTIN_RESOURCE_PACKAGE
         "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/resources"
 )
+set(HUXERUI_PLATFORM_ID "@HUXERUI_PLATFORM_ID@")
 
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIImportedTargets.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUITargets.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
-
-if (EMSCRIPTEN AND TARGET HuxerUI::huxerui_static)
-    set_property(TARGET HuxerUI::huxerui_static APPEND PROPERTY
-            INTERFACE_LINK_OPTIONS
-            --pre-js
-            "${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js"
+if (ANDROID)
+    set(HUXERUI_PLATFORM_ID "android")
+    if (NOT ANDROID_ABI)
+        message(FATAL_ERROR "HuxerUI Android package requires ANDROID_ABI")
+    endif ()
+    set_and_check(HUXERUI_ANDROID_SHARED_LIBRARY
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/platform/android/${ANDROID_ABI}/libhuxerui.so"
     )
-    set_property(TARGET HuxerUI::huxerui_static APPEND PROPERTY
-            INTERFACE_LINK_DEPENDS
-            "${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js"
+    set_and_check(HUXERUI_ANDROID_STATIC_LIBRARY
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/platform/android/${ANDROID_ABI}/libhuxerui_static.a"
     )
+    if (NOT TARGET HuxerUI::huxerui)
+        add_library(HuxerUI::huxerui SHARED IMPORTED)
+        set_target_properties(HuxerUI::huxerui PROPERTIES
+                IMPORTED_LOCATION "${HUXERUI_ANDROID_SHARED_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+        )
+    endif ()
+    if (NOT TARGET HuxerUI::huxerui_static)
+        add_library(HuxerUI::huxerui_static STATIC IMPORTED)
+        set_target_properties(HuxerUI::huxerui_static PROPERTIES
+                IMPORTED_LOCATION "${HUXERUI_ANDROID_STATIC_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+        )
+    endif ()
+elseif (EMSCRIPTEN)
+    set(HUXERUI_PLATFORM_ID "web")
+    set_and_check(HUXERUI_WEB_LIBRARY
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/platform/web/emscripten-@HUXERUI_WEB_EMSCRIPTEN_VERSION@/libhuxerui.a"
+    )
+    foreach (HUXERUI_WEB_TARGET IN ITEMS HuxerUI::huxerui HuxerUI::huxerui_static)
+        if (TARGET ${HUXERUI_WEB_TARGET})
+            continue()
+        endif ()
+        add_library(${HUXERUI_WEB_TARGET} STATIC IMPORTED)
+        set_target_properties(${HUXERUI_WEB_TARGET} PROPERTIES
+                IMPORTED_LOCATION "${HUXERUI_WEB_LIBRARY}"
+                INTERFACE_COMPILE_OPTIONS -fexceptions
+                INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+                INTERFACE_LINK_OPTIONS
+                "--bind;--no-entry;--pre-js;${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js;-fexceptions;-lidbfs.js;-sMODULARIZE=1;-sEXPORT_ES6=1;-sEXPORT_NAME=createHuxerUIApp;-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8;-sENVIRONMENT=web;-sALLOW_MEMORY_GROWTH=1;-sNO_EXIT_RUNTIME=1"
+                INTERFACE_LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/HuxerUIWebFileSystem.js"
+        )
+    endforeach ()
+else ()
+    include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIImportedTargets.cmake")
 endif ()
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUICodegen.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
 
 check_required_components(HuxerUI)

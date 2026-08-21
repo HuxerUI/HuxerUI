@@ -20,11 +20,11 @@ if (HUXERUI_PROJECT_PLAN_ONLY)
     return()
 endif ()
 
-project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES CXX)
+project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES NONE)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+    enable_language(CXX)
+endif ()
 
 if (NOT TARGET HuxerUI::huxerui)
     set(HUXERUI_HOME "$ENV{HUXERUI_HOME}" CACHE PATH "HuxerUI SDK or source directory")
@@ -35,6 +35,9 @@ if (NOT TARGET HuxerUI::huxerui)
         if (ANDROID)
             set(HUXERUI_BUILD_SHARED ON CACHE BOOL "" FORCE)
             set(HUXERUI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+        else ()
+            set(HUXERUI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+            set(HUXERUI_BUILD_STATIC ON CACHE BOOL "" FORCE)
         endif ()
         add_subdirectory("${HUXERUI_HOME}" "${CMAKE_BINARY_DIR}/huxerui-sdk" EXCLUDE_FROM_ALL)
     else ()
@@ -49,7 +52,6 @@ if (NOT TARGET HuxerUI::huxerui)
         endif ()
     endif ()
 endif ()
-
 
 file(GLOB_RECURSE MODULE_SOURCE_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
@@ -80,6 +82,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     list(APPEND MODULE_SOURCE_FILES ${MODULE_LINUX_SOURCE_FILES})
 endif ()
+if (EMSCRIPTEN)
+    file(GLOB_RECURSE MODULE_WEB_SOURCE_FILES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/web/src/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/web/src/*.cc"
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/web/src/*.cxx"
+    )
+    list(APPEND MODULE_SOURCE_FILES ${MODULE_WEB_SOURCE_FILES})
+endif ()
 
 huxerui_add_module(@TARGET_NAME@
         SOURCES
@@ -94,6 +104,5 @@ target_include_directories(@TARGET_NAME@ PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:include>"
 )
-
 
 add_library(@MODULE_PRODUCT_NAME@::@MODULE_PRODUCT_NAME@ ALIAS @TARGET_NAME@)

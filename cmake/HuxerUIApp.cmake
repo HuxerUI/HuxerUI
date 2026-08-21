@@ -1,13 +1,6 @@
 include_guard(GLOBAL)
 
-function(_huxerui_escape_json input output)
-    string(REPLACE "\\" "\\\\" value "${input}")
-    string(REPLACE "\"" "\\\"" value "${value}")
-    string(REPLACE "\n" "\\n" value "${value}")
-    string(REPLACE "\r" "\\r" value "${value}")
-    string(REPLACE "\t" "\\t" value "${value}")
-    set(${output} "${value}" PARENT_SCOPE)
-endfunction()
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
 
 function(_huxerui_configure_ios_app_core target_name)
     get_property(HUXERUI_IOS_APP_FRAMEWORK_TARGET
@@ -131,7 +124,7 @@ endfunction()
 function(huxerui_add_app target_name)
     cmake_parse_arguments(HUXERUI_APP
             ""
-            "RESOURCE_NAMESPACE;BUNDLE_NAME;BUNDLE_IDENTIFIER"
+            "RESOURCE_NAMESPACE;RESOURCE_OUTPUT_DIRECTORY;BUNDLE_NAME;BUNDLE_IDENTIFIER"
             "SOURCES;RESOURCES"
             ${ARGN}
     )
@@ -184,6 +177,16 @@ function(huxerui_add_app target_name)
         return()
     endif ()
 
+    if (NOT HUXERUI_PLATFORM_ID AND TARGET HuxerUI::huxerui)
+        get_target_property(HUXERUI_PLATFORM_ID
+                HuxerUI::huxerui
+                HUXERUI_PLATFORM_ID
+        )
+    endif ()
+    if (NOT HUXERUI_PLATFORM_ID OR HUXERUI_PLATFORM_ID MATCHES "-NOTFOUND$")
+        message(FATAL_ERROR "huxerui_add_app() requires a configured HuxerUI platform")
+    endif ()
+
     if (IOS)
         add_library(${target_name} STATIC ${HUXERUI_APP_SOURCES})
         set_target_properties(${target_name} PROPERTIES
@@ -212,6 +215,18 @@ function(huxerui_add_app target_name)
     target_link_libraries(${target_name} PRIVATE
             ${HUXERUI_APP_FRAMEWORK_TARGET}
     )
+
+    if (HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY)
+        get_filename_component(HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY
+                "${HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY}"
+                ABSOLUTE
+                BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}"
+        )
+        set_property(TARGET ${target_name} PROPERTY
+                HUXERUI_RESOURCE_OUTPUT_DIRECTORY
+                "${HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY}"
+        )
+    endif ()
 
     if (IOS)
         set_property(TARGET ${target_name} PROPERTY
@@ -273,25 +288,9 @@ function(huxerui_add_app target_name)
         return()
     endif ()
 
-    if (NOT HUXERUI_PLATFORM_ID)
-        if (EMSCRIPTEN)
-            set(HUXERUI_PLATFORM_ID "web")
-        elseif (ANDROID)
-            set(HUXERUI_PLATFORM_ID "android")
-        elseif (APPLE)
-            set(HUXERUI_PLATFORM_ID "macos")
-        elseif (WIN32)
-            set(HUXERUI_PLATFORM_ID "windows")
-        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            set(HUXERUI_PLATFORM_ID "linux")
-        else ()
-            set(HUXERUI_PLATFORM_ID "generic")
-        endif ()
-    endif ()
-
-    _huxerui_escape_json("${target_name}" HUXERUI_APP_JSON_TARGET)
-    _huxerui_escape_json("${HUXERUI_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
-    _huxerui_escape_json("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
+    _huxerui_json_escape("${target_name}" HUXERUI_APP_JSON_TARGET)
+    _huxerui_json_escape("${HUXERUI_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
+    _huxerui_json_escape("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
 
     set(HUXERUI_APP_INTEGRATION_DIRECTORY
             "${CMAKE_CURRENT_BINARY_DIR}/huxerui-integration/${target_name}"

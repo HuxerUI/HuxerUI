@@ -13,6 +13,7 @@ int Run(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
     const SdkLocation& sdk,
+    std::istream& input,
     std::ostream& output,
     std::ostream& error
 );

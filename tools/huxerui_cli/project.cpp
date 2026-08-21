@@ -498,27 +498,44 @@ void AddProjectPlatforms(
       kind == ProjectKind::App ? project.root / "platform" : project.root / "examples/preview/platform";
   const ProjectTemplateContext shell_context =
       kind == ProjectKind::App ? context : PreviewContext(MakeModuleTemplateContext(context));
+
+  struct PlatformTrees {
+    const PlatformDriver* platform;
+    std::vector<GeneratedFile> module_package;
+    std::vector<GeneratedFile> shell;
+  };
+  std::vector<PlatformTrees> generated;
+  generated.reserve(platforms.size());
   for (const PlatformDriver* platform : platforms) {
+    PlatformTrees trees{
+        platform,
+        kind == ProjectKind::Module ? platform->CreateModulePackage(context) : std::vector<GeneratedFile>{},
+        platform->CreateShell(shell_context),
+    };
     const std::filesystem::path shell_destination = shell_root / platform->Id();
-    const bool has_module_package = kind == ProjectKind::Module && !platform->CreateModulePackage(context).empty();
+    const bool has_module_package = !trees.module_package.empty();
     const std::filesystem::path module_destination = project.root / "platform" / platform->Id();
     if (std::filesystem::exists(shell_destination) ||
         (has_module_package && std::filesystem::exists(module_destination))) {
       throw std::runtime_error("platform already exists: " + std::string(platform->Id()));
     }
+    generated.push_back(std::move(trees));
   }
 
   std::vector<std::filesystem::path> created;
   created.reserve(platforms.size() * 2);
   try {
-    for (const PlatformDriver* platform : platforms) {
+    for (PlatformTrees& trees : generated) {
       if (kind == ProjectKind::Module) {
-        const std::vector<GeneratedFile> module_package = platform->CreateModulePackage(context);
-        if (!module_package.empty()) {
-          PublishGeneratedTree(project.root / "platform" / platform->Id(), module_package, created);
+        if (!trees.module_package.empty()) {
+          PublishGeneratedTree(
+              project.root / "platform" / trees.platform->Id(),
+              std::move(trees.module_package),
+              created
+          );
         }
       }
-      PublishGeneratedTree(shell_root / platform->Id(), platform->CreateShell(shell_context), created);
+      PublishGeneratedTree(shell_root / trees.platform->Id(), std::move(trees.shell), created);
     }
   } catch (...) {
     for (const std::filesystem::path& path : created) {

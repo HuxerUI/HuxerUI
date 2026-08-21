@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     if (!sdk.home.empty()) {
       huxerui::cli::SetProcessEnvironmentVariable("HUXERUI_HOME", sdk.home.string());
     }
-    return huxerui::cli::Run(arguments, std::filesystem::current_path(), sdk, std::cout, std::cerr);
+    return huxerui::cli::Run(arguments, std::filesystem::current_path(), sdk, std::cin, std::cout, std::cerr);
   } catch (const std::exception& exception) {
     std::cerr << "huxerui: " << exception.what() << '\n';
     return 1;

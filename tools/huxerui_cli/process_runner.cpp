@@ -12,6 +12,8 @@
 #include <windows.h>
 
 #include <vector>
+
+#undef FindExecutable
 #else
 #include <sys/wait.h>
 #include <unistd.h>
@@ -374,7 +376,7 @@ std::optional<std::filesystem::path> FindExecutable(std::string_view name) {
 
 #if defined(_WIN32)
   constexpr char separator = ';';
-  static constexpr std::string_view suffixes[]{"", ".exe", ".cmd", ".bat"};
+  static constexpr std::string_view suffixes[]{".exe", ".cmd", ".bat", ""};
 #else
   constexpr char separator = ':';
   static constexpr std::string_view suffixes[]{""};

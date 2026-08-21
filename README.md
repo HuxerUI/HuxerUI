@@ -92,20 +92,21 @@ Top-level builds also produce the `huxerui` CLI:
 ```bash
 huxerui create app hello_huxer --platform windows,macos,linux,web,android,ios
 huxerui doctor
+huxerui setup android,web
 huxerui devices ios
 huxerui open ios
 huxerui build windows
 huxerui run windows
 huxerui run linux
+huxerui package windows,web
 ```
 
-The CLI creates and validates source-controlled platform shells, including an Xcode project for iOS, discovers Android and iOS devices, builds enabled Windows, macOS, Linux, Web, Android, and iOS Simulator or physical-device targets from compatible hosts, and launches development artifacts.
+The CLI creates and validates source-controlled platform shells, diagnoses and sets up external toolchains, discovers Android and iOS devices, builds and launches enabled targets, and collects release artifacts under `dist/<platform>`.
 The current CMake install exports a platform-specific SDK package, the CLI, host code generators, and built-in resources.
-Tagged releases produce verified macOS arm64, macOS x86_64, and Windows x86_64 portable SDK archives with shell and PowerShell installers.
-Linux, Web, and Android CLI projects currently build against a source SDK checkout, while iOS accepts either a source checkout or a compatible installed SDK.
+Tagged releases produce verified macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 portable SDK archives with shell and PowerShell installers.
+Each SDK includes Android Java and ABI artifacts plus the pinned Emscripten Web library, so Android and Web projects can consume an installed SDK without framework sources.
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
-The approved distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
-Native installers, Linux SDK distribution, platform artifacts, and package commands remain staged work.
+The distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
 
 See [Getting Started](docs/getting-started.md) for application setup, platform builds, CMake options, code generation, and example launch commands.
 

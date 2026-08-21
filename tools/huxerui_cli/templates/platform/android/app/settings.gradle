@@ -14,8 +14,10 @@ if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
 }
 def huxeruiHome = file(huxeruiHomeValue)
 def huxeruiLibrary = new File(huxeruiHome, "platform/android/huxerui")
-if (!huxeruiLibrary.isDirectory()) {
-    throw new GradleException("HuxerUI Android library does not exist: ${huxeruiLibrary}")
+def huxeruiArchive = new File(huxeruiHome, "share/huxerui/platform/android/HuxerUI.aar")
+def huxeruiUsesSource = huxeruiLibrary.isDirectory()
+if (!huxeruiUsesSource && !huxeruiArchive.isFile()) {
+    throw new GradleException("HuxerUI Android package does not exist under ${huxeruiHome}")
 }
 
 def huxeruiModuleGraphFile = file("../../.huxerui/generated/modules.json")
@@ -34,9 +36,13 @@ dependencyResolutionManagement {
 }
 
 gradle.ext.huxeruiHome = huxeruiHome
+gradle.ext.huxeruiUsesSource = huxeruiUsesSource
+gradle.ext.huxeruiAndroidArchive = huxeruiArchive
 rootProject.name = "@PROJECT_NAME@"
-include(":HuxerUI")
-project(":HuxerUI").projectDir = huxeruiLibrary
+if (huxeruiUsesSource) {
+    include(":HuxerUI")
+    project(":HuxerUI").projectDir = huxeruiLibrary
+}
 huxeruiModuleGraph.modules.eachWithIndex { module, index ->
     def moduleDirectory = file("${module.sourceRoot}/platform/android")
     if (moduleDirectory.isDirectory()) {

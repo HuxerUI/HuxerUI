@@ -138,17 +138,21 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
 }
 
 std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandContext& context) {
+  const std::filesystem::path build_directory = context.project_root / ".huxerui/build/module-graph";
+  std::vector<std::string> arguments{
+      "-S",
+      context.project_root.string(),
+      "-B",
+      build_directory.string(),
+      "-DCMAKE_BUILD_TYPE=Debug",
+      "-DHUXERUI_MODULE_GRAPH_ONLY=ON",
+  };
+  if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
+      !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {
+    arguments.insert(arguments.begin(), {"-G", "Ninja"});
+  }
   return {
-      {"cmake",
-       {
-           "-S",
-           context.project_root.string(),
-           "-B",
-           (context.project_root / ".huxerui/build/module-graph").string(),
-           "-DCMAKE_BUILD_TYPE=Debug",
-           "-DHUXERUI_MODULE_GRAPH_ONLY=ON",
-       },
-       context.project_root},
+      {"cmake", std::move(arguments), context.project_root},
   };
 }
 
@@ -179,6 +183,16 @@ std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment() const {
     });
   }
   return diagnostics;
+}
+
+std::vector<SetupAction> PlatformDriver::PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const {
+  std::vector<SetupAction> actions;
+  for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
+    if (diagnostic.status == EnvironmentDiagnosticStatus::Missing) {
+      actions.push_back({"Install or configure " + diagnostic.label + " for " + std::string(Id()), std::nullopt});
+    }
+  }
+  return actions;
 }
 
 bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {

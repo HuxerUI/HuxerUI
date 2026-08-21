@@ -80,6 +80,18 @@
 			path = Local.xcconfig.example;
 			sourceTree = "<group>";
 		};
+		000000000000000000000209 /* build_huxerui_core.sh */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.script.sh;
+			path = build_huxerui_core.sh;
+			sourceTree = "<group>";
+		};
+		00000000000000000000020A /* stage_huxerui_resources.sh */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.script.sh;
+			path = stage_huxerui_resources.sh;
+			sourceTree = "<group>";
+		};
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +111,7 @@
 			children = (
 				000000000000000000000401 /* App */,
 				000000000000000000000402 /* Config */,
+				000000000000000000000404 /* Scripts */,
 				000000000000000000000403 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -131,6 +144,15 @@
 				000000000000000000000200 /* @PROJECT_NAME@.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		000000000000000000000404 /* Scripts */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000209 /* build_huxerui_core.sh */,
+				00000000000000000000020A /* stage_huxerui_resources.sh */,
+			);
+			path = Scripts;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -216,7 +238,7 @@
 			outputPaths = ();
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nif [ -z \"${HUXERUI_HOME:-}\" ]; then\n  echo \"error: HUXERUI_HOME is not configured; set it in Config/Local.xcconfig\" >&2\n  exit 1\nfi\nHUXERUI_CMAKE_ARCHS=$(printf '%s' \"$ARCHS\" | tr ' ' ';')\ncmake -S \"$HUXERUI_PROJECT_ROOT\" -B \"$HUXERUI_CORE_BUILD_DIR\" \\\n  -DCMAKE_SYSTEM_NAME=iOS \\\n  -DCMAKE_OSX_SYSROOT=\"$SDKROOT\" \\\n  -DCMAKE_OSX_ARCHITECTURES=\"$HUXERUI_CMAKE_ARCHS\" \\\n  -DCMAKE_OSX_DEPLOYMENT_TARGET=\"$IPHONEOS_DEPLOYMENT_TARGET\" \\\n  -DCMAKE_BUILD_TYPE=\"$CONFIGURATION\" \\\n  -DHUXERUI_HOME=\"$HUXERUI_HOME\" \\\n  -DHUXERUI_BUILD_SHARED=OFF \\\n  -DHUXERUI_BUILD_TESTS=OFF \\\n  -DHUXERUI_BUILD_EXAMPLES=OFF \\\n  -DHUXERUI_BUILD_CLI=OFF\ncmake --build \"$HUXERUI_CORE_BUILD_DIR\" --target @TARGET_NAME@_huxerui_ios_core --parallel\n";
+			shellScript = "/bin/sh \"$PROJECT_DIR/Scripts/build_huxerui_core.sh\"\n";
 		};
 		000000000000000000000305 /* Stage HuxerUI Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -230,7 +252,7 @@
 			outputPaths = ();
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nHUXERUI_RESOURCE_SOURCE=\"$HUXERUI_CORE_BUILD_DIR/huxerui-ios/@TARGET_NAME@/resources/package\"\nHUXERUI_RESOURCE_DESTINATION=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HuxerUI\"\nif [ ! -f \"$HUXERUI_RESOURCE_SOURCE/huxerui/resources.bin\" ]; then\n  echo \"error: HuxerUI resource package is missing: $HUXERUI_RESOURCE_SOURCE\" >&2\n  exit 1\nfi\ncmake -E remove_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E make_directory \"$HUXERUI_RESOURCE_DESTINATION\"\ncmake -E copy_directory \"$HUXERUI_RESOURCE_SOURCE\" \"$HUXERUI_RESOURCE_DESTINATION\"\nif [ -n \"${HUXERUI_INTEGRATION_PLAN:-}\" ]; then\n  mkdir -p \"$(dirname \"$HUXERUI_INTEGRATION_PLAN\")\"\n  {\n    printf '{\\n'\n    printf '  \"schema\": 1,\\n'\n    printf '  \"target\": \"%s\",\\n' \"@TARGET_NAME@\"\n    printf '  \"platform\": \"ios\",\\n'\n    printf '  \"artifact\": \"%s\",\\n' \"$TARGET_BUILD_DIR/$EXECUTABLE_PATH\"\n    printf '  \"bundle\": \"%s\",\\n' \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\n    printf '  \"bundleIdentifier\": \"%s\"\\n' \"$PRODUCT_BUNDLE_IDENTIFIER\"\n    printf '}\\n'\n  } > \"$HUXERUI_INTEGRATION_PLAN\"\nfi\n";
+			shellScript = "/bin/sh \"$PROJECT_DIR/Scripts/stage_huxerui_resources.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -4,7 +4,7 @@ else ()
     set(HUXERUI_TEST_LIBRARY HuxerUI::huxerui)
 endif ()
 
-include("${HUXERUI_PROJECT_DIR}/cmake/HuxerUIThirdParty.cmake")
+include("${HUXERUI_PROJECT_DIR}/3dparty/catch2/huxerui_3p.cmake")
 
 file(TO_CMAKE_PATH "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE)
 add_executable(huxerui_tests
@@ -342,12 +342,15 @@ if (TARGET huxerui_cli_core)
     add_test(NAME HuxerUICliTests COMMAND huxerui_cli_tests)
 endif ()
 
-if (TARGET huxerui_cli AND (WIN32 OR APPLE))
+if (TARGET huxerui_cli AND (WIN32 OR APPLE OR (UNIX AND NOT APPLE AND NOT EMSCRIPTEN)))
     if (WIN32)
         set(HUXERUI_INSTALLED_CONSUMER_PLATFORM windows)
         set(HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY "$ENV{TEMP}")
-    else ()
+    elseif (APPLE)
         set(HUXERUI_INSTALLED_CONSUMER_PLATFORM macos)
+        set(HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    else ()
+        set(HUXERUI_INSTALLED_CONSUMER_PLATFORM linux)
         set(HUXERUI_INSTALLED_CONSUMER_WORK_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     endif ()
     add_test(NAME HuxerUIInstalledConsumerTests
@@ -385,6 +388,7 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
                     "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
                     "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
                     "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
+                    "-DPLATFORM_ARTIFACTS_INCLUDED=$<BOOL:${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}>"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_archive.cmake"
     )
     set_tests_properties(HuxerUISdkArchiveTests PROPERTIES RUN_SERIAL TRUE)
@@ -398,7 +402,7 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_release.cmake"
     )
 
-    if (APPLE)
+    if (APPLE OR (UNIX AND NOT APPLE AND NOT EMSCRIPTEN))
         add_test(NAME HuxerUISdkInstallerTests
                 COMMAND "${CMAKE_COMMAND}"
                         "-DBUILD_DIRECTORY=${PROJECT_BINARY_DIR}"

@@ -11,6 +11,8 @@ def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
 def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
 def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
 def huxeruiStl = huxeruiProperty("huxeruiStl")
+def huxeruiDebugResourceRoot = layout.buildDirectory.dir("generated/huxerui/resources/debug").get().asFile
+def huxeruiReleaseResourceRoot = layout.buildDirectory.dir("generated/huxerui/resources/release").get().asFile
 def huxeruiDebugAssets = layout.buildDirectory.dir("generated/huxerui/assets/debug").get().asFile
 def huxeruiReleaseAssets = layout.buildDirectory.dir("generated/huxerui/assets/release").get().asFile
 
@@ -39,9 +41,21 @@ android {
     }
 
     buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments "-DHUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT=${huxeruiDebugResourceRoot.absolutePath}"
+                }
+            }
+        }
         release {
             minifyEnabled = false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            externalNativeBuild {
+                cmake {
+                    arguments "-DHUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT=${huxeruiReleaseResourceRoot.absolutePath}"
+                }
+            }
         }
     }
 
@@ -67,31 +81,39 @@ android {
 }
 
 dependencies {
-    implementation project(":HuxerUI")
+    if (rootProject.gradle.ext.huxeruiUsesSource) {
+        implementation project(":HuxerUI")
+    } else {
+        implementation files(rootProject.gradle.ext.huxeruiAndroidArchive)
+    }
     huxeruiModules.each { module ->
         implementation project(module.projectPath)
     }
 }
 
-def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
+def registerHuxerUIResourceStaging = { String buildType, File resourceRoot, File assetsDirectory ->
     def capitalizedBuildType = buildType.capitalize()
     def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
-    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
-        dependsOn nativeTaskName
-        from {
-            def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
-                include "**/huxerui-resources/@TARGET_NAME@/package/huxerui/resources.bin"
-            }.files
-            def preferredIndexFiles = indexFiles.findAll {
-                it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
+    def resolveResourcePackage = {
+        for (String abi : huxeruiAbis) {
+            def packageDirectory = new File(resourceRoot, "${abi}/package")
+            if (new File(packageDirectory, "huxerui/resources.bin").isFile()) {
+                return packageDirectory
             }
-            def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
-            def selected = candidates.max { left, right ->
-                def modified = left.lastModified() <=> right.lastModified()
-                modified != 0 ? modified : left.absolutePath <=> right.absolutePath
-            }
-            selected == null ? [] : selected.parentFile.parentFile
         }
+        return null
+    }
+    def verificationTask = tasks.register("verifyHuxerUI${capitalizedBuildType}Resources") {
+        dependsOn nativeTaskName
+        doLast {
+            if (resolveResourcePackage() == null) {
+                throw new GradleException("HuxerUI resource package is missing under ${resourceRoot}")
+            }
+        }
+    }
+    def stagingTask = tasks.register("stageHuxerUI${capitalizedBuildType}Resources", Sync) {
+        dependsOn verificationTask
+        from { resolveResourcePackage() ?: [] }
         into assetsDirectory
     }
     tasks.matching { it.name == "merge${capitalizedBuildType}Assets" }.configureEach {
@@ -99,5 +121,5 @@ def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
     }
 }
 
-registerHuxerUIResourceStaging("debug", huxeruiDebugAssets)
-registerHuxerUIResourceStaging("release", huxeruiReleaseAssets)
+registerHuxerUIResourceStaging("debug", huxeruiDebugResourceRoot, huxeruiDebugAssets)
+registerHuxerUIResourceStaging("release", huxeruiReleaseResourceRoot, huxeruiReleaseAssets)

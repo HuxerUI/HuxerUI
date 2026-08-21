@@ -37,6 +37,7 @@ std::string Render(
       "@PROJECT_",
       "@TARGET_NAME@",
       "@MODULE_",
+      "@ANDROID_",
       "@PACKAGE_DEPENDENCIES@",
       "@PRODUCT_DEPENDENCIES@",
   };

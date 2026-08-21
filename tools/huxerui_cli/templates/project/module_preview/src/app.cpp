@@ -4,9 +4,7 @@
 using namespace huxerui;
 
 View App() {
-  return MaterialTheme([] {
-    return Text("@MODULE_PROJECT_NAME@ preview");
-  });
+  return Text("@MODULE_PROJECT_NAME@ preview");
 }
 
 const Application application{

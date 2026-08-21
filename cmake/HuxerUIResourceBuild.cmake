@@ -1,0 +1,65 @@
+foreach (required_variable IN ITEMS
+        HUXERUI_HRC HUXERUI_RESOURCE_OUTPUT
+)
+    if (NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")
+        message(FATAL_ERROR "${required_variable} is required")
+    endif ()
+endforeach ()
+
+foreach (optional_variable IN ITEMS
+        HUXERUI_RESOURCE_PACKAGES HUXERUI_RESOURCE_ROOTS HUXERUI_RESOURCE_NAMESPACES
+)
+    if (NOT DEFINED ${optional_variable})
+        set(${optional_variable})
+    endif ()
+endforeach ()
+
+list(LENGTH HUXERUI_RESOURCE_ROOTS HUXERUI_RESOURCE_ROOT_COUNT)
+list(LENGTH HUXERUI_RESOURCE_NAMESPACES HUXERUI_RESOURCE_NAMESPACE_COUNT)
+if (NOT HUXERUI_RESOURCE_ROOT_COUNT EQUAL HUXERUI_RESOURCE_NAMESPACE_COUNT)
+    message(FATAL_ERROR "HuxerUI resource roots and namespaces must have matching counts")
+endif ()
+if (NOT HUXERUI_RESOURCE_PACKAGES AND NOT HUXERUI_RESOURCE_ROOTS)
+    message(FATAL_ERROR "HuxerUI resource merge requires at least one package or root")
+endif ()
+
+set(HUXERUI_RESOURCE_WORK_DIRECTORY "${HUXERUI_RESOURCE_OUTPUT}/roots")
+file(REMOVE_RECURSE "${HUXERUI_RESOURCE_WORK_DIRECTORY}")
+
+set(HUXERUI_RESOURCE_MERGE_COMMAND "${HUXERUI_HRC}" merge)
+foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGES)
+    list(APPEND HUXERUI_RESOURCE_MERGE_COMMAND
+            --input "${HUXERUI_RESOURCE_PACKAGE}"
+    )
+endforeach ()
+
+set(HUXERUI_RESOURCE_ROOT_INDEX 0)
+while (HUXERUI_RESOURCE_ROOTS)
+    list(POP_FRONT HUXERUI_RESOURCE_ROOTS HUXERUI_RESOURCE_ROOT)
+    list(POP_FRONT HUXERUI_RESOURCE_NAMESPACES HUXERUI_RESOURCE_NAMESPACE)
+    set(HUXERUI_RESOURCE_ROOT_OUTPUT
+            "${HUXERUI_RESOURCE_WORK_DIRECTORY}/${HUXERUI_RESOURCE_ROOT_INDEX}"
+    )
+    execute_process(
+            COMMAND "${HUXERUI_HRC}"
+                    --root "${HUXERUI_RESOURCE_ROOT}"
+                    --output "${HUXERUI_RESOURCE_ROOT_OUTPUT}"
+                    --namespace "${HUXERUI_RESOURCE_NAMESPACE}"
+            COMMAND_ERROR_IS_FATAL ANY
+    )
+    list(APPEND HUXERUI_RESOURCE_MERGE_COMMAND
+            --input "${HUXERUI_RESOURCE_ROOT_OUTPUT}/package"
+    )
+    math(EXPR HUXERUI_RESOURCE_ROOT_INDEX
+            "${HUXERUI_RESOURCE_ROOT_INDEX} + 1"
+    )
+endwhile ()
+
+list(APPEND HUXERUI_RESOURCE_MERGE_COMMAND
+        --output "${HUXERUI_RESOURCE_OUTPUT}"
+)
+execute_process(
+        COMMAND ${HUXERUI_RESOURCE_MERGE_COMMAND}
+        COMMAND_ERROR_IS_FATAL ANY
+)
+file(REMOVE_RECURSE "${HUXERUI_RESOURCE_WORK_DIRECTORY}")

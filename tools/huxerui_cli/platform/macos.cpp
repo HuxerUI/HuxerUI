@@ -24,6 +24,18 @@ public:
     return tools;
   }
 
+  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
+    return std::any_of(
+               diagnostics.begin(),
+               diagnostics.end(),
+               [](const EnvironmentDiagnostic& diagnostic) {
+                 return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
+               }
+           )
+               ? std::vector<SetupAction>{{"Install Xcode and select it with xcode-select", std::nullopt}}
+               : std::vector<SetupAction>{};
+  }
+
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
     std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/macos/app", context);
@@ -55,6 +67,12 @@ public:
       throw std::runtime_error("macOS application bundle is missing: " + bundle);
     }
     return {{"open", {bundle}, context.project_root}};
+  }
+
+  std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
+    const std::filesystem::path bundle =
+        detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "bundle");
+    return {{bundle, bundle.filename()}};
   }
 };
 

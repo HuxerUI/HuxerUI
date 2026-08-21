@@ -58,6 +58,11 @@ foreach (required_path IN ITEMS
         "${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}"
         "include/huxerui/huxerui.h"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIConfig.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIApp.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUICodegen.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIModules.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResourceBuild.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResources.cmake"
         "share/huxerui/resources/huxerui/resources.bin"
         "share/huxerui/tools/${HOST_SYSTEM}/${HOST_ARCHITECTURE}/hcg${CLI_SUFFIX}"
         "share/huxerui/tools/${HOST_SYSTEM}/${HOST_ARCHITECTURE}/hrc${CLI_SUFFIX}"
@@ -66,6 +71,68 @@ foreach (required_path IN ITEMS
         message(FATAL_ERROR "SDK archive is missing ${required_path}")
     endif ()
 endforeach ()
+
+foreach (build_only_path IN ITEMS
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIBuild.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/platform"
+)
+    if (EXISTS "${SDK_ROOT}/${build_only_path}")
+        message(FATAL_ERROR "SDK archive contains source-build CMake logic: ${build_only_path}")
+    endif ()
+endforeach ()
+
+if (PLATFORM_ARTIFACTS_INCLUDED)
+    foreach (required_path IN ITEMS
+            "share/huxerui/platform/android/HuxerUI.aar"
+            "share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
+            "share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
+            "share/huxerui/platform/android/x86_64/libhuxerui.so"
+            "share/huxerui/platform/android/x86_64/libhuxerui_static.a"
+            "share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
+    )
+        if (NOT EXISTS "${SDK_ROOT}/${required_path}")
+            message(FATAL_ERROR "SDK archive is missing ${required_path}")
+        endif ()
+    endforeach ()
+
+    foreach (platform IN ITEMS android web)
+        set(CONSUMER_SOURCE "${TEST_ROOT}/${platform}-consumer")
+        set(CONSUMER_BUILD "${TEST_ROOT}/${platform}-consumer-build")
+        file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
+        if (platform STREQUAL "android")
+            set(PLATFORM_CONFIGURATION "set(ANDROID TRUE)\nset(ANDROID_ABI arm64-v8a)")
+            set(EXPECTED_LIBRARY
+                    "${SDK_ROOT}/share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
+            )
+        else ()
+            set(PLATFORM_CONFIGURATION "set(EMSCRIPTEN TRUE)")
+            set(EXPECTED_LIBRARY
+                    "${SDK_ROOT}/share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
+            )
+        endif ()
+        file(WRITE "${CONSUMER_SOURCE}/CMakeLists.txt"
+                "cmake_minimum_required(VERSION 3.20)\n"
+                "project(HuxerUITargetSdkConsumer LANGUAGES NONE)\n"
+                "${PLATFORM_CONFIGURATION}\n"
+                "find_package(HuxerUI CONFIG REQUIRED PATHS \"${SDK_ROOT}\" NO_DEFAULT_PATH)\n"
+                "get_target_property(location HuxerUI::huxerui IMPORTED_LOCATION)\n"
+                "if (NOT location STREQUAL \"${EXPECTED_LIBRARY}\")\n"
+                "  message(FATAL_ERROR \"Unexpected imported library: \${location}\")\n"
+                "endif ()\n"
+        )
+        execute_process(
+                COMMAND "${CMAKE_COMMAND}" -S "${CONSUMER_SOURCE}" -B "${CONSUMER_BUILD}"
+                RESULT_VARIABLE CONSUMER_RESULT
+                OUTPUT_VARIABLE CONSUMER_OUTPUT
+                ERROR_VARIABLE CONSUMER_ERROR
+        )
+        if (NOT CONSUMER_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                    "Installed ${platform} SDK import failed:\n${CONSUMER_OUTPUT}${CONSUMER_ERROR}"
+            )
+        endif ()
+    endforeach ()
+endif ()
 
 file(GLOB HOST_DIRECTORIES
         LIST_DIRECTORIES TRUE

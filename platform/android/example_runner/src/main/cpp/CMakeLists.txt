@@ -8,7 +8,7 @@ file(TO_CMAKE_PATH "${HUXERUI_ROOT_DIR}" HUXERUI_ROOT_DIR)
 find_package(HuxerUI REQUIRED CONFIG)
 
 set(HUXERUI_PROJECT_DIR "${HUXERUI_ROOT_DIR}")
-include("${HUXERUI_ROOT_DIR}/cmake/HuxerUITargets.cmake")
+set(HUXERUI_PLATFORM_ID "android")
 include("${HUXERUI_ROOT_DIR}/cmake/HuxerUIExamples.cmake")
 
 set(HUXERUI_EXAMPLE "ui_gallery" CACHE STRING "Example displayed by the Android example runner")

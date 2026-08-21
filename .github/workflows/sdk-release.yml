@@ -31,9 +31,76 @@ jobs:
           -DOUTPUT_FILE=${GITHUB_OUTPUT}
           -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
 
+  platform-artifacts:
+    name: Build Android and Web SDK artifacts
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install Android toolchain
+        run: |
+          set +o pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          set -o pipefail
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "platform-tools" \
+            "ndk;29.0.14206865"
+      - name: Build Android artifacts
+        working-directory: platform/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :HuxerUI:assembleRelease
+          mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
+          aar="$(find huxerui/build/outputs/aar -name '*-release.aar' -print -quit)"
+          unzip -q "${aar}" -d "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
+          for abi in arm64-v8a x86_64; do
+            mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}"
+            cp "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni/${abi}/libhuxerui.so" \
+              "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}/libhuxerui.so"
+            static_library="$(find huxerui/.cxx -path "*/${abi}/lib/libhuxerui_static.a" -print -quit)"
+            cp "${static_library}" \
+              "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}/libhuxerui_static.a"
+          done
+          rm -rf "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni" \
+            "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/prefab"
+          cd "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
+          zip -qr ../HuxerUI.aar .
+          cd ..
+          rm -rf aar
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.19
+      - name: Build Web artifacts
+        run: |
+          emcmake cmake -S . -B build-web \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHUXERUI_BUILD_SHARED=OFF \
+            -DHUXERUI_BUILD_STATIC=ON \
+            -DHUXERUI_BUILD_CLI=OFF \
+            -DHUXERUI_BUILD_EXAMPLES=OFF \
+            -DHUXERUI_BUILD_TESTS=OFF
+          cmake --build build-web --target huxerui_static --parallel
+          mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19"
+          cp build-web/lib/libhuxerui_static.a \
+            "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19/libhuxerui.a"
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-platform-artifacts
+          path: ${{ runner.temp }}/huxerui-platform-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build ${{ matrix.system }} ${{ matrix.architecture }}
-    needs: validate
+    needs:
+      - validate
+      - platform-artifacts
     strategy:
       fail-fast: false
       matrix:
@@ -53,9 +120,19 @@ jobs:
             architecture: x86_64
             generator: ZIP
             extension: zip
+          - runner: ubuntu-24.04
+            system: linux
+            architecture: x86_64
+            generator: TGZ
+            extension: tar.gz
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-platform-artifacts
+          path: sdk-platform-artifacts
       - name: Prepare Unix executables
         if: runner.os != 'Windows'
         run: >-
@@ -63,6 +140,13 @@ jobs:
           install.sh
           tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hcg
           tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hrc
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          gperf libegl1-mesa-dev libgles2-mesa-dev libglib2.0-dev libsoup-3.0-dev
+          libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev meson ninja-build pkg-config
       - name: Configure
         run: >-
           cmake
@@ -72,6 +156,7 @@ jobs:
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
+          -DHUXERUI_SDK_PLATFORM_ARTIFACT_ROOT=${{ github.workspace }}/sdk-platform-artifacts
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test

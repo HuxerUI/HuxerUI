@@ -20,11 +20,11 @@ if (HUXERUI_PROJECT_PLAN_ONLY)
     return()
 endif ()
 
-project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES CXX)
+project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES NONE)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+    enable_language(CXX)
+endif ()
 
 if (NOT TARGET HuxerUI::huxerui)
     set(HUXERUI_HOME "$ENV{HUXERUI_HOME}" CACHE PATH "HuxerUI SDK or source directory")
@@ -35,6 +35,9 @@ if (NOT TARGET HuxerUI::huxerui)
         if (ANDROID)
             set(HUXERUI_BUILD_SHARED ON CACHE BOOL "" FORCE)
             set(HUXERUI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+        else ()
+            set(HUXERUI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+            set(HUXERUI_BUILD_STATIC ON CACHE BOOL "" FORCE)
         endif ()
         add_subdirectory("${HUXERUI_HOME}" "${CMAKE_BINARY_DIR}/huxerui-sdk" EXCLUDE_FROM_ALL)
     else ()
@@ -50,18 +53,12 @@ if (NOT TARGET HuxerUI::huxerui)
     endif ()
 endif ()
 
-
 if (WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/huxerui.cmake" OPTIONAL)
 elseif (APPLE AND NOT IOS)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/huxerui.cmake" OPTIONAL)
 elseif (EMSCRIPTEN)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/web/huxerui.cmake" OPTIONAL)
-endif ()
-
-set(HUXERUI_APP_BUNDLE_IDENTIFIER "@PROJECT_ID@")
-if (APPLE AND NOT IOS AND HUXERUI_MACOS_BUNDLE_IDENTIFIER)
-    set(HUXERUI_APP_BUNDLE_IDENTIFIER "${HUXERUI_MACOS_BUNDLE_IDENTIFIER}")
 endif ()
 
 file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
@@ -83,6 +80,14 @@ set(HUXERUI_MODULE_GRAPH_OUTPUT
         "${CMAKE_CURRENT_SOURCE_DIR}/.huxerui/generated/modules.json"
 )
 
+set(HUXERUI_APP_RESOURCE_OUTPUT_ARGUMENTS)
+if (ANDROID AND HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT)
+    list(APPEND HUXERUI_APP_RESOURCE_OUTPUT_ARGUMENTS
+            RESOURCE_OUTPUT_DIRECTORY
+            "${HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT}/${ANDROID_ABI}"
+    )
+endif ()
+
 huxerui_add_app(@TARGET_NAME@
         SOURCES
             ${APP_SOURCE_FILES}
@@ -90,10 +95,11 @@ huxerui_add_app(@TARGET_NAME@
             resources
         RESOURCE_NAMESPACE
             app
+        ${HUXERUI_APP_RESOURCE_OUTPUT_ARGUMENTS}
         BUNDLE_NAME
             "@PROJECT_NAME@"
         BUNDLE_IDENTIFIER
-            "${HUXERUI_APP_BUNDLE_IDENTIFIER}"
+            "@PROJECT_ID@"
 )
 
 if (WIN32 AND HUXERUI_WINDOWS_MANIFEST)

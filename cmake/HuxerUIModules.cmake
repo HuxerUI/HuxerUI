@@ -1,5 +1,7 @@
 include_guard(GLOBAL)
 
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
+
 function(_huxerui_resolve_module_target requested_target output_variable)
     if (NOT TARGET ${requested_target})
         message(FATAL_ERROR
@@ -19,7 +21,7 @@ function(_huxerui_resolve_module_target requested_target output_variable)
     set(${output_variable} "${HUXERUI_MODULE_TARGET}" PARENT_SCOPE)
 endfunction()
 
-function(_huxerui_module_json_escape input output)
+function(_huxerui_json_escape input output)
     string(REPLACE "\\" "\\\\" value "${input}")
     string(REPLACE "\"" "\\\"" value "${value}")
     string(REPLACE "\n" "\\n" value "${value}")
@@ -73,11 +75,11 @@ function(_huxerui_write_module_graph target_name output_file)
                 TARGET ${HUXERUI_GRAPH_MODULE}
                 PROPERTY HUXERUI_MODULE_SOURCE_ROOT
         )
-        _huxerui_module_json_escape(
+        _huxerui_json_escape(
                 "${HUXERUI_GRAPH_REQUESTED_TARGET}"
                 HUXERUI_GRAPH_JSON_TARGET
         )
-        _huxerui_module_json_escape(
+        _huxerui_json_escape(
                 "${HUXERUI_GRAPH_SOURCE_ROOT}"
                 HUXERUI_GRAPH_JSON_SOURCE_ROOT
         )

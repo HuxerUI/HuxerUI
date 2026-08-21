@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <istream>
 #include <iterator>
 #include <optional>
 #include <ostream>
@@ -31,9 +32,11 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui create module <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
+         << "  huxerui setup <platform-list> [--yes]\n"
          << "  huxerui devices [platform]\n"
          << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]\n"
          << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]\n"
+         << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>]\n"
          << "  huxerui open ios\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n";
@@ -150,6 +153,135 @@ bool PrintEnvironmentDiagnostics(
     output << '\n';
   }
   return ready;
+}
+
+void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& output);
+
+std::vector<SetupAction> PlanCommonSetup(std::span<const EnvironmentDiagnostic> diagnostics) {
+  std::vector<SetupAction> actions;
+  for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
+    if (diagnostic.status != EnvironmentDiagnosticStatus::Missing) {
+      continue;
+    }
+    if (diagnostic.id == "huxerui_home") {
+      actions.push_back({"Install the HuxerUI SDK or set HUXERUI_HOME", std::nullopt});
+    } else if (diagnostic.id == "cmake") {
+      actions.push_back({"Install CMake from https://cmake.org/download/ and add it to PATH", std::nullopt});
+    }
+  }
+  return actions;
+}
+
+void AppendUniqueActions(std::vector<SetupAction>& destination, std::vector<SetupAction> source) {
+  for (SetupAction& action : source) {
+    const auto duplicate = std::find_if(destination.begin(), destination.end(), [&action](const SetupAction& existing) {
+      return existing.description == action.description;
+    });
+    if (duplicate == destination.end()) {
+      destination.push_back(std::move(action));
+    }
+  }
+}
+
+bool DiagnosticsReady(std::span<const EnvironmentDiagnostic> diagnostics) {
+  return std::all_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+    return diagnostic.status == EnvironmentDiagnosticStatus::Ready;
+  });
+}
+
+int RunSetup(
+    std::span<const std::string_view> arguments, const SdkLocation& sdk, std::istream& input, std::ostream& output
+) {
+  if (arguments.size() < 2) {
+    throw UsageError("setup requires an explicit platform list");
+  }
+
+  bool assume_yes = false;
+  std::optional<std::string_view> platform_list;
+  for (std::size_t index = 1; index < arguments.size(); ++index) {
+    if (arguments[index] == "--yes") {
+      if (assume_yes) {
+        throw UsageError("--yes may be specified only once");
+      }
+      assume_yes = true;
+    } else if (!platform_list) {
+      platform_list = arguments[index];
+    } else {
+      throw UsageError("unexpected setup argument: " + std::string(arguments[index]));
+    }
+  }
+  if (!platform_list) {
+    throw UsageError("setup requires an explicit platform list");
+  }
+
+  const std::vector<const PlatformDriver*> platforms = ResolvePlatforms(*platform_list);
+  const std::vector<EnvironmentDiagnostic> common_diagnostics = DiagnoseCommonEnvironment(sdk);
+  output << "Common environment:\n";
+  PrintEnvironmentDiagnostics(common_diagnostics, "  ", output);
+
+  bool environment_ready = DiagnosticsReady(common_diagnostics);
+  std::vector<SetupAction> actions = PlanCommonSetup(common_diagnostics);
+  for (const PlatformDriver* platform : platforms) {
+    const std::vector<EnvironmentDiagnostic> diagnostics = platform->DiagnoseEnvironment();
+    output << "Platform " << platform->Id() << ":\n";
+    PrintEnvironmentDiagnostics(diagnostics, "  ", output);
+    environment_ready = DiagnosticsReady(diagnostics) && environment_ready;
+    AppendUniqueActions(actions, platform->PlanSetup(diagnostics));
+  }
+
+  if (environment_ready) {
+    output << "Environment is ready; no setup changes are required.\n";
+    return 0;
+  }
+  if (actions.empty()) {
+    output << "No setup action is available for the requested environment.\n";
+    return 1;
+  }
+
+  output << "Setup plan:\n";
+  for (const SetupAction& action : actions) {
+    output << "  [" << (action.command ? "command" : "manual") << "] " << action.description << '\n';
+    if (action.command) {
+      output << "    > " << DescribeProcess(*action.command) << '\n';
+    }
+  }
+
+  if (!assume_yes) {
+    output << "Continue? [y/N] ";
+    output.flush();
+    std::string response;
+    std::getline(input, response);
+    if (response != "y" && response != "Y" && response != "yes" && response != "YES") {
+      output << "Setup cancelled.\n";
+      return 1;
+    }
+  }
+
+  for (const SetupAction& action : actions) {
+    if (!action.command) {
+      output << "Manual action required: " << action.description << '\n';
+      continue;
+    }
+    ExecuteCommands(std::span<const ProcessCommand>(&*action.command, 1), output);
+  }
+
+  output << "Post-setup diagnosis:\n";
+  output << "Common environment:\n";
+  const std::vector<EnvironmentDiagnostic> post_common_diagnostics = DiagnoseCommonEnvironment(sdk);
+  PrintEnvironmentDiagnostics(post_common_diagnostics, "  ", output);
+  environment_ready = DiagnosticsReady(post_common_diagnostics);
+  for (const PlatformDriver* platform : platforms) {
+    const std::vector<EnvironmentDiagnostic> diagnostics = platform->DiagnoseEnvironment();
+    output << "Platform " << platform->Id() << ":\n";
+    PrintEnvironmentDiagnostics(diagnostics, "  ", output);
+    environment_ready = DiagnosticsReady(diagnostics) && environment_ready;
+  }
+  if (!environment_ready) {
+    output << "Environment setup is incomplete.\n";
+    return 1;
+  }
+  output << "Environment setup is complete.\n";
+  return 0;
 }
 
 int RunCreate(
@@ -396,6 +528,7 @@ struct BuildOptions {
   std::string device;
   std::string cmake_generator;
   std::optional<PlatformDevice> selected_device;
+  bool profile_explicit = false;
 };
 
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
@@ -406,6 +539,7 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
         throw UsageError("--profile requires a value");
       }
       options.profile = arguments[index];
+      options.profile_explicit = true;
       if (options.profile != "debug" && options.profile != "release") {
         throw UsageError("profile must be debug or release");
       }
@@ -639,6 +773,74 @@ int RunApplication(
   return 0;
 }
 
+void CopyPackageArtifacts(
+    std::span<const PackageArtifact> artifacts, const std::filesystem::path& destination_root, std::ostream& output
+) {
+  if (artifacts.empty()) {
+    throw std::runtime_error("platform did not produce any package artifacts");
+  }
+  std::filesystem::create_directories(destination_root);
+  for (const PackageArtifact& artifact : artifacts) {
+    if (artifact.destination.empty() || artifact.destination.is_absolute() ||
+        std::find(artifact.destination.begin(), artifact.destination.end(), std::filesystem::path{".."}) !=
+            artifact.destination.end()) {
+      throw std::logic_error("platform produced an invalid package destination");
+    }
+    if (!std::filesystem::exists(artifact.source)) {
+      throw std::runtime_error("package artifact is missing: " + artifact.source.string());
+    }
+    const std::filesystem::path destination = destination_root / artifact.destination;
+    std::filesystem::create_directories(destination.parent_path());
+    if (std::filesystem::is_directory(artifact.source)) {
+      std::filesystem::copy(
+          artifact.source,
+          destination,
+          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing
+      );
+    } else {
+      std::filesystem::copy_file(artifact.source, destination, std::filesystem::copy_options::overwrite_existing);
+    }
+    output << "Packaged " << destination.string() << '\n';
+  }
+}
+
+int RunPackage(
+    std::span<const std::string_view> arguments,
+    const std::filesystem::path& working_directory,
+    const std::filesystem::path& huxerui_home,
+    std::ostream& output
+) {
+  if (huxerui_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
+  }
+  BuildOptions options = ParseBuildOptions(arguments, "package");
+  if (!options.profile_explicit) {
+    options.profile = "release";
+  }
+  const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
+  if (!project.unknown_platforms.empty()) {
+    throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
+  }
+  const std::vector<const PlatformDriver*> platforms =
+      ResolveBuildPlatforms(project, options.platforms, {}, options.device);
+  if (!options.device.empty()) {
+    options.selected_device = SelectDevice(*platforms.front(), options.device);
+  }
+
+  for (const PlatformDriver* platform : platforms) {
+    BuildPlatform(project, *platform, huxerui_home, options, output);
+    const PlatformCommandContext context = MakeCommandContext(project, *platform, huxerui_home, options);
+    const std::filesystem::path destination = project.root / "dist" / platform->Id();
+    std::error_code error;
+    std::filesystem::remove_all(destination, error);
+    if (error) {
+      throw std::runtime_error("cannot replace package directory " + destination.string() + ": " + error.message());
+    }
+    CopyPackageArtifacts(platform->PackageArtifacts(context), destination, output);
+  }
+  return 0;
+}
+
 int RunOpen(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
@@ -677,6 +879,7 @@ int Run(
     std::span<const std::string_view> arguments,
     const std::filesystem::path& working_directory,
     const SdkLocation& sdk,
+    std::istream& input,
     std::ostream& output,
     std::ostream& error
 ) {
@@ -698,6 +901,9 @@ int Run(
     if (arguments[0] == "doctor") {
       return RunDoctor(arguments, working_directory, sdk, output);
     }
+    if (arguments[0] == "setup") {
+      return RunSetup(arguments, sdk, input, output);
+    }
     if (arguments[0] == "devices") {
       return RunDevices(arguments, output);
     }
@@ -706,6 +912,9 @@ int Run(
     }
     if (arguments[0] == "run") {
       return RunApplication(arguments, working_directory, sdk.home, output);
+    }
+    if (arguments[0] == "package") {
+      return RunPackage(arguments, working_directory, sdk.home, output);
     }
     if (arguments[0] == "open") {
       return RunOpen(arguments, working_directory, sdk.home, output);

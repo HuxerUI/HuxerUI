@@ -34,6 +34,7 @@ if (DEFINED ASSET_DIRECTORY AND NOT ASSET_DIRECTORY STREQUAL "")
             "huxerui-sdk-${RELEASE_VERSION}-macos-arm64.tar.gz"
             "huxerui-sdk-${RELEASE_VERSION}-macos-x86_64.tar.gz"
             "huxerui-sdk-${RELEASE_VERSION}-windows-x86_64.zip"
+            "huxerui-sdk-${RELEASE_VERSION}-linux-x86_64.tar.gz"
     )
     set(EXPECTED_ASSETS install.ps1 install.sh)
     foreach (archive_name IN LISTS EXPECTED_ARCHIVES)

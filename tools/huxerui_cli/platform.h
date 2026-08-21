@@ -30,6 +30,11 @@ struct EnvironmentDiagnostic {
   std::string detail;
 };
 
+struct SetupAction {
+  std::string description;
+  std::optional<ProcessCommand> command;
+};
+
 enum class DeviceState {
   Ready,
   Offline,
@@ -62,6 +67,13 @@ struct PlatformCommandContext {
   std::optional<PlatformDevice> device;
 };
 
+struct PackageArtifact {
+  std::filesystem::path source;
+  std::filesystem::path destination;
+
+  bool operator==(const PackageArtifact&) const = default;
+};
+
 class PlatformDriver {
 public:
   virtual ~PlatformDriver() = default;
@@ -69,6 +81,7 @@ public:
   [[nodiscard]] virtual std::string_view Id() const noexcept = 0;
   [[nodiscard]] virtual bool SupportsCurrentHost() const noexcept = 0;
   [[nodiscard]] virtual std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const;
+  [[nodiscard]] virtual std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const = 0;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const;
   [[nodiscard]] virtual std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const = 0;
@@ -78,6 +91,7 @@ public:
   virtual void UpdateProjectIntegration(const PlatformCommandContext& context) const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
+  [[nodiscard]] virtual std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const;
 
 protected:

@@ -375,6 +375,18 @@ public:
     return tools;
   }
 
+  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
+    return std::any_of(
+               diagnostics.begin(),
+               diagnostics.end(),
+               [](const EnvironmentDiagnostic& diagnostic) {
+                 return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
+               }
+           )
+               ? std::vector<SetupAction>{{"Install Xcode and select it with xcode-select", std::nullopt}}
+               : std::vector<SetupAction>{};
+  }
+
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     return RenderTemplateTree("platform/ios/app", context);
   }
@@ -398,6 +410,8 @@ public:
         std::string_view{"Config/Base.xcconfig"},
         std::string_view{"Config/Debug.xcconfig"},
         std::string_view{"Config/Release.xcconfig"},
+        std::string_view{"Scripts/build_huxerui_core.sh"},
+        std::string_view{"Scripts/stage_huxerui_resources.sh"},
     };
     std::vector<Diagnostic> diagnostics = detail::ValidateRequiredFiles(shell_root, required);
     const std::vector<std::filesystem::path> projects = IosProjects(shell_root);
@@ -530,6 +544,12 @@ public:
         {"xcrun", {"simctl", "install", simulator, bundle}, context.project_root},
         {"xcrun", {"simctl", "launch", simulator, bundle_identifier}, context.project_root},
     };
+  }
+
+  std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
+    const std::filesystem::path bundle =
+        detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "bundle");
+    return {{bundle, bundle.filename()}};
   }
 
   std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const override {

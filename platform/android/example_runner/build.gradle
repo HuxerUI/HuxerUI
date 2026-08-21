@@ -15,6 +15,10 @@ def huxeruiDebugAssets = layout.buildDirectory.dir(
         "generated/huxerui/assets/debug/${huxeruiExample}").get().asFile
 def huxeruiReleaseAssets = layout.buildDirectory.dir(
         "generated/huxerui/assets/release/${huxeruiExample}").get().asFile
+def huxeruiDebugResources = layout.buildDirectory.dir(
+        "generated/huxerui/resources/debug/${huxeruiExample}").get().asFile
+def huxeruiReleaseResources = layout.buildDirectory.dir(
+        "generated/huxerui/resources/release/${huxeruiExample}").get().asFile
 
 android {
     namespace = "org.huxerui.examples"
@@ -42,11 +46,23 @@ android {
     }
 
     buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments "-DHUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT=${huxeruiDebugResources.absolutePath}"
+                }
+            }
+        }
         release {
             minifyEnabled = false
             proguardFiles getDefaultProguardFile(
                     "proguard-android-optimize.txt"),
                     "proguard-rules.pro"
+            externalNativeBuild {
+                cmake {
+                    arguments "-DHUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT=${huxeruiReleaseResources.absolutePath}"
+                }
+            }
         }
     }
 
@@ -87,23 +103,17 @@ dependencies {
     implementation project(":HuxerUI")
 }
 
-def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
+def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory, File resourceDirectory ->
     def capitalizedBuildType = buildType.capitalize()
     def nativeTaskName = "externalNativeBuild${capitalizedBuildType}"
     def resolveResourcePackage = {
-        def indexFiles = fileTree(file(".cxx/${capitalizedBuildType}")) {
-            include "**/example/huxerui-resources/example_${huxeruiExample}/package/huxerui/resources.bin"
-        }.files
-        // ABI packages are deterministic. Prefer arm64 and the newest active CMake configuration hash.
-        def preferredIndexFiles = indexFiles.findAll {
-            it.absolutePath.contains("${File.separator}arm64-v8a${File.separator}")
+        for (def abi : huxeruiAbis) {
+            def packageDirectory = new File(resourceDirectory, "${abi}/package")
+            if (new File(packageDirectory, "huxerui/resources.bin").isFile()) {
+                return packageDirectory
+            }
         }
-        def candidates = preferredIndexFiles.empty ? indexFiles : preferredIndexFiles
-        def selected = candidates.max { left, right ->
-            def modified = left.lastModified() <=> right.lastModified()
-            modified != 0 ? modified : left.absolutePath <=> right.absolutePath
-        }
-        selected == null ? null : selected.parentFile.parentFile
+        return null
     }
     def verificationTask = tasks.register("verifyHuxerUI${capitalizedBuildType}Resources") {
         dependsOn nativeTaskName
@@ -124,5 +134,5 @@ def registerHuxerUIResourceStaging = { String buildType, File assetsDirectory ->
     }
 }
 
-registerHuxerUIResourceStaging("debug", huxeruiDebugAssets)
-registerHuxerUIResourceStaging("release", huxeruiReleaseAssets)
+registerHuxerUIResourceStaging("debug", huxeruiDebugAssets, huxeruiDebugResources)
+registerHuxerUIResourceStaging("release", huxeruiReleaseAssets, huxeruiReleaseResources)
