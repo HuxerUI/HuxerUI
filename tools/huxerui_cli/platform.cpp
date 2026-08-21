@@ -158,6 +158,29 @@ std::vector<GeneratedFile> PlatformDriver::CreateModulePackage(const ProjectTemp
   return {};
 }
 
+std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment() const {
+  if (!SupportsCurrentHost()) {
+    return {{
+        EnvironmentDiagnosticStatus::Unavailable,
+        "host",
+        "unsupported from host " + std::string(CurrentHostId()),
+        {},
+    }};
+  }
+
+  std::vector<EnvironmentDiagnostic> diagnostics;
+  for (const std::string_view tool : RequiredTools()) {
+    const std::optional<std::filesystem::path> executable = FindExecutable(tool);
+    diagnostics.push_back({
+        executable ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+        std::string(tool),
+        std::string(tool),
+        executable ? executable->string() : std::string{},
+    });
+  }
+  return diagnostics;
+}
+
 bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {
   return false;
 }

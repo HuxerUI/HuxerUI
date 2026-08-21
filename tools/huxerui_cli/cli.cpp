@@ -96,41 +96,60 @@ std::optional<Project> TryDiscoverProject(const std::filesystem::path& start) {
   }
 }
 
-bool IsExecutableFile(const std::filesystem::path& path) {
-  return std::filesystem::is_regular_file(path);
+std::vector<EnvironmentDiagnostic> DiagnoseCommonEnvironment(const SdkLocation& sdk) {
+  std::vector<EnvironmentDiagnostic> diagnostics;
+  if (sdk.home.empty()) {
+    diagnostics.push_back({
+        EnvironmentDiagnosticStatus::Missing,
+        "huxerui_home",
+        "HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME",
+        {},
+    });
+  } else {
+    diagnostics.push_back({
+        EnvironmentDiagnosticStatus::Ready,
+        "huxerui_home",
+        "HUXERUI_HOME (" + std::string(SdkLocationSourceName(sdk.source)) + ")",
+        sdk.home.string(),
+    });
+  }
+
+  const std::optional<std::filesystem::path> cmake = FindExecutable("cmake");
+  diagnostics.push_back({
+      cmake ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+      "cmake",
+      "cmake",
+      cmake ? cmake->string() : std::string{},
+  });
+  return diagnostics;
 }
 
-bool FindExecutable(std::string_view name) {
-  const std::optional<std::string> path_value = ReadEnvironmentVariable("PATH");
-  if (!path_value) {
-    return false;
-  }
-
-#if defined(_WIN32)
-  constexpr char separator = ';';
-  static constexpr std::string_view suffixes[]{"", ".exe", ".cmd", ".bat"};
-#else
-  constexpr char separator = ':';
-  static constexpr std::string_view suffixes[]{""};
-#endif
-
-  const std::string_view paths(*path_value);
-  std::size_t start = 0;
-  while (start <= paths.size()) {
-    const std::size_t delimiter = paths.find(separator, start);
-    const std::size_t end = delimiter == std::string_view::npos ? paths.size() : delimiter;
-    const std::filesystem::path directory = std::string(paths.substr(start, end - start));
-    for (const std::string_view suffix : suffixes) {
-      if (IsExecutableFile(directory / (std::string(name) + std::string(suffix)))) {
-        return true;
-      }
-    }
-    if (delimiter == std::string_view::npos) {
+bool PrintEnvironmentDiagnostics(
+    std::span<const EnvironmentDiagnostic> diagnostics, std::string_view indentation, std::ostream& output
+) {
+  bool ready = true;
+  for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
+    std::string_view status;
+    switch (diagnostic.status) {
+    case EnvironmentDiagnosticStatus::Ready:
+      status = "ok";
+      break;
+    case EnvironmentDiagnosticStatus::Missing:
+      status = "missing";
+      ready = false;
+      break;
+    case EnvironmentDiagnosticStatus::Unavailable:
+      status = "unavailable";
+      ready = false;
       break;
     }
-    start = delimiter + 1;
+    output << indentation << '[' << status << "] " << diagnostic.label;
+    if (!diagnostic.detail.empty()) {
+      output << ": " << diagnostic.detail;
+    }
+    output << '\n';
   }
-  return false;
+  return ready;
 }
 
 int RunCreate(
@@ -256,18 +275,7 @@ int RunDoctor(
   bool failed = false;
   output << "HuxerUI CLI " << version << '\n';
   output << "Host: " << CurrentHostId() << '\n';
-  if (sdk.home.empty()) {
-    output << "[missing] HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME\n";
-    failed = true;
-  } else {
-    output << "[ok] HUXERUI_HOME (" << SdkLocationSourceName(sdk.source) << "): " << sdk.home.string() << '\n';
-  }
-  if (FindExecutable("cmake")) {
-    output << "[ok] cmake\n";
-  } else {
-    output << "[missing] cmake\n";
-    failed = true;
-  }
+  failed = !PrintEnvironmentDiagnostics(DiagnoseCommonEnvironment(sdk), {}, output);
 
   std::optional<Project> project = TryDiscoverProject(working_directory);
   if (project) {
@@ -319,20 +327,12 @@ int RunDoctor(
 
   for (const PlatformDriver* platform : platforms) {
     output << "Platform " << platform->Id() << ":\n";
-    if (!platform->SupportsCurrentHost()) {
-      output << "  [unavailable] unsupported from host " << CurrentHostId() << '\n';
-      failed = true;
-    }
+    failed = !PrintEnvironmentDiagnostics(platform->DiagnoseEnvironment(), "  ", output) || failed;
     if (project) {
       for (const Diagnostic& diagnostic : platform->Diagnose(project->root / "platform" / platform->Id())) {
         output << (diagnostic.error ? "  [error] " : "  [ok] ") << diagnostic.message << '\n';
         failed = failed || diagnostic.error;
       }
-    }
-    for (const std::string_view tool : platform->RequiredTools()) {
-      const bool found = FindExecutable(tool);
-      output << (found ? "  [ok] " : "  [missing] ") << tool << '\n';
-      failed = failed || !found;
     }
   }
   return failed ? 1 : 0;

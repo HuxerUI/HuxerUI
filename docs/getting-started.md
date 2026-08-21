@@ -258,7 +258,7 @@ Module names do not require a `huxerui-` prefix and may contain uppercase letter
 Selecting Linux creates the module's CMake `platform/linux/src` root, selecting Android also creates an independent Gradle library, and selecting iOS creates a Swift Package. Android and iOS builds attach consumed platform module packages to the preview application automatically.
 Running `doctor`, `build`, `run`, or `open ios` from a module root resolves to this ordinary Preview application; the same commands also work directly inside `examples/preview`.
 The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`, plus Linux sources under `platform/linux/src` when configuring for Linux.
-`doctor` discovers the nearest project from a nested directory, validates each platform shell, and checks host tools without changing the project.
+`doctor` discovers the nearest project from a nested directory, validates each platform shell, and reports host-tool availability and resolved executable paths without changing the project.
 `devices` lists runnable Android devices, paired physical iOS devices, and booted iOS Simulators without requiring a project.
 `build` preserves platform build output under `.huxerui/build`, while `run` builds and launches exactly one target platform. iOS Simulator and device builds use separate `ios-simulator` and `ios-device` directories. `xcodebuild` builds the source-controlled Xcode project, `simctl` installs Simulator builds, and `devicectl` installs automatically signed physical-device builds.
 `huxerui open ios` records the ignored local SDK setting and opens `platform/ios/<target>.xcodeproj` without regenerating the Xcode project.

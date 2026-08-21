@@ -17,6 +17,19 @@ struct Diagnostic {
   std::string message;
 };
 
+enum class EnvironmentDiagnosticStatus {
+  Ready,
+  Missing,
+  Unavailable,
+};
+
+struct EnvironmentDiagnostic {
+  EnvironmentDiagnosticStatus status = EnvironmentDiagnosticStatus::Missing;
+  std::string id;
+  std::string label;
+  std::string detail;
+};
+
 enum class DeviceState {
   Ready,
   Offline,
@@ -55,7 +68,7 @@ public:
 
   [[nodiscard]] virtual std::string_view Id() const noexcept = 0;
   [[nodiscard]] virtual bool SupportsCurrentHost() const noexcept = 0;
-  [[nodiscard]] virtual std::span<const std::string_view> RequiredTools() const noexcept = 0;
+  [[nodiscard]] virtual std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const = 0;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const;
   [[nodiscard]] virtual std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const = 0;
@@ -66,6 +79,9 @@ public:
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const;
+
+protected:
+  [[nodiscard]] virtual std::span<const std::string_view> RequiredTools() const noexcept = 0;
 };
 
 [[nodiscard]] std::string_view DeviceStateName(DeviceState state) noexcept;

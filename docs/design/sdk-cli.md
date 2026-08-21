@@ -15,6 +15,7 @@ The current implementation provides:
 - Compile-time module targets, local and pinned HTTPS Git acquisition, predeclared-target consumption, ordered resource packages, common module scaffolding, an application-based module preview, Android Gradle library attachment, and iOS Swift Package aggregation and attachment.
 - Direct Android root-CMake builds with Gradle-owned SDK, NDK, ABI, identifier, dependency, and packaging configuration.
 - `HUXERUI_HOME` selection, CLI executable-relative self-discovery, child-process propagation, and relocatable Windows and macOS installed-SDK validation.
+- Shared read-only environment diagnosis with stable requirement identities, host availability, and resolved executable paths.
 - Versioned Windows and macOS SDK archives with canonical names, SHA-256 checksums, the project license, and only the matching host tools.
 - SDK-only macOS shell and Windows PowerShell installers with custom prefixes, checksum verification, environment selection, repeatable upgrades, and owned uninstall behavior.
 - Tag-driven SDK release automation that validates the project version, builds every supported host archive, verifies the complete asset set, and publishes through the official repository.
@@ -276,6 +277,8 @@ Checks are scoped to requested platforms.
 A missing Android toolchain does not make a Windows-only diagnostic fail.
 Host environment diagnosis and project-shell diagnosis remain separate operations even when one `doctor` invocation reports both.
 Environment diagnosis owns tool discovery, versions, executable paths, licenses, and actionable remediation; project diagnosis owns repository structure and generated or source-controlled shell validity.
+The implemented diagnostic result carries one stable requirement identity, status, display label, and optional detail; common and per-driver checks use the same result without introducing an environment-provider hierarchy.
+Current checks report SDK selection, host availability, and executable paths, while later setup phases extend the same result with version, license, and remediation checks.
 The same environment diagnosis is reused by `setup` before and after any installation, so the two commands cannot disagree about readiness.
 
 ### Setup (proposed)
@@ -825,7 +828,7 @@ The architecture is implemented through reviewable phases that keep generated pr
 - SDK packaging now produces versioned Windows and macOS archives and checksums around the canonical install tree, installs the project license, and excludes tools for unrelated hosts and architectures.
 - SDK-only `install.sh` and `install.ps1` entry points now verify local or downloaded archives, support custom prefixes, update only their owned environment state, and roll back failed upgrades.
 - SDK distribution now validates version tags, builds macOS arm64, macOS x86_64, and Windows x86_64 archives independently, and publishes the complete verified asset set through a draft-first official GitHub Release.
-- Environment diagnosis then factors the existing `doctor` checks into reusable common and per-driver results without changing its read-only public behavior.
+- Environment diagnosis now factors the existing `doctor` checks into reusable common and per-driver results, reports resolved executable paths, and keeps project-shell validation separate without changing its read-only behavior.
 - The `setup` command then adds shared planning, confirmation, `--yes`, execution, and post-install diagnosis around those results without introducing another provider abstraction.
 - Platform setup implementations then cover Android, Web, Apple, Windows, and Linux in reviewable host-specific phases, using official acquisition paths and retaining explicit manual completion where automation is unavailable.
 - Native installer packaging may subsequently wrap the same SDK tree for Windows, macOS, and Linux, while platform releases publish desktop, Web, Android, and Apple artifacts without adding another common package hierarchy.

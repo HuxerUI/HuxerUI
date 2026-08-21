@@ -21,7 +21,6 @@ public:
 
   std::span<const std::string_view> RequiredTools() const noexcept override {
     static constexpr std::array tools{
-        std::string_view{"cmake"},
         std::string_view{"emcmake"},
         std::string_view{"emrun"},
     };

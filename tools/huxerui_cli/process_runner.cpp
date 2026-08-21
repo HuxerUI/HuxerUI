@@ -20,6 +20,17 @@
 namespace huxerui::cli {
 namespace {
 
+bool IsExecutableFile(const std::filesystem::path& path) {
+  if (!std::filesystem::is_regular_file(path)) {
+    return false;
+  }
+#if defined(_WIN32)
+  return true;
+#else
+  return access(path.c_str(), X_OK) == 0;
+#endif
+}
+
 std::string QuoteForDisplay(std::string_view value) {
   if (value.find_first_of(" \t\"") == std::string_view::npos) {
     return std::string(value);
@@ -353,6 +364,40 @@ void SetProcessEnvironmentVariable(std::string_view name, std::string_view value
     throw std::runtime_error("cannot set environment variable: " + key);
   }
 #endif
+}
+
+std::optional<std::filesystem::path> FindExecutable(std::string_view name) {
+  const std::optional<std::string> path_value = ReadEnvironmentVariable("PATH");
+  if (!path_value) {
+    return std::nullopt;
+  }
+
+#if defined(_WIN32)
+  constexpr char separator = ';';
+  static constexpr std::string_view suffixes[]{"", ".exe", ".cmd", ".bat"};
+#else
+  constexpr char separator = ':';
+  static constexpr std::string_view suffixes[]{""};
+#endif
+
+  const std::string_view paths(*path_value);
+  std::size_t start = 0;
+  while (start <= paths.size()) {
+    const std::size_t delimiter = paths.find(separator, start);
+    const std::size_t end = delimiter == std::string_view::npos ? paths.size() : delimiter;
+    const std::filesystem::path directory = std::string(paths.substr(start, end - start));
+    for (const std::string_view suffix : suffixes) {
+      const std::filesystem::path candidate = directory / (std::string(name) + std::string(suffix));
+      if (IsExecutableFile(candidate)) {
+        return candidate;
+      }
+    }
+    if (delimiter == std::string_view::npos) {
+      break;
+    }
+    start = delimiter + 1;
+  }
+  return std::nullopt;
 }
 
 std::string DescribeProcess(const ProcessCommand& command) {

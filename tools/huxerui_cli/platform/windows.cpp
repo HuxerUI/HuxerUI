@@ -20,8 +20,7 @@ public:
   }
 
   std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array tools{std::string_view{"cmake"}};
-    return tools;
+    return {};
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -169,10 +170,6 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
 
   const huxerui::cli::PlatformDriver* android = huxerui::cli::FindPlatformDriver("android");
   REQUIRE(android != nullptr);
-  REQUIRE(
-      std::find(android->RequiredTools().begin(), android->RequiredTools().end(), "gradle") ==
-      android->RequiredTools().end()
-  );
   REQUIRE(android->Diagnose(project / "platform/android").empty());
   std::filesystem::remove(project / "platform/android/gradle/wrapper/gradle-wrapper.jar");
   const std::vector<huxerui::cli::Diagnostic> diagnostics = android->Diagnose(project / "platform/android");
@@ -1011,6 +1008,8 @@ TEST_CASE("HuxerUICliRejectsUnknownProjectPlatformsBeforeRun") {
 
 TEST_CASE("HuxerUICliDoctorReportsTheResolvedSdk") {
   TemporaryDirectory temporary;
+  const std::optional<std::filesystem::path> cmake = huxerui::cli::FindExecutable("cmake");
+  REQUIRE(cmake);
   const std::vector<std::string_view> arguments{"doctor"};
   std::ostringstream output;
   std::ostringstream error;
@@ -1025,7 +1024,33 @@ TEST_CASE("HuxerUICliDoctorReportsTheResolvedSdk") {
 
   REQUIRE(result == 0);
   REQUIRE(output.str().find("[ok] HUXERUI_HOME (environment): " + temporary.Path().string()) != std::string::npos);
+  REQUIRE(output.str().find("[ok] cmake: " + cmake->string()) != std::string::npos);
   REQUIRE(error.str().empty());
+}
+
+TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
+  const huxerui::cli::PlatformDriver* android = huxerui::cli::FindPlatformDriver("android");
+  REQUIRE(android != nullptr);
+  const std::vector<huxerui::cli::EnvironmentDiagnostic> android_diagnostics = android->DiagnoseEnvironment();
+  const auto has_android_diagnostic = [&android_diagnostics](std::string_view id) {
+    return std::any_of(
+        android_diagnostics.begin(),
+        android_diagnostics.end(),
+        [id](const huxerui::cli::EnvironmentDiagnostic& diagnostic) { return diagnostic.id == id; }
+    );
+  };
+  REQUIRE(has_android_diagnostic("java"));
+  REQUIRE(has_android_diagnostic("adb"));
+  REQUIRE_FALSE(has_android_diagnostic("cmake"));
+  REQUIRE_FALSE(has_android_diagnostic("gradle"));
+
+  const std::string_view unavailable_id = huxerui::cli::CurrentHostId() == "windows" ? "ios" : "windows";
+  const huxerui::cli::PlatformDriver* unavailable = huxerui::cli::FindPlatformDriver(unavailable_id);
+  REQUIRE(unavailable != nullptr);
+  const std::vector<huxerui::cli::EnvironmentDiagnostic> unavailable_diagnostics = unavailable->DiagnoseEnvironment();
+  REQUIRE(unavailable_diagnostics.size() == 1);
+  REQUIRE(unavailable_diagnostics.front().status == huxerui::cli::EnvironmentDiagnosticStatus::Unavailable);
+  REQUIRE(unavailable_diagnostics.front().id == "host");
 }
 
 TEST_CASE("HuxerUICliDoctorChecksRequestedPlatformsOutsideAProject") {
@@ -1035,6 +1060,7 @@ TEST_CASE("HuxerUICliDoctorChecksRequestedPlatformsOutsideAProject") {
   REQUIRE(invocation.result == 1);
   REQUIRE(invocation.output.find("Project: not found") != std::string::npos);
   REQUIRE(invocation.output.find("Platform android:") != std::string::npos);
+  REQUIRE(invocation.output.find("  [ok] cmake") == std::string::npos);
 }
 
 #if defined(_WIN32)
