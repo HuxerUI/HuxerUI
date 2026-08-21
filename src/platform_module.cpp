@@ -216,9 +216,9 @@ struct PlatformInstance::State : std::enable_shared_from_this<PlatformInstance::
 
   PlatformEventSink EventSink() {
     const std::weak_ptr<State> weak = weak_from_this();
-    return [weak](std::string event, PlatformPayload payload) {
+    return [weak](std::string_view event, PlatformPayload payload) {
       if (const std::shared_ptr<State> state = weak.lock()) {
-        state->PostEvent(std::move(event), std::move(payload));
+        state->PostEvent(std::string(event), std::move(payload));
       }
     };
   }

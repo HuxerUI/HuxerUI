@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -116,11 +117,11 @@ struct AndroidPlatformViews::State {
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
-    PlatformEventSink event_sink = [weak_route, dispatcher](std::string name, PlatformPayload payload) mutable {
+    PlatformEventSink event_sink = [weak_route, dispatcher](std::string_view name, PlatformPayload payload) mutable {
       if (!dispatcher) {
         return;
       }
-      dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+      dispatcher([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
         const std::shared_ptr<EventRoute> route = weak_route.lock();
         if (!route || !route->active || route->runtime == nullptr) {
           return;

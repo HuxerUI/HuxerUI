@@ -8,6 +8,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -196,9 +197,9 @@ struct WebPlatformViews::State {
 
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
-    PlatformEventSink events = [weak_route,
-                                dispatcher = dispatch_to_ui_thread](std::string name, PlatformPayload payload) mutable {
-      dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+    const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
+    PlatformEventSink events = [weak_route, dispatcher](std::string_view name, PlatformPayload payload) mutable {
+      dispatcher([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
         const std::shared_ptr<EventRoute> route = weak_route.lock();
         if (!route || !route->active || route->runtime == nullptr) {
           return;

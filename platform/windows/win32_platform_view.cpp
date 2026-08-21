@@ -10,6 +10,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -208,12 +209,12 @@ struct Win32PlatformViews::State {
 
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, dispatch, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
-    PlatformEventSink event_sink = [weak_route](std::string name, PlatformPayload payload) mutable {
+    PlatformEventSink event_sink = [weak_route](std::string_view name, PlatformPayload payload) mutable {
       const std::shared_ptr<EventRoute> route = weak_route.lock();
       if (!route || !route->dispatch) {
         return;
       }
-      route->dispatch([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+      route->dispatch([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
         const std::shared_ptr<EventRoute> active_route = weak_route.lock();
         if (!active_route || !active_route->active || active_route->runtime == nullptr) {
           return;

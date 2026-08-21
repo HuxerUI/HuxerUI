@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -237,13 +238,16 @@ struct UIKitPlatformViews::State {
         false,
     });
     const std::weak_ptr<EventRoute> weak_route = route;
-    PlatformEventSink event_sink = [weak_route](std::string name, PlatformPayload payload) mutable {
+    PlatformEventSink event_sink = [weak_route](std::string_view name, PlatformPayload payload) mutable {
+      const std::string owned_name(name);
       dispatch_async(dispatch_get_main_queue(), ^{
         const std::shared_ptr<EventRoute> route = weak_route.lock();
         if (!route || !route->active || route->runtime == nullptr) {
           return;
         }
-        static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
+        static_cast<void>(
+            RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, owned_name, payload)
+        );
       });
     };
 

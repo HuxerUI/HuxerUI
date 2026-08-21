@@ -517,6 +517,7 @@ Dispose first rejects new calls, cancels pending requests, detaches event delive
 Results and events carrying an obsolete instance or request identity are ignored safely.
 
 Platform events retain the existing HuxerUI typed-event model.
+A `PlatformEventSink` borrows its `std::string_view` name only for the synchronous call; framework routes copy that name before dispatching an event asynchronously.
 A module event key supplies its wire event name and a PlatformPayload decoder in addition to its ordinary `Signature`:
 
 ```cpp

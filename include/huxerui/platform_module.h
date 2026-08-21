@@ -92,7 +92,7 @@ private:
   std::shared_ptr<const Data> data_;
 };
 
-using PlatformEventSink = std::function<void(std::string, PlatformPayload)>;
+using PlatformEventSink = std::function<void(std::string_view, PlatformPayload)>;
 
 using PlatformRequestId = std::uint64_t;
 

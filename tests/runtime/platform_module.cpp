@@ -297,7 +297,9 @@ TEST_CASE("PlatformInstanceDeliversTypedCallsAndEventsAsynchronously") {
   platform.RunPlatformModuleTasks();
   REQUIRE(results == std::vector<PlatformResult<int>>{14});
 
-  module_state->events("changed", PlatformPayload(1));
+  std::string event_name = "changed";
+  module_state->events(std::string_view(event_name), PlatformPayload(1));
+  event_name = "replaced";
   module_state->events("changed", PlatformPayload(2));
   REQUIRE(service->events.empty());
   platform.RunPlatformModuleTasks();
