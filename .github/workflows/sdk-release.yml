@@ -19,7 +19,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate tag and version
         id: release
         env:
@@ -35,7 +35,7 @@ jobs:
     name: Build ${{ matrix.system }} ${{ matrix.architecture }}
     needs: validate
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - runner: macos-15
@@ -55,7 +55,14 @@ jobs:
             extension: zip
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: Prepare Unix executables
+        if: runner.os != 'Windows'
+        run: >-
+          chmod +x
+          install.sh
+          tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hcg
+          tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hrc
       - name: Configure
         run: >-
           cmake
@@ -131,7 +138,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download SDK archives
         uses: actions/download-artifact@v4
         with:
@@ -155,9 +162,18 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          gh release create "${RELEASE_TAG}" release-assets/* \
-            --draft \
-            --generate-notes \
-            --title "HuxerUI ${RELEASE_VERSION}" \
-            --verify-tag
-          gh release edit "${RELEASE_TAG}" --draft=false
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --draft \
+              --prerelease=false \
+              --title "HuxerUI ${RELEASE_VERSION}" \
+              --verify-tag
+          else
+            gh release create "${RELEASE_TAG}" \
+              --draft \
+              --generate-notes \
+              --title "HuxerUI ${RELEASE_VERSION}" \
+              --verify-tag
+          fi
+          gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+          gh release edit "${RELEASE_TAG}" --draft=false --prerelease=false

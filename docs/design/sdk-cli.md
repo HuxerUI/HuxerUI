@@ -407,7 +407,7 @@ Publication uses a sibling staging directory and preserves the prior valid SDK u
 Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
 A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
 The release workflow builds macOS arm64, macOS x86_64, and Windows x86_64 independently, runs each host's complete configured tests, and transfers only the expected archives and checksums to the publication job.
-That job adds both installer entry points, verifies the exact asset set and every checksum, creates a draft GitHub Release, and makes it public only after all assets upload successfully.
+That job adds both installer entry points, verifies the exact asset set and every checksum, creates or reuses the tag's GitHub Release as a draft, and makes it public only after all assets upload successfully.
 An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
 The planned release forms are:
 
