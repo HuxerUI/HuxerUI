@@ -72,6 +72,21 @@ void WriteFile(const std::filesystem::path& root, const GeneratedFile& file) {
   if (!stream) {
     throw std::runtime_error("cannot write " + output_path.string());
   }
+  stream.close();
+#if !defined(_WIN32)
+  if (file.executable) {
+    std::error_code error;
+    std::filesystem::permissions(
+        output_path,
+        std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::add,
+        error
+    );
+    if (error) {
+      throw std::runtime_error("cannot make " + output_path.string() + " executable: " + error.message());
+    }
+  }
+#endif
 }
 
 void WriteFiles(const std::filesystem::path& root, std::span<const GeneratedFile> files) {

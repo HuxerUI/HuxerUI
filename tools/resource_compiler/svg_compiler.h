@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <vector>
 
-namespace huxerui::resource_codegen {
+namespace huxerui::resource_compiler {
 
 struct CompiledSvg {
   std::vector<std::byte> payload;
@@ -14,4 +14,4 @@ struct CompiledSvg {
 
 CompiledSvg CompileSvg(const std::filesystem::path& path);
 
-} // namespace huxerui::resource_codegen
+} // namespace huxerui::resource_compiler

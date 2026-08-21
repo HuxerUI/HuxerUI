@@ -1,5 +1,5 @@
 foreach (required_variable IN ITEMS
-        HUXERUI_HAPT HUXERUI_RESOURCE_OUTPUT
+        HUXERUI_HRC HUXERUI_RESOURCE_OUTPUT
 )
     if (NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")
         message(FATAL_ERROR "${required_variable} is required")
@@ -26,7 +26,7 @@ endif ()
 set(HUXERUI_RESOURCE_WORK_DIRECTORY "${HUXERUI_RESOURCE_OUTPUT}/roots")
 file(REMOVE_RECURSE "${HUXERUI_RESOURCE_WORK_DIRECTORY}")
 
-set(HUXERUI_RESOURCE_MERGE_COMMAND "${HUXERUI_HAPT}" merge)
+set(HUXERUI_RESOURCE_MERGE_COMMAND "${HUXERUI_HRC}" merge)
 foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGES)
     list(APPEND HUXERUI_RESOURCE_MERGE_COMMAND
             --input "${HUXERUI_RESOURCE_PACKAGE}"
@@ -41,7 +41,7 @@ while (HUXERUI_RESOURCE_ROOTS)
             "${HUXERUI_RESOURCE_WORK_DIRECTORY}/${HUXERUI_RESOURCE_ROOT_INDEX}"
     )
     execute_process(
-            COMMAND "${HUXERUI_HAPT}"
+            COMMAND "${HUXERUI_HRC}"
                     --root "${HUXERUI_RESOURCE_ROOT}"
                     --output "${HUXERUI_RESOURCE_ROOT_OUTPUT}"
                     --namespace "${HUXERUI_RESOURCE_NAMESPACE}"

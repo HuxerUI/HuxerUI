@@ -268,7 +268,8 @@ The CLI selects an explicit source checkout or installed prefix through `HUXERUI
 Linux, Web, and Android CLI projects currently require a source SDK. iOS accepts a source checkout or an installed SDK built for the selected Apple SDK and architectures.
 Android includes that checkout's Java Gradle library and configures the application root `CMakeLists.txt` directly for its native libraries and final HuxerUI resources, while Web compiles the framework and application together through Emscripten.
 Android SDK levels, the NDK version, ABIs, application identity, dependencies, and packaging policy remain entirely in the generated Gradle shell.
-The generated Android shell uses a local Gradle wrapper when the project supplies one and otherwise requires `gradle` on `PATH`.
+Before Android or iOS platform-package integration, the CLI configures the root project in module-graph-only mode without selecting or building the development host's application backend.
+The generated Android shell includes a Gradle 8.13 wrapper pinned to the official binary distribution by SHA-256 checksum, so Android builds do not depend on a separately installed Gradle executable.
 
 These source-SDK restrictions are transitional rather than the public distribution contract.
 The approved model provides one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, module, and application resources.

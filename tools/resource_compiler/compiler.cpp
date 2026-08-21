@@ -1,4 +1,4 @@
-#include "generator.h"
+#include "compiler.h"
 #include "svg_compiler.h"
 
 #include <algorithm>
@@ -22,7 +22,7 @@
 #include <tuple>
 #include <vector>
 
-namespace huxerui::resource_codegen {
+namespace huxerui::resource_compiler {
 
 namespace {
 
@@ -683,7 +683,7 @@ void ValidateEntries(std::vector<Entry>& entries) {
   }
 }
 
-std::vector<Entry> Discover(const Options& options) {
+std::vector<Entry> Discover(const CompileOptions& options) {
   std::vector<Entry> entries;
   const std::filesystem::path images = options.root / "images";
   if (std::filesystem::exists(images)) {
@@ -1028,7 +1028,7 @@ void Publish(
     const std::set<std::string>& resource_namespaces,
     std::string_view header_name = {}
 ) {
-  // These roots are wholly generator-owned; replacing them prevents deleted resources or namespaces from surviving.
+  // These roots are wholly compiler-owned; replacing them prevents deleted resources or namespaces from surviving.
   std::filesystem::remove_all(output / "package");
   std::filesystem::remove_all(output / "include");
   for (const Entry& entry : entries) {
@@ -1047,7 +1047,7 @@ void Publish(
 
 } // namespace
 
-void Generate(const Options& options) {
+void Compile(const CompileOptions& options) {
   if (!std::filesystem::is_directory(options.root)) {
     throw std::runtime_error("resource root is not a directory: " + options.root.string());
   }
@@ -1102,4 +1102,4 @@ void Merge(const MergeOptions& options) {
   Publish(options.output, entries, resource_namespaces);
 }
 
-} // namespace huxerui::resource_codegen
+} // namespace huxerui::resource_compiler

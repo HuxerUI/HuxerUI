@@ -289,10 +289,10 @@ iOS builds invoke the source-controlled Xcode project. A build without `--device
 Android builds invoke the source-controlled Gradle shell, whose `externalNativeBuild` configures the repository root `CMakeLists.txt` directly.
 Gradle owns the application namespace, application identifier, compile and target SDK versions, minimum SDK, NDK version, ABI filters, dependencies, manifest merging, signing, and APK output.
 The application attaches each consumed module's `platform/android` Gradle library in module-graph order.
-Before Gradle starts, the CLI incrementally configures the same root project with the host toolchain to refresh only the platform-neutral module graph needed during Gradle settings evaluation. This dedicated module-graph build directory retains its own generator and is independent of Gradle, Xcode, and platform build directories.
+Before Gradle starts, the CLI incrementally configures the same root project with `HUXERUI_MODULE_GRAPH_ONLY=ON` to refresh only the platform-neutral module graph needed during Gradle settings evaluation. This mode records the declared application and module relationships without configuring a host platform backend, creating a native application target, compiling sources, or scheduling resources. Its dedicated build directory retains its own generator and is independent of Gradle, Xcode, and platform build directories.
 The ABI-specific C++ build remains exclusively owned by Gradle's root-project `externalNativeBuild` invocation.
-The shell uses its local `gradlew` or `gradlew.bat` when present and otherwise requires `gradle` on `PATH`.
-The current CLI does not generate or download Gradle wrapper binaries.
+The generated shell includes the source-controlled Gradle 8.13 wrapper, pins the official binary distribution by URL and SHA-256 checksum, and invokes only its local `gradlew` or `gradlew.bat`.
+Gradle itself therefore does not need to be installed separately; the Java runtime remains a host prerequisite.
 
 Web builds use `emcmake` to configure the same root CMake project and produce the ES module, WebAssembly module, and project-owned HTML entry point.
 The Web shell owns the HTML document and host-element mount code rather than hiding them in the SDK.
@@ -384,7 +384,7 @@ HuxerUI built-in package
 ```
 
 Later matching variants replace earlier variants, so an application may deliberately override the `huxerui` namespace.
-`hapt` validates its binary format while merging and rejects incompatible packages rather than requiring separate bundle metadata.
+`hrc` validates its binary format while merging and rejects incompatible packages rather than requiring separate bundle metadata.
 The final package is staged into Android assets, an Apple application bundle, the Windows or Linux application resource directory, or the Web preload set by the owning platform build.
 Android resources and manifests, Apple asset catalogs and property lists, Windows resources, Linux desktop metadata, and Web shell assets remain platform resources and do not enter `resources.bin` unless the application explicitly declares them as HuxerUI resources.
 
@@ -407,8 +407,8 @@ The interface deliberately contains only capabilities implemented by the current
 Package, clean, signing, and artifact collection operations should be added when those commands exist rather than anticipated as empty virtual methods.
 
 The current registry contains Windows, macOS, Linux, Web, Android, and iOS.
-The registry is compiled into the CLI; it is not a dynamic extension mechanism.
-Adding a platform may split template storage or driver implementations when their size justifies it, but does not change project discovery or command parsing.
+The registry and shared command helpers remain in the CLI platform core, while each driver implementation owns one platform-specific source file.
+The registry is compiled into the CLI; it is not a dynamic extension mechanism, and adding a platform does not change project discovery or command parsing.
 
 Editable project, module, Preview, platform-shell, and generated-integration templates live as ordinary files under `tools/huxerui_cli/templates`.
 CMakeRC compiles that tree into the CLI, and the internal template loader renders both relative output paths and file contents from the same project identity and feature-specific replacements.

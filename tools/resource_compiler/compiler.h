@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-namespace huxerui::resource_codegen {
+namespace huxerui::resource_compiler {
 
-struct Options {
+struct CompileOptions {
   std::filesystem::path root;
   std::filesystem::path output;
   std::string resource_namespace;
@@ -18,7 +18,7 @@ struct MergeOptions {
   std::filesystem::path output;
 };
 
-void Generate(const Options& options);
+void Compile(const CompileOptions& options);
 void Merge(const MergeOptions& options);
 
-} // namespace huxerui::resource_codegen
+} // namespace huxerui::resource_compiler

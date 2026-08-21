@@ -3,7 +3,7 @@
 Host tools are distributed by operating system and architecture:
 
 ```text
-prebuilt/<windows|macos|linux>/<x86_64|arm64>/<hcg|hapt>[.exe]
+prebuilt/<windows|macos|linux>/<x86_64|arm64>/<hcg|hrc>[.exe]
 ```
 
 These executables run on the build host. Their platform and architecture are independent of the application target and Android ABI. CMake selects the matching executable automatically and stops configuration when that host package is unavailable.
@@ -11,7 +11,7 @@ These executables run on the build host. Their platform and architecture are ind
 Current host tools are:
 
 - HuxerUI Code Generator (`hcg`) for `[[huxerui::scope]]` transformation
-- HuxerUI Asset Packaging Tool (`hapt`) for typed keys with default or explicitly named generated headers, resource indexes, ordered package merging, and package staging
+- HuxerUI Resource Compiler (`hrc`) for typed keys with default or explicitly named generated headers, resource indexes, ordered package merging, and package staging
 
 Each distributed host and architecture directory must contain every tool required by the project configuration.
 

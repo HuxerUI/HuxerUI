@@ -8,13 +8,9 @@
 #include <vector>
 
 #include "process_runner.h"
+#include "template.h"
 
 namespace huxerui::cli {
-
-struct GeneratedFile {
-  std::filesystem::path path;
-  std::string content;
-};
 
 struct Diagnostic {
   bool error = false;
@@ -44,14 +40,6 @@ struct PlatformDevice {
   bool operator==(const PlatformDevice&) const = default;
 };
 
-struct ProjectTemplateContext {
-  std::string project_name;
-  std::string target_name;
-  std::string project_id;
-
-  [[nodiscard]] std::string Render(std::string_view value) const;
-};
-
 struct PlatformCommandContext {
   std::filesystem::path project_root;
   std::filesystem::path huxerui_home;
@@ -74,7 +62,7 @@ public:
   [[nodiscard]] virtual bool SupportsDeviceDiscovery() const noexcept;
   [[nodiscard]] virtual std::vector<PlatformDevice> DiscoverDevices() const;
   [[nodiscard]] virtual std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const;
-  virtual void UpdateModuleIntegration(const PlatformCommandContext& context) const;
+  virtual void UpdateProjectIntegration(const PlatformCommandContext& context) const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> OpenCommands(const PlatformCommandContext& context) const;
@@ -89,3 +77,24 @@ public:
 [[nodiscard]] std::vector<std::string_view> PlatformIds();
 
 } // namespace huxerui::cli
+
+namespace huxerui::cli::detail {
+
+[[nodiscard]] std::vector<Diagnostic>
+ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::string_view> paths);
+[[nodiscard]] std::string ReadFile(const std::filesystem::path& path);
+[[nodiscard]] std::string JsonString(std::string_view json, std::string_view key);
+[[nodiscard]] std::filesystem::path AppIntegrationPlan(const PlatformCommandContext& context);
+[[nodiscard]] std::vector<std::string> DeviceArguments(const std::optional<PlatformDevice>& device);
+[[nodiscard]] std::string ProfileConfiguration(std::string_view profile);
+[[nodiscard]] std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& context);
+[[nodiscard]] std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandContext& context);
+
+[[nodiscard]] const PlatformDriver& AndroidPlatformDriver() noexcept;
+[[nodiscard]] const PlatformDriver& WindowsPlatformDriver() noexcept;
+[[nodiscard]] const PlatformDriver& LinuxPlatformDriver() noexcept;
+[[nodiscard]] const PlatformDriver& MacOSPlatformDriver() noexcept;
+[[nodiscard]] const PlatformDriver& IosPlatformDriver() noexcept;
+[[nodiscard]] const PlatformDriver& WebPlatformDriver() noexcept;
+
+} // namespace huxerui::cli::detail

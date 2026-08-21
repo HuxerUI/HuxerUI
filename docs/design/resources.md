@@ -78,7 +78,7 @@ Resource keys compare by value and include enough readable identity for diagnost
 The package index uses mandatory content hashes to verify payloads, while platform caches use a private stable identity carried by the resolved immutable ImageAsset rather than a ResourceId alone.
 
 The CMake `NAMESPACE` value is both the resource domain and the exact generated C++ namespace.
-The default generated header name adds the `_resources` suffix, while single-root `hapt` generation may select another `.h` filename without changing the domain or C++ namespace.
+The default generated header name adds the `_resources` suffix, while single-root `hrc` generation may select another `.h` filename without changing the domain or C++ namespace.
 For `NAMESPACE app`, the tool generates `app_resources.h` into the build directory:
 
 ```cpp
@@ -195,7 +195,7 @@ All roots configure one final resource package for the target.
 Platform shells consume its generated staging projection and do not redeclare asset roots.
 
 Resource processing is distinct from C++ scope transformation.
-The HuxerUI Asset Packaging Tool (`hapt`) belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the HuxerUI Code Generator (`hcg`) into an unrelated packager.
+The HuxerUI Resource Compiler (`hrc`) belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the HuxerUI Code Generator (`hcg`) into an unrelated compiler.
 
 The resource tool:
 
@@ -214,7 +214,7 @@ The resource tool:
 
 The framework source root is processed once as an ordinary resource package while HuxerUI itself is built, and that package is installed with the SDK.
 Each module or application root is likewise processed as an ordinary package when its application target is built.
-The `hapt merge` operation reads the precompiled framework package first and the target's packages in declaration order, then writes one final `resources.bin` plus only the payloads referenced by that final index.
+The `hrc merge` operation reads the precompiled framework package first and the target's packages in declaration order, then writes one final `resources.bin` plus only the payloads referenced by that final index.
 It does not introduce bundle metadata, base and overlay roles, or a runtime package stack; the existing binary index already contains the domain, key, kind, locale, scale, package path, content hash, and image metadata required for merging.
 CMake removes the per-root compilation workspace after a successful merge so the final package and generated headers are the only retained target resource output.
 CMake attaches generation and staging outputs directly to the application target; framework compilation, individual roots, merging, and platform staging do not create auxiliary resource targets.
@@ -227,7 +227,7 @@ Variant identity is defined by resource kind:
 
 A later entry with the same variant identity replaces the earlier entry.
 Entries with different locales or scales remain independently addressable.
-After replacement, `hapt` validates the complete merged resource family, including kind consistency, localized argument schemas, raster and vector consistency, intrinsic logical dimensions, package paths, and content hashes.
+After replacement, `hrc` validates the complete merged resource family, including kind consistency, localized argument schemas, raster and vector consistency, intrinsic logical dimensions, package paths, and content hashes.
 
 Generated headers are emitted from the final merged index and grouped by namespace so repeated roots with the same `NAMESPACE` produce one header instead of competing intermediate headers.
 Intermediate root headers are not placed on the application target's include path.
@@ -893,7 +893,7 @@ ImageAsset::FromFile uses `std::invalid_argument` for inaccessible or unreadable
 Image and PaintContext validate non-finite geometry, invalid source rectangles, invalid alignment values, and opacity outside `[0, 1]` at the earliest public boundary.
 
 Public API and runtime diagnostics are English, begin with `HuxerUI`, and include the relevant ResourceId, path, locale, variant, or argument index.
-Asset packaging diagnostics are English and use the `hapt:` CLI prefix.
+Resource compilation diagnostics are English and use the `hrc:` CLI prefix.
 
 ## Validation
 
@@ -928,7 +928,7 @@ The delivery sequence is:
 - Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Windows, macOS, Android, and iOS platform decoders.
 - Add VectorAsset construction, compiled SVG resources, automatic ImageResource format detection, vector tint, and shared path replay.
 - Add StringResource formatting and locale fallback.
-- Extend `hapt` with exact namespace generation and ordered binary-index merging.
+- Extend `hrc` with exact namespace generation and ordered binary-index merging.
 - Permit repeated target resource roots in CMake and update generated CLI projects to use `resources/images`, `resources/strings`, and `resources/raw`.
 - Add the built-in `huxerui` resource package and migrate framework-rendered Dialog, selection-menu, validation, and window-caption defaults.
 - Migrate the framework-owned check and submenu-chevron vectors required by Checkbox and Menu.

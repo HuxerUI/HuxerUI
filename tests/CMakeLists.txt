@@ -276,20 +276,20 @@ target_link_libraries(huxerui_codegen_tests PRIVATE HuxerUI3p::Catch2)
 
 add_test(NAME HuxerUICodegenTests COMMAND huxerui_codegen_tests)
 
-add_executable(huxerui_resource_codegen_tests
+add_executable(huxerui_resource_compiler_tests
         tests_main.cpp
-        resource_codegen/generator.cpp
-        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen/generator.cpp"
-        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen/svg_compiler.cpp"
+        resource_compiler/compiler.cpp
+        "${HUXERUI_PROJECT_DIR}/tools/resource_compiler/compiler.cpp"
+        "${HUXERUI_PROJECT_DIR}/tools/resource_compiler/svg_compiler.cpp"
 )
 
-target_compile_features(huxerui_resource_codegen_tests PRIVATE cxx_std_20)
-target_include_directories(huxerui_resource_codegen_tests PRIVATE
+target_compile_features(huxerui_resource_compiler_tests PRIVATE cxx_std_20)
+target_include_directories(huxerui_resource_compiler_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
-        "${HUXERUI_PROJECT_DIR}/tools/resource_codegen"
+        "${HUXERUI_PROJECT_DIR}/tools/resource_compiler"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
-target_compile_options(huxerui_resource_codegen_tests PRIVATE
+target_compile_options(huxerui_resource_compiler_tests PRIVATE
         "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
         "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"
         "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
@@ -298,12 +298,12 @@ target_compile_options(huxerui_resource_codegen_tests PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
 )
 
-target_link_libraries(huxerui_resource_codegen_tests PRIVATE
+target_link_libraries(huxerui_resource_compiler_tests PRIVATE
         HuxerUI3p::Catch2
         ${HUXERUI_TEST_LIBRARY}
 )
 
-add_test(NAME HuxerUIResourceCodegenTests COMMAND huxerui_resource_codegen_tests)
+add_test(NAME HuxerUIResourceCompilerTests COMMAND huxerui_resource_compiler_tests)
 
 add_test(NAME HuxerUIResourceMergeTests
         COMMAND "${CMAKE_COMMAND}"

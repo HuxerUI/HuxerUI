@@ -1,4 +1,4 @@
-#include "generator.h"
+#include "compiler.h"
 
 #include <exception>
 #include <iostream>
@@ -8,46 +8,46 @@
 
 namespace {
 
-constexpr std::string_view generate_usage =
-    "usage: hapt --root <path> --output <path> --namespace <name> [--header-name <filename>]";
-constexpr std::string_view merge_usage = "usage: hapt merge --input <package> [--input <package> ...] --output <path>";
+constexpr std::string_view compile_usage =
+    "usage: hrc --root <path> --output <path> --namespace <name> [--header-name <filename>]";
+constexpr std::string_view merge_usage = "usage: hrc merge --input <package> [--input <package> ...] --output <path>";
 
-huxerui::resource_codegen::Options ParseGenerateArguments(int argc, char** argv) {
-  huxerui::resource_codegen::Options options;
+huxerui::resource_compiler::CompileOptions ParseCompileArguments(int argc, char** argv) {
+  huxerui::resource_compiler::CompileOptions options;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
     if (argument == "--root" && index + 1 < argc) {
       if (!options.root.empty()) {
-        throw std::invalid_argument(std::string(generate_usage));
+        throw std::invalid_argument(std::string(compile_usage));
       }
       options.root = argv[++index];
     } else if (argument == "--output" && index + 1 < argc) {
       if (!options.output.empty()) {
-        throw std::invalid_argument(std::string(generate_usage));
+        throw std::invalid_argument(std::string(compile_usage));
       }
       options.output = argv[++index];
     } else if (argument == "--namespace" && index + 1 < argc) {
       if (!options.resource_namespace.empty()) {
-        throw std::invalid_argument(std::string(generate_usage));
+        throw std::invalid_argument(std::string(compile_usage));
       }
       options.resource_namespace = argv[++index];
     } else if (argument == "--header-name" && index + 1 < argc) {
       if (!options.header_name.empty()) {
-        throw std::invalid_argument(std::string(generate_usage));
+        throw std::invalid_argument(std::string(compile_usage));
       }
       options.header_name = argv[++index];
     } else {
-      throw std::invalid_argument(std::string(generate_usage));
+      throw std::invalid_argument(std::string(compile_usage));
     }
   }
   if (options.root.empty() || options.output.empty() || options.resource_namespace.empty()) {
-    throw std::invalid_argument(std::string(generate_usage));
+    throw std::invalid_argument(std::string(compile_usage));
   }
   return options;
 }
 
-huxerui::resource_codegen::MergeOptions ParseMergeArguments(int argc, char** argv) {
-  huxerui::resource_codegen::MergeOptions options;
+huxerui::resource_compiler::MergeOptions ParseMergeArguments(int argc, char** argv) {
+  huxerui::resource_compiler::MergeOptions options;
   for (int index = 2; index < argc; ++index) {
     const std::string_view argument = argv[index];
     if (argument == "--input" && index + 1 < argc) {
@@ -69,13 +69,13 @@ huxerui::resource_codegen::MergeOptions ParseMergeArguments(int argc, char** arg
 int main(int argc, char** argv) {
   try {
     if (argc > 1 && std::string_view(argv[1]) == "merge") {
-      huxerui::resource_codegen::Merge(ParseMergeArguments(argc, argv));
+      huxerui::resource_compiler::Merge(ParseMergeArguments(argc, argv));
     } else {
-      huxerui::resource_codegen::Generate(ParseGenerateArguments(argc, argv));
+      huxerui::resource_compiler::Compile(ParseCompileArguments(argc, argv));
     }
     return 0;
   } catch (const std::exception& error) {
-    std::cerr << "hapt: " << error.what() << '\n';
+    std::cerr << "hrc: " << error.what() << '\n';
     return 1;
   }
 }

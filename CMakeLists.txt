@@ -59,6 +59,10 @@ huxerui_configure_targets()
 include(cmake/HuxerUIApp.cmake)
 include(cmake/HuxerUIModules.cmake)
 
+if (HUXERUI_MODULE_GRAPH_ONLY)
+    return()
+endif ()
+
 if (HUXERUI_BUILD_CLI)
     add_subdirectory(tools/huxerui_cli)
 endif ()

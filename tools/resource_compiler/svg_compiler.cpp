@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace huxerui::resource_codegen {
+namespace huxerui::resource_compiler {
 
 namespace {
 
@@ -1062,4 +1062,4 @@ CompiledSvg CompileSvg(const std::filesystem::path& path) {
   }
 }
 
-} // namespace huxerui::resource_codegen
+} // namespace huxerui::resource_compiler

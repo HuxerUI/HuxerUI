@@ -18,8 +18,13 @@ cmrc_add_resource_library(huxerui_cli_template_resources
 
 add_library(huxerui_cli_core STATIC
         cli.cpp
-        ios_project.cpp
         platform.cpp
+        platform/android.cpp
+        platform/ios.cpp
+        platform/linux.cpp
+        platform/macos.cpp
+        platform/web.cpp
+        platform/windows.cpp
         process_runner.cpp
         project.cpp
         sdk.cpp

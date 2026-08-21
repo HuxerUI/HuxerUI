@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "ios_project.h"
 #include "platform.h"
 #include "process_runner.h"
 #include "project.h"
@@ -534,7 +533,7 @@ void BuildPlatform(
   output << "Building " << platform.Id() << " (" << options.profile << ")\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   ExecuteCommands(platform.ModuleGraphCommands(context), output);
-  platform.UpdateModuleIntegration(context);
+  platform.UpdateProjectIntegration(context);
   ExecuteCommands(platform.BuildCommands(context), output);
 }
 
@@ -664,11 +663,10 @@ int RunOpen(
     throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
 
-  ConfigureIosLocalHome(project.root, huxerui_home);
   output << "Opening ios Xcode project\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   ExecuteCommands(platform.ModuleGraphCommands(context), output);
-  platform.UpdateModuleIntegration(context);
+  platform.UpdateProjectIntegration(context);
   ExecuteCommands(platform.OpenCommands(context), output);
   return 0;
 }

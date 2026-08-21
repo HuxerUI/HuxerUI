@@ -13,7 +13,7 @@
 #include <huxerui/paint.h>
 #include <huxerui/resource.h>
 
-#include "generator.h"
+#include "compiler.h"
 #include "image_test_support.h"
 #include "path_internal.h"
 #include "resource_internal.h"
@@ -25,7 +25,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory() {
     path_ = std::filesystem::temp_directory_path() /
-            ("hapt-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            ("hrc-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(path_);
   }
 
@@ -100,7 +100,7 @@ huxerui::View VectorResourceApp() {
   return huxerui::Image(huxerui::ImageResource("test_app", "images/mark"));
 }
 
-TEST_CASE("ResourceCodegenGeneratesTypedKeysIndexAndPayloads") {
+TEST_CASE("ResourceCompilerGeneratesTypedKeysIndexAndPayloads") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
@@ -108,7 +108,7 @@ TEST_CASE("ResourceCodegenGeneratesTypedKeysIndexAndPayloads") {
   Write(root / "strings" / "default.properties", "title = \"Hello {0}\"\n");
   Write(root / "strings" / "zh.properties", "title = \"你好，{0}\"\n");
 
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
 
   const std::string header = Read(output / "include" / "test_app_resources.h");
   REQUIRE(header.find("namespace test_app {") != std::string::npos);
@@ -120,136 +120,136 @@ TEST_CASE("ResourceCodegenGeneratesTypedKeysIndexAndPayloads") {
   REQUIRE_FALSE(std::filesystem::exists(output / "resources.stamp"));
 }
 
-TEST_CASE("ResourceCodegenRejectsAnEmptyResourceRoot") {
+TEST_CASE("ResourceCompilerRejectsAnEmptyResourceRoot") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
   Write(root / "strings" / "default.properties", "");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, output, "test_app"}),
+      huxerui::resource_compiler::Compile({root, output, "test_app"}),
       Catch::Matchers::ContainsSubstring("resource root does not contain any supported resources")
   );
 }
 
-TEST_CASE("ResourceCodegenAcceptsACustomGeneratedHeaderName") {
+TEST_CASE("ResourceCompilerAcceptsACustomGeneratedHeaderName") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
   Write(root / "strings" / "default.properties", "title = Hello\n");
 
-  huxerui::resource_codegen::Generate({root, output, "test_app", "builtin_resources.h"});
+  huxerui::resource_compiler::Compile({root, output, "test_app", "builtin_resources.h"});
 
   const std::string header = Read(output / "include" / "builtin_resources.h");
   REQUIRE(header.find("namespace test_app {") != std::string::npos);
   REQUIRE_FALSE(std::filesystem::exists(output / "include" / "test_app_resources.h"));
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, output, "test_app", "nested/builtin_resources.h"}),
+      huxerui::resource_compiler::Compile({root, output, "test_app", "nested/builtin_resources.h"}),
       "resource header name must be a .h filename without a directory"
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsInvalidMessagePlaceholders") {
+TEST_CASE("ResourceCompilerRejectsInvalidMessagePlaceholders") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "strings" / "default.properties", "title = \"Hello {name}\"\n");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "output", "test_app"}),
       "localized string contains an invalid positional placeholder"
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsLegacyTextCatalogs") {
+TEST_CASE("ResourceCompilerRejectsLegacyTextCatalogs") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "strings" / "default.txt", "title = Legacy\n");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "output", "test_app"}),
       Catch::Matchers::ContainsSubstring("string catalog must use the .properties extension")
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsGeneratedIdentifierCollisions") {
+TEST_CASE("ResourceCompilerRejectsGeneratedIdentifierCollisions") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "raw" / "a-b.txt", "first");
   Write(root / "raw" / "a_b.txt", "second");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "output", "test_app"}),
       "resource keys generate the same C++ identifier: raw/a-b.txt and raw/a_b.txt"
   );
 }
 
-TEST_CASE("ResourceCodegenEscapesReservedGeneratedIdentifiers") {
+TEST_CASE("ResourceCompilerEscapesReservedGeneratedIdentifiers") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
   Write(root / "raw" / "class", "reserved");
 
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
 
   REQUIRE(Read(output / "include" / "test_app_resources.h").find("resource_class") != std::string::npos);
 }
 
-TEST_CASE("ResourceCodegenRejectsReservedNamespacesAndInvalidKeys") {
+TEST_CASE("ResourceCompilerRejectsReservedNamespacesAndInvalidKeys") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "raw" / "config.txt", "value");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "reserved", "class"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "reserved", "class"}),
       "resource namespace must be a non-reserved C++ identifier"
   );
 
   Write(root / "strings" / "default.properties", "bad:key = value\n");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "invalid-key", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "invalid-key", "test_app"}),
       Catch::Matchers::ContainsSubstring("resource path is not package-relative")
   );
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "invalid-namespace", "test_app_"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "invalid-namespace", "test_app_"}),
       "resource namespace must be a non-reserved C++ identifier"
   );
 }
 
-TEST_CASE("ResourceCodegenRemovesStalePackagedPayloads") {
+TEST_CASE("ResourceCompilerRemovesStalePackagedPayloads") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
   const std::filesystem::path old_source = root / "raw" / "old.txt";
   const std::filesystem::path old_output = output / "package" / "huxerui" / "test_app" / "raw" / "old.txt";
   Write(old_source, "old");
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
   REQUIRE(std::filesystem::exists(old_output));
 
   REQUIRE(std::filesystem::remove(old_source));
   Write(root / "raw" / "new.txt", "new");
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
 
   REQUIRE_FALSE(std::filesystem::exists(old_output));
   REQUIRE(Read(output / "package" / "huxerui" / "test_app" / "raw" / "new.txt") == "new");
 }
 
-TEST_CASE("ResourceCodegenRemovesOutputsFromThePreviousNamespace") {
+TEST_CASE("ResourceCompilerRemovesOutputsFromThePreviousNamespace") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path output = temporary.Path() / "output";
   Write(root / "raw" / "value.txt", "value");
 
-  huxerui::resource_codegen::Generate({root, output, "old_app"});
+  huxerui::resource_compiler::Compile({root, output, "old_app"});
   REQUIRE(std::filesystem::exists(output / "include" / "old_app_resources.h"));
   REQUIRE(std::filesystem::exists(output / "package" / "huxerui" / "old_app"));
 
-  huxerui::resource_codegen::Generate({root, output, "new_app"});
+  huxerui::resource_compiler::Compile({root, output, "new_app"});
   REQUIRE_FALSE(std::filesystem::exists(output / "include" / "old_app_resources.h"));
   REQUIRE_FALSE(std::filesystem::exists(output / "package" / "huxerui" / "old_app"));
   REQUIRE(std::filesystem::exists(output / "include" / "new_app_resources.h"));
 }
 
-TEST_CASE("ResourceCodegenMergesPackagesInDeclarationOrder") {
+TEST_CASE("ResourceCompilerMergesPackagesInDeclarationOrder") {
   TemporaryDirectory temporary;
   const std::filesystem::path base_root = temporary.Path() / "base";
   const std::filesystem::path module_root = temporary.Path() / "module";
@@ -271,10 +271,10 @@ TEST_CASE("ResourceCodegenMergesPackagesInDeclarationOrder") {
   Write(override_root / "images" / "icon@2x.png", huxerui::test::MakeTestPng(16, 8));
   Write(override_root / "images" / "mark.png", huxerui::test::MakeTestPng(8, 4));
 
-  huxerui::resource_codegen::Generate({base_root, base_output, "app"});
-  huxerui::resource_codegen::Generate({module_root, module_output, "editor"});
-  huxerui::resource_codegen::Generate({override_root, override_output, "app"});
-  huxerui::resource_codegen::Merge(
+  huxerui::resource_compiler::Compile({base_root, base_output, "app"});
+  huxerui::resource_compiler::Compile({module_root, module_output, "editor"});
+  huxerui::resource_compiler::Compile({override_root, override_output, "app"});
+  huxerui::resource_compiler::Merge(
       {{base_output / "package", module_output / "package", override_output / "package"}, merged_output}
   );
 
@@ -304,7 +304,7 @@ TEST_CASE("ResourceCodegenMergesPackagesInDeclarationOrder") {
   REQUIRE(image.PixelHeight() == 4);
 
   const std::filesystem::path reversed_output = temporary.Path() / "reversed-output";
-  huxerui::resource_codegen::Merge({{override_output / "package", base_output / "package"}, reversed_output});
+  huxerui::resource_compiler::Merge({{override_output / "package", base_output / "package"}, reversed_output});
   DirectoryResources reversed_platform(reversed_output / "package");
   huxerui::detail::AppResources reversed_resources(&reversed_platform);
   REQUIRE(reversed_resources.Resolve(huxerui::RawResource("app", "raw/config.txt")).AsStringView() == "base");
@@ -312,7 +312,7 @@ TEST_CASE("ResourceCodegenMergesPackagesInDeclarationOrder") {
   REQUIRE_FALSE(std::filesystem::exists(reversed_output / "package" / "huxerui" / "app" / "images" / "mark.png"));
 }
 
-TEST_CASE("ResourceCodegenValidatesMergedResourceFamilies") {
+TEST_CASE("ResourceCompilerValidatesMergedResourceFamilies") {
   TemporaryDirectory temporary;
   const std::filesystem::path first_root = temporary.Path() / "first";
   const std::filesystem::path second_root = temporary.Path() / "second";
@@ -323,46 +323,46 @@ TEST_CASE("ResourceCodegenValidatesMergedResourceFamilies") {
   Write(first_root / "strings" / "default.properties", "title = {0} {1}\n");
   Write(first_root / "strings" / "zh.properties", "title = {1}\n");
   Write(second_root / "strings" / "default.properties", "title = {0}\n");
-  huxerui::resource_codegen::Generate({first_root, first_output, "app"});
-  huxerui::resource_codegen::Generate({second_root, second_output, "app"});
+  huxerui::resource_compiler::Compile({first_root, first_output, "app"});
+  huxerui::resource_compiler::Compile({second_root, second_output, "app"});
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Merge(
+      huxerui::resource_compiler::Merge(
           {{first_output / "package", second_output / "package"}, temporary.Path() / "merged"}
       ),
       Catch::Matchers::ContainsSubstring("image scale variants must have the same intrinsic logical size")
   );
 
   REQUIRE(std::filesystem::remove(second_root / "images" / "logo@2x.png"));
-  huxerui::resource_codegen::Generate({second_root, second_output, "app"});
+  huxerui::resource_compiler::Compile({second_root, second_output, "app"});
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Merge(
+      huxerui::resource_compiler::Merge(
           {{first_output / "package", second_output / "package"}, temporary.Path() / "merged"}
       ),
       Catch::Matchers::ContainsSubstring("localized string references an undeclared argument")
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsMergedPayloadHashMismatches") {
+TEST_CASE("ResourceCompilerRejectsMergedPayloadHashMismatches") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "resources";
   const std::filesystem::path generated = temporary.Path() / "generated";
   Write(root / "raw" / "config.txt", "original");
-  huxerui::resource_codegen::Generate({root, generated, "app"});
+  huxerui::resource_compiler::Compile({root, generated, "app"});
   Write(generated / "package" / "huxerui" / "app" / "raw" / "config.txt", "modified");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Merge({{generated / "package"}, temporary.Path() / "merged"}),
+      huxerui::resource_compiler::Merge({{generated / "package"}, temporary.Path() / "merged"}),
       Catch::Matchers::ContainsSubstring("payload hash does not match")
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsUnsafeGeneratedStringLiteralsAndTruncatedImages") {
+TEST_CASE("ResourceCompilerRejectsUnsafeGeneratedStringLiteralsAndTruncatedImages") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "strings" / "default.properties", "bad\"key = value\n");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "unsafe", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "unsafe", "test_app"}),
       Catch::Matchers::ContainsSubstring("resource path is not package-relative")
   );
 
@@ -371,7 +371,7 @@ TEST_CASE("ResourceCodegenRejectsUnsafeGeneratedStringLiteralsAndTruncatedImages
   truncated.resize(24);
   Write(root / "images" / "broken.png", truncated);
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "truncated", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "truncated", "test_app"}),
       Catch::Matchers::ContainsSubstring("invalid IHDR")
   );
 }
@@ -387,7 +387,7 @@ TEST_CASE("GeneratedPackagesRoundTripThroughRuntimeResolution") {
   const std::vector<std::byte> image = huxerui::test::MakeTestPng(8, 4);
   Write(root / "images" / "logo.png", image);
 
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
 
   DirectoryResources platform(output / "package");
   huxerui::detail::AppResources resources(&platform);
@@ -418,7 +418,7 @@ TEST_CASE("SvgResourcesCompileToTypedVectorPayloads") {
 </svg>)"
   );
 
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
 
   const std::string header = Read(output / "include" / "test_app_resources.h");
   REQUIRE(header.find("huxerui::ImageResource mark") != std::string::npos);
@@ -452,25 +452,25 @@ TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndUnsupportedPresentationSem
 
   Write(source, R"(<path d="M0 0L1 1"/><svg viewBox="0 0 10 10"/>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "outside", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "outside", "test_app"}),
       Catch::Matchers::ContainsSubstring("inside the root svg element")
   );
 
   Write(source, R"(<svg viewBox="0 0 10 10" preserveAspectRatio="none"/>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "aspect", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "aspect", "test_app"}),
       Catch::Matchers::ContainsSubstring("unsupported attribute: preserveAspectRatio")
   );
 
   Write(source, R"(<svg viewBox="0 0 10 10"><g visibility="hidden"/></svg>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "visibility", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "visibility", "test_app"}),
       Catch::Matchers::ContainsSubstring("unsupported attribute: visibility")
   );
 
   Write(source, R"(<svg viewBox="0 0 10 10"><g style="display: none"/></svg>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "display", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "display", "test_app"}),
       Catch::Matchers::ContainsSubstring("unsupported style property: display")
   );
 }
@@ -484,7 +484,7 @@ TEST_CASE("SvgStylesAllowTrailingWhitespaceAndSmoothCurvesDoNotReflectArcControl
       R"(<svg width="40" height="20" viewBox="0 0 40 20"><path style="fill: #fff; " d="M0 10A10 10 0 0 1 20 10S30 20 40 10"/></svg>)"
   );
 
-  huxerui::resource_codegen::Generate({root, output, "test_app"});
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
   DirectoryResources platform(output / "package");
   huxerui::detail::AppResources resources(&platform);
   const huxerui::VectorAsset vector =
@@ -505,7 +505,7 @@ TEST_CASE("SvgStylesAllowTrailingWhitespaceAndSmoothCurvesDoNotReflectArcControl
   REQUIRE(elements.back().points[0] == huxerui::Point{20.0F, 10.0F});
 }
 
-TEST_CASE("ResourceCodegenRejectsUnsupportedSvgFeaturesAndDensityVariants") {
+TEST_CASE("ResourceCompilerRejectsUnsupportedSvgFeaturesAndDensityVariants") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(
@@ -513,37 +513,37 @@ TEST_CASE("ResourceCodegenRejectsUnsupportedSvgFeaturesAndDensityVariants") {
       R"svg(<svg viewBox="0 0 10 10"><path filter="url(#x)" d="M0 0L1 1"/></svg>)svg"
   );
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "filtered", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "filtered", "test_app"}),
       Catch::Matchers::ContainsSubstring("unsupported attribute: filter")
   );
 
   REQUIRE(std::filesystem::remove(root / "images" / "filtered.svg"));
   Write(root / "images" / "mark@2x.svg", R"(<svg viewBox="0 0 10 10"><path d="M0 0L1 1"/></svg>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "scaled", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "scaled", "test_app"}),
       Catch::Matchers::ContainsSubstring("do not support density suffixes")
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsMixedRasterAndVectorVariants") {
+TEST_CASE("ResourceCompilerRejectsMixedRasterAndVectorVariants") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "images" / "mark.svg", R"(<svg viewBox="0 0 8 4"><path d="M0 0L8 4"/></svg>)");
   Write(root / "images" / "mark@2x.png", huxerui::test::MakeTestPng(16, 8));
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "output", "test_app"}),
       Catch::Matchers::ContainsSubstring("raster and vector variants must not share")
   );
 }
 
-TEST_CASE("ResourceCodegenRejectsMalformedPathDataAfterClose") {
+TEST_CASE("ResourceCompilerRejectsMalformedPathDataAfterClose") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   Write(root / "images" / "mark.svg", R"(<svg viewBox="0 0 8 4"><path d="M0 0Z 1"/></svg>)");
 
   REQUIRE_THROWS_WITH(
-      huxerui::resource_codegen::Generate({root, temporary.Path() / "output", "test_app"}),
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "output", "test_app"}),
       Catch::Matchers::ContainsSubstring("path data is malformed")
   );
 }

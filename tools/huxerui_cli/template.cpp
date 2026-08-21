@@ -68,7 +68,7 @@ void CollectTemplateFiles(
     const cmrc::embedded_filesystem& filesystem,
     std::string_view root,
     std::string_view relative_directory,
-    const ProjectTemplateContext& context,
+    const ProjectTemplateContext* context,
     std::span<const TemplateReplacement> replacements,
     std::vector<GeneratedFile>& files
 ) {
@@ -89,22 +89,16 @@ void CollectTemplateFiles(
     }
     const cmrc::file resource = filesystem.open(std::string(root) + "/" + relative_path);
     const std::string_view content(resource.begin(), static_cast<std::size_t>(resource.end() - resource.begin()));
-    files.push_back({Render(relative_path, context, replacements), Render(content, context, replacements)});
+    if (context != nullptr) {
+      files.push_back({Render(relative_path, *context, replacements), Render(content, *context, replacements)});
+    } else {
+      files.push_back({relative_path, std::string(content)});
+    }
   }
 }
 
-} // namespace
-
-std::string ProjectTemplateContext::Render(std::string_view value) const {
-  std::string rendered(value);
-  ReplaceAll(rendered, "@PROJECT_NAME@", project_name);
-  ReplaceAll(rendered, "@TARGET_NAME@", target_name);
-  ReplaceAll(rendered, "@PROJECT_ID@", project_id);
-  return rendered;
-}
-
-std::vector<GeneratedFile> RenderTemplateTree(
-    std::string_view root, const ProjectTemplateContext& context, std::span<const TemplateReplacement> replacements
+std::vector<GeneratedFile> LoadTemplateTree(
+    std::string_view root, const ProjectTemplateContext* context, std::span<const TemplateReplacement> replacements
 ) {
   const cmrc::embedded_filesystem filesystem = cmrc::huxerui_cli_templates::get_filesystem();
   if (!filesystem.is_directory(std::string(root))) {
@@ -121,6 +115,26 @@ std::vector<GeneratedFile> RenderTemplateTree(
     return left.path.generic_string() < right.path.generic_string();
   });
   return files;
+}
+
+} // namespace
+
+std::string ProjectTemplateContext::Render(std::string_view value) const {
+  std::string rendered(value);
+  ReplaceAll(rendered, "@PROJECT_NAME@", project_name);
+  ReplaceAll(rendered, "@TARGET_NAME@", target_name);
+  ReplaceAll(rendered, "@PROJECT_ID@", project_id);
+  return rendered;
+}
+
+std::vector<GeneratedFile> RenderTemplateTree(
+    std::string_view root, const ProjectTemplateContext& context, std::span<const TemplateReplacement> replacements
+) {
+  return LoadTemplateTree(root, &context, replacements);
+}
+
+std::vector<GeneratedFile> CopyTemplateTree(std::string_view root) {
+  return LoadTemplateTree(root, nullptr, {});
 }
 
 } // namespace huxerui::cli

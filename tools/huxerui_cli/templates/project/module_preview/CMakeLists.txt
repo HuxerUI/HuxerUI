@@ -69,12 +69,14 @@ file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
 )
-if (WIN32)
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/main.cpp")
-elseif (APPLE AND NOT IOS)
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/main.cpp")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/main.cpp")
+if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+    if (WIN32)
+        list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/main.cpp")
+    elseif (APPLE AND NOT IOS)
+        list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/main.cpp")
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/main.cpp")
+    endif ()
 endif ()
 
 set(HUXERUI_MODULE_GRAPH_OUTPUT

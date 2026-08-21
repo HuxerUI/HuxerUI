@@ -143,6 +143,21 @@ function(huxerui_add_module target_name)
             CXX_EXTENSIONS OFF
             POSITION_INDEPENDENT_CODE ON
     )
+    file(REAL_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            HUXERUI_MODULE_SOURCE_ROOT
+    )
+    set_property(TARGET ${target_name} PROPERTY HUXERUI_MODULE TRUE)
+    set_property(TARGET ${target_name} PROPERTY
+            HUXERUI_MODULE_SOURCE_ROOT
+            "${HUXERUI_MODULE_SOURCE_ROOT}"
+    )
+    set_property(TARGET ${target_name} APPEND PROPERTY EXPORT_PROPERTIES
+            HUXERUI_MODULE
+    )
+    if (HUXERUI_MODULE_GRAPH_ONLY)
+        return()
+    endif ()
     if (TARGET HuxerUI::huxerui_static AND NOT ANDROID)
         set(HUXERUI_MODULE_FRAMEWORK_TARGET HuxerUI::huxerui_static)
     elseif (TARGET HuxerUI::huxerui)
@@ -185,18 +200,6 @@ function(huxerui_add_module target_name)
     )
     huxerui_enable_codegen(${target_name})
 
-    file(REAL_PATH
-            "${CMAKE_CURRENT_SOURCE_DIR}"
-            HUXERUI_MODULE_SOURCE_ROOT
-    )
-    set_property(TARGET ${target_name} PROPERTY HUXERUI_MODULE TRUE)
-    set_property(TARGET ${target_name} PROPERTY
-            HUXERUI_MODULE_SOURCE_ROOT
-            "${HUXERUI_MODULE_SOURCE_ROOT}"
-    )
-    set_property(TARGET ${target_name} APPEND PROPERTY EXPORT_PROPERTIES
-            HUXERUI_MODULE
-    )
     if (HUXERUI_MODULE_RESOURCES)
         list(GET HUXERUI_MODULE_RESOURCES 0 HUXERUI_MODULE_RESOURCE_ROOT)
         huxerui_add_resources(${target_name}
@@ -372,7 +375,13 @@ function(huxerui_use_module target_name)
         )
     endif ()
 
-    target_link_libraries(${target_name} PRIVATE ${HUXERUI_USE_MODULE_TARGET})
+    get_property(HUXERUI_MODULE_GRAPH_ONLY
+            TARGET ${target_name}
+            PROPERTY HUXERUI_MODULE_GRAPH_ONLY
+    )
+    if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+        target_link_libraries(${target_name} PRIVATE ${HUXERUI_USE_MODULE_TARGET})
+    endif ()
     set_property(TARGET ${target_name} APPEND PROPERTY
             HUXERUI_MODULES
             "${HUXERUI_RESOLVED_MODULE_TARGET}"
@@ -396,20 +405,22 @@ function(huxerui_use_module target_name)
                 "${HUXERUI_MODULE_GRAPH_OUTPUT}"
         )
     endif ()
-    get_property(HUXERUI_MODULE_RESOURCE_PACKAGE_SET
-            TARGET ${HUXERUI_RESOLVED_MODULE_TARGET}
-            PROPERTY HUXERUI_RESOURCE_PACKAGE
-            SET
-    )
-    if (HUXERUI_MODULE_RESOURCE_PACKAGE_SET)
-        get_property(HUXERUI_MODULE_RESOURCE_PACKAGE
+    if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+        get_property(HUXERUI_MODULE_RESOURCE_PACKAGE_SET
                 TARGET ${HUXERUI_RESOLVED_MODULE_TARGET}
                 PROPERTY HUXERUI_RESOURCE_PACKAGE
+                SET
         )
-        set_property(TARGET ${target_name} APPEND PROPERTY
-                HUXERUI_RESOURCE_PACKAGES
-                "${HUXERUI_MODULE_RESOURCE_PACKAGE}"
-        )
-        _huxerui_schedule_resources(${target_name})
+        if (HUXERUI_MODULE_RESOURCE_PACKAGE_SET)
+            get_property(HUXERUI_MODULE_RESOURCE_PACKAGE
+                    TARGET ${HUXERUI_RESOLVED_MODULE_TARGET}
+                    PROPERTY HUXERUI_RESOURCE_PACKAGE
+            )
+            set_property(TARGET ${target_name} APPEND PROPERTY
+                    HUXERUI_RESOURCE_PACKAGES
+                    "${HUXERUI_MODULE_RESOURCE_PACKAGE}"
+            )
+            _huxerui_schedule_resources(${target_name})
+        endif ()
     endif ()
 endfunction()

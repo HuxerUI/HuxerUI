@@ -119,12 +119,12 @@ function(_huxerui_configure_builtin_resources target_name)
             OUTPUT "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
             CONTENT "inputs=${HUXERUI_BUILTIN_RESOURCE_INPUTS}\n"
     )
-    huxerui_resolve_host_tool("hapt" HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND)
+    huxerui_resolve_host_tool("hrc" HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND)
     add_custom_command(
             OUTPUT
                     "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
                     "${HUXERUI_BUILTIN_RESOURCE_INDEX}"
-            COMMAND "${HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND}"
+            COMMAND "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
                     --root "${HUXERUI_PROJECT_DIR}/resources"
                     --output "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}"
                     --namespace huxerui
@@ -132,7 +132,7 @@ function(_huxerui_configure_builtin_resources target_name)
             DEPENDS
                     ${HUXERUI_BUILTIN_RESOURCE_INPUTS}
                     "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
-                    "${HUXERUI_BUILTIN_RESOURCE_CODEGEN_COMMAND}"
+                    "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
             COMMENT "Generating HuxerUI built-in resources"
             VERBATIM
     )
@@ -155,6 +155,17 @@ function(_huxerui_configure_builtin_resources target_name)
 endfunction()
 
 function(huxerui_configure_targets)
+    if (HUXERUI_MODULE_GRAPH_ONLY)
+        add_library(huxerui_module_graph_framework INTERFACE)
+        target_include_directories(huxerui_module_graph_framework INTERFACE
+                $<BUILD_INTERFACE:${HUXERUI_PUBLIC_INCLUDE_DIR}>
+                $<INSTALL_INTERFACE:include>
+        )
+        add_library(HuxerUI::huxerui ALIAS huxerui_module_graph_framework)
+        add_library(HuxerUI::huxerui_static ALIAS huxerui_module_graph_framework)
+        set(HUXERUI_PLATFORM_ID "generic" PARENT_SCOPE)
+        return()
+    endif ()
     if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
         message(FATAL_ERROR "At least one HuxerUI library target must be enabled")
     endif ()
@@ -509,11 +520,11 @@ function(_huxerui_configure_resources target_name)
             OUTPUT "${HUXERUI_RESOURCE_PLAN}"
             CONTENT "${HUXERUI_RESOURCE_PLAN_CONTENT}"
     )
-    huxerui_resolve_host_tool("hapt" HUXERUI_RESOURCE_CODEGEN_COMMAND)
+    huxerui_resolve_host_tool("hrc" HUXERUI_RESOURCE_COMPILER_COMMAND)
     add_custom_command(
             OUTPUT "${HUXERUI_RESOURCE_INDEX}"
             COMMAND ${CMAKE_COMMAND}
-                    "-DHUXERUI_HAPT=${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+                    "-DHUXERUI_HRC=${HUXERUI_RESOURCE_COMPILER_COMMAND}"
                     "-DHUXERUI_RESOURCE_PACKAGES=${HUXERUI_RESOURCE_PACKAGES}"
                     "-DHUXERUI_RESOURCE_ROOTS=${HUXERUI_RESOURCE_ROOTS}"
                     "-DHUXERUI_RESOURCE_NAMESPACES=${HUXERUI_RESOURCE_NAMESPACES}"
@@ -523,7 +534,7 @@ function(_huxerui_configure_resources target_name)
                     ${HUXERUI_RESOURCE_PACKAGE_INDEXES}
                     ${HUXERUI_RESOURCE_INPUTS}
                     "${HUXERUI_RESOURCE_PLAN}"
-                    "${HUXERUI_RESOURCE_CODEGEN_COMMAND}"
+                    "${HUXERUI_RESOURCE_COMPILER_COMMAND}"
                     "${HUXERUI_RESOURCE_DRIVER}"
             COMMENT "Generating HuxerUI resources for ${target_name}"
             VERBATIM
