@@ -1017,8 +1017,8 @@ When focus returns to a HuxerUI editable node, Runtime creates a new session.
 
 Focus transfer resolves the PlatformView identity from the current committed `RenderComposition`; a delayed platform focus notification for an obsolete identity is ignored.
 The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for platform focus transfer and platform input dispatch.
-These focus and IME lifecycle messages are internal adapter coordination rather than PlatformPayload module events.
-A module may emit a typed application event describing a platform focus change, but that event neither starts nor ends a HuxerUI text-input session.
+These focus and IME lifecycle messages are internal adapter coordination rather than PlatformModule events.
+A library may emit a typed application event describing a platform focus change, but that event neither starts nor ends a HuxerUI text-input session.
 The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one PlatformView subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global platform focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus, while hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
 This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 

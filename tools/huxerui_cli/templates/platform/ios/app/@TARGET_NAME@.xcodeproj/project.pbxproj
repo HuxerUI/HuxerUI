@@ -18,9 +18,9 @@
 			isa = PBXBuildFile;
 			fileRef = 000000000000000000000204 /* LaunchScreen.storyboard */;
 		};
-		000000000000000000000104 /* HuxerUIModules in Frameworks */ = {
+		000000000000000000000104 /* HuxerUILibraries in Frameworks */ = {
 			isa = PBXBuildFile;
-			productRef = 000000000000000000000901 /* HuxerUIModules */;
+			productRef = 000000000000000000000901 /* HuxerUILibraries */;
 		};
 /* End PBXBuildFile section */
 
@@ -99,7 +99,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000104 /* HuxerUIModules in Frameworks */,
+				000000000000000000000104 /* HuxerUILibraries in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,7 +172,7 @@
 			dependencies = ();
 			name = @TARGET_NAME@;
 			packageProductDependencies = (
-				000000000000000000000901 /* HuxerUIModules */,
+				000000000000000000000901 /* HuxerUILibraries */,
 			);
 			productName = "@PROJECT_NAME@";
 			productReference = 000000000000000000000200 /* @PROJECT_NAME@.app */;
@@ -202,7 +202,7 @@
 			);
 			mainGroup = 000000000000000000000400;
 			packageReferences = (
-				000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */,
+				000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUILibraries" */,
 			);
 			productRefGroup = 000000000000000000000403 /* Products */;
 			projectDirPath = "";
@@ -326,17 +326,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */ = {
+		000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUILibraries" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../.huxerui/generated/ios/modules;
+			relativePath = ../../.huxerui/generated/ios/libraries;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		000000000000000000000901 /* HuxerUIModules */ = {
+		000000000000000000000901 /* HuxerUILibraries */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUIModules" */;
-			productName = HuxerUIModules;
+			package = 000000000000000000000900 /* XCLocalSwiftPackageReference "HuxerUILibraries" */;
+			productName = HuxerUILibraries;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

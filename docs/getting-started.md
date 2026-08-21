@@ -196,7 +196,7 @@ cd platform/android
 ./gradlew :example_runner:assembleDebug -PhuxeruiExample=image
 ```
 
-The Android project contains the reusable `HuxerUI` library module and an `example_runner` application.
+The Android project contains the reusable `HuxerUI` Gradle library module and an `example_runner` application.
 The runner uses `ui_gallery` by default and accepts any example directory through the `huxeruiExample` Gradle property.
 It adds that example with CMake `add_subdirectory()`, includes its optional Android Java source set, emits `libhuxerui_app.so`, and registers the example's generated resources as variant assets.
 Cross-compilation resolves the matching host code generators from `tools/prebuilt/<system>/<architecture>`.
@@ -254,11 +254,11 @@ huxerui package windows,web
 
 `create app` writes the common CMake application, `.gitignore`, `resources/images`, `resources/raw`, the default string catalog, and the selected platform shells.
 Use `--id <reverse-domain-id>` to set one exact cross-platform application identifier instead of the editable `com.example.<normalized-name>` default.
-`create module` writes a common CMake module and an ordinary application under `examples/preview`.
-Module names do not require a `huxerui-` prefix and may contain uppercase letters; the supplied directory name is preserved while common identifiers are normalized to lowercase snake case.
-Selecting Linux creates the module's CMake `platform/linux/src` root, selecting Android also creates an independent Gradle library, and selecting iOS creates a Swift Package. Android and iOS builds attach consumed platform module packages to the preview application automatically.
-Running `doctor`, `build`, `run`, or `open ios` from a module root resolves to this ordinary Preview application; the same commands also work directly inside `examples/preview`.
-The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`, plus the active platform source root under `platform/android/src/main/cpp`, `platform/windows/src`, `platform/linux/src`, or `platform/web/src` for modules.
+`create library` writes a common CMake library and an ordinary application under `examples/preview`.
+Library names do not require a `huxerui-` prefix and may contain uppercase letters; the supplied directory name is preserved while common identifiers are normalized to lowercase snake case.
+Selecting Linux creates the library's CMake `platform/linux/src` root, selecting Android also creates an independent Gradle library, and selecting iOS creates a Swift Package. Android and iOS builds attach consumed library platform packages to the preview application automatically.
+Running `doctor`, `build`, `run`, or `open ios` from a library root resolves to this ordinary Preview application; the same commands also work directly inside `examples/preview`.
+The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files under `src`, plus the active platform source root under `platform/android/src/main/cpp`, `platform/windows/src`, `platform/linux/src`, or `platform/web/src` for libraries.
 `doctor` discovers the nearest project from a nested directory, validates each platform shell, and reports host-tool availability and resolved executable paths without changing the project.
 `setup <platform-list>` reuses those diagnostics, shows its complete command and manual-action plan, asks for confirmation unless `--yes` is present, and diagnoses the environment again after execution.
 `devices` lists runnable Android devices, paired physical iOS devices, and booted iOS Simulators without requiring a project.
@@ -272,11 +272,11 @@ An installed SDK provides its host library, Android's Java-only AAR and `arm64-v
 Android selects the source Gradle library only when `HUXERUI_HOME` is a source checkout; installed SDK builds consume the AAR and dynamically link the ABI-specific library through the same root `CMakeLists.txt`.
 Web source checkouts compile the framework with the application, while installed SDK builds statically link the pinned Emscripten library through the canonical `HuxerUI::huxerui_static` target.
 Android SDK levels, the NDK version, ABIs, application identity, dependencies, and packaging policy remain entirely in the generated Gradle shell.
-Before Android or iOS platform-package integration, the CLI configures the root project in module-graph-only mode without selecting or building the development host's application backend.
+Before Android or iOS platform-package integration, the CLI configures the root project in library-graph-only mode without selecting or building the development host's application backend.
 The generated Android shell includes a Gradle 8.13 wrapper pinned to the official binary distribution by SHA-256 checksum, so Android builds do not depend on a separately installed Gradle executable.
 
-The relocatable SDK is selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, module, and application resources.
-Its platform integration contracts are defined in [SDK, CLI, Platform Shell, and Module Design](design/sdk-cli.md).
+The relocatable SDK is selected through `HUXERUI_HOME` or CLI self-location, configures every application through its root `CMakeLists.txt`, and stages one final resource package containing framework, library, and application resources.
+Its platform integration contracts are defined in [SDK, CLI, Platform Shell, and Library Design](design/sdk-cli.md).
 
 ## Package the SDK from source
 

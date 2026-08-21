@@ -783,7 +783,7 @@ View ResolveAppRoute(const AppRoute& route) {
 
 The application resolver is the single route-to-View mapping.
 HuxerUI does not duplicate it in a process-global route registry, string route table, per-page registration modifier, or Runtime callback map.
-Large applications may delegate branches of the resolver to feature modules while assembling the closed AppRoute type and top-level resolver in the application target.
+Large applications may delegate branches of the resolver to feature libraries while assembling the closed AppRoute type and top-level resolver in the application target.
 
 The resolver and each route value are retained by value and invoked inside the destination entry's independent page scope.
 When the routed NavigationStack recomposes with an equal path and an updated compatible resolver, existing entry identifiers and page scopes remain stable while their retained factories use the latest resolver value.

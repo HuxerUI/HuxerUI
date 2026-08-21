@@ -4,7 +4,7 @@ plugins {
 
 def huxeruiProperty = { String name -> providers.gradleProperty(name).get() }
 def huxeruiHome = rootProject.gradle.ext.huxeruiHome
-def huxeruiModules = rootProject.gradle.ext.huxeruiModules
+def huxeruiLibraries = rootProject.gradle.ext.huxeruiLibraries
 def huxeruiCompileSdk = huxeruiProperty("huxeruiCompileSdk").toInteger()
 def huxeruiMinSdk = huxeruiProperty("huxeruiMinSdk").toInteger()
 def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
@@ -86,8 +86,8 @@ dependencies {
     } else {
         implementation files(rootProject.gradle.ext.huxeruiAndroidArchive)
     }
-    huxeruiModules.each { module ->
-        implementation project(module.projectPath)
+    huxeruiLibraries.each { library ->
+        implementation project(library.projectPath)
     }
 }
 

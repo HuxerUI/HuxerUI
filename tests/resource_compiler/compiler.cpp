@@ -252,10 +252,10 @@ TEST_CASE("ResourceCompilerRemovesOutputsFromThePreviousNamespace") {
 TEST_CASE("ResourceCompilerMergesPackagesInDeclarationOrder") {
   TemporaryDirectory temporary;
   const std::filesystem::path base_root = temporary.Path() / "base";
-  const std::filesystem::path module_root = temporary.Path() / "module";
+  const std::filesystem::path library_root = temporary.Path() / "library";
   const std::filesystem::path override_root = temporary.Path() / "override";
   const std::filesystem::path base_output = temporary.Path() / "base-output";
-  const std::filesystem::path module_output = temporary.Path() / "module-output";
+  const std::filesystem::path library_output = temporary.Path() / "library-output";
   const std::filesystem::path override_output = temporary.Path() / "override-output";
   const std::filesystem::path merged_output = temporary.Path() / "merged-output";
 
@@ -265,17 +265,17 @@ TEST_CASE("ResourceCompilerMergesPackagesInDeclarationOrder") {
   Write(base_root / "strings" / "zh.properties", "title = 你好，{0}\n");
   Write(base_root / "images" / "icon.png", huxerui::test::MakeTestPng(8, 4));
   Write(base_root / "images" / "mark.svg", R"(<svg viewBox="0 0 8 4"><path d="M0 0L8 4"/></svg>)");
-  Write(module_root / "raw" / "tool.txt", "module");
+  Write(library_root / "raw" / "tool.txt", "library");
   Write(override_root / "raw" / "config.txt", "override");
   Write(override_root / "strings" / "default.properties", "title = Welcome {0}\n");
   Write(override_root / "images" / "icon@2x.png", huxerui::test::MakeTestPng(16, 8));
   Write(override_root / "images" / "mark.png", huxerui::test::MakeTestPng(8, 4));
 
   huxerui::resource_compiler::Compile({base_root, base_output, "app"});
-  huxerui::resource_compiler::Compile({module_root, module_output, "editor"});
+  huxerui::resource_compiler::Compile({library_root, library_output, "editor"});
   huxerui::resource_compiler::Compile({override_root, override_output, "app"});
   huxerui::resource_compiler::Merge(
-      {{base_output / "package", module_output / "package", override_output / "package"}, merged_output}
+      {{base_output / "package", library_output / "package", override_output / "package"}, merged_output}
   );
 
   REQUIRE(std::filesystem::exists(merged_output / "include" / "app_resources.h"));
@@ -289,7 +289,7 @@ TEST_CASE("ResourceCompilerMergesPackagesInDeclarationOrder") {
   huxerui::detail::AppResources resources(&platform);
   REQUIRE(resources.Resolve(huxerui::RawResource("app", "raw/config.txt")).AsStringView() == "override");
   REQUIRE(resources.Resolve(huxerui::RawResource("app", "raw/kept.txt")).AsStringView() == "kept");
-  REQUIRE(resources.Resolve(huxerui::RawResource("editor", "raw/tool.txt")).AsStringView() == "module");
+  REQUIRE(resources.Resolve(huxerui::RawResource("editor", "raw/tool.txt")).AsStringView() == "library");
   REQUIRE(
       resources.Resolve(huxerui::StringResource("app", "strings/title"), huxerui::Locale::Default()).value ==
       "Welcome {0}"

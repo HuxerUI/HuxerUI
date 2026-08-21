@@ -55,7 +55,7 @@ else ()
 endif ()
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUICodegen.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILibraries.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
 
 check_required_components(HuxerUI)

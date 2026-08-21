@@ -96,7 +96,7 @@ void SkipJsonWhitespace(std::string_view json, std::size_t& offset) {
 void ExpectJsonCharacter(std::string_view json, std::size_t& offset, char expected) {
   SkipJsonWhitespace(json, offset);
   if (offset >= json.size() || json[offset] != expected) {
-    throw std::runtime_error("HuxerUI iOS module graph is malformed");
+    throw std::runtime_error("HuxerUI iOS library graph is malformed");
   }
   ++offset;
 }
@@ -104,7 +104,7 @@ void ExpectJsonCharacter(std::string_view json, std::size_t& offset, char expect
 std::string ParseJsonString(std::string_view json, std::size_t& offset) {
   SkipJsonWhitespace(json, offset);
   if (offset >= json.size() || json[offset++] != '"') {
-    throw std::runtime_error("HuxerUI iOS module graph contains a non-string value");
+    throw std::runtime_error("HuxerUI iOS library graph contains a non-string value");
   }
 
   std::string value;
@@ -115,7 +115,7 @@ std::string ParseJsonString(std::string_view json, std::size_t& offset) {
     }
     if (character != '\\') {
       if (static_cast<unsigned char>(character) < 0x20) {
-        throw std::runtime_error("HuxerUI iOS module graph contains an unescaped control character");
+        throw std::runtime_error("HuxerUI iOS library graph contains an unescaped control character");
       }
       value += character;
       continue;
@@ -149,50 +149,50 @@ std::string ParseJsonString(std::string_view json, std::size_t& offset) {
       value += '\t';
       break;
     default:
-      throw std::runtime_error("HuxerUI iOS module graph contains an unsupported string escape");
+      throw std::runtime_error("HuxerUI iOS library graph contains an unsupported string escape");
     }
   }
-  throw std::runtime_error("HuxerUI iOS module graph contains an unterminated string");
+  throw std::runtime_error("HuxerUI iOS library graph contains an unterminated string");
 }
 
 void ExpectJsonKey(std::string_view json, std::size_t& offset, std::string_view expected) {
   if (ParseJsonString(json, offset) != expected) {
-    throw std::runtime_error("HuxerUI iOS module graph contains an unexpected field");
+    throw std::runtime_error("HuxerUI iOS library graph contains an unexpected field");
   }
   ExpectJsonCharacter(json, offset, ':');
 }
 
-struct IosModulePackage {
+struct IosLibraryPackage {
   std::string target;
   std::filesystem::path path;
   std::string product;
 };
 
-std::string ModuleProductName(std::string_view target) {
+std::string LibraryProductName(std::string_view target) {
   const std::size_t separator = target.rfind("::");
   if (separator == std::string_view::npos) {
-    return MakeModuleProductName(target);
+    return MakeLibraryProductName(target);
   }
   const std::string_view product = target.substr(separator + 2);
   if (product.empty()) {
-    throw std::runtime_error("HuxerUI iOS module target has an empty product name: " + std::string(target));
+    throw std::runtime_error("HuxerUI iOS library target has an empty product name: " + std::string(target));
   }
   return std::string(product);
 }
 
-std::vector<IosModulePackage> ParseIosModulePackages(std::string_view json) {
+std::vector<IosLibraryPackage> ParseIosLibraryPackages(std::string_view json) {
   std::size_t offset = 0;
   ExpectJsonCharacter(json, offset, '{');
   ExpectJsonKey(json, offset, "schema");
   SkipJsonWhitespace(json, offset);
   if (offset >= json.size() || json[offset++] != '1') {
-    throw std::runtime_error("HuxerUI iOS module graph has an unsupported schema");
+    throw std::runtime_error("HuxerUI iOS library graph has an unsupported schema");
   }
   ExpectJsonCharacter(json, offset, ',');
-  ExpectJsonKey(json, offset, "modules");
+  ExpectJsonKey(json, offset, "libraries");
   ExpectJsonCharacter(json, offset, '[');
 
-  std::vector<IosModulePackage> modules;
+  std::vector<IosLibraryPackage> libraries;
   std::set<std::string> targets;
   std::set<std::string> products;
   SkipJsonWhitespace(json, offset);
@@ -208,16 +208,16 @@ std::vector<IosModulePackage> ParseIosModulePackages(std::string_view json) {
     const std::filesystem::path package = source_root / "platform/ios";
     if (std::filesystem::is_directory(package)) {
       if (!std::filesystem::is_regular_file(package / "Package.swift")) {
-        throw std::runtime_error("HuxerUI iOS module package is missing Package.swift: " + package.string());
+        throw std::runtime_error("HuxerUI iOS library package is missing Package.swift: " + package.string());
       }
-      std::string product = ModuleProductName(target);
+      std::string product = LibraryProductName(target);
       if (!targets.insert(target).second) {
-        throw std::runtime_error("HuxerUI iOS module target is duplicated: " + target);
+        throw std::runtime_error("HuxerUI iOS library target is duplicated: " + target);
       }
       if (!products.insert(product).second) {
-        throw std::runtime_error("HuxerUI iOS module product is duplicated: " + product);
+        throw std::runtime_error("HuxerUI iOS library product is duplicated: " + product);
       }
-      modules.push_back({std::move(target), package, std::move(product)});
+      libraries.push_back({std::move(target), package, std::move(product)});
     }
 
     SkipJsonWhitespace(json, offset);
@@ -232,9 +232,9 @@ std::vector<IosModulePackage> ParseIosModulePackages(std::string_view json) {
   ExpectJsonCharacter(json, offset, '}');
   SkipJsonWhitespace(json, offset);
   if (offset != json.size()) {
-    throw std::runtime_error("HuxerUI iOS module graph contains trailing data");
+    throw std::runtime_error("HuxerUI iOS library graph contains trailing data");
   }
-  return modules;
+  return libraries;
 }
 
 std::string EscapeSwiftString(std::string_view value) {
@@ -259,7 +259,7 @@ std::string EscapeSwiftString(std::string_view value) {
       break;
     default:
       if (static_cast<unsigned char>(character) < 0x20) {
-        throw std::runtime_error("HuxerUI iOS module path contains an unsupported control character");
+        throw std::runtime_error("HuxerUI iOS library path contains an unsupported control character");
       }
       escaped += character;
       break;
@@ -272,26 +272,26 @@ void WriteIosIntegrationFile(const std::filesystem::path& path, std::string_view
   std::filesystem::create_directories(path.parent_path());
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   if (!output || !output.write(content.data(), static_cast<std::streamsize>(content.size()))) {
-    throw std::runtime_error("HuxerUI cannot write iOS module integration: " + path.string());
+    throw std::runtime_error("HuxerUI cannot write iOS library integration: " + path.string());
   }
 }
 
-void UpdateIosModuleIntegration(const std::filesystem::path& project_root) {
-  const std::filesystem::path graph = project_root / ".huxerui/generated/modules.json";
+void UpdateIosLibraryIntegration(const std::filesystem::path& project_root) {
+  const std::filesystem::path graph = project_root / ".huxerui/generated/libraries.json";
   std::ifstream input(graph, std::ios::binary);
   if (!input) {
-    throw std::runtime_error("HuxerUI iOS module graph is missing: " + graph.string());
+    throw std::runtime_error("HuxerUI iOS library graph is missing: " + graph.string());
   }
   const std::string json{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-  const std::vector<IosModulePackage> modules = ParseIosModulePackages(json);
+  const std::vector<IosLibraryPackage> libraries = ParseIosLibraryPackages(json);
 
   std::string package_dependencies;
   std::string product_dependencies;
-  for (const IosModulePackage& module : modules) {
-    package_dependencies += "        .package(name: \"" + EscapeSwiftString(module.product) + "\", path: \"" +
-                            EscapeSwiftString(module.path.generic_string()) + "\"),\n";
-    product_dependencies += "                .product(name: \"" + EscapeSwiftString(module.product) +
-                            "\", package: \"" + EscapeSwiftString(module.product) + "\"),\n";
+  for (const IosLibraryPackage& library : libraries) {
+    package_dependencies += "        .package(name: \"" + EscapeSwiftString(library.product) + "\", path: \"" +
+                            EscapeSwiftString(library.path.generic_string()) + "\"),\n";
+    product_dependencies += "                .product(name: \"" + EscapeSwiftString(library.product) +
+                            "\", package: \"" + EscapeSwiftString(library.product) + "\"),\n";
   }
 
   const ProjectTemplateContext template_context;
@@ -299,8 +299,8 @@ void UpdateIosModuleIntegration(const std::filesystem::path& project_root) {
       TemplateReplacement{"@PACKAGE_DEPENDENCIES@", package_dependencies},
       TemplateReplacement{"@PRODUCT_DEPENDENCIES@", product_dependencies},
   };
-  const std::vector<GeneratedFile> files = RenderTemplateTree("generated/ios/modules", template_context, replacements);
-  const std::filesystem::path output = project_root / ".huxerui/generated/ios/modules";
+  const std::vector<GeneratedFile> files = RenderTemplateTree("generated/ios/libraries", template_context, replacements);
+  const std::filesystem::path output = project_root / ".huxerui/generated/ios/libraries";
   for (const GeneratedFile& file : files) {
     WriteIosIntegrationFile(output / file.path, file.content);
   }
@@ -391,12 +391,12 @@ public:
     return RenderTemplateTree("platform/ios/app", context);
   }
 
-  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const override {
-    const std::string product_name = MakeModuleProductName(context.project_name);
+  std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const override {
+    const std::string product_name = MakeLibraryProductName(context.project_name);
     const std::array replacements{
-        TemplateReplacement{"@MODULE_PRODUCT_NAME@", product_name},
+        TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", product_name},
     };
-    std::vector<GeneratedFile> files = RenderTemplateTree("platform/ios/module", context, replacements);
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/ios/library", context, replacements);
     files.push_back({"Sources/" + product_name + "/" + product_name + ".swift", {}});
     return files;
   }
@@ -473,15 +473,15 @@ public:
     return devices;
   }
 
-  std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const override {
+  std::vector<ProcessCommand> LibraryGraphCommands(const PlatformCommandContext& context) const override {
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("iOS native builds do not use a CMake generator option");
     }
-    return detail::ModuleGraphConfigureCommands(context);
+    return detail::LibraryGraphConfigureCommands(context);
   }
 
   void UpdateProjectIntegration(const PlatformCommandContext& context) const override {
-    UpdateIosModuleIntegration(context.project_root);
+    UpdateIosLibraryIntegration(context.project_root);
     ConfigureIosLocalHome(context.project_root, context.huxerui_home);
   }
 

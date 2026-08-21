@@ -221,9 +221,9 @@ public:
     return files;
   }
 
-  std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const override {
+  std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const override {
     std::vector<GeneratedFile> files =
-        RenderTemplateTree("platform/android/module", context, android_template_replacements);
+        RenderTemplateTree("platform/android/library", context, android_template_replacements);
     AppendFiles(files, AndroidWrapperFiles());
     files.push_back({"consumer-rules.pro", {}});
     return files;
@@ -274,11 +274,11 @@ public:
     return ParseAdbDevices(result.output);
   }
 
-  std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const override {
+  std::vector<ProcessCommand> LibraryGraphCommands(const PlatformCommandContext& context) const override {
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("Android native builds do not use a CMake generator option");
     }
-    return detail::ModuleGraphConfigureCommands(context);
+    return detail::LibraryGraphConfigureCommands(context);
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {

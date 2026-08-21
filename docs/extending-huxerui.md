@@ -137,10 +137,10 @@ Built-in Toast, Tooltip, Dialog, BottomSheet, Popup, and Menu services install a
 
 `PlatformAdapter` is the platform boundary for a HuxerUI host view. It provides frame scheduling, time, text measurement, text input, clipboard behavior, and platform rendering integration while sharing the same `Runtime`.
 
-Platform feature modules should expose typed services and controllers rather than adding feature-specific branches to Runtime. Embedded platform UI is designed as a real leaf View, not a Modifier or NodeExtension.
+Platform feature libraries should expose typed services and controllers rather than adding feature-specific branches to Runtime. Embedded platform UI is designed as a real leaf View, not a Modifier or NodeExtension.
 
 Detailed contracts are documented in:
 
 - [Architecture Design](design/architecture.md)
 - [Scope Code Generation Design](design/scope-codegen.md)
-- [SDK, CLI, Platform Shell, and Module Design](design/sdk-cli.md)
+- [SDK, CLI, Platform Shell, and Library Design](design/sdk-cli.md)

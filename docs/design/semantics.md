@@ -423,7 +423,7 @@ It suppresses semantic descendants that would duplicate the platform subtree, bu
 The bridge does not copy platform labels, actions, selection, or editable content into shared Runtime state.
 Accessibility queries and actions inside the subtree remain owned by the platform object, while traversal into or out of the subtree returns through the HuxerUI anchor.
 PlatformPayload events notify typed application EventBindings and do not substitute for platform accessibility queries or actions.
-Conversely, an accessibility action inside the platform subtree is not mirrored as a platform-module event unless the platform component independently emits that documented application event.
+Conversely, an accessibility action inside the platform subtree is not mirrored as a PlatformModule event unless the platform component independently emits that documented application event.
 
 Applying a new frame updates composition and semantic bridge references before issuing accessibility structure notifications.
 Replacement or removal first makes the anchor unavailable to new queries, then invalidates retained platform accessibility wrappers, and only then destroys the PlatformView instance.

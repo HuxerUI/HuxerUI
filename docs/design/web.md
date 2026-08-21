@@ -134,7 +134,7 @@ WebGPU, Skia, or another renderer may later implement the same RenderScene contr
 
 ## ExternalTexture
 
-Web modules include `<huxerui/web/external_texture.h>` and create a move-only `web::ExternalTextureSource` with one immutable logical intrinsic size.
+Web libraries include `<huxerui/web/external_texture.h>` and create a move-only `web::ExternalTextureSource` with one immutable logical intrinsic size.
 `Texture()` exposes the existing copyable platform-neutral capability, `Publish()` accepts only an open WebCodecs `VideoFrame`, and `Finish()` idempotently rejects later publication while preserving the last pending or acquired image.
 No numeric identity, JavaScript registry, PlatformModule subtype, or additional payload kind is introduced.
 
@@ -148,7 +148,7 @@ The first draw of a source during that epoch acquires its newest pending clone, 
 All Canvas slices in one `RenderComposition` share the same epoch, so content split around PlatformViews cannot display different producer frames in one physical presentation.
 Logical source rectangles map through `VideoFrame.displayWidth` and `displayHeight` before Canvas `drawImage`, while Image continues to own fit, alignment, clipping, transforms, sampling, and opacity.
 
-The Web `example_platform_module` creates an unattached Canvas, wraps its generated frames in `VideoFrame`, returns one ExternalTexture capability through the existing typed ColorStream service, and publishes later frames without per-frame module callbacks.
+The Web `example_platform_module` creates an unattached Canvas, wraps its generated frames in `VideoFrame`, returns one ExternalTexture capability through the existing typed ColorStream service, and publishes later frames without per-frame PlatformModule callbacks.
 
 ## Text layout and drawing
 
@@ -209,13 +209,13 @@ The initial locale derives from `navigator.language` and is normalized through t
 ## PlatformModule
 
 Web uses the platform-neutral `PlatformModuleFactory`, `PlatformInstance`, typed method, typed event, cancellation, and disposal contracts without adding a JavaScript factory registry or a second message protocol.
-Module-owned Web sources are ordinary C++ and Emscripten glue selected by the module's CMake target when `EMSCRIPTEN` is active.
+Library-owned Web sources are ordinary C++ and Emscripten glue selected by the library's CMake target when `EMSCRIPTEN` is active.
 They call browser APIs through Emscripten, register the existing factory from an explicit RootHook, and keep JavaScript values, callbacks, promises, and DOM objects outside `PlatformPayload` and shared application code.
-Modules that require JavaScript libraries express those link inputs through their own Emscripten target configuration; the HuxerUI module graph does not parse or reproduce JavaScript package metadata.
+Libraries that require JavaScript dependencies express those link inputs through their own Emscripten target configuration; the HuxerUI library graph does not parse or reproduce JavaScript package metadata.
 
 The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
 Platform result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
-Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the module instance.
+Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the PlatformModule instance.
 
 The Web `example_platform_module` uses Emscripten intervals to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, disposal, and ExternalTexture publication through the same Timer and ColorStream Root Services as the native examples.
 
@@ -227,7 +227,7 @@ WebPlatformAdapter consumes the shared internal `RenderComposition` before drawi
 
 Web PlatformView factories include `<huxerui/web/platform_view.h>` and register `web::PlatformViewFactory` explicitly under the same stable UTF-8 type strings as native platforms.
 The create callback receives the complete initial `PlatformPayload` and an asynchronous `PlatformEventSink`, and returns a detached `HTMLElement` as an `emscripten::val`.
-The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing, while optional update and dispose callbacks retain module-owned behavior without putting DOM values in `PlatformPayload` or adding a JavaScript registry.
+The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing, while optional update and dispose callbacks retain library-owned behavior without putting DOM values in `PlatformPayload` or adding a JavaScript registry.
 
 A PlatformView-capable session owns one isolated CSS stacking context inside the browser-supplied host element.
 The adapter-owned base Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and clipped PlatformView containers become absolutely positioned ordered siblings in the same composition root.

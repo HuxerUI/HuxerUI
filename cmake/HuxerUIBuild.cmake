@@ -115,17 +115,17 @@ function(_huxerui_configure_builtin_resources target_name)
 endfunction()
 
 function(huxerui_configure_targets)
-    if (HUXERUI_MODULE_GRAPH_ONLY)
-        add_library(huxerui_module_graph_framework INTERFACE)
-        set_property(TARGET huxerui_module_graph_framework PROPERTY
+    if (HUXERUI_LIBRARY_GRAPH_ONLY)
+        add_library(huxerui_library_graph_framework INTERFACE)
+        set_property(TARGET huxerui_library_graph_framework PROPERTY
                 HUXERUI_PLATFORM_ID "generic"
         )
-        target_include_directories(huxerui_module_graph_framework INTERFACE
+        target_include_directories(huxerui_library_graph_framework INTERFACE
                 $<BUILD_INTERFACE:${HUXERUI_PUBLIC_INCLUDE_DIR}>
                 $<INSTALL_INTERFACE:include>
         )
-        add_library(HuxerUI::huxerui ALIAS huxerui_module_graph_framework)
-        add_library(HuxerUI::huxerui_static ALIAS huxerui_module_graph_framework)
+        add_library(HuxerUI::huxerui ALIAS huxerui_library_graph_framework)
+        add_library(HuxerUI::huxerui_static ALIAS huxerui_library_graph_framework)
         set(HUXERUI_PLATFORM_ID "generic" PARENT_SCOPE)
         return()
     endif ()

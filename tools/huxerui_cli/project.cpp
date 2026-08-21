@@ -39,7 +39,7 @@ private:
   bool committed_ = false;
 };
 
-struct ModuleTemplateContext {
+struct LibraryTemplateContext {
   ProjectTemplateContext project;
   std::string product_name;
 };
@@ -125,7 +125,7 @@ bool IsAsciiDigit(char character) noexcept {
   return character >= '0' && character <= '9';
 }
 
-std::string NormalizeModuleIdentifier(std::string_view name) {
+std::string NormalizeLibraryIdentifier(std::string_view name) {
   std::string identifier;
   identifier.reserve(name.size());
   for (std::size_t index = 0; index < name.size(); ++index) {
@@ -153,33 +153,33 @@ std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext&
   return RenderTemplateTree("project/app", context);
 }
 
-ModuleTemplateContext MakeModuleTemplateContext(const ProjectTemplateContext& context) {
-  return {context, MakeModuleProductName(context.project_name)};
+LibraryTemplateContext MakeLibraryTemplateContext(const ProjectTemplateContext& context) {
+  return {context, MakeLibraryProductName(context.project_name)};
 }
 
-ProjectTemplateContext PreviewContext(const ModuleTemplateContext& module) {
+ProjectTemplateContext PreviewContext(const LibraryTemplateContext& library) {
   return {
-      module.project.project_name + " Preview",
-      "example_" + module.project.target_name,
-      module.project.project_id + ".preview",
+      library.project.project_name + " Preview",
+      "example_" + library.project.target_name,
+      library.project.project_id + ".preview",
   };
 }
 
-std::vector<GeneratedFile> ModuleProjectFiles(const ModuleTemplateContext& module) {
+std::vector<GeneratedFile> LibraryProjectFiles(const LibraryTemplateContext& library) {
   const std::array replacements{
-      TemplateReplacement{"@MODULE_PRODUCT_NAME@", module.product_name},
+      TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", library.product_name},
   };
-  return RenderTemplateTree("project/module", module.project, replacements);
+  return RenderTemplateTree("project/library", library.project, replacements);
 }
 
-std::vector<GeneratedFile> PreviewProjectFiles(const ModuleTemplateContext& module) {
-  const ProjectTemplateContext context = PreviewContext(module);
+std::vector<GeneratedFile> PreviewProjectFiles(const LibraryTemplateContext& library) {
+  const ProjectTemplateContext context = PreviewContext(library);
   const std::array replacements{
-      TemplateReplacement{"@MODULE_PRODUCT_NAME@", module.product_name},
-      TemplateReplacement{"@MODULE_PROJECT_NAME@", module.project.project_name},
-      TemplateReplacement{"@MODULE_TARGET_NAME@", module.project.target_name},
+      TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", library.product_name},
+      TemplateReplacement{"@LIBRARY_PROJECT_NAME@", library.project.project_name},
+      TemplateReplacement{"@LIBRARY_TARGET_NAME@", library.project.target_name},
   };
-  return RenderTemplateTree("project/module_preview", context, replacements);
+  return RenderTemplateTree("project/library_preview", context, replacements);
 }
 
 void CreateResourceDirectories(const std::filesystem::path& root) {
@@ -242,8 +242,8 @@ ProjectKind ParseProjectKind(std::string_view value) {
   if (value == "app") {
     return ProjectKind::App;
   }
-  if (value == "module") {
-    return ProjectKind::Module;
+  if (value == "library") {
+    return ProjectKind::Library;
   }
   throw std::runtime_error("project plan has an invalid kind");
 }
@@ -260,7 +260,7 @@ bool IsValidProjectName(std::string_view name) noexcept {
   });
 }
 
-bool IsValidModuleProjectName(std::string_view name) noexcept {
+bool IsValidLibraryProjectName(std::string_view name) noexcept {
   if (name.empty() || !IsAsciiLetter(name.front())) {
     return false;
   }
@@ -332,25 +332,25 @@ ProjectTemplateContext MakeProjectTemplateContext(std::string_view project_name,
   return {std::string(project_name), std::move(target_name), resolved_id};
 }
 
-ProjectTemplateContext MakeModuleProjectTemplateContext(std::string_view project_name, std::string_view project_id) {
-  if (!IsValidModuleProjectName(project_name)) {
+ProjectTemplateContext MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_view project_id) {
+  if (!IsValidLibraryProjectName(project_name)) {
     throw std::invalid_argument(
-        "module name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
+        "library name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
     );
   }
   ProjectTemplateContext context = MakeProjectTemplateContext(project_name, project_id);
-  context.target_name = NormalizeModuleIdentifier(project_name);
+  context.target_name = NormalizeLibraryIdentifier(project_name);
   return context;
 }
 
-std::string MakeModuleProductName(std::string_view module_name) {
-  if (!IsValidModuleProjectName(module_name)) {
-    throw std::invalid_argument("module product name requires a valid module name");
+std::string MakeLibraryProductName(std::string_view library_name) {
+  if (!IsValidLibraryProjectName(library_name)) {
+    throw std::invalid_argument("library product name requires a valid library name");
   }
   std::string product_name;
-  product_name.reserve(module_name.size());
+  product_name.reserve(library_name.size());
   bool capitalize = true;
-  for (const char character : module_name) {
+  for (const char character : library_name) {
     if (character == '-' || character == '_') {
       capitalize = true;
     } else if (capitalize) {
@@ -376,8 +376,8 @@ Project DiscoverProject(const std::filesystem::path& start) {
   while (!current.empty()) {
     const bool has_cmake = std::filesystem::is_regular_file(current / "CMakeLists.txt");
     const bool has_platforms = std::filesystem::is_directory(current / "platform");
-    const bool has_module_headers = std::filesystem::is_directory(current / "include");
-    if (has_cmake && (has_platforms || has_module_headers)) {
+    const bool has_library_headers = std::filesystem::is_directory(current / "include");
+    if (has_cmake && (has_platforms || has_library_headers)) {
       return InspectProjectRoot(current);
     }
 
@@ -423,8 +423,8 @@ std::pair<ProjectKind, ProjectTemplateContext> LoadProjectTemplateContext(const 
   if (!IsValidProjectName(context.target_name) || !IsValidProjectId(context.project_id)) {
     throw std::runtime_error("project plan contains an invalid project identity");
   }
-  if (kind == ProjectKind::Module && !IsValidModuleProjectName(context.project_name)) {
-    throw std::runtime_error("project plan contains an invalid module name");
+  if (kind == ProjectKind::Library && !IsValidLibraryProjectName(context.project_name)) {
+    throw std::runtime_error("project plan contains an invalid library name");
   }
   return {kind, std::move(context)};
 }
@@ -466,16 +466,16 @@ void CreateProject(
       WriteFiles(temporary / "platform" / platform->Id(), platform->CreateShell(context));
     }
   } else {
-    const ModuleTemplateContext module = MakeModuleTemplateContext(context);
-    const ProjectTemplateContext preview = PreviewContext(module);
-    WriteFiles(temporary, ModuleProjectFiles(module));
+    const LibraryTemplateContext library = MakeLibraryTemplateContext(context);
+    const ProjectTemplateContext preview = PreviewContext(library);
+    WriteFiles(temporary, LibraryProjectFiles(library));
     CreateResourceDirectories(temporary);
-    WriteFiles(temporary / "examples/preview", PreviewProjectFiles(module));
+    WriteFiles(temporary / "examples/preview", PreviewProjectFiles(library));
     CreateResourceDirectories(temporary / "examples/preview");
     for (const PlatformDriver* platform : platforms) {
-      const std::vector<GeneratedFile> module_package = platform->CreateModulePackage(context);
-      if (!module_package.empty()) {
-        WriteFiles(temporary / "platform" / platform->Id(), module_package);
+      const std::vector<GeneratedFile> library_package = platform->CreateLibraryPackage(context);
+      if (!library_package.empty()) {
+        WriteFiles(temporary / "platform" / platform->Id(), library_package);
       }
       WriteFiles(temporary / "examples/preview/platform" / platform->Id(), platform->CreateShell(preview));
     }
@@ -497,11 +497,11 @@ void AddProjectPlatforms(
   const std::filesystem::path shell_root =
       kind == ProjectKind::App ? project.root / "platform" : project.root / "examples/preview/platform";
   const ProjectTemplateContext shell_context =
-      kind == ProjectKind::App ? context : PreviewContext(MakeModuleTemplateContext(context));
+      kind == ProjectKind::App ? context : PreviewContext(MakeLibraryTemplateContext(context));
 
   struct PlatformTrees {
     const PlatformDriver* platform;
-    std::vector<GeneratedFile> module_package;
+    std::vector<GeneratedFile> library_package;
     std::vector<GeneratedFile> shell;
   };
   std::vector<PlatformTrees> generated;
@@ -509,14 +509,14 @@ void AddProjectPlatforms(
   for (const PlatformDriver* platform : platforms) {
     PlatformTrees trees{
         platform,
-        kind == ProjectKind::Module ? platform->CreateModulePackage(context) : std::vector<GeneratedFile>{},
+        kind == ProjectKind::Library ? platform->CreateLibraryPackage(context) : std::vector<GeneratedFile>{},
         platform->CreateShell(shell_context),
     };
     const std::filesystem::path shell_destination = shell_root / platform->Id();
-    const bool has_module_package = !trees.module_package.empty();
-    const std::filesystem::path module_destination = project.root / "platform" / platform->Id();
+    const bool has_library_package = !trees.library_package.empty();
+    const std::filesystem::path library_destination = project.root / "platform" / platform->Id();
     if (std::filesystem::exists(shell_destination) ||
-        (has_module_package && std::filesystem::exists(module_destination))) {
+        (has_library_package && std::filesystem::exists(library_destination))) {
       throw std::runtime_error("platform already exists: " + std::string(platform->Id()));
     }
     generated.push_back(std::move(trees));
@@ -526,11 +526,11 @@ void AddProjectPlatforms(
   created.reserve(platforms.size() * 2);
   try {
     for (PlatformTrees& trees : generated) {
-      if (kind == ProjectKind::Module) {
-        if (!trees.module_package.empty()) {
+      if (kind == ProjectKind::Library) {
+        if (!trees.library_package.empty()) {
           PublishGeneratedTree(
               project.root / "platform" / trees.platform->Id(),
-              std::move(trees.module_package),
+              std::move(trees.library_package),
               created
           );
         }

@@ -9,20 +9,20 @@ Reusable installed-Android integration, inherited Locale shaping for ordinary ap
 
 ## Goals
 
-- Give application, framework, and module resources stable typed identities that do not expose platform paths or platform resource identifiers.
+- Give application, framework, and library resources stable typed identities that do not expose platform paths or platform resource identifiers.
 - Package one resource model into Windows distributions, macOS application bundles, and Android assets.
 - Support Image as a built-in View and image replay from Canvas without introducing another rendering surface.
-- Keep encoded image bytes available to application and module code while retaining platform decoding and bitmap caches in platform renderers.
+- Keep encoded image bytes available to application and library code while retaining platform decoding and bitmap caches in platform renderers.
 - Resolve localized strings through the existing Environment and root-service model.
 - Support translatable positional formatting whose arguments may be reordered or repeated by each locale.
 - Preserve retained PaintSequence reuse, local invalidation, and platform-neutral RenderScene data.
-- Leave room for module resources, custom fonts, plural messages, and additional image formats without exposing a generic resource hierarchy.
+- Leave room for library resources, custom fonts, plural messages, and additional image formats without exposing a generic resource hierarchy.
 
 ## Non-goals
 
-The initial implementation does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime module registry.
+The initial implementation does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime library registry.
 
-Network and platform picker modules may produce encoded bytes and construct an ImageAsset.
+Network and platform picker libraries may produce encoded bytes and construct an ImageAsset.
 Android `content://` values, Apple security-scoped URLs, and other platform handles remain platform-service concerns rather than cross-platform file paths.
 
 ## Ownership
@@ -70,7 +70,7 @@ The domains have stable ownership:
 
 - `app` belongs to the current application.
 - `huxerui` belongs to framework resources.
-- A module owns each domain explicitly declared by its resource `NAMESPACE`.
+- A library owns each domain explicitly declared by its resource `NAMESPACE`.
 - Multiple target resource roots may contribute to the same domain.
 - For one resource variant in one domain, a later target resource root overrides an earlier root.
 
@@ -155,7 +155,7 @@ The current implementation permits repeated calls for the same target and preser
 ```cmake
 huxerui_add_resources(
     application_target
-    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/modules/editor/resources"
+    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/libraries/editor/resources"
     NAMESPACE "editor"
 )
 
@@ -176,20 +176,20 @@ huxerui_add_app(application_target
 )
 ```
 
-`huxerui_add_module` provides the same compact form for a module's primary resource root:
+`huxerui_add_library` provides the same compact form for a library's primary resource root:
 
 ```cmake
-huxerui_add_module(camera_kit
+huxerui_add_library(camera_kit
     SOURCES src/camera_kit.cpp
     RESOURCES resources
     RESOURCE_NAMESPACE camera_kit
 )
 ```
 
-The application helper registers the precompiled built-in `huxerui` package before the primary application root, while the module helper attaches its primary package to the module target.
+The application helper registers the precompiled built-in `huxerui` package before the primary application root, while the library helper attaches its primary package to the library target.
 Advanced consumers that need more than one root omit the compact resource arguments and call `huxerui_add_resources` in the required order.
 Later roots override earlier roots only when they declare the same resource variant; all other variants coexist.
-This permits application roots to override selected `huxerui` or module resources without a separate override declaration.
+This permits application roots to override selected `huxerui` or library resources without a separate override declaration.
 Each registered root must contain at least one supported resource and must not equal, contain, or be contained by another root registered for the same target.
 All roots configure one final resource package for the target.
 Platform shells consume its generated staging projection and do not redeclare asset roots.
@@ -213,7 +213,7 @@ The resource tool:
 - Removes stale payloads from generated and staged output before publishing the current package.
 
 The framework source root is processed once as an ordinary resource package while HuxerUI itself is built, and that package is installed with the SDK.
-Each module or application root is likewise processed as an ordinary package when its application target is built.
+Each library or application root is likewise processed as an ordinary package when its application target is built.
 The `hrc merge` operation reads the precompiled framework package first and the target's packages in declaration order, then writes one final `resources.bin` plus only the payloads referenced by that final index.
 It does not introduce bundle metadata, base and overlay roles, or a runtime package stack; the existing binary index already contains the domain, key, kind, locale, scale, package path, content hash, and image metadata required for merging.
 CMake removes the per-root compilation workspace after a successful merge so the final package and generated headers are the only retained target resource output.
@@ -288,7 +288,7 @@ ResourceConfiguration supplies only values that vary at runtime and affect resol
 Packaged resources must be synchronously readable before Runtime is created.
 A platform whose package transport is asynchronous completes that transport during platform startup and exposes the resulting immutable payload through PlatformResources.
 In particular, the Web entry integration loads the resource index and payload before creating a Runtime from the registered `Application`.
-Remote URLs remain application or module inputs and do not become package paths.
+Remote URLs remain application or library inputs and do not become package paths.
 
 When system locale or display scale changes, the platform integration calls `Runtime::UpdateResourceConfiguration()` with the new value.
 Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, invalidates root composition, and requests a frame.
@@ -505,7 +505,7 @@ public:
 ```
 
 The ImageResource constructor lets Runtime resolve raster scale variants or a compiled vector payload from the node's Environment and PlatformResources configuration.
-The ImageAsset constructor supports files, network results, platform picker modules, generated images, and explicitly shared application data.
+The ImageAsset constructor supports files, network results, platform picker libraries, generated images, and explicitly shared application data.
 Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
 The ExternalTexture constructor consumes a live platform-owned visual source without turning platform frames into resource bytes.
 
@@ -687,7 +687,7 @@ Decoded browser images follow the same 64 MiB renderer-owned LRU budget as platf
 The current PaintSequence remains valid because DrawImageCommand already retains immutable encoded bytes and complete geometry.
 
 Network fetches are not ResourceIds.
-Application or module code fetches bytes asynchronously, constructs ImageAsset with FromEncoded, updates controlled state, and lets ordinary recomposition replace the image.
+Application or library code fetches bytes asynchronously, constructs ImageAsset with FromEncoded, updates controlled state, and lets ordinary recomposition replace the image.
 
 ### iOS
 

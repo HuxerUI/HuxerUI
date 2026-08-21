@@ -1,15 +1,15 @@
 include_guard(GLOBAL)
 
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIModules.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILibraries.cmake")
 
 function(_huxerui_configure_ios_app_core target_name)
     get_property(HUXERUI_IOS_APP_FRAMEWORK_TARGET
             TARGET ${target_name}
             PROPERTY HUXERUI_APP_FRAMEWORK_TARGET
     )
-    get_property(HUXERUI_IOS_MODULE_TARGETS
+    get_property(HUXERUI_IOS_LIBRARY_TARGETS
             TARGET ${target_name}
-            PROPERTY HUXERUI_MODULES
+            PROPERTY HUXERUI_LIBRARIES
     )
     find_program(HUXERUI_IOS_LIBTOOL libtool REQUIRED)
     set(HUXERUI_IOS_CORE_DIRECTORY
@@ -62,12 +62,12 @@ function(_huxerui_configure_ios_app_core target_name)
             ${target_name}
             ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
     )
-    foreach (HUXERUI_IOS_MODULE_TARGET IN LISTS HUXERUI_IOS_MODULE_TARGETS)
+    foreach (HUXERUI_IOS_LIBRARY_TARGET IN LISTS HUXERUI_IOS_LIBRARY_TARGETS)
         list(APPEND HUXERUI_IOS_CORE_INPUTS
-                "$<TARGET_FILE:${HUXERUI_IOS_MODULE_TARGET}>"
+                "$<TARGET_FILE:${HUXERUI_IOS_LIBRARY_TARGET}>"
         )
         list(APPEND HUXERUI_IOS_CORE_DEPENDENCIES
-                ${HUXERUI_IOS_MODULE_TARGET}
+                ${HUXERUI_IOS_LIBRARY_TARGET}
         )
     endforeach ()
 
@@ -151,28 +151,28 @@ function(huxerui_add_app target_name)
         )
     endif ()
 
-    if (HUXERUI_MODULE_GRAPH_ONLY)
-        if (NOT HUXERUI_MODULE_GRAPH_OUTPUT)
+    if (HUXERUI_LIBRARY_GRAPH_ONLY)
+        if (NOT HUXERUI_LIBRARY_GRAPH_OUTPUT)
             message(FATAL_ERROR
-                    "HUXERUI_MODULE_GRAPH_ONLY requires HUXERUI_MODULE_GRAPH_OUTPUT"
+                    "HUXERUI_LIBRARY_GRAPH_ONLY requires HUXERUI_LIBRARY_GRAPH_OUTPUT"
             )
         endif ()
         add_library(${target_name} INTERFACE)
         set_property(TARGET ${target_name} PROPERTY
-                HUXERUI_MODULE_GRAPH_ONLY TRUE
+                HUXERUI_LIBRARY_GRAPH_ONLY TRUE
         )
-        get_filename_component(HUXERUI_APP_MODULE_GRAPH_OUTPUT
-                "${HUXERUI_MODULE_GRAPH_OUTPUT}"
+        get_filename_component(HUXERUI_APP_LIBRARY_GRAPH_OUTPUT
+                "${HUXERUI_LIBRARY_GRAPH_OUTPUT}"
                 ABSOLUTE
                 BASE_DIR "${CMAKE_BINARY_DIR}"
         )
         set_property(TARGET ${target_name} PROPERTY
-                HUXERUI_MODULE_GRAPH_OUTPUT
-                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+                HUXERUI_LIBRARY_GRAPH_OUTPUT
+                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
-        _huxerui_write_module_graph(
+        _huxerui_write_library_graph(
                 ${target_name}
-                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
         return()
     endif ()
@@ -263,19 +263,19 @@ function(huxerui_add_app target_name)
         )
     endif ()
 
-    if (HUXERUI_MODULE_GRAPH_OUTPUT)
-        get_filename_component(HUXERUI_APP_MODULE_GRAPH_OUTPUT
-                "${HUXERUI_MODULE_GRAPH_OUTPUT}"
+    if (HUXERUI_LIBRARY_GRAPH_OUTPUT)
+        get_filename_component(HUXERUI_APP_LIBRARY_GRAPH_OUTPUT
+                "${HUXERUI_LIBRARY_GRAPH_OUTPUT}"
                 ABSOLUTE
                 BASE_DIR "${CMAKE_BINARY_DIR}"
         )
         set_property(TARGET ${target_name} PROPERTY
-                HUXERUI_MODULE_GRAPH_OUTPUT
-                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+                HUXERUI_LIBRARY_GRAPH_OUTPUT
+                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
-        _huxerui_write_module_graph(
+        _huxerui_write_library_graph(
                 ${target_name}
-                "${HUXERUI_APP_MODULE_GRAPH_OUTPUT}"
+                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
     endif ()
 

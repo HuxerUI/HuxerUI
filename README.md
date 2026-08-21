@@ -106,7 +106,7 @@ The current CMake install exports a platform-specific SDK package, the CLI, host
 Tagged releases produce verified macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 portable SDK archives with shell and PowerShell installers.
 Each SDK includes Android Java and ABI artifacts plus the pinned Emscripten Web library, so Android and Web projects can consume an installed SDK without framework sources.
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
-The distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, module, and application resources into one final package.
+The distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, library, and application resources into one final package.
 
 Build a complete SDK archive for the current host, including Android and Web target artifacts, with the repository packaging script:
 
@@ -171,7 +171,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
-| [SDK, CLI, Platform Shell, and Module Design](docs/design/sdk-cli.md) | Project tooling, distribution, modules, and PlatformView |
+| [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md) | Project tooling, distribution, libraries, and PlatformView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |
 
 ## Examples

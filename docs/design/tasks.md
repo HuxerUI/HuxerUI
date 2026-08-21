@@ -109,7 +109,7 @@ Virtual item state caching does not retain TaskScope or running coroutine frames
 
 TaskScope closure is committed with scope retirement rather than performed during speculative reconciliation.
 Runtime drains Lifecycle cleanup first and then closes the retired TaskScope, so explicit resource cleanup remains deterministic before the structured cancellation fallback.
-Runtime teardown closes all TaskScopes before releasing Root Services and platform module state.
+Runtime teardown closes all TaskScopes before releasing Root Services and PlatformModule state.
 
 Copies of TaskScope may outlive their RecomposeScope, but a closed TaskScope cannot launch new work.
 Launch on an empty or closed handle throws `std::logic_error`.

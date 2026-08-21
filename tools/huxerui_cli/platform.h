@@ -83,11 +83,11 @@ public:
   [[nodiscard]] virtual std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const;
   [[nodiscard]] virtual std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const;
   [[nodiscard]] virtual std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const = 0;
-  [[nodiscard]] virtual std::vector<GeneratedFile> CreateModulePackage(const ProjectTemplateContext& context) const;
+  [[nodiscard]] virtual std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const;
   [[nodiscard]] virtual std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const = 0;
   [[nodiscard]] virtual bool SupportsDeviceDiscovery() const noexcept;
   [[nodiscard]] virtual std::vector<PlatformDevice> DiscoverDevices() const;
-  [[nodiscard]] virtual std::vector<ProcessCommand> ModuleGraphCommands(const PlatformCommandContext& context) const;
+  [[nodiscard]] virtual std::vector<ProcessCommand> LibraryGraphCommands(const PlatformCommandContext& context) const;
   virtual void UpdateProjectIntegration(const PlatformCommandContext& context) const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
@@ -118,7 +118,7 @@ ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::st
 [[nodiscard]] std::vector<std::string> DeviceArguments(const std::optional<PlatformDevice>& device);
 [[nodiscard]] std::string ProfileConfiguration(std::string_view profile);
 [[nodiscard]] std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& context);
-[[nodiscard]] std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandContext& context);
+[[nodiscard]] std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context);
 
 [[nodiscard]] const PlatformDriver& AndroidPlatformDriver() noexcept;
 [[nodiscard]] const PlatformDriver& WindowsPlatformDriver() noexcept;

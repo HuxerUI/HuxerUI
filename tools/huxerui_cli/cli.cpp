@@ -29,7 +29,7 @@ void PrintHelp(std::ostream& output) {
   output << "HuxerUI project and platform tool\n\n"
          << "Usage:\n"
          << "  huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
-         << "  huxerui create module <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
+         << "  huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui setup <platform-list> [--yes]\n"
@@ -288,22 +288,22 @@ int RunCreate(
     std::span<const std::string_view> arguments, const std::filesystem::path& working_directory, std::ostream& output
 ) {
   if (arguments.size() < 3) {
-    throw UsageError("create requires app or module and a project name");
+    throw UsageError("create requires app or library and a project name");
   }
   ProjectKind kind;
   if (arguments[1] == "app") {
     kind = ProjectKind::App;
-  } else if (arguments[1] == "module") {
-    kind = ProjectKind::Module;
+  } else if (arguments[1] == "library") {
+    kind = ProjectKind::Library;
   } else {
-    throw UsageError("create kind must be app or module");
+    throw UsageError("create kind must be app or library");
   }
   if (!IsValidProjectName(arguments[2])) {
     throw UsageError("project name must start with a letter and contain only letters, digits, underscores, or hyphens");
   }
-  if (kind == ProjectKind::Module && !IsValidModuleProjectName(arguments[2])) {
+  if (kind == ProjectKind::Library && !IsValidLibraryProjectName(arguments[2])) {
     throw UsageError(
-        "module name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
+        "library name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
     );
   }
 
@@ -338,15 +338,15 @@ int RunCreate(
   if (project_id && !IsValidProjectId(*project_id)) {
     throw UsageError("project ID must be a lowercase reverse-domain identifier with letter-prefixed segments");
   }
-  const ProjectTemplateContext context = kind == ProjectKind::Module
-                                             ? MakeModuleProjectTemplateContext(arguments[2], project_id.value_or(""))
+  const ProjectTemplateContext context = kind == ProjectKind::Library
+                                             ? MakeLibraryProjectTemplateContext(arguments[2], project_id.value_or(""))
                                              : MakeProjectTemplateContext(arguments[2], project_id.value_or(""));
   const std::vector<const PlatformDriver*> platforms =
       platform_list ? ResolvePlatforms(*platform_list) : std::vector<const PlatformDriver*>{};
   const std::filesystem::path destination = working_directory / context.project_name;
   CreateProject(destination, kind, context, platforms);
 
-  output << "Created " << (kind == ProjectKind::App ? "app " : "module ") << destination.string() << "\nPlatforms:";
+  output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << "\nPlatforms:";
   for (const PlatformDriver* platform : platforms) {
     output << ' ' << platform->Id();
   }
@@ -666,7 +666,7 @@ void BuildPlatform(
 ) {
   output << "Building " << platform.Id() << " (" << options.profile << ")\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
-  ExecuteCommands(platform.ModuleGraphCommands(context), output);
+  ExecuteCommands(platform.LibraryGraphCommands(context), output);
   platform.UpdateProjectIntegration(context);
   ExecuteCommands(platform.BuildCommands(context), output);
 }
@@ -867,7 +867,7 @@ int RunOpen(
 
   output << "Opening ios Xcode project\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
-  ExecuteCommands(platform.ModuleGraphCommands(context), output);
+  ExecuteCommands(platform.LibraryGraphCommands(context), output);
   platform.UpdateProjectIntegration(context);
   ExecuteCommands(platform.OpenCommands(context), output);
   return 0;

@@ -135,7 +135,7 @@ Do not create a public header per trivial control or grow `view.h` with unrelate
 
 Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep a type in `src/internal.h` only when Runtime subsystems genuinely share it.
 
-Detailed architecture belongs in [Architecture Design](docs/design/architecture.md), text editing contracts in [Text Input and TextField Design](docs/design/text-input.md), code generation in [Scope Code Generation Design](docs/design/scope-codegen.md), and SDK or module planning in [SDK, CLI, and Module Design](docs/design/sdk-cli.md).
+Detailed architecture belongs in [Architecture Design](docs/design/architecture.md), text editing contracts in [Text Input and TextField Design](docs/design/text-input.md), code generation in [Scope Code Generation Design](docs/design/scope-codegen.md), and SDK or library planning in [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md).
 
 ## Public API and state
 

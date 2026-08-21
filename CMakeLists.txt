@@ -6,7 +6,7 @@ endif ()
 
 project(huxerui VERSION 0.1.0 LANGUAGES NONE)
 
-if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
     enable_language(CXX)
     if (APPLE)
         enable_language(OBJCXX)
@@ -61,7 +61,7 @@ include(cmake/HuxerUIBuild.cmake)
 huxerui_configure_targets()
 include(cmake/HuxerUIApp.cmake)
 
-if (HUXERUI_MODULE_GRAPH_ONLY)
+if (HUXERUI_LIBRARY_GRAPH_ONLY)
     return()
 endif ()
 

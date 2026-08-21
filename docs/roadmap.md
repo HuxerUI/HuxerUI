@@ -1,6 +1,6 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, composition-scoped Lifecycle and structured TaskScope concurrency, responsive viewport classes, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on Windows and macOS, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, Tabs, selection navigation, shared accessibility semantics for controls, presentation, scrolling, destination selection, and virtual collections, Windows UI Automation, macOS AppKit, Android AccessibilityNodeProvider, and iOS UIKit bridges, application drawers, navigation stacks and predictive Back, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, typed nonvisual platform modules on Windows, macOS, Linux, Web, Android, and iOS, installable platform-specific CMake targets, CLI project generation, diagnostics, Android and iOS device discovery, and Windows, macOS, Linux, Web, Android, and iOS platform build, launch, and backend integration.
+The current foundation includes shared state and recomposition, composition-scoped Lifecycle and structured TaskScope concurrency, responsive viewport classes, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on Windows and macOS, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, Tabs, selection navigation, shared accessibility semantics for controls, presentation, scrolling, destination selection, and virtual collections, Windows UI Automation, macOS AppKit, Android AccessibilityNodeProvider, and iOS UIKit bridges, application drawers, navigation stacks and predictive Back, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, typed nonvisual PlatformModules on Windows, macOS, Linux, Web, Android, and iOS, installable platform-specific CMake targets, CLI project generation, diagnostics, Android and iOS device discovery, and Windows, macOS, Linux, Web, Android, and iOS platform build, launch, and backend integration.
 
 Runtime foundation work:
 
@@ -20,7 +20,7 @@ SDK, platform integration, and distribution work:
 
 - Signed HuxerUI Android releases on Maven Central
 - CLI package and platform artifact collection
-- Typed platform modules with explicit application-installed RootHooks, `PlatformPayload` calls, results, events, and platform dependency projection
+- Typed PlatformModules with explicit application-installed RootHooks, `PlatformPayload` calls, results, events, and platform dependency projection
 - PlatformView hosting on Linux, Web accessibility attachment, and remaining cross-platform integration coverage
 - Versioned SDK distribution and signing support
 - iOS archive export, distribution signing, and embeddable UIView integration
@@ -32,6 +32,6 @@ App resources and Image follow the ownership, packaging, caching, and localizati
 Page stacks, transition ownership, Back routing, typed route paths, and Web URL history follow the [Navigation Design](design/navigation.md).
 Retained timing, synchronized presentation properties, and explicit frozen-scene transitions follow the [Animation and Scene Transition Design](design/animation.md).
 Accessibility proceeds from shared semantic declarations and the immutable `SemanticFrame` through component defaults before platform adapters.
-SDK delivery proceeds from the installable CMake foundation through CLI workflows and module registration before PlatformView modules and versioned distribution.
+SDK delivery proceeds from the installable CMake foundation through CLI workflows and library integration before PlatformView coverage and versioned distribution.
 
 Detailed design constraints and delivery sequences live in [`docs/design`](design/).

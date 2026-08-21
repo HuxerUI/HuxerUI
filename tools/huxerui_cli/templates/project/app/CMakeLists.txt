@@ -22,7 +22,7 @@ endif ()
 
 project(@TARGET_NAME@ VERSION 0.1.0 LANGUAGES NONE)
 
-if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
     enable_language(CXX)
 endif ()
 
@@ -66,7 +66,7 @@ file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cxx"
 )
-if (NOT HUXERUI_MODULE_GRAPH_ONLY)
+if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
     if (WIN32)
         list(APPEND APP_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/main.cpp")
     elseif (APPLE AND NOT IOS)
@@ -76,8 +76,8 @@ if (NOT HUXERUI_MODULE_GRAPH_ONLY)
     endif ()
 endif ()
 
-set(HUXERUI_MODULE_GRAPH_OUTPUT
-        "${CMAKE_CURRENT_SOURCE_DIR}/.huxerui/generated/modules.json"
+set(HUXERUI_LIBRARY_GRAPH_OUTPUT
+        "${CMAKE_CURRENT_SOURCE_DIR}/.huxerui/generated/libraries.json"
 )
 
 set(HUXERUI_APP_RESOURCE_OUTPUT_ARGUMENTS)

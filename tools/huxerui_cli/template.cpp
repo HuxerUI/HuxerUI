@@ -36,7 +36,7 @@ std::string Render(
   static constexpr std::string_view replacement_prefixes[]{
       "@PROJECT_",
       "@TARGET_NAME@",
-      "@MODULE_",
+      "@LIBRARY_",
       "@ANDROID_",
       "@PACKAGE_DEPENDENCIES@",
       "@PRODUCT_DEPENDENCIES@",

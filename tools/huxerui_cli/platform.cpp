@@ -137,15 +137,15 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
   };
 }
 
-std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandContext& context) {
-  const std::filesystem::path build_directory = context.project_root / ".huxerui/build/module-graph";
+std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context) {
+  const std::filesystem::path build_directory = context.project_root / ".huxerui/build/library-graph";
   std::vector<std::string> arguments{
       "-S",
       context.project_root.string(),
       "-B",
       build_directory.string(),
       "-DCMAKE_BUILD_TYPE=Debug",
-      "-DHUXERUI_MODULE_GRAPH_ONLY=ON",
+      "-DHUXERUI_LIBRARY_GRAPH_ONLY=ON",
   };
   if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
       !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {
@@ -158,7 +158,7 @@ std::vector<ProcessCommand> ModuleGraphConfigureCommands(const PlatformCommandCo
 
 } // namespace detail
 
-std::vector<GeneratedFile> PlatformDriver::CreateModulePackage(const ProjectTemplateContext&) const {
+std::vector<GeneratedFile> PlatformDriver::CreateLibraryPackage(const ProjectTemplateContext&) const {
   return {};
 }
 
@@ -203,7 +203,7 @@ std::vector<PlatformDevice> PlatformDriver::DiscoverDevices() const {
   throw std::logic_error("platform does not support device discovery: " + std::string(Id()));
 }
 
-std::vector<ProcessCommand> PlatformDriver::ModuleGraphCommands(const PlatformCommandContext&) const {
+std::vector<ProcessCommand> PlatformDriver::LibraryGraphCommands(const PlatformCommandContext&) const {
   return {};
 }
 

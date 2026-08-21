@@ -313,12 +313,12 @@ add_test(NAME HuxerUIResourceMergeTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/resource_merge.cmake"
 )
 
-add_test(NAME HuxerUIModuleValidationTests
+add_test(NAME HuxerUILibraryValidationTests
         COMMAND "${CMAKE_COMMAND}"
                 "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
                 "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
                 "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/module_validation.cmake"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/library_validation.cmake"
 )
 
 if (TARGET huxerui_cli_core)
@@ -438,31 +438,31 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
     endif ()
 endif ()
 
-add_executable(huxerui_module_tests
+add_executable(huxerui_library_tests
         tests_main.cpp
-        runtime/modules.cpp
+        runtime/libraries.cpp
 )
 
-target_include_directories(huxerui_module_tests PRIVATE
+target_include_directories(huxerui_library_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )
-target_link_libraries(huxerui_module_tests PRIVATE
+target_link_libraries(huxerui_library_tests PRIVATE
         HuxerUI3p::Catch2
         ${HUXERUI_TEST_LIBRARY}
 )
-huxerui_use_module(huxerui_module_tests
-        TARGET HuxerUI::test_module
-        PATH "${CMAKE_CURRENT_SOURCE_DIR}/modules/root_service"
+huxerui_use_library(huxerui_library_tests
+        TARGET HuxerUI::test_library
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/root_service"
 )
-huxerui_add_resources(huxerui_module_tests
-        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/modules/application_resources"
-        NAMESPACE huxerui_test_module
+huxerui_add_resources(huxerui_library_tests
+        ROOT "${CMAKE_CURRENT_SOURCE_DIR}/libraries/application_resources"
+        NAMESPACE huxerui_test_library
 )
-target_compile_definitions(huxerui_module_tests PRIVATE
-        "HUXERUI_MODULE_TEST_RESOURCE_PACKAGE=\"${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/huxerui_module_tests/package\""
+target_compile_definitions(huxerui_library_tests PRIVATE
+        "HUXERUI_LIBRARY_TEST_RESOURCE_PACKAGE=\"${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/huxerui_library_tests/package\""
 )
-add_test(NAME HuxerUIModuleTests COMMAND huxerui_module_tests)
+add_test(NAME HuxerUILibraryTests COMMAND huxerui_library_tests)
 
 add_executable(huxerui_codegen_runtime_tests
         tests_main.cpp

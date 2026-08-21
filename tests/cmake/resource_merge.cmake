@@ -11,21 +11,21 @@ set(BUILD_ROOT "${TEST_ROOT}/build")
 file(MAKE_DIRECTORY
         "${PROJECT_ROOT}/base/raw"
         "${PROJECT_ROOT}/framework-override/raw"
-        "${PROJECT_ROOT}/module/resources/raw"
+        "${PROJECT_ROOT}/library/resources/raw"
         "${PROJECT_ROOT}/override/raw"
         "${PROJECT_ROOT}/resources/raw"
 )
 file(WRITE "${PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
 file(WRITE "${PROJECT_ROOT}/base/raw/config.txt" "base")
 file(WRITE "${PROJECT_ROOT}/base/raw/kept.txt" "kept")
-file(WRITE "${PROJECT_ROOT}/module/resources/raw/tool.txt" "module")
+file(WRITE "${PROJECT_ROOT}/library/resources/raw/tool.txt" "library")
 file(WRITE "${PROJECT_ROOT}/override/raw/config.txt" "override")
 file(WRITE "${PROJECT_ROOT}/resources/raw/framework.txt" "framework")
 file(WRITE "${PROJECT_ROOT}/resources/raw/framework-kept.txt" "framework-kept")
 file(WRITE "${PROJECT_ROOT}/framework-override/raw/framework.txt" "application")
-file(WRITE "${PROJECT_ROOT}/module/CMakeLists.txt"
+file(WRITE "${PROJECT_ROOT}/library/CMakeLists.txt"
         "huxerui_add_resources(resource_app\n"
-        "        ROOT \"${PROJECT_ROOT}/module/resources\"\n"
+        "        ROOT \"${PROJECT_ROOT}/library/resources\"\n"
         "        NAMESPACE editor\n"
         ")\n"
 )
@@ -41,7 +41,7 @@ file(WRITE "${PROJECT_ROOT}/CMakeLists.txt"
         "_huxerui_configure_builtin_resources(resource_app)\n"
         "set_property(TARGET resource_app APPEND PROPERTY HUXERUI_RESOURCE_PACKAGES \"\${HUXERUI_BUILTIN_RESOURCE_PACKAGE}\")\n"
         "_huxerui_schedule_resources(resource_app)\n"
-        "add_subdirectory(module)\n"
+        "add_subdirectory(library)\n"
         "huxerui_add_resources(resource_app ROOT base NAMESPACE app)\n"
         "huxerui_add_resources(resource_app ROOT override NAMESPACE app)\n"
         "huxerui_add_resources(resource_app ROOT framework-override NAMESPACE huxerui)\n"
@@ -84,23 +84,23 @@ set(RESOURCE_OUTPUT "${BUILD_ROOT}/huxerui-resources/resource_app")
 set(BUILTIN_RESOURCE_OUTPUT "${BUILD_ROOT}/huxerui-builtin-resources")
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/app/raw/config.txt" CONFIG_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/app/raw/kept.txt" KEPT_VALUE)
-file(READ "${RESOURCE_OUTPUT}/package/huxerui/editor/raw/tool.txt" MODULE_VALUE)
+file(READ "${RESOURCE_OUTPUT}/package/huxerui/editor/raw/tool.txt" LIBRARY_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/huxerui/raw/framework.txt" FRAMEWORK_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/huxerui/raw/framework-kept.txt" FRAMEWORK_KEPT_VALUE)
 file(READ "${RESOURCE_OUTPUT}/include/app_resources.h" APP_HEADER)
-file(READ "${RESOURCE_OUTPUT}/include/editor_resources.h" MODULE_HEADER)
+file(READ "${RESOURCE_OUTPUT}/include/editor_resources.h" LIBRARY_HEADER)
 file(READ "${RESOURCE_OUTPUT}/include/huxerui_resources.h" FRAMEWORK_HEADER)
 file(READ "${BUILTIN_RESOURCE_OUTPUT}/include/huxerui_builtin_resources.h" BUILTIN_HEADER)
 if (NOT CONFIG_VALUE STREQUAL "override"
         OR NOT KEPT_VALUE STREQUAL "kept"
-        OR NOT MODULE_VALUE STREQUAL "module"
+        OR NOT LIBRARY_VALUE STREQUAL "library"
         OR NOT FRAMEWORK_VALUE STREQUAL "application"
         OR NOT FRAMEWORK_KEPT_VALUE STREQUAL "framework-kept")
     message(FATAL_ERROR "Ordered resource merge produced unexpected payloads")
 endif ()
 if (NOT APP_HEADER MATCHES "namespace app \\{"
         OR APP_HEADER MATCHES "namespace app_resources"
-        OR NOT MODULE_HEADER MATCHES "namespace editor \\{"
+        OR NOT LIBRARY_HEADER MATCHES "namespace editor \\{"
         OR NOT FRAMEWORK_HEADER MATCHES "framework_txt"
         OR NOT FRAMEWORK_HEADER MATCHES "framework_kept_txt")
     message(FATAL_ERROR "Ordered resource merge produced unexpected headers")

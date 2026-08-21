@@ -340,7 +340,7 @@ File settings{files->Directories().data_directory, "settings.json"};
 `executable_directory` is present only when the platform exposes a meaningful local executable location.
 
 `CurrentDirectory()` reports the process working directory and is distinct from `executable_directory`.
-HuxerUI does not provide a process-wide working-directory mutation because it would affect other Runtime instances, modules, and threads.
+HuxerUI does not provide a process-wide working-directory mutation because it would affect other Runtime instances, libraries, and threads.
 Application storage must use the semantic application directories rather than depend on a launcher's working directory.
 
 The application directories are created and validated before the service is published.
@@ -602,7 +602,7 @@ const session = module.mountHuxerUI("#huxerui-root");
 
 Generated CLI shells derive this value from the project identifier, and repository examples use their configured bundle identifier.
 Custom shells provide it explicitly.
-The value is host-owned storage identity and does not enter `AppOptions`, the shared `Application` declaration, or C++ module payloads.
+The value is host-owned storage identity and does not enter `AppOptions`, the shared `Application` declaration, or C++ PlatformModule payloads.
 The implementation rejects a missing or invalid key instead of deriving one from a URL, output filename, or document title whose later change would make existing data appear lost.
 
 The encoded key selects one application-specific IDBFS mount and one temporary subtree:

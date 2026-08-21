@@ -13,7 +13,7 @@ namespace huxerui::cli {
 
 enum class ProjectKind {
   App,
-  Module,
+  Library,
 };
 
 struct Project {
@@ -23,13 +23,13 @@ struct Project {
 };
 
 [[nodiscard]] bool IsValidProjectName(std::string_view name) noexcept;
-[[nodiscard]] bool IsValidModuleProjectName(std::string_view name) noexcept;
+[[nodiscard]] bool IsValidLibraryProjectName(std::string_view name) noexcept;
 [[nodiscard]] bool IsValidProjectId(std::string_view id) noexcept;
 [[nodiscard]] ProjectTemplateContext
 MakeProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
 [[nodiscard]] ProjectTemplateContext
-MakeModuleProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
-[[nodiscard]] std::string MakeModuleProductName(std::string_view module_name);
+MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
+[[nodiscard]] std::string MakeLibraryProductName(std::string_view library_name);
 [[nodiscard]] Project DiscoverProject(const std::filesystem::path& start);
 [[nodiscard]] std::pair<ProjectKind, ProjectTemplateContext> LoadProjectTemplateContext(const Project& project);
 [[nodiscard]] Project ResolveApplicationProject(const Project& project);
