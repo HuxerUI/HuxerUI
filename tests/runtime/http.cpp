@@ -135,6 +135,21 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
   const std::thread::id ui_thread = std::this_thread::get_id();
 
   http_tasks.Launch([client = http_client]() -> Task<void> {
+#if defined(__GNUC__) && !defined(__clang__) && (__GNUC__ < 16 || (__GNUC__ == 16 && __GNUC_MINOR__ < 2))
+    HttpRequest request{
+        .url = "https://example.test/items",
+        .method = HttpMethod::Post,
+        .headers =
+            {
+                {"Accept", "application/json"},
+                {"X-Trace", "first"},
+                {"X-Trace", "second"},
+            },
+        .body = "{}",
+        .timeout = std::chrono::milliseconds{5000},
+    };
+    HttpResult result = co_await client->Send(std::move(request));
+#else
     HttpResult result = co_await client->Send({
         .url = "https://example.test/items",
         .method = HttpMethod::Post,
@@ -147,6 +162,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
         .body = "{}",
         .timeout = std::chrono::milliseconds{5000},
     });
+#endif
     if (result.HasResponse()) {
       http_response = std::move(result).Response();
     } else {
