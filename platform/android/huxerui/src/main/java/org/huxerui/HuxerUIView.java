@@ -42,6 +42,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Objects;
@@ -172,6 +173,8 @@ public final class HuxerUIView extends ViewGroup {
     private boolean platformAccessibilityStructureChanged;
     private long touchPlatformViewIdentity;
     private boolean platformTabKeyHandled;
+    private HuxerUIApplicationActivation startupApplicationActivation;
+    private final ArrayList<HuxerUIApplicationActivation> pendingApplicationActivations = new ArrayList<>();
 
     private boolean updateTextInputGeometry() {
         if (inputConnection != null) {
@@ -215,6 +218,29 @@ public final class HuxerUIView extends ViewGroup {
         return filePicker.dispatchResult(requestCode, resultCode, data);
     }
 
+    /** Sets the Intent normalized as startup input for the next Runtime created by this View. */
+    public void setStartupApplicationIntent(Intent intent) {
+        if (nativeHandle != 0L) {
+            throw new IllegalStateException(
+                    "HuxerUI startup application Intent must be set before the View is attached");
+        }
+        startupApplicationActivation = HuxerUIApplicationActivation.fromIntent(getContext(), intent);
+    }
+
+    /** Delivers a supported later Intent to this View's Runtime, retaining it until attachment when necessary. */
+    public boolean dispatchApplicationIntent(Intent intent) {
+        HuxerUIApplicationActivation activation = HuxerUIApplicationActivation.fromIntent(getContext(), intent);
+        if (activation == null) {
+            return false;
+        }
+        if (nativeHandle == 0L) {
+            pendingApplicationActivations.add(activation);
+        } else {
+            handleNativeApplicationActivation(activation);
+        }
+        return true;
+    }
+
     FilePickerLauncher filePickerLauncher() {
         return filePickerLauncher;
     }
@@ -245,8 +271,13 @@ public final class HuxerUIView extends ViewGroup {
         observer.addOnGlobalFocusChangeListener(platformViewFocusListener);
         requestFocus();
         if (nativeHandle == 0L) {
-            nativeHandle = nativeCreate(this);
+            nativeHandle = createNativeRuntime(startupApplicationActivation);
+            startupApplicationActivation = null;
             resizeRuntime(getWidth(), getHeight());
+            for (HuxerUIApplicationActivation activation : pendingApplicationActivations) {
+                handleNativeApplicationActivation(activation);
+            }
+            pendingApplicationActivations.clear();
         }
         requestApplyInsets();
     }
@@ -1748,7 +1779,24 @@ public final class HuxerUIView extends ViewGroup {
         return builder.build();
     }
 
-    private static native long nativeCreate(HuxerUIView view);
+    private long createNativeRuntime(HuxerUIApplicationActivation activation) {
+        if (activation == null) {
+            return nativeCreate(this, 0, null, null, -1L, null, false);
+        }
+        return nativeCreate(this, activation.kind, activation.value, activation.name, activation.size,
+                activation.contentType, activation.writable);
+    }
+
+    private void handleNativeApplicationActivation(HuxerUIApplicationActivation activation) {
+        nativeHandleApplicationActivation(nativeHandle, activation.kind, activation.value, activation.name,
+                activation.size, activation.contentType, activation.writable);
+    }
+
+    private static native long nativeCreate(HuxerUIView view, int activationKind, String activationValue,
+            String fileName, long fileSize, String contentType, boolean writable);
+
+    private static native void nativeHandleApplicationActivation(long handle, int activationKind,
+            String activationValue, String fileName, long fileSize, String contentType, boolean writable);
 
     private static native void nativeDestroy(long handle);
 

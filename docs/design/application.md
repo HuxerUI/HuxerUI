@@ -1,6 +1,6 @@
 # Application Activation and Lifecycle Design
 
-Status: application activation foundation and Windows mapping implemented; lifecycle state and remaining platform mapping staged
+Status: application activation foundation plus Windows and Android mappings implemented; lifecycle state and remaining platform mappings staged
 
 This document defines the application-facing boundary for startup activation, subsequent activation, and future application lifecycle state. It covers ownership across the platform application shell, Runtime, composition, files, and navigation without introducing an application session abstraction.
 
@@ -182,11 +182,22 @@ Ordinary launches are never forwarded, so this mechanism does not impose general
 
 URL protocol and file-association registration remain application or packaging metadata rather than `AppOptions`. `example_application` registers the `huxerui-example` URL protocol under the current Windows user and demonstrates both cold and subsequent browser activation without administrator access.
 
+## Android mapping
+
+`HuxerUIActivity` normalizes its startup `Intent` before attaching `HuxerUIView`, so the Runtime receives the corresponding activation before its first composition. Later `onNewIntent()` values are normalized by the same path and submitted to that View's current Runtime. An Activity launch mode such as `singleTop` is application policy: when Android creates another Activity instance, its Intent becomes that Runtime's startup activation instead of a subsequent activation on an arbitrary existing Runtime.
+
+`ACTION_VIEW` and `ACTION_EDIT` are accepted only when they contain a data URI. `content://` and `file://` values become one-element `FileActivation` values; other schemes become `UrlActivation`. Main-launch, share, malformed, and unsupported Intents remain an ordinary cold launch or are ignored as later input. Share payloads require a separately reviewed activation alternative rather than being projected into files or URLs.
+
+Android document activations keep the provider URI inside `FileReference`. Display name, optional size, MIME type, and write capability are resolved at the platform boundary, while file operations continue through `ContentResolver`. Temporary read and write grants remain governed by the Activity and Android task lifetime; HuxerUI does not persist or widen them. If a sender supplies an unusable capability, later file operations report the existing `FileError` instead of exposing the URI as an application-local path.
+
+The full-screen host installs both timing paths automatically. An embedded owner calls `HuxerUIView.setStartupApplicationIntent()` before attachment and forwards later values through `dispatchApplicationIntent()` on the View's UI thread. Recognized values received before attachment are retained until that View creates its Runtime. This queue exists only at the pre-Runtime platform boundary; once the Runtime exists, the shared application service remains the sole delivery source.
+
+The Android `example_runner` uses `singleTop`. When Gradle selects `example_application`, it enables a dedicated Activity alias that declares the `huxerui-example` scheme plus `content://` and `file://` `ACTION_VIEW` values with any MIME type. This allows cold and subsequent URL activation through a browser or `adb` and makes the example available in another application's system Open with chooser without registering other example runner builds as URL or file handlers.
+
 ## Remaining platform mapping stages
 
 Hosts without a completed mapping default to `LaunchActivation` and retain the same Runtime submission boundary. Remaining platform work is staged independently:
 
-- Android Activity Intent startup and `onNewIntent()` delivery.
 - iOS launch or scene URL and document contexts.
 - macOS application URL and file-open callbacks.
 - Linux command-line file and URL activation.
@@ -216,4 +227,5 @@ The implementation does not add Runtime subclasses, an Access type, a public ser
 - Platform types never enter the shared activation value.
 - Runtime never interprets application URLs, files, routes, or window policy.
 - Windows forwards only external URL and file payloads; ordinary launches remain independent.
+- Android maps only supported Activity Intents and preserves URI permission boundaries inside `FileReference`.
 - NavigationPath remains the only route-history source of truth.

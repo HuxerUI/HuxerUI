@@ -25,6 +25,7 @@
 #include <huxerui/android/platform_module.h>
 
 #include "android_accessibility.h"
+#include "android_application_internal.h"
 #include "android_file_internal.h"
 #include "android_http_internal.h"
 #include "android_platform_view.h"
@@ -517,6 +518,12 @@ public:
         runtime,
         MakeUIThreadDispatcher(dispatch_state_)
     );
+  }
+
+  ApplicationActivation DecodeApplicationActivation(
+      JNIEnv* environment, const AndroidApplicationActivationInput& input
+  ) const {
+    return DecodeAndroidApplicationActivation(virtual_machine_, environment, context_, input);
   }
 
   void ShutdownPlatformViews() {
@@ -1123,8 +1130,14 @@ private:
 
 class AndroidSession final {
 public:
-  AndroidSession(JNIEnv* environment, jobject view, const Application& application)
-      : platform_(environment, view), runtime_(application, platform_) {
+  AndroidSession(
+      JNIEnv* environment,
+      jobject view,
+      const Application& application,
+      const AndroidApplicationActivationInput& startup_activation
+  )
+      : platform_(environment, view),
+        runtime_(application, platform_, platform_.DecodeApplicationActivation(environment, startup_activation)) {
     platform_.AttachRuntime(environment, runtime_);
   }
 
@@ -1222,6 +1235,10 @@ public:
 
   bool HandleBack(BackPhase phase, float progress) {
     return runtime_.HandleBack({phase, progress});
+  }
+
+  void HandleApplicationActivation(JNIEnv* environment, const AndroidApplicationActivationInput& input) {
+    runtime_.HandleApplicationActivation(platform_.DecodeApplicationActivation(environment, input));
   }
 
   bool ApplyTextInputCommand(
@@ -1378,18 +1395,47 @@ AndroidSession* Session(jlong handle) {
 
 } // namespace huxerui::detail
 
-extern "C" JNIEXPORT jlong JNICALL
-Java_org_huxerui_HuxerUIView_nativeCreate(JNIEnv* environment, jclass, jobject view) {
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIView_nativeCreate(
+    JNIEnv* environment, jclass, jobject view, jint kind, jstring value, jstring name, jlong size,
+    jstring content_type, jboolean writable
+) {
   try {
+    const huxerui::detail::AndroidApplicationActivationInput startup_activation{
+        .kind = kind,
+        .value = value,
+        .file_name = name,
+        .file_size = size,
+        .content_type = content_type,
+        .writable = writable,
+    };
     auto session = std::make_unique<huxerui::detail::AndroidSession>(
-        environment,
-        view,
-        huxerui::detail::CurrentApplication()
+        environment, view, huxerui::detail::CurrentApplication(), startup_activation
     );
     return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session.release()));
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
     return 0;
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeHandleApplicationActivation(
+    JNIEnv* environment, jclass, jlong handle, jint kind, jstring value, jstring name, jlong size,
+    jstring content_type, jboolean writable
+) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      const huxerui::detail::AndroidApplicationActivationInput activation{
+          .kind = kind,
+          .value = value,
+          .file_name = name,
+          .file_size = size,
+          .content_type = content_type,
+          .writable = writable,
+      };
+      session->HandleApplicationActivation(environment, activation);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
   }
 }
 

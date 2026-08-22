@@ -192,7 +192,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_tabs` | Controlled Tabs, disabled items, theme policies, and viewport classes |
 | `example_navigation` | Factory and typed page stacks, Back routing, transitions, and Web URL history |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
-| `example_application` | Cold and subsequent activation, including the current-user `huxerui-example` browser protocol on Windows |
+| `example_application` | Cold and subsequent URL or file activation on Windows and Android |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |

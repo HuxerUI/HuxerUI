@@ -2,7 +2,11 @@ package org.huxerui;
 
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
+import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.system.ErrnoException;
 import android.system.Os;
 
@@ -66,6 +70,66 @@ final class HuxerUIFileReference {
 
     static Future<?> submit(Runnable operation) {
         return executor.submit(operation);
+    }
+
+    static Metadata describe(ContentResolver resolver, Uri uri, int grantFlags) {
+        String name = null;
+        long size = -1L;
+        try (Cursor cursor = resolver.query(
+                     uri, new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                int sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (nameColumn >= 0 && !cursor.isNull(nameColumn)) {
+                    name = cursor.getString(nameColumn);
+                }
+                if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
+                    size = cursor.getLong(sizeColumn);
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        if (name == null || name.isEmpty()) {
+            name = uri.getLastPathSegment();
+        }
+        if (name == null || name.isEmpty()) {
+            name = "document";
+        }
+        String contentType = null;
+        try {
+            contentType = resolver.getType(uri);
+        } catch (RuntimeException ignored) {
+        }
+        contentType = sanitizeContentType(contentType);
+        boolean writable = (grantFlags & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0 && supportsWrite(resolver, uri);
+        return new Metadata(uri, name, Math.max(-1L, size), contentType, writable);
+    }
+
+    static String sanitizeContentType(String contentType) {
+        if (contentType != null) {
+            int parameters = contentType.indexOf(';');
+            if (parameters >= 0) {
+                contentType = contentType.substring(0, parameters).trim();
+            }
+            if (contentType.isEmpty() || contentType.indexOf('*') >= 0) {
+                contentType = null;
+            }
+        }
+        return contentType;
+    }
+
+    private static boolean supportsWrite(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor =
+                        resolver.query(uri, new String[] {DocumentsContract.Document.COLUMN_FLAGS}, null, null, null)) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                return true;
+            }
+            int column = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_FLAGS);
+            return column < 0 || cursor.isNull(column)
+                    || (cursor.getInt(column) & DocumentsContract.Document.FLAG_SUPPORTS_WRITE) != 0;
+        } catch (RuntimeException ignored) {
+            return true;
+        }
     }
 
     static boolean copyFileToUri(ContentResolver resolver, File source, Uri destination, CopyState state)
@@ -145,6 +209,22 @@ final class HuxerUIFileReference {
                 stream.close();
             } catch (IOException ignored) {
             }
+        }
+    }
+
+    static final class Metadata {
+        final Uri uri;
+        final String name;
+        final long size;
+        final String contentType;
+        final boolean writable;
+
+        Metadata(Uri uri, String name, long size, String contentType, boolean writable) {
+            this.uri = uri;
+            this.name = name;
+            this.size = size;
+            this.contentType = contentType;
+            this.writable = writable;
         }
     }
 

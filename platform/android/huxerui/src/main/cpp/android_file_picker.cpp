@@ -923,6 +923,14 @@ private:
 
 } // namespace
 
+FileReference CreateAndroidFileReference(
+    JavaVM* virtual_machine, JNIEnv* environment, jobject context, FileReferenceMetadata metadata, std::string_view uri
+) {
+  auto bridge = std::make_shared<AndroidFileReferenceBridge>(virtual_machine, environment, context);
+  auto state = std::make_shared<AndroidFileReferenceState>(bridge, environment, uri);
+  return MakeFileReference(std::move(metadata), std::move(state));
+}
+
 std::shared_ptr<FilePickerTransport>
 CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view, jobject context) {
   return std::make_shared<AndroidFilePickerTransport>(virtual_machine, environment, view, context);

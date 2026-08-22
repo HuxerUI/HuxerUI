@@ -26,6 +26,7 @@ public class HuxerUIActivity extends Activity {
         super.onCreate(savedInstanceState);
         configureEdgeToEdgeWindow();
         contentView = new HuxerUIView(this);
+        contentView.setStartupApplicationIntent(getIntent());
         contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
         contentView.setFilePickerLauncher(new HuxerUIView.FilePickerLauncher() {
             @SuppressWarnings("deprecation")
@@ -46,6 +47,15 @@ public class HuxerUIActivity extends Activity {
             backCallback = Api34.registerBackCallback(this);
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backCallback = Api33.registerBackCallback(this);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (contentView != null) {
+            contentView.dispatchApplicationIntent(intent);
         }
     }
 

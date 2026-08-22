@@ -4,6 +4,7 @@ plugins {
 
 def huxeruiRoot = rootProject.projectDir.parentFile.parentFile
 def huxeruiExample = providers.gradleProperty("huxeruiExample").orElse("ui_gallery").get()
+def huxeruiApplicationActivationEnabled = huxeruiExample == "application"
 def huxeruiExampleJava = new File(huxeruiRoot, "examples/${huxeruiExample}/android/src/main/java")
 def huxeruiCompileSdk = providers.gradleProperty("huxeruiCompileSdk").map { it.toInteger() }.get()
 def huxeruiMinSdk = providers.gradleProperty("huxeruiMinSdk").map { it.toInteger() }.get()
@@ -31,6 +32,7 @@ android {
         targetSdk = huxeruiTargetSdk
         versionCode = 1
         versionName = "1.0"
+        manifestPlaceholders = [huxeruiApplicationActivationEnabled: huxeruiApplicationActivationEnabled]
 
         externalNativeBuild {
             cmake {
