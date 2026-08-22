@@ -116,7 +116,7 @@ void RegisterPlatformViewTestClasses() {
       kPlatformViewTestClass,
       nullptr,
   };
-  REQUIRE(RegisterClassExW(&platform_view_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
+  REQUIRE((RegisterClassExW(&platform_view_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS));
 
   WNDCLASSEXW root_class{
       sizeof(WNDCLASSEXW),
@@ -132,7 +132,7 @@ void RegisterPlatformViewTestClasses() {
       kPlatformViewRootClass,
       nullptr,
   };
-  REQUIRE(RegisterClassExW(&root_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
+  REQUIRE((RegisterClassExW(&root_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS));
 }
 
 class PlatformViewTestWindow final {

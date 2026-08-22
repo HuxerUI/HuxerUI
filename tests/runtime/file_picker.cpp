@@ -64,10 +64,11 @@ FileReference MakeReference(
     bool can_write = true,
     std::shared_ptr<TestFileReferenceState> state = std::make_shared<TestFileReferenceState>(Bytes("content"))
 ) {
+  const std::size_t size = state->bytes.size();
   return detail::MakeFileReference(
       {
           .name = std::move(name),
-          .size = state->bytes.size(),
+          .size = size,
           .content_type = "text/plain",
           .can_write = can_write,
       },
