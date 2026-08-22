@@ -26,6 +26,7 @@ public class HuxerUIActivity extends Activity {
         super.onCreate(savedInstanceState);
         configureEdgeToEdgeWindow();
         contentView = new HuxerUIView(this);
+        contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
         contentView.setStartupApplicationIntent(getIntent());
         contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
         contentView.setFilePickerLauncher(new HuxerUIView.FilePickerLauncher() {
@@ -48,6 +49,38 @@ public class HuxerUIActivity extends Activity {
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backCallback = Api33.registerBackCallback(this);
         }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (contentView != null) {
+            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (contentView != null) {
+            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.ACTIVE);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (contentView != null) {
+            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
+        }
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (contentView != null) {
+            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.BACKGROUND);
+        }
+        super.onStop();
     }
 
     @Override

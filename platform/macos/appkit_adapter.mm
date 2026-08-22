@@ -431,9 +431,25 @@ public:
   }
 
   void ApplicationActiveChanged(bool active) {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateApplicationLifecycleState(
+          active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive
+      );
+    }
     if (text_input_) {
       text_input_->ApplicationActiveChanged(active);
     }
+  }
+
+  void ApplicationHiddenChanged(bool hidden) {
+    if (runtime_ == nullptr) {
+      return;
+    }
+    runtime_->UpdateApplicationLifecycleState(
+        hidden ? ApplicationLifecycleState::Background
+               : [NSApplication.sharedApplication isActive] ? ApplicationLifecycleState::Active
+                                                            : ApplicationLifecycleState::Inactive
+    );
   }
 
   void InvalidateTextInputGeometry() {
@@ -1011,6 +1027,20 @@ int RunPlatformApplication(const Application& application) {
   static_cast<void>(notification);
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->ApplicationActiveChanged(false);
+  }
+}
+
+- (void)applicationDidHide:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->ApplicationHiddenChanged(true);
+  }
+}
+
+- (void)applicationDidUnhide:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->ApplicationHiddenChanged(false);
   }
 }
 

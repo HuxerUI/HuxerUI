@@ -303,6 +303,9 @@ public:
       runtime_->UpdateResourceConfiguration(Configuration());
 
       ShowWindow(window_, SW_SHOW);
+      UpdateApplicationLifecycleState(
+          GetActiveWindow() == window_ ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive
+      );
       UpdateRuntimeViewport();
       RequestFrameAt(Now());
       UpdateWindow(window_);
@@ -556,6 +559,12 @@ public:
   }
 
 private:
+  void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateApplicationLifecycleState(lifecycle_state);
+    }
+  }
+
   void RegisterWindowClass() {
     instance_ = GetModuleHandleW(nullptr);
     WNDCLASSEXW window_class{
@@ -1055,14 +1064,25 @@ private:
       return 0;
     case WM_ERASEBKGND:
       return 1;
+    case WM_ACTIVATE:
+      UpdateApplicationLifecycleState(
+          IsIconic(window)                 ? ApplicationLifecycleState::Background
+          : LOWORD(w_param) == WA_INACTIVE ? ApplicationLifecycleState::Inactive
+                                           : ApplicationLifecycleState::Active
+      );
+      break;
     case WM_SIZE:
       renderer_.Resize(window_, dpi_);
       if (platform_views_) {
         platform_views_->Resize();
       }
       if (w_param == SIZE_MINIMIZED) {
+        UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
         return 0;
       }
+      UpdateApplicationLifecycleState(
+          GetActiveWindow() == window ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive
+      );
       UpdateRuntimeViewport();
       RequestFrameAt(Now());
       return 0;

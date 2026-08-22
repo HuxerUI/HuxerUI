@@ -708,10 +708,27 @@ private:
       HandleKeyRelease(event);
       break;
     case FocusIn:
+      if (event.xfocus.detail != NotifyInferior) {
+        window_focused_ = true;
+        runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Active);
+      }
       text_input_.SetFocus(true);
       break;
     case FocusOut:
+      if (event.xfocus.detail != NotifyInferior) {
+        window_focused_ = false;
+        runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
+      }
       text_input_.SetFocus(false);
+      break;
+    case MapNotify:
+      runtime_->UpdateApplicationLifecycleState(
+          window_focused_ ? huxerui::ApplicationLifecycleState::Active
+                          : huxerui::ApplicationLifecycleState::Inactive
+      );
+      break;
+    case UnmapNotify:
+      runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Background);
       break;
     case MappingNotify: {
       XMappingEvent mapping = event.xmapping;
@@ -1367,6 +1384,7 @@ private:
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
   bool running_ = false;
+  bool window_focused_ = false;
   bool pointer_down_ = false;
   bool suppress_pointer_ = false;
   Point last_pointer_position_;

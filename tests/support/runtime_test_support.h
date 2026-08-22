@@ -314,6 +314,10 @@ public:
     runtime_.HandleApplicationActivation(std::move(activation));
   }
 
+  void UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState lifecycle_state) {
+    runtime_.UpdateApplicationLifecycleState(lifecycle_state);
+  }
+
   bool HandleBack() {
     return runtime_.HandleBack();
   }

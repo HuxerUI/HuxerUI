@@ -1241,6 +1241,22 @@ public:
     runtime_.HandleApplicationActivation(platform_.DecodeApplicationActivation(environment, input));
   }
 
+  void UpdateApplicationLifecycleState(jint state) {
+    switch (state) {
+    case 0:
+      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+      return;
+    case 1:
+      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+      return;
+    case 2:
+      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+      return;
+    default:
+      throw std::invalid_argument("HuxerUI Android application lifecycle state is invalid");
+    }
+  }
+
   bool ApplyTextInputCommand(
       TextInputSessionId session_id,
       AndroidTextInputOperation operation,
@@ -1433,6 +1449,18 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeHandleAppli
           .writable = writable,
       };
       session->HandleApplicationActivation(environment, activation);
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateApplicationLifecycleState(
+    JNIEnv* environment, jclass, jlong handle, jint lifecycle_state
+) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->UpdateApplicationLifecycleState(lifecycle_state);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

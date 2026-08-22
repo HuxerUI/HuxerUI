@@ -1509,6 +1509,10 @@ void Runtime::HandleApplicationActivation(ApplicationActivation activation) {
   state_->application_service_->Enqueue(std::move(activation));
 }
 
+void Runtime::UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
+  state_->application_service_->UpdateLifecycleState(lifecycle_state);
+}
+
 const detail::MountedNode* Runtime::RootNode() const noexcept {
   if (!state_->mounted_root_) {
     return nullptr;

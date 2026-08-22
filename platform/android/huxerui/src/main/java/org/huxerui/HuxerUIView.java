@@ -103,6 +103,18 @@ public final class HuxerUIView extends ViewGroup {
         void cancel(int requestCode);
     }
 
+    public enum ApplicationLifecycleState {
+        ACTIVE(0),
+        INACTIVE(1),
+        BACKGROUND(2);
+
+        private final int nativeValue;
+
+        ApplicationLifecycleState(int nativeValue) {
+            this.nativeValue = nativeValue;
+        }
+    }
+
     private static final float SCROLL_STEP = 48.0F;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -175,6 +187,7 @@ public final class HuxerUIView extends ViewGroup {
     private boolean platformTabKeyHandled;
     private HuxerUIApplicationActivation startupApplicationActivation;
     private final ArrayList<HuxerUIApplicationActivation> pendingApplicationActivations = new ArrayList<>();
+    private ApplicationLifecycleState applicationLifecycleState = ApplicationLifecycleState.ACTIVE;
 
     private boolean updateTextInputGeometry() {
         if (inputConnection != null) {
@@ -241,6 +254,14 @@ public final class HuxerUIView extends ViewGroup {
         return true;
     }
 
+    /** Updates the application lifecycle represented by this View's Runtime. */
+    public void setApplicationLifecycleState(ApplicationLifecycleState state) {
+        applicationLifecycleState = Objects.requireNonNull(state);
+        if (nativeHandle != 0L) {
+            nativeUpdateApplicationLifecycleState(nativeHandle, state.nativeValue);
+        }
+    }
+
     FilePickerLauncher filePickerLauncher() {
         return filePickerLauncher;
     }
@@ -273,6 +294,7 @@ public final class HuxerUIView extends ViewGroup {
         if (nativeHandle == 0L) {
             nativeHandle = createNativeRuntime(startupApplicationActivation);
             startupApplicationActivation = null;
+            nativeUpdateApplicationLifecycleState(nativeHandle, applicationLifecycleState.nativeValue);
             resizeRuntime(getWidth(), getHeight());
             for (HuxerUIApplicationActivation activation : pendingApplicationActivations) {
                 handleNativeApplicationActivation(activation);
@@ -1797,6 +1819,8 @@ public final class HuxerUIView extends ViewGroup {
 
     private static native void nativeHandleApplicationActivation(long handle, int activationKind,
             String activationValue, String fileName, long fileSize, String contentType, boolean writable);
+
+    private static native void nativeUpdateApplicationLifecycleState(long handle, int lifecycleState);
 
     private static native void nativeDestroy(long handle);
 

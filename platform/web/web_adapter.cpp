@@ -627,17 +627,17 @@ EM_JS(
           }
         });
         listen(window, "resize", resize);
-        listen(
-            document,
-            "visibilitychange",
-            () =>
-                 {
-                   if (!document.hidden) {
-                     Module._huxerui_web_visible(session_id);
-                     resize();
-                   }
-                 }
-        );
+        const updateLifecycle = () => {
+          const state = document.hidden ? 2 : document.hasFocus() ? 0 : 1;
+          Module._huxerui_web_application_lifecycle(session_id, state);
+          if (!document.hidden) {
+            resize();
+          }
+        };
+        listen(document, "visibilitychange", updateLifecycle);
+        listen(window, "focus", updateLifecycle);
+        listen(window, "blur", updateLifecycle);
+        updateLifecycle();
         observeResolution();
         return true;
       } catch (error) {
@@ -891,6 +891,27 @@ public:
     }
   }
 
+  void UpdateApplicationLifecycleState(int state) {
+    if (runtime_ == nullptr) {
+      return;
+    }
+    switch (state) {
+    case 0:
+      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+      RequestFrameAt(Now());
+      return;
+    case 1:
+      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+      RequestFrameAt(Now());
+      return;
+    case 2:
+      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+      return;
+    default:
+      throw std::invalid_argument("HuxerUI Web application lifecycle state is invalid");
+    }
+  }
+
   bool PlatformViewHit(std::uint32_t token, Point point) const {
     return platform_views_ && platform_views_->HitTest(token, point);
   }
@@ -1099,9 +1120,9 @@ huxerui_web_platform_view_move_focus(std::uintptr_t session_id, std::uint32_t to
   });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_visible(std::uintptr_t session_id) {
-  huxerui::detail::DispatchWebSession(session_id, "visibility update", [](auto& platform) {
-    platform.RequestFrameAt(platform.Now());
+EMSCRIPTEN_KEEPALIVE void huxerui_web_application_lifecycle(std::uintptr_t session_id, int state) {
+  huxerui::detail::DispatchWebSession(session_id, "application lifecycle update", [=](auto& platform) {
+    platform.UpdateApplicationLifecycleState(state);
   });
 }
 

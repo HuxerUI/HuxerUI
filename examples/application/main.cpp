@@ -70,6 +70,18 @@ std::string DescribeActivation(const ApplicationActivation& activation) {
   );
 }
 
+std::string DescribeLifecycleState(ApplicationLifecycleState state) {
+  switch (state) {
+  case ApplicationLifecycleState::Active:
+    return "active";
+  case ApplicationLifecycleState::Inactive:
+    return "inactive";
+  case ApplicationLifecycleState::Background:
+    return "background";
+  }
+  return "unknown";
+}
+
 bool IsTextFileName(std::string_view name) {
   constexpr std::string_view extension = ".txt";
   if (name.size() < extension.size()) {
@@ -148,12 +160,18 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
 [[huxerui::scope]] View ApplicationContent() {
   const ApplicationHandle application = UseApplication();
   const ApplicationActivation startup_activation = application.StartupActivation();
+  const ApplicationLifecycleState lifecycle_state = application.LifecycleState();
   auto tasks = UseTaskScope();
+  auto lifecycle_transitions =
+      UseStateList<std::string>({"Initially observed: " + DescribeLifecycleState(lifecycle_state)});
   auto activations = UseStateList<std::string>({"Startup: " + DescribeActivation(startup_activation)});
   auto preview = UseState(TextFilePreview{});
   auto preview_generation = UseState<std::uint64_t>(0);
 
   Lifecycle([=] { UpdateTextFilePreview(startup_activation, tasks, preview, preview_generation); });
+  application.OnLifecycleChange([=](ApplicationLifecycleState state) {
+    lifecycle_transitions.PushBack("Transition: " + DescribeLifecycleState(state));
+  });
   application.OnActivation([=](ApplicationActivation activation) {
     activations.PushBack("Subsequent: " + DescribeActivation(activation));
     UpdateTextFilePreview(activation, tasks, preview, preview_generation);
@@ -162,7 +180,18 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
   const ThemeSpec& theme = UseTheme();
   return ScrollView {
     Column {
-      Text("Application activation", TextRole::Title),
+      Text("Application lifecycle and activation", TextRole::Title),
+      Text("Current lifecycle: " + DescribeLifecycleState(lifecycle_state), TextRole::Label)
+          .With(Foreground(theme.colors.primary)),
+      Text("Ordered lifecycle transitions remain available after the application returns to the foreground."),
+      Column {
+        ForEach(lifecycle_transitions, [](const std::string& transition) { return Text(transition); }),
+      }.With(
+          Padding(theme.spacing.large),
+          Spacing(theme.spacing.small),
+          Background(theme.colors.surface_container_low),
+          CornerRadius(theme.shapes.medium)
+      ),
       Text(
           "StartupActivation is immutable for this Runtime. Later platform activations enter the same application "
           "policy through OnActivation."

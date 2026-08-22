@@ -1,8 +1,8 @@
 # Application Activation and Lifecycle Design
 
-Status: application activation foundation plus Windows and Android mappings implemented; lifecycle state and remaining platform mappings staged
+Status: application activation foundation, observable lifecycle state, and Windows and Android activation mappings implemented; remaining activation mappings staged
 
-This document defines the application-facing boundary for startup activation, subsequent activation, and future application lifecycle state. It covers ownership across the platform application shell, Runtime, composition, files, and navigation without introducing an application session abstraction.
+This document defines the application-facing boundary for startup activation, subsequent activation, and current application lifecycle state. It covers ownership across the platform application shell, Runtime, composition, files, and navigation without introducing an application session abstraction.
 
 ## Goals
 
@@ -11,7 +11,7 @@ This document defines the application-facing boundary for startup activation, su
 - Deliver subsequent activations in FIFO order on the target Runtime's UI thread.
 - Keep application routing, document policy, and window selection application-owned.
 - Reuse Root Service, Lifecycle, State, and ordinary Runtime frame scheduling.
-- Provide one application-level handle that can later expose lifecycle state without becoming a general service bag.
+- Provide lifecycle state on the same focused application handle without turning it into a general service bag.
 
 ## Non-goals
 
@@ -54,6 +54,10 @@ Runtime automatically installs an internal application Root Service. Components 
 ```cpp
 auto application = UseApplication();
 
+UpdateForLifecycle(application.LifecycleState());
+application.OnLifecycleChange([](ApplicationLifecycleState state) {
+  PersistOrPauseFor(state);
+});
 HandleActivation(application.StartupActivation());
 
 application.OnActivation([](ApplicationActivation activation) {
@@ -61,8 +65,10 @@ application.OnActivation([](ApplicationActivation activation) {
 });
 ```
 
-`ApplicationHandle` deliberately separates two timing contracts:
+`ApplicationHandle` deliberately separates four timing contracts:
 
+- `LifecycleState()` is the observable current platform state and may coalesce before recomposition.
+- `OnLifecycleChange()` preserves each distinct transition while its declaring component Lifecycle is mounted.
 - `StartupActivation()` is immutable for the Runtime lifetime and is available during the first root composition.
 - `OnActivation()` receives only activations submitted after that Runtime was created and never replays the startup value.
 
@@ -149,9 +155,9 @@ platform activation
 
 Adding multi-window policy later changes the platform shell and window management API, not `ApplicationActivation`, `ApplicationHandle`, or application-owned navigation values.
 
-## Future application lifecycle
+## Application lifecycle
 
-Application lifecycle state belongs on the same `ApplicationHandle` because it is another platform-owned input to the current application instance. The planned public surface is:
+Application lifecycle state belongs on the same `ApplicationHandle` because it is another platform-owned input to the current application instance:
 
 ```cpp
 enum class ApplicationLifecycleState {
@@ -161,9 +167,25 @@ enum class ApplicationLifecycleState {
 };
 
 ApplicationLifecycleState ApplicationHandle::LifecycleState() const;
+void ApplicationHandle::OnLifecycleChange(
+    std::function<void(ApplicationLifecycleState)> handler
+) const;
 ```
 
-Lifecycle state remains distinct from activation semantics. It is an observable current value that may coalesce, whereas activation is an ordered event stream that must not deduplicate. Window focus, minimization, window commands, and title-bar state remain owned by `UseWindow()`.
+Lifecycle remains distinct from activation semantics. It exposes a current value that may coalesce and a mounted stream of distinct state transitions, whereas activation is an ordered external-input stream that must not deduplicate. Window focus, minimization, window commands, and title-bar state remain owned by `UseWindow()`.
+
+Reading `LifecycleState()` during composition subscribes only the current scope. `Runtime::UpdateApplicationLifecycleState()` validates platform input, ignores an equal value, stores the latest distinct value, and invalidates subscribed scopes through the existing State dependency mechanism.
+
+`OnLifecycleChange()` uses the same component `Lifecycle()` connection model as `OnActivation()`, with one Runtime-level handler owned by its declaring component Lifecycle rather than a public observer list. While connected, every distinct transition enters a private FIFO before frame delivery. A transition that cannot be presented while the application is backgrounded remains queued and is delivered when frame processing resumes; the coalesced `LifecycleState()` may already contain a later value. Disconnecting the declaring Lifecycle drops its undelivered transitions, because an unmounted component no longer owns side effects. Connecting later begins with future transitions and reads the current value through `LifecycleState()` instead of replaying stale history.
+
+The implemented platform mappings are:
+
+- Windows maps an active restored window to `Active`, deactivation to `Inactive`, and minimization to `Background`.
+- Android maps Activity resume to `Active`, pause or foreground transition to `Inactive`, and stop to `Background`; embedded owners explicitly update their `HuxerUIView`.
+- iOS maps UIKit active, inactive, and background application callbacks directly.
+- macOS maps application activation to `Active` or `Inactive` and application hiding to `Background`.
+- Linux maps top-level X11 focus to `Active` or `Inactive` and unmapping to `Background`.
+- Web maps a focused visible document to `Active`, a visible unfocused document to `Inactive`, and a hidden document to `Background`.
 
 `Launching`, `Suspended`, and `Terminated` are not planned states. Startup input is represented by `StartupActivation()`, while suspension and termination callbacks cannot be delivered reliably across supported platforms.
 
@@ -208,8 +230,8 @@ Embedded platform views do not consume an enclosing application shell's activati
 
 ## Implementation ownership
 
-- `<huxerui/app.h>` owns activation values, `ApplicationHandle`, `UseApplication()`, and the Runtime boundary.
-- `src/application_activation.cpp` owns validation, lifecycle connection, FIFO delivery, and handle behavior.
+- `<huxerui/app.h>` owns activation values, lifecycle state, `ApplicationHandle`, `UseApplication()`, and the Runtime boundary.
+- `src/application.cpp` owns validation, observation, lifecycle-bound connections, FIFO delivery, and handle behavior.
 - `src/application_internal.h` is the private contract shared with Runtime.
 - `src/runtime.cpp` installs the service and invokes queue delivery before application recomposition.
 - Platform application shells own platform input normalization and target selection.
@@ -228,4 +250,6 @@ The implementation does not add Runtime subclasses, an Access type, a public ser
 - Runtime never interprets application URLs, files, routes, or window policy.
 - Windows forwards only external URL and file payloads; ordinary launches remain independent.
 - Android maps only supported Activity Intents and preserves URI permission boundaries inside `FileReference`.
+- Lifecycle updates use one validated current value and invalidate only scopes that observe it.
+- A mounted lifecycle handler preserves distinct transitions independently of current-value coalescing.
 - NavigationPath remains the only route-history source of truth.

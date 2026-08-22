@@ -101,13 +101,26 @@ State reads performed later inside setup do not create composition subscriptions
 Lifecycle is not a modifier.
 Modifiers and `NodeExtension` own behavior attached to a particular mounted node, while `Lifecycle()` owns component-level external setup and cleanup.
 
-## Application activation
+## Application lifecycle and activation
 
 Runtime provides one application-level handle during composition:
 
 ```cpp
 auto application = UseApplication();
 ```
+
+`LifecycleState()` returns the current platform-owned `Active`, `Inactive`, or `Background` state. Reading it during composition subscribes the current scope, and repeated equal platform updates do not cause recomposition:
+
+```cpp
+auto application = UseApplication();
+const ApplicationLifecycleState lifecycle_state = application.LifecycleState();
+
+application.OnLifecycleChange([](ApplicationLifecycleState state) {
+  PersistOrPauseFor(state);
+});
+```
+
+`LifecycleState()` is a coalescing current value for declarative UI. `OnLifecycleChange()` preserves each distinct transition while the declaring component Lifecycle is mounted, even when several transitions occur before the next visible frame. This lets an application observe `Background` after it returns to the foreground rather than relying on UI that could not be visible while backgrounded.
 
 `StartupActivation()` is the immutable activation that created this Runtime and is available while constructing the initial application state. `OnActivation()` declares the single handler for later application activations and follows the current scope's Lifecycle:
 
@@ -120,7 +133,7 @@ application.OnActivation([path](ApplicationActivation activation) mutable {
 });
 ```
 
-`LaunchActivation`, `UrlActivation`, and `FileActivation` distinguish ordinary launch, opaque URL input, and platform-granted external files. Runtime preserves subsequent activations in FIFO order but leaves document and route policy to application code. See [Application Activation and Lifecycle Design](design/application.md) for the complete contract and staged platform mappings.
+Lifecycle exposes both a coalescing current value and a mounted ordered transition stream, while activation is an ordered external-input stream. `LaunchActivation`, `UrlActivation`, and `FileActivation` distinguish ordinary launch, opaque URL input, and platform-granted external files. Runtime preserves subsequent activations in FIFO order but leaves document and route policy to application code. See [Application Activation and Lifecycle Design](design/application.md) for the complete contract and staged activation mappings.
 
 ## Tasks
 

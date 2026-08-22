@@ -270,6 +270,7 @@ public:
     if (runtime_ == nullptr) {
       return false;
     }
+    runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
 
     window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     view_controller_ = [[HuxerUIIOSViewController alloc] init];
@@ -427,6 +428,12 @@ public:
 
   void CancelActiveTouches() {
     [view_ cancelHuxerUITouches];
+  }
+
+  void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateApplicationLifecycleState(lifecycle_state);
+    }
   }
 
   UIView* HitTestPlatformView(Point point, UIEvent* event) const {
@@ -880,7 +887,29 @@ int RunPlatformApplication(const Application& application) {
 - (void)applicationWillResignActive:(UIApplication*)application {
   static_cast<void>(application);
   if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
     huxeruiAdapter->CancelActiveTouches();
+  }
+}
+
+- (void)applicationDidBecomeActive:(UIApplication*)application {
+  static_cast<void>(application);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Active);
+  }
+}
+
+- (void)applicationDidEnterBackground:(UIApplication*)application {
+  static_cast<void>(application);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Background);
+  }
+}
+
+- (void)applicationWillEnterForeground:(UIApplication*)application {
+  static_cast<void>(application);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
   }
 }
 

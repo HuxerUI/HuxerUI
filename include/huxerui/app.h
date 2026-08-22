@@ -53,6 +53,12 @@ struct FileActivation {
 
 using ApplicationActivation = std::variant<LaunchActivation, UrlActivation, FileActivation>;
 
+enum class ApplicationLifecycleState {
+  Active,
+  Inactive,
+  Background,
+};
+
 namespace detail {
 class ExternalTextureSurface;
 class ApplicationService;
@@ -92,6 +98,24 @@ public:
 class ApplicationHandle final {
 public:
   [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
+  // Reading the current platform-owned state during composition subscribes that scope to later changes.
+  [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
+
+  // Delivers each distinct platform transition while the declaring component Lifecycle is mounted.
+  template <class... Dependencies>
+  void OnLifecycleChange(
+      std::function<void(ApplicationLifecycleState)> handler, Dependencies&&... dependencies
+  ) const {
+    if (!handler) {
+      throw std::invalid_argument("HuxerUI application lifecycle handler must not be empty");
+    }
+    Lifecycle(
+        [application = *this, handler = std::move(handler)]() mutable {
+          return application.ConnectLifecycle(std::move(handler));
+        },
+        std::forward<Dependencies>(dependencies)...
+    );
+  }
 
   // Receives only activations submitted after this Runtime was created; StartupActivation remains separate.
   template <class... Dependencies>
@@ -101,7 +125,7 @@ public:
     }
     Lifecycle(
         [application = *this, handler = std::move(handler)]() mutable {
-          return application.Connect(std::move(handler));
+          return application.ConnectActivation(std::move(handler));
         },
         std::forward<Dependencies>(dependencies)...
     );
@@ -109,7 +133,9 @@ public:
 
 private:
   explicit ApplicationHandle(std::shared_ptr<detail::ApplicationService> service) : service_(std::move(service)) {}
-  [[nodiscard]] std::function<void()> Connect(std::function<void(ApplicationActivation)> handler) const;
+  [[nodiscard]] std::function<void()> ConnectActivation(std::function<void(ApplicationActivation)> handler) const;
+  [[nodiscard]] std::function<void()>
+  ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler) const;
 
   std::shared_ptr<detail::ApplicationService> service_;
 
@@ -237,6 +263,8 @@ public:
   void HandleKeyEvent(const KeyEvent& event);
   // Platform hosts submit subsequent activation on the Runtime's UI thread; startup input is a constructor argument.
   void HandleApplicationActivation(ApplicationActivation activation);
+  // Platform updates feed both the coalescing current value and any mounted ordered transition handler.
+  void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state);
   bool HandleBack();
   bool HandleBack(const BackEvent& event);
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);

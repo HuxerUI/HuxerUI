@@ -16,9 +16,12 @@ namespace huxerui::test {
 namespace {
 
 std::vector<ApplicationActivation> received_activations;
+std::vector<ApplicationLifecycleState> received_lifecycle_states;
 ApplicationActivation startup_activation;
 State<bool> show_handler;
 State<int> handler_version;
+ApplicationLifecycleState lifecycle_state = ApplicationLifecycleState::Active;
+std::size_t lifecycle_compositions = 0;
 Runtime* active_runtime = nullptr;
 
 View ActivationApp() {
@@ -58,11 +61,22 @@ View ReentrantActivationApp() {
   return {};
 }
 
+View LifecycleStateApp() {
+  auto application = UseApplication();
+  lifecycle_state = application.LifecycleState();
+  application.OnLifecycleChange([](ApplicationLifecycleState state) { received_lifecycle_states.push_back(state); });
+  ++lifecycle_compositions;
+  return {};
+}
+
 void ResetActivationState() {
   received_activations.clear();
+  received_lifecycle_states.clear();
   startup_activation = LaunchActivation{};
   show_handler = State<bool>();
   handler_version = State<int>();
+  lifecycle_state = ApplicationLifecycleState::Active;
+  lifecycle_compositions = 0;
   active_runtime = nullptr;
 }
 
@@ -170,6 +184,59 @@ TEST_CASE("Application defers activations enqueued by a handler until the next f
   runtime.BuildFrame();
   REQUIRE(received_activations.size() == 2);
   REQUIRE(std::get<UrlActivation>(received_activations.back()).url == "second");
+}
+
+TEST_CASE("Application lifecycle state invalidates only when its current value changes") {
+  ResetActivationState();
+  TestPlatform platform;
+  Runtime runtime(LifecycleStateApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(lifecycle_state == ApplicationLifecycleState::Active);
+  REQUIRE(lifecycle_compositions == 1);
+
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+  runtime.BuildFrame();
+  REQUIRE(lifecycle_state == ApplicationLifecycleState::Inactive);
+  REQUIRE(lifecycle_compositions == 2);
+
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+  runtime.BuildFrame();
+  REQUIRE(lifecycle_compositions == 2);
+
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+  runtime.BuildFrame();
+  REQUIRE(lifecycle_state == ApplicationLifecycleState::Background);
+  REQUIRE(lifecycle_compositions == 3);
+
+  REQUIRE_THROWS_AS(
+      runtime.UpdateApplicationLifecycleState(static_cast<ApplicationLifecycleState>(-1)),
+      std::invalid_argument
+  );
+}
+
+TEST_CASE("Application delivers mounted lifecycle transitions in FIFO order without losing coalesced states") {
+  ResetActivationState();
+  TestPlatform platform;
+  Runtime runtime(LifecycleStateApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+  runtime.BuildFrame();
+
+  const std::vector expected_states{
+      ApplicationLifecycleState::Inactive,
+      ApplicationLifecycleState::Background,
+      ApplicationLifecycleState::Active,
+  };
+  REQUIRE(received_lifecycle_states == expected_states);
+  REQUIRE(lifecycle_state == ApplicationLifecycleState::Active);
+  REQUIRE(lifecycle_compositions == 2);
 }
 
 } // namespace huxerui::test

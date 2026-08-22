@@ -78,6 +78,7 @@ FilePicker uses the system open and save dialogs, retains selected paths behind 
 The application shell maps one startup URL or a command line containing only existing regular files into the shared application activation model before the first composition; unrecognized or mixed arguments remain an ordinary launch.
 Later external URL or file launches forward their validated UTF-16 arguments to a window created by the same executable, restore that window, and enter the existing Runtime activation queue; ordinary launches remain independent and are never forced into single-instance behavior.
 Applications and packaging own URL protocol registration. `example_application` registers `huxerui-example` for the current Windows user so a browser can exercise cold and subsequent URL activation.
+Window activation updates the shared application lifecycle to `Active` or `Inactive`, while minimization changes it to `Background`.
 Nonvisual Windows PlatformModules register the platform-neutral `PlatformModuleFactory` from CMake sources under `platform/windows/src`.
 Platform results and events enter a FIFO owned by the adapter and wake its UI thread through a coalesced private window message; work emitted before HWND creation waits until attachment, and shutdown discards late callbacks.
 The Windows `example_platform_module` implementation uses a thread-pool timer behind the same typed Timer Root Service used by Apple platforms, Linux, and Android.
@@ -98,6 +99,7 @@ Windows 7 without Platform Update is not supported.
 ## macOS
 
 The macOS backend creates an AppKit window and View, renders through CoreGraphics, measures text with CoreText, and exposes a dedicated `NSTextInputClient` adapter for AppKit selection, composition, and geometry queries. Scheduled callbacks and AppKit view-size changes commit Runtime work before invalidation, while `drawRect:` only presents the committed scene.
+AppKit application activation updates the shared lifecycle to `Active` or `Inactive`, and hiding the application changes it to `Background`.
 It implements HttpClient through an ephemeral NSURLSession, returns complete in-memory responses, and cancels native data tasks when their owning HuxerUI Task is canceled.
 It implements FilePicker through NSOpenPanel and NSSavePanel, retains security-scoped file references, and coordinates external reads, imports, and replacements away from the Runtime thread.
 The adapter dispatches nonvisual `PlatformInstance` results and events asynchronously through the AppKit main queue, preserving the owning Runtime thread and preventing synchronous platform completion from reentering application callbacks.
@@ -117,6 +119,7 @@ Example targets build as application bundles and can be launched from `build/bin
 ## Linux
 
 The Linux backend creates an X11 window, measures text with FreeType and HarfBuzz, rasterizes shared PaintCommands with Cairo into a retained device-pixel bitmap, and presents it through an EGL/OpenGL ES 2 swap.
+Top-level X11 focus updates the shared application lifecycle to `Active` or `Inactive`, while unmapping the window changes it to `Background`.
 Partial Runtime damage limits Cairo redraw to the affected pixel bounds; the retained bitmap is then presented whole or as damaged rows, matching the Windows cost model of a retained scene bitmap plus swap-chain presentation.
 Canvas Paths map to Cairo path geometry for fill, stroke, clipping, and blurred shadow masks.
 Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), locale and `Xft.dpi` changes update the Runtime resource configuration, and libpng/libjpeg decoding produces Cairo bitmap cache entries with a bounded byte budget.
@@ -145,6 +148,7 @@ The current Linux CLI path uses a source SDK checkout. A relocatable installed L
 ## Web
 
 The Web backend compiles the same static `Application` declaration through Emscripten, mounts one `Runtime` and `WebPlatformAdapter` pair per browser-owned host element, and emits an ES module with WebAssembly output.
+Document visibility and window focus map to the shared `Background`, `Inactive`, and `Active` lifecycle states without treating browser History as application activation.
 Canvas 2D replays the shared `RenderScene`, while browser Pointer Events, wheel events, keyboard events, hidden DOM text controls, resource preloading, asynchronous `ImageBitmap` decoding, and browser-event-loop PlatformModule dispatch remain platform-owned services.
 Web PlatformModule sources use the existing platform-neutral `PlatformModuleFactory` from C++ and Emscripten glue rather than a second JavaScript registry; the Web `example_platform_module` registers an interval-backed Timer through the same typed Root Service used by the other platforms.
 `web::ExternalTextureSource` accepts open WebCodecs `VideoFrame` values on the browser main thread, synchronously clones each publication into a latest-wins mailbox, and leaves ownership of the original frame with the caller. Canvas acquires one coherent frame per browser animation frame even when PlatformViews divide rendering into several Canvas slices, retains the last acquired frame, and closes replaced or inactive frames. This path does not add a texture registry or claim zero-copy. The same PlatformModule example returns that texture capability once and then publishes generated frames without per-frame PlatformModule calls.
@@ -214,6 +218,7 @@ The application JNI library is named `huxerui_app`. Loading it constructs the ap
 `HuxerUIActivity` owns a lifecycle-bound Back callback and forwards Back to the shared Runtime. Applications using this full-screen Activity set `android:enableOnBackInvokedCallback="true"` on their manifest `application` element, as the example runner does. Android 14 and later forward predictive Back start, progress, cancel, and commit phases; Android 13 forwards Commit; older versions use `onBackPressed()` for the same Commit path. When Runtime does not consume Commit, the Activity calls its overridable `onUnhandledBack()` fallback, which finishes the Activity with transition by default. An embedded integration owns registration itself, may call `HuxerUIView.handleBack()`, and continues its platform fallback only when that method returns `false`.
 
 `HuxerUIActivity` also maps startup and `onNewIntent()` `ACTION_VIEW` or `ACTION_EDIT` data into the shared application activation model. Non-file schemes produce `UrlActivation`, while `content://` and `file://` values produce `FileActivation` capabilities backed by `ContentResolver`. The Activity launch mode and Intent filters remain application policy. Embedded integrations set the startup Intent before attaching `HuxerUIView` and explicitly forward later Intents; unsupported or share Intents are not reinterpreted.
+The full-screen Activity maps resume, pause, foreground entry, and stop into the shared application lifecycle. Embedded owners call `HuxerUIView.setApplicationLifecycleState()` from their own lifecycle authority.
 
 Coordinates remain density independent. The Android integration maps multi-touch, mouse hover, wheel, keyboard, viewport, and frame-clock events to the shared model. Frame callbacks commit Runtime work before full View invalidation, while `onDraw()` only presents the committed scene. The minimum supported Android API level is 23.
 It implements HttpClient through HttpURLConnection on a bounded Java worker executor, buffers complete responses, enforces the shared request deadline, and disconnects native requests when their owning HuxerUI Task is canceled. Applications retain authority over declaring the `INTERNET` permission; the framework library does not inject it.
@@ -237,6 +242,7 @@ Debug process metrics use `getrusage`, `Debug.getPss()`, and the online processo
 ## iOS
 
 The iOS backend creates a UIKit window and safe-area-constrained HuxerUI View, measures text with CoreText, and replays the shared RenderScene through an independent CoreGraphics renderer. CADisplayLink schedules Runtime commits before UIKit invalidation, while `drawRect:` presents only the committed frame.
+UIKit application callbacks map directly to the shared `Active`, `Inactive`, and `Background` lifecycle states.
 It implements HttpClient through an iOS-owned ephemeral NSURLSession, returns complete in-memory responses, and cancels native data tasks when their owning HuxerUI Task is canceled.
 It installs FileSystem with sandbox-owned Application Support, Caches, and temporary directories while exposing the application executable directory as a read-only location.
 It implements FilePicker through UIDocumentPickerViewController, retains security-scoped file references, coordinates external file access away from the Runtime thread, and exports local files without moving their source.
