@@ -259,9 +259,11 @@ public:
   Runtime(
       huxerui::RootFactory root_factory,
       huxerui::PlatformAdapter& platform,
-      huxerui::AppOptions options = {.show_debug_overlay = false}
+      huxerui::AppOptions options = {.show_debug_overlay = false},
+      huxerui::ApplicationActivation startup_activation = huxerui::LaunchActivation{}
   )
-      : application_(root_factory, std::move(options)), runtime_(application_, platform) {}
+      : application_(root_factory, std::move(options)),
+        runtime_(application_, platform, std::move(startup_activation)) {}
 
   void SetWindowMetrics(huxerui::WindowMetrics metrics) {
     runtime_.SetWindowMetrics(metrics);
@@ -306,6 +308,10 @@ public:
 
   void HandleKeyEvent(const KeyEvent& event) {
     runtime_.HandleKeyEvent(event);
+  }
+
+  void HandleApplicationActivation(huxerui::ApplicationActivation activation) {
+    runtime_.HandleApplicationActivation(std::move(activation));
   }
 
   bool HandleBack() {

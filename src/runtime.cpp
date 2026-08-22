@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "application_internal.h"
 #include "external_texture_internal.h"
 #include "resource_internal.h"
 #include "task_internal.h"
@@ -952,7 +953,7 @@ namespace huxerui {
 
 using namespace detail;
 
-Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
+Runtime::Runtime(const Application& application, PlatformAdapter& platform, ApplicationActivation startup_activation) {
   ValidateViewportBreakpoints(application.options.viewport_breakpoints);
   const WindowOptions& window_options = application.options.window;
   if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
@@ -979,6 +980,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
       application.options.viewport_breakpoints,
       std::move(window)
   );
+  state_->application_service_ = std::make_shared<ApplicationService>(*this, std::move(startup_activation));
   state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
@@ -993,6 +995,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform) {
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
   state_->root_environment_->Set(resource_configuration.locale);
   root.Provide(state_->app_resources_);
+  root.Provide(state_->application_service_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
@@ -1027,6 +1030,7 @@ Runtime::~Runtime() {
   state_->pointer_sessions_.clear();
   state_->hovered_extensions_.clear();
   state_->layer_controller_.Disconnect();
+  state_->application_service_->Disconnect();
   state_->window_service_->Disconnect();
   state_->scene_transition_service_->Disconnect();
   DiscardLifecycleCommits();
@@ -1334,9 +1338,11 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     frame.delta_time = 0.0;
   }
   frame.delta_time = std::clamp(frame.delta_time, 0.0, 0.25);
-  detail::AdvanceTaskDelays(state_->task_delay_scheduler_, frame.timestamp);
-  state_->previous_frame_timestamp_ = frame.timestamp;
+  // Consume the scheduled frame before callbacks run so callbacks can retain a new request in this commit.
   state_->frame_requested_ = false;
+  detail::AdvanceTaskDelays(state_->task_delay_scheduler_, frame.timestamp);
+  state_->application_service_->DispatchPending();
+  state_->previous_frame_timestamp_ = frame.timestamp;
   // Application and LayerStack composition are independent so transient presentation never executes the root factory.
   if (state_->application_dirty_) {
     ComposeApplication();
@@ -1497,6 +1503,10 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   record_debug_commit();
   state_->building_frame_ = false;
   return state_->frame_commit_;
+}
+
+void Runtime::HandleApplicationActivation(ApplicationActivation activation) {
+  state_->application_service_->Enqueue(std::move(activation));
 }
 
 const detail::MountedNode* Runtime::RootNode() const noexcept {

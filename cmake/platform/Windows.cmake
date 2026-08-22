@@ -14,6 +14,7 @@ endif ()
 set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_adapter.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_accessibility.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/windows/win32_application.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_external_texture.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file_picker.cpp"

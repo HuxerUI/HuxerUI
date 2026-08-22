@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,6 +28,7 @@
 #include "resource_internal.h"
 #include "text_layout_internal.h"
 #include "win32_accessibility.h"
+#include "win32_application_internal.h"
 #include "win32_file_internal.h"
 #include "win32_http_internal.h"
 #include "win32_internal.h"
@@ -39,7 +41,6 @@ namespace huxerui::detail {
 
 namespace {
 
-constexpr wchar_t kWindowClassName[] = L"HuxerUI.Win32.Window";
 constexpr UINT kRenderMessage = WM_APP + 1;
 constexpr UINT kWindowCommandMessage = WM_APP + 3;
 constexpr UINT_PTR kFrameTimer = 1;
@@ -284,8 +285,9 @@ class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
-  explicit Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher)
-      : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher) {
+  Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher, std::wstring window_class_name)
+      : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher),
+        window_class_name_(std::move(window_class_name)) {
     win32_api_.ConfigureProcessDpiAwareness();
   }
 
@@ -567,7 +569,7 @@ private:
         LoadCursorW(nullptr, IDC_ARROW),
         nullptr,
         nullptr,
-        kWindowClassName,
+        window_class_name_.c_str(),
         nullptr,
     };
     class_atom_ = RegisterClassExW(&window_class);
@@ -595,7 +597,7 @@ private:
     const std::wstring title = Utf8ToWide(options.title);
     window_ = CreateWindowExW(
         0,
-        kWindowClassName,
+        window_class_name_.c_str(),
         title.c_str(),
         style,
         CW_USEDEFAULT,
@@ -654,7 +656,7 @@ private:
     }
     renderer_.Discard();
     if (class_atom_ != 0 && instance_ != nullptr) {
-      UnregisterClassW(kWindowClassName, instance_);
+      UnregisterClassW(window_class_name_.c_str(), instance_);
       class_atom_ = 0;
     }
     instance_ = nullptr;
@@ -1103,6 +1105,22 @@ private:
         return accessibility_.HandleGetObject(w_param, l_param);
       }
       break;
+    case WM_COPYDATA: {
+      const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l_param);
+      if (data == nullptr || data->dwData != win32_application_activation_data_id || data->lpData == nullptr ||
+          data->cbData % sizeof(wchar_t) != 0 ||
+          data->cbData / sizeof(wchar_t) > win32_application_activation_max_characters) {
+        break;
+      }
+      const auto* characters = static_cast<const wchar_t*>(data->lpData);
+      const std::span<const wchar_t> payload(characters, data->cbData / sizeof(wchar_t));
+      std::optional<ApplicationActivation> activation = DecodeWin32ApplicationActivation(payload);
+      if (!activation.has_value()) {
+        return FALSE;
+      }
+      runtime_->HandleApplicationActivation(std::move(*activation));
+      return TRUE;
+    }
     case Win32Accessibility::action_message:
       return accessibility_.HandleActionMessage(l_param);
     case WM_PAINT: {
@@ -1269,6 +1287,7 @@ private:
   std::optional<double> timer_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
   Win32UIThreadDispatcher& ui_dispatcher_;
+  std::wstring window_class_name_;
   Win32Api win32_api_;
   Win32Renderer renderer_;
   std::unique_ptr<Win32PlatformViews> platform_views_;
@@ -1276,10 +1295,17 @@ private:
 
 int RunPlatformApplication(const Application& application) {
   WindowOptions options = application.options.window;
+  Win32StartupInput startup = CurrentWin32StartupInput();
+  const std::wstring window_class_name = Win32ApplicationWindowClassName();
+  // Ordinary launches remain independent; only externally supplied URL and file payloads reuse an existing window.
+  if (!std::holds_alternative<LaunchActivation>(startup.activation) &&
+      TryForwardWin32ApplicationActivation(window_class_name, startup.arguments)) {
+    return 0;
+  }
   Win32COMApartment com_apartment;
   Win32UIThreadDispatcher ui_dispatcher;
-  Win32PlatformAdapter platform(ui_dispatcher);
-  Runtime runtime{application, platform};
+  Win32PlatformAdapter platform(ui_dispatcher, window_class_name);
+  Runtime runtime{application, platform, std::move(startup.activation)};
   return platform.Run(runtime, options);
 }
 

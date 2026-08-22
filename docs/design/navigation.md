@@ -876,13 +876,13 @@ A deep link may update the selected destination and its associated path atomical
 ## Application activation integration
 
 Open With, document URL contexts, share intents, and equivalent requests are application activations rather than navigation commands or FilePicker results.
-The application activation boundary defined by the [Files Design](files.md#application-activation-boundary) selects or creates a window session before delivering an activation to that session's Runtime.
+The boundary defined by [Application Activation and Lifecycle Design](application.md) selects a platform target before delivering an activation to its Runtime.
 
 ```text
 platform application activation
     -> application activation policy
-    -> create or select a window session
-    -> session activation queue
+    -> create or select a platform target
+    -> Runtime activation queue
     -> application document or domain service
     -> stable route parameters
     -> root NavigationPath update
@@ -896,7 +896,7 @@ A passive file activation carries FileReference capability values only to the ap
 The application establishes a document session and places a stable DocumentId in the route rather than embedding FileReference in a URL-backed or restorable path.
 
 Navigation does not add FileEvents, inspect platform intent types, select windows, or retain an activation queue.
-Those responsibilities belong to the application and window-session design, while NavigationPath remains the destination state consumed after policy has run.
+Those responsibilities belong to application activation and platform window policy, while NavigationPath remains the destination state consumed after policy has run.
 
 ## Web URL integration
 
@@ -1075,10 +1075,10 @@ The Web integration now includes:
 - Apply Back and Forward locations without echoing another browser-history mutation.
 - Demonstrate hash-based canonical URLs in the Web navigation example.
 
-The remaining integration phase is:
+The application integration now includes the shared activation boundary and Windows cold-start URL and file mapping. Remaining integration work is:
 
-- Define the application activation and window-session boundary, then deliver Open URL and Open Files activations on each supported platform.
-- Extend the navigation example with activation simulation when that bridge is implemented.
+- Deliver startup and subsequent Open URL and Open Files activations on the remaining supported platforms.
+- Let application-owned activation policy update its NavigationPath without coupling NavigationStack to platform inputs.
 
 Saveable application state, an iOS interactive gesture, split navigation, navigation results, and shared-element transitions remain separate later milestones built on the same resolved-entry engine.
 
@@ -1105,5 +1105,5 @@ Saveable application state, an iOS interactive gesture, split navigation, naviga
 - Navigation does not automatically restore TextField focus or reopen IME.
 - Factory entries make no serialization, URL, or restoration claim.
 - Route paths resolve into the same private page-entry engine rather than creating another navigator.
-- Application activation chooses a window session before it requests route state and never targets an arbitrary committed View.
+- Application activation selects a target Runtime before it requests route state and never targets an arbitrary committed View.
 - Browser URL policy remains outside shared Runtime and PlatformAdapter.

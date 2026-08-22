@@ -12,6 +12,7 @@ Current implementation status:
 - ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
 - Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
+- Typed startup and subsequent application activations, the built-in application Root Service, lifecycle-bound `ApplicationHandle`, Runtime FIFO delivery, and Windows cold-start and same-executable external-activation mapping are implemented; remaining platform mappings and application lifecycle state remain staged.
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
 - Named and cubic timing curves, tween, spring, keyframe, and delayed or repeated playback execute through one retained MotionController. Offset, Opacity, Scale, Rotation, synchronized Transition projection, explicit frozen-scene transitions, state-overlay indication, and multi-pointer ripple indication reuse that foundation.
 - Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.

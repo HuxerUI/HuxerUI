@@ -29,6 +29,7 @@ add_executable(huxerui_tests
         platform/android_text_input.cpp
         platform/web_text.cpp
         runtime/animation.cpp
+        runtime/application.cpp
         runtime/composition.cpp
         runtime/file.cpp
         runtime/file_picker.cpp
@@ -82,6 +83,7 @@ if (WIN32)
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/windows_color_stream.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/windows_timer.cpp"
             platform/windows_accessibility.cpp
+            platform/windows_application.cpp
             platform/windows_damage.cpp
             platform/windows_external_texture.cpp
             platform/windows_file.cpp

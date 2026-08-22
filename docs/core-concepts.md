@@ -101,6 +101,27 @@ State reads performed later inside setup do not create composition subscriptions
 Lifecycle is not a modifier.
 Modifiers and `NodeExtension` own behavior attached to a particular mounted node, while `Lifecycle()` owns component-level external setup and cleanup.
 
+## Application activation
+
+Runtime provides one application-level handle during composition:
+
+```cpp
+auto application = UseApplication();
+```
+
+`StartupActivation()` is the immutable activation that created this Runtime and is available while constructing the initial application state. `OnActivation()` declares the single handler for later application activations and follows the current scope's Lifecycle:
+
+```cpp
+auto application = UseApplication();
+auto path = UseState(InitialPath(application.StartupActivation()));
+
+application.OnActivation([path](ApplicationActivation activation) mutable {
+  path = PathForActivation(std::move(activation));
+});
+```
+
+`LaunchActivation`, `UrlActivation`, and `FileActivation` distinguish ordinary launch, opaque URL input, and platform-granted external files. Runtime preserves subsequent activations in FIFO order but leaves document and route policy to application code. See [Application Activation and Lifecycle Design](design/application.md) for the complete contract and staged platform mappings.
+
 ## Tasks
 
 `Task<T>` is a lazy move-only C++20 coroutine result, while `TaskScope` starts and owns `Task<void>` children for one composition scope:

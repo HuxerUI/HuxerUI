@@ -8,13 +8,19 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <huxerui/clipboard.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
+#include <huxerui/file.h>
 #include <huxerui/layer.h>
+#include <huxerui/lifecycle.h>
 #include <huxerui/platform_module.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
@@ -31,8 +37,25 @@ class FilePicker;
 class PlatformResources;
 struct ResourceConfiguration;
 
+struct LaunchActivation {
+  bool operator==(const LaunchActivation&) const = default;
+};
+
+struct UrlActivation {
+  std::string url;
+
+  bool operator==(const UrlActivation&) const = default;
+};
+
+struct FileActivation {
+  std::vector<FileReference> files;
+};
+
+using ApplicationActivation = std::variant<LaunchActivation, UrlActivation, FileActivation>;
+
 namespace detail {
 class ExternalTextureSurface;
+class ApplicationService;
 class FilePickerTransport;
 class HttpTransport;
 class TaskScopeState;
@@ -65,6 +88,35 @@ public:
   const RootFactory root_factory;
   const AppOptions options;
 };
+
+class ApplicationHandle final {
+public:
+  [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
+
+  // Receives only activations submitted after this Runtime was created; StartupActivation remains separate.
+  template <class... Dependencies>
+  void OnActivation(std::function<void(ApplicationActivation)> handler, Dependencies&&... dependencies) const {
+    if (!handler) {
+      throw std::invalid_argument("HuxerUI application activation handler must not be empty");
+    }
+    Lifecycle(
+        [application = *this, handler = std::move(handler)]() mutable {
+          return application.Connect(std::move(handler));
+        },
+        std::forward<Dependencies>(dependencies)...
+    );
+  }
+
+private:
+  explicit ApplicationHandle(std::shared_ptr<detail::ApplicationService> service) : service_(std::move(service)) {}
+  [[nodiscard]] std::function<void()> Connect(std::function<void(ApplicationActivation)> handler) const;
+
+  std::shared_ptr<detail::ApplicationService> service_;
+
+  friend ApplicationHandle UseApplication();
+};
+
+ApplicationHandle UseApplication();
 
 struct ProcessMetrics {
   // CPU time is cumulative; consumers derive utilization from two samples and the logical processor count.
@@ -163,7 +215,11 @@ class VirtualMeasureSession;
 
 class Runtime final {
 public:
-  Runtime(const Application& application, PlatformAdapter& platform);
+  Runtime(
+      const Application& application,
+      PlatformAdapter& platform,
+      ApplicationActivation startup_activation = LaunchActivation{}
+  );
   ~Runtime();
 
   Runtime(const Runtime&) = delete;
@@ -179,6 +235,8 @@ public:
   void HandlePointerEvent(const PointerEvent& event);
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
+  // Platform hosts submit subsequent activation on the Runtime's UI thread; startup input is a constructor argument.
+  void HandleApplicationActivation(ApplicationActivation activation);
   bool HandleBack();
   bool HandleBack(const BackEvent& event);
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
@@ -293,6 +351,7 @@ private:
   std::unique_ptr<State> state_;
 
   friend class LayerController;
+  friend class detail::ApplicationService;
   friend class detail::RecomposeScope;
   friend class detail::SceneTransitionService;
   friend class detail::ScrollConnection;

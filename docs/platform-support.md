@@ -75,6 +75,9 @@ Packaged resources are read from the executable-specific `<name>.resources` dire
 Debug process metrics use process times, working-set counters, and the system logical processor count.
 FileSystem derives its application identity from the executable filename and exposes protected `data`, `cache`, and `temporary` children under the current user's Local App Data directory.
 FilePicker uses the system open and save dialogs, retains selected paths behind `FileReference`, and executes external reads and copies through the shared bounded file executor while dialog presentation and cancellation remain on the UI thread.
+The application shell maps one startup URL or a command line containing only existing regular files into the shared application activation model before the first composition; unrecognized or mixed arguments remain an ordinary launch.
+Later external URL or file launches forward their validated UTF-16 arguments to a window created by the same executable, restore that window, and enter the existing Runtime activation queue; ordinary launches remain independent and are never forced into single-instance behavior.
+Applications and packaging own URL protocol registration. `example_application` registers `huxerui-example` for the current Windows user so a browser can exercise cold and subsequent URL activation.
 Nonvisual Windows PlatformModules register the platform-neutral `PlatformModuleFactory` from CMake sources under `platform/windows/src`.
 Platform results and events enter a FIFO owned by the adapter and wake its UI thread through a coalesced private window message; work emitted before HWND creation waits until attachment, and shutdown discards late callbacks.
 The Windows `example_platform_module` implementation uses a thread-pool timer behind the same typed Timer Root Service used by Apple platforms, Linux, and Android.

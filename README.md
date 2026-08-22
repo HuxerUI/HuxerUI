@@ -157,6 +157,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | Document | Contents |
 |---|---|
 | [Architecture Design](docs/design/architecture.md) | Runtime, MountedNode, modifiers, animation, Theme, and layers |
+| [Application Activation and Lifecycle Design](docs/design/application.md) | Startup input, subsequent activation, Runtime delivery, and future lifecycle state |
 | [Animation and Scene Transition Design](docs/design/animation.md) | Timing, retained motion, synchronized properties, and frozen-scene transitions |
 | [Task and Structured Concurrency Design](docs/design/tasks.md) | C++20 Task values, scope ownership, cancellation, and UI-thread resumption |
 | [HTTP Client Design](docs/design/http.md) | Typed requests, Task cancellation, UI-thread resumption, and platform transports |
@@ -191,6 +192,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_tabs` | Controlled Tabs, disabled items, theme policies, and viewport classes |
 | `example_navigation` | Factory and typed page stacks, Back routing, transitions, and Web URL history |
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
+| `example_application` | Cold and subsequent activation, including the current-user `huxerui-example` browser protocol on Windows |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |

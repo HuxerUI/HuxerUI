@@ -260,7 +260,7 @@ private:
   File file_;
 };
 
-std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path) {
+std::optional<FileReference> MakeWin32FileReferenceInternal(std::wstring_view platform_path) {
   std::optional<File> file = FileFromPlatformPath(platform_path);
   if (!file.has_value() || !file->IsFile()) {
     return std::nullopt;
@@ -355,7 +355,7 @@ private:
         return;
       }
       const std::optional<std::wstring> path = ShellItemPath(item.Get());
-      std::optional<FileReference> reference = path ? MakeWin32FileReference(*path) : std::nullopt;
+      std::optional<FileReference> reference = path ? MakeWin32FileReferenceInternal(*path) : std::nullopt;
       if (!reference.has_value()) {
         Finish({});
         return;
@@ -550,6 +550,10 @@ private:
 };
 
 } // namespace
+
+std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path) {
+  return MakeWin32FileReferenceInternal(platform_path);
+}
 
 std::shared_ptr<FilePickerTransport>
 CreateWin32FilePickerTransport(std::function<HWND()> window_provider, UIThreadDispatcher dispatch_to_ui_thread) {

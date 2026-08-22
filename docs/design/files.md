@@ -455,15 +455,15 @@ They may arrive before a Runtime exists and may require the application to creat
 Delivering them to the currently committed Root View would assign application and window policy to an arbitrary UI tree.
 
 The file API therefore defines no `FileEvents`, root callback, cold-start queue, or Runtime dispatch operation.
-`FileReference` remains suitable as the file capability carried by a future general application-activation value, but this design does not define when or where that value is delivered.
+`FileReference` is the capability carried by `FileActivation`; activation delivery is defined by the application boundary rather than the file API.
 
-A later application activation and window-session design owns the complete route from platform activation to an application-selected Runtime:
+The [Application Activation and Lifecycle Design](application.md) owns the complete route from platform activation to an application-selected Runtime:
 
 ```text
 Platform application activation
     -> application activation policy
-    -> create or select a window session
-    -> construct the target Runtime with its launch context
+    -> create or select a platform target
+    -> construct or notify the target Runtime
 ```
 
 Platform application metadata remains owned by the shell: Android intent filters, Apple document types and URL declarations, Windows associations, Linux desktop MIME declarations, and Web application handlers are not moved into `AppOptions`, CMake, or the file API.
