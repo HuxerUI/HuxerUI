@@ -177,6 +177,8 @@ ctest --test-dir build --output-on-failure
 The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 packages through pkg-config.
 Source-checkout builds fetch the pinned Cairo, FreeType, HarfBuzz, fontconfig, pixman, libpng, libjpeg, zlib, and expat stack and require the upstream build tools reported by CMake.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
+An installed SDK application links the shared `HuxerUI::huxerui` target without requiring those source-build tools or pkg-config development metadata during CMake configuration.
+An installed static consumer uses `find_package(HuxerUI CONFIG REQUIRED COMPONENTS static)` before linking `HuxerUI::huxerui_static`; that component requires the Linux development packages because their dynamic libraries remain distribution-owned.
 
 Windows:
 

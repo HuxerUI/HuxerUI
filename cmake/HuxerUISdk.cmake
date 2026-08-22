@@ -71,6 +71,13 @@ configure_package_config_file(
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         INSTALL_DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
+if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+    configure_file(
+            "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILinuxDependencies.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxDependencies.cmake"
+            @ONLY
+    )
+endif ()
 write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
@@ -92,6 +99,12 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
+if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxDependencies.cmake"
+            DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+    )
+endif ()
 install(FILES
         "${HUXERUI_PROJECT_DIR}/platform/web/web_file.js"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"

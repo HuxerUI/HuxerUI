@@ -46,6 +46,60 @@ endif ()
 file(RENAME "${SDK_INSTALL_ROOT}" "${SDK_ROOT}")
 file(REAL_PATH "${SDK_ROOT}" SDK_ROOT)
 file(TO_NATIVE_PATH "${SDK_ROOT}" SDK_ROOT_NATIVE)
+
+if (PLATFORM_ID STREQUAL "linux")
+    file(GLOB_RECURSE INSTALLED_CMAKE_FILES "${SDK_ROOT}/*/cmake/HuxerUI/*.cmake")
+    foreach (INSTALLED_CMAKE_FILE IN LISTS INSTALLED_CMAKE_FILES)
+        file(READ "${INSTALLED_CMAKE_FILE}" INSTALLED_CMAKE_CONTENT)
+        string(FIND "${INSTALLED_CMAKE_CONTENT}" "${BUILD_DIRECTORY}" BUILD_PATH_POSITION)
+        if (NOT BUILD_PATH_POSITION EQUAL -1)
+            message(FATAL_ERROR "Installed CMake package contains the build path: ${INSTALLED_CMAKE_FILE}")
+        endif ()
+    endforeach ()
+
+    foreach (CONSUMER_TARGET IN ITEMS huxerui huxerui_static)
+        set(CONSUMER_SOURCE "${TEST_ROOT}/consumer-${CONSUMER_TARGET}")
+        set(CONSUMER_BUILD "${TEST_ROOT}/consumer-${CONSUMER_TARGET}-build")
+        file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
+        file(WRITE "${CONSUMER_SOURCE}/main.cpp"
+                "#include <huxerui/huxerui.h>\nint main() { huxerui::View view; return view ? 1 : 0; }\n")
+        set(CONSUMER_COMPONENT)
+        set(CONSUMER_CONFIGURE_ARGUMENTS)
+        if (CONSUMER_TARGET STREQUAL "huxerui_static")
+            set(CONSUMER_COMPONENT " COMPONENTS static")
+        else ()
+            list(APPEND CONSUMER_CONFIGURE_ARGUMENTS -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE)
+        endif ()
+        file(WRITE "${CONSUMER_SOURCE}/CMakeLists.txt"
+                "cmake_minimum_required(VERSION 3.20)\n"
+                "project(huxerui_installed_consumer LANGUAGES CXX)\n"
+                "find_package(HuxerUI CONFIG REQUIRED${CONSUMER_COMPONENT})\n"
+                "add_executable(consumer main.cpp)\n"
+                "target_compile_features(consumer PRIVATE cxx_std_20)\n"
+                "target_link_libraries(consumer PRIVATE HuxerUI::${CONSUMER_TARGET})\n")
+        execute_process(
+                COMMAND "${CMAKE_COMMAND}" -S "${CONSUMER_SOURCE}" -B "${CONSUMER_BUILD}"
+                        -G "${HOST_GENERATOR}" "-DCMAKE_PREFIX_PATH=${SDK_ROOT}"
+                        ${CONSUMER_CONFIGURE_ARGUMENTS}
+                RESULT_VARIABLE CONSUMER_CONFIGURE_RESULT
+                OUTPUT_VARIABLE CONSUMER_CONFIGURE_OUTPUT
+                ERROR_VARIABLE CONSUMER_CONFIGURE_ERROR
+        )
+        execute_process(
+                COMMAND "${CMAKE_COMMAND}" --build "${CONSUMER_BUILD}" --config "${BUILD_CONFIG}"
+                RESULT_VARIABLE CONSUMER_BUILD_RESULT
+                OUTPUT_VARIABLE CONSUMER_BUILD_OUTPUT
+                ERROR_VARIABLE CONSUMER_BUILD_ERROR
+        )
+        if (NOT CONSUMER_CONFIGURE_RESULT EQUAL 0 OR NOT CONSUMER_BUILD_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                    "Relocated installed ${CONSUMER_TARGET} consumer failed:\n"
+                    "${CONSUMER_CONFIGURE_OUTPUT}${CONSUMER_CONFIGURE_ERROR}"
+                    "${CONSUMER_BUILD_OUTPUT}${CONSUMER_BUILD_ERROR}")
+        endif ()
+    endforeach ()
+endif ()
+
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)

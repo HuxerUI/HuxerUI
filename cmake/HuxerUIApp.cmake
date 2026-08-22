@@ -201,7 +201,9 @@ function(huxerui_add_app target_name)
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
     endif ()
 
-    if (TARGET HuxerUI::huxerui_static AND NOT ANDROID)
+    if (TARGET HuxerUI::huxerui_static
+            AND NOT ANDROID
+            AND (NOT DEFINED HUXERUI_STATIC_COMPONENT_LOADED OR HUXERUI_STATIC_COMPONENT_LOADED))
         set(HUXERUI_APP_FRAMEWORK_TARGET HuxerUI::huxerui_static)
     elseif (TARGET HuxerUI::huxerui)
         set(HUXERUI_APP_FRAMEWORK_TARGET HuxerUI::huxerui)

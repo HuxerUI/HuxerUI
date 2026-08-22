@@ -1136,6 +1136,24 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
   REQUIRE_FALSE(has_android_diagnostic("cmake"));
   REQUIRE_FALSE(has_android_diagnostic("gradle"));
 
+  if (huxerui::cli::CurrentHostId() == "linux") {
+    const huxerui::cli::PlatformDriver* linux = huxerui::cli::FindPlatformDriver("linux");
+    REQUIRE(linux != nullptr);
+    const std::vector<huxerui::cli::EnvironmentDiagnostic> linux_diagnostics = linux->DiagnoseEnvironment();
+    const auto has_linux_diagnostic = [&linux_diagnostics](std::string_view id) {
+      return std::any_of(
+          linux_diagnostics.begin(),
+          linux_diagnostics.end(),
+          [id](const huxerui::cli::EnvironmentDiagnostic& diagnostic) { return diagnostic.id == id; }
+      );
+    };
+    REQUIRE(has_linux_diagnostic("pkg-config"));
+    REQUIRE_FALSE(has_linux_diagnostic("meson"));
+    REQUIRE_FALSE(has_linux_diagnostic("ninja"));
+    REQUIRE_FALSE(has_linux_diagnostic("gperf"));
+    REQUIRE_FALSE(has_linux_diagnostic("git"));
+  }
+
   const std::string_view unavailable_id = huxerui::cli::CurrentHostId() == "windows" ? "ios" : "windows";
   const huxerui::cli::PlatformDriver* unavailable = huxerui::cli::FindPlatformDriver(unavailable_id);
   REQUIRE(unavailable != nullptr);

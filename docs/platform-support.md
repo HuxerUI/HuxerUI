@@ -143,7 +143,9 @@ X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 are manually
 Source-checkout builds fetch only the pinned graphics, text, image, and compression libraries used by the renderer.
 Following the Windows and macOS distribution model, Linux host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
-The current Linux CLI path uses a source SDK checkout. A relocatable installed Linux SDK remains release-packaging work because its static dependency closure must be packaged without build-tree paths.
+The relocatable Linux SDK supports installed CLI projects and exports both canonical CMake targets without retaining build-tree paths.
+Shared consumers load `HuxerUI::huxerui` without requiring pkg-config development metadata; static consumers request `COMPONENTS static` and resolve the packaged archive closure plus the system development packages through pkg-config.
+Linux release binaries target glibc 2.31 and GLIBCXX 3.4.28 or older symbol versions.
 
 ## Web
 

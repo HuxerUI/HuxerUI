@@ -254,6 +254,8 @@ Use the project's existing configured build directory and native host toolchain.
 
 Validate the current host by default. Build another platform only when the change affects that platform's adapter, build configuration, packaged artifact, or shared boundary requiring platform verification, or when the owner requests it.
 
+After every platform-scoped change, explicitly assess whether shared CMake, CLI, packaging, public headers, or Runtime code can affect another platform. Test every affected platform available in the current environment and report each unavailable platform; a platform guard alone is not evidence that other platforms are unaffected.
+
 Treat a confirmed host-specific test limitation as unavailable validation rather than a product regression. Report the limitation and run the closest valid target instead of repeatedly invoking an incompatible toolchain or assertion.
 
 Validation depth is proportional to the affected contract:
