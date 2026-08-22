@@ -53,6 +53,7 @@ FetchContent_Declare(cairo GIT_REPOSITORY https://gitlab.freedesktop.org/cairo/c
 # Every library installs into one staging prefix; the meson projects
 # resolve their dependencies through the staged pkg-config files.
 set(HUXERUI_LINUX_STAGE "${CMAKE_CURRENT_BINARY_DIR}/linux-stage")
+set(HUXERUI_LINUX_STATIC_ARCHIVES cairo fontconfig harfbuzz freetype png16 jpeg expat z pixman-1)
 
 # Native tools required by the fetched projects.
 find_program(HUXERUI_MESON meson)
@@ -108,6 +109,7 @@ set(HB_BUILD_GPU OFF CACHE BOOL "" FORCE)
 
 # libpng resolves zlib through FindZLIB; hand the module the fetched build.
 if (POLICY CMP0169)
+    cmake_policy(PUSH)
     cmake_policy(SET CMP0169 OLD)
 endif ()
 FetchContent_GetProperties(zlib)
@@ -146,6 +148,7 @@ else()
 endif ()
 set(HUXERUI_LIBJPEG_CMAKE_ARGS
         -S <SOURCE_DIR> -B <BINARY_DIR>
+        -G "${CMAKE_GENERATOR}"
         -DCMAKE_BUILD_TYPE=Release
         -DENABLE_SHARED=OFF -DENABLE_STATIC=ON
         -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF -DWITH_DOCS=OFF
@@ -241,6 +244,9 @@ FetchContent_GetProperties(cairo)
 if (NOT cairo_POPULATED)
     FetchContent_Populate(cairo)
 endif ()
+if (POLICY CMP0169)
+    cmake_policy(POP)
+endif ()
 
 ExternalProject_Add(huxerui_pixman
         SOURCE_DIR "${pixman_SOURCE_DIR}"
@@ -314,7 +320,7 @@ add_custom_target(huxerui_linux_deps
 # the dependency until the directory has finished configuring.
 cmake_language(DEFER CALL add_dependencies huxerui_core_objects huxerui_linux_deps)
 
-foreach (HUXERUI_LINUX_ARCHIVE IN ITEMS cairo fontconfig harfbuzz freetype png16 jpeg expat z pixman-1)
+foreach (HUXERUI_LINUX_ARCHIVE IN LISTS HUXERUI_LINUX_STATIC_ARCHIVES)
     install(FILES "${HUXERUI_LINUX_STAGE}/lib/lib${HUXERUI_LINUX_ARCHIVE}.a"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
 endforeach ()
@@ -364,7 +370,7 @@ set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS
 # fontconfig -> freetype -> zlib, harfbuzz -> freetype, libpng -> zlib.
 # The archives do not exist until build time, so paths are assembled
 # directly; huxerui_linux_deps above orders their construction.
-foreach (lib IN ITEMS cairo fontconfig harfbuzz freetype png16 jpeg expat z pixman-1)
+foreach (lib IN LISTS HUXERUI_LINUX_STATIC_ARCHIVES)
     list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES
             "${HUXERUI_LINUX_STAGE}/lib/lib${lib}.a"
     )

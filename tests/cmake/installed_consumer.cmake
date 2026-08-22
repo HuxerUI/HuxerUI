@@ -63,16 +63,24 @@ if (PLATFORM_ID STREQUAL "linux")
         file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
         file(WRITE "${CONSUMER_SOURCE}/main.cpp"
                 "#include <huxerui/huxerui.h>\nint main() { huxerui::View view; return view ? 1 : 0; }\n")
+        set(CONSUMER_COMPONENT)
+        set(CONSUMER_CONFIGURE_ARGUMENTS)
+        if (CONSUMER_TARGET STREQUAL "huxerui_static")
+            set(CONSUMER_COMPONENT " COMPONENTS static")
+        else ()
+            list(APPEND CONSUMER_CONFIGURE_ARGUMENTS -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE)
+        endif ()
         file(WRITE "${CONSUMER_SOURCE}/CMakeLists.txt"
                 "cmake_minimum_required(VERSION 3.20)\n"
                 "project(huxerui_installed_consumer LANGUAGES CXX)\n"
-                "find_package(HuxerUI CONFIG REQUIRED)\n"
+                "find_package(HuxerUI CONFIG REQUIRED${CONSUMER_COMPONENT})\n"
                 "add_executable(consumer main.cpp)\n"
                 "target_compile_features(consumer PRIVATE cxx_std_20)\n"
                 "target_link_libraries(consumer PRIVATE HuxerUI::${CONSUMER_TARGET})\n")
         execute_process(
                 COMMAND "${CMAKE_COMMAND}" -S "${CONSUMER_SOURCE}" -B "${CONSUMER_BUILD}"
                         -G "${HOST_GENERATOR}" "-DCMAKE_PREFIX_PATH=${SDK_ROOT}"
+                        ${CONSUMER_CONFIGURE_ARGUMENTS}
                 RESULT_VARIABLE CONSUMER_CONFIGURE_RESULT
                 OUTPUT_VARIABLE CONSUMER_CONFIGURE_OUTPUT
                 ERROR_VARIABLE CONSUMER_CONFIGURE_ERROR

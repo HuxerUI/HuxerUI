@@ -160,7 +160,9 @@ function(huxerui_add_library target_name)
     if (HUXERUI_LIBRARY_GRAPH_ONLY)
         return()
     endif ()
-    if (TARGET HuxerUI::huxerui_static AND NOT ANDROID)
+    if (TARGET HuxerUI::huxerui_static
+            AND NOT ANDROID
+            AND (NOT DEFINED HUXERUI_STATIC_COMPONENT_LOADED OR HUXERUI_STATIC_COMPONENT_LOADED))
         set(HUXERUI_LIBRARY_FRAMEWORK_TARGET HuxerUI::huxerui_static)
     elseif (TARGET HuxerUI::huxerui)
         set(HUXERUI_LIBRARY_FRAMEWORK_TARGET HuxerUI::huxerui)

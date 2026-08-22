@@ -186,6 +186,8 @@ huxerui_add_app(hello_huxer
 The SDK owns the public `HuxerUIConfig.cmake`, application, library, code-generation, and resource helpers, host tools, built-in resource location, public headers, and the target-platform libraries present in that SDK form.
 Source-build target and platform configuration remains private to the repository and is not installed into the consumer package.
 `HuxerUIConfig.cmake` is the only public CMake package and exposes only the canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
+On Linux, the default package load supports shared consumers without resolving static-only dependencies.
+Static consumers request `find_package(HuxerUI CONFIG REQUIRED COMPONENTS static)`, which loads the packaged archive closure and resolves the distribution-owned libraries through pkg-config.
 Platform package managers may carry platform libraries and integration code, but they do not introduce a second public HuxerUI package or a forwarding target hierarchy.
 The CLI or source-controlled platform shell supplies the resolved SDK location to CMake; application source does not encode an SDK archive layout.
 An in-tree source override creates the same canonical targets and loads the same helpers without changing the application declarations below the SDK bootstrap.

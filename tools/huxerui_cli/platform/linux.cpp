@@ -22,13 +22,7 @@ public:
   }
 
   std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array tools{
-        std::string_view{"pkg-config"},
-        std::string_view{"meson"},
-        std::string_view{"ninja"},
-        std::string_view{"gperf"},
-        std::string_view{"git"},
-    };
+    static constexpr std::array tools{std::string_view{"pkg-config"}};
     return tools;
   }
 
@@ -75,7 +69,7 @@ public:
     std::vector<SetupAction> actions;
     if (missing_tool) {
       actions.push_back({
-          "Install pkg-config, Meson, Ninja, gperf, and Git with the host distribution package manager",
+          "Install pkg-config with the host distribution package manager",
           std::nullopt,
       });
     }
