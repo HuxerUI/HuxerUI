@@ -1,5 +1,6 @@
 #include "platform.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <stdexcept>
