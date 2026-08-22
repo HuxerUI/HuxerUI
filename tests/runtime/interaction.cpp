@@ -49,6 +49,10 @@ public:
 
   void Update(MountedNode&, const CapturePointer&) {}
 
+  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+    return node.Bounds().Contains(position);
+  }
+
   PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
     return event.type == PointerEventType::Down ? PointerResult::Capture : PointerResult::Handled;
   }
@@ -67,6 +71,10 @@ public:
   ObservePointerExtension(MountedNode&, const ObservePointer&) {}
 
   void Update(MountedNode&, const ObservePointer&) {}
+
+  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+    return node.Bounds().Contains(position);
+  }
 
   PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
     return event.type == PointerEventType::Down ? PointerResult::Observe : PointerResult::Ignored;
@@ -713,6 +721,56 @@ TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
           PointerDeviceKind::Touch,
       }
   );
+}
+
+TEST_CASE("TestDefaultTouchMomentumCarriesReleaseVelocity") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Down,
+          67,
+          {50.0F, 30.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          67,
+          {50.0F, 20.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Move,
+          67,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+  runtime.HandlePointerEvent(
+      PointerEvent{
+          PointerEventType::Up,
+          67,
+          {50.0F, 10.0F},
+          PointerDeviceKind::Touch,
+      }
+  );
+
+  const float released_offset = drag_scroll.Offset();
+  for (int frame = 0; frame < 100; ++frame) {
+    platform.AdvanceTime(0.016);
+    runtime.BuildFrame();
+  }
+  REQUIRE(drag_scroll.Offset() > released_offset + 190.0F);
+  REQUIRE(drag_scroll.Offset() < released_offset + 220.0F);
 }
 
 TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {

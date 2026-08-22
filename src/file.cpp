@@ -135,7 +135,7 @@ void ValidateRelativePath(std::string_view path) {
                    reinterpret_cast<const char8_t*>(path.data()),
                    reinterpret_cast<const char8_t*>(path.data() + path.size())
                ))
-          .is_absolute()) {
+          .has_root_path()) {
     throw std::invalid_argument("HuxerUI resolved file path must be relative");
   }
 }

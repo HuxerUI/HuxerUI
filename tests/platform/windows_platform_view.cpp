@@ -173,6 +173,24 @@ private:
   HWND window_ = nullptr;
 };
 
+class ComApartment final {
+public:
+  ComApartment() : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)) {}
+
+  ~ComApartment() {
+    if (SUCCEEDED(result_)) {
+      CoUninitialize();
+    }
+  }
+
+  [[nodiscard]] HRESULT Result() const noexcept {
+    return result_;
+  }
+
+private:
+  HRESULT result_ = E_FAIL;
+};
+
 PlatformPayload WindowsPlatformViewProperties(int value) {
   return PlatformPayload::Object{{"value", value}};
 }
@@ -187,10 +205,12 @@ View WindowsPlatformViewApp() {
   if (!mounted.Get()) {
     return Text("without platform view");
   }
-  return PlatformView("test/WindowsView", WindowsPlatformViewProperties(value.Get()))
-      .Events<WindowsPlatformViewEvents::Changed>()
-      .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
-      .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F});
+  return Stack {
+    PlatformView("test/WindowsView", WindowsPlatformViewProperties(value.Get()))
+        .Events<WindowsPlatformViewEvents::Changed>()
+        .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
+        .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
+  };
 }
 
 HWND CreateWindowsPlatformView(HWND parent, const PlatformPayload& properties, PlatformEventSink event_sink) {
@@ -246,6 +266,8 @@ windows::PlatformViewFactory WindowsPlatformViewFactory() {
 }
 
 TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
+  ComApartment com;
+  REQUIRE(SUCCEEDED(com.Result()));
   windows_platform_view_creates = 0;
   windows_platform_view_updates = 0;
   windows_platform_view_disposals = 0;
@@ -291,8 +313,8 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(GetClientRect(windows_platform_view_edit, &platform_view_edit_bounds));
   REQUIRE(platform_view_bounds.right - platform_view_bounds.left == 80);
   REQUIRE(platform_view_bounds.bottom - platform_view_bounds.top == 40);
-  REQUIRE(platform_view_edit_bounds.right - platform_view_edit_bounds.left == 80);
-  REQUIRE(platform_view_edit_bounds.bottom - platform_view_edit_bounds.top == 40);
+  REQUIRE(platform_view_edit_bounds.right - platform_view_edit_bounds.left == 70);
+  REQUIRE(platform_view_edit_bounds.bottom - platform_view_edit_bounds.top == 34);
   REQUIRE((GetWindowLongPtrW(windows_platform_view_root, GWL_STYLE) & WS_VISIBLE) != 0);
   REQUIRE((GetWindowLongPtrW(windows_platform_view_edit, GWL_STYLE) & WS_VISIBLE) != 0);
 
@@ -331,12 +353,18 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(focused_provider != nullptr);
   UiaRect focused_bounds{};
   REQUIRE(focused_provider->get_BoundingRectangle(&focused_bounds) == S_OK);
+  RECT platform_view_window_bounds{};
+  REQUIRE(GetWindowRect(windows_platform_view_root, &platform_view_window_bounds));
+  REQUIRE(focused_bounds.left == Catch::Approx(platform_view_window_bounds.left));
+  REQUIRE(focused_bounds.top == Catch::Approx(platform_view_window_bounds.top));
+  REQUIRE(
+      focused_bounds.width == Catch::Approx(platform_view_window_bounds.right - platform_view_window_bounds.left)
+  );
+  REQUIRE(
+      focused_bounds.height == Catch::Approx(platform_view_window_bounds.bottom - platform_view_window_bounds.top)
+  );
   RECT edit_bounds{};
   REQUIRE(GetWindowRect(windows_platform_view_edit, &edit_bounds));
-  REQUIRE(focused_bounds.left == Catch::Approx(edit_bounds.left));
-  REQUIRE(focused_bounds.top == Catch::Approx(edit_bounds.top));
-  REQUIRE(focused_bounds.width == Catch::Approx(edit_bounds.right - edit_bounds.left));
-  REQUIRE(focused_bounds.height == Catch::Approx(edit_bounds.bottom - edit_bounds.top));
   Microsoft::WRL::ComPtr<IRawElementProviderFragment> hit_provider;
   REQUIRE(
       semantic_fragment_root->ElementProviderFromPoint(

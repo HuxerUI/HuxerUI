@@ -1094,6 +1094,8 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
       105,
       pointer,
   });
+  runtime.BuildFrame();
+  platform.AdvanceTime(light.motion.fast);
   const FlattenedScene& pressed = runtime.BuildFrame();
   REQUIRE(FindRectWithColor(pressed, *light_press) != nullptr);
 }
@@ -1851,10 +1853,18 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 4);
-  const auto* group = root->children[0].get();
-  const auto* disabled_group = root->children[1].get();
-  const auto* rejected_group = root->children[2].get();
-  const auto* narrow_group = root->children[3].get();
+  const auto* group_scope = root->children[0].get();
+  const auto* disabled_scope = root->children[1].get();
+  const auto* rejected_scope = root->children[2].get();
+  const auto* narrow_scope = root->children[3].get();
+  REQUIRE(group_scope->children.size() == 1);
+  REQUIRE(disabled_scope->children.size() == 1);
+  REQUIRE(rejected_scope->children.size() == 1);
+  REQUIRE(narrow_scope->children.size() == 1);
+  const auto* group = group_scope->children[0].get();
+  const auto* disabled_group = disabled_scope->children[0].get();
+  const auto* rejected_group = rejected_scope->children[0].get();
+  const auto* narrow_group = narrow_scope->children[0].get();
   REQUIRE(group->kind == detail::NodeKind::Layout);
   REQUIRE(group->focusable);
   REQUIRE(group->children.size() == 3);
@@ -1867,7 +1877,7 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
   );
   REQUIRE(group->children[0]->properties.background == SegmentedButtonStyle::Default().selected_background);
   REQUIRE(group->children[1]->properties.background == SegmentedButtonStyle::Default().background);
-  REQUIRE(disabled_group->render_node.opacity == ThemeSpec::Default().interactions.disabled_opacity);
+  REQUIRE(disabled_scope->render_node.opacity == ThemeSpec::Default().interactions.disabled_opacity);
   REQUIRE(narrow_group->measured_size.width == 0.5F);
   REQUIRE(narrow_group->children.size() == 3);
   REQUIRE(narrow_group->children[1]->layout_offset.x >= narrow_group->children[0]->layout_offset.x);
@@ -1921,7 +1931,7 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
   REQUIRE(segmented_button_selection.Get() == 1);
 
   const FlattenedScene& selected_week = runtime.BuildFrame();
-  group = runtime.RootNode()->children[0].get();
+  group = runtime.RootNode()->children[0]->children[0].get();
   REQUIRE(group->identity == group_identity);
   REQUIRE(group->children[1]->properties.background == SegmentedButtonStyle::Default().selected_background);
   const DrawTextCommand* selected_week_label = FindText(selected_week, "Week");
@@ -1977,7 +1987,9 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   REQUIRE(root->children.size() == 1);
   const auto* row = root->children[0].get();
   REQUIRE(row->children.size() == 1);
-  const auto* group = row->children[0].get();
+  const auto* group_scope = row->children[0].get();
+  REQUIRE(group_scope->children.size() == 1);
+  const auto* group = group_scope->children[0].get();
   REQUIRE(group->children.size() == 3);
   REQUIRE(group->children[0]->measured_size.height == style.minimum_height);
   REQUIRE(FillColor(group->children[1]->properties.background) != nullptr);
@@ -2003,6 +2015,8 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
       first_center,
   });
   runtime.BuildFrame();
+  REQUIRE(group->children[0]->interaction.pressed);
+  REQUIRE_FALSE(group->interaction.pressed);
   platform.AdvanceTime(std::get<TweenSpec>(ripple_style.expansion).duration * 0.5);
   const FlattenedScene& pressed = runtime.BuildFrame();
   const DrawCircleCommand* ripple = nullptr;
@@ -2186,7 +2200,9 @@ TEST_CASE("TestChipAndSegmentedButtonIconContent") {
   const auto* row = root->children[0].get();
   REQUIRE(row->children.size() == 2);
   const auto* chip = row->children[0].get();
-  const auto* segments = row->children[1].get();
+  const auto* segments_scope = row->children[1].get();
+  REQUIRE(segments_scope->children.size() == 1);
+  const auto* segments = segments_scope->children[0].get();
   REQUIRE(chip->kind == detail::NodeKind::Chip);
   REQUIRE(chip->image_properties.HasValue());
   REQUIRE(segments->children.size() == 2);

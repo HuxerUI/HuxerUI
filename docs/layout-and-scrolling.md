@@ -153,12 +153,12 @@ Controllers hold weak connections and remain safe after the bound container unmo
 
 Regular `ScrollView` retains its mounted offset across descendant recomposition and clamps it against the final content and viewport extents after layout.
 
-Inertial motion is enabled by default. Use `ScrollPhysics` to tune or disable it without replacing the container's scroll implementation:
+Inertial motion is enabled by default with a deceleration rate of `3.0`. Smaller values preserve momentum for longer, while larger values stop more quickly. Use `ScrollPhysics` to tune or disable it without replacing the container's scroll implementation:
 
 ```cpp
 VirtualList(items, ItemView).With(
     ScrollPhysics{
-        .deceleration_rate = 7.0F,
+        .deceleration_rate = 4.0F,
         .minimum_fling_velocity = 48.0F,
         .maximum_fling_velocity = 6000.0F,
     }

@@ -80,6 +80,10 @@ void IndicationState::RetargetLayer(MotionController& controller, bool visible,
 
 void IndicationState::SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event,
                                      Rect frame) {
+  const bool released_before_press_frame = interaction_.pressed && !state.pressed && event.has_value() &&
+                                           event->type == InteractionEvent::Type::Release && spec_.press.has_value() &&
+                                           press_opacity_.Target() == 1.0F && press_opacity_.Value() == 0.0F &&
+                                           press_opacity_.IsRunning();
   interaction_ = state;
   if (!state.enabled || IsEmpty(spec_)) {
     Reset();
@@ -90,6 +94,10 @@ void IndicationState::SetInteraction(const InteractionState& state, const std::o
   const bool press_visible = state.pressed && spec_.press.has_value();
   const bool hover_visible = !press_visible && state.hovered && spec_.hover.has_value();
   const bool focus_visible = !press_visible && !hover_visible && state.focus_visible && spec_.focus.has_value();
+  if (released_before_press_frame) {
+    // Preserve feedback when Press and Release arrive before the first animation frame.
+    press_opacity_.Set(1.0F);
+  }
   RetargetLayer(press_opacity_, press_visible, spec_.press);
   RetargetLayer(hover_opacity_, hover_visible, spec_.hover);
   RetargetLayer(focus_opacity_, focus_visible, spec_.focus);

@@ -18,10 +18,11 @@ AnimationSpec InteractionTween(double duration) {
   return TweenSpec{.duration = duration, .easing = Easing::EaseOut};
 }
 
-Indication FlatIndication(Color color, const ThemeSpec& theme) {
+Indication FlatIndication(Color color, const ThemeSpec& theme, float hover_opacity = 0.10F,
+                          float press_opacity = 0.16F) {
   Color hover = color;
-  color.alpha *= 0.16F;
-  hover.alpha *= 0.1F;
+  color.alpha *= press_opacity;
+  hover.alpha *= hover_opacity;
   return {
       .hover = IndicationLayer{
           .fill = hover,
@@ -1403,7 +1404,7 @@ ThemeSpec FlatDarkThemeSpec() {
       .error = Color::Rgb(248, 81, 73),
   };
   theme.interactions = {
-      .indication = FlatIndication(Color::White(), theme),
+      .indication = FlatIndication(Color::White(), theme, 0.12F, 0.18F),
       .focus_ring = FocusRing{theme.colors.primary, 2.0F, 2.0F},
       .disabled_opacity = 0.42F,
   };

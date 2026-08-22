@@ -312,7 +312,7 @@ struct ScrollPhysics {
   static const detail::ModifierDescriptor& Descriptor();
 
   bool fling_enabled = true;
-  float deceleration_rate = 6.0F;
+  float deceleration_rate = 3.0F;
   float minimum_fling_velocity = 40.0F;
   float maximum_fling_velocity = 6000.0F;
 

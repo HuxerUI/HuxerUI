@@ -110,7 +110,7 @@ TEST_CASE("PaintContextClipsAsymmetricGradientCornersWithoutApplyingASecondUnifo
   context.Finish();
 
   REQUIRE(sequence.Commands().size() == 3);
-  REQUIRE(std::holds_alternative<PushClipCommand>(sequence.Commands()[0]));
+  REQUIRE(std::holds_alternative<PushPathClipCommand>(sequence.Commands()[0]));
   REQUIRE(std::get<DrawLinearGradientCommand>(sequence.Commands()[1]).corner_radius == 0.0F);
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[2]));
 }

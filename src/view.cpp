@@ -730,182 +730,52 @@ struct SegmentedButtonBorderWidth {
   using Value = float;
 };
 
-struct SegmentedButtonInput {
+struct SegmentedButtonBehavior {
   static const detail::ModifierDescriptor& Descriptor();
 
   std::size_t selected_index;
-  std::size_t segment_count;
-
-  bool operator==(const SegmentedButtonInput&) const = default;
+  EventEmitter events;
 };
 
-struct SegmentedButtonSemanticItem {
-  std::string label;
-  Rect bounds;
-};
-
-class SegmentedButtonInputExtension final : public NodeExtension {
+class SegmentedButtonBehaviorExtension final : public NodeExtension {
 public:
-  SegmentedButtonInputExtension(MountedNode& node, const SegmentedButtonInput& modifier) {
+  SegmentedButtonBehaviorExtension(MountedNode& node, const SegmentedButtonBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const SegmentedButtonInput& modifier) {
+  void Update(MountedNode&, const SegmentedButtonBehavior& modifier) {
     selected_index_ = modifier.selected_index;
-    segment_count_ = modifier.segment_count;
-    event_bindings_ = static_cast<detail::MountedNode&>(node).event_bindings;
-    if (!node.IsEnabled()) {
-      pointer_id_.reset();
-      pressed_index_.reset();
-    }
-  }
-
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
-    const std::size_t count = std::min(segment_count_, node.ChildCount());
-    semantic_items_.resize(count);
-    for (std::size_t index = 0; index < count; ++index) {
-      const MountedNode& child = node.ChildAt(index);
-      const Point offset = child.LayoutOffset();
-      const Size size = child.LayoutSize();
-      // Adjacent segments overlap their border. Assign that overlap to the later item, matching pointer hit testing.
-      const float right = index + 1 < count ? node.ChildAt(index + 1).LayoutOffset().x : offset.x + size.width;
-      SegmentedButtonSemanticItem& item = semantic_items_[index];
-      const std::string& label = static_cast<const detail::MountedNode&>(child).text;
-      if (item.label != label) {
-        item.label = label;
-      }
-      item.bounds = {offset.x, offset.y, std::max(0.0F, right - offset.x), size.height};
-    }
-    return PaintInvalidation::None;
-  }
-
-  void BuildSemantics(SemanticBuilder& builder) const override {
-    Semantics owner;
-    owner.collection = SemanticCollection{
-        .item_count = segment_count_,
-        .row_count = 1,
-        .column_count = segment_count_,
-    };
-    builder.SetOwner(std::move(owner));
-    for (std::size_t index = 0; index < semantic_items_.size(); ++index) {
-      const bool selected = index == selected_index_;
-      Semantics item;
-      item.role = SemanticRole::RadioButton;
-      item.label = semantic_items_[index].label;
-      item.checked = selected ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
-      item.selected = selected;
-      item.collection_item = SemanticCollectionItem{
-          .index = index,
-          .row_index = 0,
-          .column_index = index,
-      };
-      const std::uint64_t local_id = index + 1;
-      builder.AddChild(local_id, semantic_items_[index].bounds, std::move(item));
-      builder.AddAction(local_id, SemanticActionKind::Activate);
-    }
-  }
-
-  [[nodiscard]] bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
-    if (local_id == 0 || action.kind != SemanticActionKind::Activate ||
-        !std::holds_alternative<std::monostate>(action.value)) {
-      return false;
-    }
-    const std::uint64_t index = local_id - 1;
-    if (index >= segment_count_) {
-      return false;
-    }
-    EmitSelection(static_cast<std::size_t>(index));
-    return true;
-  }
-
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
-    return node.IsEnabled() && SegmentIndexAt(node, position).has_value();
-  }
-
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
-    if (!node.IsEnabled()) {
-      pointer_id_.reset();
-      pressed_index_.reset();
-      return PointerResult::Ignored;
-    }
-    if (event.type == PointerEventType::Down) {
-      const std::optional<std::size_t> index = SegmentIndexAt(node, event.position);
-      if (!index.has_value()) {
-        return PointerResult::Ignored;
-      }
-      pointer_id_ = event.pointer_id;
-      pressed_index_ = index;
-      return PointerResult::Observe;
-    }
-    if (!pointer_id_.has_value() || *pointer_id_ != event.pointer_id) {
-      return PointerResult::Ignored;
-    }
-    if (event.type == PointerEventType::Up) {
-      const std::optional<std::size_t> released_index = SegmentIndexAt(node, event.position);
-      if (released_index.has_value() && released_index == pressed_index_) {
-        EmitSelection(*released_index);
-      }
-      pointer_id_.reset();
-      pressed_index_.reset();
-      return PointerResult::Handled;
-    }
-    if (event.type == PointerEventType::Cancel) {
-      pointer_id_.reset();
-      pressed_index_.reset();
-    }
-    return PointerResult::Handled;
+    events_ = modifier.events;
   }
 
   void OnKey(MountedNode& node, const KeyEvent& event) override {
-    if (!node.IsEnabled() || segment_count_ == 0 || event.type != KeyEventType::Down || event.modifiers.alt ||
+    const std::size_t segment_count = node.ChildCount();
+    if (!node.IsEnabled() || segment_count == 0 || event.type != KeyEventType::Down || event.modifiers.alt ||
         event.modifiers.control || event.modifiers.meta) {
       return;
     }
     std::optional<std::size_t> requested;
     if (event.key == Key::ArrowLeft) {
-      requested = selected_index_ == 0 ? segment_count_ - 1 : selected_index_ - 1;
+      requested = selected_index_ == 0 ? segment_count - 1 : selected_index_ - 1;
     } else if (event.key == Key::ArrowRight) {
-      requested = selected_index_ + 1 == segment_count_ ? 0 : selected_index_ + 1;
+      requested = selected_index_ + 1 == segment_count ? 0 : selected_index_ + 1;
     } else if (event.key == Key::Home) {
       requested = 0;
     } else if (event.key == Key::End) {
-      requested = segment_count_ - 1;
+      requested = segment_count - 1;
     }
-    if (requested.has_value()) {
-      EmitSelection(*requested);
+    if (requested.has_value() && *requested != selected_index_) {
+      events_.Emit<SegmentedButtonEvents::Changed>(*requested);
     }
   }
 
 private:
-  static std::optional<std::size_t> SegmentIndexAt(MountedNode& node, Point position) {
-    for (std::size_t index = node.ChildCount(); index > 0; --index) {
-      const MountedNode& child = node.ChildAt(index - 1);
-      const Point offset = child.LayoutOffset();
-      const Size size = child.LayoutSize();
-      if (Rect{offset.x, offset.y, size.width, size.height}.Contains(position)) {
-        return index - 1;
-      }
-    }
-    return std::nullopt;
-  }
-
-  void EmitSelection(std::size_t index) {
-    if (index == selected_index_ || index >= segment_count_) {
-      return;
-    }
-    detail::EmitEvent<SegmentedButtonEvents::Changed>(event_bindings_, index);
-  }
-
-  detail::EventBindings event_bindings_;
-  std::vector<SegmentedButtonSemanticItem> semantic_items_;
-  std::optional<std::int64_t> pointer_id_;
-  std::optional<std::size_t> pressed_index_;
+  EventEmitter events_;
   std::size_t selected_index_ = 0;
-  std::size_t segment_count_ = 0;
 };
 
-const detail::ModifierDescriptor& SegmentedButtonInput::Descriptor() {
-  return detail::ModifierDescriptorFor<SegmentedButtonInput, SegmentedButtonInputExtension>();
+const detail::ModifierDescriptor& SegmentedButtonBehavior::Descriptor() {
+  return detail::ModifierDescriptorFor<SegmentedButtonBehavior, SegmentedButtonBehaviorExtension>();
 }
 
 struct SegmentedButtonLayoutPolicy {
@@ -1982,6 +1852,12 @@ void ApplyToggleLayoutDefaults(
   spec.properties.disabled_foreground = disabled_label;
 }
 
+struct ResolvedSegmentedButtonItem {
+  std::string label;
+  std::optional<detail::ResolvedImageAsset> icon;
+  bool show_label = true;
+};
+
 class SegmentedButtonLabel final : public View {
 public:
   SegmentedButtonLabel(
@@ -2039,7 +1915,55 @@ private:
     };
     spec->default_indication =
         selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
+    spec->component_semantics.role = SemanticRole::RadioButton;
+    spec->component_semantics.label = spec->text;
+    spec->component_semantics.checked =
+        selected ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
+    spec->component_semantics.selected = selected;
+    spec->component_semantics.collection_item = SemanticCollectionItem{
+        .index = index,
+        .row_index = 0,
+        .column_index = index,
+    };
     spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{spec->default_indication}));
+    return spec;
+  }
+};
+
+class SegmentedButtonLayoutView final : public View {
+public:
+  SegmentedButtonLayoutView(
+      std::vector<View> segments,
+      std::size_t selected_index,
+      const SegmentedButtonStyle& style,
+      EventEmitter events
+  )
+      : View(MakeSpec(std::move(segments), selected_index, style, std::move(events))) {}
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(
+      std::vector<View> segments,
+      std::size_t selected_index,
+      const SegmentedButtonStyle& style,
+      EventEmitter events
+  ) {
+    auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<SegmentedButtonLayoutPolicy>(), std::move(segments));
+    spec->focusable = true;
+    spec->component_semantics.collection = SemanticCollection{
+        .item_count = spec->children.size(),
+        .row_count = 1,
+        .column_count = spec->children.size(),
+    };
+    spec->properties.corner_radii = std::max(0.0F, style.corner_radius);
+    spec->properties.clip_children = true;
+    spec->layout_values.insert_or_assign(
+        typeid(SegmentedButtonBorderWidth),
+        detail::MakeErasedLayoutValue(std::max(0.0F, style.border_width))
+    );
+    spec->retained_modifiers.push_back(detail::MakeModifierSpec(SegmentedButtonBehavior{
+        selected_index,
+        std::move(events),
+    }));
     return spec;
   }
 };
@@ -2328,45 +2252,57 @@ MakeSegmentedButtonSpec(std::vector<SegmentedButtonItem> items, std::size_t sele
     throw std::invalid_argument("HuxerUI SegmentedButton selected index is out of range");
   }
 
-  const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
-  const SegmentedButtonStyle style =
-      ResolveStyleOverride<SegmentedButtonStyle>(environment).value_or(detail::DefaultSegmentedButtonStyle(theme));
-
-  std::vector<View> segments;
-  segments.reserve(items.size());
-  for (std::size_t index = 0; index < items.size(); ++index) {
-    const bool show_label = detail::SegmentedButtonItemAccess::ShowsLabel(items[index]);
-    std::string label = detail::SegmentedButtonItemAccess::ResolveLabel(items[index]);
-    std::optional<detail::ResolvedImageAsset> icon =
-        detail::SegmentedButtonItemAccess::ResolveIcon(items[index]);
+  std::vector<ResolvedSegmentedButtonItem> resolved_items;
+  resolved_items.reserve(items.size());
+  for (SegmentedButtonItem& item : items) {
+    ResolvedSegmentedButtonItem resolved{
+        detail::SegmentedButtonItemAccess::ResolveLabel(item),
+        detail::SegmentedButtonItemAccess::ResolveIcon(item),
+        detail::SegmentedButtonItemAccess::ShowsLabel(item),
+    };
+    const bool show_label = resolved.show_label;
+    const std::string& label = resolved.label;
+    const std::optional<detail::ResolvedImageAsset>& icon = resolved.icon;
     if (label.empty()) {
       throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
     }
     if (!show_label && !icon.has_value()) {
       throw std::invalid_argument("HuxerUI icon-only SegmentedButton item requires an icon and semantic label");
     }
-    segments.emplace_back(SegmentedButtonLabel(
-        std::move(label),
-        std::move(icon),
-        show_label,
-        style,
-        index == selected_index,
-        index,
-        items.size()
-    ));
+    resolved_items.push_back(std::move(resolved));
   }
 
-  auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<SegmentedButtonLayoutPolicy>(), std::move(segments));
-  spec->focusable = true;
-  spec->properties.corner_radii = std::max(0.0F, style.corner_radius);
-  spec->properties.clip_children = true;
-  spec->layout_values.insert_or_assign(
-      typeid(SegmentedButtonBorderWidth),
-      detail::MakeErasedLayoutValue(std::max(0.0F, style.border_width))
-  );
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(SegmentedButtonInput{selected_index, items.size()}));
-  return spec;
+  return detail::MakeScopeSpec([items = std::move(resolved_items), selected_index]() -> View {
+    const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
+    const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+    const SegmentedButtonStyle style =
+        ResolveStyleOverride<SegmentedButtonStyle>(environment).value_or(detail::DefaultSegmentedButtonStyle(theme));
+    const EventEmitter events = UseEvents();
+
+    std::vector<View> segments;
+    segments.reserve(items.size());
+    for (std::size_t index = 0; index < items.size(); ++index) {
+      segments.push_back(
+          std::move(SegmentedButtonLabel(
+                        items[index].label,
+                        items[index].icon,
+                        items[index].show_label,
+                        style,
+                        index == selected_index,
+                        index,
+                        items.size()
+                    ))
+              .OnClick([events, index, selected_index] {
+                if (index != selected_index) {
+                  events.Emit<SegmentedButtonEvents::Changed>(index);
+                }
+              })
+              .Key(index)
+      );
+    }
+
+    return SegmentedButtonLayoutView(std::move(segments), selected_index, style, events);
+  });
 }
 
 std::shared_ptr<detail::ViewSpec>
