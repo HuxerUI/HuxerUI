@@ -2,6 +2,26 @@ include_guard(GLOBAL)
 
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
 
+function(_huxerui_select_framework_target output_variable)
+    if (ANDROID)
+        if (NOT TARGET HuxerUI::huxerui)
+            message(FATAL_ERROR "HuxerUI Android integration requires the shared component")
+        endif ()
+        get_target_property(HUXERUI_FRAMEWORK_TARGET_TYPE HuxerUI::huxerui TYPE)
+        if (NOT HUXERUI_FRAMEWORK_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
+            message(FATAL_ERROR "HuxerUI Android integration requires the shared component")
+        endif ()
+        set(HUXERUI_FRAMEWORK_TARGET HuxerUI::huxerui)
+    elseif (TARGET HuxerUI::huxerui_static)
+        set(HUXERUI_FRAMEWORK_TARGET HuxerUI::huxerui_static)
+    elseif (TARGET HuxerUI::huxerui)
+        set(HUXERUI_FRAMEWORK_TARGET HuxerUI::huxerui)
+    else ()
+        message(FATAL_ERROR "HuxerUI framework target is unavailable")
+    endif ()
+    set(${output_variable} "${HUXERUI_FRAMEWORK_TARGET}" PARENT_SCOPE)
+endfunction()
+
 function(_huxerui_resolve_library_target requested_target output_variable)
     if (NOT TARGET ${requested_target})
         message(FATAL_ERROR
@@ -160,48 +180,8 @@ function(huxerui_add_library target_name)
     if (HUXERUI_LIBRARY_GRAPH_ONLY)
         return()
     endif ()
-    if (TARGET HuxerUI::huxerui_static
-            AND NOT ANDROID
-            AND (NOT DEFINED HUXERUI_STATIC_COMPONENT_LOADED OR HUXERUI_STATIC_COMPONENT_LOADED))
-        set(HUXERUI_LIBRARY_FRAMEWORK_TARGET HuxerUI::huxerui_static)
-    elseif (TARGET HuxerUI::huxerui)
-        set(HUXERUI_LIBRARY_FRAMEWORK_TARGET HuxerUI::huxerui)
-    else ()
-        message(FATAL_ERROR
-                "huxerui_add_library() requires the HuxerUI::huxerui target"
-        )
-    endif ()
-    get_target_property(HUXERUI_LIBRARY_FRAMEWORK_ALIASED_TARGET
-            ${HUXERUI_LIBRARY_FRAMEWORK_TARGET}
-            ALIASED_TARGET
-    )
-    if (HUXERUI_LIBRARY_FRAMEWORK_ALIASED_TARGET)
-        set(HUXERUI_LIBRARY_FRAMEWORK_TARGET
-                "${HUXERUI_LIBRARY_FRAMEWORK_ALIASED_TARGET}"
-        )
-    endif ()
-    # The application owns final HuxerUI linkage; library archives inherit compile usage only.
-    get_property(HUXERUI_LIBRARY_FRAMEWORK_INCLUDE_DIRECTORIES
-            TARGET ${HUXERUI_LIBRARY_FRAMEWORK_TARGET}
-            PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    )
-    get_property(HUXERUI_LIBRARY_FRAMEWORK_COMPILE_OPTIONS
-            TARGET ${HUXERUI_LIBRARY_FRAMEWORK_TARGET}
-            PROPERTY INTERFACE_COMPILE_OPTIONS
-    )
-    get_property(HUXERUI_LIBRARY_FRAMEWORK_COMPILE_DEFINITIONS
-            TARGET ${HUXERUI_LIBRARY_FRAMEWORK_TARGET}
-            PROPERTY INTERFACE_COMPILE_DEFINITIONS
-    )
-    target_include_directories(${target_name} PRIVATE
-            ${HUXERUI_LIBRARY_FRAMEWORK_INCLUDE_DIRECTORIES}
-    )
-    target_compile_options(${target_name} PRIVATE
-            ${HUXERUI_LIBRARY_FRAMEWORK_COMPILE_OPTIONS}
-    )
-    target_compile_definitions(${target_name} PRIVATE
-            ${HUXERUI_LIBRARY_FRAMEWORK_COMPILE_DEFINITIONS}
-    )
+    _huxerui_select_framework_target(HUXERUI_LIBRARY_FRAMEWORK_TARGET)
+    target_link_libraries(${target_name} PRIVATE ${HUXERUI_LIBRARY_FRAMEWORK_TARGET})
     huxerui_enable_codegen(${target_name})
 
     if (HUXERUI_LIBRARY_RESOURCES)

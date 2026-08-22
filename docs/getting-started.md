@@ -167,6 +167,7 @@ sudo pacman -S --needed base-devel cmake git pkgconf meson ninja gperf nasm \
 
 `gio-2.0` and `libsoup-3.0` are required system dynamic libraries and are not part of HuxerUI's fetched static dependency stack.
 The selected packages must provide their pkg-config metadata, headers, and shared libraries; TLS support is installed through the distribution dependencies.
+The fetched Fontconfig build requires Meson 1.11.0 or newer; distributions with an older Meson package need a newer user-managed installation on `PATH`.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -177,8 +178,9 @@ ctest --test-dir build --output-on-failure
 The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 packages through pkg-config.
 Source-checkout builds fetch the pinned Cairo, FreeType, HarfBuzz, fontconfig, pixman, libpng, libjpeg, zlib, and expat stack and require the upstream build tools reported by CMake.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
-An installed SDK application links the shared `HuxerUI::huxerui` target without requiring those source-build tools or pkg-config development metadata during CMake configuration.
-An installed static consumer uses `find_package(HuxerUI CONFIG REQUIRED COMPONENTS static)` before linking `HuxerUI::huxerui_static`; that component requires the Linux development packages because their dynamic libraries remain distribution-owned.
+An installed SDK imports both framework targets by default, and `huxerui_add_app` selects `HuxerUI::huxerui_static`.
+A shared-only consumer uses `find_package(HuxerUI CONFIG REQUIRED COMPONENTS shared)` and links `HuxerUI::huxerui` without resolving the static archive closure.
+A static consumer requests `COMPONENTS static` before linking `HuxerUI::huxerui_static`; that component requires the Linux development packages because their dynamic libraries remain distribution-owned.
 
 Windows:
 
@@ -302,6 +304,7 @@ Android and Web artifacts are private intermediates under the SDK build director
 On Windows, `bin/huxerui.exe` is the CLI while `bin/huxerui.dll` and `bin/huxerui_debug.dll` are the Release and Debug framework runtimes.
 Their corresponding `lib/huxerui.lib` and `lib/huxerui_debug.lib` files are DLL import libraries; only `lib/huxerui_static.lib` and `lib/huxerui_static_debug.lib` are static framework libraries.
 The imported `HuxerUI::huxerui` target selects the matching DLL and import library, while `HuxerUI::huxerui_static` selects the matching static library.
+The packaging build installs Debug and Release through the same CMake export sets rather than patching imported target properties after installation.
 
 ## Run examples
 

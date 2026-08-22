@@ -63,6 +63,15 @@ if (NOT HUXERUI_MESON OR NOT HUXERUI_NINJA)
             "HuxerUI Linux builds fetch cairo, fontconfig, and pixman from git and build them with meson; "
             "install meson and ninja")
 endif ()
+execute_process(
+        COMMAND "${HUXERUI_MESON}" --version
+        RESULT_VARIABLE HUXERUI_MESON_VERSION_RESULT
+        OUTPUT_VARIABLE HUXERUI_MESON_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if (NOT HUXERUI_MESON_VERSION_RESULT EQUAL 0 OR HUXERUI_MESON_VERSION VERSION_LESS 1.11.0)
+    message(FATAL_ERROR "HuxerUI Linux builds require Meson 1.11.0 or newer")
+endif ()
 find_program(HUXERUI_GPERF gperf)
 if (NOT HUXERUI_GPERF)
     message(FATAL_ERROR "HuxerUI Linux builds need gperf to build fontconfig from source; install gperf")
@@ -320,26 +329,6 @@ add_custom_target(huxerui_linux_deps
 # the dependency until the directory has finished configuring.
 cmake_language(DEFER CALL add_dependencies huxerui_core_objects huxerui_linux_deps)
 
-foreach (HUXERUI_LINUX_ARCHIVE IN LISTS HUXERUI_LINUX_STATIC_ARCHIVES)
-    install(FILES "${HUXERUI_LINUX_STAGE}/lib/lib${HUXERUI_LINUX_ARCHIVE}.a"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
-endforeach ()
-install(FILES "${zlib_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/zlib")
-install(FILES "${expat_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/expat")
-install(FILES "${libpng_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libpng")
-install(FILES "${libjpeg-turbo_SOURCE_DIR}/LICENSE.md"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libjpeg-turbo")
-install(FILES "${freetype_SOURCE_DIR}/LICENSE.TXT" "${freetype_SOURCE_DIR}/docs/FTL.TXT"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/freetype")
-install(FILES "${harfbuzz_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/harfbuzz")
-install(FILES "${pixman_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/pixman")
-install(FILES "${fontconfig_SOURCE_DIR}/COPYING" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/fontconfig")
-install(FILES
-        "${cairo_SOURCE_DIR}/COPYING"
-        "${cairo_SOURCE_DIR}/COPYING-LGPL-2.1"
-        "${cairo_SOURCE_DIR}/COPYING-MPL-1.1"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/cairo")
-
 set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_adapter.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_external_texture.cpp"
@@ -362,18 +351,16 @@ set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES
         "${HUXERUI_LINUX_STAGE}/include/freetype2"
 )
 
-set(HUXERUI_PLATFORM_COMPILE_DEFINITIONS
-        ${HUXERUI_PLATFORM_COMPILE_DEFINITIONS}
-)
-
 # Static-link order follows the dependency chain: cairo -> pixman,
 # fontconfig -> freetype -> zlib, harfbuzz -> freetype, libpng -> zlib.
 # The archives do not exist until build time, so paths are assembled
 # directly; huxerui_linux_deps above orders their construction.
-foreach (lib IN LISTS HUXERUI_LINUX_STATIC_ARCHIVES)
-    list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES
-            "${HUXERUI_LINUX_STAGE}/lib/lib${lib}.a"
-    )
+set(HUXERUI_LINUX_STATIC_DEPENDENCY_FILES)
+foreach (HUXERUI_LINUX_ARCHIVE IN LISTS HUXERUI_LINUX_STATIC_ARCHIVES)
+    set(HUXERUI_LINUX_STATIC_DEPENDENCY_FILE
+            "${HUXERUI_LINUX_STAGE}/lib/lib${HUXERUI_LINUX_ARCHIVE}.a")
+    list(APPEND HUXERUI_LINUX_STATIC_DEPENDENCY_FILES "${HUXERUI_LINUX_STATIC_DEPENDENCY_FILE}")
+    list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES "${HUXERUI_LINUX_STATIC_DEPENDENCY_FILE}")
 endforeach ()
 list(APPEND HUXERUI_PLATFORM_LINK_LIBRARIES m pthread dl)
 if (TARGET PkgConfig::HUXERUI_FCITX5_GCLIENT)

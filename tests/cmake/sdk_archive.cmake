@@ -59,6 +59,8 @@ foreach (required_path IN ITEMS
         "${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}"
         "include/huxerui/huxerui.h"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIConfig.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUISharedTargets.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIStaticTargets.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIApp.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUICodegen.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUILibraries.cmake"
@@ -72,6 +74,25 @@ foreach (required_path IN ITEMS
         message(FATAL_ERROR "SDK archive is missing ${required_path}")
     endif ()
 endforeach ()
+
+if (HOST_SYSTEM STREQUAL "windows" AND WINDOWS_DEBUG_INCLUDED)
+    foreach (required_path IN ITEMS
+            "bin/huxerui.dll"
+            "bin/huxerui_debug.dll"
+            "${INSTALL_LIBDIR}/huxerui.lib"
+            "${INSTALL_LIBDIR}/huxerui_debug.lib"
+            "${INSTALL_LIBDIR}/huxerui_static.lib"
+            "${INSTALL_LIBDIR}/huxerui_static_debug.lib"
+            "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUISharedTargets-release.cmake"
+            "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUISharedTargets-debug.cmake"
+            "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIStaticTargets-release.cmake"
+            "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIStaticTargets-debug.cmake"
+    )
+        if (NOT EXISTS "${SDK_ROOT}/${required_path}")
+            message(FATAL_ERROR "Windows SDK archive is missing ${required_path}")
+        endif ()
+    endforeach ()
+endif ()
 
 foreach (build_only_path IN ITEMS
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIBuild.cmake"

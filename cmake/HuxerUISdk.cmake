@@ -3,25 +3,7 @@ include_guard(GLOBAL)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT "" CACHE PATH "Prebuilt SDK platform artifacts")
 set(HUXERUI_WEB_EMSCRIPTEN_VERSION "4.0.19")
-set(HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS OFF)
-
-if (WIN32 AND HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
-    set(HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT
-            "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/windows/debug"
-    )
-    foreach (HUXERUI_WINDOWS_DEBUG_ARTIFACT IN ITEMS
-            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.dll"
-            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.lib"
-            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_static_debug.lib"
-    )
-        if (NOT EXISTS "${HUXERUI_WINDOWS_DEBUG_ARTIFACT}")
-            message(FATAL_ERROR "HuxerUI Windows Debug SDK artifact is missing: ${HUXERUI_WINDOWS_DEBUG_ARTIFACT}")
-        endif ()
-    endforeach ()
-    set(HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS ON)
-endif ()
 
 if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
         AND HUXERUI_BUILD_CLI
@@ -39,20 +21,20 @@ if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
     endif ()
 endif ()
 
-set(HUXERUI_INSTALL_TARGETS)
 if (TARGET ${HUXERUI_SHARED_LIB_NAME})
-    list(APPEND HUXERUI_INSTALL_TARGETS ${HUXERUI_SHARED_LIB_NAME})
+    install(TARGETS ${HUXERUI_SHARED_LIB_NAME}
+            EXPORT HuxerUISharedTargets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+    )
 endif ()
 if (TARGET ${HUXERUI_STATIC_LIB_NAME})
-    list(APPEND HUXERUI_INSTALL_TARGETS ${HUXERUI_STATIC_LIB_NAME})
-endif ()
-
-if (HUXERUI_INSTALL_TARGETS)
-    install(TARGETS ${HUXERUI_INSTALL_TARGETS}
-            EXPORT HuxerUIImportedTargets
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    install(TARGETS ${HUXERUI_STATIC_LIB_NAME}
+            EXPORT HuxerUIStaticTargets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
     )
 endif ()
 
@@ -71,10 +53,10 @@ configure_package_config_file(
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         INSTALL_DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
-if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+if (HUXERUI_PLATFORM_ID STREQUAL "linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
     configure_file(
-            "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILinuxDependencies.cmake.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxDependencies.cmake"
+            "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILinuxStaticDependencies.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxStaticDependencies.cmake"
             @ONLY
     )
 endif ()
@@ -84,11 +66,22 @@ write_basic_package_version_file(
         COMPATIBILITY SameMajorVersion
 )
 
-install(EXPORT HuxerUIImportedTargets
-        FILE HuxerUIImportedTargets.cmake
-        NAMESPACE HuxerUI::
-        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
-)
+if (TARGET ${HUXERUI_SHARED_LIB_NAME})
+    install(EXPORT HuxerUISharedTargets
+            FILE HuxerUISharedTargets.cmake
+            NAMESPACE HuxerUI::
+            DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+            COMPONENT HuxerUILibraries
+    )
+endif ()
+if (TARGET ${HUXERUI_STATIC_LIB_NAME})
+    install(EXPORT HuxerUIStaticTargets
+            FILE HuxerUIStaticTargets.cmake
+            NAMESPACE HuxerUI::
+            DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+            COMPONENT HuxerUILibraries
+    )
+endif ()
 install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
@@ -99,9 +92,9 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
-if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+if (HUXERUI_PLATFORM_ID STREQUAL "linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
     install(FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxDependencies.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxStaticDependencies.cmake"
             DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
     )
 endif ()
@@ -111,10 +104,48 @@ install(FILES
         RENAME HuxerUIWebFileSystem.js
 )
 
-if (HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
-    set(HUXERUI_ANDROID_ARTIFACT_ROOT "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/android")
+if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+    if (TARGET ${HUXERUI_STATIC_LIB_NAME})
+        install(FILES ${HUXERUI_LINUX_STATIC_DEPENDENCY_FILES}
+                DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
+    endif ()
+    include(FetchContent)
+    foreach (HUXERUI_LINUX_DEPENDENCY IN ITEMS
+            zlib expat libpng libjpeg-turbo freetype harfbuzz pixman fontconfig cairo)
+        FetchContent_GetProperties(${HUXERUI_LINUX_DEPENDENCY})
+    endforeach ()
+    install(FILES "${zlib_SOURCE_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/zlib")
+    install(FILES "${expat_SOURCE_DIR}/COPYING"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/expat")
+    install(FILES "${libpng_SOURCE_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libpng")
+    install(FILES "${libjpeg-turbo_SOURCE_DIR}/LICENSE.md"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libjpeg-turbo")
+    install(FILES "${freetype_SOURCE_DIR}/LICENSE.TXT" "${freetype_SOURCE_DIR}/docs/FTL.TXT"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/freetype")
+    install(FILES "${harfbuzz_SOURCE_DIR}/COPYING"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/harfbuzz")
+    install(FILES "${pixman_SOURCE_DIR}/COPYING"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/pixman")
+    install(FILES "${fontconfig_SOURCE_DIR}/COPYING"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/fontconfig")
+    install(FILES
+            "${cairo_SOURCE_DIR}/COPYING"
+            "${cairo_SOURCE_DIR}/COPYING-LGPL-2.1"
+            "${cairo_SOURCE_DIR}/COPYING-MPL-1.1"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/cairo")
+endif ()
+
+if (TARGET huxerui_cli)
+    install(TARGETS huxerui_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif ()
+
+if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
+    file(TO_CMAKE_PATH "${HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT}" HUXERUI_SDK_ARTIFACT_ROOT)
+    set(HUXERUI_ANDROID_ARTIFACT_ROOT "${HUXERUI_SDK_ARTIFACT_ROOT}/android")
     set(HUXERUI_WEB_ARTIFACT_ROOT
-            "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
+            "${HUXERUI_SDK_ARTIFACT_ROOT}/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
     )
     foreach (HUXERUI_REQUIRED_PLATFORM_ARTIFACT IN ITEMS
             "${HUXERUI_ANDROID_ARTIFACT_ROOT}/HuxerUI.aar"
@@ -134,17 +165,6 @@ if (HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
     install(DIRECTORY "${HUXERUI_WEB_ARTIFACT_ROOT}/"
             DESTINATION
             "${CMAKE_INSTALL_DATADIR}/huxerui/platform/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
-    )
-endif ()
-
-if (HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS)
-    install(FILES "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.dll"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    )
-    install(FILES
-            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.lib"
-            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_static_debug.lib"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
 endif ()
 
@@ -169,5 +189,29 @@ if (HUXERUI_SDK_PACKAGE_FILE_NAME)
     set(CPACK_GENERATOR "${HUXERUI_SDK_PACKAGE_GENERATOR}")
     set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
     set(CPACK_MONOLITHIC_INSTALL ON)
+    if (WIN32 AND HUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG)
+        get_property(HUXERUI_SDK_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if (NOT HUXERUI_SDK_MULTI_CONFIG)
+            message(FATAL_ERROR
+                    "HuxerUI Windows SDK packaging with Debug libraries requires a multi-config generator")
+        endif ()
+        set(HUXERUI_WINDOWS_DEBUG_INSTALL_SCRIPT
+                "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIInstallWindowsDebug.cmake"
+        )
+        file(WRITE "${HUXERUI_WINDOWS_DEBUG_INSTALL_SCRIPT}"
+                "execute_process(\n"
+                "  COMMAND \"${CMAKE_COMMAND}\" --install \"${PROJECT_BINARY_DIR}\" --config Debug"
+                " --component HuxerUILibraries --prefix \"\${CMAKE_INSTALL_PREFIX}\"\n"
+                "  RESULT_VARIABLE install_result\n"
+                "  OUTPUT_VARIABLE install_output\n"
+                "  ERROR_VARIABLE install_error\n"
+                ")\n"
+                "if (NOT install_result EQUAL 0)\n"
+                "  message(FATAL_ERROR \"HuxerUI Windows Debug SDK installation failed:\\n"
+                "\${install_output}\${install_error}\")\n"
+                "endif ()\n"
+        )
+        set(CPACK_INSTALL_SCRIPTS "${HUXERUI_WINDOWS_DEBUG_INSTALL_SCRIPT}")
+    endif ()
     include(CPack)
 endif ()

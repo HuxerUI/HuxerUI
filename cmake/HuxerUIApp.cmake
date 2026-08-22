@@ -177,14 +177,21 @@ function(huxerui_add_app target_name)
         return()
     endif ()
 
-    if (NOT HUXERUI_PLATFORM_ID AND TARGET HuxerUI::huxerui)
-        get_target_property(HUXERUI_PLATFORM_ID
-                HuxerUI::huxerui
-                HUXERUI_PLATFORM_ID
-        )
-    endif ()
-    if (NOT HUXERUI_PLATFORM_ID OR HUXERUI_PLATFORM_ID MATCHES "-NOTFOUND$")
+    _huxerui_select_framework_target(HUXERUI_APP_FRAMEWORK_TARGET)
+    get_target_property(HUXERUI_APP_PLATFORM_ID
+            ${HUXERUI_APP_FRAMEWORK_TARGET}
+            HUXERUI_PLATFORM_ID
+    )
+    get_target_property(HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE
+            ${HUXERUI_APP_FRAMEWORK_TARGET}
+            HUXERUI_BUILTIN_RESOURCE_PACKAGE
+    )
+    if (NOT HUXERUI_APP_PLATFORM_ID OR HUXERUI_APP_PLATFORM_ID MATCHES "-NOTFOUND$")
         message(FATAL_ERROR "huxerui_add_app() requires a configured HuxerUI platform")
+    endif ()
+    if (NOT HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE
+            OR HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE MATCHES "-NOTFOUND$")
+        message(FATAL_ERROR "huxerui_add_app() requires the HuxerUI built-in resource package")
     endif ()
 
     if (IOS)
@@ -199,18 +206,6 @@ function(huxerui_add_app target_name)
         )
     else ()
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
-    endif ()
-
-    if (TARGET HuxerUI::huxerui_static
-            AND NOT ANDROID
-            AND (NOT DEFINED HUXERUI_STATIC_COMPONENT_LOADED OR HUXERUI_STATIC_COMPONENT_LOADED))
-        set(HUXERUI_APP_FRAMEWORK_TARGET HuxerUI::huxerui_static)
-    elseif (TARGET HuxerUI::huxerui)
-        set(HUXERUI_APP_FRAMEWORK_TARGET HuxerUI::huxerui)
-    else ()
-        message(FATAL_ERROR
-                "huxerui_add_app() requires the HuxerUI::huxerui target"
-        )
     endif ()
 
     target_compile_features(${target_name} PRIVATE cxx_std_20)
@@ -254,7 +249,7 @@ function(huxerui_add_app target_name)
     huxerui_enable_codegen(${target_name})
     set_property(TARGET ${target_name} APPEND PROPERTY
             HUXERUI_RESOURCE_PACKAGES
-            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+            "${HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE}"
     )
     _huxerui_schedule_resources(${target_name})
     if (HUXERUI_APP_RESOURCES)
@@ -291,7 +286,7 @@ function(huxerui_add_app target_name)
     endif ()
 
     _huxerui_json_escape("${target_name}" HUXERUI_APP_JSON_TARGET)
-    _huxerui_json_escape("${HUXERUI_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
+    _huxerui_json_escape("${HUXERUI_APP_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
     _huxerui_json_escape("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
 
     set(HUXERUI_APP_INTEGRATION_DIRECTORY

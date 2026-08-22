@@ -147,11 +147,14 @@ jobs:
           tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hrc
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update &&
-          sudo apt-get install -y
-          gperf libegl1-mesa-dev libgles2-mesa-dev libglib2.0-dev libsoup-3.0-dev
-          libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev meson ninja-build pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gperf libegl1-mesa-dev libgles2-mesa-dev libglib2.0-dev libsoup-3.0-dev \
+            libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev ninja-build pkg-config python3-venv
+          python3 -m venv "$RUNNER_TEMP/huxerui-meson"
+          "$RUNNER_TEMP/huxerui-meson/bin/pip" install meson==1.11.0
+          echo "$RUNNER_TEMP/huxerui-meson/bin" >> "$GITHUB_PATH"
       - name: Configure
         run: >-
           cmake
@@ -161,7 +164,16 @@ jobs:
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
-          -DHUXERUI_SDK_PLATFORM_ARTIFACT_ROOT=${{ github.workspace }}/sdk-platform-artifacts
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/sdk-platform-artifacts
+          -DHUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG=ON
+      - name: Build Windows Debug libraries
+        if: runner.os == 'Windows'
+        run: >-
+          cmake
+          --build build
+          --config Debug
+          --target huxerui huxerui_static
+          --parallel
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test

@@ -181,7 +181,7 @@ run cmake -S "$source_directory" -B "$host_build_directory" \
   -DHUXERUI_BUILD_CLI=ON \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
   -DHUXERUI_BUILD_TESTS=OFF \
-  "-DHUXERUI_SDK_PLATFORM_ARTIFACT_ROOT=$platform_artifact_root"
+  "-DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=$platform_artifact_root"
 run cmake --build "$host_build_directory" --config "$configuration" --parallel "$jobs"
 run cpack --config "$host_build_directory/CPackConfig.cmake" \
   -C "$configuration" -G TGZ -B "$output_directory"

@@ -323,6 +323,36 @@ add_test(NAME HuxerUILibraryValidationTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/library_validation.cmake"
 )
 
+if (WIN32)
+    set(HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY "$ENV{TEMP}")
+else ()
+    set(HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif ()
+add_test(NAME HuxerUISourceSubdirectoryTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                "-DHOST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+                "-DHOST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+                "-DHOST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_subdirectory.cmake"
+)
+if (MSVC AND CMAKE_GENERATOR MATCHES "^Ninja")
+    set(HUXERUI_SOURCE_SUBDIRECTORY_ENVIRONMENT)
+    foreach (HUXERUI_MSVC_ENVIRONMENT_VARIABLE IN ITEMS PATH INCLUDE LIB LIBPATH)
+        string(REPLACE ";" "\\;" HUXERUI_MSVC_ENVIRONMENT_VALUE
+                "$ENV{${HUXERUI_MSVC_ENVIRONMENT_VARIABLE}}"
+        )
+        list(APPEND HUXERUI_SOURCE_SUBDIRECTORY_ENVIRONMENT
+                "${HUXERUI_MSVC_ENVIRONMENT_VARIABLE}=${HUXERUI_MSVC_ENVIRONMENT_VALUE}"
+        )
+    endforeach ()
+    set_tests_properties(HuxerUISourceSubdirectoryTests PROPERTIES
+            ENVIRONMENT "${HUXERUI_SOURCE_SUBDIRECTORY_ENVIRONMENT}"
+    )
+endif ()
+
 if (TARGET huxerui_cli_core)
     add_executable(huxerui_cli_tests
             tests_main.cpp
@@ -407,7 +437,8 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
                     "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
                     "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
                     "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
-                    "-DPLATFORM_ARTIFACTS_INCLUDED=$<BOOL:${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}>"
+                    "-DPLATFORM_ARTIFACTS_INCLUDED=$<BOOL:${HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT}>"
+                    "-DWINDOWS_DEBUG_INCLUDED=$<BOOL:${HUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG}>"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_archive.cmake"
     )
     set_tests_properties(HuxerUISdkArchiveTests PROPERTIES RUN_SERIAL TRUE)

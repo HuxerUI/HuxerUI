@@ -69,7 +69,10 @@ if (HUXERUI_BUILD_CLI)
     add_subdirectory(tools/huxerui_cli)
 endif ()
 
-include(cmake/HuxerUISdk.cmake)
+if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
+        AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN)
+    include(cmake/HuxerUISdk.cmake)
+endif ()
 
 if (HUXERUI_BUILD_TESTS)
     enable_testing()

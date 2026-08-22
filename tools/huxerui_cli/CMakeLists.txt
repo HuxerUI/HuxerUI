@@ -63,5 +63,7 @@ set_target_properties(huxerui_cli PROPERTIES
         OUTPUT_NAME "huxerui"
 )
 
-include(GNUInstallDirs)
-install(TARGETS huxerui_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(GNUInstallDirs)
+    install(TARGETS huxerui_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif ()

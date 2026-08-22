@@ -127,7 +127,6 @@ $platformArtifactRoot = Join-Path $buildDirectory "platform-artifacts"
 $androidExtractDirectory = Join-Path $buildDirectory "android-aar"
 $webBuildDirectory = Join-Path $buildDirectory "web"
 $hostBuildDirectory = Join-Path $buildDirectory "host"
-$hostDebugBuildDirectory = Join-Path $buildDirectory "host-debug"
 $hostConfiguration = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { "Release" } else { $Configuration }
 
 New-Item -ItemType Directory -Path $buildDirectory, $outputDirectory -Force | Out-Null
@@ -229,52 +228,31 @@ $webArtifactDirectory = Join-Path $platformArtifactRoot "web/emscripten-$webVers
 New-Item -ItemType Directory -Path $webArtifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath $webLibrary -Destination (Join-Path $webArtifactDirectory "libhuxerui.a")
 
-if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-    Invoke-Checked $cmake @(
-        "-G", "Ninja",
-        "-S", $sourceDirectory,
-        "-B", $hostDebugBuildDirectory,
-        "-DCMAKE_BUILD_TYPE=Debug",
-        "-DHUXERUI_BUILD_SHARED=ON",
-        "-DHUXERUI_BUILD_STATIC=ON",
-        "-DHUXERUI_BUILD_CLI=OFF",
-        "-DHUXERUI_BUILD_EXAMPLES=OFF",
-        "-DHUXERUI_BUILD_TESTS=OFF"
-    ) $sourceDirectory
-    Invoke-Checked $cmake @(
-        "--build", $hostDebugBuildDirectory,
-        "--target", "huxerui", "huxerui_static",
-        "--parallel", $Jobs
-    ) $sourceDirectory
-
-    $windowsDebugArtifactDirectory = Join-Path $platformArtifactRoot "windows/debug"
-    New-Item -ItemType Directory -Path $windowsDebugArtifactDirectory -Force | Out-Null
-    foreach ($artifact in @(
-        "bin/huxerui_debug.dll",
-        "lib/huxerui_debug.lib",
-        "lib/huxerui_static_debug.lib"
-    )) {
-        $source = Join-Path $hostDebugBuildDirectory $artifact
-        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            throw "HuxerUI Windows Debug build did not produce $artifact"
-        }
-        Copy-Item -LiteralPath $source -Destination $windowsDebugArtifactDirectory
-    }
-}
-
 $hostConfigureArguments = @(
     "-S", $sourceDirectory,
     "-B", $hostBuildDirectory,
-    "-DCMAKE_BUILD_TYPE=$hostConfiguration",
     "-DHUXERUI_BUILD_CLI=ON",
     "-DHUXERUI_BUILD_EXAMPLES=OFF",
     "-DHUXERUI_BUILD_TESTS=OFF",
-    "-DHUXERUI_SDK_PLATFORM_ARTIFACT_ROOT=$platformArtifactRoot"
+    "-DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=$platformArtifactRoot"
 )
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-    $hostConfigureArguments += @("-G", "Ninja")
+    $hostConfigureArguments += @(
+        "-G", "Ninja Multi-Config",
+        "-DHUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG=ON"
+    )
+} else {
+    $hostConfigureArguments += "-DCMAKE_BUILD_TYPE=$hostConfiguration"
 }
 Invoke-Checked $cmake $hostConfigureArguments $sourceDirectory
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    Invoke-Checked $cmake @(
+        "--build", $hostBuildDirectory,
+        "--config", "Debug",
+        "--target", "huxerui", "huxerui_static",
+        "--parallel", $Jobs
+    ) $sourceDirectory
+}
 Invoke-Checked $cmake @(
     "--build", $hostBuildDirectory,
     "--config", $hostConfiguration,
