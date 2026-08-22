@@ -72,6 +72,39 @@ std::wstring Utf8ToWide(std::string_view value) {
   return wide;
 }
 
+std::string WideToUtf8(std::wstring_view value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int length = WideCharToMultiByte(
+      CP_UTF8,
+      WC_ERR_INVALID_CHARS,
+      value.data(),
+      static_cast<int>(value.size()),
+      nullptr,
+      0,
+      nullptr,
+      nullptr
+  );
+  if (length <= 0) {
+    throw std::runtime_error("cannot convert process environment value to UTF-8");
+  }
+  std::string utf8(static_cast<std::size_t>(length), '\0');
+  if (WideCharToMultiByte(
+          CP_UTF8,
+          WC_ERR_INVALID_CHARS,
+          value.data(),
+          static_cast<int>(value.size()),
+          utf8.data(),
+          length,
+          nullptr,
+          nullptr
+      ) != length) {
+    throw std::runtime_error("cannot convert process environment value to UTF-8");
+  }
+  return utf8;
+}
+
 std::wstring QuoteWindowsArgument(std::wstring_view value) {
   if (!value.empty() && value.find_first_of(L" \t\"") == std::wstring_view::npos) {
     return std::wstring(value);
@@ -332,17 +365,26 @@ ProcessResult RunPosixProcess(const ProcessCommand& command, bool capture_output
 std::optional<std::string> ReadEnvironmentVariable(std::string_view name) {
   const std::string key(name);
 #if defined(_WIN32)
-  char* value = nullptr;
-  std::size_t length = 0;
-  if (_dupenv_s(&value, &length, key.c_str()) != 0) {
+  const std::wstring wide_key = Utf8ToWide(name);
+  SetLastError(ERROR_SUCCESS);
+  const DWORD required = GetEnvironmentVariableW(wide_key.c_str(), nullptr, 0);
+  if (required == 0) {
+    const DWORD error = GetLastError();
+    if (error == ERROR_ENVVAR_NOT_FOUND) {
+      return std::nullopt;
+    }
+    if (error == ERROR_SUCCESS) {
+      return std::string{};
+    }
+    throw std::runtime_error("cannot read environment variable: " + key + ", Win32 error " + std::to_string(error));
+  }
+  std::wstring value(static_cast<std::size_t>(required), L'\0');
+  const DWORD length = GetEnvironmentVariableW(wide_key.c_str(), value.data(), required);
+  if (length == 0 || length >= required) {
     throw std::runtime_error("cannot read environment variable: " + key);
   }
-  std::optional<std::string> result;
-  if (value) {
-    result = value;
-  }
-  std::free(value);
-  return result;
+  value.resize(length);
+  return WideToUtf8(value);
 #else
   const char* value = std::getenv(key.c_str());
   return value ? std::optional<std::string>(value) : std::nullopt;

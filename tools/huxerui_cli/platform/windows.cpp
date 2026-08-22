@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <fstream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -20,6 +23,84 @@ std::filesystem::path VisualStudioLocator() {
   const std::filesystem::path locator =
       std::filesystem::path(*program_files) / "Microsoft Visual Studio/Installer/vswhere.exe";
   return std::filesystem::is_regular_file(locator) ? locator : std::filesystem::path{};
+}
+
+std::filesystem::path VisualStudioInstallation() {
+  const std::filesystem::path locator = VisualStudioLocator();
+  if (locator.empty()) {
+    return {};
+  }
+  const ProcessResult result = RunProcessCapture({
+      locator.string(),
+      {"-latest",
+       "-products",
+       "*",
+       "-requires",
+       "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+       "-property",
+       "installationPath"},
+      {},
+  });
+  std::string installation = result.output;
+  while (!installation.empty() && std::isspace(static_cast<unsigned char>(installation.back()))) {
+    installation.pop_back();
+  }
+  const std::filesystem::path path =
+      result.exit_code == 0 ? std::filesystem::path(installation) : std::filesystem::path{};
+  return std::filesystem::is_regular_file(path / "Common7/Tools/VsDevCmd.bat") ? path : std::filesystem::path{};
+}
+
+void ImportMsvcEnvironment(const std::filesystem::path& installation) {
+  const std::filesystem::path developer_command = installation / "Common7/Tools/VsDevCmd.bat";
+  if (!std::filesystem::is_regular_file(developer_command)) {
+    throw std::runtime_error("Visual Studio developer environment is missing: " + developer_command.string());
+  }
+
+  const std::filesystem::path script =
+      std::filesystem::temp_directory_path() /
+      ("huxerui-msvc-environment-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+       ".cmd");
+  {
+    std::ofstream stream(script, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+      throw std::runtime_error("cannot create temporary MSVC environment script");
+    }
+    stream << "@echo off\r\n"
+           << "chcp 65001 >nul\r\n"
+           << "call \"" << developer_command.string() << "\" -arch=x64 -host_arch=x64 >nul\r\n"
+           << "if errorlevel 1 exit /b %errorlevel%\r\n"
+           << "set\r\n";
+  }
+
+  ProcessResult result;
+  try {
+    result = RunProcessCapture({script.string(), {}, script.parent_path()});
+  } catch (...) {
+    std::error_code error;
+    std::filesystem::remove(script, error);
+    throw;
+  }
+  std::error_code error;
+  std::filesystem::remove(script, error);
+  if (result.exit_code != 0) {
+    throw std::runtime_error("cannot initialize the Visual Studio developer environment");
+  }
+
+  std::istringstream output(result.output);
+  std::string line;
+  while (std::getline(output, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    const std::size_t separator = line.find('=');
+    if (separator == std::string::npos || separator == 0) {
+      continue;
+    }
+    SetProcessEnvironmentVariable(line.substr(0, separator), line.substr(separator + 1));
+  }
+  if (!FindExecutable("cl")) {
+    throw std::runtime_error("Visual Studio developer environment did not provide the MSVC compiler");
+  }
 }
 
 class WindowsDriver final : public PlatformDriver {
@@ -40,31 +121,12 @@ public:
     if (!SupportsCurrentHost()) {
       return PlatformDriver::DiagnoseEnvironment();
     }
-    const std::filesystem::path locator = VisualStudioLocator();
-    if (locator.empty()) {
-      return {{EnvironmentDiagnosticStatus::Missing, "msvc", "MSVC C++ build tools", {}}};
-    }
-    const ProcessResult result = RunProcessCapture({
-        locator.string(),
-        {"-latest",
-         "-products",
-         "*",
-         "-requires",
-         "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-         "-property",
-         "installationPath"},
-        {},
-    });
-    std::string installation = result.output;
-    while (!installation.empty() && std::isspace(static_cast<unsigned char>(installation.back()))) {
-      installation.pop_back();
-    }
+    const std::filesystem::path installation = VisualStudioInstallation();
     return {{
-        result.exit_code == 0 && !installation.empty() ? EnvironmentDiagnosticStatus::Ready
-                                                       : EnvironmentDiagnosticStatus::Missing,
+        installation.empty() ? EnvironmentDiagnosticStatus::Missing : EnvironmentDiagnosticStatus::Ready,
         "msvc",
         "MSVC C++ build tools",
-        std::move(installation),
+        installation.string(),
     }};
   }
 
@@ -107,8 +169,18 @@ public:
     return detail::ValidateRequiredFiles(shell_root, required);
   }
 
+  void PrepareBuildEnvironment() const override {
+    const std::filesystem::path installation = VisualStudioInstallation();
+    if (installation.empty()) {
+      throw std::runtime_error("HuxerUI cannot find Visual Studio with the MSVC C++ x64 tools");
+    }
+    ImportMsvcEnvironment(installation);
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
-    return detail::DesktopBuildCommands(context);
+    std::vector<ProcessCommand> commands = detail::DesktopBuildCommands(context);
+    commands.front().arguments.push_back("-DCMAKE_CXX_COMPILER=cl");
+    return commands;
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {

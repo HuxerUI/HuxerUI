@@ -19,7 +19,7 @@ fail() {
 
 source_directory=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 build_directory="$source_directory/build/sdk"
-output_directory="$source_directory/release-assets"
+output_directory=
 configuration=Release
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
 
@@ -54,6 +54,10 @@ while [ "$#" -gt 0 ]; do
     ;;
   esac
 done
+
+if [ -z "$output_directory" ]; then
+  output_directory="$build_directory/packages"
+fi
 
 case "$configuration" in
 Debug | Release) ;;

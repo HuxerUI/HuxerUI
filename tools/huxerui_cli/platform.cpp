@@ -209,6 +209,8 @@ std::vector<ProcessCommand> PlatformDriver::LibraryGraphCommands(const PlatformC
 
 void PlatformDriver::UpdateProjectIntegration(const PlatformCommandContext&) const {}
 
+void PlatformDriver::PrepareBuildEnvironment() const {}
+
 std::vector<ProcessCommand> PlatformDriver::OpenCommands(const PlatformCommandContext&) const {
   throw std::logic_error("platform does not support opening a development project: " + std::string(Id()));
 }

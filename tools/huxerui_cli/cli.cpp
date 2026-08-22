@@ -629,9 +629,18 @@ PlatformCommandContext MakeCommandContext(
   }
   const std::filesystem::path build_directory = project.root / ".huxerui/build" / build_variant / options.profile;
   std::string cmake_generator = options.cmake_generator;
-  if (platform.Id() != "android" && platform.Id() != "ios" && cmake_generator.empty() &&
+  if (platform.Id() == "windows") {
+    if (!cmake_generator.empty()) {
+      throw UsageError("Windows builds select an MSVC-compatible CMake generator automatically");
+    }
+    if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt")) {
+      cmake_generator = FindExecutable("ninja") ? "Ninja" : "NMake Makefiles";
+    }
+  } else if (
+      platform.Id() != "android" && platform.Id() != "ios" && cmake_generator.empty() &&
       !std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
-      !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {
+      !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")
+  ) {
     cmake_generator = "Ninja";
   }
   return {
@@ -666,6 +675,7 @@ void BuildPlatform(
 ) {
   output << "Building " << platform.Id() << " (" << options.profile << ")\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
+  platform.PrepareBuildEnvironment();
   ExecuteCommands(platform.LibraryGraphCommands(context), output);
   platform.UpdateProjectIntegration(context);
   ExecuteCommands(platform.BuildCommands(context), output);

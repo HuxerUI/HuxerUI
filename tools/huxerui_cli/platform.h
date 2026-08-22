@@ -89,6 +89,7 @@ public:
   [[nodiscard]] virtual std::vector<PlatformDevice> DiscoverDevices() const;
   [[nodiscard]] virtual std::vector<ProcessCommand> LibraryGraphCommands(const PlatformCommandContext& context) const;
   virtual void UpdateProjectIntegration(const PlatformCommandContext& context) const;
+  virtual void PrepareBuildEnvironment() const;
   [[nodiscard]] virtual std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
   [[nodiscard]] virtual std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const = 0;

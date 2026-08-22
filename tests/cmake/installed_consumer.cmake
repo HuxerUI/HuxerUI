@@ -45,6 +45,7 @@ if (NOT INSTALLED_BUILTIN_RESOURCE_INDEXES)
 endif ()
 file(RENAME "${SDK_INSTALL_ROOT}" "${SDK_ROOT}")
 file(REAL_PATH "${SDK_ROOT}" SDK_ROOT)
+file(TO_NATIVE_PATH "${SDK_ROOT}" SDK_ROOT_NATIVE)
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)
@@ -58,8 +59,8 @@ execute_process(
         OUTPUT_VARIABLE DOCTOR_OUTPUT
         ERROR_VARIABLE DOCTOR_ERROR
 )
-if (NOT DOCTOR_OUTPUT MATCHES "HUXERUI_HOME \\(environment\\): ${SDK_ROOT}"
-        OR DOCTOR_ERROR)
+string(FIND "${DOCTOR_OUTPUT}" "[ok] HUXERUI_HOME (environment): ${SDK_ROOT_NATIVE}" SDK_OUTPUT_POSITION)
+if (SDK_OUTPUT_POSITION LESS 0 OR DOCTOR_ERROR)
     message(FATAL_ERROR "Relocated SDK environment discovery failed:\n${DOCTOR_OUTPUT}${DOCTOR_ERROR}")
 endif ()
 execute_process(
@@ -104,12 +105,17 @@ string(REPLACE
 file(WRITE "${APP_SOURCE}" "${APP_SOURCE_CONTENT}")
 file(WRITE "${PROJECT_ROOT}/src/extra.cpp" "int AdditionalSource() {\n  return 42;\n}\n")
 
+set(BUILD_COMMAND
+        "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
+        "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
+        "${HUXERUI_CLI}" build "${PLATFORM_ID}"
+        --profile "${BUILD_PROFILE}"
+)
+if (NOT PLATFORM_ID STREQUAL "windows")
+    list(APPEND BUILD_COMMAND --generator "${HOST_GENERATOR}")
+endif ()
 execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
-                "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
-                "${HUXERUI_CLI}" build "${PLATFORM_ID}"
-                --profile "${BUILD_PROFILE}"
-                --generator "${HOST_GENERATOR}"
+        COMMAND ${BUILD_COMMAND}
         WORKING_DIRECTORY "${PROJECT_ROOT}"
         RESULT_VARIABLE BUILD_RESULT
         OUTPUT_VARIABLE BUILD_OUTPUT

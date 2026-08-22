@@ -410,7 +410,7 @@ TEST_CASE("HuxerUICliRejectsUnknownPlatformsAsUsageErrors") {
   REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "sample"));
 }
 
-TEST_CASE("HuxerUICliCreatesStableDesktopBuildCommands") {
+TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {
   TemporaryDirectory temporary;
   const huxerui::cli::PlatformDriver* windows = huxerui::cli::FindPlatformDriver("windows");
   REQUIRE(windows != nullptr);
@@ -437,6 +437,7 @@ TEST_CASE("HuxerUICliCreatesStableDesktopBuildCommands") {
           "-B",
           context.build_directory.string(),
           "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_CXX_COMPILER=cl",
       }
   );
   REQUIRE(

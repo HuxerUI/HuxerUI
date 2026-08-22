@@ -266,9 +266,11 @@ The generated CMake project recursively collects `.cpp`, `.cc`, and `.cxx` files
 `package <platform-list>` performs a Release build by default and replaces only the selected platform directories under `dist` with the artifacts reported by their platform drivers.
 `huxerui open ios` records the ignored local SDK setting and opens `platform/ios/<target>.xcodeproj` without regenerating the Xcode project.
 `run android` selects the only ready device automatically or requires `--device <id>` when several are available.
-For a fresh desktop build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence. `--generator` is rejected for Android and iOS because their platform generators belong to Gradle and Xcode.
+For a fresh Linux or macOS build the CLI selects Ninja when available; `--generator <name>`, `CMAKE_GENERATOR`, and an existing CMake cache take precedence.
+Windows builds discover the latest installed Visual Studio C++ toolchain through `vswhere`, initialize its x64 developer environment, and use Ninja with MSVC or NMake with MSVC when Ninja is unavailable.
+Windows, Android, and iOS reject `--generator`; their platform drivers own the supported generator and toolchain selection.
 The CLI selects an explicit source checkout or installed prefix through `HUXERUI_HOME`, otherwise it locates a compatible SDK relative to its executable, and propagates the resolved home to native build tools.
-An installed SDK provides its host library, Android's Java-only AAR and `arm64-v8a` or `x86_64` native libraries, and the Web static library built by Emscripten 4.0.19.
+An installed SDK provides Debug and Release host libraries on Windows, Android's Java-only AAR and `arm64-v8a` or `x86_64` native libraries, and the Web static library built by Emscripten 4.0.19.
 Android selects the source Gradle library only when `HUXERUI_HOME` is a source checkout; installed SDK builds consume the AAR and dynamically link the ABI-specific library through the same root `CMakeLists.txt`.
 Web source checkouts compile the framework with the application, while installed SDK builds statically link the pinned Emscripten library through the canonical `HuxerUI::huxerui_static` target.
 Android SDK levels, the NDK version, ABIs, application identity, dependencies, and packaging policy remain entirely in the generated Gradle shell.
@@ -290,10 +292,14 @@ The repository packaging scripts build the Android AAR and ABI libraries, build 
 sh scripts/package_sdk.sh
 ```
 
-The default build directory is `build/sdk`, the default output directory is `release-assets`, and the default configuration is `Release`.
+The default build directory is `build/sdk`, the default package output directory is `build/sdk/packages`, and the default configuration is `Release`.
 Use `-Help` or `--help` to inspect optional build-directory, output-directory, configuration, and parallelism arguments.
 The scripts require the current host compiler, CMake and CPack, Java, the Android SDK and configured NDK, and Emscripten 4.0.19.
 Android and Web artifacts are private intermediates under the SDK build directory and are not public script inputs.
+
+On Windows, `bin/huxerui.exe` is the CLI while `bin/huxerui.dll` and `bin/huxerui_debug.dll` are the Release and Debug framework runtimes.
+Their corresponding `lib/huxerui.lib` and `lib/huxerui_debug.lib` files are DLL import libraries; only `lib/huxerui_static.lib` and `lib/huxerui_static_debug.lib` are static framework libraries.
+The imported `HuxerUI::huxerui` target selects the matching DLL and import library, while `HuxerUI::huxerui_static` selects the matching static library.
 
 ## Run examples
 

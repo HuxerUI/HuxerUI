@@ -314,8 +314,11 @@ Builds retain platform output below `.huxerui/build/<platform>/<profile>`. iOS u
 The CLI validates the complete requested set before executing commands and prints each platform command.
 
 Desktop builds configure the root CMake project and then build it.
-Fresh desktop builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
-`--generator` applies only to CMake-owned desktop and Web builds. Android and iOS reject it because Gradle and Xcode own their platform build generators.
+Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
+Windows discovers the latest Visual Studio installation that provides the C++ x64 tools without constraining its product version, imports its developer environment, and explicitly selects MSVC.
+Fresh Windows builds use Ninja when available and NMake otherwise; an existing Windows cache retains its compatible generator while the compiler remains MSVC.
+The Windows SDK packages matching Debug and Release shared and static libraries so the CLI's default Debug profile and explicit Release profile use the corresponding MSVC runtime.
+`--generator` applies to Linux, macOS, and Web builds. Windows, Android, and iOS reject it because their platform drivers own the supported generator and toolchain selection.
 
 iOS builds invoke the source-controlled Xcode project. A build without `--device` uses the generic Simulator destination; selecting a Simulator or physical device uses its Xcode destination identifier, and a physical-device build allows automatic provisioning updates. The App target invokes CMake through source-controlled scripts to produce a destination-specific application core, links it into the bundle, and stages its resources.
 
@@ -359,9 +362,15 @@ For an installed SDK it names the self-contained installation prefix:
 ```text
 HUXERUI_HOME/
   bin/
-    huxerui
+    huxerui[.exe]
+    huxerui.dll                         # Windows Release framework runtime
+    huxerui_debug.dll                   # Windows Debug framework runtime
   include/
   lib/
+    huxerui.lib                         # Windows Release DLL import library
+    huxerui_debug.lib                   # Windows Debug DLL import library
+    huxerui_static.lib                  # Windows Release static library
+    huxerui_static_debug.lib            # Windows Debug static library
     cmake/HuxerUI/
   share/huxerui/
     platform/
@@ -375,6 +384,9 @@ HUXERUI_HOME/
 ```
 
 `HUXERUI_HOME/bin` belongs on `PATH` for a portable or installer-managed SDK.
+The Windows `bin` directory contains both executable tools and loadable runtime binaries; it is not a CLI-only directory.
+Windows places DLL import libraries beside static archives under `lib`, and the `_static` filename distinguishes the archives that contain the complete framework implementation.
+Consumers select these files through `HuxerUI::huxerui` or `HuxerUI::huxerui_static` rather than linking an installation filename directly.
 The CLI resolves its home in this order:
 
 - A valid explicit `HUXERUI_HOME`.

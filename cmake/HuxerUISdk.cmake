@@ -3,8 +3,25 @@ include_guard(GLOBAL)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT "" CACHE PATH "Prebuilt Android and Web SDK artifacts")
+set(HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT "" CACHE PATH "Prebuilt SDK platform artifacts")
 set(HUXERUI_WEB_EMSCRIPTEN_VERSION "4.0.19")
+set(HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS OFF)
+
+if (WIN32 AND HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
+    set(HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT
+            "${HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT}/windows/debug"
+    )
+    foreach (HUXERUI_WINDOWS_DEBUG_ARTIFACT IN ITEMS
+            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.dll"
+            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.lib"
+            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_static_debug.lib"
+    )
+        if (NOT EXISTS "${HUXERUI_WINDOWS_DEBUG_ARTIFACT}")
+            message(FATAL_ERROR "HuxerUI Windows Debug SDK artifact is missing: ${HUXERUI_WINDOWS_DEBUG_ARTIFACT}")
+        endif ()
+    endforeach ()
+    set(HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS ON)
+endif ()
 
 if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
         AND HUXERUI_BUILD_CLI
@@ -104,6 +121,17 @@ if (HUXERUI_SDK_PLATFORM_ARTIFACT_ROOT)
     install(DIRECTORY "${HUXERUI_WEB_ARTIFACT_ROOT}/"
             DESTINATION
             "${CMAKE_INSTALL_DATADIR}/huxerui/platform/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
+    )
+endif ()
+
+if (HUXERUI_WINDOWS_DEBUG_SDK_ARTIFACTS)
+    install(FILES "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.dll"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    )
+    install(FILES
+            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_debug.lib"
+            "${HUXERUI_WINDOWS_DEBUG_ARTIFACT_ROOT}/huxerui_static_debug.lib"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
 endif ()
 
