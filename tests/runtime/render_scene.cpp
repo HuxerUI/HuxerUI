@@ -39,7 +39,7 @@ public:
   OverflowPaintExtension(MountedNode& node, const OverflowPaint& modifier);
 
   void Update(MountedNode& node, const OverflowPaint& modifier);
-  void Paint(const MountedNode& node, PaintContext& context) const override;
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override;
 
 private:
   Color color_;
@@ -95,7 +95,7 @@ void OverflowPaintExtension::Update(MountedNode& node, const OverflowPaint& modi
   color_ = modifier.color;
 }
 
-void OverflowPaintExtension::Paint(const MountedNode& node, PaintContext& context) const {
+void OverflowPaintExtension::PaintAboveContent(const MountedNode& node, PaintContext& context) const {
   static_cast<void>(node);
   context.DrawRect({-200.0F, 0.0F, 80.0F, 20.0F}, color_);
 }
@@ -168,6 +168,23 @@ View AsymmetricClipChildrenApp() {
   return Stack {
     Spacer().With(Frame{80.0F, 80.0F}, Background{Color::White()}),
   }.With(Frame{80.0F, 80.0F}, CornerRadius{CornerRadii::Top(20.0F)}, ClipChildren{});
+}
+
+View AnimatedClipChildrenApp() {
+  return Button("animated clip")
+      .OnClick([] {})
+      .With(
+          Frame{80.0F, 48.0F},
+          CornerRadius{8.0F},
+          ClipChildren{},
+          Indication{
+              .press = IndicationLayer{
+                  .corner_radii = CornerRadii{20.0F},
+                  .enter = SnapSpec{},
+                  .exit = SnapSpec{},
+              },
+          }
+      );
 }
 
 View OverflowChildHitTestApp() {
@@ -410,6 +427,25 @@ TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
   const auto* child_clip = std::get_if<PushPathClipCommand>(&render_node->child_clips.front());
   REQUIRE(child_clip != nullptr);
   REQUIRE(child_clip->path.Bounds() == mounted->bounds);
+}
+
+TEST_CASE("ClipChildrenUsesTheResolvedIndicationCornerRadii") {
+  TestPlatform platform;
+  Runtime runtime{AnimatedClipChildrenApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
+  runtime.BuildRenderFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 4, {40.0F, 24.0F}});
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE(frame.scene.root != nullptr);
+  const detail::MountedNode* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  const RenderNode* render_node = FindRenderNode(*frame.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->child_clips.size() == 1);
+  const auto* child_clip = std::get_if<PushClipCommand>(&render_node->child_clips.front());
+  REQUIRE(child_clip != nullptr);
+  REQUIRE(child_clip->corner_radius == 20.0F);
 }
 
 TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {

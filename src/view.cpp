@@ -101,12 +101,182 @@ const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
   return descriptor;
 }
 
+bool IsFinite(Point point) noexcept {
+  return std::isfinite(point.x) && std::isfinite(point.y);
+}
+
+bool IsFinite(Size size) noexcept {
+  return std::isfinite(size.width) && std::isfinite(size.height);
+}
+
+bool IsFinite(Color color) noexcept {
+  return std::isfinite(color.red) && std::isfinite(color.green) && std::isfinite(color.blue) &&
+         std::isfinite(color.alpha);
+}
+
+void ValidateColor(Color color, const char* message) {
+  if (!IsFinite(color)) {
+    throw std::invalid_argument(message);
+  }
+}
+
+void ValidateCornerRadii(CornerRadii radii, const char* message) {
+  if (!std::isfinite(radii.top_left) || radii.top_left < 0.0F || !std::isfinite(radii.top_right) ||
+      radii.top_right < 0.0F || !std::isfinite(radii.bottom_right) || radii.bottom_right < 0.0F ||
+      !std::isfinite(radii.bottom_left) || radii.bottom_left < 0.0F) {
+    throw std::invalid_argument(message);
+  }
+}
+
+void ValidateBorder(const Border& border) {
+  ValidateColor(border.color, "HuxerUI border color must be finite");
+  if (!std::isfinite(border.width) || border.width < 0.0F) {
+    throw std::invalid_argument("HuxerUI border width must be finite and non-negative");
+  }
+}
+
+void ValidateGradientStops(const std::vector<GradientStop>& stops) {
+  if (stops.size() < 2) {
+    throw std::invalid_argument("HuxerUI visual fill gradient requires at least two stops");
+  }
+  float previous = -1.0F;
+  for (const GradientStop& stop : stops) {
+    if (!std::isfinite(stop.offset) || stop.offset < 0.0F || stop.offset > 1.0F || stop.offset < previous) {
+      throw std::invalid_argument("HuxerUI visual fill gradient stops must be ordered within [0, 1]");
+    }
+    ValidateColor(stop.color, "HuxerUI visual fill gradient colors must be finite");
+    previous = stop.offset;
+  }
+}
+
+void ValidateVisualFill(const VisualFill& fill) {
+  std::visit(
+      [](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          ValidateColor(value, "HuxerUI visual fill color must be finite");
+        } else if constexpr (std::same_as<Value, LinearGradient>) {
+          if (!IsFinite(value.start) || !IsFinite(value.end)) {
+            throw std::invalid_argument("HuxerUI visual fill linear gradient endpoints must be finite");
+          }
+          ValidateGradientStops(value.stops);
+        } else if constexpr (std::same_as<Value, RadialGradient>) {
+          if (!IsFinite(value.center) || !IsFinite(value.radius) || value.radius.width <= 0.0F ||
+              value.radius.height <= 0.0F) {
+            throw std::invalid_argument(
+                "HuxerUI visual fill radial gradient geometry must be finite with positive radii"
+            );
+          }
+          ValidateGradientStops(value.stops);
+        } else {
+          if (!std::isfinite(value.opacity) || value.opacity < 0.0F || value.opacity > 1.0F) {
+            throw std::invalid_argument("HuxerUI visual fill image opacity must be finite within [0, 1]");
+          }
+          if (value.tint.has_value()) {
+            ValidateColor(*value.tint, "HuxerUI visual fill image tint must be finite");
+          }
+          const bool has_source = std::visit(
+              [](const auto& source) {
+                using Source = std::decay_t<decltype(source)>;
+                if constexpr (std::same_as<Source, ImageResource>) {
+                  return true;
+                } else {
+                  return source.HasValue();
+                }
+              },
+              value.source
+          );
+          if (!has_source) {
+            throw std::invalid_argument("HuxerUI visual fill image asset must not be empty");
+          }
+        }
+      },
+      fill.Get()
+  );
+}
+
+VisualFill ResolveVisualFill(const VisualFill& fill) {
+  const auto* image = std::get_if<ImageFill>(&fill.Get());
+  if (image == nullptr) {
+    ValidateVisualFill(fill);
+    return fill;
+  }
+  ImageFill resolved = *image;
+  if (const auto* resource = std::get_if<ImageResource>(&resolved.source)) {
+    std::visit([&resolved](auto asset) { resolved.source = std::move(asset); }, detail::UseImageResource(*resource));
+  }
+  VisualFill fill_result{std::move(resolved)};
+  ValidateVisualFill(fill_result);
+  return fill_result;
+}
+
+Indication ResolveIndication(Indication indication) {
+  const auto resolve_layer = [](std::optional<IndicationLayer>& layer) {
+    if (layer.has_value() && layer->fill.has_value()) {
+      layer->fill = ResolveVisualFill(*layer->fill);
+    }
+  };
+  resolve_layer(indication.focus);
+  resolve_layer(indication.hover);
+  resolve_layer(indication.press);
+  if (indication.geometry.layer_size.has_value() &&
+      (!IsFinite(*indication.geometry.layer_size) || indication.geometry.layer_size->width < 0.0F ||
+       indication.geometry.layer_size->height < 0.0F)) {
+    throw std::invalid_argument("HuxerUI indication layer size must be finite and non-negative");
+  }
+  if (indication.geometry.clip_corner_radii.has_value()) {
+    ValidateCornerRadii(
+        *indication.geometry.clip_corner_radii,
+        "HuxerUI indication clip corner radii must be finite and non-negative"
+    );
+  }
+  const auto validate_layer = [](const std::optional<IndicationLayer>& layer) {
+    if (!layer.has_value()) {
+      return;
+    }
+    if (layer->border.has_value()) {
+      ValidateBorder(*layer->border);
+    }
+    if (layer->corner_radii.has_value()) {
+      ValidateCornerRadii(*layer->corner_radii, "HuxerUI indication corner radii must be finite and non-negative");
+    }
+    MotionController enter;
+    enter.AnimateTo(1.0F, layer->enter);
+    MotionController exit;
+    exit.AnimateTo(1.0F, layer->exit);
+  };
+  validate_layer(indication.focus);
+  validate_layer(indication.hover);
+  validate_layer(indication.press);
+  if (indication.ripple.has_value()) {
+    ValidateColor(indication.ripple->color, "HuxerUI ripple color must be finite");
+    MotionController expansion;
+    expansion.AnimateTo(1.0F, indication.ripple->expansion);
+    MotionController fade_out;
+    fade_out.AnimateTo(1.0F, indication.ripple->fade_out);
+  }
+  return indication;
+}
+
+void ValidateFocusRing(const FocusRing& focus_ring) {
+  ValidateColor(focus_ring.color, "HuxerUI focus ring color must be finite");
+  if (!std::isfinite(focus_ring.width) || focus_ring.width < 0.0F || !std::isfinite(focus_ring.offset) ||
+      focus_ring.offset < 0.0F) {
+    throw std::invalid_argument("HuxerUI focus ring width and offset must be finite and non-negative");
+  }
+}
+
 void ApplyPadding(detail::ViewSpec& spec, const Padding& modifier) {
   spec.properties.padding = modifier.insets;
 }
 
 void ApplyBackground(detail::ViewSpec& spec, const Background& modifier) {
-  spec.properties.background = modifier.color;
+  spec.properties.background = ResolveVisualFill(modifier.fill);
+}
+
+void ApplyBorder(detail::ViewSpec& spec, const Border& modifier) {
+  ValidateBorder(modifier);
+  spec.properties.border = modifier;
 }
 
 void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
@@ -215,18 +385,8 @@ void ApplyFocusable(detail::ViewSpec& spec, const Focusable& modifier) {
   spec.focusable = modifier.value;
 }
 
-Color InterpolateColor(Color from, Color to, float progress) {
-  const float value = std::clamp(progress, 0.0F, 1.0F);
-  return {
-      from.red + (to.red - from.red) * value,
-      from.green + (to.green - from.green) * value,
-      from.blue + (to.blue - from.blue) * value,
-      from.alpha + (to.alpha - from.alpha) * value,
-  };
-}
-
 bool UsesDisabledVisualState(const MountedNode& node) {
-  return static_cast<const detail::MountedNode&>(node).disabled_visual_state;
+  return static_cast<const detail::MountedNode&>(node).applies_disabled_appearance;
 }
 
 enum class ToggleVisualKind {
@@ -415,16 +575,16 @@ public:
     };
   }
 
-  [[nodiscard]] bool PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
-    std::optional<Rect> indication_frame;
+    std::optional<Rect> indication_bounds;
     if (kind_ == ToggleVisualKind::Switch) {
       const Rect track = detail::ResolveToggleControlBounds(mounted);
       const float state_layer_size =
           std::min(std::max(0.0F, switch_style_.state_layer_size), std::min(node.Bounds().width, node.Bounds().height));
       const float thumb_center_x =
           track.x + track.height * 0.5F + std::max(0.0F, track.width - track.height) * progress_.Value();
-      indication_frame = Rect{
+      indication_bounds = Rect{
           thumb_center_x - state_layer_size * 0.5F,
           track.y + (track.height - state_layer_size) * 0.5F,
           state_layer_size,
@@ -439,21 +599,18 @@ public:
           std::max(0.0F, configured_state_layer_size),
           std::min(metrics.interactive_size.width, metrics.interactive_size.height)
       );
-      indication_frame = Rect{
+      indication_bounds = Rect{
           control.x + control.width * 0.5F - size * 0.5F,
           control.y + control.height * 0.5F - size * 0.5F,
           size,
           size,
       };
     }
-    if (mounted.indication_frame == indication_frame) {
-      return false;
-    }
-    mounted.indication_frame = indication_frame;
-    return true;
+    mounted.indication_bounds_override = indication_bounds;
+    return PaintInvalidation::None;
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     if (kind_ == ToggleVisualKind::Checkbox) {
       PaintCheckbox(node, context);
     } else if (kind_ == ToggleVisualKind::RadioButton) {
@@ -491,7 +648,7 @@ private:
     const Color unselected =
         disabled ? radio_button_style_.disabled_unselected_color : radio_button_style_.unselected_color;
     const Color selected = disabled ? radio_button_style_.disabled_selected_color : radio_button_style_.selected_color;
-    const Color color = InterpolateColor(unselected, selected, progress);
+    const Color color = detail::InterpolateColor(unselected, selected, progress);
     const float maximum_radius = std::max(0.0F, std::min(frame.width, frame.height) * 0.5F);
     const float border_width = std::clamp(radio_button_style_.border_width, 0.0F, maximum_radius);
     const Point center{
@@ -513,15 +670,17 @@ private:
     const bool disabled = UsesDisabledVisualState(node);
     const Color track =
         disabled
-            ? InterpolateColor(switch_style_.disabled_unchecked_track, switch_style_.disabled_checked_track, progress)
-            : InterpolateColor(switch_style_.unchecked_track, switch_style_.checked_track, progress);
+            ? detail::InterpolateColor(
+                  switch_style_.disabled_unchecked_track, switch_style_.disabled_checked_track, progress)
+            : detail::InterpolateColor(switch_style_.unchecked_track, switch_style_.checked_track, progress);
     const Color border =
-        disabled ? InterpolateColor(
+        disabled ? detail::InterpolateColor(
                        switch_style_.disabled_unchecked_track_border,
                        switch_style_.disabled_checked_track_border,
                        progress
                    )
-                 : InterpolateColor(switch_style_.unchecked_track_border, switch_style_.checked_track_border, progress);
+                 : detail::InterpolateColor(
+                       switch_style_.unchecked_track_border, switch_style_.checked_track_border, progress);
     context.DrawRect(frame, track, std::max(0.0F, switch_style_.corner_radius));
 
     if (switch_style_.track_border_width > 0.0F && border.alpha > 0.0F) {
@@ -539,8 +698,9 @@ private:
     const float travel = std::max(0.0F, frame.width - frame.height);
     const Color thumb =
         disabled
-            ? InterpolateColor(switch_style_.disabled_unchecked_thumb, switch_style_.disabled_checked_thumb, progress)
-            : InterpolateColor(switch_style_.unchecked_thumb, switch_style_.checked_thumb, progress);
+            ? detail::InterpolateColor(
+                  switch_style_.disabled_unchecked_thumb, switch_style_.disabled_checked_thumb, progress)
+            : detail::InterpolateColor(switch_style_.unchecked_thumb, switch_style_.checked_thumb, progress);
     context.DrawCircle(
         {
             start_x + travel * progress,
@@ -600,7 +760,7 @@ public:
     }
   }
 
-  [[nodiscard]] bool PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
     const std::size_t count = std::min(segment_count_, node.ChildCount());
     semantic_items_.resize(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -616,7 +776,7 @@ public:
       }
       item.bounds = {offset.x, offset.y, std::max(0.0F, right - offset.x), size.height};
     }
-    return false;
+    return PaintInvalidation::None;
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
@@ -880,7 +1040,7 @@ private:
         .align = TextAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
-    spec->properties.indication_override = style.indication;
+    spec->default_indication = style.indication;
     spec->component_semantics.role = SemanticRole::Tab;
     spec->component_semantics.label = item.label;
     spec->component_semantics.selected = selected;
@@ -943,9 +1103,9 @@ public:
     };
   }
 
-  [[nodiscard]] bool PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
     if (selected_index_ >= node.ChildCount()) {
-      return false;
+      return PaintInvalidation::None;
     }
     const bool reveal_selection = geometry_update_pending_;
     const auto& selected = static_cast<const detail::MountedNode&>(node.ChildAt(selected_index_));
@@ -991,7 +1151,7 @@ public:
     }
     geometry_update_pending_ = false;
     animate_geometry_update_ = false;
-    return changed;
+    return changed ? PaintInvalidation::Foreground : PaintInvalidation::None;
   }
 
   void OnKey(MountedNode& node, const KeyEvent& event) override {
@@ -1014,7 +1174,7 @@ public:
     }
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     const float divider_height = std::clamp(style_.divider_height, 0.0F, frame.height);
     if (divider_height > 0.0F && style_.divider_color.alpha > 0.0F &&
@@ -1189,7 +1349,7 @@ public:
     };
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     constexpr float pi = 3.14159265358979323846F;
     constexpr float full_circle = pi * 2.0F;
 
@@ -1288,7 +1448,7 @@ public:
     };
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     if (frame.width <= 0.0F || frame.height <= 0.0F) {
       return;
@@ -1561,7 +1721,7 @@ public:
     return PointerResult::Ignored;
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     if (frame.width <= 0.0F || frame.height <= 0.0F) {
       return;
@@ -1866,8 +2026,10 @@ private:
     }
     spec->properties.padding = style.padding;
     spec->properties.background = selected ? style.selected_background : style.background;
-    spec->properties.border = selected ? style.selected_border : style.border;
-    spec->properties.border_width = std::max(0.0F, style.border_width);
+    spec->properties.border = Border{
+        selected ? style.selected_border : style.border,
+        std::max(0.0F, style.border_width),
+    };
     spec->properties.corner_radii = SegmentCornerRadii(index, count, style.corner_radius);
     spec->properties.frame.min_width = std::max(0.0F, style.minimum_segment_width);
     spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
@@ -1875,18 +2037,17 @@ private:
         .align = TextAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
-    spec->properties.indication_override =
+    spec->default_indication =
         selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
-    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{spec->default_indication}));
     return spec;
   }
 };
 
 void ApplyThemeDefaults(detail::ViewSpec& spec) {
   const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
-  spec.properties.focus_ring = theme.interactions.focus_ring.value_or(theme.colors.primary);
-  spec.properties.focus_ring_width = std::max(0.0F, theme.interactions.focus_ring_width);
-  spec.properties.focus_ring_offset = std::max(0.0F, theme.interactions.focus_ring_offset);
+  ValidateFocusRing(theme.interactions.focus_ring);
+  spec.properties.focus_ring = theme.interactions.focus_ring;
   spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
   if (spec.kind == detail::NodeKind::Text) {
     spec.properties.text_style =
@@ -1904,7 +2065,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.corner_radii = style.corner_radius;
     spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
     spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
-    spec.properties.indication_override = style.indication;
+    spec.default_indication = style.indication;
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
@@ -1924,9 +2085,10 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.corner_radii = corner_radius;
     spec.properties.frame.min_width = interactive_size;
     spec.properties.frame.min_height = interactive_size;
-    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
-    spec.properties.indication_corner_radius = std::min(corner_radius, state_layer_size * 0.5F);
-    spec.properties.indication_override = style.indication;
+    Indication indication = style.indication.value_or(theme.interactions.indication);
+    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+    indication.geometry.clip_corner_radii = CornerRadii{std::min(corner_radius, state_layer_size * 0.5F)};
+    spec.default_indication = std::move(indication);
     if (spec.image_properties.IsVector()) {
       spec.properties.disabled_opacity = 1.0F;
     }
@@ -1940,9 +2102,14 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.background = selected ? style.selected_background : style.background;
     spec.properties.disabled_background =
         selected ? style.disabled_selected_background : style.disabled_background;
-    spec.properties.border = selected ? style.selected_border : style.border;
-    spec.properties.disabled_border = selected ? style.disabled_selected_border : style.disabled_border;
-    spec.properties.border_width = std::max(0.0F, style.border_width);
+    spec.properties.border = Border{
+        selected ? style.selected_border : style.border,
+        std::max(0.0F, style.border_width),
+    };
+    spec.properties.disabled_border = Border{
+        selected ? style.disabled_selected_border : style.disabled_border,
+        std::max(0.0F, style.border_width),
+    };
     spec.properties.text_style = style.label_style;
     spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
     spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
@@ -1958,7 +2125,7 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     }
     spec.properties.corner_radii = style.corner_radius;
     spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
-    spec.properties.indication_override =
+    spec.default_indication =
         selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
     spec.properties.disabled_opacity = 1.0F;
     return;
@@ -1978,11 +2145,11 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
         ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
     const TextFieldVariantStyle& variant_style = detail::ResolveTextFieldVariantStyle(style, style.variant);
     spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.focus_ring_width = 0.0F;
     spec.properties.padding = style.padding;
     spec.properties.background = variant_style.background;
     spec.properties.text_style = style.text_style;
     spec.properties.corner_radii = detail::ResolveTextFieldCornerRadii(style, style.variant);
+    spec.properties.focus_ring.width = 0.0F;
     spec.properties.frame.min_height = std::max(0.0F, variant_style.minimum_height);
     spec.properties.disabled_opacity = 1.0F;
     return;
@@ -1999,8 +2166,10 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
         {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
     );
     spec.properties.corner_radii = state_layer_size * 0.5F;
-    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
-    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    Indication indication = theme.interactions.indication;
+    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+    spec.default_indication = std::move(indication);
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
@@ -2016,8 +2185,10 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
         {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
     );
     spec.properties.corner_radii = state_layer_size * 0.5F;
-    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
-    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    Indication indication = theme.interactions.indication;
+    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+    spec.default_indication = std::move(indication);
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
@@ -2034,8 +2205,10 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
         {{style.width, style.height}, {width, height}, theme.spacing.small}
     );
     spec.properties.corner_radii = state_layer_size * 0.5F;
-    spec.properties.indication_size = Size{state_layer_size, state_layer_size};
-    spec.properties.indication_corner_radius = state_layer_size * 0.5F;
+    Indication indication = theme.interactions.indication;
+    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+    spec.default_indication = std::move(indication);
     spec.properties.disabled_opacity = 1.0F;
     return;
   }
@@ -2062,8 +2235,9 @@ void ApplyThemeDefaults(detail::ViewSpec& spec) {
     spec.properties.frame.width = std::max(0.0F, style.width);
     spec.properties.frame.height = std::max(0.0F, style.height);
     spec.properties.corner_radii = std::max(0.0F, style.height * 0.5F);
-    if (style.focus_ring_width.has_value()) {
-      spec.properties.focus_ring_width = std::max(0.0F, *style.focus_ring_width);
+    if (style.focus_ring.has_value()) {
+      ValidateFocusRing(*style.focus_ring);
+      spec.properties.focus_ring = *style.focus_ring;
     }
     spec.properties.disabled_opacity = 1.0F;
   }
@@ -2078,19 +2252,22 @@ std::shared_ptr<detail::ViewSpec> MakeTextSpec(std::string value, TextRole role)
   return spec;
 }
 
+void ActivateClick(const detail::EventBindings& bindings) {
+  detail::EmitEvent<ViewEvents::Click>(bindings);
+}
+
 std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
   spec->text = std::move(label);
   spec->focusable = true;
+  spec->activation = ActivateClick;
   spec->component_semantics.role = SemanticRole::Button;
   spec->component_semantics.label = spec->text;
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(
-    detail::ResolvedImageAsset icon,
-    std::string semantic_label
-) {
+std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(detail::ResolvedImageAsset icon, std::string semantic_label) {
   if (semantic_label.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
     throw std::invalid_argument("HuxerUI IconButton requires a non-empty semantic label");
   }
@@ -2098,8 +2275,10 @@ std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(
   spec->text = std::move(semantic_label);
   spec->image_properties.SetResolvedAsset(std::move(icon));
   spec->focusable = true;
+  spec->activation = ActivateClick;
   spec->component_semantics.role = SemanticRole::Button;
   spec->component_semantics.label = spec->text;
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
@@ -2121,15 +2300,16 @@ std::shared_ptr<detail::ViewSpec> MakeChipSpec(
   spec->component_semantics.role = SemanticRole::Button;
   spec->component_semantics.label = spec->text;
   spec->component_semantics.selected = selection;
-  const bool selected = selection.value_or(false);
   if (selection.has_value()) {
+    const bool selected = *selection;
     spec->activation = [selected](const detail::EventBindings& bindings) {
+      detail::EmitEvent<ViewEvents::Click>(bindings);
       detail::EmitEvent<ToggleEvents::Changed>(bindings, !selected);
     };
+  } else {
+    spec->activation = ActivateClick;
   }
-  if (selection.has_value()) {
-    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
-  }
+  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
@@ -2212,6 +2392,7 @@ MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked
   spec->component_semantics.label = spec->text;
   spec->component_semantics.checked = checked ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
   spec->activation = [visual_kind, checked](const detail::EventBindings& bindings) {
+    detail::EmitEvent<ViewEvents::Click>(bindings);
     if (visual_kind == ToggleVisualKind::RadioButton && checked) {
       return;
     }
@@ -2394,6 +2575,10 @@ const detail::ModifierDescriptor& Background::Descriptor() {
   return ApplyOnlyModifierDescriptor<Background, ApplyBackground>();
 }
 
+const detail::ModifierDescriptor& Border::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Border, ApplyBorder>();
+}
+
 const detail::ModifierDescriptor& Shadow::Descriptor() {
   return ApplyOnlyModifierDescriptor<Shadow, ApplyShadow>();
 }
@@ -2506,6 +2691,25 @@ View::View(std::shared_ptr<detail::ViewSpec> spec) : spec_(std::move(spec)) {
   if (spec_) {
     spec_->environment = detail::CurrentEnvironment();
     ApplyThemeDefaults(*spec_);
+    const bool uses_default_indication = std::ranges::any_of(
+        spec_->retained_modifiers,
+        [](const detail::ModifierSpec& modifier) {
+          return detail::IsDefaultIndicationDescriptor(modifier.descriptor);
+        }
+    );
+    if (uses_default_indication) {
+      Indication indication = spec_->default_indication.value_or(
+          detail::ResolveThemeSpec(spec_->environment).interactions.indication
+      );
+      spec_->default_indication = ResolveIndication(std::move(indication));
+    } else if (spec_->default_indication.has_value()) {
+      spec_->default_indication = ResolveIndication(std::move(*spec_->default_indication));
+    }
+    for (detail::ModifierSpec& modifier : spec_->retained_modifiers) {
+      if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
+        modifier = detail::MakeModifierSpec(detail::DefaultIndication{spec_->default_indication});
+      }
+    }
   }
 }
 
@@ -2520,7 +2724,10 @@ void View::SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue v
 }
 
 void View::AddDefaultIndication() {
-  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  Indication indication = spec_->default_indication.value_or(
+      detail::ResolveThemeSpec(spec_->environment).interactions.indication
+  );
+  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{ResolveIndication(std::move(indication))}));
 }
 
 void View::AddModifier(detail::ModifierSpec modifier) {
@@ -2532,6 +2739,16 @@ void View::AddModifier(detail::ModifierSpec modifier) {
   }
   if (modifier.descriptor->apply == nullptr && modifier.descriptor->create_extension == nullptr) {
     throw std::invalid_argument("HuxerUI modifier descriptor must apply or create a node extension");
+  }
+  if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {
+    modifier = detail::MakeModifierSpec(ResolveIndication(*static_cast<const Indication*>(modifier.value.get())));
+  } else if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
+    detail::DefaultIndication value = *static_cast<const detail::DefaultIndication*>(modifier.value.get());
+    Indication indication = value.value.value_or(
+        spec_->default_indication.value_or(detail::ResolveThemeSpec(spec_->environment).interactions.indication)
+    );
+    value.value = ResolveIndication(std::move(indication));
+    modifier = detail::MakeModifierSpec(std::move(value));
   }
   EnsureUniqueSpec();
   if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {

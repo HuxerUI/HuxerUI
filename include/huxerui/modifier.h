@@ -11,6 +11,7 @@
 #include <huxerui/event.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
+#include <huxerui/paint.h>
 
 namespace huxerui {
 
@@ -32,6 +33,13 @@ struct FrameInfo {
 
 class NodeExtension {
 public:
+  enum class PaintInvalidation {
+    None,
+    Content,
+    Foreground,
+    Both,
+  };
+
   struct FrameResult {
     bool needs_frame = false;
     std::optional<double> wake_after;
@@ -56,10 +64,17 @@ public:
     return {};
   }
 
-  // Called after final presentation geometry is resolved. Return true when foreground paint inputs changed.
-  [[nodiscard]] virtual bool PrepareGeometry(MountedNode& node) {
+  // Called after final presentation geometry is resolved. Report every retained paint phase whose inputs changed.
+  [[nodiscard]] virtual PaintInvalidation PrepareGeometry(MountedNode& node) {
     static_cast<void>(node);
-    return false;
+    return PaintInvalidation::None;
+  }
+
+  virtual void OnInteraction(MountedNode& node, const InteractionState& state,
+                             const std::optional<InteractionEvent>& event) {
+    static_cast<void>(node);
+    static_cast<void>(state);
+    static_cast<void>(event);
   }
 
   virtual void OnScrollActivity(MountedNode& node) {
@@ -133,15 +148,20 @@ public:
     return false;
   }
 
-  virtual void Paint(const MountedNode& node, PaintContext& context) const {
+  virtual void PaintBehindContent(const MountedNode& node, PaintContext& context) const {
+    static_cast<void>(node);
+    static_cast<void>(context);
+  }
+
+  virtual void PaintAboveContent(const MountedNode& node, PaintContext& context) const {
     static_cast<void>(node);
     static_cast<void>(context);
   }
 
 protected:
-  void InvalidatePaint() {
-    if (invalidate_paint_) {
-      invalidate_paint_();
+  void InvalidatePaint(PaintInvalidation invalidation = PaintInvalidation::Foreground) {
+    if (invalidation != PaintInvalidation::None && invalidate_paint_) {
+      invalidate_paint_(invalidation);
     }
   }
 
@@ -152,7 +172,7 @@ protected:
   }
 
 private:
-  void BindPaintInvalidation(std::function<void()> callback) {
+  void BindPaintInvalidation(std::function<void(PaintInvalidation)> callback) {
     invalidate_paint_ = std::move(callback);
   }
 
@@ -160,7 +180,7 @@ private:
     invalidate_semantics_ = std::move(callback);
   }
 
-  std::function<void()> invalidate_paint_;
+  std::function<void(PaintInvalidation)> invalidate_paint_;
   std::function<void()> invalidate_semantics_;
 
   friend class Runtime;
@@ -329,9 +349,18 @@ struct Padding {
 struct Background {
   static const detail::ModifierDescriptor& Descriptor();
 
-  Color color;
+  VisualFill fill;
 
   bool operator==(const Background&) const = default;
+};
+
+struct Border {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  Color color;
+  float width = 1.0F;
+
+  bool operator==(const Border&) const = default;
 };
 
 struct Shadow {

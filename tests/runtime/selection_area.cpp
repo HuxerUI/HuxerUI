@@ -26,6 +26,12 @@ View SelectionAreaApp() {
   };
 }
 
+View FocusedSelectionAreaApp() {
+  ThemeSpec spec = FlatLightThemeSpec();
+  spec.interactions.focus_ring = FocusRing{Color::Rgb(40, 180, 90), 3.0F, 4.0F};
+  return Theme(ThemeDefinition{spec}, SelectionAreaApp);
+}
+
 View PlainTextApp() {
   return Text("Alpha");
 }
@@ -226,6 +232,20 @@ TEST_CASE("TestSelectionAreaRetainsForegroundPaintAcrossCleanFrames") {
   const RenderNode* retained = FindSelectionPaintNode(runtime.BuildRenderFrame().scene.root);
   REQUIRE(retained != nullptr);
   REQUIRE(retained->foreground.Revision() == foreground_revision);
+}
+
+TEST_CASE("TestSelectionAreaPaintsTheThemeFocusRingForKeyboardFocus") {
+  TestPlatform platform;
+  Runtime runtime{FocusedSelectionAreaApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab});
+  const FlattenedScene& focused = runtime.BuildFrame();
+  REQUIRE(std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->width == 3.0F;
+  }));
 }
 
 TEST_CASE("TestTextSelectionCapabilityDoesNotDependOnBuiltInNodeKinds") {

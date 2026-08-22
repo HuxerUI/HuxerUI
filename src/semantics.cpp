@@ -488,16 +488,17 @@ void Runtime::BuildSemantics() {
     }
 
     std::uint64_t actions = owner_extension_actions;
-    if (mounted.enabled && (mounted.activation || detail::HasEventBinding<ViewEvents::Click>(mounted.event_bindings))) {
+    if (mounted.interaction.enabled &&
+        (mounted.activation || detail::HasEventBinding<ViewEvents::Click>(mounted.event_bindings))) {
       actions |= SemanticActionMask(SemanticActionKind::Activate);
     }
-    if (mounted.enabled && mounted.focusable) {
+    if (mounted.interaction.enabled && mounted.focusable) {
       actions |= SemanticActionMask(SemanticActionKind::Focus);
     }
-    if (mounted.enabled && publishes_scroll && actual_scroll->maximum_offset > 0.0F) {
+    if (mounted.interaction.enabled && publishes_scroll && actual_scroll->maximum_offset > 0.0F) {
       actions |= SemanticActionMask(SemanticActionKind::Scroll);
     }
-    if (!mounted.enabled) {
+    if (!mounted.interaction.enabled) {
       actions = 0;
     }
     if (text_input_configuration.has_value()) {
@@ -516,7 +517,7 @@ void Runtime::BuildSemantics() {
         has_virtual_children,
         owner_extension_declared || mounted.author_semantics.has_value() || is_platform_view
     );
-    if (mounted.enabled && has_scroll_ancestor && emit_owner) {
+    if (mounted.interaction.enabled && has_scroll_ancestor && emit_owner) {
       actions |= SemanticActionMask(SemanticActionKind::ShowOnScreen);
     }
     const SemanticNodeId owner_id = [&] {
@@ -536,8 +537,8 @@ void Runtime::BuildSemantics() {
           owner_id,
           parent,
           resolved,
-          mounted.enabled,
-          mounted.focused,
+          mounted.interaction.enabled,
+          mounted.interaction.focused,
           owner_bounds,
           !owner_bounds.Intersects(visible_bounds)
       );
@@ -601,7 +602,7 @@ void Runtime::BuildSemantics() {
       const detail::NodeExtensionHandle handle{mounted.identity, contribution.index, entry.descriptor};
       for (const detail::SemanticBuilderItem& item : contribution.state.items) {
         if (item.local_id == 0) {
-          if (!emit_owner || !mounted.enabled) {
+          if (!emit_owner || !mounted.interaction.enabled) {
             continue;
           }
           BindExtensionActions(routes[owner_id], item.actions, {handle, 0});
@@ -627,18 +628,18 @@ void Runtime::BuildSemantics() {
             id,
             child_parent,
             item.semantics,
-            mounted.enabled,
+            mounted.interaction.enabled,
             false,
             child_bounds,
             !child_bounds.Intersects(descendant_visible_bounds)
         );
-        child.actions = mounted.enabled ? item.actions : 0;
+        child.actions = mounted.interaction.enabled ? item.actions : 0;
         child.custom_actions = item.custom_actions;
         next.nodes.push_back(std::move(child));
         children.push_back(id);
         detail::SemanticActionRoute& route = routes[id];
         route.node_identity = mounted.identity;
-        if (mounted.enabled) {
+        if (mounted.interaction.enabled) {
           BindExtensionActions(route, item.actions, {handle, item.local_id});
           for (const auto& custom : item.custom_actions) {
             route.custom_actions.insert_or_assign(custom.first, detail::SemanticExtensionRoute{handle, item.local_id});
@@ -657,7 +658,7 @@ void Runtime::BuildSemantics() {
   if (state_->mounted_root_ && !viewport.IsEmpty()) {
     // An exiting modal still blocks input until removal, but accessibility advances to the next active focus region.
     const auto semantic_focus_trap = [&](auto&& self, detail::MountedNode& node) -> detail::MountedNode* {
-      if (!node.enabled || layer_is_exiting(node)) {
+      if (!node.interaction.enabled || layer_is_exiting(node)) {
         return nullptr;
       }
       for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
@@ -754,7 +755,7 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
     return false;
   }
   detail::MountedNode* owner = FindNode(*state_->mounted_root_, route->second.node_identity);
-  if (owner == nullptr || !owner->enabled) {
+  if (owner == nullptr || !owner->interaction.enabled) {
     return false;
   }
   std::optional<detail::SemanticExtensionRoute> extension_route;

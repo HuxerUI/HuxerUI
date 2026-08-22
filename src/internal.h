@@ -249,6 +249,16 @@ inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std:
   return std::min(*first, *second);
 }
 
+inline Color InterpolateColor(Color from, Color to, float progress) noexcept {
+  const float value = std::clamp(progress, 0.0F, 1.0F);
+  return {
+      from.red + (to.red - from.red) * value,
+      from.green + (to.green - from.green) * value,
+      from.blue + (to.blue - from.blue) * value,
+      from.alpha + (to.alpha - from.alpha) * value,
+  };
+}
+
 struct ScrollItemRequest {
   std::size_t index;
   ScrollAlignment alignment;
@@ -324,29 +334,24 @@ struct ViewProperties {
   // This marker participates only in system window hit testing and has no layout, paint, or retained lifecycle state.
   bool window_drag_region = false;
   Frame frame;
-  std::optional<Color> background;
-  std::optional<Color> disabled_background;
-  std::optional<Color> border;
-  std::optional<Color> disabled_border;
-  float border_width = 0.0F;
+  std::optional<VisualFill> background;
+  std::optional<VisualFill> disabled_background;
+  std::optional<Border> border;
+  std::optional<Border> disabled_border;
   std::optional<Shadow> shadow;
   TextStyle text_style;
   TextLayoutOptions text_layout_options;
   std::optional<Color> disabled_foreground;
   CornerRadii corner_radii;
+  // The Theme supplies the ordinary value; specialized controls may override or suppress the generic focus ring.
+  FocusRing focus_ring;
   bool clip_children = false;
-  std::optional<Size> indication_size;
-  float indication_corner_radius = 0.0F;
-  std::optional<IndicationSpec> indication_override;
   float spacing = 0.0F;
   float grow = 0.0F;
   MainAxisAlignment main_axis_alignment = MainAxisAlignment::Start;
   CrossAxisAlignment cross_axis_alignment = CrossAxisAlignment::Start;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Start;
   VerticalAlignment vertical_alignment = VerticalAlignment::Start;
-  Color focus_ring = Color::Rgb(31, 111, 235);
-  float focus_ring_width = 2.0F;
-  float focus_ring_offset = 2.0F;
   float disabled_opacity = 0.42F;
   // Runtime resolves this declaration against final window-edge geometry after layout and presentation transforms.
   std::optional<SystemBarsAppearance> system_bars_appearance;
@@ -366,16 +371,13 @@ struct ViewProperties {
   [[nodiscard]] bool ContentPaintEquals(const ViewProperties& other) const {
     return padding == other.padding && safe_area_padding == other.safe_area_padding && background == other.background &&
            disabled_background == other.disabled_background && border == other.border &&
-           disabled_border == other.disabled_border && border_width == other.border_width && shadow == other.shadow &&
-           text_style == other.text_style && text_layout_options == other.text_layout_options &&
+           disabled_border == other.disabled_border && shadow == other.shadow && text_style == other.text_style &&
+           text_layout_options == other.text_layout_options &&
            disabled_foreground == other.disabled_foreground && corner_radii == other.corner_radii;
   }
 
   [[nodiscard]] bool ForegroundPaintEquals(const ViewProperties& other) const {
-    return corner_radii == other.corner_radii && focus_ring == other.focus_ring &&
-           focus_ring_width == other.focus_ring_width && focus_ring_offset == other.focus_ring_offset &&
-           indication_size == other.indication_size && indication_corner_radius == other.indication_corner_radius &&
-           indication_override == other.indication_override;
+    return corner_radii == other.corner_radii && focus_ring == other.focus_ring;
   }
 };
 
@@ -450,6 +452,8 @@ struct ViewSpec {
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
   std::vector<ModifierSpec> retained_modifiers;
+  // Theme resolution stores a component's default here until View installs its indication modifier.
+  std::optional<Indication> default_indication;
   std::shared_ptr<const Environment> environment;
   std::optional<bool> chip_selection;
   bool pointer_events_enabled = true;
@@ -558,6 +562,7 @@ struct NodeExtensionEntry {
   const ModifierDescriptor* descriptor = nullptr;
   std::unique_ptr<huxerui::NodeExtension> extension;
   std::shared_ptr<const void> value;
+  bool interaction_sync_pending = true;
 };
 
 struct NodePresentation {
@@ -621,16 +626,18 @@ struct MountedNode final : public huxerui::MountedNode {
   bool reduced_motion = false;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
-  bool enabled = true;
+  InteractionState interaction;
+  std::uint32_t active_press_count = 0;
   // True only for the node that first disables an otherwise enabled subtree. Stateful controls use their disabled
   // colors at this boundary; inherited disabled descendants remain visually enabled under the boundary group opacity.
-  bool disabled_visual_state = false;
-  // A visual extension can override the default centered indication frame with retained animated geometry.
-  std::optional<Rect> indication_frame;
+  bool applies_disabled_appearance = false;
+  // Declarative border and radii remain stable targets; these fields hold the current animated surface presentation.
+  std::optional<Border> resolved_border;
+  CornerRadii resolved_corner_radii;
+  // Re-resolved during geometry preparation from static indication geometry or a component's dynamic control bounds.
+  std::optional<Rect> indication_bounds_override;
   bool focusable = false;
   bool trap_focus = false;
-  bool focused = false;
-  bool focus_visible = false;
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
 
@@ -677,11 +684,15 @@ protected:
   }
 
   [[nodiscard]] bool IsEnabledImpl() const noexcept override {
-    return enabled;
+    return interaction.enabled;
   }
 
   [[nodiscard]] bool IsFocusedImpl() const noexcept override {
-    return focused;
+    return interaction.focused;
+  }
+
+  [[nodiscard]] const InteractionState& InteractionImpl() const noexcept override {
+    return interaction;
   }
 
   [[nodiscard]] float SpacingImpl() const noexcept override {
@@ -1036,8 +1047,15 @@ struct SemanticActionRoute {
 
 inline constexpr float touch_gesture_slop = 6.0F;
 
+struct ActivePointerInteraction {
+  std::uint64_t node_identity = 0;
+  std::uint64_t press_id = 0;
+};
+
 struct PointerSession {
   std::optional<std::uint64_t> target_identity;
+  // Pointer dispatch and interaction ownership are distinct when a retained gesture captures or observes the stream.
+  std::optional<ActivePointerInteraction> interaction;
   std::optional<std::uint64_t> pending_focus_identity;
   std::vector<std::uint64_t> scroll_chain;
   Point down_position;
@@ -1097,6 +1115,7 @@ struct TextSelectionOverlayState {
   bool show_handles = false;
   bool dismissing = false;
   std::optional<std::int64_t> pointer_id;
+  std::optional<std::uint64_t> press_id;
   std::optional<std::size_t> pressed_action;
   std::optional<std::size_t> hovered_action;
   Rect start_handle_hit_rect;
@@ -1116,6 +1135,7 @@ struct TextSelectionOverlayState {
   std::vector<TextEditingAction> actions;
   std::vector<Rect> action_rects;
   std::vector<std::string> action_labels;
+  std::vector<InteractionState> action_interactions;
   std::vector<std::shared_ptr<IndicationState>> action_indications;
 };
 
@@ -1206,12 +1226,14 @@ struct Runtime::State {
   SemanticNodeId next_semantic_identity_ = 1;
   SemanticNodeId semantic_root_identity_ = 0;
   std::uint64_t semantic_revision_ = 0;
+  std::uint64_t next_press_id_ = 1;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
   std::vector<detail::NodeExtensionHandle> hovered_extensions_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
+  std::optional<std::uint64_t> keyboard_press_id_;
   std::optional<detail::ActiveTextInputSession> text_input_session_;
   detail::TextSelectionGestureState text_selection_gesture_;
   detail::TextSelectionOverlay text_selection_overlay_;
@@ -1271,6 +1293,8 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 void ResolvePresentationTree(MountedNode& node);
+void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,
+                     float opacity = 1.0F);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);
 DamageRegion ComputeDamageRegion(
     const RenderNode* root,
@@ -1283,6 +1307,7 @@ DamageRegion ComputeDamageRegion(
 void DeactivateExternalTextures(
     RenderDamageSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
 );
+void UpdateInteraction(MountedNode& node, InteractionState state, std::optional<InteractionEvent> event = std::nullopt);
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
 bool HitTestWindowDragRegion(MountedNode& node, Point position);

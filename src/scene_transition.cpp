@@ -171,11 +171,11 @@ public:
     }
   }
 
-  bool PrepareGeometry(huxerui::MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node) override {
     if (state_) {
       state_->UpdateBounds(node.PresentationBounds());
     }
-    return false;
+    return PaintInvalidation::None;
   }
 
 private:

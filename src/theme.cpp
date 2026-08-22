@@ -14,29 +14,49 @@ namespace {
 
 constexpr float material_shadow_blur_per_elevation = 4.0F;
 
-StateOverlayIndication FlatIndication(Color color, const ThemeSpec& theme) {
+AnimationSpec InteractionTween(double duration) {
+  return TweenSpec{.duration = duration, .easing = Easing::EaseOut};
+}
+
+Indication FlatIndication(Color color, const ThemeSpec& theme) {
   Color hover = color;
   color.alpha *= 0.16F;
   hover.alpha *= 0.1F;
   return {
-      .color = color,
-      .fade_in_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
-      .fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
-      .hover_color = hover,
+      .hover = IndicationLayer{
+          .fill = hover,
+          .enter = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.fast),
+          .exit = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.normal),
+      },
+      .press = IndicationLayer{
+          .fill = color,
+          .enter = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.fast),
+          .exit = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.normal),
+      },
   };
 }
 
-RippleIndication MaterialIndication(Color color, const ThemeSpec& theme) {
+Indication MaterialIndication(Color color, const ThemeSpec& theme) {
   Color hover = color;
-  color.alpha *= 0.16F;
+  color.alpha *= 0.12F;
   hover.alpha *= 0.08F;
   return {
-      .color = color,
-      .expansion_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow,
-      .fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
-      .hover_color = hover,
-      .hover_fade_in_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
-      .hover_fade_out_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+      .hover = IndicationLayer{
+          .fill = hover,
+          .enter = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.fast),
+          .exit = InteractionTween(theme.motion.reduced_motion ? 0.0 : theme.motion.normal),
+      },
+      .ripple = RippleEffect{
+          .color = color,
+          .expansion = TweenSpec{
+              .duration = theme.motion.reduced_motion ? 0.0 : theme.motion.slow,
+              .easing = Easing::Linear,
+          },
+          .fade_out = TweenSpec{
+              .duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+              .easing = Easing::Linear,
+          },
+      },
   };
 }
 
@@ -603,7 +623,7 @@ SliderStyle MaterialSliderStyle(const ThemeSpec& theme) {
       .track_inside_corner_radius = 2.0F,
       .stop_indicator_size = 4.0F,
       .tick_size = 4.0F,
-      .focus_ring_width = 0.0F,
+      .focus_ring = FocusRing{theme.colors.primary, 0.0F, 0.0F},
       .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
   };
 }
@@ -1264,7 +1284,7 @@ SliderStyle DefaultSliderStyle(const ThemeSpec& theme) {
       .track_inside_corner_radius = 2.0F,
       .stop_indicator_size = 0.0F,
       .tick_size = 0.0F,
-      .focus_ring_width = std::nullopt,
+      .focus_ring = std::nullopt,
       .animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
   };
 }
@@ -1351,13 +1371,8 @@ ThemeSpec FlatLightThemeSpec() {
   ThemeSpec theme;
   theme.shapes.large = 14.0F;
   theme.interactions = {
-      .hover_overlay = Color::Rgb(0, 0, 0, 0.10F),
-      .pressed_overlay = Color::Rgb(0, 0, 0, 0.16F),
-      .ripple = Color::Rgb(255, 255, 255, 0.28F),
-      .indication = IndicationKind::StateOverlay,
-      .focus_ring = std::nullopt,
-      .focus_ring_width = 2.0F,
-      .focus_ring_offset = 2.0F,
+      .indication = FlatIndication(Color::Black(), theme),
+      .focus_ring = FocusRing{theme.colors.primary, 2.0F, 2.0F},
       .disabled_opacity = 0.42F,
   };
   return theme;
@@ -1388,13 +1403,8 @@ ThemeSpec FlatDarkThemeSpec() {
       .error = Color::Rgb(248, 81, 73),
   };
   theme.interactions = {
-      .hover_overlay = Color::Rgb(255, 255, 255, 0.12F),
-      .pressed_overlay = Color::Rgb(255, 255, 255, 0.18F),
-      .ripple = Color::Rgb(255, 255, 255, 0.28F),
-      .indication = IndicationKind::StateOverlay,
-      .focus_ring = std::nullopt,
-      .focus_ring_width = 2.0F,
-      .focus_ring_offset = 2.0F,
+      .indication = FlatIndication(Color::White(), theme),
+      .focus_ring = FocusRing{theme.colors.primary, 2.0F, 2.0F},
       .disabled_opacity = 0.42F,
   };
   return theme;
@@ -1462,13 +1472,8 @@ ThemeSpec MaterialLightThemeSpec() {
       .slow = 0.35,
   };
   theme.interactions = {
-      .hover_overlay = Color::Rgb(103, 80, 164, 0.08F),
-      .pressed_overlay = Color::Rgb(103, 80, 164, 0.12F),
-      .ripple = Color::Rgb(103, 80, 164, 0.16F),
-      .indication = IndicationKind::Ripple,
-      .focus_ring = Color::Rgb(103, 80, 164),
-      .focus_ring_width = 3.0F,
-      .focus_ring_offset = 2.0F,
+      .indication = MaterialIndication(theme.colors.primary, theme),
+      .focus_ring = FocusRing{theme.colors.secondary, 3.0F, 2.0F},
       .disabled_opacity = 0.38F,
   };
   return theme;
@@ -1524,13 +1529,8 @@ ThemeSpec MaterialDarkThemeSpec() {
       .slow = 0.35,
   };
   theme.interactions = {
-      .hover_overlay = Color::Rgb(208, 188, 255, 0.08F),
-      .pressed_overlay = Color::Rgb(208, 188, 255, 0.12F),
-      .ripple = Color::Rgb(208, 188, 255, 0.16F),
-      .indication = IndicationKind::Ripple,
-      .focus_ring = Color::Rgb(208, 188, 255),
-      .focus_ring_width = 3.0F,
-      .focus_ring_offset = 2.0F,
+      .indication = MaterialIndication(theme.colors.primary, theme),
+      .focus_ring = FocusRing{theme.colors.secondary, 3.0F, 2.0F},
       .disabled_opacity = 0.38F,
   };
   return theme;

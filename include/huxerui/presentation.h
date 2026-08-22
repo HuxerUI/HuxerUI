@@ -107,11 +107,14 @@ struct DialogStyle {
   TextStyle negative_action_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
   Color positive_action_background = Color::Rgb(31, 111, 235);
   Color negative_action_background = Color::Transparent();
-  IndicationSpec positive_action_indication = StateOverlayIndication{
-      .color = Color::Rgb(255, 255, 255, 0.18F),
-      .hover_color = Color::Rgb(255, 255, 255, 0.1F),
+  Indication positive_action_indication{
+      .hover = IndicationLayer{.fill = Color::Rgb(255, 255, 255, 0.1F)},
+      .press = IndicationLayer{.fill = Color::Rgb(255, 255, 255, 0.18F)},
   };
-  IndicationSpec negative_action_indication = StateOverlayIndication{};
+  Indication negative_action_indication{
+      .hover = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.06F)},
+      .press = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.12F)},
+  };
   Color action_separator_color = Color::Rgb(31, 35, 40, 0.12F);
   EdgeInsets content_padding = EdgeInsets::All(24.0F);
   EdgeInsets action_padding = EdgeInsets::Symmetric(14.0F, 8.0F);
@@ -161,7 +164,10 @@ enum class MenuSeparatorMode {
 struct MenuStyle {
   Color background = Color::White();
   Color foreground = Color::Rgb(31, 35, 40);
-  IndicationSpec item_indication = StateOverlayIndication{};
+  Indication item_indication{
+      .hover = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.06F)},
+      .press = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.12F)},
+  };
   Color separator_color = Color::Rgb(31, 35, 40, 0.12F);
   MenuSeparatorMode separator_mode = MenuSeparatorMode::BetweenItems;
   float separator_thickness = 1.0F;

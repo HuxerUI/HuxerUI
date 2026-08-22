@@ -104,11 +104,13 @@ void Runtime::ShowTextSelectionOverlay(bool show_handles) {
   gesture.previous_tap_time.reset();
   gesture.previous_tap_node.reset();
   overlay.pointer_id.reset();
+  overlay.press_id.reset();
   overlay.pressed_action.reset();
   overlay.hovered_action.reset();
   overlay.actions.clear();
   overlay.action_rects.clear();
   overlay.action_labels.clear();
+  overlay.action_interactions.clear();
   overlay.action_indications.clear();
 }
 
@@ -123,12 +125,15 @@ void Runtime::AdvanceTextSelectionOverlay(const FrameInfo& frame) {
     return;
   }
   bool needs_frame = false;
+  std::optional<double> wake_after;
   bool has_visuals = false;
   for (const std::shared_ptr<detail::IndicationState>& indication : overlay.action_indications) {
     if (!indication) {
       continue;
     }
-    needs_frame = indication->Advance(frame) || needs_frame;
+    const MotionAdvanceResult result = indication->Advance(frame);
+    needs_frame = result.needs_frame || needs_frame;
+    wake_after = detail::EarliestWakeAfter(wake_after, result.wake_after);
     has_visuals = indication->HasVisuals() || has_visuals;
   }
   if (overlay.dismissing && !needs_frame && !has_visuals) {
@@ -141,6 +146,8 @@ void Runtime::AdvanceTextSelectionOverlay(const FrameInfo& frame) {
   overlay.indication_frame_active = needs_frame;
   if (needs_frame) {
     RequestFrame();
+  } else if (wake_after.has_value()) {
+    RequestFrameAfter(*wake_after);
   }
 }
 
@@ -159,8 +166,11 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
     overlay.hovered_action = hovered;
     overlay.paint_dirty = true;
     for (std::size_t index = 0; index < overlay.action_indications.size(); ++index) {
-      if (overlay.action_indications[index]) {
-        overlay.action_indications[index]->SetHovered(hovered == index);
+      if (overlay.action_indications[index] && index < overlay.action_interactions.size() &&
+          index < overlay.action_rects.size()) {
+        overlay.action_interactions[index].hovered = hovered == index;
+        overlay.action_indications[index]->SetInteraction(overlay.action_interactions[index], std::nullopt,
+                                                          overlay.action_rects[index]);
       }
     }
     RequestFrame();
@@ -178,10 +188,24 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
     }
     if (event.type == PointerEventType::Cancel) {
       if (overlay.pressed_action.has_value() && *overlay.pressed_action < overlay.action_indications.size() &&
-          overlay.action_indications[*overlay.pressed_action]) {
-        overlay.action_indications[*overlay.pressed_action]->Release(event.pointer_id);
+          *overlay.pressed_action < overlay.action_interactions.size() &&
+          *overlay.pressed_action < overlay.action_rects.size() &&
+          overlay.action_indications[*overlay.pressed_action] && overlay.press_id.has_value()) {
+        const std::size_t index = *overlay.pressed_action;
+        overlay.action_interactions[index].pressed = false;
+        overlay.action_indications[index]->SetInteraction(
+            overlay.action_interactions[index],
+            InteractionEvent{
+                InteractionEvent::Type::Cancel,
+                InteractionEvent::Source::Pointer,
+                *overlay.press_id,
+                event.position,
+            },
+            overlay.action_rects[index]
+        );
       }
       overlay.pointer_id.reset();
+      overlay.press_id.reset();
       overlay.pressed_action.reset();
       overlay.dragging = false;
       overlay.paint_dirty = true;
@@ -209,10 +233,24 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       action = overlay.actions[*overlay.pressed_action];
     }
     if (overlay.pressed_action.has_value() && *overlay.pressed_action < overlay.action_indications.size() &&
-        overlay.action_indications[*overlay.pressed_action]) {
-      overlay.action_indications[*overlay.pressed_action]->Release(event.pointer_id);
+        *overlay.pressed_action < overlay.action_interactions.size() &&
+        *overlay.pressed_action < overlay.action_rects.size() &&
+        overlay.action_indications[*overlay.pressed_action] && overlay.press_id.has_value()) {
+      const std::size_t index = *overlay.pressed_action;
+      overlay.action_interactions[index].pressed = false;
+      overlay.action_indications[index]->SetInteraction(
+          overlay.action_interactions[index],
+          InteractionEvent{
+              InteractionEvent::Type::Release,
+              InteractionEvent::Source::Pointer,
+              *overlay.press_id,
+              event.position,
+          },
+          overlay.action_rects[index]
+      );
     }
     overlay.pointer_id.reset();
+    overlay.press_id.reset();
     overlay.pressed_action.reset();
     overlay.paint_dirty = true;
     if (action.has_value()) {
@@ -254,15 +292,21 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       continue;
     }
     overlay.pointer_id = event.pointer_id;
+    overlay.press_id = state_->next_press_id_++;
     overlay.pressed_action = index;
     update_hover(index);
-    if (index < overlay.action_indications.size() && overlay.action_indications[index]) {
-      overlay.action_indications[index]->Press(
-          event.pointer_id,
-          {
-              event.position.x - overlay.action_rects[index].x,
-              event.position.y - overlay.action_rects[index].y,
-          }
+    if (index < overlay.action_indications.size() && index < overlay.action_interactions.size() &&
+        overlay.action_indications[index]) {
+      overlay.action_interactions[index].pressed = true;
+      overlay.action_indications[index]->SetInteraction(
+          overlay.action_interactions[index],
+          InteractionEvent{
+              InteractionEvent::Type::Press,
+              InteractionEvent::Source::Pointer,
+              *overlay.press_id,
+              event.position,
+          },
+          overlay.action_rects[index]
       );
     }
     overlay.paint_dirty = true;
@@ -364,7 +408,8 @@ void Runtime::PaintTextSelectionOverlay() {
     context.PushClip(overlay.toolbar_rect, overlay.toolbar_corner_radius);
     for (std::size_t index = 0; index < overlay.action_rects.size(); ++index) {
       if (index < overlay.action_indications.size() && overlay.action_indications[index]) {
-        overlay.action_indications[index]->Paint(context, overlay.action_rects[index], 0.0F);
+        overlay.action_indications[index]->Paint(context, overlay.action_rects[index], CornerRadii{},
+                                                 IndicationPlacement::BehindContent);
       }
       if (index < overlay.action_labels.size()) {
         context.DrawText(
@@ -392,6 +437,10 @@ void Runtime::PaintTextSelectionOverlay() {
             },
             overlay.toolbar_separator
         );
+      }
+      if (index < overlay.action_indications.size() && overlay.action_indications[index]) {
+        overlay.action_indications[index]->Paint(context, overlay.action_rects[index], CornerRadii{},
+                                                 IndicationPlacement::AboveContent);
       }
     }
     context.PopClip();
@@ -483,6 +532,7 @@ void Runtime::PaintTextSelectionOverlay() {
   }
   if (available_actions.empty()) {
     overlay.action_rects.clear();
+    overlay.action_interactions.clear();
     overlay.action_indications.clear();
     finish();
     return;
@@ -494,6 +544,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const TextSelectionMenuLabels labels = ResolveSelectionMenuLabels(*focused, *state_->app_resources_, locale);
   if (overlay.actions != available_actions) {
     overlay.actions = std::move(available_actions);
+    overlay.action_interactions.assign(overlay.actions.size(), InteractionState{});
     overlay.action_indications.clear();
     overlay.action_indications.reserve(overlay.actions.size());
     for (std::size_t index = 0; index < overlay.actions.size(); ++index) {
@@ -597,6 +648,14 @@ void Runtime::PaintTextSelectionOverlay() {
     const Rect item{item_x, toolbar_y, item_widths[index], toolbar_height};
     overlay.action_rects.push_back(item);
     item_x += item_widths[index];
+  }
+  for (std::size_t index = 0; index < overlay.action_indications.size() &&
+                              index < overlay.action_interactions.size() && index < overlay.action_rects.size();
+       ++index) {
+    if (overlay.action_indications[index]) {
+      overlay.action_indications[index]->SetInteraction(overlay.action_interactions[index], std::nullopt,
+                                                        overlay.action_rects[index]);
+    }
   }
   paint_toolbar();
   finish();

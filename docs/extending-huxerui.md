@@ -111,7 +111,7 @@ public:
 
   void Update(MountedNode& node, const Glow& spec);
 
-  void Paint(const MountedNode& node, PaintContext& context) const override;
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override;
 };
 ```
 
@@ -119,10 +119,11 @@ The framework detects `Glow::Extension`, performs type erasure, and reconciles c
 An equality-comparable modifier skips `Update()` when its declarative value and relevant node inputs are unchanged.
 `Update()` refreshes changed declarative configuration without discarding retained animation or gesture state.
 
-`NodeExtension` can receive frame, resolved-geometry, scroll, pointer, hover, focus, key, and paint callbacks. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
-`PrepareGeometry()` runs after final presentation transforms are resolved and reports whether changed geometry requires foreground rerecording.
-After retained visual state changes, an extension calls the protected `InvalidatePaint()` operation so Runtime rerecords its foreground PaintSequence.
+`NodeExtension` can receive frame, resolved-geometry, interaction, scroll, pointer, hover, focus, key, and paint callbacks. It returns frame scheduling needs from `OnFrame()` and must not retain raw node or child references across reconciliation.
+`PrepareGeometry()` runs after final presentation transforms are resolved and reports which retained paint phase changed.
+After retained visual state changes, an extension calls the protected `InvalidatePaint(PaintInvalidation)` operation so Runtime rerecords only its content sequence, foreground sequence, or both.
 Invalidation outside frame construction requests a frame, while invalidation from `OnFrame()` is consumed by the current frame and follow-up scheduling remains the responsibility of `FrameResult`.
+`PaintBehindContent()` records after the normal background and before the resolved border and node content; `PaintAboveContent()` records after descendants and before the framework-owned focus ring.
 Paint commands use node-local coordinates and may extend beyond `MountedNode::Bounds()` unless the extension pushes an explicit clip. Runtime uses the recorded command bounds, rather than the layout bounds, for render visibility and damage.
 
 Custom editable or selectable components expose `TextInputClient`, `TextSelectionClient`, or both through their retained extension. Text input owns IME sessions; text selection owns word selection, handle geometry, and selection-menu actions without starting an IME session.

@@ -1636,7 +1636,7 @@ View MenuService::ItemView(
             Padding{style.item_padding},
             Spacing{style.item_content_spacing},
             Enabled{item.enabled_},
-            Indication{style.item_indication},
+            style.item_indication,
             Focusable{},
             item_semantics,
             MenuExpansionAction{
@@ -1657,7 +1657,7 @@ View MenuService::ItemView(
           Spacing{style.item_content_spacing},
           CrossAlign{CrossAxisAlignment::Center},
           Enabled{item.enabled_},
-          Indication{style.item_indication},
+          style.item_indication,
           Focusable{},
           item_semantics
       )
@@ -1772,7 +1772,7 @@ View DialogService::StandardContent(
 
     const TextStyle& text_style = is_positive ? style.positive_action_style : style.negative_action_style;
     const Color background = is_positive ? style.positive_action_background : style.negative_action_background;
-    const IndicationSpec& indication =
+    const Indication& indication =
         is_positive ? style.positive_action_indication : style.negative_action_indication;
 
     Frame action_frame;
@@ -1786,7 +1786,7 @@ View DialogService::StandardContent(
                                Padding{style.action_padding},
                                Background{background},
                                CornerRadius{style.action_corner_radius},
-                               Indication{indication},
+                               indication,
                                Focusable{},
                                detail::BuiltInSemantics{std::move(action_semantics)}
                            )
@@ -1871,11 +1871,11 @@ public:
     }
   }
 
-  [[nodiscard]] bool PrepareGeometry(huxerui::MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(huxerui::MountedNode& node) override {
     if (state_) {
       state_->UpdateBounds(node.PresentationBounds());
     }
-    return false;
+    return PaintInvalidation::None;
   }
 
 private:

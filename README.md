@@ -163,6 +163,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [HTTP Client Design](docs/design/http.md) | Typed requests, Task cancellation, UI-thread resumption, and platform transports |
 | [File and Application Storage Design](docs/design/files.md) | Local files, application directories, external references, file pickers, and Task-based I/O |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
+| [Interaction and Indication Design](docs/design/interaction-indication.md) | Unified transient interaction state, indication visuals, fills, and paint ordering |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
 | [App Resources, Images, and Localization Design](docs/design/resources.md) | Typed resources, Image, raw assets, packaging, locale, and formatted strings |

@@ -2460,6 +2460,57 @@ private:
     cairo_fill(cr_);
   }
 
+  static void AddGradientStops(cairo_pattern_t* pattern, const std::vector<GradientStop>& stops) {
+    for (const GradientStop& stop : stops) {
+      cairo_pattern_add_color_stop_rgba(
+          pattern,
+          stop.offset,
+          stop.color.red,
+          stop.color.green,
+          stop.color.blue,
+          stop.color.alpha
+      );
+    }
+  }
+
+  void RenderCommand(const DrawLinearGradientCommand& command) {
+    if (command.rect.IsEmpty()) {
+      return;
+    }
+    const double start_x = command.rect.x + command.gradient.start.x * command.rect.width;
+    const double start_y = command.rect.y + command.gradient.start.y * command.rect.height;
+    const double end_x = command.rect.x + command.gradient.end.x * command.rect.width;
+    const double end_y = command.rect.y + command.gradient.end.y * command.rect.height;
+    cairo_pattern_t* pattern = cairo_pattern_create_linear(start_x, start_y, end_x, end_y);
+    AddGradientStops(pattern, command.gradient.stops);
+    cairo_set_source(cr_, pattern);
+    AddRoundedRect(cr_, command.rect, command.corner_radius);
+    cairo_fill(cr_);
+    cairo_pattern_destroy(pattern);
+  }
+
+  void RenderCommand(const DrawRadialGradientCommand& command) {
+    if (command.rect.IsEmpty()) {
+      return;
+    }
+    const double center_x = command.rect.x + command.gradient.center.x * command.rect.width;
+    const double center_y = command.rect.y + command.gradient.center.y * command.rect.height;
+    const double radius_x = command.gradient.radius.width * command.rect.width;
+    const double radius_y = command.gradient.radius.height * command.rect.height;
+    cairo_save(cr_);
+    AddRoundedRect(cr_, command.rect, command.corner_radius);
+    cairo_clip(cr_);
+    cairo_translate(cr_, center_x, center_y);
+    cairo_scale(cr_, 1.0, radius_y / radius_x);
+    cairo_translate(cr_, -center_x, -center_y);
+    cairo_pattern_t* pattern = cairo_pattern_create_radial(center_x, center_y, 0.0, center_x, center_y, radius_x);
+    AddGradientStops(pattern, command.gradient.stops);
+    cairo_set_source(cr_, pattern);
+    cairo_paint(cr_);
+    cairo_pattern_destroy(pattern);
+    cairo_restore(cr_);
+  }
+
   void RenderCommand(const DrawTextCommand& command) {
     DrawParagraph(command.rect, command.text, command.style, command.options);
   }

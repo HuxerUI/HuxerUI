@@ -224,7 +224,7 @@ bool ExtensionHandlesPointer(MountedNode& node, Point position) {
 
 bool ExtensionHandlesHover(MountedNode& node, Point position) {
   return std::any_of(node.extensions.begin(), node.extensions.end(), [&](const NodeExtensionEntry& entry) {
-    return entry.extension && (node.enabled || entry.extension->HoverWhenDisabled()) &&
+    return entry.extension && (node.interaction.enabled || entry.extension->HoverWhenDisabled()) &&
            entry.extension->HoverHitTest(node, position);
   });
 }
@@ -832,7 +832,7 @@ std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& nod
 }
 
 bool CanScrollNode(const MountedNode& node, float delta) {
-  if (!node.enabled || !IsScrollContainer(node) || delta == 0.0F) {
+  if (!node.interaction.enabled || !IsScrollContainer(node) || delta == 0.0F) {
     return false;
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
@@ -845,7 +845,7 @@ bool CanScrollNode(const MountedNode& node, float delta) {
 }
 
 float ScrollNodeBy(MountedNode& node, float delta) {
-  if (!node.enabled || !IsScrollContainer(node)) {
+  if (!node.interaction.enabled || !IsScrollContainer(node)) {
     return 0.0F;
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
@@ -868,7 +868,7 @@ float ScrollNodeBy(MountedNode& node, float delta) {
 }
 
 bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
-  if (!node.enabled || !IsScrollContainer(node)) {
+  if (!node.interaction.enabled || !IsScrollContainer(node)) {
     return false;
   }
 
@@ -948,7 +948,7 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
     return {};
   }
   const float stop_velocity = physics.minimum_fling_velocity * 0.3F;
-  if (!node.enabled || !IsScrollContainer(node)) {
+  if (!node.interaction.enabled || !IsScrollContainer(node)) {
     Stop();
     return {};
   }
@@ -1058,7 +1058,7 @@ ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event) 
   ScrollEventResult result;
 
   for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
-    if (!(*candidate)->enabled || !IsScrollContainer(**candidate) || ScrollAxis(**candidate) != axis) {
+    if (!(*candidate)->interaction.enabled || !IsScrollContainer(**candidate) || ScrollAxis(**candidate) != axis) {
       continue;
     }
     result.scroll_chain.push_back(*candidate);

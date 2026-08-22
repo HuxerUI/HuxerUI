@@ -122,7 +122,7 @@ struct NavigationBarStyle {
   float height = 64.0F;
   float indicator_corner_radius = 16.0F;
   bool show_unselected_labels = true;
-  std::optional<IndicationSpec> indication;
+  std::optional<Indication> indication;
   AnimationSpec selection_animation = TweenSpec{.duration = 0.16};
 
   static NavigationBarStyle Default();
@@ -145,7 +145,7 @@ struct NavigationPaneStyle {
   float icon_spacing = 12.0F;
   Size compact_indicator_size{56.0F, 32.0F};
   float indicator_corner_radius = 16.0F;
-  std::optional<IndicationSpec> indication;
+  std::optional<Indication> indication;
   AnimationSpec selection_animation = TweenSpec{.duration = 0.16};
 
   static NavigationPaneStyle Default();

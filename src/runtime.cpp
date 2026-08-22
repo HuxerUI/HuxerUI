@@ -238,9 +238,12 @@ Color ResolveCaptionForeground(Color background) noexcept {
 void CollectWindowDragRegionBackground(
     const MountedNode& node, Color inherited_background, float title_bar_height, std::optional<Color>& candidate
 ) {
-  const Color background = node.properties.background.has_value()
-                               ? CompositeOver(*node.properties.background, inherited_background)
-                               : inherited_background;
+  Color background = inherited_background;
+  if (node.properties.background.has_value()) {
+    if (const Color* color = std::get_if<Color>(&node.properties.background->Get())) {
+      background = CompositeOver(*color, inherited_background);
+    }
+  }
   if (node.properties.window_drag_region && node.presentation.resolved_opacity > 0.001F) {
     const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
     if (bounds.y < title_bar_height && bounds.y + bounds.height > 0.0F) {
@@ -619,8 +622,7 @@ bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incomi
          mounted.properties == incoming.properties && mounted.component_semantics == incoming.component_semantics &&
          mounted.author_semantics == incoming.author_semantics &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
-         mounted.event_bindings == incoming.event_bindings && !mounted.activation && !incoming.activation &&
-         mounted.environment == incoming.environment &&
+         mounted.event_bindings == incoming.event_bindings && mounted.environment == incoming.environment &&
          mounted.pointer_events_enabled == incoming.pointer_events_enabled &&
          mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable &&
          mounted.trap_focus == incoming.trap_focus;
@@ -635,6 +637,8 @@ void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
   mounted.key = incoming.key;
   mounted.text = incoming.text;
   mounted.properties = incoming.properties;
+  mounted.resolved_border = incoming.properties.border;
+  mounted.resolved_corner_radii = incoming.properties.corner_radii;
   mounted.component_semantics = incoming.component_semantics;
   mounted.author_semantics = incoming.author_semantics;
   mounted.scope_factory = incoming.scope_factory;
@@ -774,7 +778,7 @@ std::vector<NodeExtensionHandle> HitTestHoverExtensions(const std::vector<Mounte
     std::vector<NodeExtensionHandle> matches;
     for (std::size_t index = 0; index < current.extensions.size(); ++index) {
       NodeExtensionEntry& entry = current.extensions[index];
-      if (entry.extension && (current.enabled || entry.extension->HoverWhenDisabled()) &&
+      if (entry.extension && (current.interaction.enabled || entry.extension->HoverWhenDisabled()) &&
           entry.extension->HoverHitTest(current, *local_position)) {
         matches.push_back(NodeExtensionHandle{
             current.identity,
@@ -822,12 +826,37 @@ void DispatchKey(MountedNode& node, const KeyEvent& event) {
 
 void PrepareExtensionGeometry(MountedNode& node) {
   if (!node.subtree_has_extensions) {
-    return;
-  }
-  for (NodeExtensionEntry& entry : node.extensions) {
-    if (entry.extension && entry.extension->PrepareGeometry(node)) {
+    if (node.indication_bounds_override.has_value()) {
+      node.indication_bounds_override.reset();
+      node.content_paint_dirty = true;
       node.foreground_paint_dirty = true;
     }
+    return;
+  }
+  const std::optional<Rect> previous_indication_bounds = node.indication_bounds_override;
+  node.indication_bounds_override.reset();
+  for (NodeExtensionEntry& entry : node.extensions) {
+    if (!entry.extension) {
+      continue;
+    }
+    switch (entry.extension->PrepareGeometry(node)) {
+    case NodeExtension::PaintInvalidation::None:
+      break;
+    case NodeExtension::PaintInvalidation::Content:
+      node.content_paint_dirty = true;
+      break;
+    case NodeExtension::PaintInvalidation::Foreground:
+      node.foreground_paint_dirty = true;
+      break;
+    case NodeExtension::PaintInvalidation::Both:
+      node.content_paint_dirty = true;
+      node.foreground_paint_dirty = true;
+      break;
+    }
+  }
+  if (node.indication_bounds_override != previous_indication_bounds) {
+    node.content_paint_dirty = true;
+    node.foreground_paint_dirty = true;
   }
   for (const std::unique_ptr<MountedNode>& child : node.children) {
     PrepareExtensionGeometry(*child);
@@ -836,33 +865,61 @@ void PrepareExtensionGeometry(MountedNode& node) {
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
   const bool enabled = parent_enabled && node.local_enabled;
-  const bool disabled_visual_state = parent_enabled && !node.local_enabled;
-  if (node.disabled_visual_state != disabled_visual_state) {
+  const bool applies_disabled_appearance = parent_enabled && !node.local_enabled;
+  const bool disabled_appearance_changed = node.applies_disabled_appearance != applies_disabled_appearance;
+  if (disabled_appearance_changed) {
     node.content_paint_dirty = true;
     node.foreground_paint_dirty = true;
+    node.resolved_border = applies_disabled_appearance && node.properties.disabled_border.has_value()
+                               ? node.properties.disabled_border
+                               : node.properties.border;
+    node.resolved_corner_radii = node.properties.corner_radii;
   }
-  node.enabled = enabled;
-  node.disabled_visual_state = disabled_visual_state;
+  node.applies_disabled_appearance = applies_disabled_appearance;
+  InteractionState interaction = node.interaction;
+  interaction.enabled = enabled;
+  if (!enabled) {
+    node.active_press_count = 0;
+    interaction.pressed = false;
+    interaction.hovered = false;
+  }
+  UpdateInteraction(node, interaction);
   for (auto& child : node.children) {
-    ResolveEnabledTree(*child, node.enabled);
+    ResolveEnabledTree(*child, node.interaction.enabled);
   }
+}
+
+std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t identity, bool parent_enabled = true) {
+  const bool enabled = parent_enabled && node.local_enabled;
+  if (node.identity == identity) {
+    return enabled;
+  }
+  for (const auto& child : node.children) {
+    if (const std::optional<bool> child_enabled = DeclaredEnabled(*child, identity, enabled);
+        child_enabled.has_value()) {
+      return child_enabled;
+    }
+  }
+  return std::nullopt;
 }
 
 void ResolveFocusedFlags(MountedNode& node, const std::optional<std::uint64_t>& focused_identity, bool focus_visible) {
   const bool focused = focused_identity.has_value() && node.identity == *focused_identity;
   const bool resolved_focus_visible = focused && focus_visible;
-  if (node.focused != focused || node.focus_visible != resolved_focus_visible) {
+  if (node.interaction.focused != focused || node.interaction.focus_visible != resolved_focus_visible) {
     node.foreground_paint_dirty = true;
+    InteractionState interaction = node.interaction;
+    interaction.focused = focused;
+    interaction.focus_visible = resolved_focus_visible;
+    UpdateInteraction(node, interaction);
   }
-  node.focused = focused;
-  node.focus_visible = resolved_focus_visible;
   for (auto& child : node.children) {
     ResolveFocusedFlags(*child, focused_identity, focus_visible);
   }
 }
 
 void CollectFocusableNodes(MountedNode& node, std::vector<MountedNode*>& nodes) {
-  if (node.enabled && node.focusable) {
+  if (node.interaction.enabled && node.focusable) {
     nodes.push_back(&node);
   }
   for (auto& child : node.children) {
@@ -871,7 +928,7 @@ void CollectFocusableNodes(MountedNode& node, std::vector<MountedNode*>& nodes) 
 }
 
 MountedNode* FindTopmostFocusTrap(MountedNode& node) {
-  if (!node.enabled) {
+  if (!node.interaction.enabled) {
     return nullptr;
   }
   for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
@@ -895,7 +952,9 @@ bool PointerSessionReferencesNode(const PointerSession& session, const MountedNo
   const auto contains = [&root](const std::optional<std::uint64_t>& identity) {
     return identity.has_value() && ContainsNodeIdentity(root, *identity);
   };
-  if (contains(session.target_identity) || contains(session.pending_focus_identity) ||
+  const std::optional<std::uint64_t> interaction_identity =
+      session.interaction.has_value() ? std::optional{session.interaction->node_identity} : std::nullopt;
+  if (contains(session.target_identity) || contains(interaction_identity) || contains(session.pending_focus_identity) ||
       contains(session.active_scroll_node)) {
     return true;
   }
@@ -912,7 +971,7 @@ bool PointerSessionReferencesNode(const PointerSession& session, const MountedNo
 }
 
 bool RouteBackTarget(MountedNode& node, const BackEvent& event, BackTarget& target, bool& already_dispatched) {
-  if (!node.enabled) {
+  if (!node.interaction.enabled) {
     return false;
   }
   for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
@@ -1540,6 +1599,16 @@ void Runtime::UpdateHoveredExtensions(Point position) {
           extension->OnHoverChanged(*node, false);
         }
       }
+      const bool node_remains_hovered = std::ranges::any_of(next_hovered, [&](const NodeExtensionHandle& handle) {
+        return handle.node_identity == previous.node_identity;
+      });
+      if (!node_remains_hovered) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, previous.node_identity)) {
+          InteractionState interaction = node->interaction;
+          interaction.hovered = false;
+          UpdateInteraction(*node, interaction);
+        }
+      }
     }
   }
   if (state_->mounted_root_) {
@@ -1550,6 +1619,17 @@ void Runtime::UpdateHoveredExtensions(Point position) {
       if (NodeExtension* extension = FindExtension(*state_->mounted_root_, next)) {
         if (detail::MountedNode* node = FindNode(*state_->mounted_root_, next.node_identity)) {
           extension->OnHoverChanged(*node, true);
+        }
+      }
+      const bool node_was_hovered =
+          std::ranges::any_of(state_->hovered_extensions_, [&](const NodeExtensionHandle& handle) {
+            return handle.node_identity == next.node_identity;
+          });
+      if (!node_was_hovered) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, next.node_identity)) {
+          InteractionState interaction = node->interaction;
+          interaction.hovered = true;
+          UpdateInteraction(*node, interaction);
         }
       }
     }
@@ -1563,22 +1643,24 @@ void Runtime::RefreshInteractionTree() {
     state_->focused_node_identity_.reset();
     state_->focus_visible_ = false;
     state_->keyboard_activation_identity_.reset();
+    state_->keyboard_press_id_.reset();
     state_->hovered_extensions_.clear();
     return;
   }
 
-  ResolveEnabledTree(*state_->mounted_root_, true);
   std::vector<PointerEvent> cancellations;
   for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
     const auto inactive = [this](std::optional<std::uint64_t> identity) {
       if (!identity.has_value()) {
         return false;
       }
-      detail::MountedNode* node = FindNode(*state_->mounted_root_, *identity);
-      return node == nullptr || !node->enabled;
+      const std::optional<bool> enabled = DeclaredEnabled(*state_->mounted_root_, *identity);
+      return !enabled.value_or(false);
     };
-    bool references_inactive = inactive(session.target_identity) || inactive(session.pending_focus_identity) ||
-                               inactive(session.active_scroll_node);
+    const std::optional<std::uint64_t> interaction_identity =
+        session.interaction.has_value() ? std::optional{session.interaction->node_identity} : std::nullopt;
+    bool references_inactive = inactive(session.target_identity) || inactive(interaction_identity) ||
+                               inactive(session.pending_focus_identity) || inactive(session.active_scroll_node);
     if (session.extension_capture.has_value()) {
       references_inactive = references_inactive || inactive(session.extension_capture->node_identity);
     }
@@ -1603,6 +1685,19 @@ void Runtime::RefreshInteractionTree() {
     HandlePointerCancel(cancellation);
     TrackTouchTextSelectionGesture(cancellation);
   }
+  if (state_->keyboard_activation_identity_.has_value() && state_->keyboard_press_id_.has_value()) {
+    const std::optional<bool> enabled =
+        DeclaredEnabled(*state_->mounted_root_, *state_->keyboard_activation_identity_);
+    if (!enabled.value_or(false)) {
+      if (detail::MountedNode* pressed = FindNode(*state_->mounted_root_, *state_->keyboard_activation_identity_)) {
+        EndInteraction(*pressed, InteractionEvent::Type::Cancel, InteractionEvent::Source::Keyboard,
+                       *state_->keyboard_press_id_);
+      }
+      state_->keyboard_activation_identity_.reset();
+      state_->keyboard_press_id_.reset();
+    }
+  }
+  ResolveEnabledTree(*state_->mounted_root_, true);
   detail::MountedNode* focus_root = ActiveFocusTrapRoot();
   const std::optional<std::uint64_t> focus_identity =
       focus_root == nullptr ? std::nullopt : std::optional{focus_root->identity};
@@ -1628,7 +1723,7 @@ void Runtime::RefreshInteractionTree() {
   focus_root = ActiveFocusTrapRoot();
   if (state_->focused_node_identity_.has_value()) {
     detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
-    if (!focused || !focused->enabled || !focused->focusable ||
+    if (!focused || !focused->interaction.enabled || !focused->focusable ||
         (focus_root && !ContainsNodeIdentity(*focus_root, focused->identity))) {
       SetFocusedNode(std::nullopt);
     }
@@ -1644,7 +1739,7 @@ void Runtime::RefreshInteractionTree() {
   std::erase_if(state_->hovered_extensions_, [this](const detail::NodeExtensionHandle& hovered) {
     detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity);
     NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered);
-    const bool remove = !node || !extension || (!node->enabled && !extension->HoverWhenDisabled());
+    const bool remove = !node || !extension || (!node->interaction.enabled && !extension->HoverWhenDisabled());
     if (remove && node && extension) {
       extension->OnHoverChanged(*node, false);
     }
@@ -1664,7 +1759,7 @@ detail::MountedNode* Runtime::ActiveFocusTrapRoot() {
 std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route) {
   std::optional<std::uint64_t> candidate;
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    if ((*node)->enabled && (*node)->focusable) {
+    if ((*node)->interaction.enabled && (*node)->focusable) {
       candidate = (*node)->identity;
       break;
     }
@@ -1721,7 +1816,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
         return true;
       }
       detail::MountedNode* node = FindNode(*state_->mounted_root_, target.node_identity);
-      if (node != nullptr && node->enabled) {
+      if (node != nullptr && node->interaction.enabled) {
         static_cast<void>(EmitEvent<ViewEvents::BackRequested>(node->event_bindings));
       }
       return true;
@@ -1732,7 +1827,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
       }
       detail::MountedNode* node = FindNode(*state_->mounted_root_, target.extension.node_identity);
       NodeExtension* extension = FindExtension(*state_->mounted_root_, target.extension);
-      if (node != nullptr && node->enabled && extension != nullptr) {
+      if (node != nullptr && node->interaction.enabled && extension != nullptr) {
         static_cast<void>(extension->OnBack(*node, event));
       }
       // A target captured at Begin owns the whole transaction even when it disappears before Commit.
@@ -1817,7 +1912,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
       identity.reset();
     } else {
       detail::MountedNode* candidate = FindNode(*state_->mounted_root_, *identity);
-      if (!candidate || !candidate->enabled || !candidate->focusable) {
+      if (!candidate || !candidate->interaction.enabled || !candidate->focusable) {
         identity.reset();
       }
     }
@@ -1830,8 +1925,10 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     state_->focus_visible_ = next_focus_visible;
     if (identity.has_value() && state_->mounted_root_) {
       if (detail::MountedNode* focused = FindNode(*state_->mounted_root_, *identity)) {
-        focused->focus_visible = state_->focus_visible_;
+        InteractionState interaction = focused->interaction;
+        interaction.focus_visible = state_->focus_visible_;
         focused->foreground_paint_dirty = true;
+        UpdateInteraction(*focused, interaction);
       }
     }
     RequestFrame();
@@ -1841,20 +1938,32 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
   HideTextSelectionOverlay();
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
-      previous->focused = false;
-      previous->focus_visible = false;
+      InteractionState interaction = previous->interaction;
+      interaction.focused = false;
+      interaction.focus_visible = false;
       previous->foreground_paint_dirty = true;
+      UpdateInteraction(*previous, interaction);
       DispatchFocusChanged(*previous, false);
     }
   }
+  if (state_->keyboard_activation_identity_.has_value() && state_->keyboard_press_id_.has_value() &&
+      state_->mounted_root_) {
+    if (detail::MountedNode* pressed = FindNode(*state_->mounted_root_, *state_->keyboard_activation_identity_)) {
+      EndInteraction(*pressed, InteractionEvent::Type::Cancel, InteractionEvent::Source::Keyboard,
+                     *state_->keyboard_press_id_);
+    }
+  }
   state_->keyboard_activation_identity_.reset();
+  state_->keyboard_press_id_.reset();
   state_->focused_node_identity_ = identity;
   state_->focus_visible_ = next_focus_visible;
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* next = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
-      next->focused = true;
-      next->focus_visible = state_->focus_visible_;
+      InteractionState interaction = next->interaction;
+      interaction.focused = true;
+      interaction.focus_visible = state_->focus_visible_;
       next->foreground_paint_dirty = true;
+      UpdateInteraction(*next, interaction);
       DispatchFocusChanged(*next, true);
     }
   }
@@ -1927,6 +2036,10 @@ bool Runtime::UpdateNodeExtensions(
       continue;
     }
     subtree_has_extensions = true;
+    if (entry.interaction_sync_pending) {
+      entry.extension->OnInteraction(node, node.interaction, std::nullopt);
+      entry.interaction_sync_pending = false;
+    }
     const NodeExtension::FrameResult result = entry.extension->OnFrame(node, node_frame);
     needs_frame = needs_frame || result.needs_frame;
     if (result.wake_after.has_value() && (!next_wakeup.has_value() || *result.wake_after < *next_wakeup)) {
@@ -1947,8 +2060,15 @@ void Runtime::BindExtensionInvalidation(detail::MountedNode& node) {
     if (!entry.extension) {
       continue;
     }
-    entry.extension->BindPaintInvalidation([this, owner = &node] {
-      owner->foreground_paint_dirty = true;
+    entry.extension->BindPaintInvalidation([this, owner = &node](NodeExtension::PaintInvalidation invalidation) {
+      if (invalidation == NodeExtension::PaintInvalidation::Content ||
+          invalidation == NodeExtension::PaintInvalidation::Both) {
+        owner->content_paint_dirty = true;
+      }
+      if (invalidation == NodeExtension::PaintInvalidation::Foreground ||
+          invalidation == NodeExtension::PaintInvalidation::Both) {
+        owner->foreground_paint_dirty = true;
+      }
       if (!state_->building_frame_) {
         RequestFrame();
       }
@@ -2027,7 +2147,7 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   }
 
   detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
-  if (!focused || !focused->enabled || !focused->focusable) {
+  if (!focused || !focused->interaction.enabled || !focused->focusable) {
     SetFocusedNode(std::nullopt);
     RefreshTextInputSession();
     return;
@@ -2070,15 +2190,24 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   if (event.type == KeyEventType::Down) {
     if (activatable && event.key == Key::Enter && !event.repeat) {
       ActivateNode(*focused);
-    } else if (activatable && event.key == Key::Space && !event.repeat) {
+    } else if (activatable && event.key == Key::Space && !event.repeat &&
+               !state_->keyboard_activation_identity_.has_value()) {
       state_->keyboard_activation_identity_ = focused->identity;
+      state_->keyboard_press_id_ = BeginInteraction(*focused, InteractionEvent::Source::Keyboard);
     }
   } else if (event.key == Key::Space) {
-    if (activatable && state_->keyboard_activation_identity_.has_value() &&
+    if (state_->keyboard_activation_identity_.has_value() &&
         *state_->keyboard_activation_identity_ == focused->identity) {
-      ActivateNode(*focused);
+      if (state_->keyboard_press_id_.has_value()) {
+        EndInteraction(*focused, activatable ? InteractionEvent::Type::Release : InteractionEvent::Type::Cancel,
+                       InteractionEvent::Source::Keyboard, *state_->keyboard_press_id_);
+      }
+      if (activatable) {
+        ActivateNode(*focused);
+      }
     }
     state_->keyboard_activation_identity_.reset();
+    state_->keyboard_press_id_.reset();
   }
   RequestFrame();
   RefreshTextInputSession();

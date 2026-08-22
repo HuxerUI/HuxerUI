@@ -263,6 +263,13 @@ The current public lifecycle is:
 ```cpp
 class NodeExtension {
 public:
+  enum class PaintInvalidation {
+    None,
+    Content,
+    Foreground,
+    Both,
+  };
+
   struct FrameResult {
     bool needs_frame;
     std::optional<double> wake_after;
@@ -282,7 +289,12 @@ public:
       MountedNode& node,
       const FrameInfo& frame);
 
-  virtual bool PrepareGeometry(MountedNode& node);
+  virtual PaintInvalidation PrepareGeometry(MountedNode& node);
+
+  virtual void OnInteraction(
+      MountedNode& node,
+      const InteractionState& state,
+      const std::optional<InteractionEvent>& event);
 
   virtual void OnScrollActivity(MountedNode& node);
   virtual void OnScrollGesture(MountedNode& node, bool active);
@@ -305,20 +317,34 @@ public:
       MountedNode& node,
       const PointerEvent& event);
 
-  virtual void Paint(
+  virtual void PaintBehindContent(
+      const MountedNode& node,
+      PaintContext& context) const;
+
+  virtual void PaintAboveContent(
       const MountedNode& node,
       PaintContext& context) const;
 
 protected:
-  void InvalidatePaint();
+  void InvalidatePaint(
+      PaintInvalidation invalidation = PaintInvalidation::Foreground);
 };
 ```
 
-`Paint()` is currently a foreground pass after the View content and children. `NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations. Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
+`PaintBehindContent()` records after the normal background and before the resolved border and node content.
+`PaintAboveContent()` records after node content and descendants, before the framework-owned focus ring.
+`NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations.
+Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
 
-`PrepareGeometry()` runs after final presentation transforms are resolved and before text services and paint consume geometry. It returns true only when the extension's foreground paint inputs changed. This phase lets geometry-dependent extensions retain value snapshots without storing raw mounted-node references or forcing clean PaintSequences to rerecord.
+`PrepareGeometry()` runs after final presentation transforms are resolved and before text services and paint consume geometry.
+It reports exactly which retained paint sequence changed.
+This phase lets geometry-dependent extensions retain value snapshots without storing raw mounted-node references or forcing unrelated clean PaintSequences to rerecord.
 
-During `Paint()`, extensions append node-local PaintCommands through `PaintContext`. Runtime stores the resulting foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene. Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants. `PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds. Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.
+During either paint callback, extensions append node-local PaintCommands through `PaintContext`.
+Runtime stores the resulting content or foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene.
+Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants.
+`PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds.
+Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.
 
 An extension whose `HitTest()` returns true keeps its node on the topmost pointer route and prevents lower visual branches from receiving that pointer. Runtime may query `HitTest()` while constructing the route and again before dispatch, so implementations keep it deterministic and free of side effects.
 
@@ -326,7 +352,8 @@ Every matching hover extension on the deepest hit node receives `OnHoverChanged(
 `HoverWhenDisabled()` opts a hover-only affordance into disabled targets without enabling focus, touch, Click, or other pointer behavior.
 An extension that returned `Observe` on pointer down continues receiving the pointer sequence without owning it; returning `CancelTarget` after recognizing a competing gesture sends PointerCancel to the active target and suppresses its activation.
 
-Clean content and foreground PaintSequences remain attached to their stable RenderNode. An extension calls `InvalidatePaint()` after changing paint-visible retained state; the operation invalidates only its owner's foreground sequence and schedules a frame when called outside frame construction.
+Clean content and foreground PaintSequences remain attached to their stable RenderNode.
+An extension calls `InvalidatePaint(PaintInvalidation)` after changing paint-visible retained state; the operation invalidates only the declared owner sequence or sequences and schedules a frame when called outside frame construction.
 During frame construction, the current recording pass consumes that invalidation and `FrameResult` remains the only extension-controlled source of follow-up scheduling.
 
 The existing `LayoutContext` and `VirtualLayoutContext` remain because they represent real child measurement sessions.
@@ -897,6 +924,8 @@ Accessibility and platform preferences enter through Environment. Theme motion r
 
 ## Interaction and indication
 
+The complete interaction-state, indication, visual-fill, and retained paint contract is specified in [Interaction and Indication Design](interaction-indication.md).
+
 Pointer input follows one shared pipeline:
 
 ```text
@@ -904,58 +933,36 @@ PointerEvent
     ↓
 hit testing and gesture arbitration
     ↓
-clickable or gesture modifier
+Runtime-owned mounted InteractionState and ordered InteractionEvent
     ↓
-InteractionState
+retained NodeExtension::OnInteraction
     ↓
-IndicationSpec
-    ↓
-mounted animation and paint
+Indication animation and phase-specific paint invalidation
 ```
 
-Interaction state is tracked per pointer ID:
+Each accepted Press receives a Runtime-unique `press_id`. Release and Cancel retain that identifier, and pointer Press position is node-local. The mounted snapshot coalesces effective enabled, hover, focus, focus-visible, and aggregate pressed facts while pointer and keyboard sessions preserve ordered interaction edges. Runtime submits complete next snapshots through one internal update path before notifying retained extensions. This supports multiple simultaneous pointers and multiple active ripple instances without turning Indication into an input recognizer.
 
-```text
-Press
-Release
-Cancel
-```
-
-A Press records the pointer ID and local press position. Release and Cancel refer to the corresponding Press. This supports multiple simultaneous pointers and multiple active ripple instances.
-
-`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event. Adding a Click handler makes the View participate in click interaction. Flat themes use a state-overlay indication, while Material themes select a ripple with a hover state layer. Default controls resolve their colors from `InteractionScheme` and their transition durations from `MotionScheme`; a typed component style can provide an explicit `IndicationSpec` when its foreground differs from the theme-wide state-layer color. Reduced-motion themes snap those transitions.
+`OnClick()` and `.On<ViewEvents::Click>()` register the same typed event and make an ordinary View participate in click interaction. Intrinsic controls such as Button, IconButton, and Chip own their activation capability and default indication independently of whether an application registers a handler; `Enabled(false)` explicitly disables them. Flat themes use state layers, while Material themes combine state layers with ripple. `InteractionScheme` provides one complete default `Indication` and one `FocusRing`; a typed component style may provide an explicit `Indication` when its surface differs from the theme-wide treatment. Reduced-motion themes snap those transitions.
 
 `Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. A control that directly establishes the disabled boundary uses its component-specific disabled state colors. A non-control boundary applies disabled group opacity once; inherited descendants keep their enabled paint colors so the subtree is not dimmed again.
 
-`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space shows pressed indication and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring color, width, disabled opacity, and key indication timing resolve from Theme.
+`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
 
 The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 
 When a pointer drag crosses the scroll threshold, the selected scroll container wins gesture arbitration. The original click target receives PointerCancel, Click is suppressed, and its indication runs the cancellation animation.
 
-### IndicationSpec
+### Indication
 
-Indications describe interaction visuals:
-
-```cpp
-using IndicationSpec = std::variant<
-    NoIndication,
-    StateOverlayIndication,
-    RippleIndication>;
-```
-
-The default indication comes from Theme. A View can override it:
+`Indication` is one immutable retained modifier and Theme value. Focus, hover, and press layers can provide a `VisualFill`, border, corner radii, placement, and animation. Ripple remains a color-based ordered Press visual with independent placement. An empty explicit value disables built-in state layers and ripple without introducing a sentinel type:
 
 ```cpp
-return Button("Save").With(
-    Indication{
-        RippleIndication{
-            .color = Color::White(),
-        },
-    });
+return Button("Save").With(Indication{});
 ```
 
-A ripple is one mounted instance per Press. It continues expanding and fading after Release or Cancel until its configured transition finishes. Its PaintSequence clip uses the resolved component corner radius.
+`VisualFill` supports colors, linear and radial gradients, image resources, image assets, vector assets, and configured image fills. Generic `Background` and indication layers share this value. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during View construction, while platform renderers execute only immutable paint commands.
+
+Retained extensions paint through `PaintBehindContent` and `PaintAboveContent`. The content sequence contains shadow, normal background, behind-content indication, resolved border, and node content; children retain their own sequences; the foreground sequence contains above-content indication and focus ring. Mounted nodes keep only the authoritative interaction snapshot, aggregate Press count, current animated border and radii, and an optional geometry-resolved indication bounds override.
 
 ## ScrollBar as a modifier
 
@@ -1664,7 +1671,7 @@ The current extension points are:
 | Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, and `TaskScope::Launch()` |
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
-| Custom interaction visual | `IndicationSpec` and `NodeExtension` |
+| Custom interaction visual | `Indication` and `NodeExtension::OnInteraction` |
 | Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
 | Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
 | Per-window service | RootHook and `RootContext::Provide()` |

@@ -61,6 +61,8 @@ private:
   void RenderSceneNode(const RenderNode& node, CommandRange* range);
   void RenderSequence(const PaintSequence& sequence, CommandRange* range);
   void RenderCommand(const DrawRectCommand& command);
+  void RenderCommand(const DrawLinearGradientCommand& command);
+  void RenderCommand(const DrawRadialGradientCommand& command);
   void RenderCommand(const DrawTextCommand& command);
   void RenderCommand(const DrawTextRunsCommand& command);
   void RenderCommand(const DrawImageCommand& command);

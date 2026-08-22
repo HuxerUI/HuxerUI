@@ -13,6 +13,9 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.LinearGradient;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.os.Debug;
 import android.os.SystemClock;
@@ -1323,6 +1326,43 @@ public final class HuxerUIView extends ViewGroup {
         preparePaint(color, Paint.Style.FILL, 0.0F);
         rect.set(x, y, x + width, y + height);
         canvas.drawRoundRect(rect, Math.max(0.0F, cornerRadius), Math.max(0.0F, cornerRadius), paint);
+    }
+
+    private void drawLinearGradient(Canvas canvas, float x, float y, float width, float height, float startX,
+            float startY, float endX, float endY, float[] stops, int[] colors, float cornerRadius) {
+        if (width <= 0.0F || height <= 0.0F || stops.length == 0 || stops.length != colors.length) {
+            return;
+        }
+        preparePaint(0xFFFFFFFF, Paint.Style.FILL, 0.0F);
+        paint.setShader(new LinearGradient(x + startX * width, y + startY * height, x + endX * width,
+                y + endY * height, colors, stops, Shader.TileMode.CLAMP));
+        rect.set(x, y, x + width, y + height);
+        canvas.drawRoundRect(rect, Math.max(0.0F, cornerRadius), Math.max(0.0F, cornerRadius), paint);
+        paint.setShader(null);
+    }
+
+    private void drawRadialGradient(Canvas canvas, float x, float y, float width, float height, float centerX,
+            float centerY, float radiusX, float radiusY, float[] stops, int[] colors, float cornerRadius) {
+        if (width <= 0.0F || height <= 0.0F || radiusX <= 0.0F || radiusY <= 0.0F || stops.length == 0
+                || stops.length != colors.length) {
+            return;
+        }
+        float resolvedCenterX = x + centerX * width;
+        float resolvedCenterY = y + centerY * height;
+        float resolvedRadiusX = radiusX * width;
+        float resolvedRadiusY = radiusY * height;
+        RadialGradient gradient = new RadialGradient(resolvedCenterX, resolvedCenterY, resolvedRadiusX, colors, stops,
+                Shader.TileMode.CLAMP);
+        if (resolvedRadiusX != resolvedRadiusY) {
+            Matrix local = new Matrix();
+            local.setScale(1.0F, resolvedRadiusY / resolvedRadiusX, resolvedCenterX, resolvedCenterY);
+            gradient.setLocalMatrix(local);
+        }
+        preparePaint(0xFFFFFFFF, Paint.Style.FILL, 0.0F);
+        paint.setShader(gradient);
+        rect.set(x, y, x + width, y + height);
+        canvas.drawRoundRect(rect, Math.max(0.0F, cornerRadius), Math.max(0.0F, cornerRadius), paint);
+        paint.setShader(null);
     }
 
     private void drawText(Canvas canvas, byte[] utf8, float x, float y, float width, float height, int color,

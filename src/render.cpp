@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <stdexcept>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -72,12 +74,13 @@ float AlignOffset(float available, float extent, VerticalAlignment alignment) no
 }
 
 void PaintImage(
-    const MountedNode& node,
+    const ImageProperties& properties,
     PaintContext& context,
     Rect content,
-    std::optional<Color> vector_tint
+    std::optional<Color> vector_tint,
+    float opacity = 1.0F
 ) {
-  const Size intrinsic = node.image_properties.IntrinsicSize();
+  const Size intrinsic = properties.IntrinsicSize();
   if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
     return;
   }
@@ -86,25 +89,25 @@ void PaintImage(
         [&](const auto& asset) {
           using Asset = std::decay_t<decltype(asset)>;
           if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, ExternalTexture>) {
-            context.DrawImageRect(asset, source, destination, node.image_properties.sampling);
+            context.DrawImageRect(asset, source, destination, properties.sampling, opacity);
           } else {
-            context.DrawImageRect(asset, source, destination, vector_tint);
+            context.DrawImageRect(asset, source, destination, vector_tint, opacity);
           }
         },
-        node.image_properties.source
+        properties.source
     );
   };
   const Rect full_source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
-  if (node.image_properties.fit == ImageFit::Fill) {
+  if (properties.fit == ImageFit::Fill) {
     draw(full_source, content);
     return;
   }
-  if (node.image_properties.fit == ImageFit::Cover) {
+  if (properties.fit == ImageFit::Cover) {
     const float scale = std::max(content.width / intrinsic.width, content.height / intrinsic.height);
     const Size source_size{content.width / scale, content.height / scale};
     const Rect source{
-        AlignOffset(intrinsic.width, source_size.width, node.image_properties.horizontal_alignment),
-        AlignOffset(intrinsic.height, source_size.height, node.image_properties.vertical_alignment),
+        AlignOffset(intrinsic.width, source_size.width, properties.horizontal_alignment),
+        AlignOffset(intrinsic.height, source_size.height, properties.vertical_alignment),
         source_size.width,
         source_size.height,
     };
@@ -112,16 +115,16 @@ void PaintImage(
     return;
   }
   float scale = 1.0F;
-  if (node.image_properties.fit == ImageFit::Contain || node.image_properties.fit == ImageFit::ScaleDown) {
+  if (properties.fit == ImageFit::Contain || properties.fit == ImageFit::ScaleDown) {
     scale = std::min(content.width / intrinsic.width, content.height / intrinsic.height);
-    if (node.image_properties.fit == ImageFit::ScaleDown) {
+    if (properties.fit == ImageFit::ScaleDown) {
       scale = std::min(1.0F, scale);
     }
   }
   const Size destination_size{intrinsic.width * scale, intrinsic.height * scale};
   const Rect destination{
-      content.x + AlignOffset(content.width, destination_size.width, node.image_properties.horizontal_alignment),
-      content.y + AlignOffset(content.height, destination_size.height, node.image_properties.vertical_alignment),
+      content.x + AlignOffset(content.width, destination_size.width, properties.horizontal_alignment),
+      content.y + AlignOffset(content.height, destination_size.height, properties.vertical_alignment),
       destination_size.width,
       destination_size.height,
   };
@@ -129,7 +132,7 @@ void PaintImage(
 }
 
 void PaintImage(const MountedNode& node, PaintContext& context) {
-  PaintImage(node, context, node.ContentBounds(), node.image_properties.tint);
+  PaintImage(node.image_properties, context, node.ContentBounds(), node.image_properties.tint);
 }
 
 void PaintLabelContent(
@@ -156,7 +159,7 @@ void PaintLabelContent(
       icon_width,
       icon_height,
   };
-  PaintImage(node, context, icon_bounds, text_style.foreground);
+  PaintImage(node.image_properties, context, icon_bounds, text_style.foreground);
   if (!show_label || text_width <= 0.0F) {
     return;
   }
@@ -188,10 +191,10 @@ Rect RenderClipBounds(const RenderClip& clip) {
 std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
   std::vector<RenderClip> clips;
   if (node.properties.clip_children) {
-    if (node.properties.corner_radii.IsUniform()) {
-      clips.emplace_back(PushClipCommand{node.bounds, std::max(0.0F, node.properties.corner_radii.top_left)});
+    if (node.resolved_corner_radii.IsUniform()) {
+      clips.emplace_back(PushClipCommand{node.bounds, std::max(0.0F, node.resolved_corner_radii.top_left)});
     } else {
-      clips.emplace_back(PushPathClipCommand{Path::RoundedRect(node.bounds, node.properties.corner_radii)});
+      clips.emplace_back(PushPathClipCommand{Path::RoundedRect(node.bounds, node.resolved_corner_radii)});
     }
   }
   if (IsScrollContainer(node)) {
@@ -504,7 +507,7 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
   float render_opacity = std::clamp(node.presentation.local_opacity, 0.0F, 1.0F);
   // Apply disabled opacity only when entering a disabled subtree; descendants inherit the result without multiplying
   // the same disabled state again.
-  if (node.disabled_visual_state) {
+  if (node.applies_disabled_appearance) {
     render_opacity *= node.properties.disabled_opacity;
   }
   node.presentation.render_opacity = render_opacity;
@@ -516,32 +519,43 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
   }
 }
 
-void PaintNodeExtensions(MountedNode& node, PaintContext& context) {
+void PaintNodeExtensionsBehindContent(MountedNode& node, PaintContext& context) {
   for (const auto& entry : node.extensions) {
     if (entry.extension) {
-      entry.extension->Paint(node, context);
+      entry.extension->PaintBehindContent(node, context);
     }
   }
 }
 
-void PaintFocusRing(const MountedNode& node, const Rect& bounds, PaintContext& context) {
-  if (!node.focus_visible || !node.enabled || node.properties.focus_ring_width <= 0.0F) {
+void PaintNodeExtensionsAboveContent(MountedNode& node, PaintContext& context) {
+  for (const auto& entry : node.extensions) {
+    if (entry.extension) {
+      entry.extension->PaintAboveContent(node, context);
+    }
+  }
+}
+
+void PaintFocusRing(const MountedNode& node, PaintContext& context) {
+  const FocusRing& ring = node.properties.focus_ring;
+  if (!node.interaction.enabled || !node.interaction.focus_visible || ring.width <= 0.0F) {
     return;
   }
-  const float ring_outset = node.properties.focus_ring_width + node.properties.focus_ring_offset;
-  const Rect ring_bounds{
-      bounds.x - ring_outset,
-      bounds.y - ring_outset,
-      bounds.width + ring_outset * 2.0F,
-      bounds.height + ring_outset * 2.0F,
-  };
-  const CornerRadii ring_radii{
-      node.properties.corner_radii.top_left + ring_outset,
-      node.properties.corner_radii.top_right + ring_outset,
-      node.properties.corner_radii.bottom_right + ring_outset,
-      node.properties.corner_radii.bottom_left + ring_outset,
-  };
-  context.DrawBorder(ring_bounds, node.properties.focus_ring, node.properties.focus_ring_width, ring_radii);
+  const Rect frame = node.indication_bounds_override.value_or(node.bounds);
+  const float width = std::max(0.0F, ring.width);
+  const float outset = std::max(0.0F, ring.offset) + width;
+  CornerRadii radii = node.resolved_corner_radii;
+  radii.top_left += outset;
+  radii.top_right += outset;
+  radii.bottom_right += outset;
+  radii.bottom_left += outset;
+  context.DrawBorder(
+      {
+          frame.x - outset,
+          frame.y - outset,
+          frame.width + outset * 2.0F,
+          frame.height + outset * 2.0F,
+      },
+      ring.color, width, radii);
 }
 
 void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
@@ -569,47 +583,37 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                      }
                                    : bounds;
     PaintContext content{render_node.content, canvas_bounds};
-    std::optional<Color> background = node.properties.background;
-    std::optional<Color> border = node.properties.border;
+    std::optional<VisualFill> background = node.properties.background;
     TextStyle text_style = node.properties.text_style;
-    if (node.disabled_visual_state) {
+    if (node.applies_disabled_appearance) {
       if (node.properties.disabled_background.has_value()) {
         background = node.properties.disabled_background;
       }
       if (node.properties.disabled_foreground.has_value()) {
         text_style.foreground = *node.properties.disabled_foreground;
       }
-      if (node.properties.disabled_border.has_value()) {
-        border = node.properties.disabled_border;
-      }
     }
     if (node.properties.shadow.has_value() && node.properties.shadow->color.alpha > 0.0F) {
       const Shadow& shadow = *node.properties.shadow;
-      content.DrawShadow(
-          bounds,
-          shadow.color,
-          shadow.offset,
-          shadow.blur_radius,
-          shadow.spread,
-          node.properties.corner_radii
-      );
+      content.DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread,
+                         node.resolved_corner_radii);
     }
-    if (background.has_value() && background->alpha > 0.0F) {
-      content.DrawRect(
-          node.kind == NodeKind::Divider ? node.ContentBounds() : bounds,
-          *background,
-          node.properties.corner_radii
-      );
+    if (background.has_value()) {
+      PaintVisualFill(content, node.kind == NodeKind::Divider ? node.ContentBounds() : bounds, *background,
+                      node.resolved_corner_radii);
     }
-    if (border.has_value() && border->alpha > 0.0F && node.properties.border_width > 0.0F) {
-      content.DrawBorder(bounds, *border, node.properties.border_width, node.properties.corner_radii);
+    PaintNodeExtensionsBehindContent(node, content);
+    if (node.resolved_border.has_value() && node.resolved_border->color.alpha > 0.0F &&
+        node.resolved_border->width > 0.0F) {
+      content.DrawBorder(bounds, node.resolved_border->color, node.resolved_border->width,
+                         node.resolved_corner_radii);
     }
     if (node.kind == NodeKind::Text) {
       if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
         PaintLabelContent(node, content, text_style);
       } else {
         content.DrawText(
-            node.ContentBounds(), node.text, node.properties.text_style, node.properties.text_layout_options
+            node.ContentBounds(), node.text, text_style, node.properties.text_layout_options
         );
       }
     } else if (node.kind == NodeKind::IconButton ||
@@ -651,10 +655,9 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   }
 
   if (node.foreground_paint_dirty) {
-    const Rect bounds = node.bounds;
     PaintContext foreground{render_node.foreground, node.bounds};
-    PaintNodeExtensions(node, foreground);
-    PaintFocusRing(node, bounds, foreground);
+    PaintNodeExtensionsAboveContent(node, foreground);
+    PaintFocusRing(node, foreground);
     foreground.Finish();
     node.foreground_paint_dirty = false;
     changed = true;
@@ -717,6 +720,62 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
 }
 
 } // namespace
+
+void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,
+                     float opacity) {
+  opacity = std::clamp(opacity, 0.0F, 1.0F);
+  if (opacity <= 0.0F || bounds.IsEmpty()) {
+    return;
+  }
+  std::visit(
+      [&](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          Color color = value;
+          color.alpha *= opacity;
+          context.DrawRect(bounds, color, corner_radii);
+        } else if constexpr (std::same_as<Value, LinearGradient>) {
+          LinearGradient gradient = value;
+          for (GradientStop& stop : gradient.stops) {
+            stop.color.alpha *= opacity;
+          }
+          context.DrawLinearGradient(bounds, std::move(gradient), corner_radii);
+        } else if constexpr (std::same_as<Value, RadialGradient>) {
+          RadialGradient gradient = value;
+          for (GradientStop& stop : gradient.stops) {
+            stop.color.alpha *= opacity;
+          }
+          context.DrawRadialGradient(bounds, std::move(gradient), corner_radii);
+        } else {
+          ImageProperties properties;
+          properties.fit = value.fit;
+          properties.horizontal_alignment = value.horizontal_alignment;
+          properties.vertical_alignment = value.vertical_alignment;
+          properties.sampling = value.sampling;
+          properties.tint = value.tint;
+          const float image_opacity = opacity * std::clamp(value.opacity, 0.0F, 1.0F);
+          std::visit(
+              [&](const auto& source) {
+                using Source = std::decay_t<decltype(source)>;
+                if constexpr (std::same_as<Source, ImageResource>) {
+                  throw std::logic_error("HuxerUI unresolved image fill resource reached retained paint recording");
+                } else {
+                  properties.source = source;
+                }
+              },
+              value.source
+          );
+          if (image_opacity <= 0.0F || !properties.HasValue()) {
+            return;
+          }
+          context.PushClip(bounds, corner_radii);
+          PaintImage(properties, context, bounds, properties.tint, image_opacity);
+          context.PopClip();
+        }
+      },
+      fill.Get()
+  );
+}
 
 std::shared_ptr<FrozenScene> FreezeRenderScene(const RenderNode* root) {
   auto frozen = std::make_shared<FrozenScene>();

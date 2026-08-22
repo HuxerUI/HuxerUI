@@ -3,7 +3,6 @@
 #include "internal.h"
 
 #include <optional>
-#include <unordered_set>
 #include <vector>
 
 #include <huxerui/indication.h>
@@ -14,6 +13,8 @@ namespace huxerui::detail {
 struct DefaultIndication {
   static const ModifierDescriptor& Descriptor();
 
+  std::optional<Indication> value;
+
   bool operator==(const DefaultIndication&) const = default;
 };
 
@@ -21,36 +22,36 @@ bool IsDefaultIndicationDescriptor(const ModifierDescriptor* descriptor) noexcep
 bool IsExplicitIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
 
 struct IndicationRippleState {
-  std::int64_t pointer_id = 0;
+  std::uint64_t press_id = 0;
   Point local_origin;
-  std::optional<double> started_at;
-  std::optional<double> released_at;
+  RippleEffect effect;
+  MotionController expansion{0.0F};
+  MotionController opacity{1.0F};
+  bool expansion_pending = true;
   bool release_pending = false;
+  bool released = false;
 };
 
 class IndicationState {
 public:
-  void Update(IndicationSpec spec);
+  void Update(Indication spec);
   void Reset();
-  void SetHovered(bool hovered);
-  void Press(std::int64_t pointer_id, Point local_origin);
-  void Release(std::int64_t pointer_id);
-  [[nodiscard]] bool Advance(const FrameInfo& frame);
-  void Paint(PaintContext& context, Rect frame, CornerRadii corner_radii, float opacity = 1.0F) const;
+  void SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event, Rect frame);
+  [[nodiscard]] MotionAdvanceResult Advance(const FrameInfo& frame);
+  void Paint(PaintContext& context, Rect frame, CornerRadii corner_radii, IndicationPlacement placement,
+             float opacity = 1.0F) const;
+  [[nodiscard]] NodeExtension::PaintInvalidation ActivePaintPhases() const noexcept;
   [[nodiscard]] bool HasVisuals() const noexcept;
 
 private:
-  IndicationSpec spec_ = StateOverlayIndication{};
-  MotionController opacity_{0.0F};
-  MotionController hover_opacity_{0.0F};
-  std::unordered_set<std::int64_t> pressed_pointers_;
-  std::vector<IndicationRippleState> ripples_;
-  bool hovered_ = false;
-  bool overlay_target_pending_ = false;
-  bool released_visual_ = false;
-  double last_frame_timestamp_ = 0.0;
-};
+  void RetargetLayer(MotionController& controller, bool visible, const std::optional<IndicationLayer>& layer);
 
-IndicationSpec ResolveDefaultIndication(const ThemeSpec& theme);
+  Indication spec_;
+  InteractionState interaction_;
+  MotionController focus_opacity_{0.0F};
+  MotionController hover_opacity_{0.0F};
+  MotionController press_opacity_{0.0F};
+  std::vector<IndicationRippleState> ripples_;
+};
 
 } // namespace huxerui::detail

@@ -191,16 +191,6 @@ Rect ContainedIconBounds(Size intrinsic, Rect bounds) {
   };
 }
 
-Color InterpolateTextFieldColor(Color from, Color to, float progress) {
-  progress = std::clamp(progress, 0.0F, 1.0F);
-  return {
-      from.red + (to.red - from.red) * progress,
-      from.green + (to.green - from.green) * progress,
-      from.blue + (to.blue - from.blue) * progress,
-      from.alpha + (to.alpha - from.alpha) * progress,
-  };
-}
-
 void PaintTextFieldIcon(PaintContext& context, const detail::TextFieldModifier::Icon& icon, Rect bounds, Color tint) {
   std::visit(
       [&](const auto& asset) {
@@ -475,18 +465,18 @@ public:
     if (!initialized_) {
       editing_.value = modifier.value;
       initialized_ = true;
-      UpdateLabelTarget(node.focused);
+      UpdateLabelTarget(node.interaction.focused);
       return;
     }
 
     const bool acknowledged = last_emitted_.has_value() && modifier.value == *last_emitted_;
     if (acknowledged) {
       last_emitted_.reset();
-      UpdateLabelTarget(node.focused);
+      UpdateLabelTarget(node.interaction.focused);
       return;
     }
     if (modifier.value == editing_.value) {
-      UpdateLabelTarget(node.focused);
+      UpdateLabelTarget(node.interaction.focused);
       return;
     }
     if (modifier.value.composition.has_value()) {
@@ -513,7 +503,7 @@ public:
     preferred_caret_x_.reset();
     RequestCaretReveal();
     ResetCaretBlink();
-    UpdateLabelTarget(node.focused);
+    UpdateLabelTarget(node.interaction.focused);
   }
 
   Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
@@ -592,21 +582,21 @@ public:
     }
 
     const bool enabled = node.IsEnabled();
-    const bool disabled_visual_state = node.disabled_visual_state;
+    const bool disabled_appearance = node.applies_disabled_appearance;
     const bool invalid = validation_.IsInvalid();
     const float label_progress = std::clamp(label_progress_.Value(), 0.0F, 1.0F);
     TextStyle text_style = style_.text_style;
     TextStyle label_style = style_.label_style;
     TextStyle floating_label_style = style_.floating_label_style;
     TextStyle placeholder_style = style_.placeholder_style;
-    if (disabled_visual_state) {
+    if (disabled_appearance) {
       text_style.foreground = style_.disabled_text;
       placeholder_style.foreground = style_.disabled_placeholder;
     }
     const Rect editor_frame = EditorFrame(node);
     const Rect content = EditorContentRect(node);
     const Point origin = TextOrigin(node);
-    const Color background = disabled_visual_state
+    const Color background = disabled_appearance
                                  ? variant_style_.disabled_background.value_or(variant_style_.background)
                                  : variant_style_.background;
     if (background.alpha > 0.0F) {
@@ -663,7 +653,7 @@ public:
       }
     }
 
-    if (node.focused && editing_.value.selection.IsCollapsed() && caret_visible_) {
+    if (node.interaction.focused && editing_.value.selection.IsCollapsed() && caret_visible_) {
       Rect caret = OffsetRect(
           text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity),
           origin
@@ -684,7 +674,7 @@ public:
       const Rect node_content = node.ContentBounds();
       const Size size = validation_layout_->Measure();
       TextStyle validation_style = style_.validation_text_style;
-      if (disabled_visual_state) {
+      if (disabled_appearance) {
         validation_style.foreground = style_.disabled_supporting_text;
       } else if (!invalid) {
         validation_style.foreground = style_.placeholder_style.foreground;
@@ -705,13 +695,16 @@ public:
 
     float border_width = std::max(0.0F, style_.border_width);
     Color border = variant_style_.border;
-    if (disabled_visual_state) {
+    if (disabled_appearance) {
       border = variant_style_.disabled_border;
     } else if (invalid) {
       border_width =
-          std::max(0.0F, node.focused ? style_.focused_validation_border_width : style_.validation_border_width);
+          std::max(
+              0.0F,
+              node.interaction.focused ? style_.focused_validation_border_width : style_.validation_border_width
+          );
       border = style_.validation_error;
-    } else if (node.focused) {
+    } else if (node.interaction.focused) {
       border_width = std::max(0.0F, style_.focused_border_width);
       border = variant_style_.focused_border;
     } else if (hovered) {
@@ -758,7 +751,7 @@ public:
           style_.label_style.font.Size() +
           (style_.floating_label_style.font.Size() - style_.label_style.font.Size()) * label_progress
       );
-      animated_label_style.foreground = InterpolateTextFieldColor(
+      animated_label_style.foreground = detail::InterpolateColor(
           ResolveLabelColor(node, invalid, false),
           ResolveLabelColor(node, invalid, true),
           label_progress
@@ -774,7 +767,7 @@ public:
       paint_changed = caret_visible_ != previous_caret_visible;
       return result;
     };
-    if (!node.focused || !editing_.value.selection.IsCollapsed()) {
+    if (!node.interaction.focused || !editing_.value.selection.IsCollapsed()) {
       caret_epoch_.reset();
       caret_visible_ = false;
       return finish({});
@@ -988,7 +981,7 @@ public:
   }
 
   bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const override {
-    if (!node_ || !node_->enabled) {
+    if (!node_ || !node_->interaction.enabled) {
       return false;
     }
     const TextRange selection = editing_.value.selection.Range();
@@ -1460,26 +1453,26 @@ private:
   }
 
   Color ResolveLabelColor(const detail::MountedNode& node, bool invalid, bool floating) const {
-    if (node.disabled_visual_state) {
+    if (node.applies_disabled_appearance) {
       return style_.disabled_label;
     }
     if (invalid) {
       return style_.error_label;
     }
-    if (node.focused) {
+    if (node.interaction.focused) {
       return style_.focused_label;
     }
     return floating ? style_.floating_label_style.foreground : style_.label_style.foreground;
   }
 
   Color ResolveIconColor(const detail::MountedNode& node, bool invalid, bool leading) const {
-    if (node.disabled_visual_state) {
+    if (node.applies_disabled_appearance) {
       return leading ? style_.disabled_leading_icon : style_.disabled_trailing_icon;
     }
     if (invalid) {
       return leading ? style_.error_leading_icon : style_.error_trailing_icon;
     }
-    if (node.focused) {
+    if (node.interaction.focused) {
       return leading ? style_.focused_leading_icon : style_.focused_trailing_icon;
     }
     return leading ? style_.leading_icon : style_.trailing_icon;
@@ -1583,7 +1576,7 @@ private:
         EnsureLayouts(*platform_);
       }
     }
-    UpdateLabelTarget(node_ && node_->focused);
+    UpdateLabelTarget(node_ && node_->interaction.focused);
     ResetCaretBlink();
     detail::EmitEvent<TextFieldEvents::Changed>(event_bindings_, editing_.value);
     return true;
@@ -1795,7 +1788,7 @@ private:
         EnsureLayouts(*platform_);
       }
     }
-    UpdateLabelTarget(node_ && node_->focused);
+    UpdateLabelTarget(node_ && node_->interaction.focused);
     ResetCaretBlink();
     detail::EmitEvent<TextFieldEvents::Changed>(event_bindings_, editing_.value);
     return {
@@ -2298,7 +2291,7 @@ public:
     return result;
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     client_->Paint(static_cast<const detail::MountedNode&>(node), context, hovered_);
   }
 

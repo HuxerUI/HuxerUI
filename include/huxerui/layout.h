@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/event.h>
 #include <huxerui/geometry.h>
 
 namespace huxerui {
@@ -196,6 +197,10 @@ public:
     return IsFocusedImpl();
   }
 
+  [[nodiscard]] const InteractionState& Interaction() const noexcept {
+    return InteractionImpl();
+  }
+
   [[nodiscard]] float Spacing() const noexcept {
     return SpacingImpl();
   }
@@ -257,6 +262,7 @@ protected:
   virtual float PresentationOpacityImpl() const noexcept = 0;
   virtual bool IsEnabledImpl() const noexcept = 0;
   virtual bool IsFocusedImpl() const noexcept = 0;
+  virtual const InteractionState& InteractionImpl() const noexcept = 0;
   virtual float SpacingImpl() const noexcept = 0;
   virtual float GrowFactorImpl() const noexcept = 0;
   virtual MainAxisAlignment MainAlignmentImpl() const noexcept = 0;

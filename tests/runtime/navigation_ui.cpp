@@ -442,7 +442,7 @@ TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
   REQUIRE(root != nullptr);
   const detail::MountedNode* drawer_focus = FindFocusableContaining(*root, "Drawer action");
   REQUIRE(drawer_focus != nullptr);
-  REQUIRE(drawer_focus->focused);
+  REQUIRE(drawer_focus->interaction.focused);
   const std::optional<Rect> action = FindPresentedTextRect(runtime.BuildFrame(), "Drawer action");
   REQUIRE(action.has_value());
   ClickAt(runtime, {action->x + action->width * 0.5F, action->y + action->height * 0.5F});
@@ -458,7 +458,7 @@ TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
   REQUIRE(root != nullptr);
   const detail::MountedNode* main_focus = FindFocusableContaining(*root, "Main content");
   REQUIRE(main_focus != nullptr);
-  REQUIRE_FALSE(main_focus->focused);
+  REQUIRE_FALSE(main_focus->interaction.focused);
   runtime.HandleKeyEvent({KeyEventType::Down, Key::Enter});
   REQUIRE(content_actions == 1);
 
@@ -468,7 +468,7 @@ TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
   REQUIRE(root != nullptr);
   main_focus = FindFocusableContaining(*root, "Main content");
   REQUIRE(main_focus != nullptr);
-  REQUIRE_FALSE(main_focus->focused);
+  REQUIRE_FALSE(main_focus->interaction.focused);
   runtime.HandleKeyEvent({KeyEventType::Down, Key::Enter});
   REQUIRE(content_actions == 1);
 
@@ -479,7 +479,7 @@ TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
   REQUIRE(root != nullptr);
   main_focus = FindFocusableContaining(*root, "Main content");
   REQUIRE(main_focus != nullptr);
-  REQUIRE(main_focus->focused);
+  REQUIRE(main_focus->interaction.focused);
   REQUIRE(runtime.HandleBack());
   REQUIRE(application_back_requests == 1);
 }
@@ -519,8 +519,8 @@ TEST_CASE("DrawerLayoutAdaptsModalAndInlinePlacementByViewportClass") {
   REQUIRE(content->LayoutOffset().x == 320.0F);
   REQUIRE(content->LayoutSize().width == 400.0F);
   REQUIRE(end->LayoutSize().width == 320.0F);
-  REQUIRE(start->enabled);
-  REQUIRE_FALSE(end->enabled);
+  REQUIRE(start->interaction.enabled);
+  REQUIRE_FALSE(end->interaction.enabled);
   REQUIRE(start->properties.corner_radii == CornerRadii{});
   REQUIRE_FALSE(start->properties.shadow.has_value());
   const std::uint64_t start_identity = start->identity;
@@ -541,7 +541,7 @@ TEST_CASE("DrawerLayoutAdaptsModalAndInlinePlacementByViewportClass") {
   REQUIRE(root != nullptr);
   end = FindBackgroundContaining(*root, DrawerStyle::Default().background, "End panel");
   REQUIRE(end != nullptr);
-  REQUIRE(end->enabled);
+  REQUIRE(end->interaction.enabled);
   REQUIRE(end->PresentationBounds().x == 400.0F);
   REQUIRE(end->properties.shadow.has_value());
   REQUIRE(end->properties.corner_radii != CornerRadii{});
@@ -564,8 +564,8 @@ TEST_CASE("DrawerLayoutAdaptsModalAndInlinePlacementByViewportClass") {
   REQUIRE(content->LayoutSize().width == 360.0F);
   REQUIRE(end->PresentationBounds().x == 600.0F);
   REQUIRE(end->LayoutSize().width == 240.0F);
-  REQUIRE(start->enabled);
-  REQUIRE(end->enabled);
+  REQUIRE(start->interaction.enabled);
+  REQUIRE(end->interaction.enabled);
   REQUIRE(start->properties.corner_radii == CornerRadii{});
   REQUIRE(end->properties.corner_radii == CornerRadii{});
   REQUIRE_FALSE(start->properties.shadow.has_value());
@@ -591,8 +591,8 @@ TEST_CASE("DrawerLayoutAutomaticallyRevealsPersistentDrawersAfterExpansion") {
   const detail::MountedNode* end = FindBackgroundContaining(*root, DrawerStyle::Default().background, "End panel");
   REQUIRE(start != nullptr);
   REQUIRE(end != nullptr);
-  REQUIRE_FALSE(start->enabled);
-  REQUIRE_FALSE(end->enabled);
+  REQUIRE_FALSE(start->interaction.enabled);
+  REQUIRE_FALSE(end->interaction.enabled);
   const std::uint64_t start_identity = start->identity;
   const std::uint64_t end_identity = end->identity;
 
@@ -606,8 +606,8 @@ TEST_CASE("DrawerLayoutAutomaticallyRevealsPersistentDrawersAfterExpansion") {
   REQUIRE(end != nullptr);
   REQUIRE(start->identity == start_identity);
   REQUIRE(end->identity == end_identity);
-  REQUIRE(start->enabled);
-  REQUIRE(end->enabled);
+  REQUIRE(start->interaction.enabled);
+  REQUIRE(end->interaction.enabled);
   REQUIRE(start->properties.corner_radii == CornerRadii{});
   REQUIRE(end->properties.corner_radii == CornerRadii{});
   REQUIRE_FALSE(start->properties.shadow.has_value());
@@ -635,8 +635,8 @@ TEST_CASE("InlineDrawersRemainVisibleWithoutChangingControlledModalState") {
   const detail::MountedNode* end = FindBackgroundContaining(*root, DrawerStyle::Default().background, "End panel");
   REQUIRE(start != nullptr);
   REQUIRE(end != nullptr);
-  REQUIRE(start->enabled);
-  REQUIRE(end->enabled);
+  REQUIRE(start->interaction.enabled);
+  REQUIRE(end->interaction.enabled);
   REQUIRE_FALSE(runtime.HandleBack());
   REQUIRE_FALSE(responsive_start_open->Get());
   REQUIRE_FALSE(responsive_end_open->Get());
@@ -691,8 +691,8 @@ TEST_CASE("DrawerLayoutFallsBackFromTheEndWhenLocalWidthIsConstrained") {
   const detail::MountedNode* end = FindBackgroundContaining(*root, DrawerStyle::Default().background, "End panel");
   REQUIRE(start != nullptr);
   REQUIRE(end != nullptr);
-  REQUIRE(start->enabled);
-  REQUIRE_FALSE(end->enabled);
+  REQUIRE(start->interaction.enabled);
+  REQUIRE_FALSE(end->interaction.enabled);
   REQUIRE(start->properties.corner_radii == CornerRadii{});
   REQUIRE_FALSE(start->properties.shadow.has_value());
 

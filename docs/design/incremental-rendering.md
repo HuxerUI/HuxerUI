@@ -305,7 +305,7 @@ node transform and opacity
     -> foreground record
 ```
 
-The foreground record preserves the current `NodeExtension` foreground-painting behavior.
+The content and foreground records preserve the two `NodeExtension` paint phases without adding another retained sequence.
 One foreground record per mounted node is sufficient initially.
 Per-extension fragments should be added only if profiling shows that rebuilding several foreground extensions on one node is material.
 
@@ -352,7 +352,7 @@ Its transform and clip stacks are reflected in those bounds, so the recorded rec
 `PaintContext::Bounds()` supplies the owning node's local layout bounds as a geometry reference; Canvas instead receives its Padding-deflated content bounds with a `(0, 0)` origin.
 Neither form clips drawing to that rectangle.
 Dirty sequences are recorded before visibility is resolved, allowing extensions, shadows, and Canvas primitives to paint beyond layout bounds correctly.
-Built-in nodes, `NodeExtension::Paint`, and the `Canvas` component use this same API.
+Built-in nodes, both `NodeExtension` paint phases, and the `Canvas` component use this same API.
 
 Paint callbacks are pure:
 
@@ -377,21 +377,22 @@ Protected extension operations provide that capability:
 
 ```cpp
 protected:
-  void InvalidatePaint();
+  void InvalidatePaint(PaintInvalidation invalidation = PaintInvalidation::Foreground);
 ```
 
 The runtime binds this operation to the extension's mounted owner for the extension lifetime.
 It is unavailable to ordinary application code and does not expose `Runtime`.
-Calling it invalidates the owning foreground PaintSequence.
+Calling it invalidates the owning content PaintSequence, foreground PaintSequence, or both according to the supplied phase.
 Outside frame construction it also schedules a frame; during frame construction the current recording pass consumes the invalidation.
 
 `FrameResult` remains responsible for continuous-frame and delayed-wake timing.
 It does not double as a dirty-state carrier, and paint invalidation does not double as an extension frame scheduler.
 Built-in presentation modifiers update retained transform or opacity state while advancing and return the appropriate scheduling result.
-An indication whose ripple geometry changed calls `InvalidatePaint()`.
+An indication whose retained visual changes calls `InvalidatePaint()` for the phase or phases that contain it.
 
-`NodeExtension::Paint` receives local `Bounds()` and `PaintContext`.
-It does not receive a flat frame display list or depend on inherited transforms already having been emitted.
+`NodeExtension::PaintBehindContent` records after the normal background and before the resolved border and node content.
+`NodeExtension::PaintAboveContent` records after descendants and before the framework-owned focus ring.
+Both callbacks receive local `Bounds()` and `PaintContext`; neither receives a flat frame display list or depends on inherited transforms already having been emitted.
 
 ## Presentation and scrolling
 

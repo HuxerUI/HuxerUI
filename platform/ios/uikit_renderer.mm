@@ -60,6 +60,35 @@ private:
   T value_ = nullptr;
 };
 
+CFRef<CGGradientRef> CreateGradient(const std::vector<GradientStop>& stops) {
+  std::vector<CGFloat> components;
+  std::vector<CGFloat> locations;
+  components.reserve(stops.size() * 4);
+  locations.reserve(stops.size());
+  for (const GradientStop& stop : stops) {
+    components.push_back(stop.color.red);
+    components.push_back(stop.color.green);
+    components.push_back(stop.color.blue);
+    components.push_back(stop.color.alpha);
+    locations.push_back(stop.offset);
+  }
+  CFRef<CGColorSpaceRef> color_space(CGColorSpaceCreateDeviceRGB());
+  return CFRef<CGGradientRef>(CGGradientCreateWithColorComponents(
+      color_space.Get(), components.data(), locations.data(), stops.size()
+  ));
+}
+
+void ClipGradientRect(CGContextRef context, Rect rect, float corner_radius) {
+  const CGRect native = CGRectMake(rect.x, rect.y, rect.width, rect.height);
+  if (corner_radius <= 0.0F) {
+    CGContextClipToRect(context, native);
+    return;
+  }
+  CFRef<CGPathRef> path(CGPathCreateWithRoundedRect(native, corner_radius, corner_radius, nullptr));
+  CGContextAddPath(context, path.Get());
+  CGContextClip(context);
+}
+
 void CombineHash(std::size_t& seed, std::size_t value) noexcept {
   seed ^= value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
 }
@@ -1181,6 +1210,57 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawRectCommand& c
   } else {
     CGContextFillRect(context, rect);
   }
+}
+
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawLinearGradientCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
+    return;
+  }
+  const auto point = [&](Point value) {
+    return CGPointMake(
+        command.rect.x + value.x * command.rect.width,
+        command.rect.y + value.y * command.rect.height
+    );
+  };
+  CGContextSaveGState(context);
+  ClipGradientRect(context, command.rect, command.corner_radius);
+  CGContextDrawLinearGradient(
+      context,
+      gradient.Get(),
+      point(command.gradient.start),
+      point(command.gradient.end),
+      kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation
+  );
+  CGContextRestoreGState(context);
+}
+
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawRadialGradientCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
+    return;
+  }
+  const CGPoint center = CGPointMake(
+      command.rect.x + command.gradient.center.x * command.rect.width,
+      command.rect.y + command.gradient.center.y * command.rect.height
+  );
+  const CGFloat radius_x = command.gradient.radius.width * command.rect.width;
+  const CGFloat radius_y = command.gradient.radius.height * command.rect.height;
+  CGContextSaveGState(context);
+  ClipGradientRect(context, command.rect, command.corner_radius);
+  CGContextTranslateCTM(context, center.x, center.y);
+  CGContextScaleCTM(context, 1.0, radius_y / radius_x);
+  CGContextTranslateCTM(context, -center.x, -center.y);
+  CGContextDrawRadialGradient(
+      context,
+      gradient.Get(),
+      center,
+      0.0,
+      center,
+      radius_x,
+      kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation
+  );
+  CGContextRestoreGState(context);
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& command) {

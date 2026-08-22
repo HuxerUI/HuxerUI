@@ -898,6 +898,55 @@ void WebRenderer::RenderCommand(const DrawRectCommand& command) {
   context_.call<void>("fill");
 }
 
+void WebRenderer::RenderCommand(const DrawLinearGradientCommand& command) {
+  if (command.rect.IsEmpty()) {
+    return;
+  }
+  const float start_x = command.rect.x + command.gradient.start.x * command.rect.width;
+  const float start_y = command.rect.y + command.gradient.start.y * command.rect.height;
+  const float end_x = command.rect.x + command.gradient.end.x * command.rect.width;
+  const float end_y = command.rect.y + command.gradient.end.y * command.rect.height;
+  val gradient = context_.call<val>("createLinearGradient", start_x, start_y, end_x, end_y);
+  for (const GradientStop& stop : command.gradient.stops) {
+    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  context_.set("fillStyle", gradient);
+  if (command.corner_radius <= 0.0F) {
+    context_.call<void>("fillRect", command.rect.x, command.rect.y, command.rect.width, command.rect.height);
+    return;
+  }
+  context_.call<void>("beginPath");
+  AddRoundedRect(context_, command.rect, command.corner_radius);
+  context_.call<void>("fill");
+}
+
+void WebRenderer::RenderCommand(const DrawRadialGradientCommand& command) {
+  if (command.rect.IsEmpty()) {
+    return;
+  }
+  const float center_x = command.rect.x + command.gradient.center.x * command.rect.width;
+  const float center_y = command.rect.y + command.gradient.center.y * command.rect.height;
+  const float radius_x = command.gradient.radius.width * command.rect.width;
+  const float radius_y = command.gradient.radius.height * command.rect.height;
+  const float scale_y = radius_y / radius_x;
+  context_.call<void>("save");
+  context_.call<void>("beginPath");
+  AddRoundedRect(context_, command.rect, command.corner_radius);
+  context_.call<void>("clip");
+  context_.call<void>("translate", center_x, center_y);
+  context_.call<void>("scale", 1.0F, scale_y);
+  context_.call<void>("translate", -center_x, -center_y);
+  val gradient = context_.call<val>("createRadialGradient", center_x, center_y, 0.0F, center_x, center_y, radius_x);
+  for (const GradientStop& stop : command.gradient.stops) {
+    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  context_.set("fillStyle", gradient);
+  // fillRect is evaluated in the scaled coordinate space, so map the original bounds through the inverse Y scale.
+  const float fill_y = center_y + (command.rect.y - center_y) / scale_y;
+  context_.call<void>("fillRect", command.rect.x, fill_y, command.rect.width, command.rect.height / scale_y);
+  context_.call<void>("restore");
+}
+
 void WebRenderer::RenderCommand(const DrawTextCommand& command) {
   if (command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
     return;

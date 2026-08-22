@@ -27,6 +27,7 @@
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
+#include <huxerui/paint.h>
 #include <huxerui/resource.h>
 #include <huxerui/scroll.h>
 #include <huxerui/state.h>
@@ -45,14 +46,6 @@ enum class TextRole {
   Body,
   Label,
   Title,
-};
-
-enum class ImageFit {
-  None,
-  Contain,
-  Cover,
-  Fill,
-  ScaleDown,
 };
 
 namespace detail {

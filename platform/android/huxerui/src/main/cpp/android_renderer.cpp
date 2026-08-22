@@ -97,6 +97,12 @@ jfloatArray ToPathArray(JNIEnv* environment, const Path& path) {
 
 void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
+  draw_linear_gradient_ = environment->GetMethodID(
+      view_class, "drawLinearGradient", "(Landroid/graphics/Canvas;FFFFFFFF[F[IF)V"
+  );
+  draw_radial_gradient_ = environment->GetMethodID(
+      view_class, "drawRadialGradient", "(Landroid/graphics/Canvas;FFFFFFFF[F[IF)V"
+  );
   draw_text_ = environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFIFI[BIIIIII[B)V");
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
@@ -263,6 +269,72 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
       command.rect.width,
       command.rect.height,
       PackColor(command.color),
+      command.corner_radius
+  );
+}
+
+void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas,
+                                    const DrawLinearGradientCommand& command) {
+  std::vector<jfloat> offsets;
+  std::vector<jint> colors;
+  offsets.reserve(command.gradient.stops.size());
+  colors.reserve(command.gradient.stops.size());
+  for (const GradientStop& stop : command.gradient.stops) {
+    offsets.push_back(stop.offset);
+    colors.push_back(PackColor(stop.color));
+  }
+  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
+  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
+  if (!java_offsets || !java_colors) {
+    return;
+  }
+  environment->CallVoidMethod(
+      view,
+      draw_linear_gradient_,
+      canvas,
+      command.rect.x,
+      command.rect.y,
+      command.rect.width,
+      command.rect.height,
+      command.gradient.start.x,
+      command.gradient.start.y,
+      command.gradient.end.x,
+      command.gradient.end.y,
+      java_offsets.Get(),
+      java_colors.Get(),
+      command.corner_radius
+  );
+}
+
+void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas,
+                                    const DrawRadialGradientCommand& command) {
+  std::vector<jfloat> offsets;
+  std::vector<jint> colors;
+  offsets.reserve(command.gradient.stops.size());
+  colors.reserve(command.gradient.stops.size());
+  for (const GradientStop& stop : command.gradient.stops) {
+    offsets.push_back(stop.offset);
+    colors.push_back(PackColor(stop.color));
+  }
+  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
+  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
+  if (!java_offsets || !java_colors) {
+    return;
+  }
+  environment->CallVoidMethod(
+      view,
+      draw_radial_gradient_,
+      canvas,
+      command.rect.x,
+      command.rect.y,
+      command.rect.width,
+      command.rect.height,
+      command.gradient.center.x,
+      command.gradient.center.y,
+      command.gradient.radius.width,
+      command.gradient.radius.height,
+      java_offsets.Get(),
+      java_colors.Get(),
       command.corner_radius
   );
 }

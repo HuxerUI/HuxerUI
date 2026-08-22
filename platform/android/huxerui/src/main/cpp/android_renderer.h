@@ -39,6 +39,8 @@ private:
   bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
   [[nodiscard]] const AndroidExternalTextureFrame* FrameFor(const ExternalTexture& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawLinearGradientCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRadialGradientCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
@@ -58,6 +60,8 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PlacePlatformViewCommand& command);
 
   jmethodID draw_rect_ = nullptr;
+  jmethodID draw_linear_gradient_ = nullptr;
+  jmethodID draw_radial_gradient_ = nullptr;
   jmethodID draw_text_ = nullptr;
   jmethodID draw_text_runs_ = nullptr;
   jmethodID draw_image_ = nullptr;

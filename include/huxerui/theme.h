@@ -91,19 +91,9 @@ struct MotionScheme {
   bool operator==(const MotionScheme&) const = default;
 };
 
-enum class IndicationKind {
-  StateOverlay,
-  Ripple,
-};
-
 struct InteractionScheme {
-  Color hover_overlay = Color::Rgb(0, 0, 0, 0.06F);
-  Color pressed_overlay = Color::Rgb(0, 0, 0, 0.12F);
-  Color ripple = Color::Rgb(255, 255, 255, 0.28F);
-  IndicationKind indication = IndicationKind::StateOverlay;
-  std::optional<Color> focus_ring;
-  float focus_ring_width = 2.0F;
-  float focus_ring_offset = 2.0F;
+  Indication indication;
+  FocusRing focus_ring{Color::Rgb(31, 111, 235), 2.0F, 2.0F};
   float disabled_opacity = 0.42F;
 
   bool operator==(const InteractionScheme&) const = default;
@@ -132,7 +122,7 @@ struct ButtonStyle {
   float minimum_width = 0.0F;
   float minimum_height = 0.0F;
   float corner_radius = 8.0F;
-  std::optional<IndicationSpec> indication;
+  std::optional<Indication> indication;
 
   static ButtonStyle Default();
 
@@ -146,7 +136,7 @@ struct IconButtonStyle {
   float minimum_interactive_size = 40.0F;
   float state_layer_size = 32.0F;
   float corner_radius = 4.0F;
-  std::optional<IndicationSpec> indication;
+  std::optional<Indication> indication;
 
   static IconButtonStyle Default();
 
@@ -172,8 +162,8 @@ struct ChipStyle {
   float minimum_height = 28.0F;
   float corner_radius = 14.0F;
   float border_width = 1.0F;
-  std::optional<IndicationSpec> indication;
-  std::optional<IndicationSpec> selected_indication;
+  std::optional<Indication> indication;
+  std::optional<Indication> selected_indication;
 
   static ChipStyle Default();
 
@@ -203,8 +193,8 @@ struct SegmentedButtonStyle {
   float minimum_height = 32.0F;
   float corner_radius = 8.0F;
   float border_width = 1.0F;
-  std::optional<IndicationSpec> indication;
-  std::optional<IndicationSpec> selected_indication;
+  std::optional<Indication> indication;
+  std::optional<Indication> selected_indication;
 
   static SegmentedButtonStyle Default();
 
@@ -234,7 +224,7 @@ struct TabsStyle {
   float minimum_item_width = 48.0F;
   float minimum_height = 36.0F;
   bool expand_items = false;
-  std::optional<IndicationSpec> indication;
+  std::optional<Indication> indication;
   double indicator_animation_duration = 0.16;
 
   static TabsStyle Default();
@@ -440,8 +430,8 @@ struct SliderStyle {
   float track_inside_corner_radius = 2.0F;
   float stop_indicator_size = 0.0F;
   float tick_size = 0.0F;
-  // An empty override inherits InteractionScheme; zero suppresses the node-level ring for handle-focused styles.
-  std::optional<float> focus_ring_width;
+  // An empty override inherits the Theme ring; zero width keeps focus in the slider's handle treatment.
+  std::optional<FocusRing> focus_ring;
   double animation_duration = 0.12;
 
   static SliderStyle Default();

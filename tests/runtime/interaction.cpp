@@ -12,9 +12,89 @@ ScrollController horizontal_drag_scroll;
 ScrollController nested_outer_scroll;
 ScrollController nested_inner_scroll;
 State<bool> include_apply_only_modifier;
+State<bool> recompose_activation_button;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 int covered_pointer_clicks = 0;
+std::vector<std::pair<InteractionState, InteractionEvent>> recorded_interactions;
+int stable_extension_updates = 0;
+
+struct RecordInteractions;
+
+class RecordInteractionsExtension final : public NodeExtension {
+public:
+  RecordInteractionsExtension(MountedNode&, const RecordInteractions&) {}
+
+  void Update(MountedNode&, const RecordInteractions&) {}
+
+  void OnInteraction(MountedNode&, const InteractionState& state,
+                     const std::optional<InteractionEvent>& event) override {
+    if (event.has_value()) {
+      recorded_interactions.emplace_back(state, *event);
+    }
+  }
+};
+
+struct RecordInteractions {
+  using Extension = RecordInteractionsExtension;
+
+  bool operator==(const RecordInteractions&) const = default;
+};
+
+struct CapturePointer;
+
+class CapturePointerExtension final : public NodeExtension {
+public:
+  CapturePointerExtension(MountedNode&, const CapturePointer&) {}
+
+  void Update(MountedNode&, const CapturePointer&) {}
+
+  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+    return event.type == PointerEventType::Down ? PointerResult::Capture : PointerResult::Handled;
+  }
+};
+
+struct CapturePointer {
+  using Extension = CapturePointerExtension;
+
+  bool operator==(const CapturePointer&) const = default;
+};
+
+struct ObservePointer;
+
+class ObservePointerExtension final : public NodeExtension {
+public:
+  ObservePointerExtension(MountedNode&, const ObservePointer&) {}
+
+  void Update(MountedNode&, const ObservePointer&) {}
+
+  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+    return event.type == PointerEventType::Down ? PointerResult::Observe : PointerResult::Ignored;
+  }
+};
+
+struct ObservePointer {
+  using Extension = ObservePointerExtension;
+
+  bool operator==(const ObservePointer&) const = default;
+};
+
+struct StableExtension;
+
+class StableExtensionState final : public NodeExtension {
+public:
+  StableExtensionState(MountedNode&, const StableExtension&) {}
+
+  void Update(MountedNode&, const StableExtension&) {
+    ++stable_extension_updates;
+  }
+};
+
+struct StableExtension {
+  using Extension = StableExtensionState;
+
+  bool operator==(const StableExtension&) const = default;
+};
 
 View PointerInputApp() {
   auto visible = UseState(true);
@@ -43,8 +123,31 @@ View ExtensionPointerTargetApp() {
           .OnClick([] { ++covered_pointer_clicks; }),
       Text("Overlay").With(
           huxerui::Frame{100.0F, 40.0F},
-          huxerui::Indication{huxerui::StateOverlayIndication{}}
+          huxerui::Indication{
+              .hover = huxerui::IndicationLayer{.fill = huxerui::Color::Rgb(0, 0, 0, 0.08F)},
+          }
       ),
+  };
+}
+
+View InteractionEventApp() {
+  return Button("Interaction").With(huxerui::Frame{100.0F, 40.0F}, RecordInteractions{});
+}
+
+View CapturedInteractionEventApp() {
+  return Text("Captured").With(huxerui::Frame{100.0F, 40.0F}, RecordInteractions{}, CapturePointer{});
+}
+
+View ObservedInteractionEventApp() {
+  return Text("Observed").With(huxerui::Frame{100.0F, 40.0F}, RecordInteractions{}, ObservePointer{});
+}
+
+View StableActivationExtensionApp() {
+  auto alternate = UseState(false);
+  recompose_activation_button = alternate;
+  return Column{
+      Button("Stable").With(StableExtension{}),
+      Text(alternate.Get() ? "alternate" : "initial"),
   };
 }
 
@@ -306,6 +409,114 @@ TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {
 
   ClickAt(runtime, {50.0F, 20.0F}, 122);
   REQUIRE(covered_pointer_clicks == 0);
+}
+
+TEST_CASE("TestRuntimePublishesOrderedInteractionEvents") {
+  recorded_interactions.clear();
+  TestPlatform platform;
+  Runtime runtime{InteractionEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 124, {25.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 124, {30.0F, 20.0F}});
+  REQUIRE(recorded_interactions.size() == 2);
+  REQUIRE(recorded_interactions[0].first.pressed);
+  REQUIRE_FALSE(recorded_interactions[1].first.pressed);
+  REQUIRE(recorded_interactions[0].second.type == InteractionEvent::Type::Press);
+  REQUIRE(recorded_interactions[1].second.type == InteractionEvent::Type::Release);
+  REQUIRE(recorded_interactions[0].second.source == InteractionEvent::Source::Pointer);
+  REQUIRE(recorded_interactions[0].second.press_id == recorded_interactions[1].second.press_id);
+  REQUIRE(recorded_interactions[0].second.press_id != 0);
+  REQUIRE(recorded_interactions[0].second.position == Point{25.0F, 20.0F});
+
+  recorded_interactions.clear();
+  runtime.HandlePointerEvent({PointerEventType::Down, 125, {25.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 125, {120.0F, 20.0F}});
+  REQUIRE(recorded_interactions.size() == 2);
+  REQUIRE(recorded_interactions[1].second.type == InteractionEvent::Type::Cancel);
+  REQUIRE(recorded_interactions[0].second.press_id == recorded_interactions[1].second.press_id);
+}
+
+TEST_CASE("TestMultiplePointersRetainPressedStateUntilTheLastRelease") {
+  recorded_interactions.clear();
+  TestPlatform platform;
+  Runtime runtime{InteractionEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 129, {20.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Down, 130, {40.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 129, {20.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 130, {40.0F, 20.0F}});
+
+  REQUIRE(recorded_interactions.size() == 4);
+  REQUIRE(recorded_interactions[0].first.pressed);
+  REQUIRE(recorded_interactions[1].first.pressed);
+  REQUIRE(recorded_interactions[2].first.pressed);
+  REQUIRE_FALSE(recorded_interactions[3].first.pressed);
+  REQUIRE(recorded_interactions[0].second.press_id != recorded_interactions[1].second.press_id);
+  REQUIRE(recorded_interactions[0].second.press_id == recorded_interactions[2].second.press_id);
+  REQUIRE(recorded_interactions[1].second.press_id == recorded_interactions[3].second.press_id);
+}
+
+TEST_CASE("TestCapturedPointerPublishesInteractionRelease") {
+  recorded_interactions.clear();
+  TestPlatform platform;
+  Runtime runtime{CapturedInteractionEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 126, {25.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 126, {30.0F, 20.0F}});
+  REQUIRE(recorded_interactions.size() == 2);
+  REQUIRE(recorded_interactions[0].second.type == InteractionEvent::Type::Press);
+  REQUIRE(recorded_interactions[1].second.type == InteractionEvent::Type::Release);
+  REQUIRE_FALSE(recorded_interactions[1].first.pressed);
+}
+
+TEST_CASE("TestCapturedPointerPublishesInteractionCancel") {
+  recorded_interactions.clear();
+  TestPlatform platform;
+  Runtime runtime{CapturedInteractionEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 127, {25.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 127, {30.0F, 20.0F}});
+  REQUIRE(recorded_interactions.size() == 2);
+  REQUIRE(recorded_interactions[0].second.type == InteractionEvent::Type::Press);
+  REQUIRE(recorded_interactions[1].second.type == InteractionEvent::Type::Cancel);
+  REQUIRE(recorded_interactions[0].second.press_id == recorded_interactions[1].second.press_id);
+  REQUIRE_FALSE(recorded_interactions[1].first.pressed);
+}
+
+TEST_CASE("TestObservedPointerPublishesOneInteractionLifecycle") {
+  recorded_interactions.clear();
+  TestPlatform platform;
+  Runtime runtime{ObservedInteractionEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 128, {25.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 128, {30.0F, 20.0F}});
+  REQUIRE(recorded_interactions.size() == 2);
+  REQUIRE(recorded_interactions[0].second.type == InteractionEvent::Type::Press);
+  REQUIRE(recorded_interactions[1].second.type == InteractionEvent::Type::Release);
+  REQUIRE(recorded_interactions[0].second.press_id == recorded_interactions[1].second.press_id);
+}
+
+TEST_CASE("TestActivationImplementationDoesNotInvalidateEqualExtensions") {
+  stable_extension_updates = 0;
+  TestPlatform platform;
+  Runtime runtime{StableActivationExtensionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  recompose_activation_button = true;
+  runtime.BuildFrame();
+
+  REQUIRE(stable_extension_updates == 0);
 }
 
 TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {

@@ -330,7 +330,7 @@ void Runtime::RefreshTextInputSession() {
   std::shared_ptr<TextInputClient> client;
   if (state_->mounted_root_ && state_->focused_node_identity_.has_value()) {
     focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
-    if (focused && focused->enabled && focused->focusable) {
+    if (focused && focused->interaction.enabled && focused->focusable) {
       client = FindTextInputClient(*focused);
     }
   }
@@ -382,7 +382,7 @@ void Runtime::RefreshTextInputSession() {
         state_->mounted_root_ ? FindNode(*state_->mounted_root_, state_->text_input_session_->node_identity) : nullptr;
     if (!previous) {
       reason = TextInputEndReason::ClientRemoved;
-    } else if (!previous->enabled) {
+    } else if (!previous->interaction.enabled) {
       reason = TextInputEndReason::Disabled;
     } else if (focused && focused->identity == previous->identity) {
       reason = TextInputEndReason::ClientRemoved;

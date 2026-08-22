@@ -13,6 +13,7 @@
 #include <huxerui/color.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/layout.h>
 #include <huxerui/platform_module.h>
 #include <huxerui/resource.h>
 #include <huxerui/text.h>
@@ -27,12 +28,95 @@ struct FrozenScene;
 struct PlatformViewPaintAccess;
 } // namespace detail
 
+enum class ImageFit {
+  None,
+  Contain,
+  Cover,
+  Fill,
+  ScaleDown,
+};
+
+struct GradientStop {
+  float offset = 0.0F;
+  Color color;
+
+  bool operator==(const GradientStop&) const = default;
+};
+
+struct LinearGradient {
+  Point start{0.0F, 0.5F};
+  Point end{1.0F, 0.5F};
+  std::vector<GradientStop> stops;
+
+  bool operator==(const LinearGradient&) const = default;
+};
+
+struct RadialGradient {
+  Point center{0.5F, 0.5F};
+  Size radius{0.5F, 0.5F};
+  std::vector<GradientStop> stops;
+
+  bool operator==(const RadialGradient&) const = default;
+};
+
+using ImageFillSource = std::variant<ImageResource, ImageAsset, VectorAsset>;
+
+struct ImageFill {
+  ImageFillSource source;
+  ImageFit fit = ImageFit::Fill;
+  HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
+  VerticalAlignment vertical_alignment = VerticalAlignment::Center;
+  ImageSampling sampling = ImageSampling::Linear;
+  std::optional<Color> tint;
+  float opacity = 1.0F;
+
+  bool operator==(const ImageFill&) const = default;
+};
+
+class VisualFill {
+public:
+  using Value = std::variant<Color, LinearGradient, RadialGradient, ImageFill>;
+
+  VisualFill(Color color) : value_(color) {}
+  VisualFill(LinearGradient gradient) : value_(std::move(gradient)) {}
+  VisualFill(RadialGradient gradient) : value_(std::move(gradient)) {}
+  VisualFill(ImageResource image) : value_(ImageFill{.source = std::move(image)}) {}
+  VisualFill(ImageAsset image) : value_(ImageFill{.source = std::move(image)}) {}
+  VisualFill(VectorAsset image) : value_(ImageFill{.source = std::move(image)}) {}
+  VisualFill(ImageFill image) : value_(std::move(image)) {}
+
+  [[nodiscard]] const Value& Get() const noexcept {
+    return value_;
+  }
+
+  bool operator==(const VisualFill&) const = default;
+
+private:
+  Value value_;
+};
+
 struct DrawRectCommand {
   Rect rect;
   Color color;
   float corner_radius = 0.0F;
 
   bool operator==(const DrawRectCommand&) const = default;
+};
+
+struct DrawLinearGradientCommand {
+  Rect rect;
+  LinearGradient gradient;
+  float corner_radius = 0.0F;
+
+  bool operator==(const DrawLinearGradientCommand&) const = default;
+};
+
+struct DrawRadialGradientCommand {
+  Rect rect;
+  RadialGradient gradient;
+  float corner_radius = 0.0F;
+
+  bool operator==(const DrawRadialGradientCommand&) const = default;
 };
 
 struct DrawTextCommand {
@@ -226,6 +310,8 @@ private:
 
 using PaintCommand = std::variant<
     DrawRectCommand,
+    DrawLinearGradientCommand,
+    DrawRadialGradientCommand,
     DrawTextCommand,
     DrawTextRunsCommand,
     DrawImageCommand,
@@ -286,6 +372,8 @@ public:
   }
 
   void DrawRect(Rect rect, Color color, CornerRadii corner_radii = {});
+  void DrawLinearGradient(Rect rect, LinearGradient gradient, CornerRadii corner_radii = {});
+  void DrawRadialGradient(Rect rect, RadialGradient gradient, CornerRadii corner_radii = {});
   void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
   void
   DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});

@@ -66,7 +66,7 @@ Built-in Theme elevation shadows use a zero two-dimensional offset. Elevation co
 
 Interactive built-ins derive hover, focus, pressed, disabled, and ripple or state-overlay treatment from the nearest Theme. Pointer and keyboard activation share the same semantic state transitions. `ButtonStyle::indication` can replace the theme-wide indication when a filled container requires a different state-layer color. `IconButtonStyle` additionally separates the state-layer geometry from the interaction target. `ChipStyle::selected_indication` replaces its normal indication while selected and falls back to it when omitted. Component-owned transparent actions, such as Dialog actions and Menu items, likewise use the indication stored in their component style.
 
-An explicit `Indication` modifier can replace the default interaction visual for a custom control. `NoIndication` disables it deliberately.
+An explicit `Indication` modifier can replace the default interaction visual for a custom control. An empty `Indication{}` disables built-in state layers and ripple deliberately.
 
 ## Presentation animation
 

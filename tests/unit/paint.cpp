@@ -72,6 +72,69 @@ TEST_CASE("PaintContextBuildsAnImmutableLocalSequence") {
   REQUIRE_THROWS_AS(context.DrawRect({}, Color::White()), std::logic_error);
 }
 
+TEST_CASE("PaintContextRecordsPlatformNeutralGradients") {
+  const LinearGradient linear{
+      .start = {0.0F, 0.0F},
+      .end = {1.0F, 1.0F},
+      .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+  };
+  const RadialGradient radial{
+      .center = {0.5F, 0.5F},
+      .radius = {0.5F, 0.25F},
+      .stops = {{0.0F, Color::White()}, {1.0F, Color::Transparent()}},
+  };
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawLinearGradient({10.0F, 12.0F, 40.0F, 20.0F}, linear, CornerRadii{6.0F});
+  context.DrawRadialGradient({20.0F, 30.0F, 50.0F, 30.0F}, radial, CornerRadii{8.0F});
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 2);
+  const auto& linear_command = std::get<DrawLinearGradientCommand>(sequence.Commands()[0]);
+  const auto& radial_command = std::get<DrawRadialGradientCommand>(sequence.Commands()[1]);
+  REQUIRE(linear_command.gradient == linear);
+  REQUIRE(linear_command.corner_radius == 6.0F);
+  REQUIRE(radial_command.gradient == radial);
+  REQUIRE(radial_command.corner_radius == 8.0F);
+  REQUIRE(sequence.Bounds() == Rect{10.0F, 12.0F, 60.0F, 48.0F});
+}
+
+TEST_CASE("PaintContextClipsAsymmetricGradientCornersWithoutApplyingASecondUniformRadius") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawLinearGradient(
+      {10.0F, 12.0F, 40.0F, 20.0F},
+      LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
+      CornerRadii{8.0F, 4.0F, 2.0F, 0.0F}
+  );
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 3);
+  REQUIRE(std::holds_alternative<PushClipCommand>(sequence.Commands()[0]));
+  REQUIRE(std::get<DrawLinearGradientCommand>(sequence.Commands()[1]).corner_radius == 0.0F);
+  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[2]));
+}
+
+TEST_CASE("PaintContextValidatesGradientGeometryAndStops") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  REQUIRE_THROWS_AS(context.DrawLinearGradient({}, LinearGradient{}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.DrawLinearGradient(
+          {},
+          LinearGradient{.stops = {{0.8F, Color::White()}, {0.2F, Color::Black()}}}
+      ),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      context.DrawRadialGradient(
+          {},
+          RadialGradient{.radius = {0.0F, 0.5F}, .stops = {{0.0F, Color::White()}}}
+      ),
+      std::invalid_argument
+  );
+}
+
 TEST_CASE("PaintContextRejectsUnbalancedCommandStacks") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};

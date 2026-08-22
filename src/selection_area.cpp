@@ -38,8 +38,9 @@ public:
 
   void Update(MountedNode&, const detail::SelectionAreaModifier&) {}
 
-  bool PrepareGeometry(MountedNode& node) override {
-    return ResolveGeometry(static_cast<detail::MountedNode&>(node));
+  PaintInvalidation PrepareGeometry(MountedNode& node) override {
+    return ResolveGeometry(static_cast<detail::MountedNode&>(node)) ? PaintInvalidation::Foreground
+                                                                   : PaintInvalidation::None;
   }
 
   TextSelectionClient* GetTextSelectionClient() noexcept override {
@@ -83,7 +84,7 @@ public:
     return PointerResult::Ignored;
   }
 
-  void Paint(const MountedNode&, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode&, PaintContext& context) const override {
     const TextRange selection = selection_.Range();
     if (selection.IsCollapsed()) {
       return;
@@ -365,7 +366,6 @@ std::shared_ptr<detail::ViewSpec> MakeSelectionAreaSpec(View content) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::SelectionArea);
   spec->children.push_back(std::move(content));
   spec->focusable = true;
-  spec->properties.focus_ring_width = 0.0F;
   spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::SelectionAreaModifier{}));
   return spec;
 }

@@ -22,9 +22,9 @@ SelectionArea {
 
 ## Button, Checkbox, RadioButton, and Switch
 
-Button, Checkbox, RadioButton, and Switch participate in focus traversal and share their pointer and keyboard activation paths. Checkbox, RadioButton, and Switch are controlled:
+Button, Checkbox, RadioButton, and Switch participate in focus traversal and share their pointer and keyboard activation paths. Intrinsic controls retain their themed interaction feedback even when no application handler is registered; use `Enabled(false)` to make one non-interactive. Checkbox, RadioButton, and Switch are controlled:
 
-Keyboard-visible focus uses `InteractionScheme::focus_ring`, `focus_ring_width`, and `focus_ring_offset`. The offset is the clear gap between the control and an outside ring; it affects paint bounds without changing measurement or layout. Material uses a 3-unit ring with a 2-unit gap, while Flat uses a 2-unit ring with the same gap.
+Keyboard-visible focus uses the `InteractionScheme::focus_ring` value. Its offset is the clear gap between the control and an outside ring; it affects paint bounds without changing measurement or layout. Material uses the secondary color with a 3-unit ring and 2-unit gap, while Flat uses a 2-unit ring with the same gap.
 
 ```cpp
 auto checked = UseState(false);
@@ -252,6 +252,8 @@ View AppContent() {
   return NavigationStack(HomePage);
 }
 ```
+
+`SelectionArea` participates in keyboard focus traversal and uses the active Theme focus ring when focus is keyboard-visible.
 
 Use a controlled NavigationPath when history must be represented as application data for deep links, restoration, or browser integration:
 

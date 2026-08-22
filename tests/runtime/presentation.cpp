@@ -114,6 +114,27 @@ const detail::MountedNode* FindMountedKind(const detail::MountedNode& node, deta
   return nullptr;
 }
 
+const Color* FillColor(const std::optional<VisualFill>& fill) {
+  return fill.has_value() ? std::get_if<Color>(&fill->Get()) : nullptr;
+}
+
+const Color* LayerFillColor(const std::optional<IndicationLayer>& layer) {
+  return layer.has_value() ? FillColor(layer->fill) : nullptr;
+}
+
+const Indication* MountedIndication(const detail::MountedNode& node) {
+  for (const detail::NodeExtensionEntry& entry : node.extensions) {
+    if (detail::IsExplicitIndicationDescriptor(entry.descriptor)) {
+      return static_cast<const Indication*>(entry.value.get());
+    }
+    if (detail::IsDefaultIndicationDescriptor(entry.descriptor)) {
+      const auto* value = static_cast<const detail::DefaultIndication*>(entry.value.get());
+      return value != nullptr && value->value.has_value() ? &*value->value : nullptr;
+    }
+  }
+  return nullptr;
+}
+
 bool PaintsText(const PaintSequence& sequence, std::string_view text) {
   return std::ranges::any_of(sequence.Commands(), [text](const PaintCommand& command) {
     const auto* draw_text = std::get_if<DrawTextCommand>(&command);
@@ -613,8 +634,8 @@ View DisabledSliderApp() {
 template <class Factory> View InteractionTestTheme(Factory&& content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
-  spec.interactions.hover_overlay = Color::Rgb(20, 80, 160, 0.2F);
-  spec.interactions.pressed_overlay = Color::Rgb(200, 40, 60, 0.3F);
+  spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
+  spec.interactions.indication.press = IndicationLayer{.fill = Color::Rgb(200, 40, 60, 0.3F)};
   return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
 }
 
@@ -622,12 +643,38 @@ View ThemedIndicationApp() {
   return HUXERUI_THEME(InteractionTestTheme, Button("themed indication").OnClick([] {}));
 }
 
+View FallbackIndicationApp() {
+  ThemeSpec spec = huxerui::FlatLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
+  spec.interactions.indication.press.reset();
+  return Theme(ThemeDefinition{spec}, [] { return Button("fallback indication").OnClick([] {}); });
+}
+
+View SurfaceIndicationApp() {
+  const Color normal_border = Color::Rgb(160, 40, 60);
+  const Color pressed_border = Color::Rgb(20, 100, 200);
+  return Button("surface indication")
+      .OnClick([] {})
+      .With(
+          Frame{160.0F, 48.0F},
+          Border{normal_border, 2.0F},
+          CornerRadius{8.0F},
+          Indication{
+              .press = IndicationLayer{
+                  .border = Border{pressed_border, 4.0F},
+                  .corner_radii = CornerRadii{20.0F},
+                  .enter = SnapSpec{},
+                  .exit = SnapSpec{},
+              },
+          }
+      );
+}
+
 template <class Factory> View FocusTestTheme(Factory&& content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
-  spec.interactions.focus_ring = Color::Rgb(40, 180, 90);
-  spec.interactions.focus_ring_width = 3.0F;
-  spec.interactions.focus_ring_offset = 4.0F;
+  spec.interactions.focus_ring = FocusRing{Color::Rgb(40, 180, 90), 3.0F, 4.0F};
   spec.interactions.disabled_opacity = 0.3F;
   return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
 }
@@ -660,6 +707,16 @@ View FocusContent() {
 
 View FocusApp() {
   return FocusTestTheme(FocusContent);
+}
+
+View FocusOnlyApp() {
+  return FocusTestTheme([] { return Text("focus only").With(Focusable{}); });
+}
+
+View InvalidFocusRingApp() {
+  ThemeSpec spec = FlatLightThemeSpec();
+  spec.interactions.focus_ring.width = -1.0F;
+  return Theme(ThemeDefinition{spec}, [] { return Text("invalid focus ring").With(Focusable{}); });
 }
 
 View DisabledHitTestApp() {
@@ -853,13 +910,7 @@ View PresentedIndicationApp() {
 }
 
 View ExplicitIndicationApp() {
-  return Button("explicit")
-      .OnClick([] { ++indication_clicks; })
-      .With(
-          huxerui::Indication{
-              huxerui::NoIndication{},
-          }
-      );
+  return Button("explicit").OnClick([] { ++indication_clicks; }).With(huxerui::Indication{});
 }
 
 View NodeExtensionPruningApp() {
@@ -972,12 +1023,20 @@ TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
 TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   const ThemeSpec light = huxerui::FlatLightThemeSpec();
   const ThemeSpec dark = huxerui::FlatDarkThemeSpec();
-  REQUIRE(std::abs(light.interactions.hover_overlay.alpha - 0.10F) < 0.001F);
-  REQUIRE(std::abs(light.interactions.pressed_overlay.alpha - 0.16F) < 0.001F);
-  REQUIRE(light.interactions.focus_ring_width == 2.0F);
-  REQUIRE(light.interactions.focus_ring_offset == 2.0F);
-  REQUIRE(std::abs(dark.interactions.hover_overlay.alpha - 0.12F) < 0.001F);
-  REQUIRE(std::abs(dark.interactions.pressed_overlay.alpha - 0.18F) < 0.001F);
+  const Color* light_hover = LayerFillColor(light.interactions.indication.hover);
+  const Color* light_press = LayerFillColor(light.interactions.indication.press);
+  const Color* dark_hover = LayerFillColor(dark.interactions.indication.hover);
+  const Color* dark_press = LayerFillColor(dark.interactions.indication.press);
+  REQUIRE(light_hover != nullptr);
+  REQUIRE(light_press != nullptr);
+  REQUIRE(dark_hover != nullptr);
+  REQUIRE(dark_press != nullptr);
+  REQUIRE(std::abs(light_hover->alpha - 0.10F) < 0.001F);
+  REQUIRE(std::abs(light_press->alpha - 0.16F) < 0.001F);
+  REQUIRE(light.interactions.focus_ring.width == 2.0F);
+  REQUIRE(light.interactions.focus_ring.offset == 2.0F);
+  REQUIRE(std::abs(dark_hover->alpha - 0.12F) < 0.001F);
+  REQUIRE(std::abs(dark_press->alpha - 0.18F) < 0.001F);
 
   const ThemeDefinition definition = huxerui::FlatThemeDefinition();
   const ToastStyle toast_style = ThemeDefinitionValue<ToastStyle>(definition);
@@ -994,8 +1053,8 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   const DialogStyle dialog_style = ThemeDefinitionValue<DialogStyle>(definition);
   REQUIRE(dialog_style.background.red == light.colors.surface.red);
   REQUIRE(dialog_style.motion.has_value());
-  REQUIRE(std::holds_alternative<StateOverlayIndication>(dialog_style.positive_action_indication));
-  REQUIRE(std::holds_alternative<StateOverlayIndication>(dialog_style.negative_action_indication));
+  REQUIRE(dialog_style.positive_action_indication.press.has_value());
+  REQUIRE(dialog_style.negative_action_indication.press.has_value());
 
   const BottomSheetStyle bottom_sheet_style = ThemeDefinitionValue<BottomSheetStyle>(definition);
   REQUIRE(bottom_sheet_style.background.red == light.colors.surface.red);
@@ -1004,7 +1063,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   REQUIRE(menu_style.separator_mode == MenuSeparatorMode::BetweenItems);
   REQUIRE(menu_style.content_padding == EdgeInsets{});
   REQUIRE_FALSE(menu_style.motion.has_value());
-  REQUIRE(std::holds_alternative<StateOverlayIndication>(menu_style.item_indication));
+  REQUIRE(menu_style.item_indication.press.has_value());
 
   const ThemeDefinition dark_definition = huxerui::FlatDarkThemeDefinition();
   REQUIRE(ThemeDefinitionValue<DialogStyle>(dark_definition).background.red == dark.colors.surface.red);
@@ -1028,7 +1087,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.fast);
   const FlattenedScene& hovered = runtime.BuildFrame();
-  REQUIRE(FindRectWithColor(hovered, light.interactions.hover_overlay) != nullptr);
+  REQUIRE(FindRectWithColor(hovered, *light_hover) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
@@ -1036,7 +1095,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
       pointer,
   });
   const FlattenedScene& pressed = runtime.BuildFrame();
-  REQUIRE(FindRectWithColor(pressed, light.interactions.pressed_overlay) != nullptr);
+  REQUIRE(FindRectWithColor(pressed, *light_press) != nullptr);
 }
 
 TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
@@ -1047,9 +1106,14 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(light.typography.title_large == 22.0F);
   REQUIRE(light.shapes.extra_large == 28.0F);
   REQUIRE(light.elevation.medium == 3.0F);
-  REQUIRE(light.interactions.indication == huxerui::IndicationKind::Ripple);
-  REQUIRE(light.interactions.focus_ring_width == 3.0F);
-  REQUIRE(light.interactions.focus_ring_offset == 2.0F);
+  REQUIRE(light.interactions.indication.ripple.has_value());
+  REQUIRE(light.interactions.focus_ring.color == light.colors.secondary);
+  REQUIRE(light.interactions.focus_ring.width == 3.0F);
+  REQUIRE(light.interactions.focus_ring.offset == 2.0F);
+  const TweenSpec& ripple_expansion = std::get<TweenSpec>(light.interactions.indication.ripple->expansion);
+  const TweenSpec& ripple_fade = std::get<TweenSpec>(light.interactions.indication.ripple->fade_out);
+  REQUIRE(std::get<Easing>(ripple_expansion.easing) == Easing::Linear);
+  REQUIRE(std::get<Easing>(ripple_fade.easing) == Easing::Linear);
 
   const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
   const ButtonStyle button_style = ThemeDefinitionValue<ButtonStyle>(definition);
@@ -1059,9 +1123,9 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(button_style.minimum_width == 58.0F);
   REQUIRE(button_style.minimum_height == 40.0F);
   REQUIRE(button_style.indication.has_value());
-  const auto* button_indication = std::get_if<RippleIndication>(&*button_style.indication);
-  REQUIRE(button_indication != nullptr);
-  REQUIRE(button_indication->color.red == light.colors.on_primary.red);
+  REQUIRE(button_style.indication->ripple.has_value());
+  const RippleEffect& button_ripple = *button_style.indication->ripple;
+  REQUIRE(button_ripple.color.red == light.colors.on_primary.red);
 
   const IconButtonStyle icon_button_style = ThemeDefinitionValue<IconButtonStyle>(definition);
   REQUIRE(icon_button_style.foreground == light.colors.on_surface_variant);
@@ -1070,12 +1134,12 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(icon_button_style.state_layer_size == 40.0F);
   REQUIRE(icon_button_style.corner_radius == 24.0F);
   REQUIRE(icon_button_style.indication.has_value());
-  const auto* icon_button_indication = std::get_if<RippleIndication>(&*icon_button_style.indication);
-  REQUIRE(icon_button_indication != nullptr);
-  REQUIRE(icon_button_indication->color.red == light.colors.on_surface_variant.red);
-  REQUIRE(icon_button_indication->color.green == light.colors.on_surface_variant.green);
-  REQUIRE(icon_button_indication->color.blue == light.colors.on_surface_variant.blue);
-  REQUIRE(icon_button_indication->color.alpha == light.colors.on_surface_variant.alpha * 0.16F);
+  REQUIRE(icon_button_style.indication->ripple.has_value());
+  const RippleEffect& icon_button_ripple = *icon_button_style.indication->ripple;
+  REQUIRE(icon_button_ripple.color.red == light.colors.on_surface_variant.red);
+  REQUIRE(icon_button_ripple.color.green == light.colors.on_surface_variant.green);
+  REQUIRE(icon_button_ripple.color.blue == light.colors.on_surface_variant.blue);
+  REQUIRE(icon_button_ripple.color.alpha == light.colors.on_surface_variant.alpha * 0.12F);
 
   const CheckboxStyle checkbox_style = ThemeDefinitionValue<CheckboxStyle>(definition);
   REQUIRE(checkbox_style.size == 18.0F);
@@ -1095,9 +1159,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(chip_style.border == light.colors.outline);
   REQUIRE(chip_style.indication.has_value());
   REQUIRE(chip_style.selected_indication.has_value());
-  const auto* selected_chip_indication = std::get_if<RippleIndication>(&*chip_style.selected_indication);
-  REQUIRE(selected_chip_indication != nullptr);
-  REQUIRE(selected_chip_indication->color.red == light.colors.on_secondary_container.red);
+  REQUIRE(chip_style.selected_indication->ripple.has_value());
+  REQUIRE(chip_style.selected_indication->ripple->color.red == light.colors.on_secondary_container.red);
 
   const SegmentedButtonStyle segmented_button_style = ThemeDefinitionValue<SegmentedButtonStyle>(definition);
   REQUIRE(segmented_button_style.background == Color::Transparent());
@@ -1166,8 +1229,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(slider_style.disabled_active_track.alpha == 0.38F);
   REQUIRE(slider_style.disabled_inactive_track.alpha == 0.12F);
   REQUIRE(slider_style.disabled_thumb.alpha == 0.38F);
-  REQUIRE(slider_style.focus_ring_width == 0.0F);
-
+  REQUIRE(slider_style.focus_ring.has_value());
+  REQUIRE(slider_style.focus_ring->width == 0.0F);
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
 
@@ -1187,10 +1250,9 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(dialog_style.motion->initial_scale == 0.94F);
   REQUIRE(std::get<TweenSpec>(dialog_style.motion->enter).duration == light.motion.normal);
   REQUIRE(std::get<TweenSpec>(dialog_style.motion->exit).duration == light.motion.fast);
-  const auto* positive_indication = std::get_if<RippleIndication>(&dialog_style.positive_action_indication);
-  REQUIRE(positive_indication != nullptr);
-  REQUIRE(positive_indication->color.red == light.colors.primary.red);
-  REQUIRE(positive_indication->color.alpha < light.colors.primary.alpha);
+  REQUIRE(dialog_style.positive_action_indication.ripple.has_value());
+  REQUIRE(dialog_style.positive_action_indication.ripple->color.red == light.colors.primary.red);
+  REQUIRE(dialog_style.positive_action_indication.ripple->color.alpha < light.colors.primary.alpha);
 
   const huxerui::BottomSheetStyle bottom_sheet_style = ThemeDefinitionValue<huxerui::BottomSheetStyle>(definition);
   REQUIRE(bottom_sheet_style.background.red == light.colors.surface_container_low.red);
@@ -1201,7 +1263,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(menu_style.minimum_width == 112.0F);
   REQUIRE(menu_style.minimum_item_height == 48.0F);
   REQUIRE(menu_style.motion.has_value());
-  REQUIRE(std::holds_alternative<RippleIndication>(menu_style.item_indication));
+  REQUIRE(menu_style.item_indication.ripple.has_value());
 
   const huxerui::ScrollBarStyle scroll_bar_style = ThemeDefinitionValue<huxerui::ScrollBarStyle>(definition);
   REQUIRE(scroll_bar_style.thickness == 4.0F);
@@ -1245,7 +1307,9 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   runtime.BuildFrame();
   platform.AdvanceTime(light.motion.fast);
   const FlattenedScene& hovered = runtime.BuildFrame();
-  REQUIRE(FindRectWithColor(hovered, button_indication->hover_color) != nullptr);
+  const Color* button_hover = LayerFillColor(button_style.indication->hover);
+  REQUIRE(button_hover != nullptr);
+  REQUIRE(FindRectWithColor(hovered, *button_hover) != nullptr);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Down,
@@ -1271,7 +1335,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(ripple_clip != nullptr);
   REQUIRE(ripple_clip->corner_radius == 20.0F);
   REQUIRE(ripple->radius > 0.0F);
-  REQUIRE(ripple->color == button_indication->color);
+  REQUIRE(ripple->color == button_ripple.color);
 
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Up,
@@ -1342,8 +1406,9 @@ TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
 
   const auto* switch_node = FindMountedKind(*runtime.RootNode(), detail::NodeKind::Switch);
   REQUIRE(switch_node != nullptr);
-  REQUIRE(switch_node->indication_frame.has_value());
-  const float initial_center = switch_node->indication_frame->x + switch_node->indication_frame->width * 0.5F;
+  REQUIRE(switch_node->indication_bounds_override.has_value());
+  const float initial_center =
+      switch_node->indication_bounds_override->x + switch_node->indication_bounds_override->width * 0.5F;
 
   const Rect bounds = switch_node->PresentationBounds();
   ClickAt(runtime, {bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F}, 120);
@@ -1353,8 +1418,9 @@ TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
 
   switch_node = FindMountedKind(*runtime.RootNode(), detail::NodeKind::Switch);
   REQUIRE(switch_node != nullptr);
-  REQUIRE(switch_node->indication_frame.has_value());
-  const float animated_center = switch_node->indication_frame->x + switch_node->indication_frame->width * 0.5F;
+  REQUIRE(switch_node->indication_bounds_override.has_value());
+  const float animated_center =
+      switch_node->indication_bounds_override->x + switch_node->indication_bounds_override->width * 0.5F;
   REQUIRE(animated_center > initial_center);
   REQUIRE(animated_center < initial_center + 20.0F);
 }
@@ -1405,10 +1471,11 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
           switch_label->x - switch_node->PresentationBounds().x - switch_style.width - material.spacing.small
       ) < 0.01F
   );
-  REQUIRE(checkbox->indication_frame.has_value());
+  REQUIRE(checkbox->indication_bounds_override.has_value());
   REQUIRE(
       std::abs(
-          checkbox->indication_frame->x + checkbox->indication_frame->width * 0.5F - checkbox_control_center_x
+          checkbox->indication_bounds_override->x + checkbox->indication_bounds_override->width * 0.5F -
+          checkbox_control_center_x
       ) < 0.01F
   );
 
@@ -1451,14 +1518,15 @@ TEST_CASE("TestLabeledToggleGeometryUsesContentBounds") {
   REQUIRE(checkbox != nullptr);
   REQUIRE(checkbox->ContentBounds().x == 7.0F);
   REQUIRE(checkbox->ContentBounds().y == 3.0F);
-  REQUIRE(checkbox->indication_frame.has_value());
+  REQUIRE(checkbox->indication_bounds_override.has_value());
 
   const ThemeSpec material = MaterialLightThemeSpec();
   const CheckboxStyle style = ThemeDefinitionValue<CheckboxStyle>(MaterialThemeDefinition());
   const float expected_control_center = checkbox->ContentBounds().x + style.size * 0.5F;
   REQUIRE(
       std::abs(
-          checkbox->indication_frame->x + checkbox->indication_frame->width * 0.5F - expected_control_center
+          checkbox->indication_bounds_override->x + checkbox->indication_bounds_override->width * 0.5F -
+          expected_control_center
       ) < 0.01F
   );
 
@@ -1728,7 +1796,8 @@ TEST_CASE("TestMaterialChipGeometryAndColors") {
   REQUIRE(row->children.size() == 2);
   REQUIRE(row->children[0]->measured_size.height == style.minimum_height);
   REQUIRE(row->children[1]->measured_size.height == style.minimum_height);
-  REQUIRE(row->children[1]->properties.indication_override == style.selected_indication);
+  REQUIRE(MountedIndication(*row->children[1]) != nullptr);
+  REQUIRE(*MountedIndication(*row->children[1]) == *style.selected_indication);
   REQUIRE(FindRectWithColor(scene, style.selected_background) != nullptr);
   const DrawTextCommand* action = FindText(scene, "Action");
   const DrawTextCommand* selected = FindText(scene, "Selected");
@@ -1911,17 +1980,18 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   const auto* group = row->children[0].get();
   REQUIRE(group->children.size() == 3);
   REQUIRE(group->children[0]->measured_size.height == style.minimum_height);
-  REQUIRE(group->children[1]->properties.background == style.selected_background);
-  REQUIRE(group->children[1]->properties.indication_override == style.selected_indication);
-  REQUIRE(group->children[0]->properties.border == style.border);
-  REQUIRE(group->children[0]->properties.border_width == style.border_width);
+  REQUIRE(FillColor(group->children[1]->properties.background) != nullptr);
+  REQUIRE(*FillColor(group->children[1]->properties.background) == style.selected_background);
+  REQUIRE(MountedIndication(*group->children[1]) != nullptr);
+  REQUIRE(*MountedIndication(*group->children[1]) == *style.selected_indication);
+  REQUIRE(group->children[0]->properties.border == Border{style.border, style.border_width});
   const DrawTextCommand* selected = FindText(scene, "Week");
   REQUIRE(selected != nullptr);
   REQUIRE(selected->style.foreground == style.selected_label);
 
   REQUIRE(style.indication.has_value());
-  const auto* ripple_style = std::get_if<RippleIndication>(&*style.indication);
-  REQUIRE(ripple_style != nullptr);
+  REQUIRE(style.indication->ripple.has_value());
+  const RippleEffect& ripple_style = *style.indication->ripple;
   const Rect first_bounds = group->children[0]->PresentationBounds();
   const Point first_center{
       first_bounds.x + first_bounds.width * 0.5F,
@@ -1933,7 +2003,7 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
       first_center,
   });
   runtime.BuildFrame();
-  platform.AdvanceTime(ripple_style->expansion_duration * 0.5);
+  platform.AdvanceTime(std::get<TweenSpec>(ripple_style.expansion).duration * 0.5);
   const FlattenedScene& pressed = runtime.BuildFrame();
   const DrawCircleCommand* ripple = nullptr;
   for (const PaintCommand& command : pressed.Commands()) {
@@ -1945,7 +2015,7 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   }
   REQUIRE(ripple != nullptr);
   REQUIRE(ripple->radius > 0.0F);
-  REQUIRE(ripple->color == ripple_style->color);
+  REQUIRE(ripple->color == ripple_style.color);
   runtime.HandlePointerEvent(PointerEvent{
       PointerEventType::Cancel,
       121,
@@ -1978,7 +2048,7 @@ TEST_CASE("TestTabsSelectionOverflowAndKeyboard") {
   REQUIRE(tabs->children.size() == 4);
   REQUIRE(tabs->measured_size.width > scroll->measured_size.width);
   REQUIRE(tabs->children[0]->measured_size.height >= TabsStyle::Default().minimum_height);
-  REQUIRE(tabs->children[1]->enabled == false);
+  REQUIRE_FALSE(tabs->children[1]->interaction.enabled);
 
   const detail::MountedNode* selected = FindMountedText(*tabs, "Overview");
   const detail::MountedNode* unselected = FindMountedText(*tabs, "Activity");
@@ -2167,8 +2237,9 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
   REQUIRE(active->focusable);
   REQUIRE(active->measured_size == Size{48.0F, 48.0F});
   REQUIRE(disabled->measured_size == Size{48.0F, 48.0F});
-  REQUIRE(active->properties.indication_size == Size{40.0F, 40.0F});
-  REQUIRE(active->properties.indication_corner_radius == 20.0F);
+  REQUIRE(MountedIndication(*active) != nullptr);
+  REQUIRE(MountedIndication(*active)->geometry.layer_size == Size{40.0F, 40.0F});
+  REQUIRE(MountedIndication(*active)->geometry.clip_corner_radii == CornerRadii{20.0F});
   const detail::LabelContentMetrics content = active->LayoutValueOr<detail::LabelContentMetrics>({});
   REQUIRE(content.icon_size == Size{24.0F, 24.0F});
   REQUIRE_FALSE(content.show_label);
@@ -2199,8 +2270,9 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
   const auto* flat = flat_root->children[0].get();
   REQUIRE(flat->kind == detail::NodeKind::IconButton);
   REQUIRE(flat->measured_size == Size{40.0F, 40.0F});
-  REQUIRE(flat->properties.indication_size == Size{32.0F, 32.0F});
-  REQUIRE(flat->properties.indication_corner_radius == 4.0F);
+  REQUIRE(MountedIndication(*flat) != nullptr);
+  REQUIRE(MountedIndication(*flat)->geometry.layer_size == Size{32.0F, 32.0F});
+  REQUIRE(MountedIndication(*flat)->geometry.clip_corner_radii == CornerRadii{4.0F});
   REQUIRE(flat->properties.corner_radii == CornerRadii{4.0F});
   const detail::LabelContentMetrics flat_content = flat->LayoutValueOr<detail::LabelContentMetrics>({});
   REQUIRE(flat_content.icon_size == Size{20.0F, 20.0F});
@@ -2706,7 +2778,7 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
   const auto* slider = FindMountedKind(*runtime.RootNode(), huxerui::detail::NodeKind::Slider);
   REQUIRE(slider != nullptr);
   REQUIRE(slider->kind == huxerui::detail::NodeKind::Slider);
-  REQUIRE_FALSE(slider->enabled);
+  REQUIRE_FALSE(slider->interaction.enabled);
   const Rect bounds = slider->PresentationBounds();
   runtime.HandlePointerEvent(PointerEvent{
       .type = PointerEventType::Down,
@@ -2815,6 +2887,40 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
   REQUIRE(FindRectWithColor(touch_released, hover) == nullptr);
 }
 
+TEST_CASE("TestPressedInteractionFallsBackToAvailableHoverLayer") {
+  TestPlatform platform;
+  Runtime runtime{FallbackIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const Color hover = Color::Rgb(20, 80, 160, 0.2F);
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Move, 103, {20.0F, 20.0F}});
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), hover) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 103, {20.0F, 20.0F}});
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), hover) != nullptr);
+}
+
+TEST_CASE("TestIndicationReplacesResolvedBorderAndCornerRadii") {
+  TestPlatform platform;
+  Runtime runtime{SurfaceIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+
+  const Color normal_border = Color::Rgb(160, 40, 60);
+  const Color pressed_border = Color::Rgb(20, 100, 200);
+  const FlattenedScene& normal = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(normal, normal_border) != nullptr);
+  REQUIRE(FindBorderWithColor(normal, pressed_border) == nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 104, {20.0F, 20.0F}});
+  const FlattenedScene& pressed = runtime.BuildFrame();
+  const DrawBorderCommand* border = FindBorderWithColor(pressed, pressed_border);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->width == 4.0F);
+  REQUIRE(border->corner_radius == 20.0F);
+  REQUIRE(FindBorderWithColor(pressed, normal_border) == nullptr);
+}
+
 TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   disabled_clicks = 0;
   underlying_clicks = 0;
@@ -2849,11 +2955,11 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   const auto* subtree_root = subtree.RootNode();
   REQUIRE(subtree_root != nullptr);
   REQUIRE(!subtree_root->IsEnabled());
-  REQUIRE(subtree_root->disabled_visual_state);
+  REQUIRE(subtree_root->applies_disabled_appearance);
   REQUIRE(subtree_root->render_node.opacity == Catch::Approx(0.42F));
   REQUIRE(subtree_root->children.size() == 1);
   REQUIRE(!subtree_root->children[0]->IsEnabled());
-  REQUIRE_FALSE(subtree_root->children[0]->disabled_visual_state);
+  REQUIRE_FALSE(subtree_root->children[0]->applies_disabled_appearance);
   REQUIRE(subtree_root->children[0]->render_node.opacity == 1.0F);
   const DrawTextCommand* child = FindText(subtree_display, "disabled child");
   REQUIRE(child != nullptr);
@@ -2953,7 +3059,9 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   });
   REQUIRE(third_keyboard_clicks == 0);
   const FlattenedScene& space_down = runtime.BuildFrame();
-  REQUIRE(FindRectWithColor(space_down, huxerui::FlatLightThemeSpec().interactions.pressed_overlay) != nullptr);
+  const Color* keyboard_press = LayerFillColor(huxerui::FlatLightThemeSpec().interactions.indication.press);
+  REQUIRE(keyboard_press != nullptr);
+  REQUIRE(FindRectWithColor(space_down, *keyboard_press) != nullptr);
 
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Up,
@@ -3041,6 +3149,49 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
   const FlattenedScene& keyboard_focused = runtime.BuildFrame();
   REQUIRE(focus_changes.back() == "third:on");
   REQUIRE(FindBorderWithColor(keyboard_focused, Color::Rgb(40, 180, 90)) != nullptr);
+}
+
+TEST_CASE("TestFocusableViewWithoutClickPaintsFocusRing") {
+  TestPlatform platform;
+  Runtime runtime{FocusOnlyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  const FlattenedScene& focused = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(focused, Color::Rgb(40, 180, 90)) != nullptr);
+}
+
+TEST_CASE("TestVisualFillIndicationAndFocusRingValidateAtViewConstruction") {
+  REQUIRE_THROWS_AS(
+      Spacer().With(Background{LinearGradient{.stops = {{0.0F, Color::Black()}}}}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Spacer().With(Background{ImageFill{.source = ImageAsset{}}}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Button("invalid indication").With(Indication{.geometry = {.layer_size = Size{-1.0F, 20.0F}}}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      Button("invalid ripple")
+          .With(Indication{
+              .ripple = RippleEffect{
+                  .color = {0.0F, 0.0F, 0.0F, std::numeric_limits<float>::quiet_NaN()},
+              },
+          }),
+      std::invalid_argument
+  );
+
+  TestPlatform platform;
+  Runtime runtime{InvalidFocusRingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
@@ -3479,13 +3630,13 @@ TEST_CASE("TestMaterialDialogActionUsesThemeRipple") {
   platform.AdvanceTime(material.motion.slow * 0.5);
   const FlattenedScene& pressed = runtime.BuildFrame();
 
-  const auto expected = std::get<RippleIndication>(
-      ThemeDefinitionValue<DialogStyle>(MaterialThemeDefinition()).positive_action_indication
-  );
+  const Indication expected =
+      ThemeDefinitionValue<DialogStyle>(MaterialThemeDefinition()).positive_action_indication;
+  REQUIRE(expected.ripple.has_value());
   const DrawCircleCommand* ripple = nullptr;
   for (const auto& command : pressed.Commands()) {
     const auto* circle = std::get_if<DrawCircleCommand>(&command);
-    if (circle && circle->radius > 0.0F && circle->color == expected.color) {
+    if (circle && circle->radius > 0.0F && circle->color == expected.ripple->color) {
       ripple = circle;
       break;
     }

@@ -1114,7 +1114,12 @@ TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
   const FlattenedScene& scene = runtime.BuildFrame();
 
   REQUIRE(FindText(scene, "Email is required") != nullptr);
-  REQUIRE(FindRectWithColor(scene, FlatLightThemeSpec().interactions.hover_overlay) == nullptr);
+  const auto& hover = FlatLightThemeSpec().interactions.indication.hover;
+  REQUIRE(hover.has_value());
+  REQUIRE(hover->fill.has_value());
+  const Color* hover_color = std::get_if<Color>(&hover->fill->Get());
+  REQUIRE(hover_color != nullptr);
+  REQUIRE(FindRectWithColor(scene, *hover_color) == nullptr);
 }
 
 TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
@@ -2116,7 +2121,8 @@ TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
   PaintContext context{sequence, text_field.bounds};
   for (const detail::NodeExtensionEntry& entry : text_field.extensions) {
     if (entry.extension) {
-      entry.extension->Paint(text_field, context);
+      entry.extension->PaintBehindContent(text_field, context);
+      entry.extension->PaintAboveContent(text_field, context);
     }
   }
   context.Finish();
@@ -2611,9 +2617,11 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
 
   const FlattenedScene& feedback = runtime.BuildFrame();
   REQUIRE(FindText(feedback, "复制") != nullptr);
-  const auto* pressed = std::get_if<StateOverlayIndication>(&menu_style.item_indication);
+  REQUIRE(menu_style.item_indication.press.has_value());
+  REQUIRE(menu_style.item_indication.press->fill.has_value());
+  const Color* pressed = std::get_if<Color>(&menu_style.item_indication.press->fill->Get());
   REQUIRE(pressed != nullptr);
-  REQUIRE(FindRectWithColor(feedback, pressed->color) != nullptr);
+  REQUIRE(FindRectWithColor(feedback, *pressed) != nullptr);
 
   platform.AdvanceTime(0.3);
   const FlattenedScene& dismissed = runtime.BuildFrame();
@@ -2824,9 +2832,9 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
   runtime.BuildFrame();
   platform.AdvanceTime(0.05);
   const FlattenedScene& pressed = runtime.BuildFrame();
-  const ThemeSpec material = MaterialLightThemeSpec();
-  Color expected_ripple = material.colors.on_surface;
-  expected_ripple.alpha = material.interactions.ripple.alpha;
+  const MenuStyle material_menu = ThemeDefinitionValue<MenuStyle>(MaterialThemeDefinition());
+  REQUIRE(material_menu.item_indication.ripple.has_value());
+  const Color expected_ripple = material_menu.item_indication.ripple->color;
   REQUIRE(std::ranges::any_of(pressed.Commands(), [expected_ripple](const PaintCommand& command) {
     const auto* circle = std::get_if<huxerui::DrawCircleCommand>(&command);
     return circle != nullptr && circle->radius > 0.0F && circle->color.red == expected_ripple.red &&

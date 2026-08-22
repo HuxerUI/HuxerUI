@@ -298,6 +298,14 @@ private:
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);
+  std::uint64_t BeginInteraction(detail::MountedNode& node, InteractionEvent::Source source,
+                                 std::optional<Point> position = std::nullopt);
+  void EndInteraction(detail::MountedNode& node, InteractionEvent::Type type, InteractionEvent::Source source,
+                      std::uint64_t press_id, std::optional<Point> position = std::nullopt);
+  void BeginPointerInteraction(detail::PointerSession& session, std::uint64_t node_identity,
+                               const PointerEvent& event);
+  void EndPointerInteraction(detail::PointerSession& session, InteractionEvent::Type type,
+                             const PointerEvent& event);
   void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
   void ReleaseScrollGesture(detail::PointerSession& session);
   bool DispatchExtensionObservers(detail::PointerSession& session, const PointerEvent& event, bool clear);

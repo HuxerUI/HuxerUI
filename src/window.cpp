@@ -118,11 +118,13 @@ View WindowControl(
     context.StrokePath(std::move(path), window->caption_foreground, 1.0F);
   });
   const bool close = command == WindowCommand::Close;
+  const Color hover = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.08F);
+  const Color press = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.16F);
   View interaction_surface = Stack {}.With(
-      Indication{StateOverlayIndication{
-          .color = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.16F),
-          .hover_color = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.08F),
-      }},
+      Indication{
+          .hover = IndicationLayer{.fill = hover},
+          .press = IndicationLayer{.fill = press},
+      },
       Semantics{.role = SemanticRole::Button, .label = WindowCommandLabel(labels, command, maximized)}
   );
   interaction_surface = std::move(interaction_surface).OnClick([service, command] { service->Request(command); });

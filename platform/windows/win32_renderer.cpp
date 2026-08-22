@@ -1425,6 +1425,86 @@ struct Win32Renderer::State {
     );
   }
 
+  ComPtr<ID2D1GradientStopCollection> CreateGradientStops(const std::vector<GradientStop>& stops) {
+    std::vector<D2D1_GRADIENT_STOP> native;
+    native.reserve(stops.size());
+    for (const GradientStop& stop : stops) {
+      native.push_back({stop.offset, ToD2DColor(stop.color)});
+    }
+    ComPtr<ID2D1GradientStopCollection> collection;
+    if (FAILED(device_context_->CreateGradientStopCollection(
+            native.data(),
+            static_cast<UINT32>(native.size()),
+            collection.GetAddressOf()
+        ))) {
+      return {};
+    }
+    return collection;
+  }
+
+  template <class Brush>
+  void FillGradientRect(Rect rect, float corner_radius, Brush* brush) {
+    if (corner_radius > 0.0F) {
+      device_context_->FillRoundedRectangle(
+          D2D1::RoundedRect(ToD2DRect(rect), corner_radius, corner_radius),
+          brush
+      );
+    } else {
+      device_context_->FillRectangle(ToD2DRect(rect), brush);
+    }
+  }
+
+  void RenderCommand(const DrawLinearGradientCommand& command) {
+    if (command.rect.IsEmpty()) {
+      return;
+    }
+    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(command.gradient.stops);
+    if (!stops) {
+      return;
+    }
+    const auto point = [&](Point value) {
+      return D2D1::Point2F(
+          command.rect.x + value.x * command.rect.width,
+          command.rect.y + value.y * command.rect.height
+      );
+    };
+    ComPtr<ID2D1LinearGradientBrush> gradient;
+    if (SUCCEEDED(device_context_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(point(command.gradient.start), point(command.gradient.end)),
+            stops.Get(),
+            gradient.GetAddressOf()
+        ))) {
+      FillGradientRect(command.rect, command.corner_radius, gradient.Get());
+    }
+  }
+
+  void RenderCommand(const DrawRadialGradientCommand& command) {
+    if (command.rect.IsEmpty()) {
+      return;
+    }
+    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(command.gradient.stops);
+    if (!stops) {
+      return;
+    }
+    const Point center{
+        command.rect.x + command.gradient.center.x * command.rect.width,
+        command.rect.y + command.gradient.center.y * command.rect.height,
+    };
+    ComPtr<ID2D1RadialGradientBrush> gradient;
+    if (SUCCEEDED(device_context_->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(
+                D2D1::Point2F(center.x, center.y),
+                D2D1::Point2F(),
+                command.gradient.radius.width * command.rect.width,
+                command.gradient.radius.height * command.rect.height
+            ),
+            stops.Get(),
+            gradient.GetAddressOf()
+        ))) {
+      FillGradientRect(command.rect, command.corner_radius, gradient.Get());
+    }
+  }
+
   void UploadExternalTextureFrame(CachedExternalTexture& cached, const Win32ExternalTextureFrame& frame) {
     const std::span<const std::byte> pixels = frame.Pixels();
     const auto pitch = static_cast<UINT32>(frame.BytesPerRow());

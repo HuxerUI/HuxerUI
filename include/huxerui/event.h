@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
@@ -15,6 +16,39 @@
 namespace huxerui {
 
 struct TextEditingValue;
+
+struct InteractionState {
+  bool enabled = true;
+  bool hovered = false;
+  bool focused = false;
+  bool focus_visible = false;
+  // Aggregate state for every active pointer or keyboard Press owned by this node.
+  bool pressed = false;
+
+  bool operator==(const InteractionState&) const = default;
+};
+
+struct InteractionEvent {
+  enum class Type {
+    Press,
+    Release,
+    Cancel,
+  };
+
+  enum class Source {
+    Pointer,
+    Keyboard,
+  };
+
+  Type type = Type::Press;
+  Source source = Source::Pointer;
+  // Release and Cancel retain the identifier allocated for their matching Press.
+  std::uint64_t press_id = 0;
+  // Pointer positions are node-local; keyboard interactions have no spatial origin.
+  std::optional<Point> position;
+
+  bool operator==(const InteractionEvent&) const = default;
+};
 
 enum class PointerEventType {
   Down,

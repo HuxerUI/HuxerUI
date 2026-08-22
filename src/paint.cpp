@@ -71,6 +71,20 @@ void RequireCornerRadii(CornerRadii corner_radii) {
   RequireNonNegative(corner_radii.bottom_right, "HuxerUI paint corner radii must be finite and non-negative");
   RequireNonNegative(corner_radii.bottom_left, "HuxerUI paint corner radii must be finite and non-negative");
 }
+
+void RequireGradientStops(const std::vector<GradientStop>& stops) {
+  if (stops.size() < 2) {
+    throw std::invalid_argument("HuxerUI paint gradient requires at least two stops");
+  }
+  float previous = -1.0F;
+  for (const GradientStop& stop : stops) {
+    if (!std::isfinite(stop.offset) || stop.offset < 0.0F || stop.offset > 1.0F || stop.offset < previous) {
+      throw std::invalid_argument("HuxerUI paint gradient stops must be ordered within [0, 1]");
+    }
+    RequireColor(stop.color);
+    previous = stop.offset;
+  }
+}
 } // namespace
 
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(sequence), bounds_(bounds) {
@@ -91,6 +105,45 @@ void PaintContext::DrawRect(Rect rect, Color color, CornerRadii corner_radii) {
     return;
   }
   FillPath(Path::RoundedRect(rect, corner_radii), color);
+}
+
+void PaintContext::DrawLinearGradient(Rect rect, LinearGradient gradient, CornerRadii corner_radii) {
+  RequireOpen();
+  RequireRect(rect);
+  RequireCornerRadii(corner_radii);
+  if (!IsFinite(gradient.start) || !IsFinite(gradient.end)) {
+    throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
+  }
+  RequireGradientStops(gradient.stops);
+  if (!corner_radii.IsUniform()) {
+    PushClip(rect, corner_radii);
+  }
+  const float command_corner_radius = corner_radii.IsUniform() ? corner_radii.top_left : 0.0F;
+  sequence_.commands_.emplace_back(DrawLinearGradientCommand{rect, std::move(gradient), command_corner_radius});
+  Include(rect);
+  if (!corner_radii.IsUniform()) {
+    PopClip();
+  }
+}
+
+void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, CornerRadii corner_radii) {
+  RequireOpen();
+  RequireRect(rect);
+  RequireCornerRadii(corner_radii);
+  if (!IsFinite(gradient.center) || !std::isfinite(gradient.radius.width) || !std::isfinite(gradient.radius.height) ||
+      gradient.radius.width <= 0.0F || gradient.radius.height <= 0.0F) {
+    throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
+  }
+  RequireGradientStops(gradient.stops);
+  if (!corner_radii.IsUniform()) {
+    PushClip(rect, corner_radii);
+  }
+  const float command_corner_radius = corner_radii.IsUniform() ? corner_radii.top_left : 0.0F;
+  sequence_.commands_.emplace_back(DrawRadialGradientCommand{rect, std::move(gradient), command_corner_radius});
+  Include(rect);
+  if (!corner_radii.IsUniform()) {
+    PopClip();
+  }
 }
 
 void PaintContext::DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options) {

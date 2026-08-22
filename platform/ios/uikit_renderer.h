@@ -46,6 +46,8 @@ private:
   void RenderSequence(const PaintSequence& sequence, CGContextRef context, CommandRange* range);
   void RenderSceneNode(const RenderNode& node, CGContextRef context, CommandRange* range);
   void RenderCommand(CGContextRef context, const DrawRectCommand& command);
+  void RenderCommand(CGContextRef context, const DrawLinearGradientCommand& command);
+  void RenderCommand(CGContextRef context, const DrawRadialGradientCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextCommand& command);
   void RenderCommand(CGContextRef context, const DrawTextRunsCommand& command);
   void RenderCommand(CGContextRef context, const DrawImageCommand& command);

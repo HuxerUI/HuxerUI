@@ -199,7 +199,7 @@ public:
     return NodeExtension::PointerResult::Handled;
   }
 
-  void Paint(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
     const auto geometry = ResolveLocalScrollBarGeometry(node);
     if (!geometry.has_value() || opacity_.Value() <= 0.0F) {
       return;

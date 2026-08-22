@@ -348,7 +348,7 @@ public:
 
   FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    target_->focus_visible = mounted.enabled && mounted.focus_visible;
+    target_->focus_visible = mounted.interaction.enabled && mounted.interaction.focus_visible;
     if (!target_->anchor_hovered && !target_->surface_hovered && !target_->focus_visible &&
         !touch_pointer_.has_value()) {
       target_->blocked = false;
@@ -433,16 +433,16 @@ public:
     return {};
   }
 
-  bool PrepareGeometry(huxerui::MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node) override {
     const Rect bounds = node.PresentationBounds();
     if (target_->bounds == bounds) {
-      return false;
+      return PaintInvalidation::None;
     }
     target_->bounds = bounds;
     if (target_->visible) {
       service_->UpdatePlacement(target_, style_);
     }
-    return false;
+    return PaintInvalidation::None;
   }
 
   bool HitTest(huxerui::MountedNode& node, Point position) const override {

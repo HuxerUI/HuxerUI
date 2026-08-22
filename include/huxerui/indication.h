@@ -1,48 +1,63 @@
 #pragma once
 
 #include <optional>
-#include <utility>
-#include <variant>
 
+#include <huxerui/animation.h>
 #include <huxerui/modifier.h>
+#include <huxerui/paint.h>
 
 namespace huxerui {
 
-struct NoIndication {
-  bool operator==(const NoIndication&) const = default;
+enum class IndicationPlacement {
+  BehindContent,
+  AboveContent,
 };
 
-struct StateOverlayIndication {
-  Color color = Color::Rgb(0, 0, 0, 0.12F);
-  double fade_in_duration = 0.08;
-  double fade_out_duration = 0.16;
-  Color hover_color = Color::Rgb(0, 0, 0, 0.06F);
+struct IndicationLayer {
+  std::optional<VisualFill> fill;
+  std::optional<Border> border;
+  std::optional<CornerRadii> corner_radii;
+  IndicationPlacement placement = IndicationPlacement::AboveContent;
+  AnimationSpec enter = TweenSpec{.duration = 0.08, .easing = Easing::EaseOut};
+  AnimationSpec exit = TweenSpec{.duration = 0.16, .easing = Easing::EaseOut};
 
-  bool operator==(const StateOverlayIndication&) const = default;
+  bool operator==(const IndicationLayer&) const = default;
 };
 
-struct RippleIndication {
+struct RippleEffect {
   Color color = Color::Rgb(255, 255, 255, 0.28F);
-  double expansion_duration = 0.32;
-  double fade_out_duration = 0.2;
-  Color hover_color = Color::Transparent();
-  double hover_fade_in_duration = 0.08;
-  double hover_fade_out_duration = 0.16;
+  IndicationPlacement placement = IndicationPlacement::AboveContent;
+  AnimationSpec expansion = TweenSpec{.duration = 0.32, .easing = Easing::Linear};
+  AnimationSpec fade_out = TweenSpec{.duration = 0.2, .easing = Easing::Linear};
 
-  bool operator==(const RippleIndication&) const = default;
+  bool operator==(const RippleEffect&) const = default;
 };
 
-using IndicationSpec = std::variant<NoIndication, StateOverlayIndication, RippleIndication>;
+struct IndicationGeometry {
+  std::optional<Size> layer_size;
+  std::optional<CornerRadii> clip_corner_radii;
+
+  bool operator==(const IndicationGeometry&) const = default;
+};
 
 struct Indication {
-  Indication() = default;
-  explicit Indication(IndicationSpec value) : value(std::move(value)) {}
-
   static const detail::ModifierDescriptor& Descriptor();
 
-  std::optional<IndicationSpec> value;
+  IndicationGeometry geometry;
+  std::optional<IndicationLayer> focus;
+  std::optional<IndicationLayer> hover;
+  std::optional<IndicationLayer> press;
+  std::optional<RippleEffect> ripple;
 
   bool operator==(const Indication&) const = default;
+};
+
+struct FocusRing {
+  Color color;
+  float width = 2.0F;
+  float offset = 2.0F;
+
+  bool operator==(const FocusRing&) const = default;
 };
 
 } // namespace huxerui

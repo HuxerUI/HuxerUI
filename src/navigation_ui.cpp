@@ -243,10 +243,10 @@ public:
     events_ = modifier.events;
   }
 
-  bool PrepareGeometry(MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(MountedNode& node) override {
     if (!reveal_selection_ || axis_ != Axis::Vertical || selected_index_ >= node.ChildCount() ||
         !scroll_controller_.IsConnected()) {
-      return false;
+      return PaintInvalidation::None;
     }
     reveal_selection_ = false;
     const MountedNode& selected = node.ChildAt(selected_index_);
@@ -258,7 +258,7 @@ public:
     } else if (bottom > metrics.offset + metrics.viewport_extent) {
       static_cast<void>(scroll_controller_.ScrollTo(bottom - metrics.viewport_extent));
     }
-    return false;
+    return PaintInvalidation::None;
   }
 
   void OnKey(MountedNode& node, const KeyEvent& event) override {
@@ -352,10 +352,10 @@ View NavigationIconLayer(
   );
 }
 
-View ApplyNavigationInteraction(View item, std::optional<IndicationSpec> indication, bool enabled) {
+View ApplyNavigationInteraction(View item, std::optional<Indication> indication, bool enabled) {
   item = std::move(item).With(PreserveDisabledAppearance{}, Enabled(enabled));
   if (indication.has_value()) {
-    item = std::move(item).With(Indication{*indication});
+    item = std::move(item).With(*indication);
   }
   return item;
 }
