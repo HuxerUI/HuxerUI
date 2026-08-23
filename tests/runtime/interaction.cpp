@@ -773,6 +773,106 @@ TEST_CASE("TestDefaultTouchMomentumCarriesReleaseVelocity") {
   REQUIRE(drag_scroll.Offset() < released_offset + 220.0F);
 }
 
+TEST_CASE("TestTouchMomentumUsesRecentMovementInsteadOfOnlyTheFinalDelta") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 68, {50.0F, 95.0F}, PointerDeviceKind::Touch});
+  for (float y : {82.0F, 69.0F, 56.0F, 43.0F, 30.0F, 17.0F}) {
+    platform.AdvanceTime(0.016);
+    runtime.HandlePointerEvent({PointerEventType::Move, 68, {50.0F, y}, PointerDeviceKind::Touch});
+  }
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent({PointerEventType::Move, 68, {50.0F, 16.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 68, {50.0F, 16.0F}, PointerDeviceKind::Touch});
+
+  const float released_offset = drag_scroll.Offset();
+  for (int frame = 0; frame < 100; ++frame) {
+    platform.AdvanceTime(0.016);
+    runtime.BuildFrame();
+  }
+  REQUIRE(drag_scroll.Offset() > released_offset + 130.0F);
+}
+
+TEST_CASE("TestTouchMomentumTracksReleaseAcceleration") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 71, {50.0F, 95.0F}, PointerDeviceKind::Touch});
+  for (float y : {92.0F, 87.0F, 79.0F, 68.0F, 52.0F, 30.0F, 3.0F}) {
+    platform.AdvanceTime(0.016);
+    runtime.HandlePointerEvent({PointerEventType::Move, 71, {50.0F, y}, PointerDeviceKind::Touch});
+  }
+  runtime.HandlePointerEvent({PointerEventType::Up, 71, {50.0F, 3.0F}, PointerDeviceKind::Touch});
+
+  const float released_offset = drag_scroll.Offset();
+  for (int frame = 0; frame < 100; ++frame) {
+    platform.AdvanceTime(0.016);
+    runtime.BuildFrame();
+  }
+  REQUIRE(drag_scroll.Offset() > released_offset + 500.0F);
+}
+
+TEST_CASE("TestTouchMomentumDoesNotReverseAfterMonotonicDeceleration") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 72, {50.0F, 95.0F}, PointerDeviceKind::Touch});
+  for (float y : {85.0F, 75.0F, 65.0F, 55.0F, 54.0F, 53.0F, 52.0F}) {
+    platform.AdvanceTime(0.016);
+    runtime.HandlePointerEvent({PointerEventType::Move, 72, {50.0F, y}, PointerDeviceKind::Touch});
+  }
+  runtime.HandlePointerEvent({PointerEventType::Up, 72, {50.0F, 52.0F}, PointerDeviceKind::Touch});
+
+  const float released_offset = drag_scroll.Offset();
+  for (int frame = 0; frame < 100; ++frame) {
+    platform.AdvanceTime(0.016);
+    runtime.BuildFrame();
+  }
+  REQUIRE(drag_scroll.Offset() >= released_offset);
+}
+
+TEST_CASE("TestTouchMomentumDoesNotStartAfterReleasePause") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 69, {50.0F, 40.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.016);
+  runtime.HandlePointerEvent({PointerEventType::Move, 69, {50.0F, 10.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.11);
+  runtime.HandlePointerEvent({PointerEventType::Up, 69, {50.0F, 10.0F}, PointerDeviceKind::Touch});
+
+  const float released_offset = drag_scroll.Offset();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(drag_scroll.Offset() == released_offset);
+}
+
+TEST_CASE("TestTouchMomentumIgnoresStaleMovementSamples") {
+  TestPlatform platform;
+  Runtime runtime{DragScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 70, {50.0F, 40.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.2);
+  runtime.HandlePointerEvent({PointerEventType::Move, 70, {50.0F, 10.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 70, {50.0F, 10.0F}, PointerDeviceKind::Touch});
+
+  const float released_offset = drag_scroll.Offset();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(drag_scroll.Offset() == released_offset);
+}
+
 TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   TestPlatform platform;
   Runtime touch{DragScrollApp, platform};

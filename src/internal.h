@@ -1052,6 +1052,11 @@ struct ActivePointerInteraction {
   std::uint64_t press_id = 0;
 };
 
+struct ScrollVelocitySample {
+  Point position;
+  double timestamp = 0.0;
+};
+
 struct PointerSession {
   std::optional<std::uint64_t> target_identity;
   // Pointer dispatch and interaction ownership are distinct when a retained gesture captures or observes the stream.
@@ -1061,9 +1066,9 @@ struct PointerSession {
   Point down_position;
   Point last_position;
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
-  double velocity_sample_timestamp = 0.0;
-  float scroll_velocity = 0.0F;
-  bool has_velocity_sample = false;
+  // A short fixed history makes release velocity resilient to a small final Move without allocating per gesture.
+  std::array<ScrollVelocitySample, 8> scroll_velocity_samples;
+  std::size_t scroll_velocity_sample_count = 0;
   bool focus_pending = false;
   std::optional<Axis> drag_axis;
   std::size_t active_scroll = 0;

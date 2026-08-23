@@ -24,17 +24,133 @@ bool SupportsHover(PointerDeviceKind device_kind) {
   return device_kind == PointerDeviceKind::Mouse || device_kind == PointerDeviceKind::Pen;
 }
 
-void RecordScrollVelocity(PointerSession& session, float delta, double timestamp) {
-  const double elapsed = timestamp - session.velocity_sample_timestamp;
-  session.velocity_sample_timestamp = timestamp;
-  if (!std::isfinite(elapsed) || elapsed <= 0.0 || elapsed > 0.15) {
-    session.scroll_velocity = 0.0F;
-    session.has_velocity_sample = false;
+void RecordScrollVelocitySample(PointerSession& session, Point position, double timestamp) {
+  if (!std::isfinite(timestamp)) {
     return;
   }
-  const float sample = delta / static_cast<float>(elapsed);
-  session.scroll_velocity = session.has_velocity_sample ? session.scroll_velocity * 0.25F + sample * 0.75F : sample;
-  session.has_velocity_sample = true;
+  if (session.scroll_velocity_sample_count > 0) {
+    ScrollVelocitySample& latest = session.scroll_velocity_samples[session.scroll_velocity_sample_count - 1];
+    if (timestamp < latest.timestamp) {
+      session.scroll_velocity_sample_count = 0;
+    } else if (timestamp == latest.timestamp) {
+      latest.position = position;
+      return;
+    }
+  }
+
+  if (session.scroll_velocity_sample_count == session.scroll_velocity_samples.size()) {
+    for (std::size_t index = 1; index < session.scroll_velocity_samples.size(); ++index) {
+      session.scroll_velocity_samples[index - 1] = session.scroll_velocity_samples[index];
+    }
+    --session.scroll_velocity_sample_count;
+  }
+  session.scroll_velocity_samples[session.scroll_velocity_sample_count++] = {position, timestamp};
+}
+
+std::optional<float> EstimateScrollVelocity(const PointerSession& session, Axis axis, double release_timestamp) {
+  constexpr double maximum_sample_age = 0.1;
+  if (session.scroll_velocity_sample_count < 2 || !std::isfinite(release_timestamp)) {
+    return std::nullopt;
+  }
+
+  const ScrollVelocitySample& latest = session.scroll_velocity_samples[session.scroll_velocity_sample_count - 1];
+  const double release_age = release_timestamp - latest.timestamp;
+  if (!std::isfinite(release_age) || release_age < 0.0 || release_age > maximum_sample_age) {
+    return std::nullopt;
+  }
+
+  const double cutoff = latest.timestamp - maximum_sample_age;
+  std::size_t first = 0;
+  while (first < session.scroll_velocity_sample_count && session.scroll_velocity_samples[first].timestamp < cutoff) {
+    ++first;
+  }
+  const std::size_t sample_count = session.scroll_velocity_sample_count - first;
+  if (sample_count < 2) {
+    return std::nullopt;
+  }
+
+  const ScrollVelocitySample& previous = session.scroll_velocity_samples[session.scroll_velocity_sample_count - 2];
+  const double latest_elapsed = latest.timestamp - previous.timestamp;
+  if (!std::isfinite(latest_elapsed) || latest_elapsed <= 0.0) {
+    return std::nullopt;
+  }
+  const double fallback_velocity =
+      static_cast<double>(PointerDelta(previous.position, latest.position, axis)) / latest_elapsed;
+  if (!std::isfinite(fallback_velocity)) {
+    return std::nullopt;
+  }
+  if (sample_count == 2) {
+    return static_cast<float>(fallback_velocity);
+  }
+
+  double weighted_velocity = 0.0;
+  double weight_sum = 0.0;
+  for (std::size_t index = first + 1; index < session.scroll_velocity_sample_count; ++index) {
+    const ScrollVelocitySample& segment_start = session.scroll_velocity_samples[index - 1];
+    const ScrollVelocitySample& segment_end = session.scroll_velocity_samples[index];
+    const double elapsed = segment_end.timestamp - segment_start.timestamp;
+    if (!std::isfinite(elapsed) || elapsed <= 0.0) {
+      continue;
+    }
+    const double weight = static_cast<double>(index - first);
+    weighted_velocity +=
+        static_cast<double>(PointerDelta(segment_start.position, segment_end.position, axis)) / elapsed * weight;
+    weight_sum += weight;
+  }
+  if (weight_sum <= 0.0) {
+    return static_cast<float>(fallback_velocity);
+  }
+  const double trend_velocity = weighted_velocity / weight_sum;
+  if (!std::isfinite(trend_velocity) || trend_velocity == 0.0) {
+    return std::nullopt;
+  }
+
+  // A quadratic position fit estimates the derivative at release, so an accelerating gesture is not reduced to its
+  // average speed. Time is normalized to the sampling window to keep the normal equation well-conditioned.
+  double time_sum = 0.0;
+  double time2_sum = 0.0;
+  double time3_sum = 0.0;
+  double time4_sum = 0.0;
+  double position_sum = 0.0;
+  double time_position_sum = 0.0;
+  double time2_position_sum = 0.0;
+  for (std::size_t index = first; index < session.scroll_velocity_sample_count; ++index) {
+    const ScrollVelocitySample& sample = session.scroll_velocity_samples[index];
+    const double time = (sample.timestamp - latest.timestamp) / maximum_sample_age;
+    const double time2 = time * time;
+    const double position = axis == Axis::Vertical ? -sample.position.y : -sample.position.x;
+    time_sum += time;
+    time2_sum += time2;
+    time3_sum += time2 * time;
+    time4_sum += time2 * time2;
+    position_sum += position;
+    time_position_sum += time * position;
+    time2_position_sum += time2 * position;
+  }
+
+  const double count = static_cast<double>(sample_count);
+  const double determinant = count * (time2_sum * time4_sum - time3_sum * time3_sum) -
+                             time_sum * (time_sum * time4_sum - time2_sum * time3_sum) +
+                             time2_sum * (time_sum * time3_sum - time2_sum * time2_sum);
+  if (!std::isfinite(determinant) || std::abs(determinant) <= 1.0e-12) {
+    return static_cast<float>(trend_velocity);
+  }
+  const double velocity_determinant = count * (time_position_sum * time4_sum - time3_sum * time2_position_sum) -
+                                      position_sum * (time_sum * time4_sum - time2_sum * time3_sum) +
+                                      time2_sum * (time_sum * time2_position_sum - time_position_sum * time2_sum);
+  const double velocity = velocity_determinant / determinant / maximum_sample_age;
+  if (!std::isfinite(velocity)) {
+    return static_cast<float>(trend_velocity);
+  }
+  if (std::signbit(velocity) != std::signbit(trend_velocity)) {
+    return std::signbit(fallback_velocity) == std::signbit(trend_velocity)
+               ? std::optional<float>{static_cast<float>(fallback_velocity)}
+               : std::nullopt;
+  }
+
+  constexpr double maximum_extrapolation_ratio = 2.0;
+  const double maximum_velocity = std::abs(trend_velocity) * maximum_extrapolation_ratio;
+  return static_cast<float>(std::clamp(velocity, -maximum_velocity, maximum_velocity));
 }
 
 void SetScrollGesture(MountedNode& node, bool active) {
@@ -341,7 +457,9 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   session.down_position = event.position;
   session.last_position = event.position;
   session.device_kind = event.device_kind;
-  session.velocity_sample_timestamp = state_->platform_->Now();
+  if (event.device_kind == PointerDeviceKind::Touch) {
+    RecordScrollVelocitySample(session, event.position, state_->platform_->Now());
+  }
   const std::optional<std::uint64_t> focus_target = ResolvePointerFocusTarget(route);
   if (event.device_kind == PointerDeviceKind::Touch) {
     session.focus_pending = true;
@@ -467,6 +585,10 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
     return;
   }
 
+  if (session.device_kind == PointerDeviceKind::Touch) {
+    RecordScrollVelocitySample(session, event.position, state_->platform_->Now());
+  }
+
   if (!session.drag_axis.has_value()) {
     if (session.target_identity.has_value()) {
       if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.target_identity)) {
@@ -509,7 +631,6 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
     cancel.type = PointerEventType::Cancel;
     DispatchExtensionObservers(session, cancel, true);
 
-    RecordScrollVelocity(session, delta, state_->platform_->Now());
     session.drag_axis = axis;
     session.active_scroll = *scroll_candidate;
     const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
@@ -528,7 +649,6 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   }
 
   const float delta = PointerDelta(session.last_position, event.position, *session.drag_axis);
-  RecordScrollVelocity(session, delta, state_->platform_->Now());
   const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
   if (!scrolled.empty()) {
     for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
@@ -633,18 +753,18 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   const std::optional<std::uint64_t> identity = captured->second.target_identity;
   const bool was_dragging = captured->second.drag_axis.has_value();
   const std::optional<std::uint64_t> momentum_identity = captured->second.active_scroll_node;
-  const double velocity_age = state_->platform_->Now() - captured->second.velocity_sample_timestamp;
-  const bool should_start_momentum = was_dragging && captured->second.device_kind == PointerDeviceKind::Touch &&
-                                     captured->second.has_velocity_sample && velocity_age >= 0.0 && velocity_age <= 0.1;
-  const float scroll_velocity = captured->second.scroll_velocity;
+  const std::optional<float> scroll_velocity =
+      was_dragging && captured->second.device_kind == PointerDeviceKind::Touch
+          ? EstimateScrollVelocity(captured->second, *captured->second.drag_axis, state_->platform_->Now())
+          : std::nullopt;
   if (!was_dragging) {
     CommitPendingTouchFocus(captured->second, event.position, true);
   }
   ReleaseScrollGesture(captured->second);
   state_->pointer_sessions_.erase(captured);
-  if (should_start_momentum && momentum_identity.has_value()) {
+  if (scroll_velocity.has_value() && momentum_identity.has_value()) {
     if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *momentum_identity);
-        node && node->scroll_state->motion.StartMomentum(*node, scroll_velocity)) {
+        node && node->scroll_state->motion.StartMomentum(*node, *scroll_velocity)) {
       state_->scroll_motion_active_ = true;
       RequestFrame();
     }
