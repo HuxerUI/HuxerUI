@@ -25,12 +25,9 @@ function(huxerui_configure_compile_target target_name)
     )
 endfunction()
 
-function(huxerui_configure_public_target target_name)
+function(huxerui_configure_public_target target_name resource_package)
     set_property(TARGET ${target_name} PROPERTY
-            HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}"
-    )
-    set_property(TARGET ${target_name} PROPERTY
-            HUXERUI_BUILTIN_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+            HUXERUI_RESOURCE_PACKAGE "${resource_package}"
     )
     target_include_directories(${target_name}
             PUBLIC
@@ -38,7 +35,7 @@ function(huxerui_configure_public_target target_name)
             $<INSTALL_INTERFACE:include>
     )
     target_compile_options(${target_name} INTERFACE ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS})
-    if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         foreach (HUXERUI_PLATFORM_LINK_LIBRARY IN LISTS HUXERUI_PLATFORM_LINK_LIBRARIES)
             target_link_libraries(${target_name} PRIVATE "$<BUILD_INTERFACE:${HUXERUI_PLATFORM_LINK_LIBRARY}>")
         endforeach ()
@@ -67,79 +64,15 @@ function(huxerui_configure_public_target target_name)
     endif ()
 endfunction()
 
-function(_huxerui_configure_builtin_resources target_name)
-    set(HUXERUI_BUILTIN_RESOURCE_OUTPUT
-            "${PROJECT_BINARY_DIR}/huxerui-builtin-resources"
-    )
-    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE
-            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/package"
-    )
-    set(HUXERUI_BUILTIN_RESOURCE_HEADER
-            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include/huxerui_builtin_resources.h"
-    )
-    set(HUXERUI_BUILTIN_RESOURCE_INDEX
-            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/huxerui/resources.bin"
-    )
-    file(GLOB_RECURSE HUXERUI_BUILTIN_RESOURCE_INPUTS
-            CONFIGURE_DEPENDS
-            LIST_DIRECTORIES FALSE
-            "${HUXERUI_PROJECT_DIR}/resources/*"
-    )
-    set(HUXERUI_BUILTIN_RESOURCE_PLAN
-            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/resource-plan-$<CONFIG>.txt"
-    )
-    file(GENERATE
-            OUTPUT "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
-            CONTENT "inputs=${HUXERUI_BUILTIN_RESOURCE_INPUTS}\n"
-    )
-    huxerui_resolve_host_tool("hrc" HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND)
-    add_custom_command(
-            OUTPUT
-                    "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
-                    "${HUXERUI_BUILTIN_RESOURCE_INDEX}"
-            COMMAND "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
-                    --root "${HUXERUI_PROJECT_DIR}/resources"
-                    --output "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}"
-                    --namespace huxerui
-                    --header-name huxerui_builtin_resources.h
-            DEPENDS
-                    ${HUXERUI_BUILTIN_RESOURCE_INPUTS}
-                    "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
-                    "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
-            COMMENT "Generating HuxerUI built-in resources"
-            VERBATIM
-    )
-    set_source_files_properties(
-            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
-            PROPERTIES
-                    GENERATED TRUE
-                    HEADER_FILE_ONLY TRUE
-    )
-    target_sources(${target_name} PRIVATE
-            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
-    )
-    target_include_directories(${target_name} PRIVATE
-            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include"
-    )
-    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE
-            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
-            PARENT_SCOPE
-    )
-endfunction()
-
 function(huxerui_configure_targets)
     if (HUXERUI_LIBRARY_GRAPH_ONLY)
         add_library(huxerui_library_graph_framework INTERFACE)
-        set_property(TARGET huxerui_library_graph_framework PROPERTY
-                HUXERUI_PLATFORM_ID "generic"
-        )
         target_include_directories(huxerui_library_graph_framework INTERFACE
                 $<BUILD_INTERFACE:${HUXERUI_PUBLIC_INCLUDE_DIR}>
                 $<INSTALL_INTERFACE:include>
         )
         add_library(HuxerUI::huxerui ALIAS huxerui_library_graph_framework)
         add_library(HuxerUI::huxerui_static ALIAS huxerui_library_graph_framework)
-        set(HUXERUI_PLATFORM_ID "generic" PARENT_SCOPE)
         return()
     endif ()
     if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
@@ -149,7 +82,6 @@ function(huxerui_configure_targets)
         message(FATAL_ERROR "HuxerUI Web and iOS support the static library target only")
     endif ()
 
-    set(HUXERUI_PLATFORM_ID "generic")
     set(HUXERUI_PLATFORM_SOURCE_FILES)
     set(HUXERUI_PLATFORM_COMPILE_OPTIONS)
     set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS)
@@ -159,22 +91,16 @@ function(huxerui_configure_targets)
     set(HUXERUI_PLATFORM_LINK_OPTIONS)
 
     if (EMSCRIPTEN)
-        set(HUXERUI_PLATFORM_ID "web")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/Web.cmake")
     elseif (ANDROID)
-        set(HUXERUI_PLATFORM_ID "android")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/Android.cmake")
     elseif (IOS)
-        set(HUXERUI_PLATFORM_ID "ios")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/IOS.cmake")
     elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        set(HUXERUI_PLATFORM_ID "macos")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/MacOS.cmake")
     elseif (WIN32)
-        set(HUXERUI_PLATFORM_ID "windows")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/Windows.cmake")
     elseif (UNIX AND NOT APPLE)
-        set(HUXERUI_PLATFORM_ID "linux")
         include("${HUXERUI_BUILD_CMAKE_DIR}/platform/Linux.cmake")
     else ()
         message(FATAL_ERROR "HuxerUI currently supports Android, iOS, macOS, Windows, Linux, and Web only")
@@ -196,7 +122,10 @@ function(huxerui_configure_targets)
         )
         set_target_properties(huxerui_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
         huxerui_configure_compile_target(huxerui_core_objects)
-        _huxerui_configure_builtin_resources(huxerui_core_objects)
+        _huxerui_compile_builtin_resources(
+                huxerui_core_objects
+                HUXERUI_BUILTIN_RESOURCE_PACKAGE
+        )
         set(HUXERUI_LIBRARY_SOURCE_FILES $<TARGET_OBJECTS:huxerui_core_objects>)
     endif ()
 
@@ -207,7 +136,10 @@ function(huxerui_configure_targets)
         if (WIN32)
             set_target_properties(${HUXERUI_SHARED_LIB_NAME} PROPERTIES DEBUG_POSTFIX "_debug")
         endif ()
-        huxerui_configure_public_target(${HUXERUI_SHARED_LIB_NAME})
+        huxerui_configure_public_target(
+                ${HUXERUI_SHARED_LIB_NAME}
+                "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+        )
         add_library(HuxerUI::huxerui ALIAS ${HUXERUI_SHARED_LIB_NAME})
     endif ()
 
@@ -218,19 +150,24 @@ function(huxerui_configure_targets)
         if (IOS)
             set_target_properties(${HUXERUI_STATIC_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
             huxerui_configure_compile_target(${HUXERUI_STATIC_LIB_NAME})
-            _huxerui_configure_builtin_resources(${HUXERUI_STATIC_LIB_NAME})
+            _huxerui_compile_builtin_resources(
+                    ${HUXERUI_STATIC_LIB_NAME}
+                    HUXERUI_BUILTIN_RESOURCE_PACKAGE
+            )
         endif ()
         if (WIN32)
             set_target_properties(${HUXERUI_STATIC_LIB_NAME} PROPERTIES DEBUG_POSTFIX "_debug")
         endif ()
-        huxerui_configure_public_target(${HUXERUI_STATIC_LIB_NAME})
+        huxerui_configure_public_target(
+                ${HUXERUI_STATIC_LIB_NAME}
+                "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+        )
         add_library(HuxerUI::huxerui_static ALIAS ${HUXERUI_STATIC_LIB_NAME})
         if (NOT TARGET HuxerUI::huxerui)
             add_library(HuxerUI::huxerui ALIAS ${HUXERUI_STATIC_LIB_NAME})
         endif ()
     endif ()
 
-    set(HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}" PARENT_SCOPE)
     set(HUXERUI_LINUX_FCITX5_ENABLED "${HUXERUI_LINUX_FCITX5_ENABLED}" PARENT_SCOPE)
     set(HUXERUI_LINUX_STATIC_ARCHIVES "${HUXERUI_LINUX_STATIC_ARCHIVES}" PARENT_SCOPE)
     set(HUXERUI_LINUX_STATIC_DEPENDENCY_FILES "${HUXERUI_LINUX_STATIC_DEPENDENCY_FILES}" PARENT_SCOPE)

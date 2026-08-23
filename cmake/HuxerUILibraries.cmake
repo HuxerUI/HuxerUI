@@ -7,10 +7,6 @@ function(_huxerui_select_framework_target output_variable)
         if (NOT TARGET HuxerUI::huxerui)
             message(FATAL_ERROR "HuxerUI Android integration requires the shared component")
         endif ()
-        get_target_property(HUXERUI_FRAMEWORK_TARGET_TYPE HuxerUI::huxerui TYPE)
-        if (NOT HUXERUI_FRAMEWORK_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
-            message(FATAL_ERROR "HuxerUI Android integration requires the shared component")
-        endif ()
         set(HUXERUI_FRAMEWORK_TARGET HuxerUI::huxerui)
     elseif (TARGET HuxerUI::huxerui_static)
         set(HUXERUI_FRAMEWORK_TARGET HuxerUI::huxerui_static)
@@ -400,11 +396,10 @@ function(huxerui_use_library target_name)
                     TARGET ${HUXERUI_RESOLVED_LIBRARY_TARGET}
                     PROPERTY HUXERUI_RESOURCE_PACKAGE
             )
-            set_property(TARGET ${target_name} APPEND PROPERTY
-                    HUXERUI_RESOURCE_PACKAGES
+            _huxerui_append_resource_package_input(
+                    ${target_name}
                     "${HUXERUI_LIBRARY_RESOURCE_PACKAGE}"
             )
-            _huxerui_schedule_resources(${target_name})
         endif ()
     endif ()
 endfunction()

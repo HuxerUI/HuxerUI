@@ -115,7 +115,12 @@ public:
     if (!std::filesystem::is_regular_file(entry)) {
       throw std::runtime_error("Web entry file is missing: " + entry.string());
     }
-    return {{"emrun", {entry.string()}, artifact.parent_path()}};
+    std::vector<std::string> arguments;
+    if (CurrentHostId() == "windows") {
+      arguments = {"--browser", "explorer.exe"};
+    }
+    arguments.push_back(entry.string());
+    return {{"emrun", std::move(arguments), artifact.parent_path()}};
   }
 
   std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {

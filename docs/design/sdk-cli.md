@@ -6,7 +6,7 @@ This document defines the HuxerUI SDK and CLI ownership model, the implemented p
 
 The current implementation provides:
 
-- An installable platform-specific CMake package with canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
+- An installable platform-specific CMake package with the canonical framework targets supported by each platform.
 - `huxerui_add_app`, installed host code generators, and generated application integration metadata.
 - A `huxerui` CLI with explicit application and library creation, `platform add`, `doctor`, `setup`, `devices`, `build`, `run`, `package`, and `open ios`.
 - Source-controlled Windows, macOS, Linux, Web, Android, and iOS platform enablement, with the Linux runtime backend built directly through CMake.
@@ -185,8 +185,9 @@ huxerui_add_app(hello_huxer
 
 The SDK owns the public `HuxerUIConfig.cmake`, application, library, code-generation, and resource helpers, host tools, built-in resource location, public headers, and the target-platform libraries present in that SDK form.
 Source-build target and platform configuration remains private to the repository and is not installed into the consumer package.
-`HuxerUIConfig.cmake` is the only public CMake package and exposes only the canonical `HuxerUI::huxerui` and `HuxerUI::huxerui_static` targets.
+`HuxerUIConfig.cmake` is the only public CMake package and exposes only canonical HuxerUI framework targets.
 Desktop packages import both targets by default, and `huxerui_add_app` selects the static target.
+Android imports only the shared `HuxerUI::huxerui` target because its Java host loads `libhuxerui.so`; Web and iOS use static framework artifacts.
 Consumers may request only `COMPONENTS shared` or `COMPONENTS static`; requesting the Linux shared component does not resolve static-only dependencies, while the static component loads the packaged archive closure and resolves the distribution-owned libraries through pkg-config.
 Platform package managers may carry platform libraries and integration code, but they do not introduce a second public HuxerUI package or a forwarding target hierarchy.
 The CLI or source-controlled platform shell supplies the resolved SDK location to CMake; application source does not encode an SDK archive layout.
@@ -341,6 +342,7 @@ The Web shell owns the HTML document and host-element mount code rather than hid
 
 `run` accepts exactly one enabled platform and performs a build before launch.
 Windows starts the executable, macOS opens the application bundle, Web delegates the generated HTML entry point to `emrun`, Android installs and launches the generated APK, and iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device.
+On Windows hosts, the Web driver asks `emrun` to open its URL through `explorer.exe` so the operating system selects the default browser without relying on Python browser discovery.
 
 For Android, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
@@ -380,7 +382,6 @@ HUXERUI_HOME/
       android/
         HuxerUI.aar
         <abi>/libhuxerui.so
-        <abi>/libhuxerui_static.a
       web/emscripten-4.0.19/libhuxerui.a
     resources/
     tools/<host>/<architecture>/
@@ -409,7 +410,7 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 
 Platform build systems consume platform artifacts through their normal mechanisms:
 
-- Android uses a Java-only AAR plus ABI-specific shared and static libraries imported by the installed CMake package.
+- Android uses a Java-only AAR plus ABI-specific shared libraries imported by the installed CMake package.
 - macOS and iOS may use signed XCFramework and Swift Package artifacts where platform-package integration is required.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
 - Web uses the Emscripten 4.0.19 static library from the selected SDK while configuring the application root through `emcmake`.

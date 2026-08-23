@@ -119,14 +119,9 @@ emcc --version 2>&1 | grep "$web_version" >/dev/null || fail "Emscripten $web_ve
 android_directory="$source_directory/platform/android"
 [ -f "$android_directory/gradlew" ] || fail "HuxerUI Android Gradle wrapper is missing"
 gradle_variant=$(printf '%s' "$configuration" | tr '[:upper:]' '[:lower:]')
-if [ "$configuration" = Release ]; then
-  android_native_configuration=RelWithDebInfo
-else
-  android_native_configuration=Debug
-fi
 (
   cd "$android_directory"
-  run sh ./gradlew ":HuxerUI:assemble$configuration" --no-daemon
+  run sh ./gradlew ":HuxerUI:assemble$configuration" -PhuxeruiBuildNative=true --no-daemon
 )
 
 aar_count=$(find "$android_directory/huxerui/build/outputs/aar" -maxdepth 1 \
@@ -147,15 +142,6 @@ for abi in arm64-v8a x86_64; do
   shared_library="$android_extract_directory/jni/$abi/libhuxerui.so"
   [ -f "$shared_library" ] || fail "HuxerUI Android AAR is missing $abi/libhuxerui.so"
   cp -- "$shared_library" "$abi_output/libhuxerui.so"
-
-  static_root="$android_directory/huxerui/.cxx/$android_native_configuration"
-  static_count=$(find "$static_root" -type f \
-    -path "*/$abi/lib/libhuxerui_static.a" -print | wc -l | tr -d ' ')
-  [ "$static_count" -eq 1 ] || \
-    fail "expected one HuxerUI Android $configuration static library for $abi, found $static_count"
-  static_library=$(find "$static_root" -type f \
-    -path "*/$abi/lib/libhuxerui_static.a" -print -quit)
-  cp -- "$static_library" "$abi_output/libhuxerui_static.a"
 done
 
 rm -rf -- "$android_extract_directory/jni" "$android_extract_directory/prefab"

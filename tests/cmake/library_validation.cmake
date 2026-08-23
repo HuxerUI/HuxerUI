@@ -58,6 +58,41 @@ expect_library_configure_failure(
         "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git REVISION 0123456789abcdef)"
         "REVISION must be a full commit SHA"
 )
+expect_library_configure_failure(
+        android_missing_framework
+        "set(ANDROID TRUE)\n_huxerui_select_framework_target(framework_target)"
+        "HuxerUI Android integration requires the shared component"
+)
+
+set(ANDROID_SHARED_PROJECT_ROOT "${TEST_ROOT}/android-shared-source")
+set(ANDROID_SHARED_BUILD_ROOT "${TEST_ROOT}/android-shared-build")
+file(MAKE_DIRECTORY "${ANDROID_SHARED_PROJECT_ROOT}")
+file(WRITE "${ANDROID_SHARED_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${ANDROID_SHARED_PROJECT_ROOT}/CMakeLists.txt"
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(android_shared_framework LANGUAGES CXX)\n"
+        "set(ANDROID TRUE)\n"
+        "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUILibraries.cmake\")\n"
+        "add_library(HuxerUI::huxerui INTERFACE IMPORTED)\n"
+        "_huxerui_select_framework_target(framework_target)\n"
+        "if (NOT framework_target STREQUAL \"HuxerUI::huxerui\")\n"
+        "  message(FATAL_ERROR \"Android shared framework target was not selected\")\n"
+        "endif ()\n"
+)
+execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+                -S "${ANDROID_SHARED_PROJECT_ROOT}"
+                -B "${ANDROID_SHARED_BUILD_ROOT}"
+                -G "${HOST_GENERATOR}"
+        RESULT_VARIABLE ANDROID_SHARED_CONFIGURE_RESULT
+        OUTPUT_VARIABLE ANDROID_SHARED_CONFIGURE_OUTPUT
+        ERROR_VARIABLE ANDROID_SHARED_CONFIGURE_ERROR
+)
+if (NOT ANDROID_SHARED_CONFIGURE_RESULT EQUAL 0)
+    message(FATAL_ERROR
+            "Android shared framework target configure failed:\n${ANDROID_SHARED_CONFIGURE_OUTPUT}${ANDROID_SHARED_CONFIGURE_ERROR}"
+    )
+endif ()
 
 set(PREEXISTING_LIBRARY_ROOT "${TEST_ROOT}/preexisting-library")
 file(MAKE_DIRECTORY "${PREEXISTING_LIBRARY_ROOT}")

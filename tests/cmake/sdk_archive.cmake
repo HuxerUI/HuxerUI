@@ -107,13 +107,20 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
     foreach (required_path IN ITEMS
             "share/huxerui/platform/android/HuxerUI.aar"
             "share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
-            "share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
             "share/huxerui/platform/android/x86_64/libhuxerui.so"
-            "share/huxerui/platform/android/x86_64/libhuxerui_static.a"
             "share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
     )
         if (NOT EXISTS "${SDK_ROOT}/${required_path}")
             message(FATAL_ERROR "SDK archive is missing ${required_path}")
+        endif ()
+    endforeach ()
+
+    foreach (unexpected_path IN ITEMS
+            "share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
+            "share/huxerui/platform/android/x86_64/libhuxerui_static.a"
+    )
+        if (EXISTS "${SDK_ROOT}/${unexpected_path}")
+            message(FATAL_ERROR "SDK archive contains unsupported Android static library: ${unexpected_path}")
         endif ()
     endforeach ()
 
@@ -123,11 +130,15 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
         file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
         if (platform STREQUAL "android")
             set(PLATFORM_CONFIGURATION "set(ANDROID TRUE)\nset(ANDROID_ABI arm64-v8a)")
+            set(PLATFORM_ASSERTION
+                    "if (TARGET HuxerUI::huxerui_static)\n  message(FATAL_ERROR \"Android SDK unexpectedly exposes HuxerUI::huxerui_static\")\nendif ()"
+            )
             set(EXPECTED_LIBRARY
                     "${SDK_ROOT}/share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
             )
         else ()
-            set(PLATFORM_CONFIGURATION "set(EMSCRIPTEN TRUE)")
+            set(PLATFORM_CONFIGURATION "set(EMSCRIPTEN TRUE)\nset(CMAKE_SIZEOF_VOID_P 4)")
+            set(PLATFORM_ASSERTION)
             set(EXPECTED_LIBRARY
                     "${SDK_ROOT}/share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
             )
@@ -137,6 +148,7 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
                 "project(HuxerUITargetSdkConsumer LANGUAGES NONE)\n"
                 "${PLATFORM_CONFIGURATION}\n"
                 "find_package(HuxerUI CONFIG REQUIRED PATHS \"${SDK_ROOT}\" NO_DEFAULT_PATH)\n"
+                "${PLATFORM_ASSERTION}\n"
                 "get_target_property(location HuxerUI::huxerui IMPORTED_LOCATION)\n"
                 "if (NOT location STREQUAL \"${EXPECTED_LIBRARY}\")\n"
                 "  message(FATAL_ERROR \"Unexpected imported library: \${location}\")\n"

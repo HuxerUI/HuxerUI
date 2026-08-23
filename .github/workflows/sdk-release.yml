@@ -59,7 +59,7 @@ jobs:
       - name: Build Android artifacts
         working-directory: platform/android
         run: |
-          ./gradlew :HuxerUI:assembleRelease
+          ./gradlew :HuxerUI:assembleRelease -PhuxeruiBuildNative=true
           mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
           aar="$(find huxerui/build/outputs/aar -name '*-release.aar' -print -quit)"
           unzip -q "${aar}" -d "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
@@ -67,9 +67,6 @@ jobs:
             mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}"
             cp "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni/${abi}/libhuxerui.so" \
               "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}/libhuxerui.so"
-            static_library="$(find huxerui/.cxx -path "*/${abi}/lib/libhuxerui_static.a" -print -quit)"
-            cp "${static_library}" \
-              "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}/libhuxerui_static.a"
           done
           rm -rf "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni" \
             "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/prefab"

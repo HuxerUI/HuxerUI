@@ -17,7 +17,6 @@ if [ -n "${HUXERUI_INTEGRATION_PLAN:-}" ]; then
     printf '{\n'
     printf '  "schema": 1,\n'
     printf '  "target": "%s",\n' "@TARGET_NAME@"
-    printf '  "platform": "ios",\n'
     printf '  "artifact": "%s",\n' "$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
     printf '  "bundle": "%s",\n' "$TARGET_BUILD_DIR/$WRAPPER_NAME"
     printf '  "bundleIdentifier": "%s"\n' "$PRODUCT_BUNDLE_IDENTIFIER"

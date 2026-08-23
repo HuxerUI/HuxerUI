@@ -53,7 +53,7 @@ configure_package_config_file(
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         INSTALL_DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
-if (HUXERUI_PLATFORM_ID STREQUAL "linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
     configure_file(
             "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILinuxStaticDependencies.cmake.in"
             "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxStaticDependencies.cmake"
@@ -64,6 +64,7 @@ write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY SameMajorVersion
+        ARCH_INDEPENDENT
 )
 
 if (TARGET ${HUXERUI_SHARED_LIB_NAME})
@@ -92,7 +93,7 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
-if (HUXERUI_PLATFORM_ID STREQUAL "linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
     install(FILES
             "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxStaticDependencies.cmake"
             DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
@@ -104,7 +105,7 @@ install(FILES
         RENAME HuxerUIWebFileSystem.js
 )
 
-if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if (TARGET ${HUXERUI_STATIC_LIB_NAME})
         install(FILES ${HUXERUI_LINUX_STATIC_DEPENDENCY_FILES}
                 DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
@@ -150,9 +151,7 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
     foreach (HUXERUI_REQUIRED_PLATFORM_ARTIFACT IN ITEMS
             "${HUXERUI_ANDROID_ARTIFACT_ROOT}/HuxerUI.aar"
             "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui.so"
-            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui_static.a"
             "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui.so"
-            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui_static.a"
             "${HUXERUI_WEB_ARTIFACT_ROOT}/libhuxerui.a"
     )
         if (NOT EXISTS "${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")

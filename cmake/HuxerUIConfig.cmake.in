@@ -4,7 +4,6 @@ set(HUXERUI_HOST_TOOL_ROOT "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxeru
 set_and_check(HUXERUI_BUILTIN_RESOURCE_PACKAGE
         "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/resources"
 )
-set(HUXERUI_PLATFORM_ID "@HUXERUI_PLATFORM_ID@")
 
 set(_HUXERUI_WANT_SHARED FALSE)
 set(_HUXERUI_WANT_STATIC FALSE)
@@ -16,6 +15,8 @@ if (HuxerUI_FIND_COMPONENTS)
             set(_HUXERUI_WANT_STATIC TRUE)
         endif ()
     endforeach ()
+elseif (ANDROID)
+    set(_HUXERUI_WANT_SHARED TRUE)
 elseif (EMSCRIPTEN)
     set(_HUXERUI_WANT_STATIC TRUE)
 else ()
@@ -24,7 +25,6 @@ else ()
 endif ()
 
 if (ANDROID)
-    set(HUXERUI_PLATFORM_ID "android")
     if (NOT ANDROID_ABI)
         message(FATAL_ERROR "HuxerUI Android package requires ANDROID_ABI")
     endif ()
@@ -40,20 +40,7 @@ if (ANDROID)
             )
         endif ()
     endif ()
-    if (_HUXERUI_WANT_STATIC)
-        set_and_check(HUXERUI_ANDROID_STATIC_LIBRARY
-                "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/platform/android/${ANDROID_ABI}/libhuxerui_static.a"
-        )
-        if (NOT TARGET HuxerUI::huxerui_static)
-            add_library(HuxerUI::huxerui_static STATIC IMPORTED)
-            set_target_properties(HuxerUI::huxerui_static PROPERTIES
-                    IMPORTED_LOCATION "${HUXERUI_ANDROID_STATIC_LIBRARY}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
-            )
-        endif ()
-    endif ()
 elseif (EMSCRIPTEN)
-    set(HUXERUI_PLATFORM_ID "web")
     if (_HUXERUI_WANT_STATIC)
         set_and_check(HUXERUI_WEB_LIBRARY
                 "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/huxerui/platform/web/emscripten-@HUXERUI_WEB_EMSCRIPTEN_VERSION@/libhuxerui.a"
@@ -74,11 +61,17 @@ elseif (EMSCRIPTEN)
         endforeach ()
     endif ()
 else ()
+    if (CMAKE_SIZEOF_VOID_P AND NOT CMAKE_SIZEOF_VOID_P STREQUAL "@CMAKE_SIZEOF_VOID_P@")
+        message(FATAL_ERROR
+                "HuxerUI SDK host libraries use a @CMAKE_SIZEOF_VOID_P@-byte pointer model, "
+                "but the consuming target uses ${CMAKE_SIZEOF_VOID_P} bytes"
+        )
+    endif ()
     if (_HUXERUI_WANT_SHARED AND @HUXERUI_BUILD_SHARED@ AND NOT TARGET HuxerUI::huxerui)
         include("${CMAKE_CURRENT_LIST_DIR}/HuxerUISharedTargets.cmake")
     endif ()
     if (_HUXERUI_WANT_STATIC AND @HUXERUI_BUILD_STATIC@ AND NOT TARGET HuxerUI::huxerui_static)
-        if (HUXERUI_PLATFORM_ID STREQUAL "linux")
+        if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILinuxStaticDependencies.cmake")
         endif ()
         include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIStaticTargets.cmake")
@@ -88,8 +81,7 @@ endif ()
 foreach (_HUXERUI_TARGET IN ITEMS HuxerUI::huxerui HuxerUI::huxerui_static)
     if (TARGET ${_HUXERUI_TARGET})
         set_target_properties(${_HUXERUI_TARGET} PROPERTIES
-                HUXERUI_PLATFORM_ID "${HUXERUI_PLATFORM_ID}"
-                HUXERUI_BUILTIN_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
+                HUXERUI_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
         )
     endif ()
 endforeach ()

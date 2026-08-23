@@ -25,10 +25,67 @@ function(_huxerui_get_resource_output target_name output_variable)
     set(${output_variable} "${HUXERUI_RESOURCE_OUTPUT_DIRECTORY}" PARENT_SCOPE)
 endfunction()
 
+function(_huxerui_compile_builtin_resources target_name output_variable)
+    set(HUXERUI_BUILTIN_RESOURCE_OUTPUT
+            "${PROJECT_BINARY_DIR}/huxerui-builtin-resources"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_PACKAGE
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/package"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_HEADER
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include/huxerui_builtin_resources.h"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_INDEX
+            "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/huxerui/resources.bin"
+    )
+    file(GLOB_RECURSE HUXERUI_BUILTIN_RESOURCE_INPUTS
+            CONFIGURE_DEPENDS
+            LIST_DIRECTORIES FALSE
+            "${HUXERUI_PROJECT_DIR}/resources/*"
+    )
+    set(HUXERUI_BUILTIN_RESOURCE_PLAN
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/resource-plan-$<CONFIG>.txt"
+    )
+    file(GENERATE
+            OUTPUT "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
+            CONTENT "inputs=${HUXERUI_BUILTIN_RESOURCE_INPUTS}\n"
+    )
+    huxerui_resolve_host_tool("hrc" HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND)
+    add_custom_command(
+            OUTPUT
+                    "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+                    "${HUXERUI_BUILTIN_RESOURCE_INDEX}"
+            COMMAND "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
+                    --root "${HUXERUI_PROJECT_DIR}/resources"
+                    --output "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}"
+                    --namespace huxerui
+                    --header-name huxerui_builtin_resources.h
+            DEPENDS
+                    ${HUXERUI_BUILTIN_RESOURCE_INPUTS}
+                    "${HUXERUI_BUILTIN_RESOURCE_PLAN}"
+                    "${HUXERUI_BUILTIN_RESOURCE_COMPILER_COMMAND}"
+            COMMENT "Generating HuxerUI built-in resources"
+            VERBATIM
+    )
+    set_source_files_properties(
+            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+            PROPERTIES
+                    GENERATED TRUE
+                    HEADER_FILE_ONLY TRUE
+    )
+    target_sources(${target_name} PRIVATE
+            "${HUXERUI_BUILTIN_RESOURCE_HEADER}"
+    )
+    target_include_directories(${target_name} PRIVATE
+            "${HUXERUI_BUILTIN_RESOURCE_OUTPUT}/include"
+    )
+    set(${output_variable} "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" PARENT_SCOPE)
+endfunction()
+
 function(_huxerui_configure_resources target_name)
-    get_property(HUXERUI_RESOURCE_PACKAGES
+    get_property(HUXERUI_RESOURCE_PACKAGE_INPUTS
             TARGET ${target_name}
-            PROPERTY HUXERUI_RESOURCE_PACKAGES
+            PROPERTY HUXERUI_RESOURCE_PACKAGE_INPUTS
     )
     get_property(HUXERUI_RESOURCE_ROOTS
             TARGET ${target_name}
@@ -38,12 +95,12 @@ function(_huxerui_configure_resources target_name)
             TARGET ${target_name}
             PROPERTY HUXERUI_RESOURCE_NAMESPACES
     )
-    if (NOT HUXERUI_RESOURCE_PACKAGES AND NOT HUXERUI_RESOURCE_ROOTS)
+    if (NOT HUXERUI_RESOURCE_PACKAGE_INPUTS AND NOT HUXERUI_RESOURCE_ROOTS)
         return()
     endif ()
 
     set(HUXERUI_RESOURCE_PACKAGE_INDEXES)
-    foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGES)
+    foreach (HUXERUI_RESOURCE_PACKAGE IN LISTS HUXERUI_RESOURCE_PACKAGE_INPUTS)
         list(APPEND HUXERUI_RESOURCE_PACKAGE_INDEXES
                 "${HUXERUI_RESOURCE_PACKAGE}/huxerui/resources.bin"
         )
@@ -71,7 +128,7 @@ function(_huxerui_configure_resources target_name)
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/HuxerUIResourceBuild.cmake"
     )
     string(CONCAT HUXERUI_RESOURCE_PLAN_CONTENT
-            "packages=${HUXERUI_RESOURCE_PACKAGES}\n"
+            "package_inputs=${HUXERUI_RESOURCE_PACKAGE_INPUTS}\n"
             "roots=${HUXERUI_RESOURCE_ROOTS}\n"
             "namespaces=${HUXERUI_RESOURCE_NAMESPACES}\n"
             "inputs=${HUXERUI_RESOURCE_INPUTS}\n"
@@ -85,7 +142,7 @@ function(_huxerui_configure_resources target_name)
             OUTPUT "${HUXERUI_RESOURCE_INDEX}"
             COMMAND ${CMAKE_COMMAND}
                     "-DHUXERUI_HRC=${HUXERUI_RESOURCE_COMPILER_COMMAND}"
-                    "-DHUXERUI_RESOURCE_PACKAGES=${HUXERUI_RESOURCE_PACKAGES}"
+                    "-DHUXERUI_RESOURCE_PACKAGE_INPUTS=${HUXERUI_RESOURCE_PACKAGE_INPUTS}"
                     "-DHUXERUI_RESOURCE_ROOTS=${HUXERUI_RESOURCE_ROOTS}"
                     "-DHUXERUI_RESOURCE_NAMESPACES=${HUXERUI_RESOURCE_NAMESPACES}"
                     "-DHUXERUI_RESOURCE_OUTPUT=${HUXERUI_RESOURCE_OUTPUT}"
@@ -205,6 +262,20 @@ function(_huxerui_schedule_resources target_name)
                 CALL _huxerui_configure_scheduled_resources
         )
     endif ()
+endfunction()
+
+function(_huxerui_append_resource_package_input target_name resource_package)
+    if (NOT TARGET ${target_name})
+        message(FATAL_ERROR "HuxerUI resource package target does not exist: ${target_name}")
+    endif ()
+    if (NOT resource_package)
+        message(FATAL_ERROR "HuxerUI resource package input must not be empty")
+    endif ()
+    set_property(TARGET ${target_name} APPEND PROPERTY
+            HUXERUI_RESOURCE_PACKAGE_INPUTS
+            "${resource_package}"
+    )
+    _huxerui_schedule_resources(${target_name})
 endfunction()
 
 function(huxerui_add_resources target_name)

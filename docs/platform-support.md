@@ -189,8 +189,8 @@ huxerui run web
 ```
 
 The CLI uses `emcmake` for configuration and `emrun` to serve and open the generated application entry point.
-Web CLI projects currently require `HUXERUI_HOME` to identify a source SDK checkout.
-The formal SDK design adds an Emscripten-compatible SDK archive while preserving the same root-project configuration and SDK-home discovery contract.
+On Windows hosts, `emrun` opens the local URL through `explorer.exe` and therefore follows the system default browser association.
+Source checkouts build the Web framework with the application, while installed SDKs import the Emscripten 4.0.19 static framework artifact through the same root-project configuration.
 
 The configured Emscripten compiler must provide the C++20 language and library support required by HuxerUI; obsolete toolchains are not supported through compatibility headers.
 Platform-neutral semantics and browser accessibility mapping, broader browser integration tests, production packaging, and real mobile-browser IME validation remain follow-up work.
@@ -203,7 +203,6 @@ The Android integration provides:
 - `HuxerUIActivity` for full-screen applications
 - `HuxerUIView` for embedding HuxerUI in an existing Android interface
 - The `HuxerUI` Gradle library module
-- Prefab metadata in the current source Gradle module
 - The `example_runner` application module
 
 Generated source-SDK applications use the Gradle library for Java integration while their app module configures the application root `CMakeLists.txt` directly for the shared C++ library and final resources.

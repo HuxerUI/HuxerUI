@@ -42,11 +42,7 @@ foreach (required_command IN ITEMS huxerui_add_app huxerui_add_library huxerui_a
   endif ()
 endforeach ()
 
-get_target_property(framework_platform HuxerUI::huxerui_static HUXERUI_PLATFORM_ID)
-get_target_property(framework_resources HuxerUI::huxerui_static HUXERUI_BUILTIN_RESOURCE_PACKAGE)
-if (NOT framework_platform OR framework_platform MATCHES "-NOTFOUND$")
-  message(FATAL_ERROR "Source target is missing its platform identity")
-endif ()
+get_target_property(framework_resources HuxerUI::huxerui_static HUXERUI_RESOURCE_PACKAGE)
 if (NOT framework_resources OR framework_resources MATCHES "-NOTFOUND$")
   message(FATAL_ERROR "Source target is missing its built-in resource package")
 endif ()

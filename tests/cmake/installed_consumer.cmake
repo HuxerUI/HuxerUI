@@ -214,14 +214,6 @@ list(LENGTH APP_INTEGRATION_PLANS APP_INTEGRATION_PLAN_COUNT)
 if (NOT APP_INTEGRATION_PLAN_COUNT EQUAL 1)
     message(FATAL_ERROR "Installed SDK consumer generated an unexpected number of application integration plans")
 endif ()
-list(GET APP_INTEGRATION_PLANS 0 APP_INTEGRATION_PLAN)
-file(READ "${APP_INTEGRATION_PLAN}" APP_INTEGRATION_JSON)
-string(JSON APP_INTEGRATION_PLATFORM GET "${APP_INTEGRATION_JSON}" platform)
-if (NOT APP_INTEGRATION_PLATFORM STREQUAL PLATFORM_ID)
-    message(FATAL_ERROR
-            "Installed SDK consumer reported platform ${APP_INTEGRATION_PLATFORM}, expected ${PLATFORM_ID}"
-    )
-endif ()
 file(GLOB_RECURSE BUILTIN_RESOURCE_HEADERS
         "${PROJECT_ROOT}/.huxerui/build/*/huxerui_resources.h"
 )

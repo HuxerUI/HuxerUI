@@ -178,19 +178,12 @@ function(huxerui_add_app target_name)
     endif ()
 
     _huxerui_select_framework_target(HUXERUI_APP_FRAMEWORK_TARGET)
-    get_target_property(HUXERUI_APP_PLATFORM_ID
+    get_target_property(HUXERUI_APP_FRAMEWORK_RESOURCE_PACKAGE
             ${HUXERUI_APP_FRAMEWORK_TARGET}
-            HUXERUI_PLATFORM_ID
+            HUXERUI_RESOURCE_PACKAGE
     )
-    get_target_property(HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE
-            ${HUXERUI_APP_FRAMEWORK_TARGET}
-            HUXERUI_BUILTIN_RESOURCE_PACKAGE
-    )
-    if (NOT HUXERUI_APP_PLATFORM_ID OR HUXERUI_APP_PLATFORM_ID MATCHES "-NOTFOUND$")
-        message(FATAL_ERROR "huxerui_add_app() requires a configured HuxerUI platform")
-    endif ()
-    if (NOT HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE
-            OR HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE MATCHES "-NOTFOUND$")
+    if (NOT HUXERUI_APP_FRAMEWORK_RESOURCE_PACKAGE
+            OR HUXERUI_APP_FRAMEWORK_RESOURCE_PACKAGE MATCHES "-NOTFOUND$")
         message(FATAL_ERROR "huxerui_add_app() requires the HuxerUI built-in resource package")
     endif ()
 
@@ -247,11 +240,10 @@ function(huxerui_add_app target_name)
     endif ()
 
     huxerui_enable_codegen(${target_name})
-    set_property(TARGET ${target_name} APPEND PROPERTY
-            HUXERUI_RESOURCE_PACKAGES
-            "${HUXERUI_APP_BUILTIN_RESOURCE_PACKAGE}"
+    _huxerui_append_resource_package_input(
+            ${target_name}
+            "${HUXERUI_APP_FRAMEWORK_RESOURCE_PACKAGE}"
     )
-    _huxerui_schedule_resources(${target_name})
     if (HUXERUI_APP_RESOURCES)
         list(GET HUXERUI_APP_RESOURCES 0 HUXERUI_APP_RESOURCE_ROOT)
         huxerui_add_resources(${target_name}
@@ -286,7 +278,6 @@ function(huxerui_add_app target_name)
     endif ()
 
     _huxerui_json_escape("${target_name}" HUXERUI_APP_JSON_TARGET)
-    _huxerui_json_escape("${HUXERUI_APP_PLATFORM_ID}" HUXERUI_APP_JSON_PLATFORM)
     _huxerui_json_escape("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
 
     set(HUXERUI_APP_INTEGRATION_DIRECTORY
@@ -302,6 +293,6 @@ function(huxerui_add_app target_name)
     file(MAKE_DIRECTORY "${HUXERUI_APP_INTEGRATION_DIRECTORY}")
     file(GENERATE
             OUTPUT "${HUXERUI_APP_INTEGRATION_PLAN}"
-            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"platform\": \"${HUXERUI_APP_JSON_PLATFORM}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\",\n  \"bundleIdentifier\": \"${HUXERUI_APP_JSON_BUNDLE_IDENTIFIER}\"\n}\n"
+            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\",\n  \"bundleIdentifier\": \"${HUXERUI_APP_JSON_BUNDLE_IDENTIFIER}\"\n}\n"
     )
 endfunction()

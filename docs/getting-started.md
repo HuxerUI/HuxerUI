@@ -274,7 +274,7 @@ For a fresh Linux or macOS build the CLI selects Ninja when available; `--genera
 Windows builds discover the latest installed Visual Studio C++ toolchain through `vswhere`, initialize its x64 developer environment, and use Ninja with MSVC or NMake with MSVC when Ninja is unavailable.
 Windows, Android, and iOS reject `--generator`; their platform drivers own the supported generator and toolchain selection.
 The CLI selects an explicit source checkout or installed prefix through `HUXERUI_HOME`, otherwise it locates a compatible SDK relative to its executable, and propagates the resolved home to native build tools.
-An installed SDK provides Debug and Release host libraries on Windows, Android's Java-only AAR and `arm64-v8a` or `x86_64` native libraries, and the Web static library built by Emscripten 4.0.19.
+An installed SDK provides Debug and Release host libraries on Windows, Android's Java-only AAR and shared `arm64-v8a` or `x86_64` framework libraries, and the Web static library built by Emscripten 4.0.19.
 Android selects the source Gradle library only when `HUXERUI_HOME` is a source checkout; installed SDK builds consume the AAR and dynamically link the ABI-specific library through the same root `CMakeLists.txt`.
 Web source checkouts compile the framework with the application, while installed SDK builds statically link the pinned Emscripten library through the canonical `HuxerUI::huxerui_static` target.
 Android SDK levels, the NDK version, ABIs, application identity, dependencies, and packaging policy remain entirely in the generated Gradle shell.

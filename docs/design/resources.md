@@ -246,8 +246,8 @@ Target packaging maps the staging directory as follows:
 - Web preloads it into WASM-owned memory or a virtual filesystem before Runtime is created.
 - Android CMake builds generate one package per ABI, then a Gradle generated-assets task selects one deterministic
   package after platform builds complete and synchronizes it into APK assets.
-  The repository example runner recompiles the built-in source package when Prefab does not expose the standalone SDK resource
-  artifact, and its Gradle staging task fails the build rather than packaging an application without that final package.
+  Source and installed framework targets expose the built-in package to the same application resource merge, and the Gradle
+  staging task fails the build rather than packaging an application without that final package.
 - iOS copies it into the application bundle's reserved HuxerUI resources directory.
 - OHOS includes it in the HAP rawfile payload.
 

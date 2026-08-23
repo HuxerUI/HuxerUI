@@ -643,8 +643,15 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
 
   REQUIRE(run_commands.size() == 1);
   REQUIRE(run_commands[0].executable == "emrun");
-  REQUIRE(run_commands[0].arguments.size() == 1);
-  REQUIRE(std::filesystem::equivalent(run_commands[0].arguments[0], entry));
+  if (huxerui::cli::CurrentHostId() == "windows") {
+    REQUIRE(run_commands[0].arguments.size() == 3);
+    REQUIRE(run_commands[0].arguments[0] == "--browser");
+    REQUIRE(run_commands[0].arguments[1] == "explorer.exe");
+    REQUIRE(std::filesystem::equivalent(run_commands[0].arguments[2], entry));
+  } else {
+    REQUIRE(run_commands[0].arguments.size() == 1);
+    REQUIRE(std::filesystem::equivalent(run_commands[0].arguments[0], entry));
+  }
   REQUIRE(std::filesystem::equivalent(run_commands[0].working_directory, build));
 
   const std::vector<huxerui::cli::PackageArtifact> package_artifacts = web->PackageArtifacts(context);

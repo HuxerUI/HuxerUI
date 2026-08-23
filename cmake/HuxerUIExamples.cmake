@@ -25,15 +25,6 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
             ${HUXERUI_EXAMPLE_RESOURCE_OUTPUT_ARGUMENTS}
     )
 
-    # Android Prefab exports native targets but not the built-in resource package consumed by source-tree examples.
-    if (ANDROID AND (NOT HUXERUI_BUILTIN_RESOURCE_PACKAGE
-            OR NOT EXISTS "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/huxerui/resources.bin"))
-        huxerui_add_resources(${target_name}
-                ROOT "${HUXERUI_PROJECT_DIR}/resources"
-                NAMESPACE huxerui
-        )
-    endif ()
-
     if (EMSCRIPTEN)
         set_target_properties(${target_name} PROPERTIES SUFFIX ".mjs")
         set(HUXERUI_WEB_MODULE_FILE "${target_name}.mjs")

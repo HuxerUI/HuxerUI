@@ -161,8 +161,11 @@ if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
     throw "HuxerUI Android Gradle wrapper is missing: $gradleWrapper"
 }
 $gradleVariant = $Configuration.ToLowerInvariant()
-$androidNativeConfiguration = if ($Configuration -eq "Release") { "RelWithDebInfo" } else { "Debug" }
-Invoke-Checked $gradleWrapper @(":HuxerUI:assemble$Configuration", "--no-daemon") $androidDirectory
+Invoke-Checked $gradleWrapper @(
+    ":HuxerUI:assemble$Configuration",
+    "-PhuxeruiBuildNative=true",
+    "--no-daemon"
+) $androidDirectory
 
 $aarCandidates = @(Get-ChildItem -LiteralPath (Join-Path $androidDirectory "huxerui/build/outputs/aar") `
         -Filter "*-$gradleVariant.aar" -File)
@@ -181,17 +184,6 @@ foreach ($abi in @("arm64-v8a", "x86_64")) {
         throw "HuxerUI Android AAR is missing $abi/libhuxerui.so"
     }
     Copy-Item -LiteralPath $sharedLibrary -Destination (Join-Path $abiOutput "libhuxerui.so")
-
-    $staticRoot = Join-Path $androidDirectory "huxerui/.cxx/$androidNativeConfiguration"
-    $abiPattern = "[\\/]" + [regex]::Escape($abi) + "[\\/]lib[\\/]libhuxerui_static\.a$"
-    $staticCandidates = @(
-        Get-ChildItem -LiteralPath $staticRoot -Filter "libhuxerui_static.a" -File -Recurse |
-            Where-Object { $_.FullName -match $abiPattern }
-    )
-    if ($staticCandidates.Count -ne 1) {
-        throw "Expected one HuxerUI Android $Configuration static library for $abi, found $($staticCandidates.Count)"
-    }
-    Copy-Item -LiteralPath $staticCandidates[0].FullName -Destination (Join-Path $abiOutput "libhuxerui_static.a")
 }
 
 Remove-Item -LiteralPath (Join-Path $androidExtractDirectory "jni") -Recurse -Force
