@@ -60,6 +60,8 @@ public:
   [[nodiscard]] bool InitializePresentation(Display* display);
   [[nodiscard]] bool EnsureGl(Display* display, Window window);
   [[nodiscard]] bool PresentGl();
+  [[nodiscard]] bool CanPresentRetained() const noexcept;
+  [[nodiscard]] LinuxRenderResult PresentRetained();
   [[nodiscard]] bool HasPresentation() const noexcept;
   [[nodiscard]] unsigned long XVisualId() const noexcept;
 

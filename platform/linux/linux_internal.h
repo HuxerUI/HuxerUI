@@ -58,11 +58,44 @@ struct LinuxDamageRegion {
   std::vector<XRectangle> rects;
 };
 
+enum class LinuxFrameRenderAction {
+  Skip,
+  Repaint,
+  PresentRetained,
+};
+
 struct LinuxTextureUploadPlan {
   bool full = false;
   std::vector<XRectangle> rects;
   std::uint64_t pixel_count = 0;
 };
+
+inline int ResolveLinuxPollTimeout(std::optional<double> deadline, double now) noexcept {
+  if (!deadline.has_value()) {
+    return -1;
+  }
+  if (std::isnan(*deadline) || std::isnan(now) || *deadline <= now) {
+    return 0;
+  }
+  const double remaining_milliseconds = (*deadline - now) * 1000.0;
+  if (!std::isfinite(remaining_milliseconds) ||
+      remaining_milliseconds >= static_cast<double>(std::numeric_limits<int>::max())) {
+    return std::numeric_limits<int>::max();
+  }
+  return std::max(1, static_cast<int>(std::ceil(remaining_milliseconds)));
+}
+
+inline LinuxFrameRenderAction ResolveLinuxFrameRenderAction(
+    const LinuxDamageRegion& damage, bool expose_pending, bool can_present_retained
+) noexcept {
+  if (damage.full || !damage.rects.empty()) {
+    return LinuxFrameRenderAction::Repaint;
+  }
+  if (!expose_pending) {
+    return LinuxFrameRenderAction::Skip;
+  }
+  return can_present_retained ? LinuxFrameRenderAction::PresentRetained : LinuxFrameRenderAction::Repaint;
+}
 
 inline WindowTitleBarMetrics ResolveLinuxTitleBarMetrics(
     float preferred_height, Size viewport, bool maximized
