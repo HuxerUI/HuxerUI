@@ -248,7 +248,7 @@ jobs:
             libgles2-mesa-dev libglib2.0-dev libgnutls28-dev libmount-dev libnghttp2-dev \
             libpcre2-dev libpsl-dev libselinux1-dev libsqlite3-dev libx11-dev libxext-dev \
             libxkbcommon-dev libxml2-dev libxrandr-dev ninja-build pkg-config python3-pip \
-            software-properties-common
+            software-properties-common fontconfig fonts-dejavu-core
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-11 g++-11

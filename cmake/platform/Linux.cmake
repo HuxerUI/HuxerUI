@@ -143,6 +143,14 @@ foreach (HUXERUI_FETCHED_CMAKE_DEPENDENCY IN ITEMS expat libpng freetype harfbuz
         endif ()
     endif ()
 endforeach ()
+# FreeType unconditionally invokes include(CPack), which writes
+# CPackConfig.cmake and CPackSourceConfig.cmake into the top-level binary
+# directory. When HuxerUI is consumed through add_subdirectory, those files
+# leak into the consumer build and break source-subdirectory validation;
+# remove them so only the consumer's own CPack configuration, if any,
+# remains. Top-level HuxerUI builds regenerate them through HuxerUISdk.cmake.
+file(REMOVE "${CMAKE_BINARY_DIR}/CPackConfig.cmake")
+file(REMOVE "${CMAKE_BINARY_DIR}/CPackSourceConfig.cmake")
 # libpng appends a Debug postfix to its archive name. The fetched
 # libraries build as Release, but the staging target records their
 # outputs through the parent build type, so the postfix would leave a
