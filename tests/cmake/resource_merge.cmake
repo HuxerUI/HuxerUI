@@ -114,6 +114,8 @@ if (EXISTS "${RESOURCE_OUTPUT}/resources.stamp"
     message(FATAL_ERROR "Resource merge retained intermediate output")
 endif ()
 
+# Keep the changed resource plan newer than generated outputs on build tools with one-second timestamp precision.
+execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
 file(REMOVE "${PROJECT_ROOT}/base/raw/kept.txt")
 file(REMOVE "${PROJECT_ROOT}/resources/raw/framework-kept.txt")
 execute_process(

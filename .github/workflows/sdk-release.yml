@@ -273,7 +273,7 @@ jobs:
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
-          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${GITHUB_WORKSPACE}/platform-artifacts
       - name: Build
         run: cmake --build build --parallel
       - name: Test

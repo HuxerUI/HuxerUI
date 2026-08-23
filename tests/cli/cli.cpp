@@ -1011,7 +1011,7 @@ TEST_CASE("HuxerUICliDescribesProcessArgumentsWithoutShellEvaluation") {
       {},
   };
 
-  REQUIRE(huxerui::cli::DescribeProcess(command) == R"(tool plain "with space" "quoted\"value")");
+  REQUIRE(huxerui::cli::DescribeProcess(command) == "tool plain \"with space\" \"quoted\\\"value\"");
 }
 
 TEST_CASE("HuxerUICliCapturesProcessOutput") {
