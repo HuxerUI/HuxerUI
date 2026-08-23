@@ -110,6 +110,36 @@ void ResetHttpState() {
   http_completions = 0;
 }
 
+Task<void> CaptureHttpResult(std::shared_ptr<HttpClient> client, HttpRequest request) {
+  HttpResult result = co_await client->Send(std::move(request));
+  if (result.HasResponse()) {
+    http_response = std::move(result).Response();
+  } else {
+    http_error = result.Error().code;
+  }
+  http_resume_thread = std::this_thread::get_id();
+}
+
+Task<void> CaptureHttpResponse(std::shared_ptr<HttpClient> client, HttpRequest request) {
+  HttpResult result = co_await client->Send(std::move(request));
+  if (result.HasResponse()) {
+    http_response = std::move(result).Response();
+  }
+  ++http_completions;
+}
+
+Task<void> CaptureHttpError(std::shared_ptr<HttpClient> client, HttpRequest request) {
+  HttpResult result = co_await client->Send(std::move(request));
+  if (!result.HasResponse()) {
+    http_error = result.Error().code;
+  }
+}
+
+Task<void> CountHttpCompletion(std::shared_ptr<HttpClient> client, HttpRequest request) {
+  static_cast<void>(co_await client->Send(std::move(request)));
+  ++http_completions;
+}
+
 } // namespace
 
 TEST_CASE("HttpResultDistinguishesResponsesFromTransportErrors") {
@@ -134,26 +164,21 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
 
-  http_tasks.Launch([client = http_client]() -> Task<void> {
-    HttpResult result = co_await client->Send({
-        .url = "https://example.test/items",
-        .method = HttpMethod::Post,
-        .headers =
-            {
-                {"Accept", "application/json"},
-                {"X-Trace", "first"},
-                {"X-Trace", "second"},
-            },
-        .body = "{}",
-        .timeout = std::chrono::milliseconds{5000},
-    });
-    if (result.HasResponse()) {
-      http_response = std::move(result).Response();
-    } else {
-      http_error = result.Error().code;
-    }
-    http_resume_thread = std::this_thread::get_id();
-  });
+  http_tasks.Launch(CaptureHttpResult(
+      http_client,
+      {
+          .url = "https://example.test/items",
+          .method = HttpMethod::Post,
+          .headers =
+              {
+                  {"Accept", "application/json"},
+                  {"X-Trace", "first"},
+                  {"X-Trace", "second"},
+              },
+          .body = "{}",
+          .timeout = std::chrono::milliseconds{5000},
+      }
+  ));
   platform.RunPlatformModuleTasks();
 
   REQUIRE(platform.transport->CallCount() == 1);
@@ -203,13 +228,7 @@ TEST_CASE("HttpClientHandlesImmediateTransportCompletion") {
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  http_tasks.Launch([client = http_client]() -> Task<void> {
-    HttpResult result = co_await client->Send({.url = "https://example.test/immediate"});
-    if (result.HasResponse()) {
-      http_response = std::move(result).Response();
-    }
-    ++http_completions;
-  });
+  http_tasks.Launch(CaptureHttpResponse(http_client, {.url = "https://example.test/immediate"}));
   platform.RunPlatformModuleTasks();
 
   REQUIRE(http_completions == 1);
@@ -224,13 +243,7 @@ TEST_CASE("HttpClientAcceptsOnlyTheFirstTransportCompletion") {
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  http_tasks.Launch([client = http_client]() -> Task<void> {
-    HttpResult result = co_await client->Send({.url = "https://example.test/duplicate"});
-    if (result.HasResponse()) {
-      http_response = std::move(result).Response();
-    }
-    ++http_completions;
-  });
+  http_tasks.Launch(CaptureHttpResponse(http_client, {.url = "https://example.test/duplicate"}));
   platform.RunPlatformModuleTasks();
 
   platform.transport->Complete(
@@ -262,12 +275,7 @@ TEST_CASE("HttpClientMapsTransportFailuresWithoutTreatingHttpStatusesAsErrors") 
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  http_tasks.Launch([client = http_client]() -> Task<void> {
-    HttpResult result = co_await client->Send({.url = "https://example.test/failure"});
-    if (!result.HasResponse()) {
-      http_error = result.Error().code;
-    }
-  });
+  http_tasks.Launch(CaptureHttpError(http_client, {.url = "https://example.test/failure"}));
   platform.RunPlatformModuleTasks();
   platform.transport->Complete(0, HttpResult(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"}));
   platform.RunPlatformModuleTasks();
@@ -281,10 +289,7 @@ TEST_CASE("HttpClientCancellationStopsThePlatformRequestAndDropsLateCompletion")
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  TaskHandle request = http_tasks.Launch([client = http_client]() -> Task<void> {
-    static_cast<void>(co_await client->Send({.url = "https://example.test/slow"}));
-    ++http_completions;
-  });
+  TaskHandle request = http_tasks.Launch(CountHttpCompletion(http_client, {.url = "https://example.test/slow"}));
   platform.RunPlatformModuleTasks();
   REQUIRE_FALSE(platform.transport->Canceled(0));
 
@@ -345,12 +350,7 @@ TEST_CASE("HttpClientReportsUnsupportedAdaptersThroughTheTask") {
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  http_tasks.Launch([client = http_client]() -> Task<void> {
-    HttpResult result = co_await client->Send({.url = "https://example.test"});
-    if (!result.HasResponse()) {
-      http_error = result.Error().code;
-    }
-  });
+  http_tasks.Launch(CaptureHttpError(http_client, {.url = "https://example.test"}));
   platform.RunPlatformModuleTasks();
 
   REQUIRE(http_error == HttpErrorCode::Unsupported);

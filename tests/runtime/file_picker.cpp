@@ -168,6 +168,24 @@ void ResetFilePickerState() {
   picker_resume_thread = {};
 }
 
+Task<void> CaptureOpenedFile(
+    std::shared_ptr<FilePicker> picker, FilePickerFilter filter = {}, bool capture_resume_thread = false
+) {
+  opened_reference = co_await picker->OpenFileAsync(std::move(filter));
+  if (capture_resume_thread) {
+    picker_resume_thread = std::this_thread::get_id();
+  }
+}
+
+Task<void> CaptureSavedFile(std::shared_ptr<FilePicker> picker, File source, SaveFileOptions options = {}) {
+  saved_file = co_await picker->SaveFileAsync(std::move(source), std::move(options));
+}
+
+Task<void> CaptureOpenedFiles(std::shared_ptr<FilePicker> picker) {
+  opened_references = co_await picker->OpenFilesAsync();
+  picker_task_completed = true;
+}
+
 } // namespace
 
 static_assert(!std::is_default_constructible_v<FileReference>);
@@ -297,23 +315,23 @@ TEST_CASE("FilePickerSerializesPlatformPresentationAndResumesOnTheUIThread") {
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
 
-  file_picker_tasks.Launch([picker = file_picker]() -> Task<void> {
-    opened_reference = co_await picker->OpenFileAsync({
-        .name = "Text",
-        .extensions = {"txt"},
-        .content_types = {"text/plain"},
-    });
-    picker_resume_thread = std::this_thread::get_id();
-  });
-  file_picker_tasks.Launch([picker = file_picker]() -> Task<void> {
-    saved_file = co_await picker->SaveFileAsync(
-        File("/tmp/source.txt"),
-        {
-            .suggested_name = "export.txt",
-            .filter = {.name = "Text", .extensions = {"txt"}},
-        }
-    );
-  });
+  file_picker_tasks.Launch(CaptureOpenedFile(
+      file_picker,
+      {
+          .name = "Text",
+          .extensions = {"txt"},
+          .content_types = {"text/plain"},
+      },
+      true
+  ));
+  file_picker_tasks.Launch(CaptureSavedFile(
+      file_picker,
+      File("/tmp/source.txt"),
+      {
+          .suggested_name = "export.txt",
+          .filter = {.name = "Text", .extensions = {"txt"}},
+      }
+  ));
   platform.RunPlatformModuleTasks();
 
   REQUIRE(platform.transport->open_calls.size() == 1);
@@ -344,15 +362,11 @@ TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
   Runtime runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
-  TaskHandle active = file_picker_tasks.Launch([picker = file_picker]() -> Task<void> {
-    opened_reference = co_await picker->OpenFileAsync();
-  });
+  TaskHandle active = file_picker_tasks.Launch(CaptureOpenedFile(file_picker));
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.transport->open_calls.size() == 1);
 
-  TaskHandle queued = file_picker_tasks.Launch([picker = file_picker]() -> Task<void> {
-    saved_file = co_await picker->SaveFileAsync(File("/tmp/skipped.txt"));
-  });
+  TaskHandle queued = file_picker_tasks.Launch(CaptureSavedFile(file_picker, File("/tmp/skipped.txt")));
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.transport->save_calls.empty());
 
@@ -361,10 +375,7 @@ TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
   REQUIRE(*platform.transport->open_calls.front().canceled);
   REQUIRE(platform.transport->save_calls.empty());
 
-  file_picker_tasks.Launch([picker = file_picker]() -> Task<void> {
-    opened_references = co_await picker->OpenFilesAsync();
-    picker_task_completed = true;
-  });
+  file_picker_tasks.Launch(CaptureOpenedFiles(file_picker));
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.transport->open_calls.size() == 1);
 

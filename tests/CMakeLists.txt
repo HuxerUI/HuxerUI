@@ -119,6 +119,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_include_directories(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
+            "$<TARGET_PROPERTY:huxerui_core_objects,INCLUDE_DIRECTORIES>"
     )
     target_link_libraries(huxerui_tests PRIVATE PkgConfig::HUXERUI_GIO)
 endif ()
