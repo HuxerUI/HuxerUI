@@ -19,6 +19,7 @@
 #include <huxerui/modifier.h>
 #include <huxerui/resource.h>
 #include <huxerui/text.h>
+#include <huxerui/vector.h>
 
 namespace huxerui {
 
@@ -164,6 +165,7 @@ enum class MenuSeparatorMode {
 struct MenuStyle {
   Color background = Color::White();
   Color foreground = Color::Rgb(31, 35, 40);
+  Color icon_tint = Color::Rgb(31, 35, 40);
   Indication item_indication{
       .hover = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.06F)},
       .press = IndicationLayer{.fill = Color::Rgb(0, 0, 0, 0.12F)},
@@ -513,10 +515,12 @@ public:
   MenuItem(StringVariant label, std::function<void()> on_item_click);
   MenuItem(ImageResource icon, StringVariant label, std::function<void()> on_item_click);
   MenuItem(ImageAsset icon, StringVariant label, std::function<void()> on_item_click);
+  MenuItem(VectorAsset icon, StringVariant label, std::function<void()> on_item_click);
 
   MenuItem(StringVariant label, std::vector<MenuEntry> children);
   MenuItem(ImageResource icon, StringVariant label, std::vector<MenuEntry> children);
   MenuItem(ImageAsset icon, StringVariant label, std::vector<MenuEntry> children);
+  MenuItem(VectorAsset icon, StringVariant label, std::vector<MenuEntry> children);
 
   MenuItem(const MenuItem& other);
   MenuItem(MenuItem&& other) noexcept;
@@ -526,9 +530,10 @@ public:
 
   MenuItem Enabled(bool enabled) &&;
   MenuItem Checked(bool checked) &&;
+  MenuItem IconTint(Color tint) &&;
 
 private:
-  using Icon = std::variant<std::monostate, ImageResource, ImageAsset>;
+  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
   using Destination = std::variant<std::function<void()>, std::vector<MenuEntry>>;
 
   MenuItem(StringVariant label, Icon icon, std::function<void()> on_item_click);
@@ -539,6 +544,7 @@ private:
   Destination destination_;
   bool enabled_ = true;
   std::optional<bool> checked_;
+  std::optional<Color> icon_tint_;
 
   friend class MenuEntry;
   friend class detail::MenuService;

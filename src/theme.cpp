@@ -162,6 +162,7 @@ MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
   return {
       .background = theme.colors.surface,
       .foreground = theme.colors.on_surface,
+      .icon_tint = theme.colors.on_surface,
       .item_indication = FlatIndication(theme.colors.on_surface, theme),
       .separator_color = separator,
       .separator_mode = MenuSeparatorMode::BetweenItems,
@@ -744,6 +745,7 @@ MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
   return {
       .background = theme.colors.surface_container,
       .foreground = theme.colors.on_surface,
+      .icon_tint = theme.colors.on_surface_variant,
       .item_indication = MaterialIndication(theme.colors.on_surface, theme),
       .separator_color = separator,
       .separator_mode = MenuSeparatorMode::None,

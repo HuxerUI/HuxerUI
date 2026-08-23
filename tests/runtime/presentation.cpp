@@ -1061,6 +1061,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
 
   const MenuStyle menu_style = ThemeDefinitionValue<MenuStyle>(definition);
   REQUIRE(menu_style.separator_mode == MenuSeparatorMode::BetweenItems);
+  REQUIRE(menu_style.icon_tint == light.colors.on_surface);
   REQUIRE(menu_style.content_padding == EdgeInsets{});
   REQUIRE_FALSE(menu_style.motion.has_value());
   REQUIRE(menu_style.item_indication.press.has_value());
@@ -1261,6 +1262,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   const huxerui::MenuStyle menu_style = ThemeDefinitionValue<huxerui::MenuStyle>(definition);
   REQUIRE(menu_style.separator_mode == huxerui::MenuSeparatorMode::None);
+  REQUIRE(menu_style.icon_tint == light.colors.on_surface_variant);
   REQUIRE(menu_style.content_padding == EdgeInsets{});
   REQUIRE(menu_style.minimum_width == 112.0F);
   REQUIRE(menu_style.minimum_item_height == 48.0F);

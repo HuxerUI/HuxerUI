@@ -15,6 +15,7 @@
 
 #include "huxerui_builtin_resources.h"
 #include "internal.h"
+#include "resource_internal.h"
 #include "tooltip_internal.h"
 
 namespace huxerui {
@@ -1555,7 +1556,10 @@ void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
       throw std::invalid_argument("HuxerUI menu item label must not be empty");
     }
     if (const auto* icon = std::get_if<ImageAsset>(&item.icon_); icon && !icon->HasValue()) {
-      throw std::invalid_argument("HuxerUI menu item image asset must not be empty");
+      throw std::invalid_argument("HuxerUI menu item icon asset must not be empty");
+    }
+    if (const auto* icon = std::get_if<VectorAsset>(&item.icon_); icon && !icon->HasValue()) {
+      throw std::invalid_argument("HuxerUI menu item icon asset must not be empty");
     }
     if (const auto* action = std::get_if<std::function<void()>>(&item.destination_)) {
       if (!*action) {
@@ -1587,12 +1591,31 @@ View MenuService::ItemView(
 
   std::vector<View> content;
   if (item.checked_.value_or(false)) {
-    content.push_back(Image(images::check).Fit(ImageFit::Contain).Tint(style.foreground).With(icon_frame));
+    content.push_back(Image(images::check).Fit(ImageFit::Contain).Tint(style.icon_tint).With(icon_frame));
   }
-  if (const auto* resource = std::get_if<ImageResource>(&item.icon_)) {
-    content.push_back(Image(*resource).Fit(ImageFit::Contain).With(icon_frame));
-  } else if (const auto* asset = std::get_if<ImageAsset>(&item.icon_)) {
-    content.push_back(Image(*asset).Fit(ImageFit::Contain).With(icon_frame));
+
+  std::optional<detail::ResolvedImageAsset> resolved_icon;
+  if (auto* resource = std::get_if<ImageResource>(&item.icon_)) {
+    resolved_icon = detail::UseImageResource(std::move(*resource));
+  } else if (auto* asset = std::get_if<ImageAsset>(&item.icon_)) {
+    resolved_icon = std::move(*asset);
+  } else if (auto* vector_asset = std::get_if<VectorAsset>(&item.icon_)) {
+    resolved_icon = std::move(*vector_asset);
+  }
+  if (resolved_icon.has_value()) {
+    if (auto* vector = std::get_if<VectorAsset>(&*resolved_icon)) {
+      content.push_back(
+          Image(std::move(*vector))
+              .Fit(ImageFit::Contain)
+              .Tint(item.icon_tint_.value_or(style.icon_tint))
+              .With(icon_frame)
+      );
+    } else {
+      if (item.icon_tint_.has_value()) {
+        throw std::invalid_argument("HuxerUI raster menu item icons do not support tint");
+      }
+      content.push_back(Image(std::move(std::get<ImageAsset>(*resolved_icon))).Fit(ImageFit::Contain).With(icon_frame));
+    }
   }
 
   std::string label = UseString(std::move(item.label_));
@@ -1628,7 +1651,7 @@ View MenuService::ItemView(
     };
     return MenuItemLayout{
         Row {std::move(content)}.With(Spacing{style.item_content_spacing}, CrossAlign{CrossAxisAlignment::Center}),
-        Image(images::chevron_right).Fit(ImageFit::Contain).Tint(style.foreground).With(arrow_frame),
+        Image(images::chevron_right).Fit(ImageFit::Contain).Tint(style.icon_tint).With(arrow_frame),
     }
         .With(
             submenu.Anchor(),
@@ -1995,6 +2018,9 @@ MenuItem::MenuItem(ImageResource icon, StringVariant label, std::function<void()
 MenuItem::MenuItem(ImageAsset icon, StringVariant label, std::function<void()> on_item_click)
     : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(on_item_click)) {}
 
+MenuItem::MenuItem(VectorAsset icon, StringVariant label, std::function<void()> on_item_click)
+    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(on_item_click)) {}
+
 MenuItem::MenuItem(StringVariant label, std::vector<MenuEntry> children)
     : MenuItem(std::move(label), Icon{std::monostate{}}, std::move(children)) {}
 
@@ -2002,6 +2028,9 @@ MenuItem::MenuItem(ImageResource icon, StringVariant label, std::vector<MenuEntr
     : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
 
 MenuItem::MenuItem(ImageAsset icon, StringVariant label, std::vector<MenuEntry> children)
+    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
+
+MenuItem::MenuItem(VectorAsset icon, StringVariant label, std::vector<MenuEntry> children)
     : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
 
 MenuItem::MenuItem(StringVariant label, Icon icon, std::function<void()> on_item_click)
@@ -2027,6 +2056,11 @@ MenuItem MenuItem::Enabled(bool enabled) && {
 
 MenuItem MenuItem::Checked(bool checked) && {
   checked_ = checked;
+  return std::move(*this);
+}
+
+MenuItem MenuItem::IconTint(Color tint) && {
+  icon_tint_ = tint;
   return std::move(*this);
 }
 

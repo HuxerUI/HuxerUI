@@ -31,6 +31,14 @@ int exiting_layer_pointer_cancels = 0;
 constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
 constexpr Color section_separator_color = Color::Rgb(210, 70, 40);
 constexpr Color bottom_sheet_width_color = Color::Rgb(35, 125, 175);
+constexpr Color menu_icon_override = Color::Rgb(30, 130, 210);
+
+VectorAsset MenuTestIcon() {
+  static const VectorAsset icon = VectorAsset::Create({16.0F, 16.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(Path::RoundedRect({2.0F, 2.0F, 12.0F, 12.0F}, CornerRadii{2.0F}), Color::Black());
+  });
+  return icon;
+}
 
 std::vector<MenuEntry> TestMenu(std::string label, std::function<void()> action = [] {}) {
   return {
@@ -406,6 +414,7 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
   );
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::function<void()>{})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::vector<MenuEntry>{})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem(VectorAsset{}, "invalid", [] {})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("", [] {})}), std::invalid_argument);
   REQUIRE_THROWS_AS(layer_menu->Show(TestMenu("menu"), MenuOptions{.width = 0.0F}), std::invalid_argument);
 }
@@ -705,6 +714,7 @@ TEST_CASE("TestThemedMenuMotionRetainsTheLayerThroughExit") {
 
 TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   STATIC_REQUIRE(std::is_constructible_v<MenuItem, ImageResource, StringResource, std::function<void()>>);
+  STATIC_REQUIRE(std::is_constructible_v<MenuItem, VectorAsset, StringResource, std::function<void()>>);
 
   layer_menu.reset();
   TestPlatform platform;
@@ -767,6 +777,27 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   REQUIRE(natural_submenu_surface->width < 300.0F);
   REQUIRE(natural_submenu_arrow.has_value());
   REQUIRE(natural_submenu_arrow->x > natural_submenu_surface->x + natural_submenu_surface->width * 0.75F);
+}
+
+TEST_CASE("TestMenuVectorIconsUseThemedAndItemTint") {
+  layer_menu.reset();
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  layer_menu->Show({
+      MenuItem(MenuTestIcon(), "Themed icon", [] {}),
+      MenuItem(MenuTestIcon(), "Override icon", [] {}).IconTint(menu_icon_override),
+  });
+  const FlattenedScene& shown = runtime.BuildFrame();
+  REQUIRE(FindPresentedRectWithColor(shown, MenuStyle::Default().icon_tint).has_value());
+  REQUIRE(FindPresentedRectWithColor(shown, menu_icon_override).has_value());
+
+  const ImageAsset raster = ImageAsset::FromEncoded(MakeTestPng(16, 16));
+  layer_menu->Show({MenuItem(raster, "Raster icon", [] {}).IconTint(menu_icon_override)});
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("TestBottomSheetPlacementContextAndBackDismissal") {
