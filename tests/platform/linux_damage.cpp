@@ -1,6 +1,7 @@
 #include <catch2/catch_amalgamated.hpp>
 
 #include <limits>
+#include <optional>
 
 #include "linux_internal.h"
 
@@ -75,6 +76,46 @@ TEST_CASE("LinuxDamageClampsNegativeRectanglesToZero") {
   REQUIRE(rect.y == 0);
   REQUIRE(rect.width == 20);
   REQUIRE(rect.height == 20);
+}
+
+TEST_CASE("LinuxDamagePreservesAnEmptyRegion") {
+  const detail::LinuxDamageRegion resolved = detail::ResolveLinuxDamage({}, 1.0F, 100, 100);
+  REQUIRE_FALSE(resolved.full);
+  REQUIRE(resolved.rects.empty());
+}
+
+TEST_CASE("LinuxFrameRenderActionSkipsUndamagedCommits") {
+  const detail::LinuxDamageRegion empty;
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(empty, false, false) == detail::LinuxFrameRenderAction::Skip);
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(empty, false, true) == detail::LinuxFrameRenderAction::Skip);
+}
+
+TEST_CASE("LinuxFrameRenderActionPresentsRetainedContentAfterExpose") {
+  const detail::LinuxDamageRegion empty;
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(empty, true, true) == detail::LinuxFrameRenderAction::PresentRetained);
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(empty, true, false) == detail::LinuxFrameRenderAction::Repaint);
+}
+
+TEST_CASE("LinuxFrameRenderActionRepaintsDamage") {
+  const detail::LinuxDamageRegion full{.full = true};
+  const detail::LinuxDamageRegion partial{.rects = {{1, 2, 3, 4}}};
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(full, false, true) == detail::LinuxFrameRenderAction::Repaint);
+  REQUIRE(detail::ResolveLinuxFrameRenderAction(partial, false, true) == detail::LinuxFrameRenderAction::Repaint);
+}
+
+TEST_CASE("LinuxPollTimeoutRoundsPositiveDeadlinesUp") {
+  REQUIRE(detail::ResolveLinuxPollTimeout(1.0001, 1.0) == 1);
+  REQUIRE(detail::ResolveLinuxPollTimeout(1.0162, 1.0) == 17);
+}
+
+TEST_CASE("LinuxPollTimeoutHandlesDueAndUnboundedDeadlines") {
+  REQUIRE(detail::ResolveLinuxPollTimeout(1.0, 1.0) == 0);
+  REQUIRE(detail::ResolveLinuxPollTimeout(0.5, 1.0) == 0);
+  REQUIRE(detail::ResolveLinuxPollTimeout(std::nullopt, 1.0) == -1);
+  REQUIRE(
+      detail::ResolveLinuxPollTimeout(std::numeric_limits<double>::infinity(), 1.0) == std::numeric_limits<int>::max()
+  );
+  REQUIRE(detail::ResolveLinuxPollTimeout(std::numeric_limits<double>::max(), 1.0) == std::numeric_limits<int>::max());
 }
 
 TEST_CASE("LinuxTextureUploadKeepsMultipleSmallDamageRectanglesPartial") {

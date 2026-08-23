@@ -605,13 +605,7 @@ private:
   void RunEventLoop() {
     const int connection = ConnectionNumber(display_);
     while (running_) {
-      int timeout_ms = -1;
-      if (scheduled_frame_deadline_.has_value()) {
-        const double remaining_seconds = std::max(0.0, *scheduled_frame_deadline_ - Now());
-        timeout_ms = static_cast<int>(
-            std::min(remaining_seconds * 1000.0, static_cast<double>(std::numeric_limits<int>::max()))
-        );
-      }
+      int timeout_ms = ResolveLinuxPollTimeout(scheduled_frame_deadline_, Now());
 
       poll_descriptors_.clear();
       poll_descriptors_.push_back({.fd = connection, .events = POLLIN, .revents = 0});
@@ -913,6 +907,7 @@ private:
   }
 
   void HandleExpose(const XExposeEvent& event) {
+    expose_pending_ = true;
     if (event.count == 0) {
       RequestFrameAt(Now());
     }
@@ -1227,21 +1222,27 @@ private:
     if (frame == nullptr || window_ == 0) {
       return;
     }
-    frame_state_.BeginPaint();
     LinuxDamageRegion resolved = ResolveLinuxDamage(frame->damage, DpiScale(), width_, height_);
+    const LinuxFrameRenderAction action =
+        ResolveLinuxFrameRenderAction(resolved, expose_pending_, renderer_.CanPresentRetained());
+    if (action == LinuxFrameRenderAction::Skip) {
+      return;
+    }
+
+    frame_state_.BeginPaint();
     std::vector<XRectangle> rects = std::move(resolved.rects);
-    if (resolved.full) {
+    if (action == LinuxFrameRenderAction::Repaint && rects.empty()) {
       rects.assign(1, XRectangle{0, 0, static_cast<unsigned short>(width_), static_cast<unsigned short>(height_)});
     }
-    const LinuxRenderResult result = renderer_.Render(
-        display_,
-        window_,
-        dpi_,
-        *frame,
-        rects.empty() ? nullptr : rects.data(),
-        static_cast<unsigned long>(rects.size())
-    );
+    const LinuxRenderResult result =
+        action == LinuxFrameRenderAction::PresentRetained
+            ? renderer_.PresentRetained()
+            : renderer_.Render(display_, window_, dpi_, *frame, rects.data(), static_cast<unsigned long>(rects.size()));
+    if (result == LinuxRenderResult::Presented) {
+      expose_pending_ = false;
+    }
     if (result == LinuxRenderResult::Recreate) {
+      expose_pending_ = true;
       RequestFrameAt(Now());
     }
     if (const std::optional<double> deadline = frame_state_.EndPaint(window_ != 0)) {
@@ -1383,6 +1384,7 @@ private:
   std::vector<LinuxDeferredKeyEvent> deferred_key_events_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
+  bool expose_pending_ = false;
   bool running_ = false;
   bool window_focused_ = false;
   bool pointer_down_ = false;

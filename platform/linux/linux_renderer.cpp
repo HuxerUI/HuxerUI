@@ -801,11 +801,16 @@ struct LinuxRenderer::State {
   EGLContext egl_context = EGL_NO_CONTEXT;
   bool egl_ready = false;
   bool gl_ready = false;
+  bool egl_surface_size_dirty = true;
+  EGLint egl_surface_width = 0;
+  EGLint egl_surface_height = 0;
   unsigned long x_visual_id = 0;
   bool use_bgra_upload = false;
+  bool use_unpack_row_length = false;
   GLuint texture = 0;
   int texture_width = 0;
   int texture_height = 0;
+  GLenum texture_filter = 0;
   GLuint quad_vbo = 0;
   GLuint program = 0;
   GLint uniform_sampler = -1;
@@ -1391,11 +1396,16 @@ struct LinuxRenderer::State {
     egl_context = EGL_NO_CONTEXT;
     egl_ready = false;
     gl_ready = false;
+    egl_surface_size_dirty = true;
+    egl_surface_width = 0;
+    egl_surface_height = 0;
     x_visual_id = 0;
     use_bgra_upload = false;
+    use_unpack_row_length = false;
     texture = 0;
     texture_width = 0;
     texture_height = 0;
+    texture_filter = 0;
     quad_vbo = 0;
     program = 0;
     uniform_sampler = -1;
@@ -1645,6 +1655,7 @@ struct LinuxRenderer::State {
         DestroyGlResources();
         return false;
       }
+      egl_surface_size_dirty = true;
     }
     if (eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_context) != EGL_TRUE) {
       DestroyGlResources();
@@ -1693,112 +1704,148 @@ struct LinuxRenderer::State {
     // byte-for-byte and the shader swizzles to RGBA when it is missing.
     const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     use_bgra_upload = ExtensionSupported(extensions, "GL_EXT_texture_format_BGRA8888");
+    use_unpack_row_length = ExtensionSupported(extensions, "GL_EXT_unpack_subimage");
     gl_ready = true;
     return true;
   }
 
-  [[nodiscard]] bool PresentGl() {
+  [[nodiscard]] bool PresentGl(bool upload_pixels) {
     if (!gl_ready || retained_surface == nullptr || surface_width <= 0 || surface_height <= 0) {
       return false;
     }
+    const bool texture_initialized = texture != 0 && texture_width == surface_width && texture_height == surface_height;
+    if (!upload_pixels && !texture_initialized) {
+      return false;
+    }
+
     // The EGL window surface tracks the X window's real client size, which may
     // briefly differ from the recorded surface size (e.g. right after a window
-    // manager resize). View to the actual surface and fall back to linear
-    // filtering whenever a non-1:1 blit would otherwise drop thin glyph
-    // strokes under nearest sampling.
-    EGLint egl_width = 0;
-    EGLint egl_height = 0;
-    const bool egl_size_valid = eglQuerySurface(egl_display, egl_surface, EGL_WIDTH, &egl_width) == EGL_TRUE &&
-                                eglQuerySurface(egl_display, egl_surface, EGL_HEIGHT, &egl_height) == EGL_TRUE;
-    glViewport(
-        0,
-        0,
-        egl_size_valid ? static_cast<GLsizei>(egl_width) : surface_width,
-        egl_size_valid ? static_cast<GLsizei>(egl_height) : surface_height
-    );
+    // manager resize). Query only while the sizes may be out of sync, then
+    // retain the matched dimensions for stable frames.
+    if (egl_surface_size_dirty) {
+      EGLint queried_width = 0;
+      EGLint queried_height = 0;
+      const bool query_succeeded = eglQuerySurface(egl_display, egl_surface, EGL_WIDTH, &queried_width) == EGL_TRUE &&
+                                   eglQuerySurface(egl_display, egl_surface, EGL_HEIGHT, &queried_height) == EGL_TRUE;
+      if (query_succeeded && queried_width > 0 && queried_height > 0) {
+        egl_surface_width = queried_width;
+        egl_surface_height = queried_height;
+        egl_surface_size_dirty =
+            static_cast<int>(queried_width) != surface_width || static_cast<int>(queried_height) != surface_height;
+      } else {
+        egl_surface_width = surface_width;
+        egl_surface_height = surface_height;
+      }
+    }
+    const int viewport_width = egl_surface_width > 0 ? static_cast<int>(egl_surface_width) : surface_width;
+    const int viewport_height = egl_surface_height > 0 ? static_cast<int>(egl_surface_height) : surface_height;
+    glViewport(0, 0, static_cast<GLsizei>(viewport_width), static_cast<GLsizei>(viewport_height));
+
     const GLenum format = use_bgra_upload ? GL_BGRA_EXT : GL_RGBA;
-    const bool texture_initialized = texture != 0 && texture_width == surface_width && texture_height == surface_height;
     if (!texture_initialized) {
       if (texture == 0) {
         glGenTextures(1, &texture);
+        texture_filter = 0;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      } else {
+        glBindTexture(GL_TEXTURE_2D, texture);
       }
-      glBindTexture(GL_TEXTURE_2D, texture);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
       glTexImage2D(GL_TEXTURE_2D, 0, format, surface_width, surface_height, 0, format, GL_UNSIGNED_BYTE, nullptr);
       texture_width = surface_width;
       texture_height = surface_height;
     } else {
       glBindTexture(GL_TEXTURE_2D, texture);
     }
-    const GLenum filter =
-        egl_size_valid && static_cast<int>(egl_width) == surface_width && static_cast<int>(egl_height) == surface_height
-            ? GL_NEAREST
-            : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+    const GLenum filter = viewport_width == surface_width && viewport_height == surface_height ? GL_NEAREST : GL_LINEAR;
+    if (texture_filter != filter) {
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+      texture_filter = filter;
+    }
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    const unsigned char* data = cairo_image_surface_get_data(retained_surface);
-    const int stride = cairo_image_surface_get_stride(retained_surface);
-    cairo_surface_flush(retained_surface);
-    const LinuxTextureUploadPlan upload = ResolveLinuxTextureUpload(
-        pending_damage_full,
-        pending_damage_rects,
-        surface_width,
-        surface_height,
-        texture_initialized
-    );
-    if (upload.full) {
-      if (stride == surface_width * 4) {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, surface_width, surface_height, format, GL_UNSIGNED_BYTE, data);
-      } else {
-        const std::size_t row_bytes = static_cast<std::size_t>(surface_width) * 4U;
-        upload_scratch.resize(row_bytes * static_cast<std::size_t>(surface_height));
-        for (int row = 0; row < surface_height; ++row) {
-          std::memcpy(
-              upload_scratch.data() + static_cast<std::size_t>(row) * row_bytes,
-              data + static_cast<std::size_t>(row) * static_cast<std::size_t>(stride),
-              row_bytes
+    if (upload_pixels) {
+      cairo_surface_flush(retained_surface);
+      const unsigned char* data = cairo_image_surface_get_data(retained_surface);
+      const int stride = cairo_image_surface_get_stride(retained_surface);
+      const LinuxTextureUploadPlan upload = ResolveLinuxTextureUpload(
+          pending_damage_full,
+          pending_damage_rects,
+          surface_width,
+          surface_height,
+          texture_initialized
+      );
+      const auto upload_rect = [&](int rect_x, int rect_y, int rect_width, int rect_height) {
+        const unsigned char* rect_data = data + static_cast<std::size_t>(rect_y) * static_cast<std::size_t>(stride) +
+                                         static_cast<std::size_t>(rect_x) * 4U;
+        if (use_unpack_row_length) {
+          glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, stride / 4);
+          glTexSubImage2D(
+              GL_TEXTURE_2D,
+              0,
+              rect_x,
+              rect_y,
+              rect_width,
+              rect_height,
+              format,
+              GL_UNSIGNED_BYTE,
+              rect_data
           );
+          return;
         }
-        glTexSubImage2D(
-            GL_TEXTURE_2D,
-            0,
-            0,
-            0,
-            surface_width,
-            surface_height,
-            format,
-            GL_UNSIGNED_BYTE,
-            upload_scratch.data()
-        );
-      }
-    } else {
-      for (const XRectangle& rect : upload.rects) {
-        const int rect_width = static_cast<int>(rect.width);
-        const int rect_height = static_cast<int>(rect.height);
+
         const std::size_t row_bytes = static_cast<std::size_t>(rect_width) * 4U;
+        if (stride == static_cast<int>(row_bytes)) {
+          glTexSubImage2D(
+              GL_TEXTURE_2D,
+              0,
+              rect_x,
+              rect_y,
+              rect_width,
+              rect_height,
+              format,
+              GL_UNSIGNED_BYTE,
+              rect_data
+          );
+          return;
+        }
+
         upload_scratch.resize(row_bytes * static_cast<std::size_t>(rect_height));
         for (int row = 0; row < rect_height; ++row) {
           std::memcpy(
               upload_scratch.data() + static_cast<std::size_t>(row) * row_bytes,
-              data + static_cast<std::size_t>(static_cast<int>(rect.y) + row) * static_cast<std::size_t>(stride) +
-                  static_cast<std::size_t>(rect.x) * 4U,
+              rect_data + static_cast<std::size_t>(row) * static_cast<std::size_t>(stride),
               row_bytes
           );
         }
         glTexSubImage2D(
             GL_TEXTURE_2D,
             0,
-            rect.x,
-            rect.y,
+            rect_x,
+            rect_y,
             rect_width,
             rect_height,
             format,
             GL_UNSIGNED_BYTE,
             upload_scratch.data()
         );
+      };
+
+      if (upload.full) {
+        upload_rect(0, 0, surface_width, surface_height);
+      } else {
+        for (const XRectangle& rect : upload.rects) {
+          upload_rect(
+              static_cast<int>(rect.x),
+              static_cast<int>(rect.y),
+              static_cast<int>(rect.width),
+              static_cast<int>(rect.height)
+          );
+        }
+      }
+      if (use_unpack_row_length) {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
       }
     }
 
@@ -1832,6 +1879,9 @@ struct LinuxRenderer::State {
           static_cast<void>(eglDestroySurface(egl_display, egl_surface));
           egl_surface = EGL_NO_SURFACE;
         }
+        egl_surface_size_dirty = true;
+        egl_surface_width = 0;
+        egl_surface_height = 0;
         gl_ready = false;
       }
       return false;
@@ -2064,8 +2114,13 @@ void LinuxRenderer::Resize(Display* display, Window window, int width, int heigh
   state_->display = display;
   state_->window = window;
   state_->dpi = dpi;
-  state_->surface_width = std::max(1, width);
-  state_->surface_height = std::max(1, height);
+  const int surface_width = std::max(1, width);
+  const int surface_height = std::max(1, height);
+  if (state_->surface_width != surface_width || state_->surface_height != surface_height) {
+    state_->egl_surface_size_dirty = true;
+  }
+  state_->surface_width = surface_width;
+  state_->surface_height = surface_height;
   state_->force_full_repaint = true;
 }
 
@@ -3112,7 +3167,19 @@ bool LinuxRenderer::EnsureGl(Display* display, Window window) {
 }
 
 bool LinuxRenderer::PresentGl() {
-  return state_->PresentGl();
+  return state_->PresentGl(true);
+}
+
+bool LinuxRenderer::CanPresentRetained() const noexcept {
+  return state_->gl_ready && state_->retained_surface != nullptr && state_->texture != 0 &&
+         state_->texture_width == state_->surface_width && state_->texture_height == state_->surface_height;
+}
+
+LinuxRenderResult LinuxRenderer::PresentRetained() {
+  if (!CanPresentRetained()) {
+    return LinuxRenderResult::Skipped;
+  }
+  return state_->PresentGl(false) ? LinuxRenderResult::Presented : LinuxRenderResult::Recreate;
 }
 
 bool LinuxRenderer::HasPresentation() const noexcept {
