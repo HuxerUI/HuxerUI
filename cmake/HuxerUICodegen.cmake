@@ -15,7 +15,11 @@ function(_huxerui_resolve_host output_system output_architecture)
     if (host_architecture MATCHES "^(amd64|x64|x86_64)$")
         set(host_architecture "x86_64")
     elseif (host_architecture MATCHES "^(aarch64|arm64)$")
-        set(host_architecture "arm64")
+        if (host_system STREQUAL "linux")
+            set(host_architecture "aarch64")
+        else ()
+            set(host_architecture "arm64")
+        endif ()
     else ()
         message(FATAL_ERROR
                 "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_PROCESSOR}"

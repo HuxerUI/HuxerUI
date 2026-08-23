@@ -3,7 +3,7 @@
 Host tools are distributed by operating system and architecture:
 
 ```text
-prebuilt/<windows|macos|linux>/<x86_64|arm64>/<hcg|hrc>[.exe]
+prebuilt/<windows|macos|linux>/<architecture>/<hcg|hrc>[.exe]
 ```
 
 These executables run on the build host. Their platform and architecture are independent of the application target and Android ABI. CMake selects the matching executable automatically and stops configuration when that host package is unavailable.
@@ -16,6 +16,10 @@ Current host tools are:
 Each distributed host and architecture directory must contain every tool required by the project configuration.
 
 Prebuilt executables must be rebuilt from the matching tool source whenever that source changes. Tests compile the tool sources directly and therefore do not prove that a distributed executable is current.
+
+Linux x86_64 and aarch64 tools require no GLIBC symbol newer than 2.17 and statically link the GNU C++ runtime.
+Linux uses `aarch64` for 64-bit Arm packages and directories, while Apple platforms use `arm64`.
+Release CI applies that stricter tool contract through `.github/scripts/check_linux_binary_compatibility.sh` so a newer build host cannot silently raise their glibc baseline or add a GLIBCXX runtime requirement.
 
 ## macOS distribution
 

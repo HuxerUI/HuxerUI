@@ -12,6 +12,32 @@ namespace {
 
 constexpr std::string_view emscripten_version = "4.0.19";
 
+std::string ResolveCMakeGenerator(const PlatformCommandContext& context) {
+  if (!context.cmake_generator.empty()) {
+    return context.cmake_generator;
+  }
+
+  const std::filesystem::path cache = context.build_directory / "CMakeCache.txt";
+  if (!std::filesystem::is_regular_file(cache)) {
+    return ReadEnvironmentVariable("CMAKE_GENERATOR").value_or(std::string{});
+  }
+
+  constexpr std::string_view marker = "CMAKE_GENERATOR:INTERNAL=";
+  const std::string content = detail::ReadFile(cache);
+  const std::size_t start = content.find(marker);
+  if (start == std::string::npos) {
+    throw std::runtime_error("HuxerUI Web CMake cache is missing CMAKE_GENERATOR: " + cache.string());
+  }
+  const std::size_t value_start = start + marker.size();
+  const std::size_t end = content.find_first_of("\r\n", value_start);
+  const std::string generator =
+      content.substr(value_start, end == std::string::npos ? std::string::npos : end - value_start);
+  if (generator.empty()) {
+    throw std::runtime_error("HuxerUI Web CMake cache has an empty CMAKE_GENERATOR: " + cache.string());
+  }
+  return generator;
+}
+
 class WebDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -93,8 +119,9 @@ public:
         context.build_directory.string(),
         "-DCMAKE_BUILD_TYPE=" + configuration,
     };
-    if (!context.cmake_generator.empty()) {
-      configure_arguments.insert(configure_arguments.begin() + 1, {"-G", context.cmake_generator});
+    const std::string generator = ResolveCMakeGenerator(context);
+    if (!generator.empty()) {
+      configure_arguments.insert(configure_arguments.begin() + 1, {"-G", generator});
     }
     return {
         {"emcmake", std::move(configure_arguments), context.project_root},

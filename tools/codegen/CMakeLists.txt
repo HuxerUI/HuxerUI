@@ -17,6 +17,10 @@ target_compile_options(huxerui_codegen PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
 )
 
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(huxerui_codegen PRIVATE -static-libstdc++ -static-libgcc)
+endif ()
+
 set_target_properties(huxerui_codegen PROPERTIES
         CXX_EXTENSIONS OFF
         OUTPUT_NAME "hcg"

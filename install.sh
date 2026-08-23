@@ -118,7 +118,11 @@ esac
 
 case "$(uname -m)" in
 arm64 | aarch64)
-  host_architecture="arm64"
+  if [ "$host_system" = "linux" ]; then
+    host_architecture="aarch64"
+  else
+    host_architecture="arm64"
+  fi
   ;;
 x86_64 | amd64)
   host_architecture="x86_64"

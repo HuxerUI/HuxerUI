@@ -93,7 +93,7 @@ jobs:
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sdk-platform-artifacts
+          name: platform-artifacts
           path: ${{ runner.temp }}/huxerui-platform-artifacts
           if-no-files-found: error
           retention-days: 7
@@ -107,6 +107,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - runner: windows-2022
+            system: windows
+            architecture: x86_64
+            generator: ZIP
+            extension: zip
           - runner: macos-15
             system: macos
             architecture: arm64
@@ -117,24 +122,14 @@ jobs:
             architecture: x86_64
             generator: TGZ
             extension: tar.gz
-          - runner: windows-2022
-            system: windows
-            architecture: x86_64
-            generator: ZIP
-            extension: zip
-          - runner: ubuntu-24.04
-            system: linux
-            architecture: x86_64
-            generator: TGZ
-            extension: tar.gz
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
-          name: sdk-platform-artifacts
-          path: sdk-platform-artifacts
+          name: platform-artifacts
+          path: platform-artifacts
       - name: Prepare Unix executables
         if: runner.os != 'Windows'
         run: >-
@@ -142,16 +137,6 @@ jobs:
           install.sh
           tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hcg
           tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hrc
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            gperf libegl1-mesa-dev libgles2-mesa-dev libglib2.0-dev libsoup-3.0-dev \
-            libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev ninja-build pkg-config python3-venv
-          python3 -m venv "$RUNNER_TEMP/huxerui-meson"
-          "$RUNNER_TEMP/huxerui-meson/bin/pip" install meson==1.11.0
-          echo "$RUNNER_TEMP/huxerui-meson/bin" >> "$GITHUB_PATH"
       - name: Configure
         run: >-
           cmake
@@ -161,7 +146,7 @@ jobs:
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
-          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/sdk-platform-artifacts
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
           -DHUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG=ON
       - name: Build Windows Debug libraries
         if: runner.os == 'Windows'
@@ -228,11 +213,104 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  build-linux:
+    name: Build linux ${{ matrix.architecture }}
+    needs:
+      - validate
+      - platform-artifacts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: aarch64
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:20.04
+    env:
+      CC: gcc-11
+      CXX: g++-11
+      PKG_CONFIG_PATH: /opt/huxerui-linux-baseline/lib/pkgconfig
+      LD_LIBRARY_PATH: /opt/huxerui-linux-baseline/lib
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts
+          path: platform-artifacts
+      - name: Install Linux build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            binutils ca-certificates git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
+            libgles2-mesa-dev libglib2.0-dev libgnutls28-dev libmount-dev libnghttp2-dev \
+            libpcre2-dev libpsl-dev libselinux1-dev libsqlite3-dev libx11-dev libxext-dev \
+            libxkbcommon-dev libxml2-dev libxrandr-dev ninja-build pkg-config python3-pip \
+            software-properties-common
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-11 g++-11
+          python3 -m pip install cmake==3.31.10 meson==1.11.0
+      - name: Build baseline system dependencies
+        run: >-
+          sh .github/scripts/build_linux_release_dependencies.sh
+          /opt/huxerui-linux-baseline
+          "${RUNNER_TEMP}/huxerui-linux-dependencies"
+      - name: Prepare executables
+        run: >-
+          chmod +x
+          install.sh
+          tools/prebuilt/linux/${{ matrix.architecture }}/hcg
+          tools/prebuilt/linux/${{ matrix.architecture }}/hrc
+      - name: Configure
+        run: >-
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_BUILD_CLI=ON
+          -DHUXERUI_BUILD_EXAMPLES=OFF
+          -DHUXERUI_BUILD_TESTS=ON
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Validate Linux binary compatibility
+        run: |
+          sh .github/scripts/check_linux_binary_compatibility.sh \
+            build/lib/libhuxerui.so \
+            build/bin/huxerui
+          HUXERUI_MAX_GLIBC=2.17 HUXERUI_REQUIRE_STATIC_CXX=true \
+            sh .github/scripts/check_linux_binary_compatibility.sh \
+            tools/prebuilt/linux/${{ matrix.architecture }}/hcg \
+            tools/prebuilt/linux/${{ matrix.architecture }}/hrc
+      - name: Package
+        run: >-
+          cpack
+          --config build/CPackConfig.cmake
+          -C Release
+          -G TGZ
+          -B release-assets
+      - name: Upload SDK archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-linux-${{ matrix.architecture }}
+          path: |
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-linux-${{ matrix.architecture }}.tar.gz
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-linux-${{ matrix.architecture }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   publish:
     name: Publish release
     needs:
       - validate
       - build
+      - build-linux
     runs-on: ubuntu-24.04
     permissions:
       contents: write

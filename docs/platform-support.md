@@ -141,11 +141,14 @@ HttpClient uses one libsoup 3 Session on a dedicated GLib network thread, preser
 Requests and responses remain complete in-memory values, GCancellable backs Task cancellation, and a GLib timeout source enforces the complete request deadline.
 X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download them.
 Source-checkout builds fetch only the pinned graphics, text, image, and compression libraries used by the renderer.
-Following the Windows and macOS distribution model, Linux host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
+Following the Windows and macOS distribution model, Linux x86_64 and aarch64 host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
 The relocatable Linux SDK supports installed CLI projects and exports both canonical CMake targets without retaining build-tree paths.
 Shared consumers load `HuxerUI::huxerui` without requiring pkg-config development metadata; static consumers request `COMPONENTS static` and resolve the packaged archive closure plus the system development packages through pkg-config.
-Linux release binaries target glibc 2.31 and GLIBCXX 3.4.28 or older symbol versions.
+Linux release binaries target glibc 2.31, GLIBCXX 3.4.29, and CXXABI 1.3.13 or older symbol versions.
+Release CI builds them with GCC 11 in an Ubuntu 20.04 environment and rejects ELF outputs that exceed those symbol-version ceilings.
+Because Ubuntu 20.04 does not package libsoup 3, CI builds GLib 2.70.5 and libsoup 3.0.7 into a private link-time prefix; those libraries are not bundled into the SDK, and consumers continue to resolve the documented system dependencies.
+The distributed Linux host tools statically link the GNU C++ runtime and therefore do not add a target-system GLIBCXX dependency.
 
 ## Web
 

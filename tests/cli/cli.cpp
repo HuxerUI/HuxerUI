@@ -596,6 +596,14 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
   TemporaryDirectory temporary;
   const huxerui::cli::PlatformDriver* web = huxerui::cli::FindPlatformDriver("web");
   REQUIRE(web != nullptr);
+  const std::vector<huxerui::cli::GeneratedFile> shell =
+      web->CreateShell(huxerui::cli::MakeProjectTemplateContext("Sample-App"));
+  const auto configuration = std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "huxerui.cmake";
+  });
+  REQUIRE(configuration != shell.end());
+  REQUIRE(configuration->content.find("${target_name}.js") != std::string::npos);
+  REQUIRE(configuration->content.find(".mjs") == std::string::npos);
   const std::filesystem::path project = temporary.Path() / "sample";
   const std::filesystem::path build = project / ".huxerui/build/web/debug";
   const huxerui::cli::PlatformCommandContext context{
@@ -626,7 +634,14 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
   );
   REQUIRE(build_commands[1].executable == "cmake");
 
-  const std::filesystem::path artifact = build / "sample.mjs";
+  std::filesystem::create_directories(build);
+  std::ofstream(build / "CMakeCache.txt") << "CMAKE_GENERATOR:INTERNAL=Ninja\n";
+  huxerui::cli::PlatformCommandContext cached_context = context;
+  cached_context.cmake_generator.clear();
+  const std::vector<huxerui::cli::ProcessCommand> cached_build_commands = web->BuildCommands(cached_context);
+  REQUIRE(cached_build_commands[0].arguments == build_commands[0].arguments);
+
+  const std::filesystem::path artifact = build / "sample.js";
   const std::filesystem::path entry = build / "sample.html";
   const std::filesystem::path module = build / "sample.wasm";
   const std::filesystem::path plan = build / "huxerui-integration/sample/Debug/app.json";

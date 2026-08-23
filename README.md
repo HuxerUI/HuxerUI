@@ -103,7 +103,7 @@ huxerui package windows,web
 
 The CLI creates and validates source-controlled platform shells, diagnoses and sets up external toolchains, discovers Android and iOS devices, builds and launches enabled targets, and collects release artifacts under `dist/<platform>`.
 The current CMake install exports a platform-specific SDK package, the CLI, host code generators, and built-in resources.
-Tagged releases produce verified macOS arm64, macOS x86_64, Windows x86_64, and Linux x86_64 portable SDK archives with shell and PowerShell installers.
+Tagged releases produce verified Windows x86_64, macOS arm64, macOS x86_64, Linux x86_64, and Linux aarch64 portable SDK archives with shell and PowerShell installers.
 Each SDK includes Android Java and ABI artifacts plus the pinned Emscripten Web library, so Android and Web projects can consume an installed SDK without framework sources.
 Android Gradle shells own their platform configuration and invoke the application root `CMakeLists.txt` directly.
 The distribution model uses one relocatable SDK selected through `HUXERUI_HOME` or CLI self-location, preserves one root-CMake contract for source and installed use, and merges framework, library, and application resources into one final package.
