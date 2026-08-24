@@ -447,6 +447,8 @@ return TextField(value)
 An empty unfocused field displays the label in the input line and hides the placeholder.
 Focus or non-empty text moves the label to the selected variant's floating position, and an empty focused field then displays the placeholder as the editing hint.
 Omitting `Label()` preserves the ordinary placeholder-only behavior.
+Themes that use a border-and-background field without a visual label set `TextFieldStyle::show_label` to `false`.
+The label then remains available to accessibility semantics while the placeholder occupies the input line without a floating transition or outline cutout.
 Material defaults to the 56-unit Filled variant with a bottom state indicator.
 Flat defaults to the compact Standard variant.
 All three variants can be selected explicitly:

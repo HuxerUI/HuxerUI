@@ -246,7 +246,9 @@ struct TextFieldVariantStyle {
 
 struct TextFieldStyle {
   TextFieldVariant variant = TextFieldVariant::Standard;
-  TextFieldVariantStyle standard;
+  // Visual label presentation is independent from the label exposed through accessibility semantics.
+  bool show_label = true;
+  TextFieldVariantStyle standard{.minimum_height = 40.0F};
   TextFieldVariantStyle filled{
       .background = Color::Rgb(239, 241, 243),
       .minimum_height = 44.0F,
@@ -274,7 +276,7 @@ struct TextFieldStyle {
   Color caret = Color::Rgb(31, 111, 235);
   Color error_caret = Color::Rgb(207, 34, 46);
   Color composition = Color::Rgb(31, 111, 235);
-  float caret_width = 1.0F;
+  float caret_width = 2.0F;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 6.0F;
@@ -282,6 +284,7 @@ struct TextFieldStyle {
   float leading_icon_size = 18.0F;
   float trailing_icon_size = 18.0F;
   float icon_spacing = 8.0F;
+  float label_spacing = 4.0F;
   float label_cutout_padding = 4.0F;
   double label_animation_duration = 0.12;
   double caret_blink_interval = 0.5;

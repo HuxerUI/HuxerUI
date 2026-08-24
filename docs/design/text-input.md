@@ -827,6 +827,7 @@ struct TextFieldVariantStyle {
 
 struct TextFieldStyle {
   TextFieldVariant variant;
+  bool show_label = true;
   TextFieldVariantStyle standard;
   TextFieldVariantStyle filled;
   TextFieldVariantStyle outlined;
@@ -852,7 +853,7 @@ struct TextFieldStyle {
   Color caret;
   Color error_caret;
   Color composition;
-  float caret_width = 1.0F;
+  float caret_width = 2.0F;
   float border_width = 1.0F;
   float focused_border_width = 2.0F;
   float corner_radius = 0.0F;
@@ -860,6 +861,7 @@ struct TextFieldStyle {
   float leading_icon_size = 0.0F;
   float trailing_icon_size = 0.0F;
   float icon_spacing = 0.0F;
+  float label_spacing = 4.0F;
   float label_cutout_padding = 0.0F;
   double label_animation_duration = 0.0;
   double caret_blink_interval = 0.5;
@@ -873,11 +875,13 @@ struct TextFieldStyle {
 };
 ```
 
-Flat and Material Theme definitions provide their own TextField styles. Material defaults to a 56-unit Filled field and provides 56-unit Standard and Outlined alternatives. Flat defaults to a 36-unit Standard field, retains a 36-unit Outlined alternative, and provides a 44-unit compact Filled alternative. Material paints a 2-unit caret and uses 24-unit leading and trailing icons, while Flat retains a 1-unit caret and 18-unit icons.
+Flat and Material Theme definitions provide their own TextField styles. Material defaults to a 56-unit Filled field and provides 56-unit Standard and Outlined alternatives. Flat defaults to a 40-unit Standard field, retains a 36-unit Outlined alternative, and provides a 44-unit Filled alternative. Both themes paint a 2-unit caret, while Material uses 24-unit leading and trailing icons and Flat uses 18-unit icons.
 
 Standard uses a transparent container and bottom state indicator. Filled adds a top-rounded container fill to the same indicator geometry. Outlined keeps the same radius on all four corners and uses a segmented top outline so a floating label does not depend on painting an opaque background over the border. Material Filled and Standard indicators use `on_surface_variant`, while Outlined uses `outline`; hover, focus, and disabled colors also resolve from the selected variant bundle. Container backgrounds are painted only within the editor frame and never extend through supporting text.
 
 Each `TextFieldVariantStyle` owns one variant's background, optional disabled background, stateful border colors, and minimum height. An absent disabled background falls back to the ordinary background. `TextFieldStyle::variant` selects the Theme default, while an explicit component variant selects the corresponding bundle without duplicating active aliases. TextField draws its hover, focus, validation, and disabled states from these style values, so the common node indication and focus ring do not surround supporting text. Hover changes only the variant's indicator or outline, and disabled colors are resolved per element instead of reducing the opacity of the complete field subtree.
+
+`TextFieldStyle::show_label` controls only visual label layout and painting. When it is `false`, `TextField::Label()` still supplies the accessibility label, while the placeholder remains in the editing line and Outlined paints a continuous border without a cutout. `label_spacing` defines the gap between a floating label and editable text for Standard and Filled fields.
 
 `TextFieldStyle` belongs in `theme.h` with the existing built-in component styles. Its type is also its Theme override identity.
 

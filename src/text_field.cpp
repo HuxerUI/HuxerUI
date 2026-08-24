@@ -468,7 +468,8 @@ public:
     const TextFieldVariantStyle next_variant_style = detail::ResolveTextFieldVariantStyle(next_style, next_variant);
     next_style.text_style = node.properties.text_style;
     corner_radii_ = node.properties.corner_radii;
-    if (!initialized_ || text_layout_mode_changed || next_style.text_style.font != style_.text_style.font ||
+    if (!initialized_ || text_layout_mode_changed || next_style.show_label != style_.show_label ||
+        next_style.text_style.font != style_.text_style.font ||
         next_style.label_style.font != style_.label_style.font ||
         next_style.floating_label_style.font != style_.floating_label_style.font ||
         next_style.placeholder_style.font != style_.placeholder_style.font ||
@@ -585,7 +586,7 @@ public:
         editor_height = std::min(editor_height, line_height * static_cast<float>(*max_lines_));
       }
       if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
-        editor_height += floating_label_size.height;
+        editor_height += floating_label_size.height + std::max(0.0F, style_.label_spacing);
       }
     }
     const float minimum_editor_height =
@@ -639,7 +640,8 @@ public:
     if (background.alpha > 0.0F) {
       context.DrawRect(editor_frame, background, corner_radii_);
     }
-    context.PushClip(content, corner_radii_);
+    context.PushClip(editor_frame, corner_radii_);
+    context.PushClip(content);
 
     if (enabled && !editing_.value.selection.IsCollapsed()) {
       for (const Rect& rect : text_layout_->RangeRects(editing_.value.selection.Range())) {
@@ -647,7 +649,7 @@ public:
       }
     }
 
-    const float placeholder_opacity = label_.empty() ? 1.0F : label_progress;
+    const float placeholder_opacity = HasVisualLabel() ? label_progress : 1.0F;
     if (editing_.value.text.empty() && !placeholder_.empty() && placeholder_layout_ && placeholder_opacity > 0.0F) {
       const Size size = placeholder_layout_->Measure();
       placeholder_style.foreground.alpha *= placeholder_opacity;
@@ -699,6 +701,7 @@ public:
       context.DrawRect(caret, invalid ? style_.error_caret : style_.caret);
     }
     context.PopClip();
+    context.PopClip();
 
     if (leading_icon_.has_value()) {
       PaintTextFieldIcon(context, *leading_icon_, IconBounds(node, true), ResolveIconColor(node, invalid, true));
@@ -716,7 +719,7 @@ public:
       } else if (!invalid) {
         validation_style.foreground = style_.placeholder_style.foreground;
       }
-      context.PushClip(node.bounds, corner_radii_);
+      context.PushClip(node.bounds);
       context.DrawText(
           {
               node_content.x,
@@ -1325,7 +1328,7 @@ private:
     if (!text_layout_) {
       throw std::logic_error("HuxerUI platform does not provide editable text layout");
     }
-    if (label_.empty()) {
+    if (!HasVisualLabel()) {
       label_layout_.reset();
       floating_label_layout_.reset();
       laid_out_label_.clear();
@@ -1380,6 +1383,10 @@ private:
   bool ShowsSupportingMessage() const {
     return !validation_.message.empty() &&
            (validation_.status == ValidationStatus::Invalid || validation_.status == ValidationStatus::Pending);
+  }
+
+  bool HasVisualLabel() const {
+    return style_.show_label && !label_.empty();
   }
 
   Rect EditorFrame(const detail::MountedNode& node) const {
@@ -1454,8 +1461,19 @@ private:
     const Rect content = EditorContentRect(node);
     const Rect frame = EditorFrame(node);
     const Size size = floating_label_layout_->Measure();
-    const float y = UsesTextFieldIndicator(variant_) ? frame.y + std::max(0.0F, node.resolved_padding.top * 0.5F)
-                                                     : frame.y - size.height * 0.5F;
+    float y = frame.y - size.height * 0.5F;
+    if (UsesTextFieldIndicator(variant_)) {
+      if (configuration_.multiline) {
+        y = frame.y + std::max(0.0F, node.resolved_padding.top * 0.5F);
+      } else {
+        const float input_height = std::max(
+            text_layout_ ? text_layout_->Measure().height : 0.0F,
+            placeholder_layout_ ? placeholder_layout_->Measure().height : 0.0F
+        );
+        const float stack_height = size.height + std::max(0.0F, style_.label_spacing) + input_height;
+        y = frame.y + std::max(0.0F, (frame.height - stack_height) * 0.5F);
+      }
+    }
     return {
         content.x,
         y,
@@ -2015,9 +2033,10 @@ private:
     float y = configuration_.multiline ? content.y : frame.y + std::max(0.0F, (frame.height - size.height) * 0.5F);
     if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
       const Rect floating_label = FloatingLabelBounds(node);
-      float floating_y = floating_label.y + floating_label.height + 2.0F;
+      float floating_y = floating_label.y + floating_label.height + std::max(0.0F, style_.label_spacing);
       if (!configuration_.multiline) {
-        floating_y = frame.y + frame.height - std::max(0.0F, node.resolved_padding.bottom * 0.5F) - size.height;
+        const float maximum_y = frame.y + frame.height - size.height;
+        floating_y = std::min(floating_y, maximum_y);
       }
       y += (std::max(y, floating_y) - y) * std::clamp(label_progress_.Value(), 0.0F, 1.0F);
     }
@@ -2159,8 +2178,10 @@ private:
       } while (start <= text.size());
     };
     measure_lines(editing_.value.text, style_.text_style);
-    measure_lines(label_, style_.label_style);
-    measure_lines(label_, style_.floating_label_style);
+    if (HasVisualLabel()) {
+      measure_lines(label_, style_.label_style);
+      measure_lines(label_, style_.floating_label_style);
+    }
     measure_lines(placeholder_, style_.placeholder_style);
     return width;
   }
@@ -2177,7 +2198,12 @@ private:
   }
 
   void UpdateLabelTarget(bool focused) {
-    const float target = !label_.empty() && (focused || !editing_.value.text.empty()) ? 1.0F : 0.0F;
+    if (!HasVisualLabel()) {
+      label_progress_.Set(0.0F);
+      label_progress_initialized_ = true;
+      return;
+    }
+    const float target = focused || !editing_.value.text.empty() ? 1.0F : 0.0F;
     if (!label_progress_initialized_) {
       label_progress_.Set(target);
       label_progress_initialized_ = true;

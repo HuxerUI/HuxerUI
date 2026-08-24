@@ -424,6 +424,7 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   disabled_container.alpha *= 0.04F;
   return {
       .variant = TextFieldVariant::Filled,
+      .show_label = true,
       .standard =
           {
               .background = Color::Transparent(),
@@ -488,6 +489,7 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
       .leading_icon_size = 24.0F,
       .trailing_icon_size = 24.0F,
       .icon_spacing = theme.spacing.small,
+      .label_spacing = theme.spacing.extra_small,
       .label_cutout_padding = theme.spacing.extra_small,
       .label_animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,
@@ -1107,6 +1109,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
   disabled_border.alpha *= theme.interactions.disabled_opacity;
   return {
       .variant = TextFieldVariant::Standard,
+      .show_label = true,
       .standard =
           {
               .background = Color::Transparent(),
@@ -1114,7 +1117,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
               .hovered_border = hovered_border,
               .focused_border = theme.colors.primary,
               .disabled_border = disabled_border,
-              .minimum_height = 36.0F,
+              .minimum_height = 40.0F,
           },
       .filled =
           {
@@ -1162,7 +1165,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
       .caret = theme.colors.primary,
       .error_caret = theme.colors.error,
       .composition = theme.colors.primary,
-      .caret_width = 1.0F,
+      .caret_width = 2.0F,
       .border_width = 1.0F,
       .focused_border_width = 2.0F,
       .corner_radius = theme.shapes.extra_small + 2.0F,
@@ -1170,6 +1173,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
       .leading_icon_size = 18.0F,
       .trailing_icon_size = 18.0F,
       .icon_spacing = theme.spacing.small,
+      .label_spacing = theme.spacing.extra_small,
       .label_cutout_padding = theme.spacing.extra_small,
       .label_animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
       .caret_blink_interval = theme.motion.reduced_motion ? 0.0 : 0.5,

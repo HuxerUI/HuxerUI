@@ -276,6 +276,23 @@ View FlatFilledTextFieldApp() {
   };
 }
 
+View FlatHiddenVisualLabelTextFieldApp() {
+  TextFieldStyle style = TextFieldStyle::Default();
+  style.variant = TextFieldVariant::Outlined;
+  style.show_label = false;
+  style.outlined.background = Color::Rgb(248, 249, 250);
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme {
+    std::move(definition),
+    TextField(TextEditingValue::FromText(""))
+        .Label("Search mail")
+        .Placeholder("Sender or subject")
+        .LeadingIcon(TextFieldVectorIcon())
+        .With(huxerui::Frame{.width = 180.0F}),
+  };
+}
+
 View MaterialInvalidIconTextFieldApp() {
   return MaterialTheme {
     TextField(TextEditingValue::FromText("Value"))
@@ -680,7 +697,7 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
 
   const TextFieldStyle flat_style = TextFieldStyle::Default();
   REQUIRE(flat_style.variant == TextFieldVariant::Standard);
-  REQUIRE(flat_style.caret_width == 1.0F);
+  REQUIRE(flat_style.caret_width == 2.0F);
   REQUIRE(FindTextFieldIndicator(scene, flat_style.standard.border, 160.0F, flat_style.border_width) != nullptr);
 
   const ThemeDefinition material = huxerui::MaterialThemeDefinition();
@@ -867,6 +884,7 @@ TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
   REQUIRE(label != nullptr);
   REQUIRE(text != nullptr);
   REQUIRE(label->style.font == style.floating_label_style.font);
+  REQUIRE(label->rect.y + label->rect.height <= text->rect.y);
   REQUIRE(FindText(scene, "Placeholder") == nullptr);
   const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
   REQUIRE(field != nullptr);
@@ -887,6 +905,39 @@ TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
   }));
   REQUIRE(FindTextFieldIndicator(scene, style.standard.border, 180.0F, style.border_width) != nullptr);
   REQUIRE(FindBorderWithColor(scene, style.standard.border) == nullptr);
+}
+
+TEST_CASE("TestTextFieldCanHideItsVisualLabelWithoutDroppingSemantics") {
+  TestPlatform platform;
+  Runtime runtime{FlatHiddenVisualLabelTextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const TextFieldStyle style = TextFieldStyle::Default();
+
+  REQUIRE(FindText(scene, "Search mail") == nullptr);
+  REQUIRE(FindText(scene, "Sender or subject") != nullptr);
+  REQUIRE(FindBorderWithColor(scene, style.outlined.border) != nullptr);
+  REQUIRE(FindTextFieldOutline(scene, style.outlined.border, style.border_width) == nullptr);
+
+  const detail::MountedNode* mounted = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(mounted != nullptr);
+  Rect content = mounted->ContentBounds();
+  const float leading_slot = style.leading_icon_size + style.icon_spacing;
+  content.x += leading_slot;
+  content.width -= leading_slot;
+  REQUIRE(std::ranges::any_of(scene.Commands(), [mounted, &style](const PaintCommand& command) {
+    const auto* clip = std::get_if<PushClipCommand>(&command);
+    return clip && clip->rect == mounted->bounds && clip->corner_radius == style.corner_radius;
+  }));
+  REQUIRE(std::ranges::any_of(scene.Commands(), [content](const PaintCommand& command) {
+    const auto* clip = std::get_if<PushClipCommand>(&command);
+    return clip && clip->rect == content && clip->corner_radius == 0.0F;
+  }));
+
+  const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+  const auto field = std::ranges::find(frame->nodes, SemanticRole::TextField, &SemanticNode::role);
+  REQUIRE(field != frame->nodes.end());
+  REQUIRE(field->label == "Search mail");
 }
 
 TEST_CASE("TestTextFieldIconsOffsetSharedInputGeometry") {
@@ -977,7 +1028,7 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   REQUIRE(message->style.foreground.green == style.validation_text_style.foreground.green);
   REQUIRE(message->style.foreground.blue == style.validation_text_style.foreground.blue);
   REQUIRE(message->style.font == style.validation_text_style.font);
-  REQUIRE(runtime.RootNode()->children.front()->bounds.height == 80.0F);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == style.standard.minimum_height + 44.0F);
 
   REQUIRE(FindTextFieldIndicator(scene, style.validation_error, 160.0F, style.validation_border_width) != nullptr);
 
@@ -1166,7 +1217,7 @@ TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
   REQUIRE(message->style.foreground.green == style.placeholder_style.foreground.green);
   REQUIRE(message->style.foreground.blue == style.placeholder_style.foreground.blue);
   REQUIRE(FindBorderWithColor(scene, style.validation_error) == nullptr);
-  REQUIRE(runtime.RootNode()->children.front()->bounds.height == 60.0F);
+  REQUIRE(runtime.RootNode()->children.front()->bounds.height == style.standard.minimum_height + 24.0F);
 }
 
 TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
