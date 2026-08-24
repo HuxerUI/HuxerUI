@@ -154,6 +154,8 @@ if ($LASTEXITCODE -ne 0 -or $emccVersion -notmatch [regex]::Escape($webVersion))
 
 Reset-OwnedDirectory $platformArtifactRoot $buildDirectory
 Reset-OwnedDirectory $androidExtractDirectory $buildDirectory
+Reset-OwnedDirectory $webBuildDirectory $buildDirectory
+Reset-OwnedDirectory $hostBuildDirectory $buildDirectory
 
 $androidDirectory = Join-Path $sourceDirectory "platform/android"
 $gradleWrapper = Join-Path $androidDirectory "gradlew.bat"

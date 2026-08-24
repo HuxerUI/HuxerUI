@@ -110,6 +110,8 @@ run() {
 
 reset_owned_directory "$platform_artifact_root"
 reset_owned_directory "$android_extract_directory"
+reset_owned_directory "$web_build_directory"
+reset_owned_directory "$host_build_directory"
 
 web_version=$(sed -n 's/^set(HUXERUI_WEB_EMSCRIPTEN_VERSION "\([^"]*\)").*/\1/p' \
   "$source_directory/cmake/HuxerUISdk.cmake")

@@ -5,40 +5,67 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to create or reuse
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
 concurrency:
-  group: sdk-release-${{ github.ref }}
+  group: sdk-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   validate:
     name: Validate release
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Validate tag and version
         id: release
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: >-
           cmake
           -DSOURCE_DIRECTORY=${{ github.workspace }}
           -DRELEASE_TAG=${RELEASE_TAG}
           -DOUTPUT_FILE=${GITHUB_OUTPUT}
           -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
+      - name: Create release tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
+            existing_commit="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
+            if [ "${existing_commit}" != "${GITHUB_SHA}" ]; then
+              echo "Release tag ${RELEASE_TAG} already points to ${existing_commit}, not ${GITHUB_SHA}" >&2
+              exit 1
+            fi
+            echo "Release tag ${RELEASE_TAG} already points to ${GITHUB_SHA}"
+            exit 0
+          fi
 
-  platform-artifacts:
-    name: Build Android and Web SDK artifacts
+          git tag "${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+
+  android-artifacts:
+    name: Build Android SDK artifacts
     needs: validate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Prepare platform artifact tools
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Prepare Android tools
         run: >-
           chmod +x
           platform/android/gradlew
@@ -75,6 +102,27 @@ jobs:
           zip -qr ../HuxerUI.aar .
           cd ..
           rm -rf aar
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-artifacts-android
+          path: ${{ runner.temp }}/huxerui-platform-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
+  web-artifacts:
+    name: Build Web SDK artifacts
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Prepare Web tools
+        run: >-
+          chmod +x
+          tools/prebuilt/linux/x86_64/hcg
+          tools/prebuilt/linux/x86_64/hrc
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: 4.0.19
@@ -91,46 +139,53 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19"
           cp build-web/lib/libhuxerui_static.a \
             "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19/libhuxerui.a"
-      - name: Upload platform artifacts
+      - name: Upload Web artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: platform-artifacts
+          name: platform-artifacts-web
           path: ${{ runner.temp }}/huxerui-platform-artifacts
           if-no-files-found: error
           retention-days: 7
 
   build:
-    name: Build ${{ matrix.system }} ${{ matrix.architecture }}
+    name: Build ${{ matrix.display_name }} ${{ matrix.architecture }}
     needs:
       - validate
-      - platform-artifacts
+      - android-artifacts
+      - web-artifacts
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: windows-2022
             system: windows
+            display_name: Windows
             architecture: x86_64
             generator: ZIP
             extension: zip
           - runner: macos-15
             system: macos
+            display_name: macOS
             architecture: arm64
             generator: TGZ
             extension: tar.gz
           - runner: macos-15-intel
             system: macos
+            display_name: macOS
             architecture: x86_64
             generator: TGZ
             extension: tar.gz
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
-          name: platform-artifacts
+          pattern: platform-artifacts-*
           path: platform-artifacts
+          merge-multiple: true
       - name: Prepare Unix executables
         if: runner.os != 'Windows'
         run: >-
@@ -215,10 +270,11 @@ jobs:
           retention-days: 7
 
   build-linux:
-    name: Build linux ${{ matrix.architecture }}
+    name: Build Linux ${{ matrix.architecture }}
     needs:
       - validate
-      - platform-artifacts
+      - android-artifacts
+      - web-artifacts
     strategy:
       fail-fast: false
       matrix:
@@ -236,11 +292,14 @@ jobs:
       LD_LIBRARY_PATH: /opt/huxerui-linux-baseline/lib
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
-          name: platform-artifacts
+          pattern: platform-artifacts-*
           path: platform-artifacts
+          merge-multiple: true
       - name: Install Linux build dependencies
         run: |
           apt-get update
@@ -317,6 +376,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Download SDK archives
         uses: actions/download-artifact@v4
         with:
@@ -326,8 +387,6 @@ jobs:
       - name: Add installers
         run: cp install.sh install.ps1 release-assets/
       - name: Validate release assets
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: >-
           cmake
           -DSOURCE_DIRECTORY=${{ github.workspace }}
@@ -337,7 +396,6 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
