@@ -21,17 +21,18 @@ FilePickerFilter TextFileFilter() {
   };
 }
 
+[[huxerui::composable]]
 View DirectoryPath(std::string label, const File& directory) {
   const ThemeSpec& theme = UseTheme();
   return Column {
-    Text(std::move(label), TextRole::Label).With(Foreground(theme.colors.primary)),
+    Text(label, TextRole::Label).With(Foreground(theme.colors.primary)),
     SelectionArea {
       Text(directory.Path()),
     },
   }.With(Spacing(theme.spacing.extra_small));
 }
 
-[[huxerui::scope]] View FilesContent() {
+[[huxerui::composable]] View FilesContent() {
   auto files = UseService<FileSystem>();
   auto picker = UseService<FilePicker>();
   auto tasks = UseTaskScope();

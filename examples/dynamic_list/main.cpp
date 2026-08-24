@@ -13,7 +13,7 @@ struct Item {
   std::string title;
 };
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ItemRow(Item item) {
   auto taps = UseState(0);
 
@@ -34,7 +34,7 @@ View ItemRow(Item item) {
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View DynamicList() {
   auto items = UseStateList<Item>({
       {1, "Alpha"},

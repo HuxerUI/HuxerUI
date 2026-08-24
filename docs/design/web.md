@@ -92,7 +92,7 @@ Emscripten is selected through `EMSCRIPTEN` before native platform branches and 
 
 The Web platform configuration supplies Web sources, platform-owned application registration, IDBFS initialization, required Emscripten link settings, JavaScript bridge code, and exported lifecycle operations. Web targets do not build the ordinary HuxerUI shared library by default.
 
-Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable scope code generation, and attach resources. Tool resolution continues to use the development host, so a Windows, macOS, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
+Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable composable code generation, and attach resources. Tool resolution continues to use the development host, so a Windows, macOS, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 
 The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, and local serving through `emrun`.
 The project-owned Web shell keeps its HTML and host-element mount code under `platform/web`, while the backend continues to avoid a parallel JavaScript component build system.

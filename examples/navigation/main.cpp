@@ -19,6 +19,7 @@ View FactoryDetailsPage(int section);
 View FactoryFinalPage();
 View FactoryReplacementPage();
 
+[[huxerui::composable]]
 View FactoryRootPage() {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
@@ -37,6 +38,7 @@ View FactoryRootPage() {
   );
 }
 
+[[huxerui::composable]]
 View FactoryDetailsPage(int section) {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
@@ -55,6 +57,7 @@ View FactoryDetailsPage(int section) {
   );
 }
 
+[[huxerui::composable]]
 View FactoryFinalPage() {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
@@ -72,6 +75,7 @@ View FactoryFinalPage() {
   );
 }
 
+[[huxerui::composable]]
 View FactoryReplacementPage() {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
@@ -104,6 +108,7 @@ struct ArticleRoute {
 
 using DemoRoute = std::variant<ShelfRoute, ArticleRoute>;
 
+[[huxerui::composable]]
 View RoutedArticleNotesPage(int article) {
   const ThemeSpec& theme = UseTheme();
   const NavigationController local_navigation = UseNavigation();
@@ -124,6 +129,7 @@ View RoutedArticleNotesPage(int article) {
   );
 }
 
+[[huxerui::composable]]
 View RoutedArticleOverviewPage(int article) {
   const ThemeSpec& theme = UseTheme();
   const NavigationController local_navigation = UseNavigation();
@@ -149,6 +155,7 @@ View RoutedArticlePage(const ArticleRoute& route) {
   return NavigationStack(RoutedArticleOverviewPage, route.article);
 }
 
+[[huxerui::composable]]
 View RoutedShelfPage(const ShelfRoute& route) {
   const ThemeSpec& theme = UseTheme();
   const RouteNavigationController<DemoRoute> navigation = UseNavigation<DemoRoute>();
@@ -177,6 +184,7 @@ View ResolveDemoRoute(const DemoRoute& route) {
   return RoutedArticlePage(std::get<ArticleRoute>(route));
 }
 
+[[huxerui::composable]]
 View RoutedRootContent(std::optional<NavigationController> factory_navigation) {
   const ThemeSpec& theme = UseTheme();
   const RouteNavigationController<DemoRoute> route_navigation = UseNavigation<DemoRoute>();
@@ -205,6 +213,7 @@ View StandaloneRoutedRootPage() {
   return RoutedRootContent(std::nullopt);
 }
 
+[[huxerui::composable]]
 View NestedRoutedRootPage() {
   return RoutedRootContent(UseRootNavigation());
 }
@@ -283,7 +292,7 @@ View RoutedNavigationContent(State<NavigationPath<DemoRoute>> path) {
 #endif
 }
 
-[[huxerui::scope]] View RoutedNavigationDemo() {
+[[huxerui::composable]] View RoutedNavigationDemo() {
   auto path = UseState(NavigationPath<DemoRoute>{});
   return RoutedNavigationContent(path);
 }

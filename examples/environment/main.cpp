@@ -16,11 +16,12 @@ struct GreetingLocale {
   bool operator==(const GreetingLocale&) const = default;
 };
 
+[[huxerui::composable]]
 View LocaleCard(std::string title) {
   const auto& locale = UseEnvironment<GreetingLocale>();
   const auto& theme = UseTheme();
   return Column {
-    Text(std::move(title), TextRole::Label),
+    Text(title, TextRole::Label),
     Text(locale.name + ": " + locale.greeting, TextRole::Title),
   }.With(
       Padding(theme.spacing.medium),
@@ -30,12 +31,12 @@ View LocaleCard(std::string title) {
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View FrenchContent() {
   return LocaleCard("Nested provider overrides the value");
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ProvidedContent() {
   return Column {
     LocaleCard("Inherited from the nearest provider"),
@@ -43,7 +44,7 @@ View ProvidedContent() {
   }.With(Spacing(UseTheme().spacing.medium));
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View EnvironmentContent() {
   auto use_chinese = UseState(true);
   const ThemeSpec& theme = UseTheme();

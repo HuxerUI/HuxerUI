@@ -4,7 +4,7 @@ using namespace huxerui;
 
 constexpr Color primary_text_color = Color::Rgb(27, 31, 36);
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View Counter(const std::string& button_text, int value) {
   auto count = UseState(1);
 

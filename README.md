@@ -25,7 +25,7 @@ HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, 
 
 using namespace huxerui;
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View Counter() {
   auto count = UseState(0);
 
@@ -69,7 +69,7 @@ int main() {
 ```
 
 Add the common declaration and the selected platform entry to the application target.
-The helper links HuxerUI and enables scope generation:
+The helper links HuxerUI and enables composable generation:
 
 ```cmake
 huxerui_add_app(my_app
@@ -174,8 +174,8 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Navigation Design](docs/design/navigation.md) | Page stacks, typed routes, scoped controllers, transitions, Back routing, and Web URL history |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
-| [View Composition and Environment Design](docs/design/view-composition.md) | Immediate View declarations, mounted Environment propagation, reconciliation-time compilation, and the deferred composable migration |
-| [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
+| [View Composition and Environment Design](docs/design/view-composition.md) | Immediate View declarations, mounted Environment propagation, reconciliation-time compilation, and composable functions |
+| [Composable Code Generation Design](docs/design/composable-codegen.md) | Composable transformation, composition-call validation, and build integration |
 | [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md) | Project tooling, distribution, libraries, and PlatformView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |
 

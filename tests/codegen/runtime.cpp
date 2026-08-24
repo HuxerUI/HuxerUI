@@ -94,7 +94,7 @@ public:
 State<int> generated_count;
 int generated_compositions = 0;
 
-[[huxerui::scope]] View GeneratedCounter(int initial) {
+[[huxerui::composable]] View GeneratedCounter(int initial) {
   ++generated_compositions;
   auto count = UseState(initial);
   generated_count = count;

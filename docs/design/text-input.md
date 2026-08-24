@@ -541,7 +541,7 @@ Normal application code continues to use the umbrella header:
 Representative use is:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View LoginForm() {
   auto name = UseState(TextEditingValue::FromText(""));
 

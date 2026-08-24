@@ -100,7 +100,7 @@ It is appropriate for UI feedback, retry backoff, polling, and presentation life
 
 UseTaskScope requires an active composition and does not allocate an ordered state slot.
 Every call in the same RecomposeScope returns a handle to the same lazily created TaskScope.
-An ordinary helper contributes to its caller's scope, while `[[huxerui::scope]]` creates an independent TaskScope lifetime.
+An ordinary helper contributes to its caller's scope, while `[[huxerui::composable]]` creates an independent TaskScope lifetime.
 Launch is a side effect and is rejected during view composition; application code starts work from committed Lifecycle setup, event callbacks, or other post-composition owners.
 
 Compatible recomposition, a changed returned root View, and keyed movement retain the TaskScope and its running tasks.
@@ -137,7 +137,7 @@ Lifecycle does not recognize Task types.
 Application code explicitly launches a task from setup and cancels the corresponding TaskHandle from cleanup when a dependency change must stop that individual request:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View UserName(UserId user_id, std::shared_ptr<UserService> service) {
   auto tasks = UseTaskScope();
   auto name = UseState(std::string{"Loading..."});

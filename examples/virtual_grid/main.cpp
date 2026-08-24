@@ -8,7 +8,7 @@ using namespace huxerui;
 constexpr Color primary_text_color = Color::Rgb(31, 35, 40);
 constexpr Color secondary_text_color = Color::Rgb(91, 98, 106);
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View VirtualGridItem(int index) {
   auto taps = UseState(0);
 

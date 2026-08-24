@@ -187,7 +187,7 @@ KeyframeSpec TaijiAnimation() {
   };
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View TaijiEffect() {
   const ThemeSpec& theme = UseTheme();
   auto started = UseState(false);
@@ -209,7 +209,7 @@ View TaijiEffect() {
       );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View OrbitEffect() {
   const ThemeSpec& theme = UseTheme();
   auto started = UseState(false);
@@ -233,6 +233,7 @@ View OrbitEffect() {
       );
 }
 
+[[huxerui::composable]]
 View PathEffect() {
   const ColorScheme colors = UseTheme().colors;
   return Canvas([colors](PaintContext& paint, Size size) { PaintPathStudy(paint, size, colors); }).With(Grow());
@@ -253,7 +254,7 @@ View SelectedEffect(std::size_t selected) {
 
 } // namespace
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View CanvasDemo() {
   const ThemeSpec& theme = UseTheme();
   auto selected = UseState<std::size_t>(0);

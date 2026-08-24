@@ -22,7 +22,7 @@ HuxerUI's public identity is fixed:
 - Include prefix: `<huxerui/...>`.
 - Umbrella header: `<huxerui/huxerui.h>`.
 - CMake targets: `HuxerUI::huxerui` and `HuxerUI::huxerui_static`.
-- Scoped components: `[[huxerui::scope]]`.
+- Composable functions: `[[huxerui::composable]]`.
 - Application declaration: `huxerui::Application`.
 - Native application entry: `huxerui::RunApplication()`.
 
@@ -135,11 +135,11 @@ Do not create a public header per trivial control or grow `view.h` with unrelate
 
 Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep a type in `src/internal.h` only when Runtime subsystems genuinely share it.
 
-Detailed architecture belongs in [Architecture Design](docs/design/architecture.md), text editing contracts in [Text Input and TextField Design](docs/design/text-input.md), code generation in [Scope Code Generation Design](docs/design/scope-codegen.md), and SDK or library planning in [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md).
+Detailed architecture belongs in [Architecture Design](docs/design/architecture.md), text editing contracts in [Text Input and TextField Design](docs/design/text-input.md), code generation in [Composable Code Generation Design](docs/design/composable-codegen.md), and SDK or library planning in [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md).
 
 ## Public API and state
 
-A component is an ordinary function returning `View`. The application root already owns a scope. Use `[[huxerui::scope]]` only when a reusable component needs independent local state, a component event hub, or a local recomposition boundary.
+A component is an ordinary function returning `View`. The application root already owns a scope. Mark a reusable function `[[huxerui::composable]]` when it directly calls a composition-bound `UseXxx()` facility or needs an independent local recomposition lifetime. A custom hook named `UseXxx()` may return a non-View value and share its composable caller's active scope; do not wrap it in a View-producing composable solely because it calls another hook.
 
 `UseState` identity belongs to the current `RecomposeScope`, source location, and occurrence at that location. Reordered dynamic content needs stable child scopes or keys. `UseEnvironment`, `UseTheme`, and `UseEvents` do not allocate ordered state slots.
 
@@ -162,7 +162,7 @@ Put required component values in constructors and component-only semantics in st
 
 Choose the narrowest existing extension mechanism:
 
-- Function or scoped function component for composition.
+- Ordinary or composable function for composition.
 - Built-in View type for a new primitive semantic or rendering node.
 - `Layout<Derived>` or `VirtualLayout<Derived>` for layout policy.
 - Property modifier for reusable data applied to `ViewSpec`.
@@ -244,9 +244,9 @@ Use C++20 with extensions disabled. Preserve `-Wall -Wextra -Wpedantic` and MSVC
 
 Shared `src/*.cpp` files belong to the core object target; platform sources and libraries are selected through `cmake/platform/*.cmake`. Consumers link public targets and never include `src` or depend on source-checkout platform paths.
 
-Enable `[[huxerui::scope]]` transformation with `huxerui_enable_codegen(target)` after all sources are added. Marked definitions belong in `.cpp`, `.cc`, or `.cxx`; do not annotate the app root.
+Enable `[[huxerui::composable]]` transformation with `huxerui_enable_codegen(target)` after all sources are added. Marked definitions belong in `.cpp`, `.cc`, or `.cxx`; do not annotate the app root.
 
-Host tools in `tools/prebuilt/<host>/<architecture>` run on the development host, not the target. Scope syntax, transformation, source discovery, generated code, or entry-point changes update codegen tests, Runtime tests, CMake, documentation, and required host tools together. Do not edit generated files.
+Host tools in `tools/prebuilt/<host>/<architecture>` run on the development host, not the target. Composable syntax, transformation, source discovery, generated code, or entry-point changes update codegen tests, Runtime tests, CMake, documentation, and required host tools together. Do not edit generated files.
 
 Place tests by ownership under `tests/unit`, `tests/runtime`, `tests/platform`, or `tests/codegen`. Tests verify public outcomes and invariants rather than private steps. Cover mount, compatible recomposition, replacement, unmount, keyed movement, Cancel and disabled input paths, deterministic animation time, and exception categories where relevant.
 

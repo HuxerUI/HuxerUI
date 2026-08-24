@@ -13,7 +13,7 @@ constexpr float platform_text_field_height = 48.0F;
 constexpr float platform_text_field_height = 28.0F;
 #endif
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View PlatformViewDemo() {
   auto value = UseState<std::string>("Editable PlatformView text");
   auto visible = UseState(true);

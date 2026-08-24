@@ -7,7 +7,7 @@ using namespace huxerui;
 
 struct CounterChanged : Event<int> {};
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 auto Counter(int value) {
   auto count = UseState(1);
   auto events = UseEvents();

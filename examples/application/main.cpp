@@ -140,6 +140,7 @@ void UpdateTextFilePreview(
   });
 }
 
+[[huxerui::composable]]
 View TextFilePreviewCard(const TextFilePreview& preview) {
   const ThemeSpec& theme = UseTheme();
   return Column {
@@ -157,7 +158,7 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
   );
 }
 
-[[huxerui::scope]] View ApplicationContent() {
+[[huxerui::composable]] View ApplicationContent() {
   const ApplicationHandle application = UseApplication();
   const ApplicationActivation startup_activation = application.StartupActivation();
   const ApplicationLifecycleState lifecycle_state = application.LifecycleState();

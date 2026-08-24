@@ -25,6 +25,7 @@ View CommandDialogCard(DialogContext dialog) {
   }.With(Padding(24.0F), Spacing(16.0F), Background(surface_color), CornerRadius(12.0F));
 }
 
+[[huxerui::composable]]
 View BottomSheetCard(BottomSheetContext bottom_sheet) {
   const ThemeSpec& theme = UseTheme();
   return Column {
@@ -46,6 +47,7 @@ View PopupCard(PopupContext popup) {
   }.With(Padding(16.0F), Spacing(8.0F), Background(surface_color), CornerRadius(10.0F));
 }
 
+[[huxerui::composable]]
 View App() {
   auto declarative_dialog_visible = UseState(false);
   auto toast = UseToast();
@@ -110,7 +112,7 @@ View App() {
 }
 
 View PresentationRoot() {
-  return MaterialTheme {Scope(App)};
+  return MaterialTheme {App()};
 }
 
 const Application application{

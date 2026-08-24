@@ -8,7 +8,7 @@ using namespace huxerui;
 constexpr Color primary_text_color = Color::Rgb(31, 35, 40);
 constexpr Color secondary_text_color = Color::Rgb(91, 98, 106);
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ScrollToolbar(ScrollController scroll) {
   const ScrollMetrics metrics = scroll.Metrics();
 
@@ -23,7 +23,7 @@ View ScrollToolbar(ScrollController scroll) {
       .With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center));
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ScrollRow(int index) {
   auto taps = UseState(0);
 
@@ -80,7 +80,7 @@ View HorizontalScrollSection() {
       );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View NestedScrollSection(ScrollController scroll) {
   const ScrollMetrics metrics = scroll.Metrics();
   std::vector<int> items(12);

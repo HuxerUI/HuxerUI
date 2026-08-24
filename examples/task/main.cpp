@@ -15,7 +15,7 @@ public:
   }
 };
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View UserName(UserId user_id, std::shared_ptr<UserService> service) {
   auto tasks = UseTaskScope();
   auto name = UseState(std::string{"Loading..."});
@@ -48,7 +48,7 @@ View UserName(UserId user_id, std::shared_ptr<UserService> service) {
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View TaskContent(std::shared_ptr<UserService> service) {
   auto user_id = UseState<UserId>(1);
   const ThemeSpec& theme = UseTheme();

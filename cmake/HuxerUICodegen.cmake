@@ -67,6 +67,21 @@ function(huxerui_enable_codegen target_name)
         )
     endif ()
 
+    get_target_property(HUXERUI_CODEGEN_ALREADY_SCHEDULED
+            ${target_name}
+            HUXERUI_CODEGEN_SCHEDULED
+    )
+    if (HUXERUI_CODEGEN_ALREADY_SCHEDULED)
+        return()
+    endif ()
+    set_property(TARGET ${target_name} PROPERTY HUXERUI_CODEGEN_SCHEDULED TRUE)
+    # DEFER evaluates arguments after function locals expire, so bind the target name into the deferred call now.
+    cmake_language(EVAL CODE
+            "cmake_language(DEFER CALL _huxerui_apply_codegen [[${target_name}]])"
+    )
+endfunction()
+
+function(_huxerui_apply_codegen target_name)
     huxerui_resolve_host_tool("hcg" HUXERUI_CODEGEN_COMMAND)
 
     get_target_property(HUXERUI_CODEGEN_ALREADY_ENABLED
@@ -146,10 +161,16 @@ function(huxerui_enable_codegen target_name)
         )
         string(FIND
                 "${HUXERUI_CODEGEN_SOURCE_CONTENT}"
-                "[[huxerui::scope]]"
+                "[[huxerui::composable]]"
                 HUXERUI_CODEGEN_MARKER_INDEX
         )
-        if (HUXERUI_CODEGEN_MARKER_INDEX EQUAL -1)
+        string(FIND
+                "${HUXERUI_CODEGEN_SOURCE_CONTENT}"
+                "Use"
+                HUXERUI_CODEGEN_COMPOSITION_CALL_INDEX
+        )
+        if (HUXERUI_CODEGEN_MARKER_INDEX EQUAL -1
+                AND HUXERUI_CODEGEN_COMPOSITION_CALL_INDEX EQUAL -1)
             list(APPEND HUXERUI_CODEGEN_REWRITTEN_SOURCES
                     "${HUXERUI_CODEGEN_SOURCE}"
             )
@@ -190,7 +211,7 @@ function(huxerui_enable_codegen target_name)
                         "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
                         "${HUXERUI_CODEGEN_COMMAND}"
                 COMMENT
-                        "Generating HuxerUI scope source ${HUXERUI_CODEGEN_SOURCE_NAME}"
+                        "Generating HuxerUI composable source ${HUXERUI_CODEGEN_SOURCE_NAME}"
                 VERBATIM
         )
 

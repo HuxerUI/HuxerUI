@@ -196,7 +196,7 @@ Each registered root must contain at least one supported resource and must not e
 All roots configure one final resource package for the target.
 Platform shells consume its generated staging projection and do not redeclare asset roots.
 
-Resource processing is distinct from C++ scope transformation.
+Resource processing is distinct from C++ composable transformation.
 The HuxerUI Resource Compiler (`hrc`) belongs in the existing `tools/prebuilt/<host>/<architecture>` layout rather than expanding the HuxerUI Code Generator (`hcg`) into an unrelated compiler.
 
 The resource tool:

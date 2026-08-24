@@ -262,7 +262,7 @@ An ordinary HuxerUI component is a function returning View.
 It does not automatically own an independent RecomposeScope merely because it is a component function.
 
 The application root already owns a scope.
-`[[huxerui::scope]]` is used only when a reusable component needs independent local state, a local event hub, or a local recomposition boundary.
+`[[huxerui::composable]]` marks reusable functions that directly call composition-bound `UseXxx()` facilities or need an independent local recomposition lifetime.
 
 NavigationStack is explicit even when every page function is scoped because page scopes and navigation ownership solve different problems:
 

@@ -198,7 +198,7 @@ Only a top-level desktop HuxerUI build registers SDK installation and CPack beha
 
 - Creates an executable, application bundle, or Android application library for the active platform.
 - Links a canonical HuxerUI target.
-- Enables scope code generation after all declared sources are known.
+- Enables composable code generation after all declared sources are known.
 - Registers the optional resource root.
 - Accepts an optional `RESOURCE_OUTPUT_DIRECTORY` for a platform shell that owns final package staging.
 - Applies bundle metadata supplied by the application.
@@ -549,7 +549,7 @@ There is no project-level `huxerui.cmake`, generated Android SDK configuration p
 
 The shell is a source-controlled Xcode application project. It owns the Info.plist, launch screen, asset catalog, build configurations, shared scheme, product identifier, signing, Capabilities, platform sources, archive behavior, and final App Bundle.
 
-On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake places the archive, linker response file, and merged HuxerUI resource package under `huxerui-ios/<target>` so every Xcode shell consumes the same stable application-core contract. CMake remains responsible for the common C++ sources, scope code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, platform resources, destination selection, signing, packaging, installation metadata, and debugging, and fails its staging phase when the merged HuxerUI resource package is absent.
+On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake places the archive, linker response file, and merged HuxerUI resource package under `huxerui-ios/<target>` so every Xcode shell consumes the same stable application-core contract. CMake remains responsible for the common C++ sources, composable code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, platform resources, destination selection, signing, packaging, installation metadata, and debugging, and fails its staging phase when the merged HuxerUI resource package is absent.
 
 iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_HOME` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding remain outside the current preview.
 

@@ -4,6 +4,7 @@ using namespace huxerui;
 
 constexpr Color explicit_button_color = Color::Rgb(88, 166, 255);
 
+[[huxerui::composable]]
 View AccentTheme(View content) {
   const ThemeSpec& theme = UseTheme();
   ThemeDefinition definition;
@@ -13,10 +14,10 @@ View AccentTheme(View content) {
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
       .corner_radius = theme.shapes.large,
   });
-  return Theme {std::move(definition), std::move(content)};
+  return Theme {std::move(definition), content};
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View TextFieldDemo() {
   const auto theme = UseTheme();
   auto material_value = UseState(TextEditingValue::FromText(""));
@@ -59,7 +60,7 @@ View TextFieldDemo() {
       .With(Spacing(theme.spacing.small));
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ThemeContent() {
   const auto theme = UseTheme();
   auto checkbox_checked = UseState(true);

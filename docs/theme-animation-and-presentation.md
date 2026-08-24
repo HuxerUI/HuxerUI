@@ -53,7 +53,7 @@ View BrandTheme(View content) {
 
 `FlatTheme {theme, content}` provides the same token-to-style rebuild path for a branded Flat Theme.
 
-A custom component style is an Environment value registered through `ThemeDefinition::Set()`. The component reads it inside its own `[[huxerui::scope]]` function when the style changes composition structure; a built-in leaf may instead resolve it through its private ViewSpec defaults operation. Runtime does not maintain a global component-style switch.
+A custom component style is an Environment value registered through `ThemeDefinition::Set()`. The component reads it inside its own `[[huxerui::composable]]` function when the style changes composition structure; a built-in leaf may instead resolve it through its private ViewSpec defaults operation. Runtime does not maintain a global component-style switch.
 
 Flat and Material definitions also provide a complete `SystemBarsAppearance` Theme value.
 Runtime paints the status and navigation backplane with those colors and derives light or dark native foreground content when the corresponding setting is `Automatic`.

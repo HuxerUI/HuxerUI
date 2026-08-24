@@ -8,7 +8,7 @@ using namespace huxerui;
 constexpr Color primary_text_color = Color::Rgb(31, 35, 40);
 constexpr Color secondary_text_color = Color::Rgb(91, 98, 106);
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View VirtualListToolbar(ScrollController scroll) {
   const auto offset = static_cast<int>(scroll.Offset());
 
@@ -21,7 +21,7 @@ View VirtualListToolbar(ScrollController scroll) {
       .With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center));
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View VirtualListItem(int index) {
   auto taps = UseState(0);
 

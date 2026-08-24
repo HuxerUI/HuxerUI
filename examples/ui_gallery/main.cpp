@@ -136,16 +136,17 @@ VectorAsset TuneIcon() {
   return icon;
 }
 
+[[huxerui::composable]]
 View Panel(View content) {
   const ThemeSpec& theme = UseTheme();
-  return std::move(content).With(
+  return View(content).With(
       Padding(theme.spacing.medium),
       Background(theme.colors.surface_container_low),
       CornerRadius(theme.shapes.extra_large)
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ControlsDemo() {
   const ThemeSpec& theme = UseTheme();
   auto checkbox_checked = UseState(true);
@@ -251,6 +252,7 @@ View ControlsDemo() {
   );
 }
 
+[[huxerui::composable]]
 View LayoutDemo() {
   const ThemeSpec& theme = UseTheme();
   return Panel(
@@ -285,7 +287,7 @@ View LayoutDemo() {
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View MotionDemo() {
   const ThemeSpec& theme = UseTheme();
   auto transformed = UseState(false);
@@ -304,6 +306,7 @@ View MotionDemo() {
   );
 }
 
+[[huxerui::composable]]
 View ToolValue(const char* label, const char* value) {
   const ThemeSpec& theme = UseTheme();
   return Row {
@@ -313,7 +316,7 @@ View ToolValue(const char* label, const char* value) {
   }.With(CrossAlign(CrossAxisAlignment::Center));
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View GalleryToolsContent(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
   const ThemeSpec& theme = UseTheme();
   auto family_transition = UseSceneTransition();
@@ -341,6 +344,7 @@ View GalleryToolsContent(std::size_t selected_page, State<std::size_t> theme_fam
   }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
 }
 
+[[huxerui::composable]]
 View GalleryNavigation(State<std::size_t> selected_page, State<bool> start_open) {
   const ThemeSpec& theme = UseTheme();
   return Column {
@@ -370,6 +374,7 @@ View GalleryNavigation(State<std::size_t> selected_page, State<bool> start_open)
   );
 }
 
+[[huxerui::composable]]
 View GalleryTools(std::size_t selected_page, State<std::size_t> theme_family, State<bool> dark_mode) {
   const ThemeSpec& theme = UseTheme();
   return GalleryToolsContent(selected_page, theme_family, dark_mode).With(
@@ -391,6 +396,7 @@ View GalleryPage(std::size_t selected_page) {
   }
 }
 
+[[huxerui::composable]]
 View GalleryMain(
     State<std::size_t> selected_page,
     State<bool> start_open,
@@ -446,6 +452,7 @@ View GalleryMain(
   );
 }
 
+[[huxerui::composable]]
 View GalleryShell(
     State<std::size_t> selected_page,
     State<std::size_t> theme_family,
@@ -476,15 +483,15 @@ View App() {
 
   if (theme_family == 1) {
     if (dark_mode) {
-      return FlatDarkTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+      return FlatDarkTheme {GalleryShell(selected_page, theme_family, dark_mode, start_open, end_open)};
     }
-    return FlatTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+    return FlatTheme {GalleryShell(selected_page, theme_family, dark_mode, start_open, end_open)};
   }
 
   if (dark_mode) {
-    return MaterialDarkTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+    return MaterialDarkTheme {GalleryShell(selected_page, theme_family, dark_mode, start_open, end_open)};
   }
-  return MaterialTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+  return MaterialTheme {GalleryShell(selected_page, theme_family, dark_mode, start_open, end_open)};
 }
 
 const Application application{

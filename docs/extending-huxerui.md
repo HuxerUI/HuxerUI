@@ -4,12 +4,12 @@ HuxerUI exposes typed extension points for component events, layout, virtualizat
 
 ## Custom components and events
 
-Custom components remain ordinary functions returning `View`. Use a scope only when the component owns local state:
+Custom components remain ordinary functions returning `View`. Mark a function composable when it directly uses composition state or another `UseXxx()` facility:
 
 ```cpp
 struct Submitted : Event<std::string> {};
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View SearchBox() {
   auto events = UseEvents();
 
@@ -143,5 +143,5 @@ Platform feature libraries should expose typed services and controllers rather t
 Detailed contracts are documented in:
 
 - [Architecture Design](design/architecture.md)
-- [Scope Code Generation Design](design/scope-codegen.md)
+- [Composable Code Generation Design](design/composable-codegen.md)
 - [SDK, CLI, Platform Shell, and Library Design](design/sdk-cli.md)

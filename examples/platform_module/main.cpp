@@ -27,7 +27,7 @@ template <class Result> std::string ResultStatus(const PlatformResult<Result>& r
 } // namespace
 
 #if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
-[[huxerui::scope]]
+[[huxerui::composable]]
 View PlatformSpecificDemo() {
   auto color_stream = example::UseColorStream();
   auto stream_texture = UseState(ExternalTexture{});
@@ -64,7 +64,7 @@ View PlatformSpecificDemo() {
 }
 #endif
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View PlatformModuleDemo() {
   auto timer = example::UseTimer();
   auto tick = UseState<std::uint64_t>(0);

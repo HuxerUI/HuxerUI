@@ -11,7 +11,7 @@ struct LoadingState {
   std::string body {"Press Send to perform an HTTPS GET request."};
 };
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View HttpContent() {
   auto http = UseService<HttpClient>();
   auto tasks = UseTaskScope();

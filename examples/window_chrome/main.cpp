@@ -2,6 +2,7 @@
 
 using namespace huxerui;
 
+[[huxerui::composable]]
 View WindowChromeDemo() {
   const ThemeSpec& theme = UseTheme();
   auto toast = UseToast();
@@ -55,7 +56,7 @@ View WindowChromeDemo() {
 }
 
 View App() {
-  return MaterialTheme {Scope(WindowChromeDemo)};
+  return MaterialTheme {WindowChromeDemo()};
 }
 
 const Application application{

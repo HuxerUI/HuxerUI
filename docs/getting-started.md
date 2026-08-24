@@ -19,7 +19,7 @@ The repository vendors the Catch2 sources used by its tests, so a normal configu
 
 using namespace huxerui;
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View Counter() {
   auto count = UseState(0);
 
@@ -59,7 +59,7 @@ int main() {
 }
 ```
 
-The static `Application` declares the process-level root and `AppOptions`; its constructor makes the declaration available to the platform shell without requiring a fixed C++ variable or factory name. Desktop platform projects call `RunApplication()` from their native entry point, while Android and Web create Runtime sessions from the same registered application after loading its native library. The root already owns an implicit scope. `[[huxerui::scope]]` is needed only when a component requires its own local state and recomposition boundary.
+The static `Application` declares the process-level root and `AppOptions`; its constructor makes the declaration available to the platform shell without requiring a fixed C++ variable or factory name. Desktop platform projects call `RunApplication()` from their native entry point, while Android and Web create Runtime sessions from the same registered application after loading its native library. The root already owns an implicit scope. A reusable function that directly calls a composition-bound `UseXxx()` facility is marked `[[huxerui::composable]]`; an Environment-independent View helper remains unmarked.
 
 ## CMake target
 
@@ -71,10 +71,10 @@ huxerui_add_app(my_app
 )
 ```
 
-`huxerui_add_app()` creates the platform-appropriate application target, links HuxerUI, and enables scope code generation after all declared sources are known.
+`huxerui_add_app()` creates the platform-appropriate application target, links HuxerUI, and enables composable code generation after all declared sources are known.
 CLI-generated projects select `platform/windows/main.cpp`, `platform/macos/main.cpp`, or `platform/linux/main.cpp` for the current desktop host; Web and Android are hosted, while iOS owns the corresponding Objective-C++ entry.
 Advanced embedded targets may still create their target directly and call `huxerui_enable_codegen()` after adding all sources.
-The code generator detects `[[huxerui::scope]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
+The code generator detects `[[huxerui::composable]]` in `.cpp`, `.cc`, and `.cxx` definitions and generates the scope boundary before compilation.
 
 ## App resources
 
@@ -218,7 +218,7 @@ huxerui run ios --device <id>
 ```
 
 The Xcode project owns its App target, Info.plist, launch screen, asset catalog, build configurations, signing, and shared scheme.
-Its build phase asks CMake for an architecture-correct application core containing the C++ application, generated scope code, generated resources, and HuxerUI static library.
+Its build phase asks CMake for an architecture-correct application core containing the C++ application, generated composable code, generated resources, and HuxerUI static library.
 The resulting App Bundle remains a normal Xcode product and can be built, debugged, archived, and extended with native files in Xcode.
 
 `huxerui open ios` records the detected SDK location in the ignored `platform/ios/Config/Local.xcconfig` before opening Xcode. Only optional local signing settings need manual configuration:

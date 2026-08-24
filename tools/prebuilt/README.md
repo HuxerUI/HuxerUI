@@ -10,7 +10,7 @@ These executables run on the build host. Their platform and architecture are ind
 
 Current host tools are:
 
-- HuxerUI Code Generator (`hcg`) for `[[huxerui::scope]]` transformation
+- HuxerUI Code Generator (`hcg`) for `[[huxerui::composable]]` transformation and direct composition-call validation
 - HuxerUI Resource Compiler (`hrc`) for typed keys with default or explicitly named generated headers, resource indexes, ordered package merging, and package staging
 
 Each distributed host and architecture directory must contain every tool required by the project configuration.

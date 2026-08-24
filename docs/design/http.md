@@ -97,7 +97,7 @@ Runtime installs one HttpClient Root Service before application RootHooks run.
 Components retrieve it through the existing typed service function and launch requests through their existing TaskScope:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View RepositoryPage() {
   auto http = UseService<HttpClient>();
   auto tasks = UseTaskScope();

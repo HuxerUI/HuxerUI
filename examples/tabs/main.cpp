@@ -14,7 +14,7 @@ const char* ViewportClassName(ViewportClass viewport_class) {
   return "Unknown";
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View TabsDemo() {
   const ThemeSpec& theme = UseTheme();
   const ViewportClass viewport_class = UseViewportClass();

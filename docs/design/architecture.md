@@ -4,7 +4,7 @@ Status: implemented foundation with deferred follow-up work
 
 This document describes the implemented modifier, animation, interaction, theme, presentation, and root extension foundation, followed by explicitly identified follow-up work. Code examples in implemented sections match the current public API.
 
-The ViewSpec compilation and Environment dependency model, together with the separately deferred `[[huxerui::composable]]` marker migration, is specified in [View Composition and Environment Design](view-composition.md).
+The ViewSpec compilation, Environment dependency, and `[[huxerui::composable]]` function model is specified in [View Composition and Environment Design](view-composition.md).
 
 HuxerUI uses the `Platform` prefix for framework abstractions that cross the shared-runtime boundary, including PlatformAdapter, PlatformView, PlatformModule, and their lifecycle state. Concrete operating-system objects keep their exact API names, such as `UIView`, `NSView`, `HWND`, and `HTMLElement`. Feature and type names do not use `Native` as a synonym for `Platform`; lowercase native remains valid when it describes operating-system behavior or an ecosystem term such as a Java native method or Gradle `externalNativeBuild`.
 
@@ -221,7 +221,7 @@ The framework detects `Glow::Extension`, creates the node extension, and dispatc
 
 `Lifecycle(setup, dependencies...)` declares post-commit external setup and cleanup in the current `RecomposeScope`.
 It is a composition function rather than a modifier because component lifetime follows scope identity, not the identity or kind of one returned root View.
-The application root uses its implicit scope, ordinary helper functions contribute to their caller's scope, and `[[huxerui::scope]]` establishes an independent reusable lifetime.
+The application root uses its implicit scope, ordinary helper functions contribute to their caller's scope, and `[[huxerui::composable]]` establishes an independent reusable lifetime.
 
 Lifecycle identity combines the current scope, source location, and occurrence at that location.
 Dependencies are listed last and accept State, StateList, or ordinary copyable equality-comparable values.
@@ -1067,7 +1067,7 @@ return Theme {
 
 The Theme node stores one ordinary child declaration and does not create a RecomposeScope.
 Built-in primitives retain raw semantic inputs and resolve final component values when Runtime reconciles them under the mounted Theme Environment.
-A component whose implementation directly calls `UseTheme()` or `UseEnvironment()` remains a scoped component because the read belongs to its own composition lifetime.
+A component whose implementation directly calls `UseTheme()` or `UseEnvironment()` is composable because the read belongs to its own composition lifetime.
 
 ### Theme systems
 
@@ -1136,7 +1136,7 @@ return MaterialTheme {
 A reusable component that reads Theme values for composition logic keeps its own scope:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View BrandContent(UserId user_id) {
   const ThemeSpec& theme = UseTheme();
   return Text(UserLabel(user_id)).With(Foreground{theme.colors.primary});
@@ -1166,7 +1166,7 @@ A complete Theme establishes a design system boundary. A Theme override inherits
 
 `ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent.
 
-Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to Runtime or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its scoped component function. It does not register a global NodeKind or extend a Runtime style table.
+Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to Runtime or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its composable function. It does not register a global NodeKind or extend a Runtime style table.
 
 Built-in elevation styles keep `Shadow::offset` and `Shadow::spread` at zero so elevation remains a platform-neutral ambient effect. Custom drawing and explicit `Shadow` modifiers retain directional offset and spread when a design calls for a drop shadow rather than semantic elevation.
 
@@ -1604,7 +1604,7 @@ Root services are installed before application composition and inherited through
 A global presentation handle obtained inside themed content captures the caller Environment:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View AppContent()
 {
   auto toast = UseToast();

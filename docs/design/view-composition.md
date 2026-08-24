@@ -1,11 +1,11 @@
 # View Composition and Environment Design
 
-Status: direct Environment and Theme content, precise dependency propagation, and mounted ViewSpec compilation implemented; composable marker migration follows
+Status: implemented
 
 This document defines the boundary between immediate View declaration, deferred scope execution, Environment propagation, ViewSpec compilation, and MountedNode reconciliation.
 Direct Environment and Theme content, mounted Environment propagation, and deferred ViewSpec compilation are the intended contract.
 The current implementation uses the precise dependency model in this document and does not retain the former broad mounted-context invalidation path.
-The `[[huxerui::composable]]` marker described below is a later breaking phase; the current public marker remains `[[huxerui::scope]]` until that phase is approved and delivered with code generation and host prebuilts.
+The public `[[huxerui::composable]]` marker and direct `UseXxx()` validation implement the composition boundary described below.
 
 ## Goals
 
@@ -23,7 +23,6 @@ The `[[huxerui::composable]]` marker described below is a later breaking phase; 
 - It does not introduce a public Component type, a virtual-item Composer, or a second state model.
 - It does not make every View constructor or primitive carry a deferred callable.
 - It does not compile declarations during every frame, measurement, layout, or paint pass.
-- It does not preserve `[[huxerui::scope]]` as a compatibility spelling after the breaking migration.
 
 ## Terminology
 
@@ -167,7 +166,7 @@ Descriptor equality and layout equality subsequently compare those compiled valu
 
 The internal entry point is named `CompileViewSpec` rather than introducing a Compiler object or a public compiled configuration type.
 Ordinary custom components continue to compose public primitives and modifiers; this phase does not expose a callback that can mutate private ViewSpec state.
-Until the later composable migration, a custom function that directly reads Theme or another ambient value still needs a real Scope.
+A custom function that directly reads Theme or another ambient value must be marked composable or use an explicit Scope.
 
 ## Reconciliation and commit behavior
 
@@ -325,13 +324,12 @@ The resource audit must include Text, Button, toggles, Tabs, SegmentedButton, na
 
 ## Composable marker
 
-The public marker becomes:
+The public marker is:
 
 ```cpp
 [[huxerui::composable]]
 ```
 
-It replaces `[[huxerui::scope]]` as a breaking rename and semantic clarification.
 The generated function still returns an ordinary Scope View and the existing Scope, Composer, RecomposeScope, State, Lifecycle, and TaskScope runtime models remain authoritative.
 No public Component type is added.
 
@@ -353,18 +351,10 @@ Calling an unmarked helper from a composable contributes its declarations to the
 The marker applies to a function definition rather than an individual call.
 Code generation removes the marker and wraps the original body in the existing Scope form while preserving captures, source locations, and return behavior.
 
-The initial lightweight source transformer cannot prove that every unmarked C++ function is free of indirect composition API calls.
-Runtime checks can diagnose calls made with no active Composer, but they cannot reliably detect a helper that accidentally reads the caller's outer Environment when one is active.
-Hard compile-time enforcement requires a real C++ AST-based analyzer and is deferred.
-The lexical transformer must not grow an unreliable call-graph checker or claim stronger enforcement than it provides.
-
-Implementation of the marker migration requires coordinated updates to:
-
-- The code generator and its syntax tests.
-- CMake integration and incremental generated-source dependencies.
-- Windows, macOS, and Linux host prebuilts for every shipped architecture.
-- Runtime tests for state identity, Environment dependencies, and lazy execution.
-- Public headers, examples, README, user guides, design documents, SDK templates, and AGENTS guidance.
+The lightweight source transformer rejects direct unqualified and namespace-qualified calls named `UseXxx()` outside composable functions.
+It ignores member calls, comments, literals, and preprocessor directives, and recognizes the Application root registered in the same translation unit as an implicit composable context.
+A custom hook named `UseXxx()` may call other hooks without becoming a View-producing composable because it deliberately shares its caller's active composition scope.
+This deliberately avoids a partial C++ call graph: aliases, function pointers, macro-generated calls, and indirect wrappers without the hook naming convention remain outside lexical enforcement and retain the existing runtime Composer checks.
 
 ## Virtual layout
 
@@ -415,13 +405,13 @@ Reconciliation is not a whole-subtree rollback transaction, but a failed frame d
 
 ## Migration
 
-This is a coordinated breaking migration and should be implemented in ownership-sized patches while keeping the tree buildable after each patch.
+This was delivered as a coordinated breaking migration without retaining the former marker as a compatibility spelling.
 
 The implemented Environment and Theme phases make ViewSpec independent of construction-time Environment, pass mounted context explicitly through mount and reconciliation, and use a transparent Environment node rather than a provider-only Scope.
 Stable mounted Environment identity, typed entry dependencies, transactional updates, and Scope-owned ViewSpec compilation replace the removed broad mounted-context and captured-layer invalidation paths.
 Property, component, resource, layer, TextSelection, virtual-layout, and window-control paths compile against their effective mounted Environment.
 Theme and ProvideEnvironment accept direct View content and do not retain provider-only factories.
-The composable marker and codegen prebuilts remain a separate later migration after this runtime behavior is reviewed and delivered independently.
+Composable code generation validates direct composition calls and lowers marked functions to the existing Scope runtime model.
 
 No phase introduces a second declaration tree, a public resolved configuration type, or a concrete-component switch in Runtime.
 
@@ -438,7 +428,7 @@ Focused validation must cover:
 - Theme switching preserving State, NodeExtension identity, focus, selection, and controlled values.
 - Locale changes re-resolving strings without reconstructing unrelated declarations.
 - Density and platform context changes selecting the correct image variant through existing caches.
-- A scoped component reconciling under an updated mounted Environment.
+- A composable component reconciling under an updated mounted Environment.
 - An ordinary unmarked View helper remaining immediate and Environment-independent.
 - Code-generated composables matching explicit Scope state, key, Lifecycle, and TaskScope behavior.
 - Virtual items rejecting missing or duplicate root keys and preserving keyed state across recycling.

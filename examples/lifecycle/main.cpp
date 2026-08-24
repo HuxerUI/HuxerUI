@@ -5,7 +5,7 @@
 
 using namespace huxerui;
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View ChannelConnection(std::string channel, StateList<std::string> events) {
   Lifecycle([channel, events] {
     events.PushBack("Setup: connect to " + channel);
@@ -26,7 +26,7 @@ View ChannelConnection(std::string channel, StateList<std::string> events) {
   );
 }
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View LifecycleContent() {
   auto channel = UseState<std::string>("Design");
   auto mounted = UseState(true);

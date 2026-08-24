@@ -79,7 +79,7 @@ Non-Web platforms execute them on a bounded filesystem executor, while Web seria
 Every platform resumes the owning HuxerUI Task on its UI thread:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View SettingsStatus() {
   auto files = UseService<FileSystem>();
   auto tasks = UseTaskScope();

@@ -26,15 +26,11 @@ private:
 
 struct TransformResult {
   std::string source;
-  std::size_t scope_count = 0;
+  std::size_t composable_count = 0;
 };
 
-[[nodiscard]] SourcePosition PositionAt(
-    std::string_view source,
-    std::size_t offset) noexcept;
+[[nodiscard]] SourcePosition PositionAt(std::string_view source, std::size_t offset) noexcept;
 
-[[nodiscard]] TransformResult TransformSource(
-    std::string_view source,
-    std::string_view source_path);
+[[nodiscard]] TransformResult TransformSource(std::string_view source, std::string_view source_path);
 
-}  // namespace huxerui::codegen
+} // namespace huxerui::codegen

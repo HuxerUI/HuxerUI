@@ -23,7 +23,7 @@ return Column {
 `State<T>` is a lightweight handle to a shared state cell. Reading it while a scope is composed subscribes that scope to future changes:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View Counter() {
   auto count = UseState(0);
 
@@ -62,14 +62,14 @@ Reading the size, an element, or an iterator subscribes the current scope. `Push
 
 `StateList` does not bypass declarative composition or assign identity to its elements. A scope that enumerates the list recomposes after a mutation, and dynamic stateful children still require stable semantic keys so reconciliation preserves the correct mounted state.
 
-The application root has an implicit scope. Mark a reusable stateful component with `[[huxerui::scope]]`; stateless functions do not need a scope.
+The application root has an implicit scope. Mark a reusable function with `[[huxerui::composable]]` when it directly calls a composition-bound `UseXxx()` facility; an Environment-independent View helper remains unmarked.
 
 ## Lifecycle
 
 `Lifecycle()` attaches an external resource lifetime to the current composition scope rather than to a returned View:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View AccountStatus(std::string account_id) {
   auto service = UseService<AccountService>();
 
@@ -95,7 +95,7 @@ Multiple dependency writes before a frame coalesce into one restart using the la
 
 `Lifecycle()` has the same current-scope and call-site occurrence identity model as `UseState()`.
 Changing the returned root View does not restart it, keyed movement preserves it, and failed composition does not run setup or cleanup.
-A helper without its own scope contributes lifecycle declarations to its caller; mark a reusable component with `[[huxerui::scope]]` when it requires an independent lifetime.
+A helper without its own scope contributes lifecycle declarations to its caller; mark a reusable component with `[[huxerui::composable]]` when it requires an independent lifetime.
 State reads performed later inside setup do not create composition subscriptions, so every value that should restart the resource must be listed explicitly.
 
 Lifecycle is not a modifier.
@@ -140,7 +140,7 @@ Lifecycle exposes both a coalescing current value and a mounted ordered transiti
 `Task<T>` is a lazy move-only C++20 coroutine result, while `TaskScope` starts and owns `Task<void>` children for one composition scope:
 
 ```cpp
-[[huxerui::scope]]
+[[huxerui::composable]]
 View UserName(UserId user_id, std::shared_ptr<UserService> service) {
   auto tasks = UseTaskScope();
   auto name = UseState(std::string{"Loading..."});
@@ -321,7 +321,7 @@ Built-in interactions and custom component events share one typed event system:
 ```cpp
 struct SearchSubmitted : Event<std::string> {};
 
-[[huxerui::scope]]
+[[huxerui::composable]]
 View SearchBox() {
   auto events = UseEvents();
 
