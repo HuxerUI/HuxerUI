@@ -373,6 +373,12 @@ private:
       g_object_unref(connection_);
       connection_ = nullptr;
     }
+    // Drain pending GSource releases (e.g. GDestroyNotify callbacks from
+    // g_dbus_connection_signal_unsubscribe) before leaving the context, so
+    // GLib worker threads finish accessing connection state here rather than
+    // after the context is no longer thread-default.
+    while (g_main_context_iteration(context_, FALSE)) {
+    }
     g_main_context_pop_thread_default(context_);
   }
 

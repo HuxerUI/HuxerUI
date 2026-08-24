@@ -252,11 +252,11 @@ public:
               request->failure = "The fake portal did not own its bus name";
             }
             request->finished = true;
+            request->condition.notify_all();
           }
           if (error != nullptr) {
             g_error_free(error);
           }
-          request->condition.notify_all();
           return G_SOURCE_REMOVE;
         },
         &request,
@@ -375,6 +375,8 @@ private:
       static_cast<void>(g_dbus_connection_close_sync(connection_, nullptr, nullptr));
       g_object_unref(connection_);
       connection_ = nullptr;
+    }
+    while (g_main_context_iteration(context_, FALSE)) {
     }
     g_main_context_pop_thread_default(context_);
   }
@@ -588,10 +590,8 @@ template <class Value> Value WaitFor(std::function<void(std::function<void(Value
   std::condition_variable condition;
   std::optional<Value> value;
   start([&](Value result) {
-    {
-      std::scoped_lock lock(mutex);
-      value.emplace(std::move(result));
-    }
+    std::scoped_lock lock(mutex);
+    value.emplace(std::move(result));
     condition.notify_all();
   });
   std::unique_lock lock(mutex);
