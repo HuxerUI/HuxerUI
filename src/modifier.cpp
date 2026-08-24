@@ -23,7 +23,7 @@ ScrollBarStyle ResolveScrollBarStyle(
     }
     throw std::logic_error("HuxerUI scroll bar style environment value has an invalid type");
   }
-  const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
   ScrollBarStyle style = ScrollBarStyle::Default();
   style.fade_in_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.fast);
   style.fade_out_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.normal);
@@ -45,8 +45,11 @@ public:
   }
 
   void Update(MountedNode& node, const ScrollBar& modifier) {
-    const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    style_ = ResolveScrollBarStyle(mounted.environment, modifier.style);
+    static_cast<void>(node);
+    if (!modifier.style.has_value()) {
+      throw std::logic_error("HuxerUI compiled scroll bar style is missing");
+    }
+    style_ = *modifier.style;
   }
 
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
@@ -246,10 +249,13 @@ void ValidateScrollBarStyle(const ScrollBarStyle& style) {
   }
 }
 
-void ApplyScrollBar(detail::ViewSpec& spec, const ScrollBar& modifier) {
-  const ScrollBarStyle style = ResolveScrollBarStyle(spec.environment, modifier.style);
+ScrollBar CompileScrollBar(
+    detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment, const ScrollBar& modifier
+) {
+  const ScrollBarStyle style = ResolveScrollBarStyle(environment, modifier.style);
   ValidateScrollBarStyle(style);
   spec.layout_values.insert_or_assign(typeid(detail::ScrollBarBinding), detail::MakeErasedLayoutValue(style));
+  return ScrollBar{style};
 }
 
 void ValidateScrollPhysics(const ScrollPhysics& physics) {
@@ -274,9 +280,10 @@ ScrollBarStyle ScrollBarStyle::Default() {
 
 const detail::ModifierDescriptor& ScrollPhysics::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) {
-        ApplyScrollPhysics(spec, *static_cast<const ScrollPhysics*>(value));
-      },
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) { ApplyScrollPhysics(spec, *static_cast<const ScrollPhysics*>(modifier.value.get())); },
       nullptr,
       nullptr,
   };
@@ -285,7 +292,14 @@ const detail::ModifierDescriptor& ScrollPhysics::Descriptor() {
 
 const detail::ModifierDescriptor& ScrollBar::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) { ApplyScrollBar(spec, *static_cast<const ScrollBar*>(value)); },
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>& environment,
+         detail::AppResources&) {
+        modifier.value = std::make_shared<ScrollBar>(
+            CompileScrollBar(spec, environment, *static_cast<const ScrollBar*>(modifier.value.get()))
+        );
+      },
       [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<ScrollBarExtension>(node, *static_cast<const ScrollBar*>(value));
       },

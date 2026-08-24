@@ -35,9 +35,9 @@ View TabsDemo() {
         selected
     ).OnChanged([selected](std::size_t index) { selected = index; }),
     Text::Format("Selected page: {}", pages[selected.Get()]),
-    HUXERUI_THEME(
-        FlatTheme,
-        Column {
+    FlatTheme {
+      Scope([=] {
+        return Column {
           Text("Flat tabs", TextRole::Label),
           Tabs({"Files", "Search", "History"}, flat_selected)
               .OnChanged([flat_selected](std::size_t index) { flat_selected = index; }),
@@ -45,8 +45,9 @@ View TabsDemo() {
             Padding(theme.spacing.medium),
             Spacing(theme.spacing.small),
             Background(UseTheme().colors.background)
-        )
-    ),
+        );
+      }),
+    },
   }.With(
       Padding(theme.spacing.extra_large),
       Spacing(theme.spacing.medium),
@@ -55,7 +56,7 @@ View TabsDemo() {
 }
 
 View App() {
-  return MaterialTheme(TabsDemo);
+  return MaterialTheme {TabsDemo()};
 }
 
 const Application application{

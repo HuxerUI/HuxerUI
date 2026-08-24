@@ -221,7 +221,7 @@ View DirectoryPath(std::string label, const File& directory) {
 }
 
 View App() {
-  return MaterialTheme(FilesContent);
+  return MaterialTheme {FilesContent()};
 }
 
 const Application application{

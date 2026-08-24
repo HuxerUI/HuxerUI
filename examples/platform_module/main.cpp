@@ -115,7 +115,7 @@ View PlatformModuleDemo() {
 }
 
 View App() {
-  return MaterialTheme(PlatformModuleDemo);
+  return MaterialTheme {PlatformModuleDemo()};
 }
 
 AppOptions Options() {

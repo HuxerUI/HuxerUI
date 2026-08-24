@@ -374,13 +374,21 @@ private:
   void ComposeLayers();
   bool ComposeScope(detail::MountedNode& mounted);
   bool RecomposeDirtyScopes(detail::MountedNode& mounted);
-  bool Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<detail::ViewSpec>& incoming);
-  std::unique_ptr<detail::MountedNode> Mount(const std::shared_ptr<detail::ViewSpec>& incoming);
+  bool Reconcile(
+      std::unique_ptr<detail::MountedNode>& mounted,
+      const std::shared_ptr<detail::ViewSpec>& incoming,
+      const std::shared_ptr<const Environment>& environment
+  );
+  std::unique_ptr<detail::MountedNode>
+  Mount(const std::shared_ptr<detail::ViewSpec>& incoming, const std::shared_ptr<const Environment>& environment);
   bool ReconcileChildren(
-      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children,
+      const std::vector<View>& incoming_children,
+      const std::shared_ptr<const Environment>& environment
   );
   bool ReconcileLayerChildren(
-      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+      std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children,
+      const std::vector<std::pair<View, std::shared_ptr<const Environment>>>& incoming_children
   );
   [[nodiscard]] const detail::MountedNode* RootNode() const noexcept;
 

@@ -191,7 +191,7 @@ Rect ContainedIconBounds(Size intrinsic, Rect bounds) {
   };
 }
 
-void PaintTextFieldIcon(PaintContext& context, const detail::TextFieldModifier::Icon& icon, Rect bounds, Color tint) {
+void PaintTextFieldIcon(PaintContext& context, const detail::ResolvedImageAsset& icon, Rect bounds, Color tint) {
   std::visit(
       [&](const auto& asset) {
         const Size intrinsic = asset.IntrinsicSize();
@@ -280,15 +280,18 @@ struct TextFieldVariantVisual {
 
   static const detail::ModifierDescriptor& Descriptor() {
     static const detail::ModifierDescriptor descriptor{
-        [](detail::ViewSpec& spec, const void* value) {
+        [](detail::ViewSpec& spec,
+           detail::ModifierSpec& modifier,
+           const std::shared_ptr<const Environment>&,
+           detail::AppResources&) {
           TextFieldStyle style = TextFieldStyle::Default();
-          const auto found = spec.layout_values.find(typeid(detail::ResolvedTextFieldStyle));
+          const auto found = spec.layout_values.find(typeid(detail::TextFieldStyleBinding));
           if (found != spec.layout_values.end()) {
             if (const auto* resolved = std::any_cast<TextFieldStyle>(&found->second.value)) {
               style = *resolved;
             }
           }
-          const auto* visual = static_cast<const TextFieldVariantVisual*>(value);
+          const auto* visual = static_cast<const TextFieldVariantVisual*>(modifier.value.get());
           const TextFieldVariant variant = visual->variant.value_or(style.variant);
           if (visual->clear_node_background) {
             spec.properties.background = Color::Transparent();
@@ -393,18 +396,43 @@ public:
   }
 
   void Update(detail::MountedNode& node, const detail::TextFieldModifier& modifier) {
+    const std::string& label = detail::StringLiteral(modifier.label);
+    const std::string& placeholder = detail::StringLiteral(modifier.placeholder);
+    const detail::ResolvedValidationResult validation{
+        modifier.validation.status,
+        detail::StringLiteral(modifier.validation.message),
+    };
+    const auto resolved_icon = [](const std::optional<ImageVariant>& icon) {
+      if (!icon.has_value()) {
+        return std::optional<detail::ResolvedImageAsset>{};
+      }
+      return std::visit(
+          [](const auto& image) -> std::optional<detail::ResolvedImageAsset> {
+            using Image = std::decay_t<decltype(image)>;
+            if constexpr (std::same_as<Image, ImageResource>) {
+              throw std::logic_error("HuxerUI unresolved TextField icon reached mounted state");
+            } else {
+              return detail::ResolvedImageAsset{image};
+            }
+          },
+          *icon
+      );
+    };
+    const std::optional<detail::ResolvedImageAsset> leading_icon = resolved_icon(modifier.leading_icon);
+    const std::optional<detail::ResolvedImageAsset> trailing_icon = resolved_icon(modifier.trailing_icon);
+
     ValidateConfiguration(modifier.configuration);
     ValidateLimits(modifier.configuration, modifier.min_lines, modifier.max_lines);
     if (!detail::IsValidTextEditingValue(modifier.value)) {
       throw std::invalid_argument("HuxerUI TextField value is invalid");
     }
-    if (!detail::Utf16Length(modifier.label).has_value()) {
+    if (!detail::Utf16Length(label).has_value()) {
       throw std::invalid_argument("HuxerUI TextField label must contain valid UTF-8");
     }
-    if (!detail::Utf16Length(modifier.placeholder).has_value()) {
+    if (!detail::Utf16Length(placeholder).has_value()) {
       throw std::invalid_argument("HuxerUI TextField placeholder must contain valid UTF-8");
     }
-    if (!detail::Utf16Length(modifier.validation.message).has_value()) {
+    if (!detail::Utf16Length(validation.message).has_value()) {
       throw std::invalid_argument("HuxerUI TextField validation message must contain valid UTF-8");
     }
     if (!initialized_ && modifier.value.composition.has_value()) {
@@ -416,24 +444,26 @@ public:
     const bool text_layout_mode_changed =
         initialized_ && (configuration_.multiline != modifier.configuration.multiline ||
                          configuration_.secure != modifier.configuration.secure);
+    const bool authoritative_value_changed = initialized_ && modifier.value != authoritative_value_;
     const bool length_limit_changed = initialized_ && max_length_ != modifier.max_length;
-    const bool validation_changed = validation_ != modifier.validation;
-    const bool label_changed = label_ != modifier.label;
+    const bool validation_changed = validation_ != validation;
+    const bool label_changed = label_ != label;
     configuration_ = modifier.configuration;
     min_lines_ = modifier.min_lines;
     max_lines_ = modifier.max_lines;
     max_length_ = modifier.max_length;
-    validation_ = modifier.validation;
+    authoritative_value_ = modifier.value;
+    validation_ = validation;
     if (length_limit_changed) {
       ClearHistory();
     }
     ConfigureScrollNode(node);
-    label_ = modifier.label;
-    placeholder_ = modifier.placeholder;
-    leading_icon_ = modifier.leading_icon;
-    trailing_icon_ = modifier.trailing_icon;
+    label_ = label;
+    placeholder_ = placeholder;
+    leading_icon_ = leading_icon;
+    trailing_icon_ = trailing_icon;
 
-    TextFieldStyle next_style = node.LayoutValueOr<detail::ResolvedTextFieldStyle>(TextFieldStyle::Default());
+    TextFieldStyle next_style = node.LayoutValueOr<detail::TextFieldStyleBinding>(TextFieldStyle::Default());
     const TextFieldVariant next_variant = modifier.variant.value_or(next_style.variant);
     const TextFieldVariantStyle next_variant_style = detail::ResolveTextFieldVariantStyle(next_style, next_variant);
     next_style.text_style = node.properties.text_style;
@@ -465,6 +495,13 @@ public:
     if (!initialized_) {
       editing_.value = modifier.value;
       initialized_ = true;
+      UpdateLabelTarget(node.interaction.focused);
+      return;
+    }
+
+    // Environment and style changes may update this retained extension without changing the controlled value.
+    // Preserve transient selection and composition until the owner supplies a distinct authoritative value.
+    if (!authoritative_value_changed) {
       UpdateLabelTarget(node.interaction.focused);
       return;
     }
@@ -2169,6 +2206,7 @@ private:
   TextFieldVariant variant_ = TextFieldVariant::Standard;
   CornerRadii corner_radii_;
   detail::TextFieldEditingState editing_;
+  TextEditingValue authoritative_value_;
   std::optional<TextEditingValue> last_emitted_;
   std::optional<TextEditingValue> composition_history_start_;
   std::vector<HistoryEntry> undo_history_;
@@ -2179,8 +2217,8 @@ private:
   std::string laid_out_label_;
   std::string laid_out_placeholder_;
   std::string laid_out_validation_message_;
-  std::optional<detail::TextFieldModifier::Icon> leading_icon_;
-  std::optional<detail::TextFieldModifier::Icon> trailing_icon_;
+  std::optional<detail::ResolvedImageAsset> leading_icon_;
+  std::optional<detail::ResolvedImageAsset> trailing_icon_;
   std::unique_ptr<detail::TextLayout> text_layout_;
   std::unique_ptr<detail::TextLayout> label_layout_;
   std::unique_ptr<detail::TextLayout> floating_label_layout_;
@@ -2313,8 +2351,29 @@ TextFieldExtension& FindTextFieldExtension(detail::MountedNode& node) {
   throw std::logic_error("HuxerUI TextField has no retained input extension");
 }
 
+void ApplyTextFieldDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  TextFieldStyle style = detail::DefaultTextFieldStyle(detail::ResolveThemeSpec(environment));
+  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(TextFieldStyle))) {
+    const auto* override_style = std::any_cast<TextFieldStyle>(value);
+    if (override_style == nullptr) {
+      throw std::logic_error("HuxerUI component style environment value has an invalid type");
+    }
+    style = *override_style;
+  }
+  const TextFieldVariantStyle& variant_style = detail::ResolveTextFieldVariantStyle(style, style.variant);
+  spec.layout_values.insert_or_assign(typeid(detail::TextFieldStyleBinding), detail::MakeErasedLayoutValue(style));
+  spec.properties.padding = style.padding;
+  spec.properties.background = variant_style.background;
+  spec.properties.text_style = style.text_style;
+  spec.properties.corner_radii = detail::ResolveTextFieldCornerRadii(style, style.variant);
+  spec.properties.focus_ring.width = 0.0F;
+  spec.properties.frame.min_height = std::max(0.0F, variant_style.minimum_height);
+  spec.properties.disabled_opacity = 1.0F;
+}
+
 std::shared_ptr<detail::ViewSpec> MakeTextFieldSpec() {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::TextField);
+  spec->defaults = ApplyTextFieldDefaults;
   spec->focusable = true;
   return spec;
 }
@@ -2322,6 +2381,48 @@ std::shared_ptr<detail::ViewSpec> MakeTextFieldSpec() {
 } // namespace
 
 namespace detail {
+
+TextFieldModifier CompileTextFieldModifier(
+    const TextFieldModifier& declaration,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources
+) {
+  std::optional<Locale> locale;
+  const auto resource_locale = [&]() -> const Locale& {
+    if (!locale.has_value()) {
+      locale = ResolveResourceLocale(environment, resources);
+    }
+    return *locale;
+  };
+  const auto compile_string = [&resources, &resource_locale](const StringVariant& value) -> StringVariant {
+    if (!NeedsResourceResolution(value)) {
+      return value;
+    }
+    return ResolveString(value, resources, resource_locale());
+  };
+  TextFieldModifier compiled = declaration;
+  compiled.label = compile_string(declaration.label);
+  compiled.placeholder = compile_string(declaration.placeholder);
+  compiled.validation.message = compile_string(declaration.validation.message);
+  const auto compile_icon = [&resources, &resource_locale](const std::optional<ImageVariant>& declaration_icon) {
+    if (!declaration_icon.has_value()) {
+      return std::optional<ImageVariant>{};
+    }
+    if (!NeedsResourceResolution(*declaration_icon)) {
+      return declaration_icon;
+    }
+    ResolvedImageAsset resolved = ResolveImage(*declaration_icon, resources, resource_locale());
+    return std::visit(
+        [](auto&& image) -> std::optional<ImageVariant> {
+          return ImageVariant{std::forward<decltype(image)>(image)};
+        },
+        std::move(resolved)
+    );
+  };
+  compiled.leading_icon = compile_icon(declaration.leading_icon);
+  compiled.trailing_icon = compile_icon(declaration.trailing_icon);
+  return compiled;
+}
 
 bool TextFieldModifier::LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right) {
   return left.value.text == right.value.text && left.label == right.label && left.placeholder == right.placeholder &&
@@ -2333,7 +2434,21 @@ bool TextFieldModifier::LayoutEquals(const TextFieldModifier& left, const TextFi
 }
 
 const ModifierDescriptor& TextFieldModifier::Descriptor() {
-  return ModifierDescriptorFor<TextFieldModifier, TextFieldExtension, true, TextFieldModifier::LayoutEquals>();
+  static const ModifierDescriptor descriptor = [] {
+    ModifierDescriptor result =
+        ModifierDescriptorFor<TextFieldModifier, TextFieldExtension, true, TextFieldModifier::LayoutEquals>();
+    result.compile = [](ViewSpec&,
+                        ModifierSpec& modifier,
+                        const std::shared_ptr<const Environment>& environment,
+                        AppResources& resources) {
+      const auto& declaration = *static_cast<const TextFieldModifier*>(modifier.value.get());
+      modifier.value = std::make_shared<TextFieldModifier>(
+          CompileTextFieldModifier(declaration, environment, resources)
+      );
+    };
+    return result;
+  }();
+  return descriptor;
 }
 
 Size MeasureTextField(MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
@@ -2372,92 +2487,28 @@ TextField::TextField(TextEditingValue value)
   UpdateModifier();
 }
 
-TextField TextField::Label(StringResource resource) && {
-  return std::move(*this).Label(UseString(std::move(resource)));
-}
-
-TextField TextField::Label(std::string value) && {
-  if (!detail::Utf16Length(value).has_value()) {
-    throw std::invalid_argument("HuxerUI TextField label must contain valid UTF-8");
-  }
+TextField TextField::Label(StringVariant value) && {
   label_ = std::move(value);
   UpdateModifier();
   return std::move(*this);
 }
 
-TextField TextField::Label(std::string_view value) && {
-  return std::move(*this).Label(std::string(value));
-}
-
-TextField TextField::Label(const char* value) && {
-  return std::move(*this).Label(value == nullptr ? std::string{} : std::string(value));
-}
-
-TextField TextField::Placeholder(StringResource resource) && {
-  return std::move(*this).Placeholder(UseString(std::move(resource)));
-}
-
-TextField TextField::Placeholder(std::string value) && {
-  if (!detail::Utf16Length(value).has_value()) {
-    throw std::invalid_argument("HuxerUI TextField placeholder must contain valid UTF-8");
-  }
+TextField TextField::Placeholder(StringVariant value) && {
   placeholder_ = std::move(value);
   UpdateModifier();
   return std::move(*this);
 }
 
-TextField TextField::Placeholder(std::string_view value) && {
-  return std::move(*this).Placeholder(std::string(value));
-}
-
-TextField TextField::Placeholder(const char* value) && {
-  return std::move(*this).Placeholder(value == nullptr ? std::string{} : std::string(value));
-}
-
-TextField TextField::LeadingIcon(ImageResource resource) && {
-  leading_icon_ = detail::UseImageResource(std::move(resource));
+TextField TextField::LeadingIcon(ImageVariant icon) && {
+  detail::ValidateImageVariant(icon);
+  leading_icon_ = std::move(icon);
   UpdateModifier();
   return std::move(*this);
 }
 
-TextField TextField::LeadingIcon(ImageAsset asset) && {
-  if (!asset.HasValue()) {
-    throw std::invalid_argument("HuxerUI TextField leading icon must not be empty");
-  }
-  leading_icon_ = std::move(asset);
-  UpdateModifier();
-  return std::move(*this);
-}
-
-TextField TextField::LeadingIcon(VectorAsset asset) && {
-  if (!asset.HasValue()) {
-    throw std::invalid_argument("HuxerUI TextField leading icon must not be empty");
-  }
-  leading_icon_ = std::move(asset);
-  UpdateModifier();
-  return std::move(*this);
-}
-
-TextField TextField::TrailingIcon(ImageResource resource) && {
-  trailing_icon_ = detail::UseImageResource(std::move(resource));
-  UpdateModifier();
-  return std::move(*this);
-}
-
-TextField TextField::TrailingIcon(ImageAsset asset) && {
-  if (!asset.HasValue()) {
-    throw std::invalid_argument("HuxerUI TextField trailing icon must not be empty");
-  }
-  trailing_icon_ = std::move(asset);
-  UpdateModifier();
-  return std::move(*this);
-}
-
-TextField TextField::TrailingIcon(VectorAsset asset) && {
-  if (!asset.HasValue()) {
-    throw std::invalid_argument("HuxerUI TextField trailing icon must not be empty");
-  }
-  trailing_icon_ = std::move(asset);
+TextField TextField::TrailingIcon(ImageVariant icon) && {
+  detail::ValidateImageVariant(icon);
+  trailing_icon_ = std::move(icon);
   UpdateModifier();
   return std::move(*this);
 }
@@ -2523,10 +2574,7 @@ void TextField::UpdateModifier() {
       line_limits_.Minimum(),
       line_limits_.Maximum(),
       max_length_,
-      detail::ResolvedValidationResult{
-          .status = validation_.status,
-          .message = UseString(validation_.message),
-      },
+      validation_,
   }));
 }
 

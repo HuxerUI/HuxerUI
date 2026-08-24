@@ -9,6 +9,7 @@ bool first_hovered = false;
 bool second_hovered = false;
 State<bool> tooltip_target_visible;
 State<bool> tooltip_use_updated_message;
+State<int> tooltip_style_mode;
 
 TooltipStyle TestTooltipStyle() {
   TooltipStyle style = TooltipStyle::Default();
@@ -19,35 +20,35 @@ TooltipStyle TestTooltipStyle() {
   return style;
 }
 
-template <class Factory> View TestTooltipTheme(Factory&& content) {
+View TestTooltipTheme(View content) {
   ThemeDefinition definition;
   definition.Set(TestTooltipStyle());
-  return Theme(std::move(definition), std::forward<Factory>(content));
+  return Theme {std::move(definition), std::move(content)};
 }
 
 View TooltipApp() {
-  return TestTooltipTheme([] {
+  return TestTooltipTheme(Scope([] {
     return Column {
       Button("Target")
           .With(Frame{.width = 100.0F, .height = 40.0F}, Tooltip("Tooltip message"))
           .OnClick([] { ++tooltip_clicks; }),
     };
-  });
+  }));
 }
 
 View DisabledTooltipApp() {
-  return TestTooltipTheme([] {
+  return TestTooltipTheme(Scope([] {
     return Column {
       Text("Disabled target")
           .With(Frame{.width = 120.0F, .height = 40.0F}, Enabled{false}, Tooltip("Disabled explanation")),
     };
-  });
+  }));
 }
 
 View PlainTooltipApp() {
-  return TestTooltipTheme([] {
+  return TestTooltipTheme(Scope([] {
     return Text("Plain target").With(Frame{.width = 100.0F, .height = 40.0F}, Tooltip("Plain tooltip"));
-  });
+  }));
 }
 
 View TooltipLifecycleApp() {
@@ -55,7 +56,7 @@ View TooltipLifecycleApp() {
   auto use_updated_message = UseState(false);
   tooltip_target_visible = target_visible;
   tooltip_use_updated_message = use_updated_message;
-  return TestTooltipTheme([target_visible, use_updated_message]() -> View {
+  return TestTooltipTheme(Scope([target_visible, use_updated_message]() -> View {
     if (!target_visible.Get()) {
       return Text("Target removed");
     }
@@ -64,11 +65,11 @@ View TooltipLifecycleApp() {
             Frame{.width = 120.0F, .height = 40.0F},
             Tooltip(use_updated_message.Get() ? "Updated tooltip" : "Initial tooltip")
         );
-  });
+  }));
 }
 
 View MultipleTooltipTargetsApp() {
-  return TestTooltipTheme([] {
+  return TestTooltipTheme(Scope([] {
     return Column {
       Button("First target")
           .With(Frame{.width = 120.0F, .height = 40.0F}, Tooltip("First tooltip"))
@@ -77,7 +78,28 @@ View MultipleTooltipTargetsApp() {
           .With(Frame{.width = 120.0F, .height = 40.0F}, Tooltip("Second tooltip"))
           .OnClick([] {}),
     };
-  });
+  }));
+}
+
+TooltipStyle DynamicTooltipStyle(int mode) {
+  TooltipStyle style = TestTooltipStyle();
+  style.hover_delay = 0.0;
+  style.background = mode == 0 ? Color::Rgb(180, 30, 40) : Color::Rgb(20, 100, 180);
+  if (mode == 2) {
+    style.maximum_width = 0.0F;
+  }
+  return style;
+}
+
+View DynamicTooltipStyleApp() {
+  auto mode = UseState(0);
+  tooltip_style_mode = mode;
+  ThemeDefinition definition;
+  definition.Set(DynamicTooltipStyle(mode.Get()));
+  return Theme {
+    std::move(definition),
+    Text("Dynamic target").With(Frame{.width = 120.0F, .height = 40.0F}, Tooltip("Dynamic tooltip")),
+  };
 }
 
 struct HoverProbe {
@@ -325,6 +347,36 @@ TEST_CASE("TestTooltipUpdatesCompatiblyAndDismissesWhenTargetUnmounts") {
   REQUIRE(FindText(runtime.BuildFrame(), "Updated tooltip") == nullptr);
 }
 
+TEST_CASE("TestTooltipCompilesThemeStyleBeforeUpdatingItsExtension") {
+  tooltip_style_mode = State<int>{};
+  TestPlatform platform;
+  Runtime runtime{DynamicTooltipStyleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  const auto* target = runtime.RootNode()->children[0].get();
+  REQUIRE(target != nullptr);
+  REQUIRE(target->extensions.size() == 1);
+  const NodeExtension* extension = target->extensions[0].extension.get();
+
+  MovePointer(runtime, {40.0F, 20.0F});
+  runtime.BuildFrame();
+  REQUIRE(FindPresentedRectWithColor(runtime.BuildFrame(), DynamicTooltipStyle(0).background).has_value());
+
+  tooltip_style_mode = 1;
+  REQUIRE(FindPresentedRectWithColor(runtime.BuildFrame(), DynamicTooltipStyle(1).background).has_value());
+  target = runtime.RootNode()->children[0].get();
+  REQUIRE(target->extensions[0].extension.get() == extension);
+
+  tooltip_style_mode = 2;
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+
+  tooltip_style_mode = 1;
+  REQUIRE(FindPresentedRectWithColor(runtime.BuildFrame(), DynamicTooltipStyle(1).background).has_value());
+  target = runtime.RootNode()->children[0].get();
+  REQUIRE(target->extensions[0].extension.get() == extension);
+}
+
 TEST_CASE("TestOnlyOneTooltipIsVisiblePerWindow") {
   TestPlatform platform;
   Runtime runtime{MultipleTooltipTargetsApp, platform};
@@ -362,12 +414,12 @@ TEST_CASE("TestTooltipRejectsEmptyLiteralAndInvalidStyle") {
   REQUIRE_THROWS_AS(Tooltip(""), std::invalid_argument);
 
   TestPlatform platform;
-  const auto invalid = [] {
+  const auto invalid = []() -> View {
     TooltipStyle style = TooltipStyle::Default();
     style.maximum_width = 0.0F;
     ThemeDefinition definition;
     definition.Set(style);
-    return Theme(std::move(definition), [] { return Text("Target").With(Tooltip("Message")); });
+    return Theme {std::move(definition), Text("Target").With(Tooltip("Message"))};
   };
   REQUIRE_THROWS_AS(Runtime(invalid, platform).BuildFrame(), std::invalid_argument);
 }

@@ -6,7 +6,9 @@ HuxerUI includes Flat and Material light and dark themes:
 
 ```cpp
 View App() {
-  return MaterialTheme(AppContent);
+  return MaterialTheme {
+    AppContent(),
+  };
 }
 ```
 
@@ -14,18 +16,17 @@ Providers can be nested to form complete theme boundaries:
 
 ```cpp
 return Column {
-  HUXERUI_THEME(MaterialDarkTheme, DarkContent()),
-  HUXERUI_THEME(FlatTheme, FlatContent()),
+  MaterialDarkTheme {DarkContent()},
+  FlatTheme {FlatContent()},
 };
 ```
 
-`HUXERUI_THEME` is optional syntax sugar for an inline View expression or a component call with arguments. Theme functions also accept a component factory directly.
+Theme boundaries accept ordinary View content and do not allocate a provider-only RecomposeScope.
 
 `ThemeSpec` contains semantic color, typography, shape, spacing, elevation, motion, and interaction tokens. Component styles use the same Environment mechanism and can be overridden for one subtree:
 
 ```cpp
-template <class Factory>
-View AccentTheme(Factory&& content) {
+View AccentTheme(View content) {
   ThemeDefinition definition;
   definition.Set(ButtonStyle{
       .background = Color::Rgb(207, 34, 46),
@@ -33,7 +34,7 @@ View AccentTheme(Factory&& content) {
       .padding = EdgeInsets::Symmetric(16.0F, 8.0F),
       .corner_radius = 12.0F,
   });
-  return Theme(std::move(definition), std::forward<Factory>(content));
+  return Theme {std::move(definition), std::move(content)};
 }
 ```
 
@@ -42,16 +43,17 @@ Explicit modifiers such as `Background`, `Foreground`, and `FontSize` are applie
 To customize built-in semantic tokens while retaining that Theme's complete component mapping:
 
 ```cpp
-template <class Factory>
-View BrandTheme(Factory&& content) {
+View BrandTheme(View content) {
   ThemeSpec theme = MaterialLightThemeSpec();
   theme.colors.primary = Color::Rgb(130, 80, 210);
   theme.colors.on_primary = Color::White();
-  return MaterialTheme(std::move(theme), std::forward<Factory>(content));
+  return MaterialTheme {std::move(theme), std::move(content)};
 }
 ```
 
-`FlatTheme(theme, content)` provides the same token-to-style rebuild path for a branded Flat Theme.
+`FlatTheme {theme, content}` provides the same token-to-style rebuild path for a branded Flat Theme.
+
+A custom component style is an Environment value registered through `ThemeDefinition::Set()`. The component reads it inside its own `[[huxerui::scope]]` function when the style changes composition structure; a built-in leaf may instead resolve it through its private ViewSpec defaults operation. Runtime does not maintain a global component-style switch.
 
 Flat and Material definitions also provide a complete `SystemBarsAppearance` Theme value.
 Runtime paints the status and navigation backplane with those colors and derives light or dark native foreground content when the corresponding setting is `Automatic`.

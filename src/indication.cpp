@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 #include <huxerui/theme.h>
 
 #include "indication_internal.h"
 #include "internal.h"
+#include "resource_internal.h"
 
 namespace huxerui::detail {
 
@@ -15,6 +17,93 @@ namespace {
 bool IsEmpty(const Indication& indication) noexcept {
   return !indication.focus.has_value() && !indication.hover.has_value() && !indication.press.has_value() &&
          !indication.ripple.has_value();
+}
+
+bool NeedsResourceResolution(const Indication& indication) {
+  const auto layer_needs_resolution = [](const std::optional<IndicationLayer>& layer) {
+    return layer.has_value() && layer->fill.has_value() && detail::NeedsResourceResolution(*layer->fill);
+  };
+  return layer_needs_resolution(indication.focus) || layer_needs_resolution(indication.hover) ||
+         layer_needs_resolution(indication.press);
+}
+
+Indication ResolveIndication(Indication indication, AppResources& resources, const Locale& locale) {
+  const auto resolve_layer = [&resources, &locale](std::optional<IndicationLayer>& layer) {
+    if (layer.has_value() && layer->fill.has_value()) {
+      layer->fill = ResolveVisualFill(*layer->fill, resources, locale);
+    }
+  };
+  resolve_layer(indication.focus);
+  resolve_layer(indication.hover);
+  resolve_layer(indication.press);
+  if (indication.geometry.layer_size.has_value() &&
+      (!std::isfinite(indication.geometry.layer_size->width) ||
+       !std::isfinite(indication.geometry.layer_size->height) || indication.geometry.layer_size->width < 0.0F ||
+       indication.geometry.layer_size->height < 0.0F)) {
+    throw std::invalid_argument("HuxerUI indication layer size must be finite and non-negative");
+  }
+  if (indication.geometry.clip_corner_radii.has_value()) {
+    ValidateCornerRadii(
+        *indication.geometry.clip_corner_radii,
+        "HuxerUI indication clip corner radii must be finite and non-negative"
+    );
+  }
+  const auto validate_layer = [](const std::optional<IndicationLayer>& layer) {
+    if (!layer.has_value()) {
+      return;
+    }
+    if (layer->border.has_value()) {
+      ValidateBorder(*layer->border);
+    }
+    if (layer->corner_radii.has_value()) {
+      ValidateCornerRadii(*layer->corner_radii, "HuxerUI indication corner radii must be finite and non-negative");
+    }
+    MotionController enter;
+    enter.AnimateTo(1.0F, layer->enter);
+    MotionController exit;
+    exit.AnimateTo(1.0F, layer->exit);
+  };
+  validate_layer(indication.focus);
+  validate_layer(indication.hover);
+  validate_layer(indication.press);
+  if (indication.ripple.has_value()) {
+    ValidateColor(indication.ripple->color, "HuxerUI ripple color must be finite");
+    MotionController expansion;
+    expansion.AnimateTo(1.0F, indication.ripple->expansion);
+    MotionController fade_out;
+    fade_out.AnimateTo(1.0F, indication.ripple->fade_out);
+  }
+  return indication;
+}
+
+void CompileIndicationModifier(
+    ViewSpec&, ModifierSpec& modifier, const std::shared_ptr<const Environment>& environment, AppResources& resources
+) {
+  Indication indication = *static_cast<const Indication*>(modifier.value.get());
+  const Locale locale =
+      NeedsResourceResolution(indication) ? ResolveResourceLocale(environment, resources) : Locale::Default();
+  modifier.value = std::make_shared<Indication>(ResolveIndication(std::move(indication), resources, locale));
+}
+
+void CompileDefaultIndicationModifier(
+    ViewSpec& spec,
+    ModifierSpec& modifier,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources
+) {
+  DefaultIndication value = *static_cast<const DefaultIndication*>(modifier.value.get());
+  Indication indication;
+  if (value.value.has_value()) {
+    indication = *value.value;
+  } else if (spec.default_indication.has_value()) {
+    indication = *spec.default_indication;
+  } else {
+    indication = ResolveThemeSpec(environment).interactions.indication;
+  }
+  const Locale locale =
+      NeedsResourceResolution(indication) ? ResolveResourceLocale(environment, resources) : Locale::Default();
+  value.value = ResolveIndication(std::move(indication), resources, locale);
+  modifier.value = std::make_shared<DefaultIndication>(std::move(value));
 }
 
 NodeExtension::PaintInvalidation MergeInvalidation(NodeExtension::PaintInvalidation left,
@@ -284,8 +373,10 @@ public:
   }
 
   void Update(MountedNode& node, const detail::DefaultIndication& modifier) {
-    const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    Update(node, modifier.value.value_or(detail::ResolveThemeSpec(mounted.environment).interactions.indication));
+    if (!modifier.value.has_value()) {
+      throw std::logic_error("HuxerUI compiled default indication is missing");
+    }
+    Update(node, *modifier.value);
   }
 
   bool HoverHitTest(MountedNode& node, Point position) const override {
@@ -476,13 +567,23 @@ private:
 } // namespace
 
 const detail::ModifierDescriptor& Indication::Descriptor() {
-  return detail::ModifierDescriptorFor<Indication, IndicationExtension>();
+  static const detail::ModifierDescriptor descriptor = [] {
+    detail::ModifierDescriptor result = detail::ModifierDescriptorFor<Indication, IndicationExtension>();
+    result.compile = detail::CompileIndicationModifier;
+    return result;
+  }();
+  return descriptor;
 }
 
 namespace detail {
 
 const ModifierDescriptor& DefaultIndication::Descriptor() {
-  return ModifierDescriptorFor<DefaultIndication, IndicationExtension>();
+  static const ModifierDescriptor descriptor = [] {
+    ModifierDescriptor result = ModifierDescriptorFor<DefaultIndication, IndicationExtension>();
+    result.compile = CompileDefaultIndicationModifier;
+    return result;
+  }();
+  return descriptor;
 }
 
 bool IsDefaultIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept {

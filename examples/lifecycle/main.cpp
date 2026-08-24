@@ -83,7 +83,9 @@ View LifecycleContent() {
 }
 
 View App() {
-  return MaterialTheme(LifecycleContent);
+  return MaterialTheme {
+    LifecycleContent(),
+  };
 }
 
 const Application application{

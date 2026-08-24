@@ -283,7 +283,9 @@ View CanvasDemo() {
 }
 
 View App() {
-  return MaterialTheme(CanvasDemo);
+  return MaterialTheme {
+    CanvasDemo(),
+  };
 }
 
 const Application application{

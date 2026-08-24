@@ -55,7 +55,7 @@ View WindowChromeDemo() {
 }
 
 View App() {
-  return MaterialTheme(WindowChromeDemo);
+  return MaterialTheme {Scope(WindowChromeDemo)};
 }
 
 const Application application{

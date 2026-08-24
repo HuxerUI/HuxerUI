@@ -216,7 +216,9 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
 }
 
 View App() {
-  return MaterialTheme(ApplicationContent);
+  return MaterialTheme {
+    ApplicationContent(),
+  };
 }
 
 AppOptions Options() {

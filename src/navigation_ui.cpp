@@ -19,23 +19,8 @@ namespace huxerui::detail {
 
 namespace {
 
-template <class IconVariant> std::optional<ResolvedImageAsset> ResolveNavigationIcon(IconVariant& value) {
-  return std::visit(
-      [](auto& icon) -> std::optional<ResolvedImageAsset> {
-        using Icon = std::decay_t<decltype(icon)>;
-        if constexpr (std::same_as<Icon, std::monostate>) {
-          return std::nullopt;
-        } else if constexpr (std::same_as<Icon, ImageResource>) {
-          return UseImageResource(std::move(icon));
-        } else {
-          if (!icon.HasValue()) {
-            throw std::invalid_argument("HuxerUI NavigationItem icon must not be empty");
-          }
-          return ResolvedImageAsset{std::move(icon)};
-        }
-      },
-      value
-  );
+std::optional<ResolvedImageAsset> ResolveNavigationIcon(const std::optional<ImageVariant>& value) {
+  return value.has_value() ? std::optional<ResolvedImageAsset>{UseImageVariant(*value)} : std::nullopt;
 }
 
 } // namespace
@@ -55,6 +40,27 @@ struct NavigationItemAccess {
 
   static bool IsEnabled(const NavigationItem& item) noexcept {
     return item.enabled_;
+  }
+
+  static bool HasIcon(const NavigationItem& item) noexcept {
+    return item.icon_.has_value();
+  }
+
+  static bool HasSelectedIcon(const NavigationItem& item) noexcept {
+    return item.selected_icon_.has_value();
+  }
+
+  static bool HasBlankLiteralLabel(const NavigationItem& item) noexcept {
+    return IsBlankStringVariantLiteral(item.label_);
+  }
+
+  static void ValidateImages(const NavigationItem& item) {
+    if (item.icon_.has_value()) {
+      ValidateImageVariant(*item.icon_);
+    }
+    if (item.selected_icon_.has_value()) {
+      ValidateImageVariant(*item.selected_icon_);
+    }
   }
 };
 
@@ -96,31 +102,8 @@ struct TopAppBarConfigurationValue {
   using Value = TopAppBarConfiguration;
 };
 
-class TopAppBarTitle final : public View {
-public:
-  TopAppBarTitle(std::string title, TextStyle style) : View(MakeSpec(std::move(title))) {
-    SetTextStyle(std::move(style));
-  }
-
-private:
-  static std::shared_ptr<detail::ViewSpec> MakeSpec(std::string title) {
-    auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
-    spec->text = std::move(title);
-    spec->text_role = TextRole::Title;
-    spec->properties.text_layout_options = {.wrap = TextWrap::NoWrap};
-    spec->component_semantics.role = SemanticRole::Heading;
-    spec->component_semantics.label = spec->text;
-    spec->component_semantics.heading_level = 1;
-    return spec;
-  }
-};
-
-float IndicatorCornerRadius(float shortest_side, float radius) noexcept {
-  return std::min(std::max(0.0F, radius), shortest_side * 0.5F);
-}
-
-template <class Style> Style ResolveNavigationStyle() {
-  const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
+template <class Style>
+Style ResolveNavigationStyle(const std::shared_ptr<const Environment>& environment) {
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
     if (const auto* style = std::any_cast<Style>(value)) {
       return *style;
@@ -128,6 +111,70 @@ template <class Style> Style ResolveNavigationStyle() {
     throw std::logic_error("HuxerUI navigation style environment value has an invalid type");
   }
   return Style::Default();
+}
+
+template <class Style> Style ResolveNavigationStyle() {
+  return ResolveNavigationStyle<Style>(detail::CurrentEnvironment());
+}
+
+template <EnvironmentValue Value>
+Value ResolveNavigationEnvironmentValue(const std::shared_ptr<const Environment>& environment) {
+  if (const std::any* value = detail::FindEnvironmentValue(environment, typeid(Value))) {
+    if (const auto* typed = std::any_cast<Value>(value)) {
+      return *typed;
+    }
+    throw std::logic_error("HuxerUI navigation environment value has an invalid type");
+  }
+  return Value::Default();
+}
+
+void ApplyTopAppBarDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment);
+void ApplyTopAppBarTitleDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment);
+void ApplyTopAppBarActionsDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment);
+
+template <class Layout>
+std::shared_ptr<detail::ViewSpec> MakeNavigationLayoutSpec(
+    std::vector<View> children,
+    detail::ViewDefaults defaults
+) {
+  auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Layout>(), std::move(children));
+  spec->defaults = defaults;
+  return spec;
+}
+
+class TopAppBarTitle final : public View {
+public:
+  explicit TopAppBarTitle(StringVariant title) : View(MakeSpec(std::move(title))) {}
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(StringVariant title) {
+    auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
+    spec->text = std::move(title);
+    spec->text_role = TextRole::Title;
+    spec->properties.text_layout_options = {.wrap = TextWrap::NoWrap};
+    spec->component_semantics.role = SemanticRole::Heading;
+    spec->component_semantics.heading_level = 1;
+    spec->defaults = ApplyTopAppBarTitleDefaults;
+    return spec;
+  }
+};
+
+class TopAppBarActions final : public View {
+public:
+  explicit TopAppBarActions(std::vector<View> actions) : View(MakeSpec(std::move(actions))) {}
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(std::vector<View> actions) {
+    auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Row>(), std::move(actions));
+    spec->defaults = ApplyTopAppBarActionsDefaults;
+    spec->modifiers.push_back(detail::MakeModifierSpec(CrossAlign(CrossAxisAlignment::Center)));
+    spec->modifiers.push_back(detail::MakeModifierSpec(ClipChildren{}));
+    return spec;
+  }
+};
+
+float IndicatorCornerRadius(float shortest_side, float radius) noexcept {
+  return std::min(std::max(0.0F, radius), shortest_side * 0.5F);
 }
 
 std::shared_ptr<const detail::ResolvedNavigationItems> ResolveItems(std::vector<NavigationItem> items) {
@@ -178,6 +225,29 @@ void ValidateNavigationPaneItems(const detail::ResolvedNavigationItems& items, b
   }
 }
 
+void ValidateNavigationDeclarations(
+    const std::vector<NavigationItem>& items, std::size_t selected_index, bool require_icons
+) {
+  if (items.empty()) {
+    throw std::invalid_argument("HuxerUI navigation requires at least one item");
+  }
+  if (selected_index >= items.size()) {
+    throw std::invalid_argument("HuxerUI navigation selected index is out of range");
+  }
+  for (const NavigationItem& item : items) {
+    if (detail::NavigationItemAccess::HasBlankLiteralLabel(item)) {
+      throw std::invalid_argument("HuxerUI NavigationItem requires a non-empty semantic label");
+    }
+    if (detail::NavigationItemAccess::HasSelectedIcon(item) && !detail::NavigationItemAccess::HasIcon(item)) {
+      throw std::invalid_argument("HuxerUI NavigationItem selected icon requires a regular icon");
+    }
+    if (require_icons && !detail::NavigationItemAccess::HasIcon(item)) {
+      throw std::invalid_argument("HuxerUI navigation items require icons");
+    }
+    detail::NavigationItemAccess::ValidateImages(item);
+  }
+}
+
 View BuildNavigationIcon(detail::ResolvedImageAsset icon, float size, Color tint) {
   return std::visit(
       [size, tint](auto asset) -> View {
@@ -199,14 +269,51 @@ struct PreserveDisabledAppearance {
   bool operator==(const PreserveDisabledAppearance&) const = default;
 };
 
+void ApplyTopAppBarDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const TopAppBarStyle style = ResolveNavigationStyle<TopAppBarStyle>(environment);
+  const auto configuration_it = spec.layout_values.find(typeid(TopAppBarConfigurationValue));
+  if (configuration_it == spec.layout_values.end()) {
+    throw std::logic_error("HuxerUI TopAppBar is missing its layout configuration");
+  }
+  auto* configuration = std::any_cast<TopAppBarConfiguration>(&configuration_it->second.value);
+  if (configuration == nullptr) {
+    throw std::logic_error("HuxerUI TopAppBar layout configuration has an invalid type");
+  }
+  configuration->style = style;
+  spec.properties.background = style.background;
+  SystemBarsAppearance system_bars = ResolveNavigationEnvironmentValue<SystemBarsAppearance>(environment);
+  system_bars.status_bar_background = style.background;
+  spec.properties.system_bars_appearance = system_bars;
+}
+
+void ApplyTopAppBarTitleDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const std::string& title = detail::StringLiteral(spec.text);
+  if (title.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
+    throw std::invalid_argument("HuxerUI TopAppBar requires a non-empty title");
+  }
+  if (!spec.component_semantics.label.has_value()) {
+    spec.component_semantics.label = title;
+  }
+  spec.properties.text_style = ResolveNavigationStyle<TopAppBarStyle>(environment).title_style;
+}
+
+void ApplyTopAppBarActionsDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  spec.properties.spacing = std::max(0.0F, ResolveNavigationStyle<TopAppBarStyle>(environment).action_spacing);
+}
+
 void ApplyPreserveDisabledAppearance(detail::ViewSpec& spec, const PreserveDisabledAppearance&) {
   spec.properties.disabled_opacity = 1.0F;
 }
 
 const detail::ModifierDescriptor& PreserveDisabledAppearance::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) {
-        ApplyPreserveDisabledAppearance(spec, *static_cast<const PreserveDisabledAppearance*>(value));
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) {
+        ApplyPreserveDisabledAppearance(
+            spec, *static_cast<const PreserveDisabledAppearance*>(modifier.value.get())
+        );
       },
       nullptr,
       nullptr,
@@ -510,9 +617,11 @@ std::vector<bool> EnabledItems(const detail::ResolvedNavigationItems& items) {
   return enabled;
 }
 
-std::function<View()>
-NavigationBarFactory(std::shared_ptr<const detail::ResolvedNavigationItems> items, std::size_t selected_index) {
-  return [items = std::move(items), selected_index] {
+std::function<View()> NavigationBarFactory(std::vector<NavigationItem> declarations, std::size_t selected_index) {
+  return [declarations = std::move(declarations), selected_index] {
+    const std::shared_ptr<const detail::ResolvedNavigationItems> items = ResolveItems(declarations);
+    ValidateSelectedIndex(*items, selected_index);
+    ValidateNavigationBarItems(*items);
     const NavigationBarStyle style = ResolveNavigationStyle<NavigationBarStyle>();
     SystemBarsAppearance system_bars = UseEnvironment<SystemBarsAppearance>();
     system_bars.navigation_bar_background = style.background;
@@ -547,9 +656,12 @@ NavigationBarFactory(std::shared_ptr<const detail::ResolvedNavigationItems> item
 }
 
 std::function<View()> NavigationPaneFactory(
-    std::shared_ptr<const detail::ResolvedNavigationItems> items, std::size_t selected_index, bool expanded
+    std::vector<NavigationItem> declarations, std::size_t selected_index, bool expanded
 ) {
-  return [items = std::move(items), selected_index, expanded] {
+  return [declarations = std::move(declarations), selected_index, expanded] {
+    const std::shared_ptr<const detail::ResolvedNavigationItems> items = ResolveItems(declarations);
+    ValidateSelectedIndex(*items, selected_index);
+    ValidateNavigationPaneItems(*items, expanded);
     const NavigationPaneStyle style = ResolveNavigationStyle<NavigationPaneStyle>();
     const EventEmitter events = UseEvents();
     const ScrollController scroll = UseScrollController();
@@ -606,6 +718,10 @@ std::vector<View> DrawerPanelChild(View content, const char* name) {
   return children;
 }
 
+struct DrawerStyleBinding {
+  using Value = DrawerStyle;
+};
+
 struct DrawerPresentationState {
   DrawerPlacement placement = DrawerPlacement::Modal;
   float progress = 0.0F;
@@ -635,8 +751,6 @@ enum class DrawerPresentationRole {
 struct DrawerPresentation {
   std::shared_ptr<DrawerPresentationState> state;
   DrawerPresentationRole role = DrawerPresentationRole::Scrim;
-  std::optional<Shadow> modal_shadow;
-  CornerRadii modal_corner_radii;
 
   static const detail::ModifierDescriptor& Descriptor();
 
@@ -650,11 +764,20 @@ public:
   }
 
   void Update(MountedNode& node, const DrawerPresentation& modifier) {
-    static_cast<void>(node);
     state_ = modifier.state;
     role_ = modifier.role;
-    modal_shadow_ = modifier.modal_shadow;
-    modal_corner_radii_ = modifier.modal_corner_radii;
+    if (role_ == DrawerPresentationRole::Scrim) {
+      modal_shadow_.reset();
+      modal_corner_radii_ = {};
+      return;
+    }
+    const DrawerStyle style = node.LayoutValueOr<DrawerStyleBinding>(DrawerStyle::Default());
+    modal_shadow_ = style.shadow;
+    if (role_ == DrawerPresentationRole::StartPanel) {
+      modal_corner_radii_ = {0.0F, style.corner_radius, style.corner_radius, 0.0F};
+    } else if (role_ == DrawerPresentationRole::EndPanel) {
+      modal_corner_radii_ = {style.corner_radius, 0.0F, 0.0F, style.corner_radius};
+    }
   }
 
   FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
@@ -750,8 +873,12 @@ public:
   }
 
   void Update(MountedNode& node, const DrawerOverlayConfiguration& modifier) {
-    static_cast<void>(node);
-    configuration_ = modifier;
+    static_cast<void>(modifier);
+    const DrawerOverlayConfiguration* configuration = node.LayoutValue<DrawerOverlayValue>();
+    if (configuration == nullptr) {
+      throw std::logic_error("HuxerUI drawer overlay is missing its compiled configuration");
+    }
+    configuration_ = *configuration;
     if (!initialized_) {
       placement_ = Placement();
       target_visible_ = TargetVisible();
@@ -987,10 +1114,89 @@ struct DrawerLayoutValue {
   using Value = DrawerLayoutConfiguration;
 };
 
+template <class Value>
+Value& MutableNavigationLayoutValue(detail::ViewSpec& spec, std::type_index key, const char* message) {
+  const auto value_it = spec.layout_values.find(key);
+  if (value_it == spec.layout_values.end()) {
+    throw std::logic_error(message);
+  }
+  auto* value = std::any_cast<Value>(&value_it->second.value);
+  if (value == nullptr) {
+    throw std::logic_error("HuxerUI navigation layout value has an invalid type");
+  }
+  return *value;
+}
+
+void ApplyDrawerSurfaceDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment,
+                                DrawerSide side) {
+  const DrawerStyle style = ResolveNavigationStyle<DrawerStyle>(environment);
+  spec.layout_values.insert_or_assign(typeid(DrawerStyleBinding), detail::MakeErasedLayoutValue(style));
+  spec.properties.frame.width = std::max(0.0F, style.preferred_width);
+  spec.properties.background = style.background;
+  spec.properties.safe_area_padding = side == DrawerSide::Start ? SafeAreaPadding{.right = false}
+                                                                 : SafeAreaPadding{.left = false};
+}
+
+void ApplyStartDrawerDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  ApplyDrawerSurfaceDefaults(spec, environment, DrawerSide::Start);
+}
+
+void ApplyEndDrawerDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  ApplyDrawerSurfaceDefaults(spec, environment, DrawerSide::End);
+}
+
+void ApplyDrawerScrimDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  spec.properties.background = ResolveNavigationStyle<DrawerStyle>(environment).scrim;
+}
+
+void ApplyDrawerOverlayDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  DrawerOverlayConfiguration& configuration = MutableNavigationLayoutValue<DrawerOverlayConfiguration>(
+      spec,
+      typeid(DrawerOverlayValue),
+      "HuxerUI drawer overlay is missing its configuration"
+  );
+  const DrawerStyle style = ResolveNavigationStyle<DrawerStyle>(environment);
+  configuration.modal_content_reveal = style.modal_content_reveal;
+  configuration.edge_drag_width = style.edge_drag_width;
+  configuration.motion = style.motion;
+}
+
+void ApplyDrawerLayoutDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  DrawerLayoutConfiguration& configuration = MutableNavigationLayoutValue<DrawerLayoutConfiguration>(
+      spec,
+      typeid(DrawerLayoutValue),
+      "HuxerUI DrawerLayout is missing its responsive configuration"
+  );
+  configuration.viewport_class = ResolveNavigationEnvironmentValue<detail::ViewportEnvironment>(environment).value;
+  const DrawerStyle style = ResolveNavigationStyle<DrawerStyle>(environment);
+  if (configuration.start.has_value()) {
+    configuration.start->style = style;
+  }
+  if (configuration.end.has_value()) {
+    configuration.end->style = style;
+  }
+}
+
+class DrawerScrimView final : public View {
+public:
+  explicit DrawerScrimView(std::shared_ptr<DrawerPresentationState> presentation)
+      : View(MakeSpec(std::move(presentation))) {}
+
+private:
+  static std::shared_ptr<detail::ViewSpec> MakeSpec(std::shared_ptr<DrawerPresentationState> presentation) {
+    auto spec = detail::MakeLayoutSpec(detail::LayoutDescriptorFor<Stack>(), {});
+    spec->defaults = ApplyDrawerScrimDefaults;
+    spec->modifiers.push_back(
+        detail::MakeModifierSpec(DrawerPresentation{std::move(presentation), DrawerPresentationRole::Scrim})
+    );
+    return spec;
+  }
+};
+
 class DrawerOverlayView final : public View {
 public:
-  DrawerOverlayView(DrawerSide side, View panel, bool open, DrawerStyle style)
-      : DrawerOverlayView(Build(side, std::move(panel), open, std::move(style))) {}
+  DrawerOverlayView(DrawerSide side, View panel, bool open)
+      : DrawerOverlayView(Build(side, std::move(panel), open)) {}
 
   const std::shared_ptr<DrawerPresentationState>& Presentation() const noexcept {
     return presentation_;
@@ -1005,29 +1211,20 @@ private:
   explicit DrawerOverlayView(Construction construction)
       : View(std::move(construction.spec)), presentation_(std::move(construction.presentation)) {}
 
-  static Construction Build(DrawerSide side, View panel, bool open, DrawerStyle style) {
+  static Construction Build(DrawerSide side, View panel, bool open) {
     auto presentation = std::make_shared<DrawerPresentationState>();
     presentation->progress = open ? 1.0F : 0.0F;
     DrawerOverlayConfiguration configuration{
-        side,
-        open,
-        style.modal_content_reveal,
-        style.edge_drag_width,
-        style.motion,
-        presentation,
+        .side = side,
+        .requested_open = open,
+        .presentation = presentation,
     };
-    View scrim = Stack {}.With(
-        Background(style.scrim),
-        DrawerPresentation{presentation, DrawerPresentationRole::Scrim}
-    );
+    View scrim = DrawerScrimView(presentation);
     panel = std::move(panel).With(
         PreserveDisabledAppearance{},
         DrawerPresentation{
             presentation,
             side == DrawerSide::Start ? DrawerPresentationRole::StartPanel : DrawerPresentationRole::EndPanel,
-            style.shadow,
-            side == DrawerSide::Start ? CornerRadii{0.0F, style.corner_radius, style.corner_radius, 0.0F}
-                                      : CornerRadii{style.corner_radius, 0.0F, 0.0F, style.corner_radius},
         }
     );
     auto spec = detail::MakeLayoutSpec(
@@ -1036,7 +1233,8 @@ private:
     );
     spec->properties.clip_children = true;
     spec->layout_values.insert_or_assign(typeid(DrawerOverlayValue), detail::MakeErasedLayoutValue(configuration));
-    spec->retained_modifiers.push_back(detail::MakeModifierSpec(configuration));
+    spec->defaults = ApplyDrawerOverlayDefaults;
+    spec->modifiers.push_back(detail::MakeModifierSpec(configuration));
     return {std::move(spec), std::move(presentation)};
   }
 
@@ -1057,7 +1255,6 @@ DrawerPlacement PreferredDrawerPlacement(ViewportClass viewport_class, DrawerSid
 
 struct TopAppBar::Construction {
   std::vector<View> children;
-  TopAppBarStyle style;
 };
 
 TopAppBar::Construction TopAppBar::Build(
@@ -1066,11 +1263,6 @@ TopAppBar::Construction TopAppBar::Build(
     std::vector<View> actions
 ) {
   Construction construction;
-  construction.style = ResolveNavigationStyle<TopAppBarStyle>();
-  std::string resolved_title = UseString(std::move(title));
-  if (resolved_title.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
-    throw std::invalid_argument("HuxerUI TopAppBar requires a non-empty title");
-  }
   if (leading.has_value() && !*leading) {
     throw std::invalid_argument("HuxerUI TopAppBar leading view must not be empty");
   }
@@ -1080,26 +1272,30 @@ TopAppBar::Construction TopAppBar::Build(
 
   construction.children.reserve(3);
   construction.children.push_back(leading.has_value() ? std::move(*leading) : View{Spacer()});
-  construction.children.push_back(TopAppBarTitle(std::move(resolved_title), construction.style.title_style));
-  construction.children.push_back(
-      Row(std::move(actions))
-          .With(
-              Spacing(std::max(0.0F, construction.style.action_spacing)),
-              CrossAlign(CrossAxisAlignment::Center),
-              ClipChildren{}
-          )
-  );
+  construction.children.push_back(TopAppBarTitle(std::move(title)));
+  construction.children.push_back(TopAppBarActions(std::move(actions)));
   return construction;
 }
 
 TopAppBar::TopAppBar(StringVariant title, std::optional<View> leading, std::vector<View> actions)
-    : TopAppBar(Build(std::move(title), std::move(leading), std::move(actions))) {}
+    : TopAppBar([&] {
+        if (detail::IsBlankStringVariantLiteral(title)) {
+          throw std::invalid_argument("HuxerUI TopAppBar requires a non-empty title");
+        }
+        if (leading.has_value() && !*leading) {
+          throw std::invalid_argument("HuxerUI TopAppBar leading view must not be empty");
+        }
+        if (std::ranges::any_of(actions, [](const View& action) { return !action; })) {
+          throw std::invalid_argument("HuxerUI TopAppBar actions must not contain empty views");
+        }
+        return Build(std::move(title), std::move(leading), std::move(actions));
+      }()) {}
 
 TopAppBar::TopAppBar(Construction construction)
-    : Layout<TopAppBar>(std::move(construction.children)), style_(std::move(construction.style)) {
-  SystemBarsAppearance system_bars = UseEnvironment<SystemBarsAppearance>();
-  system_bars.status_bar_background = style_.background;
-  ApplyModifiers(Background(style_.background), SafeAreaPadding{.bottom = false}, system_bars, ClipChildren{});
+    : Layout<TopAppBar>(
+          MakeNavigationLayoutSpec<TopAppBar>(std::move(construction.children), ApplyTopAppBarDefaults)
+      ) {
+  ApplyModifiers(SafeAreaPadding{.bottom = false}, ClipChildren{});
   UpdateConfiguration();
 }
 
@@ -1110,7 +1306,9 @@ TopAppBar TopAppBar::TitleAlignment(TopAppBarTitleAlignment alignment) && {
 }
 
 void TopAppBar::UpdateConfiguration() {
-  ApplyLayoutValue<TopAppBarConfigurationValue>(TopAppBarConfiguration{style_, title_alignment_});
+  ApplyLayoutValue<TopAppBarConfigurationValue>(
+      TopAppBarConfiguration{TopAppBarStyle::Default(), title_alignment_}
+  );
 }
 
 LayoutResult TopAppBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
@@ -1194,30 +1392,15 @@ DrawerStyle DrawerStyle::Default() {
   return {};
 }
 
-NavigationItem::NavigationItem(Icon icon, StringVariant label) : icon_(std::move(icon)), label_(std::move(label)) {}
+NavigationItem::NavigationItem(StringVariant label) : label_(std::move(label)) {}
 
-NavigationItem::NavigationItem(StringVariant label) : NavigationItem(Icon{}, std::move(label)) {}
-
-NavigationItem::NavigationItem(ImageResource icon, StringVariant label)
-    : NavigationItem(Icon{std::move(icon)}, std::move(label)) {}
-
-NavigationItem::NavigationItem(ImageAsset icon, StringVariant label)
-    : NavigationItem(Icon{std::move(icon)}, std::move(label)) {}
-
-NavigationItem::NavigationItem(VectorAsset icon, StringVariant label)
-    : NavigationItem(Icon{std::move(icon)}, std::move(label)) {}
-
-NavigationItem NavigationItem::SelectedIcon(ImageResource icon) && {
-  selected_icon_ = std::move(icon);
-  return std::move(*this);
+NavigationItem::NavigationItem(ImageVariant icon, StringVariant label)
+    : icon_(std::move(icon)), label_(std::move(label)) {
+  detail::ValidateImageVariant(*icon_);
 }
 
-NavigationItem NavigationItem::SelectedIcon(ImageAsset icon) && {
-  selected_icon_ = std::move(icon);
-  return std::move(*this);
-}
-
-NavigationItem NavigationItem::SelectedIcon(VectorAsset icon) && {
+NavigationItem NavigationItem::SelectedIcon(ImageVariant icon) && {
+  detail::ValidateImageVariant(icon);
   selected_icon_ = std::move(icon);
   return std::move(*this);
 }
@@ -1229,29 +1412,22 @@ NavigationItem NavigationItem::Enabled(bool enabled) && {
 
 NavigationBar::NavigationBar(std::vector<NavigationItem> items, std::size_t selected_index)
     : detail::TypedView<NavigationBar>([&] {
-        auto resolved = ResolveItems(std::move(items));
-        ValidateSelectedIndex(*resolved, selected_index);
-        ValidateNavigationBarItems(*resolved);
-        return detail::MakeScopeSpec(NavigationBarFactory(std::move(resolved), selected_index));
+        ValidateNavigationDeclarations(items, selected_index, true);
+        return detail::MakeScopeSpec(NavigationBarFactory(std::move(items), selected_index));
       }()) {}
 
 NavigationPane::NavigationPane(std::vector<NavigationItem> items, std::size_t selected_index, bool expanded)
     : detail::TypedView<NavigationPane>([&] {
-        auto resolved = ResolveItems(std::move(items));
-        ValidateSelectedIndex(*resolved, selected_index);
-        ValidateNavigationPaneItems(*resolved, expanded);
-        return detail::MakeScopeSpec(NavigationPaneFactory(std::move(resolved), selected_index, expanded));
+        ValidateNavigationDeclarations(items, selected_index, !expanded);
+        return detail::MakeScopeSpec(NavigationPaneFactory(std::move(items), selected_index, expanded));
       }()) {}
 
 StartDrawer::StartDrawer(View content)
-    : Layout<StartDrawer>(DrawerPanelChild(std::move(content), "StartDrawer")),
-      style_(ResolveNavigationStyle<DrawerStyle>()) {
-  ApplyModifiers(
-      Frame{.width = std::max(0.0F, style_.preferred_width)},
-      Background(style_.background),
-      SafeAreaPadding{.right = false},
-      ClipChildren{}
-  );
+    : Layout<StartDrawer>(MakeNavigationLayoutSpec<StartDrawer>(
+          DrawerPanelChild(std::move(content), "StartDrawer"),
+          ApplyStartDrawerDefaults
+      )) {
+  ApplyModifiers(ClipChildren{});
 }
 
 StartDrawer StartDrawer::Open(bool open) && {
@@ -1267,14 +1443,11 @@ LayoutResult StartDrawer::Measure(LayoutContext& context, MountedNode& node, Con
 }
 
 EndDrawer::EndDrawer(View content)
-    : Layout<EndDrawer>(DrawerPanelChild(std::move(content), "EndDrawer")),
-      style_(ResolveNavigationStyle<DrawerStyle>()) {
-  ApplyModifiers(
-      Frame{.width = std::max(0.0F, style_.preferred_width)},
-      Background(style_.background),
-      SafeAreaPadding{.left = false},
-      ClipChildren{}
-  );
+    : Layout<EndDrawer>(MakeNavigationLayoutSpec<EndDrawer>(
+          DrawerPanelChild(std::move(content), "EndDrawer"),
+          ApplyEndDrawerDefaults
+      )) {
+  ApplyModifiers(ClipChildren{});
 }
 
 EndDrawer EndDrawer::Open(bool open) && {
@@ -1301,18 +1474,16 @@ DrawerLayoutSlot AppendDrawer(
     DrawerSide side,
     View panel,
     bool open,
-    DrawerStyle style,
     ViewportClass viewport_class
 ) {
-  DrawerStyle layout_style = style;
-  DrawerOverlayView drawer(side, std::move(panel), open, std::move(style));
+  DrawerOverlayView drawer(side, std::move(panel), open);
   const std::shared_ptr<DrawerPresentationState> presentation = drawer.Presentation();
   presentation->placement = PreferredDrawerPlacement(viewport_class, side);
   presentation->target_visible = presentation->placement == DrawerPlacement::Inline || open;
   presentation->progress = presentation->target_visible ? 1.0F : 0.0F;
   const std::size_t child_index = children.size();
   children.push_back(std::move(drawer));
-  return {child_index, open, std::move(layout_style), presentation};
+  return {child_index, open, DrawerStyle::Default(), presentation};
 }
 
 float DrawerMinimumWidth(const DrawerLayoutSlot& slot) noexcept {
@@ -1371,28 +1542,24 @@ DrawerLayout::Construction DrawerLayout::Build(
   }
   Construction construction;
   construction.children.push_back(std::move(content));
-  construction.configuration.viewport_class = UseViewportClass();
+  construction.configuration.viewport_class = ViewportClass::Compact;
   if (start.has_value()) {
     const bool open = start->open_;
-    DrawerStyle style = start->style_;
     construction.configuration.start = AppendDrawer(
         construction.children,
         DrawerSide::Start,
         std::move(*start),
         open,
-        std::move(style),
         construction.configuration.viewport_class
     );
   }
   if (end.has_value()) {
     const bool open = end->open_;
-    DrawerStyle style = end->style_;
     construction.configuration.end = AppendDrawer(
         construction.children,
         DrawerSide::End,
         std::move(*end),
         open,
-        std::move(style),
         construction.configuration.viewport_class
     );
   }
@@ -1400,7 +1567,10 @@ DrawerLayout::Construction DrawerLayout::Build(
 }
 
 DrawerLayout::DrawerLayout(Construction construction)
-    : Layout<DrawerLayout>(std::move(construction.children)) {
+    : Layout<DrawerLayout>(MakeNavigationLayoutSpec<DrawerLayout>(
+          std::move(construction.children),
+          ApplyDrawerLayoutDefaults
+      )) {
   SetLayoutValue(typeid(DrawerLayoutValue), std::move(construction.configuration));
   ApplyModifiers(ClipChildren{});
 }

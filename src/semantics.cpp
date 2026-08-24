@@ -6,8 +6,10 @@
 #include <iterator>
 #include <stdexcept>
 #include <unordered_set>
+#include <variant>
 
 #include "internal.h"
+#include "resource_internal.h"
 #include "text_input_internal.h"
 #include "window_internal.h"
 
@@ -21,11 +23,31 @@ template <class Value> void ApplyOptional(std::optional<Value>& target, const st
   }
 }
 
-std::optional<std::string> ResolveString(const std::optional<StringVariant>& value) {
+std::string ResolveSemanticString(
+    const StringVariant& value,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources,
+    std::optional<Locale>& locale
+) {
+  if (!NeedsResourceResolution(value)) {
+    return StringLiteral(value);
+  }
+  if (!locale.has_value()) {
+    locale = ResolveResourceLocale(environment, resources);
+  }
+  return ResolveString(value, resources, *locale);
+}
+
+std::optional<std::string> ResolveOptionalString(
+    const std::optional<StringVariant>& value,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources,
+    std::optional<Locale>& locale
+) {
   if (!value.has_value()) {
     return std::nullopt;
   }
-  return UseString(*value);
+  return ResolveSemanticString(*value, environment, resources, locale);
 }
 
 void ValidateRange(const SemanticRange& range) {
@@ -59,9 +81,18 @@ SemanticBuilderItem& RequireItem(SemanticBuilderState& state, std::uint64_t loca
   return *found;
 }
 
+AppResources& RequireResources(SemanticBuilderState& state) {
+  if (state.resources == nullptr) {
+    throw std::logic_error("HuxerUI semantic builder resource service is not available");
+  }
+  return *state.resources;
+}
+
 } // namespace
 
-SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const Environment> environment) {
+SemanticPatch ResolveSemantics(
+    const Semantics& semantics, std::shared_ptr<const Environment> environment, AppResources& resources
+) {
   if (semantics.heading_level.has_value() && (*semantics.heading_level == 0 || *semantics.heading_level > 6)) {
     throw std::invalid_argument("HuxerUI semantic heading level must be between one and six");
   }
@@ -78,16 +109,14 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
     ValidateCollectionItem(*semantics.collection_item);
   }
 
-  Composer composer(nullptr, environment);
-  Composer::Guard guard(composer);
-  return {
+  SemanticPatch resolved{
       .role = semantics.role,
-      .label = ResolveString(semantics.label),
-      .value = ResolveString(semantics.value),
-      .placeholder = ResolveString(semantics.placeholder),
-      .hint = ResolveString(semantics.hint),
-      .state_description = ResolveString(semantics.state_description),
-      .error = ResolveString(semantics.error),
+      .label = std::nullopt,
+      .value = std::nullopt,
+      .placeholder = std::nullopt,
+      .hint = std::nullopt,
+      .state_description = std::nullopt,
+      .error = std::nullopt,
       .identifier = semantics.identifier,
       .checked = semantics.checked,
       .selected = semantics.selected,
@@ -106,6 +135,14 @@ SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const
       .descendants = semantics.descendants,
       .hidden = semantics.hidden,
   };
+  std::optional<Locale> locale;
+  resolved.label = ResolveOptionalString(semantics.label, environment, resources, locale);
+  resolved.value = ResolveOptionalString(semantics.value, environment, resources, locale);
+  resolved.placeholder = ResolveOptionalString(semantics.placeholder, environment, resources, locale);
+  resolved.hint = ResolveOptionalString(semantics.hint, environment, resources, locale);
+  resolved.state_description = ResolveOptionalString(semantics.state_description, environment, resources, locale);
+  resolved.error = ResolveOptionalString(semantics.error, environment, resources, locale);
+  return resolved;
 }
 
 void ApplySemantics(SemanticPatch& target, const SemanticPatch& source) {
@@ -137,9 +174,12 @@ void ApplySemantics(SemanticPatch& target, const SemanticPatch& source) {
 
 const ModifierDescriptor& BuiltInSemantics::Descriptor() {
   static const ModifierDescriptor descriptor{
-      [](ViewSpec& spec, const void* value) {
-        const auto& semantics = static_cast<const BuiltInSemantics*>(value)->value;
-        ApplySemantics(spec.component_semantics, ResolveSemantics(semantics, spec.environment));
+      [](ViewSpec& spec,
+         ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>& environment,
+         AppResources& resources) {
+        const auto& semantics = static_cast<const BuiltInSemantics*>(modifier.value.get())->value;
+        ApplySemantics(spec.component_semantics, ResolveSemantics(semantics, environment, resources));
       },
       nullptr,
       nullptr,
@@ -305,12 +345,15 @@ void BindExtensionActions(
 
 const detail::ModifierDescriptor& Semantics::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) {
-        const auto& semantics = *static_cast<const Semantics*>(value);
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>& environment,
+         detail::AppResources& resources) {
+        const auto& semantics = *static_cast<const Semantics*>(modifier.value.get());
         if (!spec.author_semantics.has_value()) {
           spec.author_semantics.emplace();
         }
-        detail::ApplySemantics(*spec.author_semantics, detail::ResolveSemantics(semantics, spec.environment));
+        detail::ApplySemantics(*spec.author_semantics, detail::ResolveSemantics(semantics, environment, resources));
       },
       nullptr,
       nullptr,
@@ -327,7 +370,8 @@ void SemanticBuilder::SetOwner(Semantics semantics) {
     state_->items.push_back({.local_id = 0});
     found = std::prev(state_->items.end());
   }
-  detail::ApplySemantics(found->semantics, detail::ResolveSemantics(semantics, state_->environment));
+  detail::AppResources& resources = detail::RequireResources(*state_);
+  detail::ApplySemantics(found->semantics, detail::ResolveSemantics(semantics, state_->environment, resources));
 }
 
 void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semantics semantics) {
@@ -344,7 +388,9 @@ void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semant
   state_->items.push_back({
       .local_id = local_id,
       .local_bounds = local_bounds,
-      .semantics = detail::ResolveSemantics(semantics, state_->environment),
+      .semantics = detail::ResolveSemantics(
+          semantics, state_->environment, detail::RequireResources(*state_)
+      ),
   });
 }
 
@@ -365,9 +411,10 @@ void SemanticBuilder::AddCustomAction(std::uint64_t local_id, std::uint64_t acti
       std::ranges::any_of(item.custom_actions, [action_id](const auto& action) { return action.first == action_id; })) {
     throw std::logic_error("HuxerUI custom semantic action ids must be nonzero and unique within a semantic node");
   }
-  detail::Composer composer(nullptr, state_->environment);
-  detail::Composer::Guard guard(composer);
-  std::string resolved = UseString(std::move(label));
+  std::optional<Locale> locale;
+  std::string resolved = detail::ResolveSemanticString(
+      label, state_->environment, detail::RequireResources(*state_), locale
+  );
   if (resolved.empty() ||
       std::ranges::all_of(resolved, [](unsigned char character) { return std::isspace(character) != 0; })) {
     throw std::invalid_argument("HuxerUI custom semantic action label must not be empty");
@@ -452,7 +499,10 @@ void Runtime::BuildSemantics() {
       }
       ExtensionContribution contribution{
           .index = index,
-          .state = {.environment = mounted.environment},
+          .state = {
+              .environment = mounted.environment,
+              .resources = state_->app_resources_.get(),
+          },
       };
       SemanticBuilder builder(contribution.state);
       entry.extension->BuildSemantics(builder);

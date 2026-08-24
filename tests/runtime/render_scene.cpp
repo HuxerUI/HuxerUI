@@ -30,6 +30,7 @@ bool render_scene_external_texture_visible = true;
 int canvas_paint_count = 0;
 int clipped_child_clicks = 0;
 int overflowing_child_clicks = 0;
+Shadow invalid_shadow;
 
 struct OverflowPaint;
 struct FramePaintInvalidation;
@@ -136,6 +137,10 @@ View ShadowApp() {
           }
       ),
   }.With(CrossAlign{CrossAxisAlignment::Start});
+}
+
+View InvalidShadowApp() {
+  return Spacer().With(invalid_shadow);
 }
 
 View CanvasApp() {
@@ -936,19 +941,17 @@ TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {
 
 TEST_CASE("ShadowModifierRejectsInvalidValues") {
   const float nan = std::numeric_limits<float>::quiet_NaN();
+  const auto rejects = [](Shadow shadow) {
+    invalid_shadow = shadow;
+    TestPlatform platform;
+    Runtime runtime{InvalidShadowApp, platform};
+    runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  };
 
-  REQUIRE_THROWS_AS(
-      Spacer().With(Shadow{.color = Color::Black(), .blur_radius = -1.0F}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Spacer().With(Shadow{.color = Color::Black(), .blur_radius = nan}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Spacer().With(Shadow{.color = Color::Black(), .spread = nan}),
-      std::invalid_argument
-  );
+  rejects(Shadow{.color = Color::Black(), .blur_radius = -1.0F});
+  rejects(Shadow{.color = Color::Black(), .blur_radius = nan});
+  rejects(Shadow{.color = Color::Black(), .spread = nan});
 }
 
 } // namespace huxerui::test

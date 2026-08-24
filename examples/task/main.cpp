@@ -77,7 +77,7 @@ View TaskContent(std::shared_ptr<UserService> service) {
 
 View App() {
   static const auto service = std::make_shared<UserService>();
-  return MaterialTheme(TaskContent, service);
+  return MaterialTheme {TaskContent(service)};
 }
 
 const Application application{

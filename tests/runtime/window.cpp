@@ -260,12 +260,17 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
   invalid_options.window.initial_size = {520.0F, std::numeric_limits<float>::infinity()};
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
-  REQUIRE_THROWS_AS(
-      Stack {}.With(huxerui::SystemBarsAppearance{
-          .status_bar_content = static_cast<SystemBarContentBrightness>(99),
-      }),
-      std::invalid_argument
-  );
+  TestPlatform invalid_appearance_platform;
+  Runtime invalid_appearance{
+      +[]() -> View {
+        return Stack {}.With(huxerui::SystemBarsAppearance{
+            .status_bar_content = static_cast<SystemBarContentBrightness>(99),
+        });
+      },
+      invalid_appearance_platform,
+  };
+  invalid_appearance.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  REQUIRE_THROWS_AS(invalid_appearance.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {

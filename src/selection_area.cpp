@@ -366,7 +366,7 @@ std::shared_ptr<detail::ViewSpec> MakeSelectionAreaSpec(View content) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::SelectionArea);
   spec->children.push_back(std::move(content));
   spec->focusable = true;
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::SelectionAreaModifier{}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(detail::SelectionAreaModifier{}));
   return spec;
 }
 

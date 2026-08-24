@@ -14,6 +14,7 @@
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -24,14 +25,22 @@ namespace detail {
 class RecomposeScope;
 struct LifecycleDependencyAccess;
 
-class StateCellBase {
+class CompositionDependency {
 public:
-  virtual ~StateCellBase() = default;
+  virtual ~CompositionDependency() = default;
+
+  std::unordered_map<std::uint64_t, std::weak_ptr<RecomposeScope>> subscribers;
+  bool notification_pending = false;
+  std::unordered_set<std::uint64_t> pending_readers;
+};
+
+class StateCellBase : public CompositionDependency {
+public:
+  ~StateCellBase() override = default;
 
   [[nodiscard]] virtual std::type_index Type() const noexcept = 0;
 
   std::uint64_t version = 0;
-  std::unordered_map<std::uint64_t, std::weak_ptr<RecomposeScope>> subscribers;
 };
 
 template <class T> class StateCell final : public StateCellBase {
@@ -86,6 +95,10 @@ std::vector<std::ranges::range_value_t<Range>> CollectStateListValues(Range&& ra
 
 void ObserveState(const std::shared_ptr<StateCellBase>& cell);
 void NotifyState(const std::shared_ptr<StateCellBase>& cell);
+void ObserveDependency(const std::shared_ptr<CompositionDependency>& dependency);
+void BeginDependencyChange(const std::shared_ptr<CompositionDependency>& dependency);
+void CommitDependencyChange(const std::shared_ptr<CompositionDependency>& dependency);
+void CancelDependencyChange(const std::shared_ptr<CompositionDependency>& dependency) noexcept;
 
 std::shared_ptr<StateCellBase>
 UseStateCell(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);

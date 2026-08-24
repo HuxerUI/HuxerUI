@@ -538,7 +538,7 @@ void Runtime::PaintTextSelectionOverlay() {
     return;
   }
 
-  const ThemeSpec theme = detail::ResolveThemeSpec(focused->environment);
+  const ThemeSpec& theme = detail::ResolveThemeSpec(focused->environment);
   const MenuStyle menu_style = ResolveSelectionMenuStyle(*focused);
   const Locale& locale = ResolveSelectionLocale(*focused);
   const TextSelectionMenuLabels labels = ResolveSelectionMenuLabels(*focused, *state_->app_resources_, locale);

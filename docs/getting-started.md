@@ -32,7 +32,9 @@ View Counter() {
 }
 
 View App() {
-  return MaterialTheme(Counter);
+  return MaterialTheme {
+    Counter(),
+  };
 }
 
 const Application application{

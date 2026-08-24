@@ -12,6 +12,8 @@ struct GreetingLocale {
   static GreetingLocale Default() {
     return {"Default", "Hello"};
   }
+
+  bool operator==(const GreetingLocale&) const = default;
 };
 
 View LocaleCard(std::string title) {
@@ -28,14 +30,16 @@ View LocaleCard(std::string title) {
   );
 }
 
+[[huxerui::scope]]
 View FrenchContent() {
   return LocaleCard("Nested provider overrides the value");
 }
 
+[[huxerui::scope]]
 View ProvidedContent() {
   return Column {
     LocaleCard("Inherited from the nearest provider"),
-    ProvideEnvironment(GreetingLocale {"French", "Bonjour"}, FrenchContent),
+    ProvideEnvironment(GreetingLocale {"French", "Bonjour"}, FrenchContent()),
   }.With(Spacing(UseTheme().spacing.medium));
 }
 
@@ -54,7 +58,7 @@ View EnvironmentContent() {
         "The closest provider wins."
     ),
     LocaleCard("No provider uses GreetingLocale::Default()"),
-    ProvideEnvironment(std::move(locale), ProvidedContent),
+    ProvideEnvironment(std::move(locale), ProvidedContent()),
     Button("Toggle outer locale").OnClick([use_chinese] {
       use_chinese = !use_chinese;
     }),
@@ -67,7 +71,7 @@ View EnvironmentContent() {
 }
 
 View App() {
-  return MaterialTheme(EnvironmentContent);
+  return MaterialTheme {EnvironmentContent()};
 }
 
 const Application application{

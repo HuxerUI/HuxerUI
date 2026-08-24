@@ -68,7 +68,7 @@ View PlatformViewDemo() {
 }
 
 View App() {
-  return MaterialTheme(PlatformViewDemo);
+  return MaterialTheme {PlatformViewDemo()};
 }
 
 const Application application{

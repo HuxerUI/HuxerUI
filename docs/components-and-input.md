@@ -423,6 +423,7 @@ Image(app::images::logo)
 ```
 
 UseImage returns a raster asset and UseVectorImage returns a vector asset when application code needs the concrete value.
+ImageVariant is the shared value accepted by Image and component icon APIs for ImageResource, ImageAsset, and VectorAsset inputs.
 Vector assets can also be constructed with VectorAsset::Create and painted by Canvas.
 Sampling applies to raster images and ExternalTexture; Tint applies only to vector images.
 ExternalTexture reuses ImageFit, alignment, intrinsic measurement, transforms, clipping, and opacity while retaining a distinct renderer command for the latest platform-owned frame.
@@ -524,7 +525,7 @@ return TextField(email)
     });
 ```
 
-Rules return valid, invalid, or pending results. Validation messages are StringVariant values resolved when TextField is composed; `Required()` and `EmailAddress()` use localized framework resources, while passing a literal or StringResource overrides either default. Applications decide whether to validate on change, focus loss, or submission and can pass `ValidationResult::None()` before a field is touched.
+Rules return valid, invalid, or pending results. Validation messages are StringVariant values resolved when TextField is reconciled under its mounted Environment; `Required()` and `EmailAddress()` use localized framework resources, while passing a literal or StringResource overrides either default. Applications decide whether to validate on change, focus loss, or submission and can pass `ValidationResult::None()` before a field is touched.
 
 ## Submission actions
 

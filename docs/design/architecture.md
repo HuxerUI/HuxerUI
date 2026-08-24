@@ -4,13 +4,15 @@ Status: implemented foundation with deferred follow-up work
 
 This document describes the implemented modifier, animation, interaction, theme, presentation, and root extension foundation, followed by explicitly identified follow-up work. Code examples in implemented sections match the current public API.
 
+The ViewSpec compilation and Environment dependency model, together with the separately deferred `[[huxerui::composable]]` marker migration, is specified in [View Composition and Environment Design](view-composition.md).
+
 HuxerUI uses the `Platform` prefix for framework abstractions that cross the shared-runtime boundary, including PlatformAdapter, PlatformView, PlatformModule, and their lifecycle state. Concrete operating-system objects keep their exact API names, such as `UIView`, `NSView`, `HWND`, and `HTMLElement`. Feature and type names do not use `Native` as a synonym for `Platform`; lowercase native remains valid when it describes operating-system behavior or an ecosystem term such as a Java native method or Gradle `externalNativeBuild`.
 
 Current implementation status:
 
 - Generic View modifiers, node extension reconciliation, frame callbacks, pointer observation, foreground painting, and third-party descriptors are implemented.
 - ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
-- Typed Environment, direct Theme providers, nested Theme propagation, and reduced-motion animation resolution are implemented.
+- Typed Environment and direct Theme providers, precise typed dependency propagation, and reconciliation-time Theme stabilization are implemented.
 - RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
 - Typed startup and subsequent application activations, observable application lifecycle state, mounted ordered lifecycle transitions, the built-in application Root Service, Runtime FIFO delivery, Windows cold-start and same-executable external forwarding, and Android Activity Intent mapping are implemented; remaining activation mappings remain staged.
 - Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
@@ -140,7 +142,7 @@ The current API does not require a dedicated `View` member function for every ne
 
 ### Modifier order
 
-Modifiers are processed from left to right, but the current property modifiers do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`, `FontSize`, alignment, spacing, and similar values apply directly to `ViewSpec`. A later modifier that writes the same property wins. `Frame` merges only explicitly supplied width, height, minimum, and maximum fields so independent declarations can constrain separate axes.
+Modifiers are processed from left to right, but property modifiers do not form wrapper nodes. `Padding`, `Frame`, `Background`, `Foreground`, `FontSize`, alignment, spacing, and similar values remain in one ordered declaration sequence. Reconciliation applies that sequence once after component defaults resolve, so a later modifier that writes the same property wins without per-property override flags. `Frame` merges only explicitly supplied width, height, minimum, and maximum fields so independent declarations can constrain separate axes.
 
 ```cpp
 view.With(
@@ -165,13 +167,13 @@ Retained modifiers such as `ScrollBar`, `Indication`, animated `Opacity`, and th
 
 There are two modifier categories:
 
-- A property modifier applies its value directly to `ViewSpec` and is not retained afterward.
+- A property modifier remains ordered in `ViewSpec` and applies while resolving the declaration for a MountedNode, but does not create retained MountedNode state.
 - A retained modifier stores a type-erased `ModifierSpec` in `ViewSpec` and a persistent `NodeExtension` in `MountedNode`.
 
 Conceptually:
 
 ```text
-Padding / Background ── apply ──▶ ViewSpec properties
+Padding / Background ── apply ──▶ resolved node properties
 
 Ripple / ScrollBar / Glow
     └── type erasure ──▶ ModifierSpec
@@ -960,7 +962,7 @@ When a pointer drag crosses the scroll threshold, the selected scroll container 
 return Button("Save").With(Indication{});
 ```
 
-`VisualFill` supports colors, linear and radial gradients, image resources, image assets, vector assets, and configured image fills. Generic `Background` and indication layers share this value. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during View construction, while platform renderers execute only immutable paint commands.
+`VisualFill` supports colors, linear and radial gradients, image resources, image assets, vector assets, and configured image fills. Generic `Background` and indication layers share this value. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during mounted reconciliation, while platform renderers execute only immutable paint commands.
 
 Retained extensions paint through `PaintBehindContent` and `PaintAboveContent`. The content sequence contains shadow, normal background, behind-content indication, resolved border, and node content; children retain their own sequences; the foreground sequence contains above-content indication and focus ring. Mounted nodes keep only the authoritative interaction snapshot, aggregate Press count, current animated border and radii, and an optional geometry-resolved indication bounds override.
 
@@ -1011,24 +1013,31 @@ struct GreetingLocale {
   static GreetingLocale Default() {
     return {"en"};
   }
+
+  bool operator==(const GreetingLocale&) const = default;
 };
 
 const GreetingLocale& locale = UseEnvironment<GreetingLocale>();
-return ProvideEnvironment(GreetingLocale{"fr"}, Content);
+return ProvideEnvironment(GreetingLocale{"fr"}, Content());
 ```
 
 Use a semantic wrapper when two ambient values share the same underlying representation. Primitive or third-party representation types are not separate Environment keys by themselves.
 
-Each Environment stores only local values and points to its parent:
+An Environment used as a public value is a detached declaration.
+Runtime mounts that declaration into a stable shared Environment, installs its inherited parent, and updates its private typed entries in place during compatible reconciliation:
 
 ```cpp
 class Environment {
   std::shared_ptr<const Environment> parent_;
-  std::unordered_map<std::type_index, std::any> local_values_;
+  std::unordered_map<std::type_index, Entry> entries_;
 };
 ```
 
-Each composed subtree captures its current Environment. A nested provider shadows only the value type it supplies and inherits every other value through the shared parent chain.
+Each entry retains an optional local value, its equality operation, and a shared composition dependency.
+Copying an Environment copies only detached declaration values, not its mounted parent, dependency identities, or subscribers.
+Each composed subtree receives its current shared Environment, and a nested provider shadows only the value type it supplies while inheriting every other value through the parent chain.
+`UseEnvironment<T>()` observes each `T` entry it visits until it finds the nearest local value, including absent entries whose later insertion could change the result.
+Provider updates invalidate only RecomposeScopes subscribed to entries whose values actually changed.
 
 Environment carries:
 
@@ -1040,21 +1049,25 @@ Environment carries:
 
 Theme and services reuse Environment rather than introducing parallel tree propagation systems.
 
-The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetWindowMetrics()` updates that value and invalidates the application root and layers only when the resolved viewport class changes. Exact viewport and safe-area dimensions do not become raw Environment values: measurement receives them through `Constraints` and the layout-time safe-area context, while repeated changes inside one class remain incremental layout work rather than composition dependencies.
+The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetWindowMetrics()` updates that entry only when the resolved viewport class changes, and normal dependency tracking invalidates the exact application or layer scopes that observed it. Exact viewport and safe-area dimensions do not become raw Environment values: measurement receives them through `Constraints` and the layout-time safe-area context, while repeated changes inside one class remain incremental layout work rather than composition dependencies.
 
 ## Theme
 
-Theme is a direct, deferred subtree provider built on Environment:
+Theme is a transparent subtree provider built on Environment:
 
 ```cpp
-template <class Factory, class... Arguments>
-View Theme(
-    ThemeDefinition definition,
-    Factory&& content,
-    Arguments&&... arguments);
+return Theme {
+  std::move(definition),
+  Column {
+    Text("Settings"),
+    SettingsContent(),
+  },
+};
 ```
 
-The content factory is stored and invoked only after the Theme Environment is active. This allows `UseTheme()` inside child component composition.
+The Theme node stores one ordinary child declaration and does not create a RecomposeScope.
+Built-in primitives retain raw semantic inputs and resolve final component values when Runtime reconciles them under the mounted Theme Environment.
+A component whose implementation directly calls `UseTheme()` or `UseEnvironment()` remains a scoped component because the read belongs to its own composition lifetime.
 
 ### Theme systems
 
@@ -1097,109 +1110,63 @@ ScrollBarStyle
 
 Third-party components can define their own style keys without extending a single global style registry.
 
-Material, flat, liquid, and third-party themes are theme provider functions, not Runtime types and not subclasses:
-
-```cpp
-template <class Factory, class... Arguments>
-View MaterialTheme(Factory&& content, Arguments&&... arguments)
-{
-  return Theme(
-      MaterialThemeDefinition(),
-      std::forward<Factory>(content),
-      std::forward<Arguments>(arguments)...);
-}
-```
-
-```cpp
-template <class Factory>
-View XxxTheme(Factory&& content)
-{
-  return Theme(
-      BuildXxxTheme(),
-      std::forward<Factory>(content));
-}
-```
+Material, flat, and third-party themes are ordinary View declarations, not Runtime types or Runtime subclasses.
 
 The built-in Flat and Material systems provide complete light and dark boundaries:
 
 ```cpp
-FlatTheme(Content)
-FlatDarkTheme(Content)
-MaterialTheme(Content)
-MaterialDarkTheme(Content)
+FlatTheme {Content()}
+FlatDarkTheme {Content()}
+MaterialTheme {Content()}
+MaterialDarkTheme {Content()}
 ```
 
-`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the corresponding Material tokens. Flat and Material Theme definitions explicitly register their complete Dialog, BottomSheet, Menu, and Toast styles rather than relying on presentation services to infer a style from ThemeSpec. Passing customized tokens to `FlatTheme(theme, factory)` or `MaterialTheme(theme, factory)` rebuilds that system's component styles from those tokens.
+`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the corresponding Material tokens. Flat and Material Theme definitions explicitly register their complete Dialog, BottomSheet, Menu, and Toast styles rather than relying on presentation services to infer a style from ThemeSpec. Passing customized tokens as the first constructor argument to `FlatTheme` or `MaterialTheme` rebuilds that system's component styles from those tokens.
 
 ### Theme syntax
 
-Pass a component function directly in the common case:
+Pass ordinary View content directly:
 
 ```cpp
-return MaterialTheme(AppContent);
+return MaterialTheme {
+  AppContent(),
+};
 ```
 
-A component function can receive typed arguments directly:
+A reusable component that reads Theme values for composition logic keeps its own scope:
 
 ```cpp
-return MaterialTheme(AppContent, user_id);
-```
-
-Scope, Environment, Theme, Navigation, Layer, Dialog, BottomSheet, and Popup factories share this binding contract.
-Bound arguments are decayed and retained by value because a content factory may execute repeatedly during recomposition.
-A lambda remains appropriate when argument derivation or capture behavior is more complex than direct function invocation.
-
-`HUXERUI_THEME` is optional syntax sugar for an inline View expression or a component call with arguments:
-
-```cpp
-#define HUXERUI_THEME(ThemeProvider, ...)                              \
-  (ThemeProvider)([=]() -> ::huxerui::View { return (__VA_ARGS__); })
-```
-
-Root usage:
-
-```cpp
-View App()
-{
-  return MaterialTheme(AppContent);
+[[huxerui::scope]]
+View BrandContent(UserId user_id) {
+  const ThemeSpec& theme = UseTheme();
+  return Text(UserLabel(user_id)).With(Foreground{theme.colors.primary});
 }
+
+return MaterialTheme {
+  BrandContent(user_id),
+};
 ```
 
-Nested usage:
-
-```cpp
-return HUXERUI_THEME(
-    MaterialTheme,
-    Column {
-        Header(),
-        HUXERUI_THEME(
-            LiquidTheme,
-            LiquidPanel()),
-        Footer(),
-    });
-```
+Theme does not retain a content factory and there is no separate Theme macro.
 
 ### Theme resolution
 
-Theme resolution follows a fixed order:
+Final component resolution follows a fixed order:
 
 ```text
-explicit View modifier
-    ↓
-nearest component style
-    ↓
-nearest Theme override
-    ↓
-nearest complete Theme
-    ↓
-root Theme
-    ↓
-platform defaults
+generic initial values
+  -> component Theme/default projection using component declaration configuration
+  -> ordered property modifiers
 ```
+
+`LayoutValue` remains a separate parent-child metadata and component-layout configuration channel rather than a ViewProperties precedence layer.
+Component-owned layout configuration may be completed with resolved Theme values during its default projection.
 
 A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. Runtime does not branch on Material, flat, liquid, or third-party theme identity.
 
-`ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent. Explicit View modifiers run after semantic style resolution and win without a separate runtime style branch.
+`ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent.
+
+Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to Runtime or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its scoped component function. It does not register a global NodeKind or extend a Runtime style table.
 
 Built-in elevation styles keep `Shadow::offset` and `Shadow::spread` at zero so elevation remains a platform-neutral ambient effect. Custom drawing and explicit `Shadow` modifiers retain directional offset and spread when a design calls for a drop shadow rather than semantic elevation.
 
@@ -1522,7 +1489,7 @@ dialog.Show(
 );
 ```
 
-`StringVariant` is the shared deferred display-string representation for component, validation, semantics, and presentation APIs that accept either direct text or a `StringResource` plus positional arguments. `UseString` is the single composition-time resolution operation for both StringResource and StringVariant; Runtime and components do not introduce parallel resolver APIs.
+`StringVariant` is the shared deferred display-string representation for component, validation, semantics, and presentation APIs that accept either direct text or a `StringResource` plus positional arguments. Shared resource resolution resolves it under the effective mounted Environment, while `UseString` is the explicit composition adapter for application logic that needs immediate UTF-8.
 
 `DialogStyle` is the complete standard Dialog presentation policy. It covers the modal scrim, default placement, viewport margins, enter and exit motion, surface appearance and width constraints, content padding and alignment, title and message styles, action direction and alignment, positive and negative action appearance and indication, and action separator policy.
 
@@ -1650,7 +1617,9 @@ View AppContent()
 
 View App()
 {
-  return MaterialTheme(AppContent);
+  return MaterialTheme {
+    AppContent(),
+  };
 }
 ```
 
@@ -1673,7 +1642,7 @@ The current extension points are:
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `Indication` and `NodeExtension::OnInteraction` |
 | Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
-| Custom theme | `XxxTheme(factory)` wrapping `Theme()` |
+| Custom theme | Typed values in `ThemeDefinition` and a direct Theme View boundary |
 | Per-window service | RootHook and `RootContext::Provide()` |
 | Global component | RootHook and `LayerController` |
 | Typed presentation library | A service backed by the Runtime LayerStack |
@@ -1692,7 +1661,7 @@ The architecture follows these rules:
 - Animation advances mounted state and does not recompose components every frame.
 - Node extension frame traversal skips subtrees that contain no retained extensions after the extension-tree cache is rebuilt.
 - Delayed animation work schedules one wake-up instead of polling.
-- Environment values are captured during composition; the current runtime does not maintain per-key Environment dependency subscriptions.
+- Mounted nodes and layers retain their effective shared Environment, while RecomposeScopes subscribe to the exact typed entries consumed during ViewSpec compilation.
 - Layer entries use independent scopes.
 - ScrollBar state exists only on Views that install the modifier.
 - Pointer interaction state is stored per pointer ID.

@@ -59,10 +59,8 @@ struct RadialGradient {
   bool operator==(const RadialGradient&) const = default;
 };
 
-using ImageFillSource = std::variant<ImageResource, ImageAsset, VectorAsset>;
-
 struct ImageFill {
-  ImageFillSource source;
+  ImageVariant source;
   ImageFit fit = ImageFit::Fill;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;

@@ -51,11 +51,14 @@ class ResourceId;
 class ImageResource;
 class StringResource;
 class RawResource;
+
+using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 ```
 
 The typed keys derive from ResourceId, so shared identity operations remain available without another storage wrapper.
 They are not implicitly convertible to one another.
 A string key cannot therefore be passed to Image, and an image key cannot be read as arbitrary raw data by accident.
+ImageVariant is the common immutable image input accepted by Image, component icons, menus, navigation, and image-backed fills; ExternalTexture remains separate because it represents a live platform source.
 
 A ResourceId contains a domain and a key:
 
@@ -119,8 +122,8 @@ std::string UseString(StringVariant&& value);
 
 These operations read the current root service and Environment but do not allocate ordered UseState slots.
 There is no public mutable ResourceManager, global resource singleton, or second context system.
-Deferred display-string APIs use `StringVariant`, which stores direct text or a `StringResource` and its positional arguments until composition occurs in the captured Environment.
-The `UseString` overloads form its single resolution boundary; components do not use a parallel private resolver.
+Deferred display-string APIs use `StringVariant`, which stores direct text or a `StringResource` and its positional arguments until mounted reconciliation reaches the effective Environment.
+Shared internal resolution owns resource lookup and formatting; `UseString` is the thin explicit composition adapter for application logic that needs immediate UTF-8.
 Text also accepts a zero-argument StringResource directly and mirrors its existing Format surface for localized arguments:
 
 ```cpp
@@ -130,10 +133,9 @@ Text::Format(app::strings::file_count, user_name, file_count);
 Text::Format(TextRole::Label, app::strings::file_count, user_name, file_count);
 ```
 
-The constructors keep the common static-string case compact.
+The converting `StringVariant` constructors keep literal, string, and StringResource calls compact without duplicating those overloads on each component.
 The named Format operation avoids a variadic constructor that could conflict with TextRole or future Text configuration.
-Button and TextField placeholder provide direct StringResource overloads.
-UseString remains the explicit operation for application logic that needs resolved UTF-8 immediately, while StringVariant lets component, validation, semantics, and presentation APIs retain direct text or a StringResource until their composition boundary.
+UseString remains the explicit operation for application logic that needs resolved UTF-8 immediately, while StringVariant lets component, validation, semantics, and presentation APIs retain direct text or a StringResource until mounted reconciliation.
 
 ## Build and package model
 
@@ -492,9 +494,7 @@ enum class ImageSampling {
 
 class Image final : public View {
 public:
-  explicit Image(ImageResource resource);
-  explicit Image(ImageAsset asset);
-  explicit Image(VectorAsset asset);
+  explicit Image(ImageVariant image);
   explicit Image(ExternalTexture texture);
 
   Image Fit(ImageFit fit) &&;
@@ -504,10 +504,11 @@ public:
 };
 ```
 
-The ImageResource constructor lets Runtime resolve raster scale variants or a compiled vector payload from the node's Environment and PlatformResources configuration.
-The ImageAsset constructor supports files, network results, platform picker libraries, generated images, and explicitly shared application data.
+`ImageVariant` is the shared public value for ImageResource, ImageAsset, and VectorAsset inputs.
+It lets Runtime resolve a resource to either immutable image format from the node's Environment and PlatformResources configuration while preserving already-resolved assets.
+ImageAsset supports files, network results, platform picker libraries, generated images, and explicitly shared application data.
 Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
-The ExternalTexture constructor consumes a live platform-owned visual source without turning platform frames into resource bytes.
+ExternalTexture remains a separate constructor because it is a live platform-owned source with frame and lifecycle semantics rather than an immutable ImageVariant value.
 
 Sampling configures raster and ExternalTexture filtering and is invalid for a VectorAsset.
 Tint replaces the RGB channels of vector fills and strokes while preserving their per-layer alpha, then multiplies the supplied tint alpha.
@@ -723,9 +724,7 @@ Applications may override it for any subtree with ProvideEnvironment.
 ```cpp
 return ProvideEnvironment(
     Locale::FromLanguageTag("zh-Hans-CN"),
-    [] {
-      return Text(app::strings::save);
-    }
+    Text(app::strings::save)
 );
 ```
 
@@ -807,9 +806,9 @@ An unsupported argument type is rejected at compile time.
 Missing or extra arguments produce `std::invalid_argument` diagnostics containing the full resource identity.
 
 Text::Format with a string view remains the lightweight formatter for non-localized application text.
-Its StringResource overload performs locale resolution and message validation before Text stores the final UTF-8 value.
+Its StringResource overload retains the resource and arguments so locale resolution and message validation occur under the mounted Environment.
 UseString exposes the same resolution for non-Text consumers.
-StringVariant::Format retains the resource identity and formatted arguments until a deferred consumer composes in its captured Environment.
+StringVariant::Format retains the resource identity and formatted arguments until a deferred consumer is reconciled in its effective Environment.
 
 ### Deferred plural and select messages
 
@@ -851,7 +850,7 @@ The framework does not require a separate override manifest or public resource-b
 
 `TextSelectionMenuLabels` and `WindowCaptionLabels` remain explicit local overrides; absent values resolve the generated framework keys like any other StringResource.
 Each empty `TextSelectionMenuLabels` field falls back independently, so an application may replace one action label without duplicating the other localized defaults.
-`ValidationResult` retains a StringVariant until TextField composition so built-in rules and application rules use the same deferred localization path.
+`ValidationResult` retains a StringVariant until TextField reconciliation so built-in rules and application rules use the same deferred localization path.
 Direct Runtime integrations that render framework defaults provide the merged resource package just like applications using ordinary StringResource values; the Runtime does not special-case the `huxerui` domain or carry a duplicate fallback table.
 The framework package also provides `images/check` and `images/chevron_right` as tintable vectors for Checkbox and Menu.
 These fixed component glyphs resolve through the same generated resource keys as application images rather than relying on platform fonts or a duplicate code-defined shape.
@@ -861,8 +860,9 @@ Simple stateful glyphs that are clearer as programmatic paths, such as window co
 
 Resource reads participate in the existing dependency and invalidation model:
 
-- UseString, Text resource construction, Text resource formatting, UseImage, and UseVectorImage resolve from the Runtime-owned service during composition without allocating state slots.
-- An Image constructed from ImageResource resolves that key during composition and retains the resulting immutable raster or vector asset.
+- UseString, UseImage, and UseVectorImage resolve explicitly from the Runtime-owned service during composition without allocating state slots.
+- Text, controls, TextField, semantics, presentation values, VisualFill, and Image retain StringVariant or ImageVariant inputs until mounted reconciliation.
+- An Image constructed from ImageResource resolves that key to an immutable raster or vector asset before layout and paint.
 - ResourceConfiguration changes currently invalidate the root composition so locale and density variants are selected consistently.
 - A visible selection overlay is repainted and remeasured when ResourceConfiguration changes because it is Runtime-owned rather than part of the application composition tree.
 - Reconciliation limits a changed image asset or intrinsic size to the affected node's measure, layout, and paint paths.
@@ -951,7 +951,7 @@ Each slice updates public headers, standalone-header checks, common tests, platf
 - Packaged resources are synchronously readable before Runtime starts; the Web entry integration performs asynchronous transport during startup.
 - Filesystem construction is synchronous and distinct from platform URI services.
 - Localized formatting uses indexed positional arguments and permits translation reordering.
-- StringResource values resolve during composition and never enter PaintCommand as resources.
+- StringResource and ImageResource values resolve during mounted reconciliation and never enter PaintCommand as resources.
 - ImageFit is resolved before platform replay and does not change parent layout policy.
 - Platform renderers own decoding, asynchronous readiness when required, and bounded device-resource caches.
 - Resource lookup reuses root services, Environment, Layer capture, and existing invalidation instead of adding another context or observer system.

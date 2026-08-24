@@ -15,6 +15,7 @@
 
 namespace huxerui {
 
+class Environment;
 class PaintContext;
 class Runtime;
 class SemanticBuilder;
@@ -188,21 +189,24 @@ private:
 
 namespace detail {
 
+class AppResources;
 struct ViewSpec;
+struct ModifierDescriptor;
+
+struct ModifierSpec {
+  const ModifierDescriptor* descriptor = nullptr;
+  std::shared_ptr<const void> value;
+};
 
 struct ModifierDescriptor {
-  void (*apply)(ViewSpec&, const void*) = nullptr;
+  // Compilation applies one ordered declaration and may replace its retained value before mounted state changes.
+  void (*compile)(ViewSpec&, ModifierSpec&, const std::shared_ptr<const Environment>&, AppResources&) = nullptr;
   std::unique_ptr<NodeExtension> (*create_extension)(MountedNode&, const void*) = nullptr;
   void (*update_extension)(NodeExtension&, MountedNode&, const void*) = nullptr;
   // A changed retained value can affect this node's measured size.
   bool layout_affecting = false;
   bool (*equals)(const void*, const void*) = nullptr;
   bool (*layout_equals)(const void*, const void*) = nullptr;
-};
-
-struct ModifierSpec {
-  const ModifierDescriptor* descriptor = nullptr;
-  std::shared_ptr<const void> value;
 };
 
 template <class Value> constexpr auto ErasedEqualsFor() noexcept -> bool (*)(const void*, const void*) {

@@ -469,17 +469,10 @@ inline const ThemeSpec& UseTheme() {
   return UseEnvironment<ThemeSpec>();
 }
 
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View Theme(ThemeDefinition definition, Factory&& content, Arguments&&... arguments) {
-  Environment environment;
-  detail::ApplyThemeDefinition(environment, definition);
-  return ProvideEnvironment(
-      std::move(environment),
-      std::forward<Factory>(content),
-      std::forward<Arguments>(arguments)...
-  );
-}
+class Theme final : public detail::TypedView<Theme> {
+public:
+  Theme(ThemeDefinition definition, View content);
+};
 
 ThemeSpec FlatLightThemeSpec();
 ThemeSpec FlatDarkThemeSpec();
@@ -492,53 +485,31 @@ ThemeDefinition MaterialThemeDefinition(ThemeSpec theme);
 ThemeDefinition MaterialThemeDefinition();
 ThemeDefinition MaterialDarkThemeDefinition();
 
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View FlatTheme(ThemeSpec theme, Factory&& content, Arguments&&... arguments) {
-  return Theme(
-      FlatThemeDefinition(std::move(theme)),
-      std::forward<Factory>(content),
-      std::forward<Arguments>(arguments)...
-  );
-}
+class FlatTheme final : public detail::TypedView<FlatTheme> {
+public:
+  explicit FlatTheme(View content);
+  FlatTheme(ThemeSpec theme, View content);
+};
 
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View FlatTheme(Factory&& content, Arguments&&... arguments) {
-  return Theme(FlatThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
-}
+class FlatDarkTheme final : public detail::TypedView<FlatDarkTheme> {
+public:
+  explicit FlatDarkTheme(View content);
+};
 
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View FlatDarkTheme(Factory&& content, Arguments&&... arguments) {
-  return Theme(FlatDarkThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
-}
+class MaterialTheme final : public detail::TypedView<MaterialTheme> {
+public:
+  explicit MaterialTheme(View content);
+  MaterialTheme(ThemeSpec theme, View content);
+};
 
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View MaterialTheme(ThemeSpec theme, Factory&& content, Arguments&&... arguments) {
-  return Theme(
-      MaterialThemeDefinition(std::move(theme)),
-      std::forward<Factory>(content),
-      std::forward<Arguments>(arguments)...
-  );
-}
-
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View MaterialTheme(Factory&& content, Arguments&&... arguments) {
-  return Theme(MaterialThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
-}
-
-template <class Factory, class... Arguments>
-  requires detail::ViewFactoryFor<Factory, Arguments...>
-View MaterialDarkTheme(Factory&& content, Arguments&&... arguments) {
-  return Theme(MaterialDarkThemeDefinition(), std::forward<Factory>(content), std::forward<Arguments>(arguments)...);
-}
+class MaterialDarkTheme final : public detail::TypedView<MaterialDarkTheme> {
+public:
+  explicit MaterialDarkTheme(View content);
+};
 
 namespace detail {
 
-ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment);
+const ThemeSpec& ResolveThemeSpec(std::shared_ptr<const Environment> environment);
 const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key);
 TextStyle DefaultTextStyle(const ThemeSpec& theme, TextRole role = TextRole::Body);
 ButtonStyle DefaultButtonStyle(const ThemeSpec& theme);
@@ -558,5 +529,3 @@ SliderStyle DefaultSliderStyle(const ThemeSpec& theme);
 } // namespace detail
 
 } // namespace huxerui
-
-#define HUXERUI_THEME(ThemeProvider, ...) (ThemeProvider)([=]() -> ::huxerui::View { return (__VA_ARGS__); })

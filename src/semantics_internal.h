@@ -14,6 +14,7 @@
 
 namespace huxerui::detail {
 
+class AppResources;
 struct ModifierDescriptor;
 
 struct SemanticPatch {
@@ -52,7 +53,9 @@ struct BuiltInSemantics {
   bool operator==(const BuiltInSemantics&) const = default;
 };
 
-SemanticPatch ResolveSemantics(const Semantics& semantics, std::shared_ptr<const Environment> environment);
+SemanticPatch ResolveSemantics(
+    const Semantics& semantics, std::shared_ptr<const Environment> environment, AppResources& resources
+);
 void ApplySemantics(SemanticPatch& target, const SemanticPatch& source);
 
 struct SemanticBuilderItem {
@@ -65,6 +68,7 @@ struct SemanticBuilderItem {
 
 struct SemanticBuilderState {
   std::shared_ptr<const Environment> environment;
+  AppResources* resources = nullptr;
   std::vector<SemanticBuilderItem> items;
 };
 

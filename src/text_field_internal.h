@@ -18,7 +18,7 @@ class PlatformAdapter;
 
 namespace huxerui::detail {
 
-struct ResolvedTextFieldStyle {
+struct TextFieldStyleBinding {
   using Value = TextFieldStyle;
 };
 
@@ -57,19 +57,17 @@ struct ResolvedValidationResult {
 struct TextFieldModifier {
   static const ModifierDescriptor& Descriptor();
 
-  using Icon = std::variant<ImageAsset, VectorAsset>;
-
   TextEditingValue value;
-  std::string label;
-  std::string placeholder;
-  std::optional<Icon> leading_icon;
-  std::optional<Icon> trailing_icon;
+  StringVariant label;
+  StringVariant placeholder;
+  std::optional<ImageVariant> leading_icon;
+  std::optional<ImageVariant> trailing_icon;
   std::optional<TextFieldVariant> variant;
   TextInputConfiguration configuration;
   std::size_t min_lines = 1;
   std::optional<std::size_t> max_lines;
   std::optional<std::size_t> max_length;
-  ResolvedValidationResult validation;
+  ValidationResult validation;
 
   bool operator==(const TextFieldModifier&) const = default;
   static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);

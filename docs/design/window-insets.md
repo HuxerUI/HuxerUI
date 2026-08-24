@@ -265,7 +265,7 @@ definition.Set(SystemBarsAppearance{
   .navigation_bar_background = theme.colors.surface_container,
 });
 
-return Theme(std::move(definition), AppContent);
+return Theme {std::move(definition), AppContent()};
 ```
 
 TopAppBar contributes its resolved `TopAppBarStyle::background` to the status-bar region.

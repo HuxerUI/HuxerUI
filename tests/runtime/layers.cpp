@@ -18,10 +18,12 @@ std::optional<PopupHandle> layer_popup;
 std::optional<PopupContext> layer_popup_context;
 std::optional<MenuHandle> layer_menu;
 std::optional<MenuHandle> nested_menu;
+std::optional<DialogHandle> retained_environment_dialog;
 std::optional<LayerController> raw_layers;
 State<float> layer_anchor_offset;
 State<bool> layer_anchor_visible;
 State<int> layer_environment_value;
+State<bool> layer_environment_provider_visible;
 int layer_app_compositions = 0;
 int layer_background_clicks = 0;
 int popup_focus_clicks = 0;
@@ -87,7 +89,7 @@ View LayerApp() {
 }
 
 View MaterialLayerApp() {
-  return huxerui::MaterialTheme(LayerApp);
+  return huxerui::MaterialTheme {LayerApp()};
 }
 
 View SectionMenuLayerApp() {
@@ -96,7 +98,7 @@ View SectionMenuLayerApp() {
   style.separator_mode = MenuSeparatorMode::BetweenSections;
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), LayerApp);
+  return Theme {std::move(definition), LayerApp()};
 }
 
 View AnimatedMenuLayerApp() {
@@ -108,7 +110,7 @@ View AnimatedMenuLayerApp() {
   };
   ThemeDefinition definition;
   definition.Set(std::move(style));
-  return Theme(std::move(definition), LayerApp);
+  return Theme {std::move(definition), LayerApp()};
 }
 
 View ExitingLayerInputContent() {
@@ -124,6 +126,8 @@ struct LayerEnvironmentValue {
   static LayerEnvironmentValue Default() {
     return {};
   }
+
+  bool operator==(const LayerEnvironmentValue&) const = default;
 };
 
 View LayerEnvironmentDialogContent() {
@@ -132,13 +136,28 @@ View LayerEnvironmentDialogContent() {
 
 View LayerEnvironmentApp() {
   layer_environment_value = UseState(1);
-  return ProvideEnvironment(LayerEnvironmentValue{layer_environment_value.Get()}, [] {
+  return ProvideEnvironment(LayerEnvironmentValue{layer_environment_value.Get()}, Scope([] {
     return Text("application")
         .With(Dialog{
             .visible = true,
             .content = LayerEnvironmentDialogContent,
         });
+  }));
+}
+
+View RetainedLayerEnvironmentOwner() {
+  HUXERUI_SCOPE({
+    retained_environment_dialog = UseDialog();
+    return Text("environment owner");
   });
+}
+
+View RetainedLayerEnvironmentApp() {
+  layer_environment_provider_visible = UseState(true);
+  if (!layer_environment_provider_visible.Get()) {
+    return Text("provider removed");
+  }
+  return ProvideEnvironment(LayerEnvironmentValue{7}, RetainedLayerEnvironmentOwner());
 }
 
 View DebugOverlayApp() {
@@ -156,11 +175,11 @@ View NestedAnchorContent() {
   style.background = nested_menu_color;
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), [] {
+  return Theme {std::move(definition), Scope([] {
     auto menu = UseMenu();
     nested_menu = menu;
     return Button("nested menu anchor").With(huxerui::Frame{60.0F, 30.0F}, menu.Anchor());
-  });
+  })};
 }
 
 View NestedAnchorApp() {
@@ -204,7 +223,7 @@ View BottomSheetThemeApp() {
   spec.colors.scrim = Color::Rgb(20, 80, 160, 0.25F);
   ThemeDefinition definition = FlatThemeDefinition(spec);
   definition.Set(DialogStyle{.scrim = Color::Rgb(180, 20, 20, 0.75F)});
-  return Theme(std::move(definition), BottomSheetThemeContent);
+  return Theme {std::move(definition), Scope(BottomSheetThemeContent)};
 }
 
 View BottomSheetWidthApp() {
@@ -213,13 +232,13 @@ View BottomSheetWidthApp() {
   style.maximum_width = 320.0F;
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), BottomSheetThemeContent);
+  return Theme {std::move(definition), Scope(BottomSheetThemeContent)};
 }
 
 View ReducedMotionLayerApp() {
   ThemeSpec spec = FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
-  return Theme(ThemeDefinition{spec}, LayerApp);
+  return Theme {ThemeDefinition{spec}, LayerApp()};
 }
 
 View InvalidMenuShadowApp() {
@@ -227,7 +246,7 @@ View InvalidMenuShadowApp() {
   style.shadow.blur_radius = -1.0F;
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), LayerApp);
+  return Theme {std::move(definition), LayerApp()};
 }
 
 View InvalidBottomSheetShadowApp() {
@@ -235,7 +254,7 @@ View InvalidBottomSheetShadowApp() {
   style.shadow.spread = std::numeric_limits<float>::infinity();
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), LayerApp);
+  return Theme {std::move(definition), LayerApp()};
 }
 
 } // namespace
@@ -1101,6 +1120,27 @@ TEST_CASE("TestDeclarativeDialogUpdatesCapturedEnvironment") {
 
   layer_environment_value = 2;
   REQUIRE(ContainsText(runtime.BuildFrame(), "dialog environment 2"));
+}
+
+TEST_CASE("LayerRetainsTheLastCommittedEnvironmentAfterProviderUnmount") {
+  retained_environment_dialog.reset();
+
+  TestPlatform platform;
+  Runtime runtime{RetainedLayerEnvironmentApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
+  runtime.BuildFrame();
+  REQUIRE(retained_environment_dialog.has_value());
+
+  const LayerId dialog = retained_environment_dialog->Show(LayerEnvironmentDialogContent);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "dialog environment 7"));
+
+  layer_environment_provider_visible = false;
+  runtime.BuildFrame();
+  REQUIRE(retained_environment_dialog->Update(dialog, LayerEnvironmentDialogContent));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "dialog environment 7"));
+  REQUIRE(retained_environment_dialog->Dismiss(dialog));
 }
 
 TEST_CASE("TestPopupContextAndMenuActionDismissTheirOwnLayers") {

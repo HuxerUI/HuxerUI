@@ -1,12 +1,19 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include <huxerui/resource.h>
+#include <huxerui/state.h>
 #include <huxerui/vector.h>
+
+namespace huxerui {
+class Environment;
+class VisualFill;
+}
 
 namespace huxerui::detail {
 
@@ -45,6 +52,9 @@ bool IsValidResourcePackagePath(std::string_view path) noexcept;
 
 class ResourceAccess {
 public:
+  static const std::variant<std::string, StringResource>& StringValue(const StringVariant& value) noexcept;
+  static std::variant<std::string, StringResource>& StringValue(StringVariant& value) noexcept;
+  static std::span<const std::string> StringArguments(const StringVariant& value) noexcept;
   static RawAsset WithMimeType(RawAsset asset, std::string mime_type);
   static ImageAsset ImageFromRaw(RawAsset asset, float scale);
   static VectorAsset VectorFromRaw(RawAsset asset);
@@ -59,7 +69,7 @@ public:
   explicit AppResources(PlatformResources* platform_resources);
 
   void UpdateConfiguration(ResourceConfiguration configuration);
-  [[nodiscard]] ResourceConfiguration Configuration() const noexcept;
+  [[nodiscard]] ResourceConfiguration Configuration() const;
   [[nodiscard]] RawAsset Resolve(RawResource resource);
   [[nodiscard]] ResolvedImageAsset ResolveImage(ImageResource resource, const Locale& locale);
   [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale);
@@ -73,11 +83,24 @@ private:
 
   PlatformResources* platform_resources_ = nullptr;
   ResourceConfiguration configuration_;
+  std::shared_ptr<CompositionDependency> configuration_dependency_ = std::make_shared<CompositionDependency>();
   std::vector<ResourceIndexEntry> entries_;
   std::unordered_map<std::string, RawAsset> raw_cache_;
   std::unordered_map<std::string, ResolvedImageAsset> image_cache_;
 };
 
-ResolvedImageAsset UseImageResource(ImageResource resource);
+std::string ResolveString(const StringVariant& value, AppResources& resources, const Locale& locale);
+std::string ResolveString(StringVariant&& value, AppResources& resources, const Locale& locale);
+const std::string& StringLiteral(const StringVariant& value);
+std::string StringLiteral(StringVariant&& value);
+bool NeedsResourceResolution(const StringVariant& value) noexcept;
+bool NeedsResourceResolution(const ImageVariant& value) noexcept;
+bool NeedsResourceResolution(const VisualFill& fill) noexcept;
+bool IsBlankStringVariantLiteral(const StringVariant& value) noexcept;
+void ValidateImageVariant(const ImageVariant& image);
+ResolvedImageAsset ResolveImage(const ImageVariant& image, AppResources& resources, const Locale& locale);
+ResolvedImageAsset UseImageVariant(const ImageVariant& image);
+std::shared_ptr<AppResources> RequireAppResources(std::shared_ptr<const Environment> environment);
+Locale ResolveResourceLocale(std::shared_ptr<const Environment> environment, const AppResources& resources);
 
 } // namespace huxerui::detail

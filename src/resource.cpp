@@ -10,6 +10,8 @@
 #include <ranges>
 #include <stdexcept>
 
+#include <huxerui/paint.h>
+
 #include "resource_internal.h"
 
 namespace huxerui {
@@ -25,9 +27,43 @@ StringVariant::StringVariant(StringResource resource) : value_(std::move(resourc
 StringVariant::StringVariant(StringResource resource, std::vector<std::string> arguments)
     : value_(std::move(resource)), arguments_(std::move(arguments)) {}
 
+bool detail::NeedsResourceResolution(const StringVariant& value) noexcept {
+  return std::holds_alternative<StringResource>(detail::ResourceAccess::StringValue(value));
+}
+
+bool detail::NeedsResourceResolution(const ImageVariant& value) noexcept {
+  return std::holds_alternative<ImageResource>(value);
+}
+
+bool detail::NeedsResourceResolution(const VisualFill& fill) noexcept {
+  const auto* image = std::get_if<ImageFill>(&fill.Get());
+  return image != nullptr && NeedsResourceResolution(image->source);
+}
+
 bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept {
-  const auto* literal = std::get_if<std::string>(&value.value_);
+  const auto* literal = std::get_if<std::string>(&detail::ResourceAccess::StringValue(value));
   return literal != nullptr && literal->empty();
+}
+
+bool detail::IsBlankStringVariantLiteral(const StringVariant& value) noexcept {
+  const auto* literal = std::get_if<std::string>(&detail::ResourceAccess::StringValue(value));
+  return literal != nullptr && std::ranges::all_of(*literal, [](unsigned char character) {
+           return std::isspace(character) != 0;
+         });
+}
+
+void detail::ValidateImageVariant(const ImageVariant& image) {
+  std::visit(
+      [](const auto& value) {
+        using Image = std::decay_t<decltype(value)>;
+        if constexpr (!std::same_as<Image, ImageResource>) {
+          if (!value.HasValue()) {
+            throw std::invalid_argument("HuxerUI image asset must not be empty");
+          }
+        }
+      },
+      image
+  );
 }
 
 namespace {
@@ -389,6 +425,18 @@ bool ImageAsset::operator==(const ImageAsset& other) const noexcept {
 } // namespace huxerui
 
 namespace huxerui::detail {
+
+const std::variant<std::string, StringResource>& ResourceAccess::StringValue(const StringVariant& value) noexcept {
+  return value.value_;
+}
+
+std::variant<std::string, StringResource>& ResourceAccess::StringValue(StringVariant& value) noexcept {
+  return value.value_;
+}
+
+std::span<const std::string> ResourceAccess::StringArguments(const StringVariant& value) noexcept {
+  return value.arguments_;
+}
 
 RawAsset ResourceAccess::WithMimeType(RawAsset asset, std::string mime_type) {
   if (!asset.data_ || asset.data_->mime_type == mime_type) {

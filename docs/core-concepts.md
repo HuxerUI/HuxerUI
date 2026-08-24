@@ -352,15 +352,17 @@ struct GreetingLocale {
   static GreetingLocale Default() {
     return {"en"};
   }
+
+  bool operator==(const GreetingLocale&) const = default;
 };
 
 const GreetingLocale& locale = UseEnvironment<GreetingLocale>();
-return ProvideEnvironment(GreetingLocale{"fr"}, Content);
+return ProvideEnvironment(GreetingLocale{"fr"}, Content());
 ```
 
 Use a semantic wrapper when two values have the same underlying representation but different meanings.
 
-Theme is a deferred Environment provider for visual tokens and component styles. See [Theme, Animation, and Presentation](theme-animation-and-presentation.md).
+Theme is a transparent Environment boundary for visual tokens and component styles. See [Theme, Animation, and Presentation](theme-animation-and-presentation.md).
 
 `UseViewportClass()` is the framework-managed responsive Environment read. It exposes Compact, Medium, or Expanded rather than raw dimensions, so an ordinary resize does not continuously recompose the application. The Runtime updates this value only when width crosses the configured `ViewportBreakpoints`; exact responsive geometry remains the responsibility of layout constraints.
 

@@ -12,6 +12,7 @@
 
 #include "image_test_support.h"
 #include "resource_internal.h"
+#include "text_field_internal.h"
 
 namespace huxerui::test {
 
@@ -124,6 +125,17 @@ public:
 
 std::optional<MenuHandle> resource_menu;
 std::optional<DialogHandle> resource_dialog;
+int density_image_compositions = 0;
+int density_unrelated_compositions = 0;
+int virtual_density_compositions = 0;
+int direct_literal_resource_compositions = 0;
+int literal_text_field_compositions = 0;
+int literal_semantics_compositions = 0;
+int resource_semantics_compositions = 0;
+int literal_tooltip_compositions = 0;
+int resource_tooltip_compositions = 0;
+State<bool> missing_text_field_placeholder;
+ImageAsset direct_image_asset;
 
 View ResourceMenuApp() {
   auto menu = UseMenu();
@@ -147,9 +159,10 @@ View FrameworkSelectionResourceApp() {
 }
 
 View PartialSelectionLabelsResourceApp() {
-  return ProvideEnvironment(TextSelectionMenuLabels{.copy = "Duplicate"}, [] {
-    return TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F});
-  });
+  return ProvideEnvironment(
+      TextSelectionMenuLabels{.copy = "Duplicate"},
+      TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F})
+  );
 }
 
 View LocalizedResourceApp() {
@@ -165,6 +178,13 @@ View DirectLocalizedResourceApp() {
   };
 }
 
+View TextFieldResourceFailureApp() {
+  auto missing = UseState(false);
+  missing_text_field_placeholder = missing;
+  const StringResource placeholder("test", missing.Get() ? "strings/missing_placeholder" : "strings/placeholder");
+  return TextField(TextEditingValue::FromText("")).Placeholder(placeholder);
+}
+
 View LocalizedWindowControlsApp() {
   return Spacer();
 }
@@ -175,6 +195,89 @@ View MissingResourceArgumentsApp() {
 
 View ExtraResourceArgumentsApp() {
   return Text(UseString(StringResource("test", "strings/greeting"), "Ada", "extra"));
+}
+
+View DensityImageResourceContent() {
+  ++density_image_compositions;
+  return Image(ImageResource("test", "images/density"));
+}
+
+View DensityUnrelatedResourceContent() {
+  ++density_unrelated_compositions;
+  return Text("unrelated");
+}
+
+View ResourceConfigurationDependencyApp() {
+  return Column {
+    Scope(DensityImageResourceContent),
+    Scope(DensityUnrelatedResourceContent),
+  };
+}
+
+View DirectLiteralResourceHelperApp() {
+  ++direct_literal_resource_compositions;
+  const detail::ResolvedImageAsset resolved = detail::UseImageVariant(ImageVariant{direct_image_asset});
+  REQUIRE(std::get<ImageAsset>(resolved) == direct_image_asset);
+  return Text(UseString(StringVariant{"literal"}));
+}
+
+View VirtualDensityResourceContent() {
+  ++virtual_density_compositions;
+  return VirtualList(std::size_t{1}, [](std::size_t) {
+    return Image(ImageResource("test", "images/density")).With(huxerui::Frame{20.0F, 10.0F});
+  }).ItemExtent(10.0F);
+}
+
+View VirtualResourceConfigurationDependencyApp() {
+  return Column {
+    Scope(VirtualDensityResourceContent),
+    Scope(DensityUnrelatedResourceContent),
+  };
+}
+
+View LiteralTextFieldResourceContent() {
+  ++literal_text_field_compositions;
+  return TextField(TextEditingValue::FromText("literal")).Placeholder("placeholder");
+}
+
+View LiteralTextFieldResourceDependencyApp() {
+  return Scope(LiteralTextFieldResourceContent);
+}
+
+View LiteralSemanticsResourceContent() {
+  ++literal_semantics_compositions;
+  return Text("semantic").With(Semantics{.label = "literal"});
+}
+
+View LiteralSemanticsResourceDependencyApp() {
+  return Scope(LiteralSemanticsResourceContent);
+}
+
+View ResourceSemanticsContent() {
+  ++resource_semantics_compositions;
+  return Text("semantic").With(Semantics{.label = StringResource("test", "strings/semantic_label")});
+}
+
+View ResourceSemanticsDependencyApp() {
+  return Scope(ResourceSemanticsContent);
+}
+
+View LiteralTooltipContent() {
+  ++literal_tooltip_compositions;
+  return Text("tooltip target").With(Tooltip("literal hint"));
+}
+
+View LiteralTooltipDependencyApp() {
+  return Scope(LiteralTooltipContent);
+}
+
+View ResourceTooltipContent() {
+  ++resource_tooltip_compositions;
+  return Text("tooltip target").With(Tooltip(StringResource("test", "strings/tooltip_hint")));
+}
+
+View ResourceTooltipDependencyApp() {
+  return Scope(ResourceTooltipContent);
 }
 
 } // namespace
@@ -230,6 +333,270 @@ TEST_CASE("AppResourcesResolveLocaleScaleAndRawPayloads") {
   const ImageAsset image = service.Resolve(ImageResource("test", "images/logo"), Locale::Default());
   REQUIRE(image.Scale() == 2.0F);
   REQUIRE(image.IntrinsicSize() == Size{20.0F, 10.0F});
+}
+
+TEST_CASE("ImageResourceScopesObserveDisplayScalePrecisely") {
+  density_image_compositions = 0;
+  density_unrelated_compositions = 0;
+  TestResources resources;
+  const RawAsset image = TestPng(20, 10);
+  const RawAsset image_2x = TestPng(40, 20);
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {detail::ResourceEntryKind::Image,
+           "images/density",
+           "huxerui/test/images/density.png",
+           "image/png",
+           {},
+           {},
+           1.0F,
+           20,
+           10,
+           Hash(image.Bytes())},
+          {detail::ResourceEntryKind::Image,
+           "images/density",
+           "huxerui/test/images/density@2x.png",
+           "image/png",
+           {},
+           {},
+           2.0F,
+           40,
+           20,
+           Hash(image_2x.Bytes())},
+      })
+  );
+  resources.assets.emplace("huxerui/test/images/density.png", image);
+  resources.assets.emplace("huxerui/test/images/density@2x.png", image_2x);
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{ResourceConfigurationDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(std::get<ImageAsset>(root->children[0]->children[0]->image_properties.source).Scale() == 2.0F);
+  REQUIRE(density_image_compositions == 1);
+  REQUIRE(density_unrelated_compositions == 1);
+
+  resources.configuration.display_scale = 1.0F;
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(std::get<ImageAsset>(root->children[0]->children[0]->image_properties.source).Scale() == 1.0F);
+  REQUIRE(density_image_compositions == 2);
+  REQUIRE(density_unrelated_compositions == 1);
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  REQUIRE(density_image_compositions == 3);
+  REQUIRE(density_unrelated_compositions == 1);
+
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  REQUIRE(density_image_compositions == 3);
+  REQUIRE(density_unrelated_compositions == 1);
+}
+
+TEST_CASE("DirectLiteralResourceHelpersDoNotObserveResourceConfiguration") {
+  direct_literal_resource_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(detail::resource_index_path, EncodeIndex({}));
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  direct_image_asset = ImageAsset::FromEncoded(MakeTestPng(20, 10));
+  Runtime runtime{DirectLiteralResourceHelperApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+
+  REQUIRE(FirstText(runtime.BuildFrame()) == "literal");
+  REQUIRE(direct_literal_resource_compositions == 1);
+
+  resources.configuration = {Locale::FromLanguageTag("fr-FR"), 2.0F};
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  REQUIRE(direct_literal_resource_compositions == 1);
+}
+
+TEST_CASE("LiteralTextFieldsDoNotObserveResourceConfiguration") {
+  literal_text_field_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(detail::resource_index_path, EncodeIndex({}));
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{LiteralTextFieldResourceDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
+
+  runtime.BuildFrame();
+  REQUIRE(literal_text_field_compositions == 1);
+
+  resources.configuration.display_scale = 2.0F;
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  REQUIRE(literal_text_field_compositions == 1);
+}
+
+TEST_CASE("LiteralSemanticsDoNotObserveResourceConfiguration") {
+  literal_semantics_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(detail::resource_index_path, EncodeIndex({}));
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{LiteralSemanticsResourceDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
+
+  runtime.BuildFrame();
+  REQUIRE(literal_semantics_compositions == 1);
+
+  resources.configuration.locale = Locale::FromLanguageTag("fr-FR");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  REQUIRE(literal_semantics_compositions == 1);
+}
+
+TEST_CASE("ResourceSemanticsObserveLocalePrecisely") {
+  resource_semantics_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/semantic_label",
+              .mime_type = "text/plain",
+              .value = "English label",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/semantic_label",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Chinese label",
+          },
+      })
+  );
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{ResourceSemanticsDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
+
+  const auto contains_label = [](const FrameCommit& frame, std::string_view label) {
+    return frame.semantic_frame != nullptr &&
+           std::ranges::any_of(frame.semantic_frame->nodes, [label](const SemanticNode& node) {
+             return node.label == label;
+           });
+  };
+  REQUIRE(contains_label(runtime.BuildCommit(), "Chinese label"));
+  REQUIRE(resource_semantics_compositions == 1);
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  REQUIRE(contains_label(runtime.BuildCommit(), "English label"));
+  REQUIRE(resource_semantics_compositions == 2);
+}
+
+TEST_CASE("TooltipCompileObservesOnlyResourceBackedMessages") {
+  literal_tooltip_compositions = 0;
+  resource_tooltip_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/tooltip_hint",
+              .mime_type = "text/plain",
+              .value = "English hint",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/tooltip_hint",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "Chinese hint",
+          },
+      })
+  );
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime literal{LiteralTooltipDependencyApp, platform};
+  Runtime localized{ResourceTooltipDependencyApp, platform};
+  literal.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
+  localized.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
+
+  const auto contains_hint = [](const FrameCommit& frame, std::string_view hint) {
+    return frame.semantic_frame != nullptr &&
+           std::ranges::any_of(frame.semantic_frame->nodes, [hint](const SemanticNode& node) {
+             return node.hint == hint;
+           });
+  };
+  REQUIRE(contains_hint(literal.BuildCommit(), "literal hint"));
+  REQUIRE(contains_hint(localized.BuildCommit(), "Chinese hint"));
+  REQUIRE(literal_tooltip_compositions == 1);
+  REQUIRE(resource_tooltip_compositions == 1);
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  literal.UpdateResourceConfiguration(resources.configuration);
+  localized.UpdateResourceConfiguration(resources.configuration);
+  REQUIRE(contains_hint(literal.BuildCommit(), "literal hint"));
+  REQUIRE(contains_hint(localized.BuildCommit(), "English hint"));
+  REQUIRE(literal_tooltip_compositions == 1);
+  REQUIRE(resource_tooltip_compositions == 2);
+}
+
+TEST_CASE("VirtualItemsRetainResourceDependenciesOnTheirDeclaringScope") {
+  virtual_density_compositions = 0;
+  density_unrelated_compositions = 0;
+  TestResources resources;
+  const RawAsset image = TestPng(20, 10);
+  const RawAsset image_2x = TestPng(40, 20);
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {detail::ResourceEntryKind::Image,
+           "images/density",
+           "huxerui/test/images/density.png",
+           "image/png",
+           {},
+           {},
+           1.0F,
+           20,
+           10,
+           Hash(image.Bytes())},
+          {detail::ResourceEntryKind::Image,
+           "images/density",
+           "huxerui/test/images/density@2x.png",
+           "image/png",
+           {},
+           {},
+           2.0F,
+           40,
+           20,
+           Hash(image_2x.Bytes())},
+      })
+  );
+  resources.assets.emplace("huxerui/test/images/density.png", image);
+  resources.assets.emplace("huxerui/test/images/density@2x.png", image_2x);
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{VirtualResourceConfigurationDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(std::get<ImageAsset>(root->children[0]->children[0]->children[0]->image_properties.source).Scale() == 2.0F);
+  REQUIRE(virtual_density_compositions == 1);
+  REQUIRE(density_unrelated_compositions == 1);
+
+  resources.configuration.display_scale = 1.0F;
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(std::get<ImageAsset>(root->children[0]->children[0]->children[0]->image_properties.source).Scale() == 1.0F);
+  REQUIRE(virtual_density_compositions == 2);
+  REQUIRE(density_unrelated_compositions == 1);
 }
 
 TEST_CASE("AppResourcesPrefersRegionBeforeScriptDuringLocaleFallback") {
@@ -548,6 +915,58 @@ TEST_CASE("TextAndControlsResolveStringResourcesDirectly") {
   REQUIRE(ContainsText(scene, "Localized title"));
   REQUIRE(ContainsText(scene, "Localized action"));
   REQUIRE(ContainsText(scene, "Localized placeholder"));
+
+  resources.configuration.locale = Locale::FromLanguageTag("en-US");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  const FlattenedScene& updated = runtime.BuildFrame();
+  REQUIRE(ContainsText(updated, "Title"));
+  REQUIRE(ContainsText(updated, "Action"));
+  REQUIRE(ContainsText(updated, "Placeholder"));
+  REQUIRE_FALSE(ContainsText(updated, "Localized title"));
+}
+
+TEST_CASE("TextFieldResourceFailurePreservesTheCommittedExtensionValue") {
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/placeholder",
+              .mime_type = "text/plain",
+              .value = "Placeholder",
+          },
+      })
+  );
+  TestPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{TextFieldResourceFailureApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto find_text_field_modifier = [](const detail::MountedNode& node) -> const detail::TextFieldModifier* {
+    const auto found = std::ranges::find_if(node.extensions, [](const detail::NodeExtensionEntry& entry) {
+      return entry.descriptor == &detail::TextFieldModifier::Descriptor();
+    });
+    if (found == node.extensions.end()) {
+      return nullptr;
+    }
+    return static_cast<const detail::TextFieldModifier*>(found->value.get());
+  };
+  const detail::MountedNode* field = runtime.RootNode();
+  REQUIRE(field != nullptr);
+  const auto* committed = find_text_field_modifier(*field);
+  REQUIRE(committed != nullptr);
+  REQUIRE(detail::StringLiteral(committed->placeholder) == "Placeholder");
+
+  missing_text_field_placeholder = true;
+  REQUIRE_THROWS(runtime.BuildFrame());
+
+  field = runtime.RootNode();
+  REQUIRE(field != nullptr);
+  committed = find_text_field_modifier(*field);
+  REQUIRE(committed != nullptr);
+  REQUIRE(detail::StringLiteral(committed->placeholder) == "Placeholder");
 }
 
 TEST_CASE("MenuItemsResolveStringAndImageResources") {

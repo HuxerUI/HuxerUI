@@ -256,14 +256,4 @@ LayerController::DismissRequestResult LayerController::RequestDismiss(LayerId id
   return {.handled = dismissed, .dismissed = dismissed};
 }
 
-void LayerController::InvalidateAllEntries() const {
-  if (state_->runtime == nullptr) {
-    return;
-  }
-  for (detail::LayerEntry& entry : state_->entries) {
-    ++entry.revision;
-  }
-  state_->runtime->InvalidateLayers();
-}
-
 } // namespace huxerui

@@ -12,6 +12,8 @@ struct TestEnvironmentValue {
   static TestEnvironmentValue Default() {
     return {"fallback"};
   }
+
+  bool operator==(const TestEnvironmentValue&) const = default;
 };
 
 std::vector<std::string> observed_environment_values;
@@ -191,12 +193,13 @@ View EnvironmentApp() {
   outer.Set(TestEnvironmentValue{"outer"});
   return Column {
     EnvironmentReader(),
-    huxerui::ProvideEnvironment(std::move(outer), [] {
-      return Column {
-        EnvironmentReader(),
-        huxerui::ProvideEnvironment(TestEnvironmentValue{"inner"}, EnvironmentReader),
-      };
-    }),
+    huxerui::ProvideEnvironment(
+        std::move(outer),
+        Column {
+          EnvironmentReader(),
+          huxerui::ProvideEnvironment(TestEnvironmentValue{"inner"}, EnvironmentReader()),
+        }
+    ),
   };
 }
 
@@ -241,7 +244,7 @@ View TestButtonTheme(std::function<View()> content) {
           .corner_radius = 13.0F,
       }
   );
-  return Theme(std::move(definition), std::move(content));
+  return Theme {std::move(definition), Scope(std::move(content))};
 }
 
 View TestThemeProvider(std::function<View()> content) {
@@ -251,7 +254,7 @@ View TestThemeProvider(std::function<View()> content) {
   spec.typography.body_medium = 18.0F;
   spec.typography.label_large = 16.0F;
   spec.typography.title_large = 25.0F;
-  return Theme(ThemeDefinition{spec}, std::move(content));
+  return Theme {ThemeDefinition{spec}, Scope(std::move(content))};
 }
 
 View ThemeApp() {
@@ -260,36 +263,33 @@ View ThemeApp() {
 }
 
 View FlatDarkThemeApp() {
-  return HUXERUI_THEME(
-      TestButtonTheme,
-      HUXERUI_THEME(
-          huxerui::FlatDarkTheme,
-          Column {
-            Text("dark body"),
-            Text("dark title", TextRole::Title),
-            Button("dark button"),
-          }
-      )
-  );
+  return TestButtonTheme([=] {
+    return huxerui::FlatDarkTheme {
+      Column {
+        Text("dark body"),
+        Text("dark title", TextRole::Title),
+        Button("dark button"),
+      },
+    };
+  });
 }
 
 View FlatThemeInteractionApp() {
-  return HUXERUI_THEME(huxerui::FlatTheme, Button("flat interaction").OnClick([] {}));
+  return huxerui::FlatTheme {Button("flat interaction").OnClick([] {})};
 }
 
 View MaterialThemeApp() {
-  return HUXERUI_THEME(huxerui::MaterialTheme, Button("material button").OnClick([] {}));
+  return huxerui::MaterialTheme {Button("material button").OnClick([] {})};
 }
 
 View MaterialToggleApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        Checkbox(false),
-        RadioButton(false),
-        Switch(false),
-      }
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      Checkbox(false),
+      RadioButton(false),
+      Switch(false),
+    },
+  };
 }
 
 View MaterialLabeledToggleApp() {
@@ -299,92 +299,85 @@ View MaterialLabeledToggleApp() {
   labeled_checkbox_checked = checkbox;
   labeled_radio_selected = radio;
   labeled_switch_checked = switch_value;
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        Checkbox("Checkbox label", checkbox).OnChanged([checkbox](bool checked) {
-          ++labeled_checkbox_changes;
-          checkbox = checked;
-        }),
-        RadioButton("Radio label", radio).OnChanged([radio](bool selected) {
-          ++labeled_radio_changes;
-          radio = selected;
-        }),
-        Switch("Switch label", switch_value).OnChanged([switch_value](bool checked) {
-          ++labeled_switch_changes;
-          switch_value = checked;
-        }),
-      }.With(Spacing(16.0F))
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      Checkbox("Checkbox label", checkbox).OnChanged([checkbox](bool checked) {
+        ++labeled_checkbox_changes;
+        checkbox = checked;
+      }),
+      RadioButton("Radio label", radio).OnChanged([radio](bool selected) {
+        ++labeled_radio_changes;
+        radio = selected;
+      }),
+      Switch("Switch label", switch_value).OnChanged([switch_value](bool checked) {
+        ++labeled_switch_changes;
+        switch_value = checked;
+      }),
+    }.With(Spacing(16.0F)),
+  };
 }
 
 View MaterialPaddedLabeledToggleApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Checkbox("Padded label", false).With(Padding({.top = 3.0F, .right = 11.0F, .bottom = 5.0F, .left = 7.0F}))
-  );
+  return huxerui::MaterialTheme {
+    Checkbox("Padded label", false).With(Padding({.top = 3.0F, .right = 11.0F, .bottom = 5.0F, .left = 7.0F})),
+  };
 }
 
 View MaterialChipApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        Chip("Action").OnClick([] {}),
-        Chip("Selected", true).OnChanged([](bool) {}),
-      }.With(Spacing(8.0F))
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      Chip("Action").OnClick([] {}),
+      Chip("Selected", true).OnChanged([](bool) {}),
+    }.With(Spacing(8.0F)),
+  };
 }
 
 View MaterialSegmentedButtonApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        SegmentedButton({"Day", "Week", "Month"}, 1).OnChanged([](std::size_t) {}),
-      }
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      SegmentedButton({"Day", "Week", "Month"}, 1).OnChanged([](std::size_t) {}),
+    },
+  };
 }
 
 View MaterialTabsApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Tabs(
-          std::vector<TabItem>{
-              TabItem(ControlIcon(), "Overview"),
-              TabItem::IconOnly(ControlIcon(), "Activity"),
-              TabItem("Settings"),
-          },
-          1
-      )
-          .OnChanged([](std::size_t) {})
-  );
+  return huxerui::MaterialTheme {
+    Tabs(
+        std::vector<TabItem>{
+            TabItem(ControlIcon(), "Overview"),
+            TabItem::IconOnly(ControlIcon(), "Activity"),
+            TabItem("Settings"),
+        },
+        1
+    )
+        .OnChanged([](std::size_t) {}),
+  };
 }
 
 View MaterialIconControlsApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        Chip(ControlIcon(), "With icon", false).OnChanged([](bool) {}),
-        SegmentedButton(
-            std::vector<SegmentedButtonItem>{
-                SegmentedButtonItem(ControlIcon(), "Mixed"),
-                SegmentedButtonItem::IconOnly(ControlIcon(), "Icon only"),
-            },
-            1
-        ).OnChanged([](std::size_t) {}),
-      }.With(Spacing(12.0F))
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      Chip(ControlIcon(), "With icon", false).OnChanged([](bool) {}),
+      SegmentedButton(
+          std::vector<SegmentedButtonItem>{
+              SegmentedButtonItem(ControlIcon(), "Mixed"),
+              SegmentedButtonItem::IconOnly(ControlIcon(), "Icon only"),
+          },
+          1
+      ).OnChanged([](std::size_t) {}),
+    }.With(Spacing(12.0F)),
+  };
 }
 
 View MaterialIconButtonApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        IconButton(ControlIcon(), "Play").OnClick([] { ++icon_button_clicks; }),
-        IconButton(ControlIcon(), "Disabled play")
-            .OnClick([] { ++icon_button_clicks; })
-            .With(Enabled{false}),
-      }.With(Spacing(8.0F))
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      IconButton(ControlIcon(), "Play").OnClick([] { ++icon_button_clicks; }),
+      IconButton(ControlIcon(), "Disabled play")
+          .OnClick([] { ++icon_button_clicks; })
+          .With(Enabled{false}),
+    }.With(Spacing(8.0F)),
+  };
 }
 
 View FlatIconButtonApp() {
@@ -396,13 +389,13 @@ View FlatIconButtonApp() {
 View MaterialControlledSwitchApp() {
   auto value = UseState(false);
   switch_checked = value;
-  return HUXERUI_THEME(huxerui::MaterialTheme, Switch(value).OnChanged([value](bool checked) {
-    value = checked;
-  }));
+  return huxerui::MaterialTheme {
+    Switch(value).OnChanged([value](bool checked) { value = checked; }),
+  };
 }
 
 View MaterialDarkThemeApp() {
-  return HUXERUI_THEME(huxerui::MaterialDarkTheme, Button("material dark button"));
+  return huxerui::MaterialDarkTheme {Button("material dark button")};
 }
 
 View ToggleApp() {
@@ -511,30 +504,30 @@ View FullProgressCircleApp() {
   return ProgressCircle(2.0F);
 }
 
-template <class Factory> View ReducedMotionProgressTheme(Factory&& content) {
+View ReducedMotionProgressTheme(View content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
-  return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
+  return Theme {ThemeDefinition{spec}, std::move(content)};
 }
 
 View ReducedMotionProgressCircleApp() {
-  return HUXERUI_THEME(ReducedMotionProgressTheme, ProgressCircle());
+  return ReducedMotionProgressTheme(ProgressCircle());
 }
 
 View MaterialDeterminateProgressCircleApp() {
-  return huxerui::MaterialTheme([] {
-    return Row {
+  return huxerui::MaterialTheme {
+    Row {
       ProgressCircle(0.25F),
-    };
-  });
+    },
+  };
 }
 
 View MaterialIndeterminateProgressCircleApp() {
-  return huxerui::MaterialTheme([] {
-    return Row {
+  return huxerui::MaterialTheme {
+    Row {
       ProgressCircle(),
-    };
-  });
+    },
+  };
 }
 
 View DeterminateProgressBarApp() {
@@ -564,30 +557,25 @@ View FullProgressBarApp() {
 }
 
 View ReducedMotionProgressBarApp() {
-  return HUXERUI_THEME(
-      ReducedMotionProgressTheme,
-      Row {
-        ProgressBar(),
-      }
-  );
+  return ReducedMotionProgressTheme(Row {ProgressBar()});
 }
 
 View MaterialDeterminateProgressBarApp() {
-  return HUXERUI_THEME(huxerui::MaterialTheme, ProgressBar(0.25F));
+  return huxerui::MaterialTheme {ProgressBar(0.25F)};
 }
 
 View MaterialIndeterminateProgressBarApp() {
-  return HUXERUI_THEME(huxerui::MaterialTheme, ProgressBar());
+  return huxerui::MaterialTheme {ProgressBar()};
 }
 
-template <class Factory> View ReducedMotionMaterialTheme(Factory&& content) {
+View ReducedMotionMaterialTheme(View content) {
   ThemeSpec spec = huxerui::MaterialLightThemeSpec();
   spec.motion.reduced_motion = true;
-  return Theme(huxerui::MaterialThemeDefinition(std::move(spec)), std::forward<Factory>(content));
+  return Theme {huxerui::MaterialThemeDefinition(std::move(spec)), std::move(content)};
 }
 
 View ReducedMotionMaterialProgressBarApp() {
-  return HUXERUI_THEME(ReducedMotionMaterialTheme, ProgressBar());
+  return ReducedMotionMaterialTheme(ProgressBar());
 }
 
 View AdjustableProgressBarApp() {
@@ -597,11 +585,12 @@ View AdjustableProgressBarApp() {
   style.animation_duration = duration.Get();
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), [] {
-    return Row {
+  return Theme {
+    std::move(definition),
+    Row {
       ProgressBar(),
-    };
-  });
+    },
+  };
 }
 
 View SliderApp() {
@@ -616,31 +605,29 @@ View SliderApp() {
 }
 
 View MaterialSliderApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Row {
-        Slider(4.0F).Range(0.0F, 10.0F).Step(2.0F),
-      }
-  );
+  return huxerui::MaterialTheme {
+    Row {
+      Slider(4.0F).Range(0.0F, 10.0F).Step(2.0F),
+    },
+  };
 }
 
 View DisabledSliderApp() {
-  return HUXERUI_THEME(
-      huxerui::MaterialTheme,
-      Slider(0.5F).OnChanged([](float) { ++slider_changes; }).With(Enabled{false})
-  );
+  return huxerui::MaterialTheme {
+    Slider(0.5F).OnChanged([](float) { ++slider_changes; }).With(Enabled{false}),
+  };
 }
 
-template <class Factory> View InteractionTestTheme(Factory&& content) {
+View InteractionTestTheme(View content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
   spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
   spec.interactions.indication.press = IndicationLayer{.fill = Color::Rgb(200, 40, 60, 0.3F)};
-  return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
+  return Theme {ThemeDefinition{spec}, std::move(content)};
 }
 
 View ThemedIndicationApp() {
-  return HUXERUI_THEME(InteractionTestTheme, Button("themed indication").OnClick([] {}));
+  return InteractionTestTheme(Button("themed indication").OnClick([] {}));
 }
 
 View FallbackIndicationApp() {
@@ -648,7 +635,7 @@ View FallbackIndicationApp() {
   spec.motion.reduced_motion = true;
   spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
   spec.interactions.indication.press.reset();
-  return Theme(ThemeDefinition{spec}, [] { return Button("fallback indication").OnClick([] {}); });
+  return Theme {ThemeDefinition{spec}, Button("fallback indication").OnClick([] {})};
 }
 
 View SurfaceIndicationApp() {
@@ -671,16 +658,16 @@ View SurfaceIndicationApp() {
       );
 }
 
-template <class Factory> View FocusTestTheme(Factory&& content) {
+View FocusTestTheme(View content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
   spec.interactions.focus_ring = FocusRing{Color::Rgb(40, 180, 90), 3.0F, 4.0F};
   spec.interactions.disabled_opacity = 0.3F;
-  return Theme(ThemeDefinition{spec}, std::forward<Factory>(content));
+  return Theme {ThemeDefinition{spec}, std::move(content)};
 }
 
 View FlatSliderFocusApp() {
-  return FocusTestTheme([] { return Slider(0.5F); });
+  return FocusTestTheme(Slider(0.5F));
 }
 
 View FocusContent() {
@@ -706,17 +693,17 @@ View FocusContent() {
 }
 
 View FocusApp() {
-  return FocusTestTheme(FocusContent);
+  return FocusTestTheme(FocusContent());
 }
 
 View FocusOnlyApp() {
-  return FocusTestTheme([] { return Text("focus only").With(Focusable{}); });
+  return FocusTestTheme(Text("focus only").With(Focusable{}));
 }
 
 View InvalidFocusRingApp() {
   ThemeSpec spec = FlatLightThemeSpec();
   spec.interactions.focus_ring.width = -1.0F;
-  return Theme(ThemeDefinition{spec}, [] { return Text("invalid focus ring").With(Focusable{}); });
+  return Theme {ThemeDefinition{spec}, Text("invalid focus ring").With(Focusable{})};
 }
 
 View DisabledHitTestApp() {
@@ -739,7 +726,7 @@ View DisabledButtonStyleUpdateApp() {
   style.disabled_background = alternate ? Color::Rgb(180, 40, 60) : Color::Rgb(30, 80, 170);
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), [] { return Button("disabled style").With(Enabled{false}); });
+  return Theme {std::move(definition), Button("disabled style").With(Enabled{false})};
 }
 
 View FocusDialogApp() {
@@ -779,11 +766,11 @@ View PresentationThemeApp() {
           .scrim = Color::Rgb(180, 20, 20, 0.3F),
       }
   );
-  return Theme(std::move(definition), PresentationApp);
+  return Theme {std::move(definition), PresentationApp()};
 }
 
 View MaterialPresentationApp() {
-  return huxerui::MaterialTheme(PresentationApp);
+  return huxerui::MaterialTheme {PresentationApp()};
 }
 
 View DialogUpdateEnvironmentContent() {
@@ -805,7 +792,7 @@ View DialogUpdateEnvironmentApp() {
 
   ThemeDefinition definition{std::move(theme)};
   definition.Set(std::move(dialog_style));
-  return Theme(std::move(definition), PresentationApp);
+  return Theme {std::move(definition), PresentationApp()};
 }
 
 View ThemedPresentationPolicyApp() {
@@ -827,11 +814,11 @@ View ThemedPresentationPolicyApp() {
   ThemeDefinition definition;
   definition.Set(std::move(dialog_style));
   definition.Set(std::move(toast_style));
-  return Theme(std::move(definition), PresentationApp);
+  return Theme {std::move(definition), PresentationApp()};
 }
 
 View FlatDarkPresentationApp() {
-  return huxerui::FlatDarkTheme(PresentationApp);
+  return huxerui::FlatDarkTheme {PresentationApp()};
 }
 
 View DeclarativeDialogApp() {
@@ -858,14 +845,15 @@ View DeclarativeDialogMotionApp() {
   }
   ThemeDefinition definition;
   definition.Set(std::move(style));
-  return Theme(std::move(definition), [] {
-    return Text("content").With(
+  return Theme {
+    std::move(definition),
+    Text("content").With(
         Dialog {
             .visible = declarative_dialog_visible,
             .content = [] { return Text("motion dialog"); },
         }
-    );
-  });
+    ),
+  };
 }
 
 View AnimationApp() {
@@ -3183,28 +3171,27 @@ TEST_CASE("TestFocusableViewWithoutClickPaintsFocusRing") {
   REQUIRE(FindBorderWithColor(focused, Color::Rgb(40, 180, 90)) != nullptr);
 }
 
-TEST_CASE("TestVisualFillIndicationAndFocusRingValidateAtViewConstruction") {
-  REQUIRE_THROWS_AS(
-      Spacer().With(Background{LinearGradient{.stops = {{0.0F, Color::Black()}}}}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Spacer().With(Background{ImageFill{.source = ImageAsset{}}}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Button("invalid indication").With(Indication{.geometry = {.layer_size = Size{-1.0F, 20.0F}}}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Button("invalid ripple")
-          .With(Indication{
-              .ripple = RippleEffect{
-                  .color = {0.0F, 0.0F, 0.0F, std::numeric_limits<float>::quiet_NaN()},
-              },
-          }),
-      std::invalid_argument
-  );
+TEST_CASE("TestVisualFillIndicationAndFocusRingValidateDuringViewResolution") {
+  const auto rejects = [](RootFactory factory) {
+    TestPlatform platform;
+    Runtime runtime{factory, platform};
+    runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  };
+
+  rejects(+[] { return Spacer().With(Background{LinearGradient{.stops = {{0.0F, Color::Black()}}}}); });
+  rejects(+[] { return Spacer().With(Background{ImageFill{.source = ImageAsset{}}}); });
+  rejects(+[] {
+    return Button("invalid indication").With(Indication{.geometry = {.layer_size = Size{-1.0F, 20.0F}}});
+  });
+  rejects(+[] {
+    return Button("invalid ripple")
+        .With(Indication{
+            .ripple = RippleEffect{
+                .color = {0.0F, 0.0F, 0.0F, std::numeric_limits<float>::quiet_NaN()},
+            },
+        });
+  });
 
   TestPlatform platform;
   Runtime runtime{InvalidFocusRingApp, platform};

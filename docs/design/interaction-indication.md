@@ -223,7 +223,7 @@ Gradient stop offsets are finite, lie between zero and one, are nondecreasing, p
 
 ImageResource remains unresolved in public Theme and modifier values.
 
-View construction resolves it against the current resource context before the immutable retained modifier is installed. Platform renderers never resolve resources, and unchanged retained sequences do not repeat resource lookup.
+Mounted reconciliation resolves it against the effective resource context before the immutable retained modifier is installed. Platform renderers never resolve resources, and unchanged retained sequences do not repeat resource lookup.
 
 Resource-context changes invalidate the affected application and layer Views through the existing resource update path, so recomposition resolves current assets before the next retained recording.
 
@@ -247,10 +247,10 @@ struct RadialGradient {
   std::vector<GradientStop> stops;
 };
 
-using ImageFillSource = std::variant<ImageResource, ImageAsset, VectorAsset>;
+using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 
 struct ImageFill {
-  ImageFillSource source;
+  ImageVariant source;
   ImageFit fit = ImageFit::Fill;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;

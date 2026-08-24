@@ -475,12 +475,16 @@ View App() {
   auto end_open = UseState(false);
 
   if (theme_family == 1) {
-    return dark_mode ? FlatDarkTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)
-                     : FlatTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open);
+    if (dark_mode) {
+      return FlatDarkTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+    }
+    return FlatTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
   }
 
-  return dark_mode ? MaterialDarkTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)
-                   : MaterialTheme(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open);
+  if (dark_mode) {
+    return MaterialDarkTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
+  }
+  return MaterialTheme {Scope(GalleryShell, selected_page, theme_family, dark_mode, start_open, end_open)};
 }
 
 const Application application{

@@ -202,7 +202,12 @@ void ApplyWindowDragRegion(detail::ViewSpec& spec, const WindowDragRegion&) {
 template <class Modifier, void (*Apply)(detail::ViewSpec&, const Modifier&)>
 const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) { Apply(spec, *static_cast<const Modifier*>(value)); },
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) {
+        Apply(spec, *static_cast<const Modifier*>(modifier.value.get()));
+      },
       nullptr,
       nullptr,
       false,

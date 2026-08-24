@@ -62,7 +62,7 @@ Repository prose, documentation, diagnostics, identifiers, examples, and new com
 
 Comments explain non-obvious invariants, lifetimes, platform limitations, or algorithmic reasons. Do not restate code or add numbered procedural comments, `Step` comments, decorative separators such as `// ---` or `// ===`, or generated-sounding narration.
 
-Use `.clang-format` as the baseline:
+Use `.clang-format` as the reference baseline for non-DSL code:
 
 - C++ and Objective-C++: two-space indentation, 120-column limit, no tabs.
 - Java: four-space indentation, 120-column limit, no tabs.
@@ -70,7 +70,7 @@ Use `.clang-format` as the baseline:
 - Bind pointer and reference markers to the type: `Type* value` and `Type& value`.
 - Do not automatically sort includes.
 
-Run formatters only on files or ranges changed by the task. Generic clang-format does not preserve every HuxerUI DSL rule, so inspect UI declarations manually afterward.
+Do not run clang-format unless formatting is necessary for the requested change. Never apply it to whole files or UI DSL declarations. The formatter does not preserve HuxerUI DSL layout, including chained `.With(...)` placement and indentation, so format touched UI declarations manually according to the rules below. When formatting is explicitly necessary, limit it to the smallest non-DSL range changed by the task.
 
 Follow local naming:
 

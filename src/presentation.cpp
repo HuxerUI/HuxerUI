@@ -1555,12 +1555,6 @@ void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
     if (detail::IsEmptyStringVariantLiteral(item.label_)) {
       throw std::invalid_argument("HuxerUI menu item label must not be empty");
     }
-    if (const auto* icon = std::get_if<ImageAsset>(&item.icon_); icon && !icon->HasValue()) {
-      throw std::invalid_argument("HuxerUI menu item icon asset must not be empty");
-    }
-    if (const auto* icon = std::get_if<VectorAsset>(&item.icon_); icon && !icon->HasValue()) {
-      throw std::invalid_argument("HuxerUI menu item icon asset must not be empty");
-    }
     if (const auto* action = std::get_if<std::function<void()>>(&item.destination_)) {
       if (!*action) {
         throw std::invalid_argument("HuxerUI menu action item must provide an action");
@@ -1595,12 +1589,8 @@ View MenuService::ItemView(
   }
 
   std::optional<detail::ResolvedImageAsset> resolved_icon;
-  if (auto* resource = std::get_if<ImageResource>(&item.icon_)) {
-    resolved_icon = detail::UseImageResource(std::move(*resource));
-  } else if (auto* asset = std::get_if<ImageAsset>(&item.icon_)) {
-    resolved_icon = std::move(*asset);
-  } else if (auto* vector_asset = std::get_if<VectorAsset>(&item.icon_)) {
-    resolved_icon = std::move(*vector_asset);
+  if (item.icon_.has_value()) {
+    resolved_icon = detail::UseImageVariant(*item.icon_);
   }
   if (resolved_icon.has_value()) {
     if (auto* vector = std::get_if<VectorAsset>(&*resolved_icon)) {
@@ -2009,35 +1999,38 @@ void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> m
 
 } // namespace detail
 
+namespace {
+
+void ValidateMenuItemDeclaration(const StringVariant& label, const std::optional<ImageVariant>& icon) {
+  if (detail::IsBlankStringVariantLiteral(label)) {
+    throw std::invalid_argument("HuxerUI menu item label must not be empty");
+  }
+  if (icon.has_value()) {
+    detail::ValidateImageVariant(*icon);
+  }
+}
+
+} // namespace
+
 MenuItem::MenuItem(StringVariant label, std::function<void()> on_item_click)
-    : MenuItem(std::move(label), Icon{std::monostate{}}, std::move(on_item_click)) {}
+    : label_(std::move(label)), destination_(std::move(on_item_click)) {
+  ValidateMenuItemDeclaration(label_, icon_);
+}
 
-MenuItem::MenuItem(ImageResource icon, StringVariant label, std::function<void()> on_item_click)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(on_item_click)) {}
-
-MenuItem::MenuItem(ImageAsset icon, StringVariant label, std::function<void()> on_item_click)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(on_item_click)) {}
-
-MenuItem::MenuItem(VectorAsset icon, StringVariant label, std::function<void()> on_item_click)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(on_item_click)) {}
+MenuItem::MenuItem(ImageVariant icon, StringVariant label, std::function<void()> on_item_click)
+    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(on_item_click)) {
+  ValidateMenuItemDeclaration(label_, icon_);
+}
 
 MenuItem::MenuItem(StringVariant label, std::vector<MenuEntry> children)
-    : MenuItem(std::move(label), Icon{std::monostate{}}, std::move(children)) {}
+    : label_(std::move(label)), destination_(std::move(children)) {
+  ValidateMenuItemDeclaration(label_, icon_);
+}
 
-MenuItem::MenuItem(ImageResource icon, StringVariant label, std::vector<MenuEntry> children)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
-
-MenuItem::MenuItem(ImageAsset icon, StringVariant label, std::vector<MenuEntry> children)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
-
-MenuItem::MenuItem(VectorAsset icon, StringVariant label, std::vector<MenuEntry> children)
-    : MenuItem(std::move(label), Icon{std::move(icon)}, std::move(children)) {}
-
-MenuItem::MenuItem(StringVariant label, Icon icon, std::function<void()> on_item_click)
-    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(on_item_click)) {}
-
-MenuItem::MenuItem(StringVariant label, Icon icon, std::vector<MenuEntry> children)
-    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(children)) {}
+MenuItem::MenuItem(ImageVariant icon, StringVariant label, std::vector<MenuEntry> children)
+    : label_(std::move(label)), icon_(std::move(icon)), destination_(std::move(children)) {
+  ValidateMenuItemDeclaration(label_, icon_);
+}
 
 MenuItem::MenuItem(const MenuItem& other) = default;
 

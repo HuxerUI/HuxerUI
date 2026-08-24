@@ -18,6 +18,7 @@ State<TextEditingValue> limited_text_field_value;
 State<TextEditingValue> single_line_scroll_value;
 State<int> text_field_recompose_trigger;
 State<bool> text_field_offset;
+State<bool> text_field_dark_theme;
 TextInputAction submission_action = TextInputAction::Default;
 int first_action_submissions = 0;
 int second_action_submissions = 0;
@@ -131,9 +132,10 @@ View IndependentPlaceholderFontApp() {
   style.placeholder_style.font = Font::Monospace(11.0F).WithWeight(FontWeight::Bold);
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), [] {
-    return TextField(TextEditingValue::FromText("")).Placeholder("Independent").With(huxerui::Frame{160.0F, 40.0F});
-  });
+  return Theme {
+    std::move(definition),
+    TextField(TextEditingValue::FromText("")).Placeholder("Independent").With(huxerui::Frame{160.0F, 40.0F}),
+  };
 }
 
 View DefaultVariantTextFieldStyleApp() {
@@ -143,11 +145,12 @@ View DefaultVariantTextFieldStyleApp() {
   style.filled.minimum_height = 52.0F;
   ThemeDefinition definition;
   definition.Set(style);
-  return Theme(std::move(definition), [] {
-    return Column {
+  return Theme {
+    std::move(definition),
+    Column {
       TextField(TextEditingValue::FromText("Value")).With(huxerui::Frame{.width = 160.0F}),
-    };
-  });
+    },
+  };
 }
 
 View StableTextFieldApp() {
@@ -179,56 +182,56 @@ View InvalidTextFieldApp() {
 }
 
 View MaterialSecureInvalidTextFieldApp() {
-  return MaterialTheme([] {
-    return Column {
+  return MaterialTheme {
+    Column {
       TextField(TextEditingValue::FromText(""))
           .Secure()
           .Placeholder("Password")
           .Validation(ValidationResult::Invalid("Password is required"))
           .With(huxerui::Frame{.width = 160.0F}),
-    };
-  });
+    },
+  };
 }
 
 View MaterialEmptyTextFieldApp() {
-  return MaterialTheme([] {
-    return TextField(TextEditingValue::FromText(""))
+  return MaterialTheme {
+    TextField(TextEditingValue::FromText(""))
         .Placeholder("Material placeholder")
-        .With(huxerui::Frame{.width = 160.0F});
-  });
+        .With(huxerui::Frame{.width = 160.0F}),
+  };
 }
 
 View MaterialLabeledTextFieldApp() {
-  return MaterialTheme([] {
-    return Column {
+  return MaterialTheme {
+    Column {
       TextField(TextEditingValue::FromText(""))
           .Label("Email")
           .Placeholder("name@example.com")
           .With(huxerui::Frame{.width = 160.0F}),
-    };
-  });
+    },
+  };
 }
 
 View MaterialOutlinedLabeledTextFieldApp() {
-  return MaterialTheme([] {
-    return Column {
+  return MaterialTheme {
+    Column {
       TextField(TextEditingValue::FromText("Value"))
           .Label("Email")
           .Variant(TextFieldVariant::Outlined)
           .With(huxerui::Frame{.width = 160.0F}),
-    };
-  });
+    },
+  };
 }
 
 View MaterialStandardLabeledTextFieldApp() {
-  return MaterialTheme([] {
-    return Column {
+  return MaterialTheme {
+    Column {
       TextField(TextEditingValue::FromText("Value"))
           .Label("Email")
           .Variant(TextFieldVariant::Standard)
           .With(huxerui::Frame{.width = 160.0F}),
-    };
-  });
+    },
+  };
 }
 
 ImageAsset TextFieldRasterIcon() {
@@ -274,34 +277,35 @@ View FlatFilledTextFieldApp() {
 }
 
 View MaterialInvalidIconTextFieldApp() {
-  return MaterialTheme([] {
-    return TextField(TextEditingValue::FromText("Value"))
+  return MaterialTheme {
+    TextField(TextEditingValue::FromText("Value"))
         .Label("Account")
         .LeadingIcon(TextFieldVectorIcon())
         .TrailingIcon(TextFieldVectorIcon())
         .Validation(ValidationResult::Invalid("Invalid account"))
-        .With(huxerui::Frame{.width = 180.0F});
-  });
+        .With(huxerui::Frame{.width = 180.0F}),
+  };
 }
 
 View ReducedMotionMaterialLabeledTextFieldApp() {
   ThemeSpec theme = MaterialLightThemeSpec();
   theme.motion.reduced_motion = true;
-  return MaterialTheme(std::move(theme), [] {
-    return TextField(TextEditingValue::FromText(""))
+  return MaterialTheme {
+    std::move(theme),
+    TextField(TextEditingValue::FromText(""))
         .Label("Email")
         .Placeholder("name@example.com")
-        .With(huxerui::Frame{.width = 160.0F});
-  });
+        .With(huxerui::Frame{.width = 160.0F}),
+  };
 }
 
 View MaterialDisabledTextFieldApp() {
-  return MaterialTheme([] {
-    return TextField(TextEditingValue::FromText(""))
+  return MaterialTheme {
+    TextField(TextEditingValue::FromText(""))
         .Placeholder("Disabled placeholder")
         .Validation(ValidationResult::Pending("Disabled supporting"))
-        .With(huxerui::Frame{.width = 160.0F}, Enabled{false});
-  });
+        .With(huxerui::Frame{.width = 160.0F}, Enabled{false}),
+  };
 }
 
 View ValidTextFieldApp() {
@@ -494,23 +498,24 @@ View TextSelectionOverlayApp() {
   style.caret = Color::Rgb(214, 55, 48);
   ThemeDefinition definition = FlatThemeDefinition();
   definition.Set(style);
-  return Theme(std::move(definition), [] {
-    return ProvideEnvironment(
+  return Theme {
+    std::move(definition),
+    ProvideEnvironment(
         TextSelectionMenuLabels{
             .cut = "剪切",
             .copy = "复制",
             .paste = "粘贴",
             .select_all = "全选",
         },
-        [] { return TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F}); }
-    );
-  });
+        TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F})
+    ),
+  };
 }
 
 View MaterialTextSelectionOverlayApp() {
-  return MaterialTheme([] {
-    return TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F});
-  });
+  return MaterialTheme {
+    TextField(TextEditingValue::FromText("alpha beta")).With(huxerui::Frame{180.0F, 40.0F}),
+  };
 }
 
 View ScrollableTextFieldApp() {
@@ -558,6 +563,7 @@ void ResetTextFieldState() {
   single_line_scroll_value = {};
   text_field_recompose_trigger = State<int>{};
   text_field_offset = State<bool>{};
+  text_field_dark_theme = State<bool>{};
   submission_action = TextInputAction::Default;
   first_action_submissions = 0;
   second_action_submissions = 0;
@@ -590,9 +596,21 @@ const RenderNode* FindRenderNodeById(const RenderNode& node, std::uint64_t id) {
 View MaterialDisabledSelectedTextFieldApp() {
   TextEditingValue value = TextEditingValue::FromText("Selected text");
   value.selection = {0, 8};
-  return MaterialTheme([value = std::move(value)] {
-    return TextField(value).With(huxerui::Frame{.width = 160.0F}, Enabled{false});
-  });
+  return MaterialTheme {TextField(std::move(value)).With(huxerui::Frame{.width = 160.0F}, Enabled{false})};
+}
+
+View ThemeSwitchTextFieldApp() {
+  auto dark = UseState(false);
+  auto value = UseState(TextEditingValue::FromText("theme"));
+  text_field_dark_theme = dark;
+  text_field_value = value;
+  View field = TextField(value)
+                   .OnChanged([value](const TextEditingValue& changed) mutable { value = changed; })
+                   .With(huxerui::Frame{.width = 160.0F});
+  if (dark.Get()) {
+    return MaterialDarkTheme {std::move(field)};
+  }
+  return MaterialTheme {std::move(field)};
 }
 
 const detail::MountedNode* FindMountedNodeKind(const detail::MountedNode& node, detail::NodeKind kind) {
@@ -1355,13 +1373,56 @@ TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
   REQUIRE(text_field_value.Get().composition == TextRange{0, 1});
 
   text_input.restarted_sessions.clear();
-  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
-      field->id,
-      {SemanticActionKind::SetText, std::string("reset")}
-  ));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(field->id, {SemanticActionKind::SetText, std::string("reset")}));
   REQUIRE(text_field_value.Get() == TextEditingValue::FromText("reset"));
   REQUIRE(text_input.restarted_sessions == std::vector<TextInputSessionId>{1});
   REQUIRE_FALSE(text_input.restarted_states.back().composition.has_value());
+}
+
+TEST_CASE("ThemeSwitchPreservesFocusedTextFieldEditingStateAndExtensions") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{ThemeSwitchTextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const detail::MountedNode* field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE_FALSE(field->extensions.empty());
+  const std::uint64_t identity = field->identity;
+  const NodeExtension* extension = field->extensions.front().extension.get();
+
+  Pointer(runtime, PointerEventType::Down, 34.0F);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  TextInputCommand begin;
+  begin.kind = TextInputCommandKind::BeginComposition;
+  begin.target = TextRange{1, 3};
+  TextInputCommand update;
+  update.kind = TextInputCommandKind::UpdateComposition;
+  update.text = "xy";
+  update.selection_after = TextSelection{3, 3};
+  REQUIRE(runtime.HandleTextInputCommands({1, {begin, update}}).result_code == TextInputResultCode::Ok);
+  const TextEditingValue editing = text_field_value.Get();
+  REQUIRE(editing.composition.has_value());
+
+  text_input.started_sessions.clear();
+  text_input.restarted_sessions.clear();
+  text_input.stopped_sessions.clear();
+  text_field_dark_theme = true;
+  runtime.BuildFrame();
+
+  field = FindMountedNodeKind(*runtime.RootNode(), detail::NodeKind::TextField);
+  REQUIRE(field != nullptr);
+  REQUIRE(field->identity == identity);
+  REQUIRE(field->extensions.front().extension.get() == extension);
+  REQUIRE(text_field_value.Get() == editing);
+  REQUIRE(runtime.QueryTextInputContext(1, 0, editing.text.size()).selection == editing.selection);
+  REQUIRE(runtime.QueryTextInputContext(1, 0, editing.text.size()).composition == editing.composition);
+  REQUIRE(text_input.started_sessions.empty());
+  REQUIRE(text_input.restarted_sessions.empty());
+  REQUIRE(text_input.stopped_sessions.empty());
 }
 
 TEST_CASE("TestTextFieldPresentationMovementUpdatesImeGeometryWithoutLayout") {

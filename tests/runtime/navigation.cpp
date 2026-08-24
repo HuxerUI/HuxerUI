@@ -159,7 +159,7 @@ View ParameterizedNavigationContent(int value) {
 }
 
 View ParameterizedNavigationApp() {
-  return MaterialTheme(ParameterizedNavigationContent, 17);
+  return MaterialTheme {ParameterizedNavigationContent(17)};
 }
 
 View InteractiveRootPage() {
@@ -221,7 +221,7 @@ View NavigationApp() {
 View ReducedMotionNavigationApp() {
   ThemeSpec spec = FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
-  return Theme(ThemeDefinition{spec}, [] { return NavigationStack(RootPage); });
+  return Theme {ThemeDefinition{spec}, NavigationStack(RootPage)};
 }
 
 View InnerRootPage() {

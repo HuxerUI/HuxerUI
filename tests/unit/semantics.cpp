@@ -1065,23 +1065,22 @@ TEST_CASE("CompatibleSemanticUpdatesPreserveIdentityAndAdvanceRevision") {
 }
 
 TEST_CASE("SemanticsModifierRejectsInvalidSharedValues") {
-  REQUIRE_THROWS_AS(
-      Canvas([](PaintContext&, Size) {}).With(Semantics{.heading_level = 7}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Canvas([](PaintContext&, Size) {}).With(Semantics{.range = SemanticRange{1.0, 0.0, 0.5}}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Canvas([](PaintContext&, Size) {}).With(Semantics{.text_selection = TextRange{2, 1}}),
-      std::invalid_argument
-  );
-  REQUIRE_THROWS_AS(
-      Canvas([](PaintContext&, Size) {})
-          .With(Semantics{.scroll = ScrollMetrics{.offset = 2.0F, .maximum_offset = 1.0F}}),
-      std::invalid_argument
-  );
+  const auto rejects = [](RootFactory factory) {
+    TestPlatform platform;
+    Runtime runtime{factory, platform};
+    runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  };
+
+  rejects(+[] { return Canvas([](PaintContext&, Size) {}).With(Semantics{.heading_level = 7}); });
+  rejects(+[] {
+    return Canvas([](PaintContext&, Size) {}).With(Semantics{.range = SemanticRange{1.0, 0.0, 0.5}});
+  });
+  rejects(+[] { return Canvas([](PaintContext&, Size) {}).With(Semantics{.text_selection = TextRange{2, 1}}); });
+  rejects(+[] {
+    return Canvas([](PaintContext&, Size) {})
+        .With(Semantics{.scroll = ScrollMetrics{.offset = 2.0F, .maximum_offset = 1.0F}});
+  });
 }
 
 } // namespace huxerui::test

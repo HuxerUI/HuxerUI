@@ -14,6 +14,8 @@ State<bool> modifier_style_changed;
 int extension_creations = 0;
 int extension_updates = 0;
 int extension_destroys = 0;
+State<bool> property_modifier_value;
+int property_modifier_applications = 0;
 TextMeasurer* observed_text_measurer = nullptr;
 ViewportClass observed_viewport_class = ViewportClass::Compact;
 int viewport_compositions = 0;
@@ -22,6 +24,9 @@ StateList<int> empty_state_list;
 StateList<int> unobserved_state_list;
 int state_list_compositions = 0;
 int unobserved_state_list_compositions = 0;
+State<int> environment_boundary_value;
+State<int> environment_boundary_trigger;
+bool environment_boundary_should_throw = false;
 
 State<int> operator_state;
 int operator_state_compositions = 0;
@@ -159,7 +164,48 @@ struct ParameterizedEnvironmentValue {
   static ParameterizedEnvironmentValue Default() {
     return {};
   }
+
+  bool operator==(const ParameterizedEnvironmentValue&) const = default;
 };
+
+int viewport_environment_compositions = 0;
+int locale_environment_compositions = 0;
+
+View ViewportEnvironmentContent() {
+  ++viewport_environment_compositions;
+  return Text(std::to_string(static_cast<int>(UseViewportClass())));
+}
+
+View LocaleEnvironmentContent() {
+  ++locale_environment_compositions;
+  return Text(UseEnvironment<Locale>().LanguageTag());
+}
+
+View PreciseEnvironmentDependencyApp() {
+  return Column {
+    Scope(ViewportEnvironmentContent),
+    Scope(LocaleEnvironmentContent),
+  };
+}
+
+View EnvironmentBoundaryContent() {
+  HUXERUI_SCOPE({
+    if (environment_boundary_should_throw) {
+      throw std::runtime_error("environment content failed");
+    }
+    return Text("environment " + std::to_string(UseEnvironment<ParameterizedEnvironmentValue>().value));
+  });
+}
+
+View EnvironmentBoundaryApp() {
+  environment_boundary_value = UseState(1);
+  environment_boundary_trigger = UseState(0);
+  static_cast<void>(environment_boundary_trigger.Get());
+  return ProvideEnvironment(
+      ParameterizedEnvironmentValue{environment_boundary_value.Get()},
+      EnvironmentBoundaryContent()
+  );
+}
 
 View ParameterizedScopeContent(std::string label, int value) {
   return Text(label + " " + std::to_string(value));
@@ -170,11 +216,55 @@ View ParameterizedEnvironmentContent(std::string label) {
 }
 
 View ParameterizedThemeContent(int value, std::string label) {
-  return ProvideEnvironment(ParameterizedEnvironmentValue{value}, ParameterizedEnvironmentContent, std::move(label));
+  return ProvideEnvironment(
+      ParameterizedEnvironmentValue{value},
+      Scope(ParameterizedEnvironmentContent, std::move(label))
+  );
 }
 
 View ParameterizedFactoryApp() {
-  return MaterialTheme(ParameterizedThemeContent, 42, std::string{"bound"});
+  return MaterialTheme {Scope(ParameterizedThemeContent, 42, std::string{"bound"})};
+}
+
+View ReconciliationThemeApp() {
+  View content = Column {
+    Button("themed"),
+    Button("explicit").With(
+        Padding{23.0F},
+        Foreground{Color::Rgb(190, 40, 30)},
+        FontSize{27.0F},
+        Frame{.width = 144.0F}
+    ),
+    Button("explicit zero").With(Frame{.min_width = 0.0F}),
+  };
+
+  ButtonStyle style = ButtonStyle::Default();
+  style.background = Color::Rgb(20, 90, 170);
+  style.padding = EdgeInsets::All(9.0F);
+  style.label_style = {
+      Font::Monospace(19.0F).WithWeight(FontWeight::Bold),
+      Color::Rgb(230, 240, 250),
+      TextDecoration::Underline,
+  };
+  style.minimum_width = 72.0F;
+  ThemeDefinition definition;
+  definition.Set(std::move(style));
+  return Theme {std::move(definition), std::move(content)};
+}
+
+View SharedDeclarationThemeApp() {
+  View shared = Button("shared");
+  const auto themed = [](View content, Color background) {
+    ButtonStyle style = ButtonStyle::Default();
+    style.background = background;
+    ThemeDefinition definition;
+    definition.Set(std::move(style));
+    return Theme {std::move(definition), std::move(content)};
+  };
+  return Row {
+    themed(shared, Color::Rgb(180, 30, 40)),
+    themed(shared, Color::Rgb(20, 100, 180)),
+  };
 }
 
 struct ProbeModifier;
@@ -209,6 +299,32 @@ struct ProbeModifier {
 
   bool operator==(const ProbeModifier&) const = default;
 };
+
+struct PropertyProbe {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool value = false;
+
+  bool operator==(const PropertyProbe&) const = default;
+};
+
+const detail::ModifierDescriptor& PropertyProbe::Descriptor() {
+  static const detail::ModifierDescriptor descriptor{
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) {
+        ++property_modifier_applications;
+        spec.properties.clip_children = static_cast<const PropertyProbe*>(modifier.value.get())->value;
+      },
+      nullptr,
+      nullptr,
+      false,
+      detail::ErasedEqualsFor<PropertyProbe>(),
+      nullptr,
+  };
+  return descriptor;
+}
 
 struct OpaqueProbeModifier;
 
@@ -370,6 +486,12 @@ View ModifierApp() {
           huxerui::Background{style_changed.Get() ? huxerui::Color::Black() : huxerui::Color::White()},
           ProbeModifier{value.Get()}
       );
+}
+
+View PropertyModifierApp() {
+  auto value = UseState(false);
+  property_modifier_value = value;
+  return Text("Property modifier").With(PropertyProbe{value.Get()});
 }
 
 View ModifierCopyOnWriteApp() {
@@ -946,6 +1068,153 @@ TEST_CASE("TestViewCopyOnWrite") {
   REQUIRE(root->children[1]->properties.text_style.foreground.red == 1.0F);
 }
 
+TEST_CASE("ViewDeclarationsResolveInheritedStylesDuringReconciliation") {
+  TestPlatform platform;
+  Runtime runtime{ReconciliationThemeApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  const auto* environment = runtime.RootNode();
+  REQUIRE(environment != nullptr);
+  REQUIRE(environment->kind == detail::NodeKind::Environment);
+  REQUIRE(environment->children.size() == 1);
+  const auto* content = environment->children[0].get();
+  REQUIRE(content->children.size() == 3);
+
+  const auto& themed = *content->children[0];
+  REQUIRE(themed.properties.background == Color::Rgb(20, 90, 170));
+  REQUIRE(themed.properties.padding == EdgeInsets::All(9.0F));
+  REQUIRE(themed.properties.text_style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(themed.properties.text_style.font.Size() == 19.0F);
+  REQUIRE(themed.properties.text_style.decoration == TextDecoration::Underline);
+  REQUIRE(themed.properties.frame.min_width == 72.0F);
+
+  const auto& explicit_button = *content->children[1];
+  REQUIRE(explicit_button.properties.background == Color::Rgb(20, 90, 170));
+  REQUIRE(explicit_button.properties.padding == EdgeInsets::All(23.0F));
+  REQUIRE(explicit_button.properties.text_style.font.FamilyKind() == FontFamilyKind::Monospace);
+  REQUIRE(explicit_button.properties.text_style.font.Size() == 27.0F);
+  REQUIRE(explicit_button.properties.text_style.foreground == Color::Rgb(190, 40, 30));
+  REQUIRE(explicit_button.properties.text_style.decoration == TextDecoration::Underline);
+  REQUIRE(explicit_button.properties.frame.width == 144.0F);
+  REQUIRE(explicit_button.properties.frame.min_width == 72.0F);
+
+  const auto& explicit_zero = *content->children[2];
+  REQUIRE(explicit_zero.properties.frame.min_width == 0.0F);
+}
+
+TEST_CASE("EnvironmentBoundaryRetainsIdentityWithoutOwningARecomposeScope") {
+  environment_boundary_should_throw = false;
+  TestPlatform platform;
+  Runtime runtime{EnvironmentBoundaryApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const auto* environment = runtime.RootNode();
+  REQUIRE(environment != nullptr);
+  REQUIRE(environment->kind == detail::NodeKind::Environment);
+  REQUIRE(environment->recompose_scope == nullptr);
+  REQUIRE(environment->owned_environment != nullptr);
+  REQUIRE(environment->children.size() == 1);
+  const auto* content = environment->children[0].get();
+  REQUIRE(content->kind == detail::NodeKind::Scope);
+  REQUIRE(content->children.size() == 1);
+  REQUIRE(content->children[0]->text == "environment 1");
+
+  const std::uint64_t environment_identity = environment->identity;
+  const std::uint64_t content_identity = content->identity;
+  const Environment* mounted_environment = environment->owned_environment.get();
+  const std::uint64_t measure_revision = environment->measure_revision;
+
+  environment_boundary_trigger = 1;
+  runtime.BuildFrame();
+  environment = runtime.RootNode();
+  REQUIRE(environment->identity == environment_identity);
+  REQUIRE(environment->children[0]->identity == content_identity);
+  REQUIRE(environment->owned_environment.get() == mounted_environment);
+  REQUIRE(environment->measure_revision == measure_revision);
+
+  environment_boundary_value = 2;
+  runtime.BuildFrame();
+  environment = runtime.RootNode();
+  REQUIRE(environment->identity == environment_identity);
+  REQUIRE(environment->children[0]->identity == content_identity);
+  REQUIRE(environment->owned_environment.get() == mounted_environment);
+  REQUIRE(environment->children[0]->children[0]->text == "environment 2");
+}
+
+TEST_CASE("EnvironmentEntriesInvalidateOnlyTheirExactReaders") {
+  viewport_environment_compositions = 0;
+  locale_environment_compositions = 0;
+  TestPlatform platform;
+  Runtime runtime{PreciseEnvironmentDependencyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {500.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(viewport_environment_compositions == 1);
+  REQUIRE(locale_environment_compositions == 1);
+
+  runtime.SetWindowMetrics({.viewport = {700.0F, 120.0F}});
+  runtime.BuildFrame();
+  REQUIRE(viewport_environment_compositions == 2);
+  REQUIRE(locale_environment_compositions == 1);
+
+  runtime.UpdateResourceConfiguration({Locale::Default(), 2.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_environment_compositions == 2);
+  REQUIRE(locale_environment_compositions == 1);
+
+  runtime.UpdateResourceConfiguration({Locale::FromLanguageTag("fr-FR"), 2.0F});
+  runtime.BuildFrame();
+  REQUIRE(viewport_environment_compositions == 2);
+  REQUIRE(locale_environment_compositions == 2);
+}
+
+TEST_CASE("EnvironmentBoundaryRecoversAfterDescendantCompositionFailure") {
+  environment_boundary_should_throw = false;
+
+  TestPlatform platform;
+  Runtime runtime{EnvironmentBoundaryApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const auto* environment = runtime.RootNode();
+  REQUIRE(environment != nullptr);
+  const Environment* mounted_environment = environment->owned_environment.get();
+
+  environment_boundary_should_throw = true;
+  environment_boundary_value = 2;
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
+  environment = runtime.RootNode();
+  REQUIRE(environment->owned_environment.get() == mounted_environment);
+  const std::any* committed =
+      detail::FindEnvironmentValue(environment->environment, typeid(ParameterizedEnvironmentValue));
+  REQUIRE(committed != nullptr);
+  REQUIRE(std::any_cast<const ParameterizedEnvironmentValue&>(*committed).value == 2);
+  REQUIRE(environment->children[0]->children[0]->text == "environment 1");
+
+  environment_boundary_should_throw = false;
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[0]->children[0]->text == "environment 2");
+}
+
+TEST_CASE("OneViewDeclarationResolvesIndependentlyUnderDifferentThemes") {
+  TestPlatform platform;
+  Runtime runtime{SharedDeclarationThemeApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 2);
+  REQUIRE(root->children[0]->kind == detail::NodeKind::Environment);
+  REQUIRE(root->children[1]->kind == detail::NodeKind::Environment);
+  REQUIRE(root->children[0]->children.size() == 1);
+  REQUIRE(root->children[1]->children.size() == 1);
+  REQUIRE(root->children[0]->children[0]->properties.background == Color::Rgb(180, 30, 40));
+  REQUIRE(root->children[1]->children[0]->properties.background == Color::Rgb(20, 100, 180));
+}
+
 TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
   TestPlatform platform;
   Runtime runtime{TextStyleApp, platform};
@@ -959,6 +1228,27 @@ TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
   REQUIRE(root->properties.text_style.font.Size() == 22.0F);
   REQUIRE(root->properties.text_style.foreground == Color::Rgb(40, 50, 60));
   REQUIRE(root->properties.text_style.decoration == TextDecoration::Underline);
+}
+
+TEST_CASE("PropertyModifiersApplyOncePerMountedDeclarationResolution") {
+  property_modifier_applications = 0;
+  static_cast<void>(Text("Declaration").With(PropertyProbe{true}));
+  static_cast<void>(Checkbox(false));
+  REQUIRE(property_modifier_applications == 0);
+
+  TestPlatform platform;
+  Runtime runtime{PropertyModifierApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(property_modifier_applications == 1);
+  REQUIRE_FALSE(runtime.RootNode()->properties.clip_children);
+
+  property_modifier_value = true;
+  runtime.BuildFrame();
+
+  REQUIRE(property_modifier_applications == 2);
+  REQUIRE(runtime.RootNode()->properties.clip_children);
 }
 
 TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {

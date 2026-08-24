@@ -29,7 +29,7 @@ View SelectionAreaApp() {
 View FocusedSelectionAreaApp() {
   ThemeSpec spec = FlatLightThemeSpec();
   spec.interactions.focus_ring = FocusRing{Color::Rgb(40, 180, 90), 3.0F, 4.0F};
-  return Theme(ThemeDefinition{spec}, SelectionAreaApp);
+  return Theme {ThemeDefinition{spec}, SelectionAreaApp()};
 }
 
 View PlainTextApp() {

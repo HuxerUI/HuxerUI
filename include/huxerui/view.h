@@ -39,6 +39,7 @@
 
 namespace huxerui {
 
+class Environment;
 class PaintContext;
 class Runtime;
 
@@ -161,6 +162,7 @@ private:
 
   std::shared_ptr<detail::ViewSpec> spec_;
 
+  friend View ProvideEnvironment(Environment environment, View content);
   friend class Runtime;
   friend class detail::VirtualMeasureSession;
 };
@@ -456,6 +458,7 @@ public:
 
 protected:
   explicit TypedView(std::shared_ptr<ViewSpec> spec) : View(std::move(spec)) {}
+  explicit TypedView(View view) : View(std::move(view)) {}
 
 private:
   Derived TakeDerived() {
@@ -475,6 +478,9 @@ public:
   template <class... Children>
     requires(detail::ViewChild<Children> && ...)
   explicit Layout(Children&&... children) : Layout(detail::CollectChildren(std::forward<Children>(children)...)) {}
+
+protected:
+  explicit Layout(std::shared_ptr<detail::ViewSpec> spec) : detail::TypedView<Derived>(std::move(spec)) {}
 };
 
 template <class Derived> class VirtualLayout : public detail::TypedView<Derived> {
@@ -513,10 +519,7 @@ protected:
 
 class Text final : public View {
 public:
-  explicit Text(StringResource resource, TextRole role = TextRole::Body);
-  explicit Text(std::string value, TextRole role = TextRole::Body);
-  explicit Text(std::string_view value, TextRole role = TextRole::Body);
-  explicit Text(const char* value, TextRole role = TextRole::Body);
+  explicit Text(StringVariant value, TextRole role = TextRole::Body);
 
   Text Style(TextStyle style) &&;
 
@@ -525,7 +528,7 @@ public:
   }
 
   template <class... Arguments> static Text Format(StringResource resource, const Arguments&... arguments) {
-    return Text(UseString(std::move(resource), arguments...));
+    return Text(StringVariant::Format(std::move(resource), arguments...));
   }
 
   template <class... Arguments>
@@ -535,7 +538,7 @@ public:
 
   template <class... Arguments>
   static Text Format(TextRole role, StringResource resource, const Arguments&... arguments) {
-    return Text(UseString(std::move(resource), arguments...), role);
+    return Text(StringVariant::Format(std::move(resource), arguments...), role);
   }
 
   template <class T>
@@ -544,37 +547,21 @@ public:
 
 class Button final : public View {
 public:
-  explicit Button(StringResource resource);
-  explicit Button(std::string label);
-  explicit Button(std::string_view label);
-  explicit Button(const char* label);
+  explicit Button(StringVariant label);
 };
 
 class IconButton final : public detail::TypedView<IconButton> {
 public:
-  IconButton(ImageResource icon, StringVariant semantic_label);
-  IconButton(ImageAsset icon, StringVariant semantic_label);
-  IconButton(VectorAsset icon, StringVariant semantic_label);
+  IconButton(ImageVariant icon, StringVariant semantic_label);
 };
 
 class Chip final : public detail::TypedView<Chip> {
 public:
-  explicit Chip(StringResource resource);
-  explicit Chip(std::string label);
-  explicit Chip(std::string_view label);
-  explicit Chip(const char* label);
+  explicit Chip(StringVariant label);
+  Chip(StringVariant label, bool selected);
 
-  Chip(StringResource resource, bool selected);
-  Chip(std::string label, bool selected);
-  Chip(std::string_view label, bool selected);
-  Chip(const char* label, bool selected);
-
-  Chip(ImageResource icon, StringVariant label);
-  Chip(ImageAsset icon, StringVariant label);
-  Chip(VectorAsset icon, StringVariant label);
-  Chip(ImageResource icon, StringVariant label, bool selected);
-  Chip(ImageAsset icon, StringVariant label, bool selected);
-  Chip(VectorAsset icon, StringVariant label, bool selected);
+  Chip(ImageVariant icon, StringVariant label);
+  Chip(ImageVariant icon, StringVariant label, bool selected);
 
   template <class Function> Chip OnChanged(Function&& function) && {
     return std::move(*this).On<ToggleEvents::Changed>(std::forward<Function>(function));
@@ -589,20 +576,12 @@ public:
 class SegmentedButtonItem final {
 public:
   explicit SegmentedButtonItem(StringVariant label);
-  SegmentedButtonItem(ImageResource icon, StringVariant label);
-  SegmentedButtonItem(ImageAsset icon, StringVariant label);
-  SegmentedButtonItem(VectorAsset icon, StringVariant label);
+  SegmentedButtonItem(ImageVariant icon, StringVariant label);
 
-  static SegmentedButtonItem IconOnly(ImageResource icon, StringVariant semantic_label);
-  static SegmentedButtonItem IconOnly(ImageAsset icon, StringVariant semantic_label);
-  static SegmentedButtonItem IconOnly(VectorAsset icon, StringVariant semantic_label);
+  static SegmentedButtonItem IconOnly(ImageVariant icon, StringVariant semantic_label);
 
 private:
-  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
-
-  SegmentedButtonItem(Icon icon, StringVariant label, bool show_label);
-
-  Icon icon_;
+  std::optional<ImageVariant> icon_;
   StringVariant label_;
   bool show_label_ = true;
 
@@ -630,22 +609,14 @@ public:
 class TabItem final {
 public:
   explicit TabItem(StringVariant label);
-  TabItem(ImageResource icon, StringVariant label);
-  TabItem(ImageAsset icon, StringVariant label);
-  TabItem(VectorAsset icon, StringVariant label);
+  TabItem(ImageVariant icon, StringVariant label);
 
-  static TabItem IconOnly(ImageResource icon, StringVariant semantic_label);
-  static TabItem IconOnly(ImageAsset icon, StringVariant semantic_label);
-  static TabItem IconOnly(VectorAsset icon, StringVariant semantic_label);
+  static TabItem IconOnly(ImageVariant icon, StringVariant semantic_label);
 
   TabItem Enabled(bool enabled) &&;
 
 private:
-  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
-
-  TabItem(Icon icon, StringVariant label, bool show_label);
-
-  Icon icon_;
+  std::optional<ImageVariant> icon_;
   StringVariant label_;
   bool show_label_ = true;
   bool enabled_ = true;
@@ -673,9 +644,7 @@ public:
 
 class Image final : public View {
 public:
-  explicit Image(ImageResource resource);
-  explicit Image(ImageAsset asset);
-  explicit Image(VectorAsset asset);
+  explicit Image(ImageVariant image);
   explicit Image(ExternalTexture texture);
 
   Image Fit(ImageFit fit) &&;
@@ -731,20 +700,10 @@ public:
   explicit TextField(TextEditingValue value);
   explicit TextField(const State<TextEditingValue>& value) : TextField(value.Get()) {}
 
-  TextField Label(StringResource resource) &&;
-  TextField Label(std::string value) &&;
-  TextField Label(std::string_view value) &&;
-  TextField Label(const char* value) &&;
-  TextField Placeholder(StringResource resource) &&;
-  TextField Placeholder(std::string value) &&;
-  TextField Placeholder(std::string_view value) &&;
-  TextField Placeholder(const char* value) &&;
-  TextField LeadingIcon(ImageResource resource) &&;
-  TextField LeadingIcon(ImageAsset asset) &&;
-  TextField LeadingIcon(VectorAsset asset) &&;
-  TextField TrailingIcon(ImageResource resource) &&;
-  TextField TrailingIcon(ImageAsset asset) &&;
-  TextField TrailingIcon(VectorAsset asset) &&;
+  TextField Label(StringVariant value) &&;
+  TextField Placeholder(StringVariant value) &&;
+  TextField LeadingIcon(ImageVariant icon) &&;
+  TextField TrailingIcon(ImageVariant icon) &&;
   TextField Variant(TextFieldVariant value) &&;
   TextField LineLimits(TextFieldLineLimits value) &&;
   TextField MaxLength(std::size_t value) &&;
@@ -761,15 +720,13 @@ public:
   }
 
 private:
-  using Icon = std::variant<ImageAsset, VectorAsset>;
-
   void UpdateModifier();
 
   TextEditingValue value_;
-  std::string label_;
-  std::string placeholder_;
-  std::optional<Icon> leading_icon_;
-  std::optional<Icon> trailing_icon_;
+  StringVariant label_;
+  StringVariant placeholder_;
+  std::optional<ImageVariant> leading_icon_;
+  std::optional<ImageVariant> trailing_icon_;
   std::optional<TextFieldVariant> variant_;
   TextInputConfiguration configuration_;
   TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();

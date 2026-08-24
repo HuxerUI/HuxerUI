@@ -28,10 +28,19 @@ RecomposeScope::RecomposeScope(Runtime& runtime, std::uint64_t id, StateSlotStor
     : runtime_(&runtime), id_(id), state_slots_(std::move(state_slots)) {}
 
 RecomposeScope::~RecomposeScope() {
-  for (auto& [cell_address, weak_cell] : dependencies_) {
-    static_cast<void>(cell_address);
-    if (auto cell = weak_cell.lock()) {
-      cell->subscribers.erase(id_);
+  for (auto& [dependency_address, weak_dependency] : dependencies_) {
+    static_cast<void>(dependency_address);
+    if (auto dependency = weak_dependency.lock()) {
+      dependency->subscribers.erase(id_);
+    }
+  }
+  for (auto& [owner_identity, dependencies] : retained_dependencies_) {
+    static_cast<void>(owner_identity);
+    for (auto& [dependency_address, weak_dependency] : dependencies) {
+      static_cast<void>(dependency_address);
+      if (auto dependency = weak_dependency.lock()) {
+        dependency->subscribers.erase(id_);
+      }
     }
   }
   runtime_->RetireLifecycles(*this);
@@ -66,18 +75,20 @@ void RecomposeScope::EndComposition() {
   });
 
   const auto self = shared_from_this();
-  for (auto& [cell_address, weak_cell] : pending_dependencies_) {
-    static_cast<void>(cell_address);
-    if (auto cell = weak_cell.lock()) {
-      cell->subscribers[id_] = self;
+  for (auto& [dependency_address, weak_dependency] : pending_dependencies_) {
+    static_cast<void>(dependency_address);
+    if (auto dependency = weak_dependency.lock()) {
+      dependency->subscribers[id_] = self;
     }
   }
-  for (auto& [cell_address, weak_cell] : dependencies_) {
-    if (pending_dependencies_.contains(cell_address)) {
+  for (auto& [dependency_address, weak_dependency] : dependencies_) {
+    if (pending_dependencies_.contains(dependency_address)) {
       continue;
     }
-    if (auto cell = weak_cell.lock()) {
-      cell->subscribers.erase(id_);
+    if (auto dependency = weak_dependency.lock()) {
+      if (!HasRetainedDependency(dependency_address)) {
+        dependency->subscribers.erase(id_);
+      }
     }
   }
 
@@ -87,7 +98,8 @@ void RecomposeScope::EndComposition() {
     if (found == pending_dependencies_.end()) {
       continue;
     }
-    if (auto cell = found->second.lock(); cell && cell->version != version) {
+    if (auto dependency = found->second.lock();
+        dependency && static_cast<StateCellBase&>(*dependency).version != version) {
       observed_value_changed = true;
       break;
     }
@@ -125,11 +137,55 @@ void RecomposeScope::AbortComposition() noexcept {
 }
 
 void RecomposeScope::Observe(const std::shared_ptr<StateCellBase>& cell) {
-  if (!composing_) {
-    throw std::logic_error("HuxerUI state observation requires an active composition");
-  }
-  pending_dependencies_[cell.get()] = cell;
+  Observe(std::static_pointer_cast<CompositionDependency>(cell));
   observed_versions_.try_emplace(cell.get(), cell->version);
+}
+
+void RecomposeScope::Observe(const std::shared_ptr<CompositionDependency>& dependency) {
+  if (!composing_) {
+    throw std::logic_error("HuxerUI dependency observation requires an active composition");
+  }
+  pending_dependencies_[dependency.get()] = dependency;
+  if (dependency->notification_pending) {
+    dependency->pending_readers.insert(id_);
+  }
+}
+
+void RecomposeScope::ObserveRetained(
+    std::uint64_t owner_identity,
+    const std::shared_ptr<CompositionDependency>& dependency
+) {
+  retained_dependencies_[owner_identity][dependency.get()] = dependency;
+  dependency->subscribers[id_] = shared_from_this();
+  if (dependency->notification_pending) {
+    dependency->pending_readers.insert(id_);
+  }
+}
+
+void RecomposeScope::ClearRetained(std::uint64_t owner_identity) {
+  const auto found = retained_dependencies_.find(owner_identity);
+  if (found == retained_dependencies_.end()) {
+    return;
+  }
+  for (const auto& [dependency_address, weak_dependency] : found->second) {
+    if (dependencies_.contains(dependency_address) || pending_dependencies_.contains(dependency_address) ||
+        HasRetainedDependency(dependency_address, owner_identity)) {
+      continue;
+    }
+    if (auto dependency = weak_dependency.lock()) {
+      dependency->subscribers.erase(id_);
+    }
+  }
+  retained_dependencies_.erase(found);
+}
+
+bool RecomposeScope::HasRetainedDependency(
+    CompositionDependency* dependency,
+    std::optional<std::uint64_t> excluding_owner
+) const {
+  return std::ranges::any_of(retained_dependencies_, [dependency, excluding_owner](const auto& entry) {
+    return (!excluding_owner.has_value() || entry.first != *excluding_owner) && entry.second.contains(dependency);
+  });
 }
 
 void RecomposeScope::RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies) {
@@ -270,6 +326,44 @@ std::shared_ptr<StateCellBase> RecomposeScope::UseState(
 }
 
 thread_local Composer* Composer::current_ = nullptr;
+thread_local VirtualItemDependencyCapture* VirtualItemDependencyCapture::current_ = nullptr;
+
+VirtualItemDependencyCapture::VirtualItemDependencyCapture(
+    std::shared_ptr<RecomposeScope> scope,
+    std::uint64_t owner_identity
+) : scope_(std::move(scope)), owner_identity_(owner_identity) {}
+
+VirtualItemDependencyCapture::~VirtualItemDependencyCapture() {
+  Clear();
+}
+
+void VirtualItemDependencyCapture::Clear() {
+  if (auto scope = scope_.lock()) {
+    scope->ClearRetained(owner_identity_);
+  }
+}
+
+void VirtualItemDependencyCapture::Observe(const std::shared_ptr<CompositionDependency>& dependency) {
+  if (auto scope = scope_.lock()) {
+    scope->ObserveRetained(owner_identity_, dependency);
+  }
+}
+
+VirtualItemDependencyCapture::Guard::Guard(VirtualItemDependencyCapture& capture) : previous_(current_) {
+  current_ = &capture;
+}
+
+VirtualItemDependencyCapture::Guard::~Guard() {
+  current_ = previous_;
+}
+
+VirtualItemDependencyCapture* VirtualItemDependencyCapture::Current() noexcept {
+  return current_;
+}
+
+std::shared_ptr<RecomposeScope> VirtualItemDependencyCapture::Scope() const noexcept {
+  return scope_.lock();
+}
 
 Composer::Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const Environment> environment)
     : scope_(std::move(scope)), environment_(std::move(environment)) {}
@@ -289,6 +383,10 @@ void Composer::Observe(const std::shared_ptr<StateCellBase>& cell) {
   scope_->Observe(cell);
 }
 
+void Composer::Observe(const std::shared_ptr<CompositionDependency>& dependency) {
+  scope_->Observe(dependency);
+}
+
 std::shared_ptr<StateCellBase>
 Composer::UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial) {
   return scope_->UseState(type, location, std::move(initial));
@@ -306,15 +404,6 @@ std::shared_ptr<EventHub> Composer::Events() const noexcept {
   return scope_->Events();
 }
 
-Composer::EnvironmentGuard::EnvironmentGuard(std::shared_ptr<const Environment> environment)
-    : composer_(&Composer::RequireCurrent()), previous_(composer_->environment_) {
-  composer_->environment_ = std::move(environment);
-}
-
-Composer::EnvironmentGuard::~EnvironmentGuard() {
-  composer_->environment_ = std::move(previous_);
-}
-
 Composer::Guard::Guard(Composer& composer) : previous_(current_) {
   current_ = &composer;
 }
@@ -329,13 +418,25 @@ void ObserveState(const std::shared_ptr<StateCellBase>& cell) {
   }
 }
 
-void NotifyState(const std::shared_ptr<StateCellBase>& cell) {
-  std::vector<std::shared_ptr<RecomposeScope>> scopes;
-  scopes.reserve(cell->subscribers.size());
+void ObserveDependency(const std::shared_ptr<CompositionDependency>& dependency) {
+  if (auto* composer = Composer::Current()) {
+    composer->Observe(dependency);
+  } else if (auto* capture = VirtualItemDependencyCapture::Current()) {
+    capture->Observe(dependency);
+  }
+}
 
-  std::erase_if(cell->subscribers, [&scopes](const auto& entry) {
+namespace {
+
+void NotifyDependency(const std::shared_ptr<CompositionDependency>& dependency) {
+  std::vector<std::shared_ptr<RecomposeScope>> scopes;
+  scopes.reserve(dependency->subscribers.size());
+
+  std::erase_if(dependency->subscribers, [&scopes, &dependency](const auto& entry) {
     if (auto scope = entry.second.lock()) {
-      scopes.push_back(std::move(scope));
+      if (!dependency->pending_readers.contains(entry.first)) {
+        scopes.push_back(std::move(scope));
+      }
       return false;
     }
     return true;
@@ -344,6 +445,37 @@ void NotifyState(const std::shared_ptr<StateCellBase>& cell) {
   for (const auto& scope : scopes) {
     scope->Invalidate();
   }
+}
+
+} // namespace
+
+void NotifyState(const std::shared_ptr<StateCellBase>& cell) {
+  NotifyDependency(cell);
+}
+
+void BeginDependencyChange(const std::shared_ptr<CompositionDependency>& dependency) {
+  if (dependency->notification_pending) {
+    throw std::logic_error("HuxerUI composition dependency already has a pending change");
+  }
+  dependency->notification_pending = true;
+  dependency->pending_readers.clear();
+  if (const Composer* composer = Composer::Current()) {
+    dependency->pending_readers.insert(composer->ScopeId());
+  }
+}
+
+void CommitDependencyChange(const std::shared_ptr<CompositionDependency>& dependency) {
+  if (!dependency->notification_pending) {
+    throw std::logic_error("HuxerUI composition dependency has no pending change");
+  }
+  NotifyDependency(dependency);
+  dependency->pending_readers.clear();
+  dependency->notification_pending = false;
+}
+
+void CancelDependencyChange(const std::shared_ptr<CompositionDependency>& dependency) noexcept {
+  dependency->pending_readers.clear();
+  dependency->notification_pending = false;
 }
 
 std::shared_ptr<StateCellBase>

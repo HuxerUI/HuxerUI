@@ -41,7 +41,9 @@ View Counter() {
 }
 
 View App() {
-  return MaterialTheme(Counter);
+  return MaterialTheme {
+    Counter(),
+  };
 }
 
 const Application application{
@@ -172,6 +174,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Navigation Design](docs/design/navigation.md) | Page stacks, typed routes, scoped controllers, transitions, Back routing, and Web URL history |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
+| [View Composition and Environment Design](docs/design/view-composition.md) | Immediate View declarations, mounted Environment propagation, reconciliation-time compilation, and the deferred composable migration |
 | [Scope Code Generation Design](docs/design/scope-codegen.md) | Scope attribute transformation and build integration |
 | [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md) | Project tooling, distribution, libraries, and PlatformView |
 | [Web Platform Design](docs/design/web.md) | Emscripten, Canvas rendering, browser input, resources, and accessibility |

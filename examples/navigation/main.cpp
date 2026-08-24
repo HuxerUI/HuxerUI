@@ -290,9 +290,9 @@ View RoutedNavigationContent(State<NavigationPath<DemoRoute>> path) {
 
 View App() {
 #ifdef __EMSCRIPTEN__
-  return MaterialTheme(RoutedNavigationDemo);
+  return MaterialTheme {RoutedNavigationDemo()};
 #else
-  return MaterialTheme(FactoryNavigationDemo);
+  return MaterialTheme {FactoryNavigationDemo()};
 #endif
 }
 

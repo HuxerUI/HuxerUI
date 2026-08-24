@@ -4,7 +4,7 @@ using namespace huxerui;
 
 constexpr Color explicit_button_color = Color::Rgb(88, 166, 255);
 
-template <class Factory> View AccentTheme(Factory&& content) {
+View AccentTheme(View content) {
   const ThemeSpec& theme = UseTheme();
   ThemeDefinition definition;
   definition.Set(ButtonStyle{
@@ -13,7 +13,7 @@ template <class Factory> View AccentTheme(Factory&& content) {
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
       .corner_radius = theme.shapes.large,
   });
-  return Theme(std::move(definition), std::forward<Factory>(content));
+  return Theme {std::move(definition), std::move(content)};
 }
 
 [[huxerui::scope]]
@@ -38,23 +38,23 @@ View TextFieldDemo() {
           .Placeholder("Multiline message")
           .OnChanged([message](const TextEditingValue& value) { message = value; })
           .With(Frame{.height = 140.0F}),
-      HUXERUI_THEME(
-          FlatTheme,
-          Column{
-              Text("Flat text field", TextRole::Label),
-              TextField(flat_value)
-                  .Placeholder("Flat text field")
-                  .OnChanged([flat_value](const TextEditingValue& value) { flat_value = value; })
-                  .OnSubmitted([flat_value, submission] {
-                    submission = std::string{"Flat submitted: "} + flat_value->text;
-                  }),
-          }
-              .With(
-                  Padding(UseTheme().spacing.medium),
-                  Spacing(UseTheme().spacing.small),
-                  Background(UseTheme().colors.background)
-              )
-      ),
+      FlatTheme {
+        Scope([=] {
+          return Column {
+            Text("Flat text field", TextRole::Label),
+            TextField(flat_value)
+                .Placeholder("Flat text field")
+                .OnChanged([flat_value](const TextEditingValue& value) { flat_value = value; })
+                .OnSubmitted([flat_value, submission] {
+                  submission = std::string{"Flat submitted: "} + flat_value->text;
+                }),
+          }.With(
+              Padding(UseTheme().spacing.medium),
+              Spacing(UseTheme().spacing.small),
+              Background(UseTheme().colors.background)
+          );
+        }),
+      },
   }
       .With(Spacing(theme.spacing.small));
 }
@@ -104,45 +104,46 @@ View ThemeContent() {
       }
           .With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center)),
       TextFieldDemo(),
-      HUXERUI_THEME(AccentTheme, Button("Nested button style").OnClick([] {})),
+      AccentTheme(Button("Nested button style").OnClick([] {})),
       Button("Explicit modifier wins").With(Background(explicit_button_color)).OnClick([] {}),
       Button("Disabled button").With(Enabled(false)).OnClick([] {}),
-      HUXERUI_THEME(
-          MaterialDarkTheme,
-          Column{
-              Text("Nested Material dark theme", TextRole::Title),
-              Text("A complete nested theme replaces every token."),
-              Button("Dark theme button").OnClick([] {}),
-          }
-              .With(
-                  Padding(UseTheme().spacing.medium),
-                  Spacing(UseTheme().spacing.small),
-                  Background(UseTheme().colors.background)
-              )
-      ),
-      HUXERUI_THEME(
-          FlatTheme,
-          Column{
-              Text("Nested Flat theme", TextRole::Title),
-              Button("Flat theme button").OnClick([] {}),
-          }
-              .With(
-                  Padding(UseTheme().spacing.medium),
-                  Spacing(UseTheme().spacing.small),
-                  Background(UseTheme().colors.background)
-              )
-      ),
+      MaterialDarkTheme {
+        Scope([] {
+          return Column {
+            Text("Nested Material dark theme", TextRole::Title),
+            Text("A complete nested theme replaces every token."),
+            Button("Dark theme button").OnClick([] {}),
+          }.With(
+              Padding(UseTheme().spacing.medium),
+              Spacing(UseTheme().spacing.small),
+              Background(UseTheme().colors.background)
+          );
+        }),
+      },
+      FlatTheme {
+        Scope([] {
+          return Column {
+            Text("Nested Flat theme", TextRole::Title),
+            Button("Flat theme button").OnClick([] {}),
+          }.With(
+              Padding(UseTheme().spacing.medium),
+              Spacing(UseTheme().spacing.small),
+              Background(UseTheme().colors.background)
+          );
+        }),
+      },
   }
       .With(Padding(theme.spacing.extra_large), Spacing(theme.spacing.medium), Background(theme.colors.background));
 }
 
 View App() {
-  return MaterialTheme([] {
-    return ScrollView{
+  return MaterialTheme {
+    Scope([] {
+      return ScrollView {
         ThemeContent(),
-    }
-        .With(ScrollBar());
-  });
+      }.With(ScrollBar());
+    }),
+  };
 }
 
 const Application application{

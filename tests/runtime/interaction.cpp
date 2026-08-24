@@ -13,11 +13,25 @@ ScrollController nested_outer_scroll;
 ScrollController nested_inner_scroll;
 State<bool> include_apply_only_modifier;
 State<bool> recompose_activation_button;
+State<bool> alternate_scroll_bar_style;
+State<bool> alternate_default_indication;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 int covered_pointer_clicks = 0;
 std::vector<std::pair<InteractionState, InteractionEvent>> recorded_interactions;
 int stable_extension_updates = 0;
+
+std::optional<detail::ScrollBarGeometry> FindScrollBarGeometry(const detail::MountedNode& node) {
+  if (auto geometry = detail::ResolveScrollBarGeometry(node)) {
+    return geometry;
+  }
+  for (const auto& child : node.children) {
+    if (auto geometry = FindScrollBarGeometry(*child)) {
+      return geometry;
+    }
+  }
+  return std::nullopt;
+}
 
 struct RecordInteractions;
 
@@ -204,11 +218,42 @@ View ThemedScrollBarApp() {
       .track_color = Color::Transparent(),
       .thumb_color = Color::Rgb(200, 80, 60, 0.75F),
   });
-  return Theme(std::move(definition), DragScrollApp);
+  return Theme {std::move(definition), Scope(DragScrollApp)};
 }
 
 View FlatDarkScrollBarApp() {
-  return huxerui::FlatDarkTheme(DragScrollApp);
+  return huxerui::FlatDarkTheme {Scope(DragScrollApp)};
+}
+
+View DynamicScrollBarApp() {
+  auto alternate = UseState(false);
+  alternate_scroll_bar_style = alternate;
+  ScrollBarStyle style = ScrollBarStyle::Default();
+  style.thickness = alternate.Get() ? 11.0F : 7.0F;
+  style.corner_radius = style.thickness * 0.5F;
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme {std::move(definition), Scope(DragScrollApp)};
+}
+
+View DynamicDefaultIndicationApp() {
+  auto alternate = UseState(false);
+  alternate_default_indication = alternate;
+  const Color color = alternate.Get() ? Color::Rgb(20, 100, 180) : Color::Rgb(180, 30, 40);
+  ButtonStyle style = ButtonStyle::Default();
+  style.indication = Indication{
+      .hover = IndicationLayer{
+          .fill = color,
+          .enter = SnapSpec{},
+          .exit = SnapSpec{},
+      },
+  };
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme {
+    std::move(definition),
+    Button("Dynamic indication").With(huxerui::Frame{120.0F, 40.0F}).OnClick([] {}),
+  };
 }
 
 View HorizontalDragScrollApp() {
@@ -1021,19 +1066,19 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
   runtime.BuildFrame();
   REQUIRE(configured_drag_scroll.Offset() == released_offset);
 
-  bool rejected = false;
-  try {
-    static_cast<void>(VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
-                          .With(
-                              ScrollPhysics{
-                                  .minimum_fling_velocity = 100.0F,
-                                  .maximum_fling_velocity = 50.0F,
-                              }
-                          ));
-  } catch (const std::invalid_argument&) {
-    rejected = true;
-  }
-  REQUIRE(rejected);
+  TestPlatform invalid_platform;
+  Runtime invalid{
+      +[]() -> View {
+        return VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
+            .With(ScrollPhysics{
+                .minimum_fling_velocity = 100.0F,
+                .maximum_fling_velocity = 50.0F,
+            });
+      },
+      invalid_platform,
+  };
+  invalid.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  REQUIRE_THROWS_AS(invalid.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
@@ -1330,20 +1375,20 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   short_content.BuildFrame();
   REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode()));
 
-  bool invalid_style_rejected = false;
-  try {
-    static_cast<void>(VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
-                          .With(
-                              huxerui::ScrollBar{
-                                  huxerui::ScrollBarStyle{
-                                      .thickness = 0.0F,
-                                  },
-                              }
-                          ));
-  } catch (const std::invalid_argument&) {
-    invalid_style_rejected = true;
-  }
-  REQUIRE(invalid_style_rejected);
+  TestPlatform invalid_style_platform;
+  Runtime invalid_style{
+      +[]() -> View {
+        return VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
+            .With(huxerui::ScrollBar{
+                huxerui::ScrollBarStyle{
+                    .thickness = 0.0F,
+                },
+            });
+      },
+      invalid_style_platform,
+  };
+  invalid_style.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  REQUIRE_THROWS_AS(invalid_style.BuildFrame(), std::invalid_argument);
 
   Runtime themed{ThemedScrollBarApp, platform};
   themed.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
@@ -1351,7 +1396,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   const auto* themed_root = themed.RootNode();
   REQUIRE(themed_root != nullptr);
   REQUIRE(themed_root->children.size() == 1);
-  const auto themed_bar = huxerui::detail::ResolveScrollBarGeometry(*themed_root->children.front());
+  const auto themed_bar = FindScrollBarGeometry(*themed_root);
   REQUIRE(themed_bar.has_value());
   REQUIRE(themed_bar->style.thickness == 9.0F);
   REQUIRE(themed_bar->style.minimum_thumb_extent == 30.0F);
@@ -1363,12 +1408,49 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   const auto* dark_root = dark.RootNode();
   REQUIRE(dark_root != nullptr);
   REQUIRE(dark_root->children.size() == 1);
-  const auto dark_bar = huxerui::detail::ResolveScrollBarGeometry(*dark_root->children.front());
+  const auto dark_bar = FindScrollBarGeometry(*dark_root);
   REQUIRE(dark_bar.has_value());
   const ThemeSpec dark_theme = huxerui::FlatDarkThemeSpec();
   REQUIRE(dark_bar->style.thumb_color.red == dark_theme.colors.on_surface.red);
   REQUIRE(dark_bar->style.thumb_color.alpha == 0.55F);
   REQUIRE(dark_bar->style.fade_in_duration == static_cast<float>(dark_theme.motion.fast));
+
+  alternate_scroll_bar_style = State<bool>{};
+  Runtime dynamic{DynamicScrollBarApp, platform};
+  dynamic.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  dynamic.BuildFrame();
+  const auto* dynamic_node = dynamic.RootNode()->children[0]->children[0].get();
+  REQUIRE(dynamic_node != nullptr);
+  REQUIRE(dynamic_node->extensions.size() == 1);
+  const NodeExtension* dynamic_extension = dynamic_node->extensions[0].extension.get();
+  REQUIRE(FindScrollBarGeometry(*dynamic.RootNode())->style.thickness == 7.0F);
+
+  alternate_scroll_bar_style = true;
+  dynamic.BuildFrame();
+  dynamic_node = dynamic.RootNode()->children[0]->children[0].get();
+  REQUIRE(dynamic_node->extensions[0].extension.get() == dynamic_extension);
+  REQUIRE(FindScrollBarGeometry(*dynamic.RootNode())->style.thickness == 11.0F);
+}
+
+TEST_CASE("TestDefaultIndicationConsumesCompiledThemeValue") {
+  alternate_default_indication = State<bool>{};
+  TestPlatform platform;
+  Runtime runtime{DynamicDefaultIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto* button = runtime.RootNode()->children[0].get();
+  REQUIRE(button != nullptr);
+  REQUIRE(button->extensions.size() == 1);
+  const NodeExtension* extension = button->extensions[0].extension.get();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {20.0F, 20.0F}, PointerDeviceKind::Mouse});
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), Color::Rgb(180, 30, 40)) != nullptr);
+
+  alternate_default_indication = true;
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), Color::Rgb(20, 100, 180)) != nullptr);
+  button = runtime.RootNode()->children[0].get();
+  REQUIRE(button->extensions[0].extension.get() == extension);
 }
 
 TEST_CASE("TestFrameClockAndScrollBarAutoHide") {

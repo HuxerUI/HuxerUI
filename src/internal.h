@@ -43,6 +43,37 @@ class TaskDelayScheduler;
 struct WindowState;
 class WindowService;
 
+class EnvironmentTransaction {
+public:
+  EnvironmentTransaction(
+      Environment& mounted,
+      const Environment& declaration,
+      std::shared_ptr<const Environment> parent
+  );
+  ~EnvironmentTransaction();
+
+  EnvironmentTransaction(const EnvironmentTransaction&) = delete;
+  EnvironmentTransaction& operator=(const EnvironmentTransaction&) = delete;
+
+  void Commit();
+
+private:
+  struct Change {
+    std::type_index key{typeid(void)};
+    std::any previous_value;
+    EnvironmentEquals previous_equals = nullptr;
+  };
+
+  void Rollback() noexcept;
+
+  Environment* mounted_ = nullptr;
+  std::shared_ptr<const Environment> previous_parent_;
+  std::vector<Change> changes_;
+  std::vector<std::shared_ptr<CompositionDependency>> dependencies_;
+  bool parent_changed_ = false;
+  bool committed_ = false;
+};
+
 struct ScrollBarBinding {
   using Value = ScrollBarStyle;
 };
@@ -292,11 +323,12 @@ enum class NodeKind {
   PlatformView,
   Canvas,
   Spacer,
-  Scope,
   SelectionArea,
   Layout,
   ScrollView,
   VirtualLayout,
+  Scope,
+  Environment,
 };
 
 struct ToggleLayoutMetrics {
@@ -381,10 +413,8 @@ struct ViewProperties {
   }
 };
 
-using ImageSource = std::variant<ImageAsset, VectorAsset, ExternalTexture>;
-
 struct ImageProperties {
-  ImageSource source;
+  std::variant<ImageAsset, VectorAsset, ExternalTexture, ImageResource> source;
   ImageFit fit = ImageFit::Contain;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;
@@ -392,7 +422,17 @@ struct ImageProperties {
   std::optional<Color> tint;
 
   [[nodiscard]] Size IntrinsicSize() const noexcept {
-    return std::visit([](const auto& value) { return value.IntrinsicSize(); }, source);
+    return std::visit(
+        [](const auto& value) {
+          using Image = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Image, ImageResource>) {
+            return Size{};
+          } else {
+            return value.IntrinsicSize();
+          }
+        },
+        source
+    );
   }
 
   [[nodiscard]] bool IsVector() const noexcept {
@@ -400,10 +440,24 @@ struct ImageProperties {
   }
 
   [[nodiscard]] bool HasValue() const noexcept {
-    return std::visit([](const auto& value) { return value.HasValue(); }, source);
+    return std::visit(
+        [](const auto& value) {
+          using Image = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Image, ImageResource>) {
+            return true;
+          } else {
+            return value.HasValue();
+          }
+        },
+        source
+    );
   }
 
   void SetResolvedAsset(std::variant<ImageAsset, VectorAsset> value) {
+    std::visit([this](auto&& image) { source = std::forward<decltype(image)>(image); }, std::move(value));
+  }
+
+  void SetImage(ImageVariant value) {
     std::visit([this](auto&& image) { source = std::forward<decltype(image)>(image); }, std::move(value));
   }
 
@@ -430,13 +484,15 @@ inline bool PlatformViewPropertiesEqual(
 
 // ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
 // fields unrelated to that kind stay at their defaults and are ignored by the corresponding Runtime stages.
+using ViewDefaults = void (*)(ViewSpec&, const std::shared_ptr<const Environment>&);
+
 struct ViewSpec {
   explicit ViewSpec(NodeKind kind_value) : kind(kind_value) {}
 
   NodeKind kind;
   TextRole text_role = TextRole::Body;
   std::optional<ViewKey> key;
-  std::string text;
+  StringVariant text;
   ViewProperties properties;
   SemanticPatch component_semantics;
   std::optional<SemanticPatch> author_semantics;
@@ -451,10 +507,13 @@ struct ViewSpec {
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
-  std::vector<ModifierSpec> retained_modifiers;
-  // Theme resolution stores a component's default here until View installs its indication modifier.
+  ViewDefaults defaults = nullptr;
+  // Modifiers remain one ordered declaration sequence; each mounted phase selects the capabilities it consumes.
+  std::vector<ModifierSpec> modifiers;
+  // Component Theme resolution supplies this value to a retained DefaultIndication declaration.
   std::optional<Indication> default_indication;
-  std::shared_ptr<const Environment> environment;
+  // Environment nodes retain only their local declaration values; Runtime attaches the inherited parent at mount.
+  std::optional<Environment> local_environment;
   std::optional<bool> chip_selection;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
@@ -464,6 +523,8 @@ struct ViewSpec {
 };
 
 std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory);
+ViewSpec CompileViewSpec(const ViewSpec& declaration, const std::shared_ptr<const Environment>& environment,
+                         AppResources& resources);
 
 struct CompositionSlotKey {
   std::string file;
@@ -517,8 +578,41 @@ struct VirtualCollectionSemantics {
   bool operator==(const VirtualCollectionSemantics&) const = default;
 };
 
+class VirtualItemDependencyCapture {
+public:
+  VirtualItemDependencyCapture(std::shared_ptr<RecomposeScope> scope, std::uint64_t owner_identity);
+  ~VirtualItemDependencyCapture();
+
+  VirtualItemDependencyCapture(const VirtualItemDependencyCapture&) = delete;
+  VirtualItemDependencyCapture& operator=(const VirtualItemDependencyCapture&) = delete;
+
+  void Clear();
+  void Observe(const std::shared_ptr<CompositionDependency>& dependency);
+
+  class Guard {
+  public:
+    explicit Guard(VirtualItemDependencyCapture& capture);
+    ~Guard();
+
+    Guard(const Guard&) = delete;
+    Guard& operator=(const Guard&) = delete;
+
+  private:
+    VirtualItemDependencyCapture* previous_;
+  };
+
+  static VirtualItemDependencyCapture* Current() noexcept;
+  [[nodiscard]] std::shared_ptr<RecomposeScope> Scope() const noexcept;
+
+private:
+  static thread_local VirtualItemDependencyCapture* current_;
+  std::weak_ptr<RecomposeScope> scope_;
+  std::uint64_t owner_identity_ = 0;
+};
+
 struct VirtualNodeState {
   VirtualItemSource source;
+  std::unique_ptr<VirtualItemDependencyCapture> dependency_capture;
   std::unordered_map<std::size_t, View> item_declarations;
   std::vector<std::size_t> realized_indices;
   std::vector<VirtualLayoutResult::Placement> realized_placements;
@@ -622,7 +716,8 @@ struct MountedNode final : public huxerui::MountedNode {
   std::unique_ptr<VirtualNodeState> virtual_state;
   std::vector<NodeExtensionEntry> extensions;
   std::shared_ptr<const Environment> environment;
-  // Cached when the immutable Environment is applied so animation frames do not repeatedly copy and resolve ThemeSpec.
+  std::shared_ptr<Environment> owned_environment;
+  // Cached when the compiled declaration is applied so animation frames do not repeatedly resolve ThemeSpec.
   bool reduced_motion = false;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
@@ -912,6 +1007,12 @@ public:
   void EndComposition();
   void AbortComposition() noexcept;
   void Observe(const std::shared_ptr<StateCellBase>& cell);
+  void Observe(const std::shared_ptr<CompositionDependency>& dependency);
+  void ObserveRetained(
+      std::uint64_t owner_identity,
+      const std::shared_ptr<CompositionDependency>& dependency
+  );
+  void ClearRetained(std::uint64_t owner_identity);
   void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
   TaskScope Tasks();
   void Invalidate();
@@ -937,6 +1038,10 @@ public:
   }
 
 private:
+  [[nodiscard]] bool HasRetainedDependency(
+      CompositionDependency* dependency,
+      std::optional<std::uint64_t> excluding_owner = std::nullopt
+  ) const;
   void PrepareLifecycleCommit();
   void CommitLifecycleCleanups() noexcept;
   void CommitLifecycleSetups();
@@ -958,8 +1063,12 @@ private:
   std::unordered_map<CompositionSlotKey, std::uint32_t, CompositionSlotKeyHash> lifecycle_occurrences_;
   bool lifecycle_commit_pending_ = false;
   std::shared_ptr<TaskScopeState> task_scope_;
-  std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> dependencies_;
-  std::unordered_map<StateCellBase*, std::weak_ptr<StateCellBase>> pending_dependencies_;
+  std::unordered_map<CompositionDependency*, std::weak_ptr<CompositionDependency>> dependencies_;
+  std::unordered_map<CompositionDependency*, std::weak_ptr<CompositionDependency>> pending_dependencies_;
+  std::unordered_map<
+      std::uint64_t,
+      std::unordered_map<CompositionDependency*, std::weak_ptr<CompositionDependency>>
+  > retained_dependencies_;
   std::unordered_map<StateCellBase*, std::uint64_t> observed_versions_;
   std::shared_ptr<EventHub> event_hub_ = std::make_shared<EventHub>();
 
@@ -974,27 +1083,21 @@ public:
   static Composer& RequireCurrent();
 
   void Observe(const std::shared_ptr<StateCellBase>& cell);
+  void Observe(const std::shared_ptr<CompositionDependency>& dependency);
   std::shared_ptr<StateCellBase>
   UseState(std::type_index type, const std::source_location& location, std::shared_ptr<StateCellBase> initial);
   void RegisterLifecycle(LifecycleSetup setup, std::vector<LifecycleDependency> dependencies);
   TaskScope Tasks();
   [[nodiscard]] std::shared_ptr<EventHub> Events() const noexcept;
+  [[nodiscard]] std::uint64_t ScopeId() const noexcept {
+    return scope_->Id();
+  }
+  [[nodiscard]] const std::shared_ptr<RecomposeScope>& Scope() const noexcept {
+    return scope_;
+  }
   [[nodiscard]] const std::shared_ptr<const Environment>& CurrentEnvironment() const noexcept {
     return environment_;
   }
-
-  class EnvironmentGuard {
-  public:
-    explicit EnvironmentGuard(std::shared_ptr<const Environment> environment);
-    ~EnvironmentGuard();
-
-    EnvironmentGuard(const EnvironmentGuard&) = delete;
-    EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
-
-  private:
-    Composer* composer_;
-    std::shared_ptr<const Environment> previous_;
-  };
 
   class Guard {
   public:
@@ -1298,6 +1401,10 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 void ResolvePresentationTree(MountedNode& node);
+void ValidateColor(Color color, const char* message);
+void ValidateCornerRadii(CornerRadii radii, const char* message);
+void ValidateBorder(const Border& border);
+VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);
 void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,
                      float opacity = 1.0F);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);

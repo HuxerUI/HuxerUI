@@ -10,6 +10,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "resource_internal.h"
 #include "tooltip_internal.h"
 
 namespace huxerui {
@@ -25,6 +26,13 @@ struct TooltipTargetState {
   bool focus_visible = false;
   bool blocked = false;
   bool visible = false;
+};
+
+struct TooltipConfiguration {
+  std::string message;
+  TooltipStyle style;
+
+  bool operator==(const TooltipConfiguration&) const = default;
 };
 
 struct TooltipSurfaceHover {
@@ -162,16 +170,12 @@ LayerPlacement TooltipPlacement(Rect anchor, const TooltipStyle& style) {
   };
 }
 
-ViewFactory TooltipContent(std::weak_ptr<TooltipTargetState> target, StringVariant message, TooltipStyle style) {
+ViewFactory TooltipContent(std::weak_ptr<TooltipTargetState> target, std::string message, TooltipStyle style) {
   return [target = std::move(target), message = std::move(message), style = std::move(style)] {
-    std::string resolved_message = UseString(message);
-    if (resolved_message.empty()) {
-      throw std::invalid_argument("HuxerUI tooltip message must not be empty");
-    }
     Semantics semantics;
     semantics.descendants = SemanticDescendantPolicy::Exclude;
     semantics.hidden = true;
-    return Text(std::move(resolved_message))
+    return Text(std::move(message))
         .Style(style.text_style)
         .With(
             Frame{.max_width = style.maximum_width, .min_height = style.minimum_height},
@@ -203,13 +207,33 @@ LayerOptions TooltipLayerOptions(
 
 } // namespace
 
+void CompileTooltipModifier(
+    ViewSpec&,
+    ModifierSpec& modifier,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources
+) {
+  const auto& declaration = *static_cast<const Tooltip*>(modifier.value.get());
+  const Locale locale = NeedsResourceResolution(declaration.message)
+                            ? ResolveResourceLocale(environment, resources)
+                            : Locale::Default();
+  std::string message = ResolveString(declaration.message, resources, locale);
+  if (message.empty()) {
+    throw std::invalid_argument("HuxerUI tooltip message must not be empty");
+  }
+  modifier.value = std::make_shared<TooltipConfiguration>(TooltipConfiguration{
+      std::move(message),
+      ResolveTooltipStyle(environment),
+  });
+}
+
 class TooltipService final : public std::enable_shared_from_this<TooltipService> {
 public:
   explicit TooltipService(LayerController layers) : layers_(std::move(layers)) {}
 
   void Show(
       const std::shared_ptr<TooltipTargetState>& target,
-      StringVariant message,
+      std::string message,
       const TooltipStyle& style,
       std::shared_ptr<const Environment> environment
   ) {
@@ -318,7 +342,7 @@ static std::shared_ptr<TooltipService> TooltipServiceFor(const huxerui::MountedN
 
 class TooltipExtension final : public NodeExtension {
 public:
-  TooltipExtension(huxerui::MountedNode& node, const Tooltip& modifier)
+  TooltipExtension(huxerui::MountedNode& node, const TooltipConfiguration& modifier)
       : target_(std::make_shared<TooltipTargetState>()) {
     Update(node, modifier);
   }
@@ -332,13 +356,13 @@ public:
     }
   }
 
-  void Update(huxerui::MountedNode& node, const Tooltip& modifier) {
+  void Update(huxerui::MountedNode& node, const TooltipConfiguration& modifier) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!service_) {
       service_ = TooltipServiceFor(node);
     }
     message_ = modifier.message;
-    style_ = ResolveTooltipStyle(mounted.environment);
+    style_ = modifier.style;
     environment_ = mounted.environment;
     if (target_->visible) {
       service_->Show(target_, message_, style_, environment_);
@@ -542,7 +566,7 @@ private:
   std::shared_ptr<TooltipService> service_;
   std::shared_ptr<TooltipTargetState> target_;
   std::shared_ptr<const Environment> environment_;
-  StringVariant message_;
+  std::string message_;
   TooltipStyle style_;
   std::optional<std::int64_t> touch_pointer_;
   Point touch_origin_;
@@ -567,7 +591,22 @@ Tooltip::Tooltip(StringVariant message) : message(std::move(message)) {
 }
 
 const detail::ModifierDescriptor& Tooltip::Descriptor() {
-  return detail::ModifierDescriptorFor<Tooltip, detail::TooltipExtension>();
+  static const detail::ModifierDescriptor descriptor{
+      detail::CompileTooltipModifier,
+      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+        return std::make_unique<detail::TooltipExtension>(
+            node, *static_cast<const detail::TooltipConfiguration*>(value)
+        );
+      },
+      [](NodeExtension& extension, MountedNode& node, const void* value) {
+        static_cast<detail::TooltipExtension&>(extension).Update(
+            node, *static_cast<const detail::TooltipConfiguration*>(value)
+        );
+      },
+      false,
+      detail::ErasedEqualsFor<detail::TooltipConfiguration>(),
+  };
+  return descriptor;
 }
 
 } // namespace huxerui

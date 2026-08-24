@@ -130,7 +130,6 @@ private:
   std::optional<LayerOptions> EntryOptions(LayerId id) const;
   std::shared_ptr<detail::LayerTransitionState> Transition(LayerId id) const;
   DismissRequestResult RequestDismiss(LayerId id) const;
-  void InvalidateAllEntries() const;
   void BindTransitionCompletion(LayerId id, const std::shared_ptr<detail::LayerTransitionState>& transition) const;
 
   explicit LayerController(Runtime& runtime);

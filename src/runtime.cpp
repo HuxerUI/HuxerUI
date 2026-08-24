@@ -579,6 +579,21 @@ bool IsCompatibleNode(const MountedNode& mounted, const ViewSpec& incoming) {
            mounted.platform_view->type == incoming.platform_view->type));
 }
 
+void ValidateEnvironmentDeclaration(const ViewSpec& declaration) {
+  if (!declaration.local_environment) {
+    throw std::logic_error("HuxerUI Environment node has no declared values");
+  }
+  if (declaration.children.size() != 1 || !declaration.children.front()) {
+    throw std::logic_error("HuxerUI Environment node must have exactly one child");
+  }
+  if (declaration.scope_factory || !declaration.modifiers.empty() || !declaration.layout_values.empty() ||
+      !declaration.event_bindings.empty() || declaration.activation || declaration.author_semantics.has_value() ||
+      !declaration.pointer_events_enabled || !declaration.local_enabled || declaration.focusable ||
+      declaration.trap_focus) {
+    throw std::logic_error("HuxerUI Environment node cannot declare view behavior");
+  }
+}
+
 bool IsCompatibleVirtualItemState(const MountedNode& mounted, const VirtualItemState& state) {
   return mounted.kind == state.kind && IsCompatibleLayout(mounted.layout_descriptor, state.layout_descriptor) &&
          IsCompatibleVirtualLayout(mounted.virtual_layout_descriptor, state.virtual_layout_descriptor);
@@ -601,7 +616,7 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
   if (incoming.kind == NodeKind::Canvas) {
     return false;
   }
-  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+  return mounted.text == StringLiteral(incoming.text) && mounted.image_properties == incoming.image_properties &&
          PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties.ContentPaintEquals(incoming.properties);
 }
@@ -611,51 +626,61 @@ bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& inco
 }
 
 bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.image_properties.LayoutEquals(incoming.image_properties) &&
+  return mounted.text == StringLiteral(incoming.text) &&
+         mounted.image_properties.LayoutEquals(incoming.image_properties) &&
          mounted.properties.LayoutEquals(incoming.properties) &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
 }
 
-bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == incoming.text && mounted.image_properties == incoming.image_properties &&
+bool ExtensionNodeInputsEqual(
+    const MountedNode& mounted,
+    const ViewSpec& incoming,
+    const std::shared_ptr<const Environment>& environment
+) {
+  return mounted.text == StringLiteral(incoming.text) && mounted.image_properties == incoming.image_properties &&
          PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties == incoming.properties && mounted.component_semantics == incoming.component_semantics &&
          mounted.author_semantics == incoming.author_semantics &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values) &&
-         mounted.event_bindings == incoming.event_bindings && mounted.environment == incoming.environment &&
+         mounted.event_bindings == incoming.event_bindings && mounted.environment == environment &&
          mounted.pointer_events_enabled == incoming.pointer_events_enabled &&
          mounted.local_enabled == incoming.local_enabled && mounted.focusable == incoming.focusable &&
          mounted.trap_focus == incoming.trap_focus;
 }
 
-// Child structure, virtual sources, and retained modifiers reconcile separately because they carry mounted state.
-void ApplyViewDeclaration(MountedNode& mounted, const ViewSpec& incoming) {
-  if (!PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view)) {
+// Child structure, virtual sources, and node extensions reconcile separately because they carry mounted state.
+void ApplyViewDeclaration(
+    MountedNode& mounted,
+    ViewSpec& compiled,
+    std::shared_ptr<const Environment> environment
+) {
+  std::string compiled_text = StringLiteral(std::move(compiled.text));
+  if (!PlatformViewPropertiesEqual(mounted.platform_view, compiled.platform_view)) {
     ++mounted.platform_view_properties_revision;
   }
-  mounted.kind = incoming.kind;
-  mounted.key = incoming.key;
-  mounted.text = incoming.text;
-  mounted.properties = incoming.properties;
-  mounted.resolved_border = incoming.properties.border;
-  mounted.resolved_corner_radii = incoming.properties.corner_radii;
-  mounted.component_semantics = incoming.component_semantics;
-  mounted.author_semantics = incoming.author_semantics;
-  mounted.scope_factory = incoming.scope_factory;
-  mounted.canvas_painter = incoming.canvas_painter;
-  mounted.image_properties = incoming.image_properties;
-  mounted.platform_view = incoming.platform_view;
-  mounted.layout_descriptor = incoming.layout_descriptor;
-  mounted.virtual_layout_descriptor = incoming.virtual_layout_descriptor;
-  mounted.layout_values = incoming.layout_values;
-  mounted.event_bindings = incoming.event_bindings;
-  mounted.activation = incoming.activation;
-  mounted.environment = incoming.environment;
-  mounted.reduced_motion = ResolveThemeSpec(incoming.environment).motion.reduced_motion;
-  mounted.pointer_events_enabled = incoming.pointer_events_enabled;
-  mounted.local_enabled = incoming.local_enabled;
-  mounted.focusable = incoming.focusable;
-  mounted.trap_focus = incoming.trap_focus;
+  mounted.kind = compiled.kind;
+  mounted.key = std::move(compiled.key);
+  mounted.text = std::move(compiled_text);
+  mounted.resolved_border = compiled.properties.border;
+  mounted.resolved_corner_radii = compiled.properties.corner_radii;
+  mounted.properties = std::move(compiled.properties);
+  mounted.component_semantics = std::move(compiled.component_semantics);
+  mounted.author_semantics = std::move(compiled.author_semantics);
+  mounted.scope_factory = std::move(compiled.scope_factory);
+  mounted.canvas_painter = std::move(compiled.canvas_painter);
+  mounted.image_properties = std::move(compiled.image_properties);
+  mounted.platform_view = std::move(compiled.platform_view);
+  mounted.layout_descriptor = compiled.layout_descriptor;
+  mounted.virtual_layout_descriptor = compiled.virtual_layout_descriptor;
+  mounted.layout_values = std::move(compiled.layout_values);
+  mounted.event_bindings = std::move(compiled.event_bindings);
+  mounted.activation = std::move(compiled.activation);
+  mounted.environment = std::move(environment);
+  mounted.reduced_motion = ResolveThemeSpec(mounted.environment).motion.reduced_motion;
+  mounted.pointer_events_enabled = compiled.pointer_events_enabled;
+  mounted.local_enabled = compiled.local_enabled;
+  mounted.focusable = compiled.focusable;
+  mounted.trap_focus = compiled.trap_focus;
 }
 
 bool MarkLayoutDirtyPath(MountedNode& node, std::uint64_t identity) {
@@ -689,27 +714,19 @@ struct ModifierChanges {
   bool structure_changed = false;
 };
 
-ModifierChanges
-ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& incoming, bool node_inputs_equal) {
-  for (const ModifierSpec& spec : incoming) {
-    if (spec.descriptor == nullptr || !spec.value) {
-      throw std::logic_error("HuxerUI modifier descriptor and value must not be empty");
-    }
-    if (spec.descriptor->create_extension == nullptr) {
-      throw std::logic_error("HuxerUI retained modifier descriptor must create a node extension");
-    }
-  }
-
-  std::vector<std::unique_ptr<NodeExtension>> created(incoming.size());
+ModifierChanges ReconcileNodeExtensions(
+    MountedNode& mounted, const std::vector<ModifierSpec>& modifiers, bool node_inputs_equal
+) {
+  std::vector<std::unique_ptr<NodeExtension>> created(modifiers.size());
   std::vector<NodeExtensionEntry> next;
-  next.reserve(incoming.size());
+  next.reserve(modifiers.size());
   ModifierChanges changes{
-      mounted.extensions.size() != incoming.size(),
+      mounted.extensions.size() != modifiers.size(),
       false,
-      mounted.extensions.size() != incoming.size(),
+      mounted.extensions.size() != modifiers.size(),
   };
-  for (std::size_t index = 0; index < incoming.size(); ++index) {
-    const ModifierSpec& spec = incoming[index];
+  for (std::size_t index = 0; index < modifiers.size(); ++index) {
+    const ModifierSpec& spec = modifiers[index];
     if (index < mounted.extensions.size() && mounted.extensions[index].descriptor == spec.descriptor) {
       if (!mounted.extensions[index].extension) {
         throw std::logic_error("HuxerUI node extension entry must not be empty");
@@ -727,8 +744,8 @@ ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& i
     }
   }
 
-  for (std::size_t index = 0; index < incoming.size(); ++index) {
-    const ModifierSpec& spec = incoming[index];
+  for (std::size_t index = 0; index < modifiers.size(); ++index) {
+    const ModifierSpec& spec = modifiers[index];
     if (index >= mounted.extensions.size() || mounted.extensions[index].descriptor != spec.descriptor ||
         spec.descriptor->update_extension == nullptr) {
       continue;
@@ -739,28 +756,30 @@ ReconcileNodeExtensions(MountedNode& mounted, const std::vector<ModifierSpec>& i
       continue;
     }
     changes.changed = true;
-    const bool layout_equal = !spec.descriptor->layout_affecting ||
-                              (spec.descriptor->layout_equals != nullptr && mounted.extensions[index].value &&
-                               spec.descriptor->layout_equals(mounted.extensions[index].value.get(), spec.value.get()));
+    const bool layout_equal =
+        !spec.descriptor->layout_affecting ||
+        (spec.descriptor->layout_equals != nullptr && mounted.extensions[index].value &&
+         spec.descriptor->layout_equals(mounted.extensions[index].value.get(), spec.value.get()));
     changes.layout_changed = changes.layout_changed || !layout_equal;
     spec.descriptor->update_extension(*mounted.extensions[index].extension, mounted, spec.value.get());
   }
 
-  for (std::size_t index = incoming.size(); index < mounted.extensions.size(); ++index) {
+  for (std::size_t index = modifiers.size(); index < mounted.extensions.size(); ++index) {
     if (mounted.extensions[index].descriptor != nullptr) {
       changes.layout_changed = changes.layout_changed || mounted.extensions[index].descriptor->layout_affecting;
     }
   }
 
-  for (std::size_t index = 0; index < incoming.size(); ++index) {
-    if (index < mounted.extensions.size() && mounted.extensions[index].descriptor == incoming[index].descriptor) {
+  for (std::size_t index = 0; index < modifiers.size(); ++index) {
+    const ModifierSpec& spec = modifiers[index];
+    if (index < mounted.extensions.size() && mounted.extensions[index].descriptor == spec.descriptor) {
       next.push_back(std::move(mounted.extensions[index]));
-      next.back().value = incoming[index].value;
+      next.back().value = spec.value;
     } else {
       next.push_back({
-          incoming[index].descriptor,
+          spec.descriptor,
           std::move(created[index]),
-          incoming[index].value,
+          spec.value,
       });
     }
   }
@@ -1220,9 +1239,7 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
   const ViewportClass viewport_class = ResolveViewportClass(metrics.viewport.width, state_->viewport_breakpoints_);
   if (viewport_class != state_->viewport_class_) {
     state_->viewport_class_ = viewport_class;
-    state_->root_environment_->Set(detail::ViewportEnvironment{viewport_class});
-    InvalidateRoot();
-    state_->layer_controller_.InvalidateAllEntries();
+    static_cast<void>(state_->root_environment_->Update(detail::ViewportEnvironment{viewport_class}));
     return;
   }
   RequestFrame();
@@ -1367,11 +1384,8 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
     return;
   }
   state_->app_resources_->UpdateConfiguration(configuration);
-  // Mutate the shared root so environments already captured by layers observe the new system locale.
-  state_->root_environment_->Set(configuration.locale);
+  static_cast<void>(state_->root_environment_->Update(configuration.locale));
   ReconcileWindowControls();
-  InvalidateRoot();
-  state_->layer_controller_.InvalidateAllEntries();
   if (state_->text_selection_overlay_.state.visible) {
     state_->text_selection_overlay_.state.paint_dirty = true;
   }
@@ -1406,11 +1420,11 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   if (state_->application_dirty_) {
     ComposeApplication();
   }
-  if (state_->layers_dirty_) {
-    ComposeLayers();
-  }
   if (state_->mounted_root_) {
     RecomposeDirtyScopes(*state_->mounted_root_);
+  }
+  if (state_->layers_dirty_) {
+    ComposeLayers();
   }
 
   if (!state_->mounted_root_ || state_->window_->metrics.viewport.width <= 0.0F ||
@@ -2324,7 +2338,7 @@ void Runtime::EnsureRootStructure() {
   }
 
   View root = RuntimeRootLayout{};
-  state_->mounted_root_ = Mount(root.spec_);
+  state_->mounted_root_ = Mount(root.spec_, state_->root_environment_);
   View backplane = Canvas([window = state_->window_](PaintContext& context, Size size) {
                      const float top = std::min(std::max(0.0F, window->metrics.safe_area.top), size.height);
                      const float bottom =
@@ -2344,9 +2358,9 @@ void Runtime::EnsureRootStructure() {
     application = std::move(application).With(SafeAreaPadding{});
   }
   View layers = LayerStackLayout{};
-  state_->mounted_root_->children.push_back(Mount(backplane.spec_));
-  state_->mounted_root_->children.push_back(Mount(application.spec_));
-  state_->mounted_root_->children.push_back(Mount(layers.spec_));
+  state_->mounted_root_->children.push_back(Mount(backplane.spec_, state_->root_environment_));
+  state_->mounted_root_->children.push_back(Mount(application.spec_, state_->root_environment_));
+  state_->mounted_root_->children.push_back(Mount(layers.spec_, state_->root_environment_));
   if (state_->window_->chrome_mode == WindowChromeMode::Custom) {
     View controls = MakeWindowControls(
         state_->window_service_,
@@ -2354,7 +2368,7 @@ void Runtime::EnsureRootStructure() {
         state_->root_environment_,
         HasWindowControlGeometry(state_->window_->metrics)
     );
-    state_->mounted_root_->children.push_back(Mount(controls.spec_));
+    state_->mounted_root_->children.push_back(Mount(controls.spec_, state_->root_environment_));
   }
 }
 
@@ -2374,7 +2388,7 @@ void Runtime::ReconcileWindowControls() {
       state_->root_environment_,
       HasWindowControlGeometry(state_->window_->metrics)
   );
-  Reconcile(*found, controls.spec_);
+  Reconcile(*found, controls.spec_, state_->root_environment_);
 }
 
 void Runtime::CommitWindowAppearance() {
@@ -2456,15 +2470,9 @@ void Runtime::ComposeApplication() {
     state_->root_scope_->BeginComposition();
     scope_composing = true;
     Composer composer{state_->root_scope_, state_->root_environment_};
+    Composer::Guard guard{composer};
 
-    View application;
-    {
-      Composer::Guard guard{composer};
-      application = state_->root_factory_();
-    }
-
-    state_->root_scope_->EndComposition();
-    scope_composing = false;
+    View application = state_->root_factory_();
     EnsureRootStructure();
     detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
     if (!application_content) {
@@ -2475,10 +2483,12 @@ void Runtime::ComposeApplication() {
     if (application) {
       application_children.push_back(std::move(application));
     }
-    if (ReconcileChildren(application_content->children, application_children)) {
+    if (ReconcileChildren(application_content->children, application_children, state_->root_environment_)) {
       application_content->measure_dirty = true;
       state_->mounted_root_->measure_dirty = true;
     }
+    state_->root_scope_->EndComposition();
+    scope_composing = false;
   } catch (...) {
     if (scope_composing) {
       state_->root_scope_->AbortComposition();
@@ -2501,14 +2511,11 @@ void Runtime::ComposeLayers() {
   try {
     // Factories may mutate the controller while composing; those mutations mark layers dirty for the next frame.
     const std::vector<LayerEntry> ordered = OrderedLayerEntries(state_->layer_controller_.state_->entries);
-    std::vector<View> layer_children;
+    std::vector<std::pair<View, std::shared_ptr<const Environment>>> layer_children;
     layer_children.reserve(ordered.size());
     for (const LayerEntry& entry : ordered) {
       const auto environment = entry.environment ? entry.environment : state_->root_environment_;
-      View content = Scope([factory = entry.content, environment]() mutable {
-        Composer::EnvironmentGuard guard{environment};
-        return factory();
-      });
+      View content = Scope(entry.content);
       const bool barrier = entry.options.pointer_policy == LayerPointerPolicy::Barrier;
       const bool exiting = entry.transition && !entry.transition->target_visible;
       if (exiting) {
@@ -2527,9 +2534,6 @@ void Runtime::ComposeLayers() {
                            .exiting = exiting,
                            .semantic_modal_group = entry.semantic_modal_group,
                        });
-      // Layer wrappers live under the Runtime root, but their behavior must observe the environment captured at
-      // presentation time just like their content does.
-      layer.spec_->environment = environment;
       if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::Constrain) {
         layer = std::move(layer).With(SafeAreaPadding{});
       } else if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::ExtendBottom) {
@@ -2556,7 +2560,7 @@ void Runtime::ComposeLayers() {
       if (entry.transition) {
         layer = std::move(layer).With(LayerTransition{entry.transition});
       }
-      layer_children.push_back(std::move(layer));
+      layer_children.emplace_back(std::move(layer), environment);
     }
 
     if (ReconcileLayerChildren(layer_stack->children, layer_children)) {
@@ -2586,21 +2590,17 @@ bool Runtime::ComposeScope(detail::MountedNode& mounted) {
     mounted.recompose_scope->BeginComposition();
     scope_composing = true;
     Composer composer{mounted.recompose_scope, mounted.environment ? mounted.environment : state_->root_environment_};
+    Composer::Guard guard{composer};
 
-    View content;
-    {
-      Composer::Guard guard{composer};
-      content = mounted.scope_factory();
-    }
-
-    mounted.recompose_scope->EndComposition();
-    scope_composing = false;
+    View content = mounted.scope_factory();
 
     std::vector<View> children;
     if (content) {
       children.push_back(std::move(content));
     }
-    const bool layout_changed = ReconcileChildren(mounted.children, children);
+    const bool layout_changed = ReconcileChildren(mounted.children, children, mounted.environment);
+    mounted.recompose_scope->EndComposition();
+    scope_composing = false;
     mounted.measure_dirty = mounted.measure_dirty || layout_changed;
     return layout_changed;
   } catch (...) {
@@ -2614,27 +2614,44 @@ bool Runtime::ComposeScope(detail::MountedNode& mounted) {
   }
 }
 
-bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming) {
+bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming,
+                        const std::shared_ptr<const Environment>& environment) {
   if (state_->text_selection_overlay_.state.visible) {
     state_->text_selection_overlay_.state.paint_dirty = true;
   }
   const bool compatible = mounted && IsCompatibleNode(*mounted, *incoming) && mounted->key == incoming->key;
   if (!compatible) {
     state_->extension_tree_dirty_ = true;
-    mounted = Mount(incoming);
+    mounted = Mount(incoming, environment);
     return true;
   }
 
-  if (incoming->platform_view &&
-      !detail::PlatformViewPropertiesEqual(mounted->platform_view, incoming->platform_view)) {
-    detail::BindExternalTextures(incoming->platform_view->properties, state_->platform_->external_texture_surface_);
+  std::shared_ptr<const Environment> mounted_environment = environment;
+  std::optional<EnvironmentTransaction> environment_transaction;
+  if (incoming->kind == NodeKind::Environment) {
+    ValidateEnvironmentDeclaration(*incoming);
+    if (!mounted->owned_environment) {
+      throw std::logic_error("HuxerUI mounted Environment node has no owned values");
+    }
+    environment_transaction.emplace(*mounted->owned_environment, *incoming->local_environment, environment);
+    mounted_environment = mounted->owned_environment;
+  }
+  ViewSpec compiled = CompileViewSpec(*incoming, mounted_environment, *state_->app_resources_);
+  if (environment_transaction.has_value()) {
+    environment_transaction->Commit();
+    environment_transaction.reset();
   }
 
-  bool layout_changed = !LayoutInputsEqual(*mounted, *incoming);
-  if (!ContentPaintInputsEqual(*mounted, *incoming)) {
+  if (compiled.platform_view &&
+      !detail::PlatformViewPropertiesEqual(mounted->platform_view, compiled.platform_view)) {
+    detail::BindExternalTextures(compiled.platform_view->properties, state_->platform_->external_texture_surface_);
+  }
+
+  bool layout_changed = !LayoutInputsEqual(*mounted, compiled);
+  if (!ContentPaintInputsEqual(*mounted, compiled)) {
     mounted->content_paint_dirty = true;
   }
-  if (!ForegroundPaintInputsEqual(*mounted, *incoming)) {
+  if (!ForegroundPaintInputsEqual(*mounted, compiled)) {
     mounted->foreground_paint_dirty = true;
   }
   std::vector<const ModifierDescriptor*> previous_extension_descriptors;
@@ -2642,10 +2659,10 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   for (const NodeExtensionEntry& entry : mounted->extensions) {
     previous_extension_descriptors.push_back(entry.descriptor);
   }
-  const bool extension_node_inputs_equal = ExtensionNodeInputsEqual(*mounted, *incoming);
-  ApplyViewDeclaration(*mounted, *incoming);
+  const bool extension_node_inputs_equal = ExtensionNodeInputsEqual(*mounted, compiled, mounted_environment);
+  ApplyViewDeclaration(*mounted, compiled, mounted_environment);
   const ModifierChanges modifier_changes =
-      ReconcileNodeExtensions(*mounted, incoming->retained_modifiers, extension_node_inputs_equal);
+      ReconcileNodeExtensions(*mounted, compiled.modifiers, extension_node_inputs_equal);
   layout_changed = layout_changed || modifier_changes.layout_changed;
   if (modifier_changes.changed) {
     mounted->foreground_paint_dirty = true;
@@ -2665,6 +2682,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
   if (mounted->kind == NodeKind::Scope) {
     layout_changed = ComposeScope(*mounted) || layout_changed;
   } else if (IsVirtualLayoutNode(*mounted)) {
+    mounted->virtual_state->dependency_capture->Clear();
     mounted->virtual_state->source = incoming->virtual_items;
     mounted->virtual_state->item_declarations.clear();
     mounted->virtual_state->source_dirty = true;
@@ -2680,37 +2698,57 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     }
     layout_changed = true;
   } else {
-    layout_changed = ReconcileChildren(mounted->children, incoming->children) || layout_changed;
+    layout_changed = ReconcileChildren(mounted->children, incoming->children, mounted->environment) || layout_changed;
   }
   mounted->measure_dirty = mounted->measure_dirty || layout_changed;
   return layout_changed;
 }
 
-std::unique_ptr<detail::MountedNode> Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming) {
-  if (incoming->platform_view) {
-    detail::BindExternalTextures(incoming->platform_view->properties, state_->platform_->external_texture_surface_);
+std::unique_ptr<detail::MountedNode>
+Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<const Environment>& environment) {
+  std::shared_ptr<Environment> owned_environment;
+  std::shared_ptr<const Environment> mounted_environment = environment;
+  if (incoming->kind == NodeKind::Environment) {
+    ValidateEnvironmentDeclaration(*incoming);
+    owned_environment = std::make_shared<Environment>(*incoming->local_environment);
+    owned_environment->parent_ = environment;
+    mounted_environment = owned_environment;
+  }
+  ViewSpec compiled = CompileViewSpec(*incoming, mounted_environment, *state_->app_resources_);
+  if (compiled.platform_view) {
+    detail::BindExternalTextures(compiled.platform_view->properties, state_->platform_->external_texture_surface_);
   }
   auto mounted = std::make_unique<detail::MountedNode>();
   mounted->identity = state_->next_node_identity_++;
-  ApplyViewDeclaration(*mounted, *incoming);
+  mounted->owned_environment = std::move(owned_environment);
+  ApplyViewDeclaration(*mounted, compiled, mounted_environment);
   if (mounted->kind == NodeKind::ScrollView || mounted->kind == NodeKind::VirtualLayout) {
     mounted->scroll_state = std::make_unique<ScrollNodeState>();
   }
-  static_cast<void>(ReconcileNodeExtensions(*mounted, incoming->retained_modifiers, false));
+  static_cast<void>(ReconcileNodeExtensions(*mounted, compiled.modifiers, false));
   BindExtensionInvalidation(*mounted);
   if (mounted->kind == NodeKind::Scope) {
     static_cast<void>(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {
     mounted->virtual_state = std::make_unique<VirtualNodeState>();
     mounted->virtual_state->source = incoming->virtual_items;
+    std::shared_ptr<RecomposeScope> dependency_scope;
+    if (Composer* composer = Composer::Current()) {
+      dependency_scope = composer->Scope();
+    } else if (VirtualItemDependencyCapture* capture = VirtualItemDependencyCapture::Current()) {
+      dependency_scope = capture->Scope();
+    }
+    mounted->virtual_state->dependency_capture =
+        std::make_unique<VirtualItemDependencyCapture>(std::move(dependency_scope), mounted->identity);
   } else {
-    static_cast<void>(ReconcileChildren(mounted->children, incoming->children));
+    static_cast<void>(ReconcileChildren(mounted->children, incoming->children, mounted->environment));
   }
   return mounted;
 }
 
 bool Runtime::ReconcileChildren(
-    std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+    std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children,
+    const std::shared_ptr<const Environment>& environment
 ) {
   std::unordered_set<ViewKey> incoming_keys;
   for (const auto& child_view : incoming_children) {
@@ -2754,15 +2792,15 @@ bool Runtime::ReconcileChildren(
       }
 
       if (origin.has_value()) {
-        layout_changed = Reconcile(previous[*origin], child_view.spec_) || layout_changed;
+        layout_changed = Reconcile(previous[*origin], child_view.spec_, environment) || layout_changed;
         layout_changed = *origin != next.size() || layout_changed;
         structure_changed = *origin != next.size() || structure_changed;
         next.push_back(std::move(previous[*origin]));
       } else {
-        std::unique_ptr<detail::MountedNode> candidate;
-        layout_changed = Reconcile(candidate, child_view.spec_) || layout_changed;
+        std::unique_ptr<detail::MountedNode> child;
+        layout_changed = Reconcile(child, child_view.spec_, environment) || layout_changed;
         structure_changed = true;
-        next.push_back(std::move(candidate));
+        next.push_back(std::move(child));
       }
       origins.push_back(origin);
     }
@@ -2785,7 +2823,8 @@ bool Runtime::ReconcileChildren(
 }
 
 bool Runtime::ReconcileLayerChildren(
-    std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children
+    std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children,
+    const std::vector<std::pair<View, std::shared_ptr<const Environment>>>& incoming_children
 ) {
   const auto declaration_snapshot = [](const View& view) {
     if (!view.spec_) {
@@ -2809,7 +2848,8 @@ bool Runtime::ReconcileLayerChildren(
   bool structure_changed = layout_changed;
 
   try {
-    for (const View& incoming : incoming_children) {
+    for (std::size_t incoming_index = 0; incoming_index < incoming_children.size(); ++incoming_index) {
+      const auto& [incoming, environment] = incoming_children[incoming_index];
       const LayerEntrySnapshot incoming_snapshot = declaration_snapshot(incoming);
       std::optional<std::size_t> origin;
       for (std::size_t index = 0; index < previous.size(); ++index) {
@@ -2821,16 +2861,16 @@ bool Runtime::ReconcileLayerChildren(
       }
 
       if (!origin.has_value()) {
-        std::unique_ptr<detail::MountedNode> candidate;
-        layout_changed = Reconcile(candidate, incoming.spec_) || layout_changed;
-        next.push_back(std::move(candidate));
+        std::unique_ptr<detail::MountedNode> child;
+        layout_changed = Reconcile(child, incoming.spec_, environment) || layout_changed;
+        next.push_back(std::move(child));
         structure_changed = true;
       } else if (previous[*origin]->LayoutValue<LayerEntrySnapshotValue>()->revision == incoming_snapshot.revision) {
         layout_changed = *origin != next.size() || layout_changed;
         structure_changed = *origin != next.size() || structure_changed;
         next.push_back(std::move(previous[*origin]));
       } else {
-        layout_changed = Reconcile(previous[*origin], incoming.spec_) || layout_changed;
+        layout_changed = Reconcile(previous[*origin], incoming.spec_, environment) || layout_changed;
         layout_changed = *origin != next.size() || layout_changed;
         structure_changed = *origin != next.size() || structure_changed;
         next.push_back(std::move(previous[*origin]));
@@ -2962,11 +3002,11 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
     throw std::logic_error("HuxerUI mounted virtual items must not use duplicate keys");
   }
 
-  std::unique_ptr<MountedNode> candidate;
+  std::unique_ptr<MountedNode> node;
   if (item.spec_->key.has_value()) {
     for (auto& previous : previous_nodes_) {
       if (previous && IsCompatibleNode(*previous, *item.spec_) && previous->key == item.spec_->key) {
-        candidate = std::move(previous);
+        node = std::move(previous);
         break;
       }
     }
@@ -2974,14 +3014,14 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
     for (std::size_t position = 0; position < previous_nodes_.size(); ++position) {
       if (previous_nodes_[position] && !previous_nodes_[position]->key.has_value() &&
           position < previous_realized_indices_.size() && previous_realized_indices_[position] == index) {
-        candidate = std::move(previous_nodes_[position]);
+        node = std::move(previous_nodes_[position]);
         break;
       }
     }
   }
 
   std::optional<VirtualItemState> retained_state;
-  if (!candidate && state.item_state_cache) {
+  if (!node && state.item_state_cache) {
     if (item.spec_->key.has_value()) {
       const auto found = state.item_state_cache->keyed.find(*item.spec_->key);
       if (found != state.item_state_cache->keyed.end()) {
@@ -3000,16 +3040,17 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
     }
   }
 
-  if (!candidate || state.source_dirty) {
-    runtime_->Reconcile(candidate, item.spec_);
+  if (!node || state.source_dirty) {
+    VirtualItemDependencyCapture::Guard dependency_guard{*state.dependency_capture};
+    runtime_->Reconcile(node, item.spec_, owner_->environment);
   }
   if (retained_state.has_value()) {
-    RestoreItemState(*candidate, *retained_state);
+    RestoreItemState(*node, *retained_state);
   }
 
   const std::size_t position = requested_nodes_.size();
   requested_positions_by_index_.emplace(index, position);
-  requested_nodes_.push_back(std::move(candidate));
+  requested_nodes_.push_back(std::move(node));
   requested_item_indices_.push_back(index);
   return *requested_nodes_.back();
 }

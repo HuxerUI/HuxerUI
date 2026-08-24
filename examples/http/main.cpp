@@ -62,7 +62,7 @@ View HttpContent() {
 }
 
 View App() {
-  return MaterialTheme(HttpContent);
+  return MaterialTheme {HttpContent()};
 }
 
 const Application application{

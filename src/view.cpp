@@ -17,29 +17,13 @@ namespace huxerui {
 
 namespace detail {
 
-template <class IconVariant> std::optional<ResolvedImageAsset> ResolveOptionalControlIcon(IconVariant& value) {
-    return std::visit(
-        [](auto& icon) -> std::optional<ResolvedImageAsset> {
-          using Icon = std::decay_t<decltype(icon)>;
-          if constexpr (std::same_as<Icon, std::monostate>) {
-            return std::nullopt;
-          } else if constexpr (std::same_as<Icon, ImageResource>) {
-            return UseImageResource(std::move(icon));
-          } else {
-            if (!icon.HasValue()) {
-              throw std::invalid_argument("HuxerUI control icon asset must not be empty");
-            }
-            return ResolvedImageAsset{std::move(icon)};
-          }
-        },
-        value
-  );
+std::optional<ResolvedImageAsset> ResolveOptionalControlIcon(const std::optional<ImageVariant>& value) {
+  return value.has_value() ? std::optional<ResolvedImageAsset>{UseImageVariant(*value)} : std::nullopt;
 }
 
 struct SegmentedButtonItemAccess {
   static std::optional<ResolvedImageAsset> ResolveIcon(SegmentedButtonItem& item) {
-    return ResolveOptionalControlIcon(item.icon_
-    );
+    return ResolveOptionalControlIcon(item.icon_);
   }
 
   static std::string ResolveLabel(SegmentedButtonItem& item) {
@@ -48,6 +32,20 @@ struct SegmentedButtonItemAccess {
 
   static bool ShowsLabel(const SegmentedButtonItem& item) noexcept {
     return item.show_label_;
+  }
+
+  static bool HasIcon(const SegmentedButtonItem& item) noexcept {
+    return item.icon_.has_value();
+  }
+
+  static bool HasBlankLiteralLabel(const SegmentedButtonItem& item) noexcept {
+    return IsBlankStringVariantLiteral(item.label_);
+  }
+
+  static void ValidateIcon(const SegmentedButtonItem& item) {
+    if (item.icon_.has_value()) {
+      ValidateImageVariant(*item.icon_);
+    }
   }
 };
 
@@ -67,38 +65,53 @@ struct TabItemAccess {
   static bool IsEnabled(const TabItem& item) noexcept {
     return item.enabled_;
   }
+
+  static bool HasIcon(const TabItem& item) noexcept {
+    return item.icon_.has_value();
+  }
+
+  static bool HasBlankLiteralLabel(const TabItem& item) noexcept {
+    return IsBlankStringVariantLiteral(item.label_);
+  }
+
+  static void ValidateIcon(const TabItem& item) {
+    if (item.icon_.has_value()) {
+      ValidateImageVariant(*item.icon_);
+    }
+  }
 };
 
 } // namespace detail
 
 namespace {
 
-detail::ResolvedImageAsset ResolveControlIcon(ImageResource icon) {
-  return detail::UseImageResource(std::move(icon));
-}
-
-detail::ResolvedImageAsset ResolveControlIcon(ImageAsset icon) {
-  if (!icon.HasValue()) {
-    throw std::invalid_argument("HuxerUI control icon asset must not be empty");
-  }
-  return icon;
-}
-
-detail::ResolvedImageAsset ResolveControlIcon(VectorAsset icon) {
-  if (!icon.HasValue()) {
-    throw std::invalid_argument("HuxerUI control icon asset must not be empty");
-  }
-  return icon;
-}
-
 template <class Modifier, void (*Apply)(detail::ViewSpec&, const Modifier&)>
 const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
   static const detail::ModifierDescriptor descriptor{
-      [](detail::ViewSpec& spec, const void* value) { Apply(spec, *static_cast<const Modifier*>(value)); },
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) {
+        Apply(spec, *static_cast<const Modifier*>(modifier.value.get()));
+      },
       nullptr,
       nullptr,
   };
   return descriptor;
+}
+
+struct TextStyleProperty {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  TextStyle value;
+};
+
+void ApplyTextStyleProperty(detail::ViewSpec& spec, const TextStyleProperty& property) {
+  spec.properties.text_style = property.value;
+}
+
+const detail::ModifierDescriptor& TextStyleProperty::Descriptor() {
+  return ApplyOnlyModifierDescriptor<TextStyleProperty, ApplyTextStyleProperty>();
 }
 
 bool IsFinite(Point point) noexcept {
@@ -113,6 +126,10 @@ bool IsFinite(Color color) noexcept {
   return std::isfinite(color.red) && std::isfinite(color.green) && std::isfinite(color.blue) &&
          std::isfinite(color.alpha);
 }
+
+} // namespace
+
+namespace detail {
 
 void ValidateColor(Color color, const char* message) {
   if (!IsFinite(color)) {
@@ -135,6 +152,10 @@ void ValidateBorder(const Border& border) {
   }
 }
 
+} // namespace detail
+
+namespace {
+
 void ValidateGradientStops(const std::vector<GradientStop>& stops) {
   if (stops.size() < 2) {
     throw std::invalid_argument("HuxerUI visual fill gradient requires at least two stops");
@@ -144,7 +165,7 @@ void ValidateGradientStops(const std::vector<GradientStop>& stops) {
     if (!std::isfinite(stop.offset) || stop.offset < 0.0F || stop.offset > 1.0F || stop.offset < previous) {
       throw std::invalid_argument("HuxerUI visual fill gradient stops must be ordered within [0, 1]");
     }
-    ValidateColor(stop.color, "HuxerUI visual fill gradient colors must be finite");
+    detail::ValidateColor(stop.color, "HuxerUI visual fill gradient colors must be finite");
     previous = stop.offset;
   }
 }
@@ -154,7 +175,7 @@ void ValidateVisualFill(const VisualFill& fill) {
       [](const auto& value) {
         using Value = std::decay_t<decltype(value)>;
         if constexpr (std::same_as<Value, Color>) {
-          ValidateColor(value, "HuxerUI visual fill color must be finite");
+          detail::ValidateColor(value, "HuxerUI visual fill color must be finite");
         } else if constexpr (std::same_as<Value, LinearGradient>) {
           if (!IsFinite(value.start) || !IsFinite(value.end)) {
             throw std::invalid_argument("HuxerUI visual fill linear gradient endpoints must be finite");
@@ -173,7 +194,7 @@ void ValidateVisualFill(const VisualFill& fill) {
             throw std::invalid_argument("HuxerUI visual fill image opacity must be finite within [0, 1]");
           }
           if (value.tint.has_value()) {
-            ValidateColor(*value.tint, "HuxerUI visual fill image tint must be finite");
+            detail::ValidateColor(*value.tint, "HuxerUI visual fill image tint must be finite");
           }
           const bool has_source = std::visit(
               [](const auto& source) {
@@ -195,71 +216,32 @@ void ValidateVisualFill(const VisualFill& fill) {
   );
 }
 
-VisualFill ResolveVisualFill(const VisualFill& fill) {
+} // namespace
+
+namespace detail {
+
+VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale) {
   const auto* image = std::get_if<ImageFill>(&fill.Get());
   if (image == nullptr) {
     ValidateVisualFill(fill);
     return fill;
   }
   ImageFill resolved = *image;
-  if (const auto* resource = std::get_if<ImageResource>(&resolved.source)) {
-    std::visit([&resolved](auto asset) { resolved.source = std::move(asset); }, detail::UseImageResource(*resource));
-  }
+  std::visit(
+      [&resolved](auto asset) { resolved.source = std::move(asset); },
+      ResolveImage(resolved.source, resources, locale)
+  );
   VisualFill fill_result{std::move(resolved)};
   ValidateVisualFill(fill_result);
   return fill_result;
 }
 
-Indication ResolveIndication(Indication indication) {
-  const auto resolve_layer = [](std::optional<IndicationLayer>& layer) {
-    if (layer.has_value() && layer->fill.has_value()) {
-      layer->fill = ResolveVisualFill(*layer->fill);
-    }
-  };
-  resolve_layer(indication.focus);
-  resolve_layer(indication.hover);
-  resolve_layer(indication.press);
-  if (indication.geometry.layer_size.has_value() &&
-      (!IsFinite(*indication.geometry.layer_size) || indication.geometry.layer_size->width < 0.0F ||
-       indication.geometry.layer_size->height < 0.0F)) {
-    throw std::invalid_argument("HuxerUI indication layer size must be finite and non-negative");
-  }
-  if (indication.geometry.clip_corner_radii.has_value()) {
-    ValidateCornerRadii(
-        *indication.geometry.clip_corner_radii,
-        "HuxerUI indication clip corner radii must be finite and non-negative"
-    );
-  }
-  const auto validate_layer = [](const std::optional<IndicationLayer>& layer) {
-    if (!layer.has_value()) {
-      return;
-    }
-    if (layer->border.has_value()) {
-      ValidateBorder(*layer->border);
-    }
-    if (layer->corner_radii.has_value()) {
-      ValidateCornerRadii(*layer->corner_radii, "HuxerUI indication corner radii must be finite and non-negative");
-    }
-    MotionController enter;
-    enter.AnimateTo(1.0F, layer->enter);
-    MotionController exit;
-    exit.AnimateTo(1.0F, layer->exit);
-  };
-  validate_layer(indication.focus);
-  validate_layer(indication.hover);
-  validate_layer(indication.press);
-  if (indication.ripple.has_value()) {
-    ValidateColor(indication.ripple->color, "HuxerUI ripple color must be finite");
-    MotionController expansion;
-    expansion.AnimateTo(1.0F, indication.ripple->expansion);
-    MotionController fade_out;
-    fade_out.AnimateTo(1.0F, indication.ripple->fade_out);
-  }
-  return indication;
-}
+} // namespace detail
+
+namespace {
 
 void ValidateFocusRing(const FocusRing& focus_ring) {
-  ValidateColor(focus_ring.color, "HuxerUI focus ring color must be finite");
+  detail::ValidateColor(focus_ring.color, "HuxerUI focus ring color must be finite");
   if (!std::isfinite(focus_ring.width) || focus_ring.width < 0.0F || !std::isfinite(focus_ring.offset) ||
       focus_ring.offset < 0.0F) {
     throw std::invalid_argument("HuxerUI focus ring width and offset must be finite and non-negative");
@@ -271,11 +253,12 @@ void ApplyPadding(detail::ViewSpec& spec, const Padding& modifier) {
 }
 
 void ApplyBackground(detail::ViewSpec& spec, const Background& modifier) {
-  spec.properties.background = ResolveVisualFill(modifier.fill);
+  ValidateVisualFill(modifier.fill);
+  spec.properties.background = modifier.fill;
 }
 
 void ApplyBorder(detail::ViewSpec& spec, const Border& modifier) {
-  ValidateBorder(modifier);
+  detail::ValidateBorder(modifier);
   spec.properties.border = modifier;
 }
 
@@ -395,27 +378,27 @@ enum class ToggleVisualKind {
   Switch,
 };
 
-struct ResolvedCheckboxStyle {
+struct CheckboxStyleBinding {
   using Value = CheckboxStyle;
 };
 
-struct ResolvedRadioButtonStyle {
+struct RadioButtonStyleBinding {
   using Value = RadioButtonStyle;
 };
 
-struct ResolvedSwitchStyle {
+struct SwitchStyleBinding {
   using Value = SwitchStyle;
 };
 
-struct ResolvedProgressCircleStyle {
+struct ProgressCircleStyleBinding {
   using Value = ProgressCircleStyle;
 };
 
-struct ResolvedProgressBarStyle {
+struct ProgressBarStyleBinding {
   using Value = ProgressBarStyle;
 };
 
-struct ResolvedSliderStyle {
+struct SliderStyleBinding {
   using Value = SliderStyle;
 };
 
@@ -515,10 +498,16 @@ struct ToggleVisual {
 
   ToggleVisualKind kind;
   bool checked;
-  VectorAsset checkmark;
+  std::optional<ImageVariant> checkmark;
 
   bool operator==(const ToggleVisual&) const = default;
 };
+
+ToggleVisual CompileToggleVisual(
+    const ToggleVisual& declaration,
+    const std::shared_ptr<const Environment>& environment,
+    detail::AppResources& resources
+);
 
 class ToggleVisualExtension final : public NodeExtension {
 public:
@@ -528,13 +517,18 @@ public:
 
   void Update(MountedNode& node, const ToggleVisual& modifier) {
     kind_ = modifier.kind;
-    checkmark_ = modifier.checkmark;
     if (kind_ == ToggleVisualKind::Checkbox) {
-      checkbox_style_ = node.LayoutValueOr<ResolvedCheckboxStyle>(CheckboxStyle::Default());
+      if (!modifier.checkmark.has_value() || !std::holds_alternative<VectorAsset>(*modifier.checkmark)) {
+        throw std::logic_error("HuxerUI Checkbox checkmark must resolve to a vector image");
+      }
+      checkmark_ = std::get<VectorAsset>(*modifier.checkmark);
+      checkbox_style_ = node.LayoutValueOr<CheckboxStyleBinding>(CheckboxStyle::Default());
     } else if (kind_ == ToggleVisualKind::RadioButton) {
-      radio_button_style_ = node.LayoutValueOr<ResolvedRadioButtonStyle>(RadioButtonStyle::Default());
+      checkmark_ = {};
+      radio_button_style_ = node.LayoutValueOr<RadioButtonStyleBinding>(RadioButtonStyle::Default());
     } else {
-      switch_style_ = node.LayoutValueOr<ResolvedSwitchStyle>(SwitchStyle::Default());
+      checkmark_ = {};
+      switch_style_ = node.LayoutValueOr<SwitchStyleBinding>(SwitchStyle::Default());
     }
     if (!initialized_) {
       checked_ = modifier.checked;
@@ -723,7 +717,41 @@ private:
 };
 
 const detail::ModifierDescriptor& ToggleVisual::Descriptor() {
-  return detail::ModifierDescriptorFor<ToggleVisual, ToggleVisualExtension>();
+  static const detail::ModifierDescriptor descriptor = [] {
+    detail::ModifierDescriptor result = detail::ModifierDescriptorFor<ToggleVisual, ToggleVisualExtension>();
+    result.compile = [](detail::ViewSpec&,
+                        detail::ModifierSpec& modifier,
+                        const std::shared_ptr<const Environment>& environment,
+                        detail::AppResources& resources) {
+      const auto& declaration = *static_cast<const ToggleVisual*>(modifier.value.get());
+      if (!declaration.checkmark.has_value() || !detail::NeedsResourceResolution(*declaration.checkmark)) {
+        return;
+      }
+      modifier.value = std::make_shared<ToggleVisual>(
+          CompileToggleVisual(declaration, environment, resources)
+      );
+    };
+    return result;
+  }();
+  return descriptor;
+}
+
+ToggleVisual CompileToggleVisual(
+    const ToggleVisual& declaration,
+    const std::shared_ptr<const Environment>& environment,
+    detail::AppResources& resources
+) {
+  if (!declaration.checkmark.has_value() || !detail::NeedsResourceResolution(*declaration.checkmark)) {
+    return declaration;
+  }
+  const Locale locale = detail::ResolveResourceLocale(environment, resources);
+  detail::ResolvedImageAsset resolved = detail::ResolveImage(*declaration.checkmark, resources, locale);
+  if (!std::holds_alternative<VectorAsset>(resolved)) {
+    throw std::invalid_argument("HuxerUI Checkbox checkmark resource must contain a vector image");
+  }
+  ToggleVisual compiled = declaration;
+  compiled.checkmark = std::get<VectorAsset>(std::move(resolved));
+  return compiled;
 }
 
 struct SegmentedButtonBorderWidth {
@@ -1165,7 +1193,7 @@ private:
     spec->component_semantics.collection->item_count = spec->children.size();
     spec->properties.background = style.background;
     spec->layout_values.insert_or_assign(typeid(TabsExpandItems), detail::MakeErasedLayoutValue(style.expand_items));
-    spec->retained_modifiers.push_back(
+    spec->modifiers.push_back(
         detail::MakeModifierSpec(
             TabsBehavior{
                 selected_index,
@@ -1195,7 +1223,7 @@ public:
   }
 
   void Update(MountedNode& node, const ProgressCircleVisual& modifier) {
-    style_ = node.LayoutValueOr<ResolvedProgressCircleStyle>(ProgressCircleStyle::Default());
+    style_ = node.LayoutValueOr<ProgressCircleStyleBinding>(ProgressCircleStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
       phase_.Reset();
@@ -1294,7 +1322,7 @@ public:
   }
 
   void Update(MountedNode& node, const ProgressBarVisual& modifier) {
-    style_ = node.LayoutValueOr<ResolvedProgressBarStyle>(ProgressBarStyle::Default());
+    style_ = node.LayoutValueOr<ProgressBarStyleBinding>(ProgressBarStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
       phase_.Reset();
@@ -1436,7 +1464,7 @@ public:
   }
 
   void Update(MountedNode& node, const SliderVisual& modifier) {
-    style_ = node.LayoutValueOr<ResolvedSliderStyle>(SliderStyle::Default());
+    style_ = node.LayoutValueOr<SliderStyleBinding>(SliderStyle::Default());
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       hovered_ = false;
@@ -1824,6 +1852,7 @@ CornerRadii SegmentCornerRadii(std::size_t index, std::size_t count, float radiu
 
 void ApplyToggleLayoutDefaults(
     detail::ViewSpec& spec,
+    const std::shared_ptr<const Environment>& environment,
     const ThemeSpec& theme,
     detail::ToggleLayoutMetrics metrics
 ) {
@@ -1836,7 +1865,7 @@ void ApplyToggleLayoutDefaults(
       typeid(detail::ToggleLayoutMetrics),
       detail::MakeErasedLayoutValue(metrics)
   );
-  if (spec.text.empty()) {
+  if (detail::IsEmptyStringVariantLiteral(spec.text)) {
     spec.properties.frame.width = metrics.interactive_size.width;
     spec.properties.frame.height = metrics.interactive_size.height;
     return;
@@ -1845,7 +1874,7 @@ void ApplyToggleLayoutDefaults(
   spec.properties.frame.min_width = metrics.interactive_size.width;
   spec.properties.frame.min_height = metrics.interactive_size.height;
   spec.properties.text_style =
-      ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, TextRole::Body));
+      ResolveStyleOverride<TextStyle>(environment).value_or(detail::DefaultTextStyle(theme, TextRole::Body));
   spec.properties.text_layout_options = {.wrap = TextWrap::NoWrap};
   Color disabled_label = spec.properties.text_style.foreground;
   disabled_label.alpha *= spec.properties.disabled_opacity;
@@ -1916,7 +1945,7 @@ private:
     spec->default_indication =
         selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
     spec->component_semantics.role = SemanticRole::RadioButton;
-    spec->component_semantics.label = spec->text;
+    spec->component_semantics.label = detail::StringLiteral(spec->text);
     spec->component_semantics.checked =
         selected ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
     spec->component_semantics.selected = selected;
@@ -1925,7 +1954,7 @@ private:
         .row_index = 0,
         .column_index = index,
     };
-    spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{spec->default_indication}));
+    spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{spec->default_indication}));
     return spec;
   }
 };
@@ -1960,7 +1989,7 @@ private:
         typeid(SegmentedButtonBorderWidth),
         detail::MakeErasedLayoutValue(std::max(0.0F, style.border_width))
     );
-    spec->retained_modifiers.push_back(detail::MakeModifierSpec(SegmentedButtonBehavior{
+    spec->modifiers.push_back(detail::MakeModifierSpec(SegmentedButtonBehavior{
         selected_index,
         std::move(events),
     }));
@@ -1968,211 +1997,237 @@ private:
   }
 };
 
-void ApplyThemeDefaults(detail::ViewSpec& spec) {
-  const ThemeSpec theme = detail::ResolveThemeSpec(spec.environment);
+void ApplyInteractionDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
   ValidateFocusRing(theme.interactions.focus_ring);
   spec.properties.focus_ring = theme.interactions.focus_ring;
   spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
-  if (spec.kind == detail::NodeKind::Text) {
-    spec.properties.text_style =
-        ResolveStyleOverride<TextStyle>(spec.environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Button) {
-    const ButtonStyle style =
-        ResolveStyleOverride<ButtonStyle>(spec.environment).value_or(detail::DefaultButtonStyle(theme));
-    spec.properties.padding = style.padding;
-    spec.properties.background = style.background;
-    spec.properties.disabled_background = style.disabled_background;
-    spec.properties.text_style = style.label_style;
-    spec.properties.disabled_foreground = style.disabled_label;
-    spec.properties.corner_radii = style.corner_radius;
-    spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
-    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
-    spec.default_indication = style.indication;
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::IconButton) {
-    const IconButtonStyle style =
-        ResolveStyleOverride<IconButtonStyle>(spec.environment).value_or(detail::DefaultIconButtonStyle(theme));
-    const float icon_size = std::max(0.0F, style.icon_size);
-    const float interactive_size = std::max(icon_size, std::max(0.0F, style.minimum_interactive_size));
-    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
-    const float corner_radius = std::max(0.0F, style.corner_radius);
-    spec.properties.text_style = TextStyle{Font::System(theme.typography.label_large), style.foreground};
-    spec.properties.disabled_foreground = style.disabled_foreground;
-    spec.layout_values.insert_or_assign(
-        typeid(detail::LabelContentMetrics),
-        detail::MakeErasedLayoutValue(detail::LabelContentMetrics{{icon_size, icon_size}, 0.0F, false})
-    );
-    spec.properties.corner_radii = corner_radius;
-    spec.properties.frame.min_width = interactive_size;
-    spec.properties.frame.min_height = interactive_size;
-    Indication indication = style.indication.value_or(theme.interactions.indication);
-    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
-    indication.geometry.clip_corner_radii = CornerRadii{std::min(corner_radius, state_layer_size * 0.5F)};
-    spec.default_indication = std::move(indication);
-    if (spec.image_properties.IsVector()) {
-      spec.properties.disabled_opacity = 1.0F;
-    }
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Chip) {
-    const ChipStyle style =
-        ResolveStyleOverride<ChipStyle>(spec.environment).value_or(detail::DefaultChipStyle(theme));
-    const bool selected = spec.chip_selection.value_or(false);
-    spec.properties.padding = style.padding;
-    spec.properties.background = selected ? style.selected_background : style.background;
-    spec.properties.disabled_background =
-        selected ? style.disabled_selected_background : style.disabled_background;
-    spec.properties.border = Border{
-        selected ? style.selected_border : style.border,
-        std::max(0.0F, style.border_width),
-    };
-    spec.properties.disabled_border = Border{
-        selected ? style.disabled_selected_border : style.disabled_border,
-        std::max(0.0F, style.border_width),
-    };
-    spec.properties.text_style = style.label_style;
-    spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
-    spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
-    if (spec.image_properties.HasValue()) {
-      spec.layout_values.insert_or_assign(
-          typeid(detail::LabelContentMetrics),
-          detail::MakeErasedLayoutValue(detail::LabelContentMetrics{
-              {std::max(0.0F, style.icon_size), std::max(0.0F, style.icon_size)},
-              std::max(0.0F, style.icon_spacing),
-              true,
-          })
-      );
-    }
-    spec.properties.corner_radii = style.corner_radius;
-    spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
-    spec.default_indication =
-        selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Divider) {
-    const DividerStyle style =
-        ResolveStyleOverride<DividerStyle>(spec.environment).value_or(detail::DefaultDividerStyle(theme));
-    spec.properties.background = style.color;
-    spec.layout_values.insert_or_assign(
-        typeid(detail::DividerThicknessBinding),
-        detail::MakeErasedLayoutValue(std::max(0.0F, style.thickness))
-    );
-    return;
-  }
-  if (spec.kind == detail::NodeKind::TextField) {
-    const TextFieldStyle style =
-        ResolveStyleOverride<TextFieldStyle>(spec.environment).value_or(detail::DefaultTextFieldStyle(theme));
-    const TextFieldVariantStyle& variant_style = detail::ResolveTextFieldVariantStyle(style, style.variant);
-    spec.layout_values.insert_or_assign(typeid(detail::ResolvedTextFieldStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.padding = style.padding;
-    spec.properties.background = variant_style.background;
-    spec.properties.text_style = style.text_style;
-    spec.properties.corner_radii = detail::ResolveTextFieldCornerRadii(style, style.variant);
-    spec.properties.focus_ring.width = 0.0F;
-    spec.properties.frame.min_height = std::max(0.0F, variant_style.minimum_height);
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Checkbox) {
-    const CheckboxStyle style =
-        ResolveStyleOverride<CheckboxStyle>(spec.environment).value_or(detail::DefaultCheckboxStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedCheckboxStyle), detail::MakeErasedLayoutValue(style));
-    const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
-    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
-    ApplyToggleLayoutDefaults(
-        spec,
-        theme,
-        {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
-    );
-    spec.properties.corner_radii = state_layer_size * 0.5F;
-    Indication indication = theme.interactions.indication;
-    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
-    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
-    spec.default_indication = std::move(indication);
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::RadioButton) {
-    const RadioButtonStyle style =
-        ResolveStyleOverride<RadioButtonStyle>(spec.environment).value_or(detail::DefaultRadioButtonStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedRadioButtonStyle), detail::MakeErasedLayoutValue(style));
-    const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
-    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
-    ApplyToggleLayoutDefaults(
-        spec,
-        theme,
-        {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
-    );
-    spec.properties.corner_radii = state_layer_size * 0.5F;
-    Indication indication = theme.interactions.indication;
-    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
-    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
-    spec.default_indication = std::move(indication);
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Switch) {
-    const SwitchStyle style =
-        ResolveStyleOverride<SwitchStyle>(spec.environment).value_or(detail::DefaultSwitchStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedSwitchStyle), detail::MakeErasedLayoutValue(style));
-    const float width = std::max(0.0F, style.width);
-    const float height = std::max(0.0F, std::max(style.height, style.minimum_interactive_height));
-    const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), std::min(width, height));
-    ApplyToggleLayoutDefaults(
-        spec,
-        theme,
-        {{style.width, style.height}, {width, height}, theme.spacing.small}
-    );
-    spec.properties.corner_radii = state_layer_size * 0.5F;
-    Indication indication = theme.interactions.indication;
-    indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
-    indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
-    spec.default_indication = std::move(indication);
-    spec.properties.disabled_opacity = 1.0F;
-    return;
-  }
-  if (spec.kind == detail::NodeKind::ProgressCircle) {
-    const ProgressCircleStyle style =
-        ResolveStyleOverride<ProgressCircleStyle>(spec.environment).value_or(detail::DefaultProgressCircleStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedProgressCircleStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.frame.width = std::max(0.0F, style.size);
-    spec.properties.frame.height = std::max(0.0F, style.size);
-    return;
-  }
-  if (spec.kind == detail::NodeKind::ProgressBar) {
-    const ProgressBarStyle style =
-        ResolveStyleOverride<ProgressBarStyle>(spec.environment).value_or(detail::DefaultProgressBarStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedProgressBarStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.frame.width = std::max(0.0F, style.width);
-    spec.properties.frame.height = std::max(0.0F, style.height);
-    return;
-  }
-  if (spec.kind == detail::NodeKind::Slider) {
-    const SliderStyle style =
-        ResolveStyleOverride<SliderStyle>(spec.environment).value_or(detail::DefaultSliderStyle(theme));
-    spec.layout_values.insert_or_assign(typeid(ResolvedSliderStyle), detail::MakeErasedLayoutValue(style));
-    spec.properties.frame.width = std::max(0.0F, style.width);
-    spec.properties.frame.height = std::max(0.0F, style.height);
-    spec.properties.corner_radii = std::max(0.0F, style.height * 0.5F);
-    if (style.focus_ring.has_value()) {
-      ValidateFocusRing(*style.focus_ring);
-      spec.properties.focus_ring = *style.focus_ring;
-    }
-    spec.properties.disabled_opacity = 1.0F;
+}
+
+void ResolveComponentLabel(detail::ViewSpec& spec) {
+  if (!spec.component_semantics.label.has_value()) {
+    spec.component_semantics.label = detail::StringLiteral(spec.text);
   }
 }
 
-std::shared_ptr<detail::ViewSpec> MakeTextSpec(std::string value, TextRole role) {
+void ApplyTextDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  spec.properties.text_style =
+      ResolveStyleOverride<TextStyle>(environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
+  ResolveComponentLabel(spec);
+}
+
+void ApplyButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const ButtonStyle style = ResolveStyleOverride<ButtonStyle>(environment).value_or(detail::DefaultButtonStyle(theme));
+  spec.properties.padding = style.padding;
+  spec.properties.background = style.background;
+  spec.properties.disabled_background = style.disabled_background;
+  spec.properties.text_style = style.label_style;
+  spec.properties.disabled_foreground = style.disabled_label;
+  spec.properties.corner_radii = style.corner_radius;
+  spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
+  spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+  spec.default_indication = style.indication;
+  spec.properties.disabled_opacity = 1.0F;
+  ResolveComponentLabel(spec);
+}
+
+void ApplyIconButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const IconButtonStyle style =
+      ResolveStyleOverride<IconButtonStyle>(environment).value_or(detail::DefaultIconButtonStyle(theme));
+  const float icon_size = std::max(0.0F, style.icon_size);
+  const float interactive_size = std::max(icon_size, std::max(0.0F, style.minimum_interactive_size));
+  const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+  const float corner_radius = std::max(0.0F, style.corner_radius);
+  spec.properties.text_style = TextStyle{Font::System(theme.typography.label_large), style.foreground};
+  spec.properties.disabled_foreground = style.disabled_foreground;
+  spec.layout_values.insert_or_assign(
+      typeid(detail::LabelContentMetrics),
+      detail::MakeErasedLayoutValue(detail::LabelContentMetrics{{icon_size, icon_size}, 0.0F, false})
+  );
+  spec.properties.corner_radii = corner_radius;
+  spec.properties.frame.min_width = interactive_size;
+  spec.properties.frame.min_height = interactive_size;
+  Indication indication = style.indication.value_or(theme.interactions.indication);
+  indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+  indication.geometry.clip_corner_radii = CornerRadii{std::min(corner_radius, state_layer_size * 0.5F)};
+  spec.default_indication = std::move(indication);
+  if (spec.image_properties.IsVector()) {
+    spec.properties.disabled_opacity = 1.0F;
+  }
+  ResolveComponentLabel(spec);
+  if (detail::StringLiteral(spec.text).find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
+    throw std::invalid_argument("HuxerUI IconButton requires a non-empty semantic label");
+  }
+}
+
+void ApplyChipDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const ChipStyle style = ResolveStyleOverride<ChipStyle>(environment).value_or(detail::DefaultChipStyle(theme));
+  const bool selected = spec.chip_selection.value_or(false);
+  spec.properties.padding = style.padding;
+  spec.properties.background = selected ? style.selected_background : style.background;
+  spec.properties.disabled_background = selected ? style.disabled_selected_background : style.disabled_background;
+  spec.properties.border = Border{
+      selected ? style.selected_border : style.border,
+      std::max(0.0F, style.border_width),
+  };
+  spec.properties.disabled_border = Border{
+      selected ? style.disabled_selected_border : style.disabled_border,
+      std::max(0.0F, style.border_width),
+  };
+  spec.properties.text_style = style.label_style;
+  spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
+  spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
+  if (spec.image_properties.HasValue()) {
+    spec.layout_values.insert_or_assign(
+        typeid(detail::LabelContentMetrics),
+        detail::MakeErasedLayoutValue(detail::LabelContentMetrics{
+            {std::max(0.0F, style.icon_size), std::max(0.0F, style.icon_size)},
+            std::max(0.0F, style.icon_spacing),
+            true,
+        })
+    );
+  }
+  spec.properties.corner_radii = style.corner_radius;
+  spec.properties.frame.min_height = std::max(0.0F, style.minimum_height);
+  spec.default_indication =
+      selected && style.selected_indication.has_value() ? style.selected_indication : style.indication;
+  spec.properties.disabled_opacity = 1.0F;
+  ResolveComponentLabel(spec);
+  if (spec.image_properties.HasValue() && detail::StringLiteral(spec.text).empty()) {
+    throw std::invalid_argument("HuxerUI Chip with an icon requires a non-empty label");
+  }
+}
+
+void ApplyDividerDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const DividerStyle style =
+      ResolveStyleOverride<DividerStyle>(environment).value_or(detail::DefaultDividerStyle(theme));
+  spec.properties.background = style.color;
+  spec.layout_values.insert_or_assign(
+      typeid(detail::DividerThicknessBinding),
+      detail::MakeErasedLayoutValue(std::max(0.0F, style.thickness))
+  );
+}
+
+void ApplyCheckboxDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const CheckboxStyle style =
+      ResolveStyleOverride<CheckboxStyle>(environment).value_or(detail::DefaultCheckboxStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(CheckboxStyleBinding), detail::MakeErasedLayoutValue(style));
+  const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
+  const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+  ApplyToggleLayoutDefaults(
+      spec,
+      environment,
+      theme,
+      {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
+  );
+  spec.properties.corner_radii = state_layer_size * 0.5F;
+  Indication indication = theme.interactions.indication;
+  indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+  indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+  spec.default_indication = std::move(indication);
+  spec.properties.disabled_opacity = 1.0F;
+  ResolveComponentLabel(spec);
+}
+
+void ApplyRadioButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const RadioButtonStyle style =
+      ResolveStyleOverride<RadioButtonStyle>(environment).value_or(detail::DefaultRadioButtonStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(RadioButtonStyleBinding), detail::MakeErasedLayoutValue(style));
+  const float interactive_size = std::max(0.0F, std::max(style.size, style.minimum_interactive_size));
+  const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
+  ApplyToggleLayoutDefaults(
+      spec,
+      environment,
+      theme,
+      {{style.size, style.size}, {interactive_size, interactive_size}, theme.spacing.small}
+  );
+  spec.properties.corner_radii = state_layer_size * 0.5F;
+  Indication indication = theme.interactions.indication;
+  indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+  indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+  spec.default_indication = std::move(indication);
+  spec.properties.disabled_opacity = 1.0F;
+  ResolveComponentLabel(spec);
+}
+
+void ApplySwitchDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const SwitchStyle style = ResolveStyleOverride<SwitchStyle>(environment).value_or(detail::DefaultSwitchStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(SwitchStyleBinding), detail::MakeErasedLayoutValue(style));
+  const float width = std::max(0.0F, style.width);
+  const float height = std::max(0.0F, std::max(style.height, style.minimum_interactive_height));
+  const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), std::min(width, height));
+  ApplyToggleLayoutDefaults(
+      spec,
+      environment,
+      theme,
+      {{style.width, style.height}, {width, height}, theme.spacing.small}
+  );
+  spec.properties.corner_radii = state_layer_size * 0.5F;
+  Indication indication = theme.interactions.indication;
+  indication.geometry.layer_size = Size{state_layer_size, state_layer_size};
+  indication.geometry.clip_corner_radii = CornerRadii{state_layer_size * 0.5F};
+  spec.default_indication = std::move(indication);
+  spec.properties.disabled_opacity = 1.0F;
+  ResolveComponentLabel(spec);
+}
+
+void ResolveProgressStateDescription(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  if (spec.component_semantics.busy.value_or(false) && !spec.component_semantics.state_description.has_value()) {
+    std::shared_ptr<detail::AppResources> resources = detail::RequireAppResources(environment);
+    const Locale locale = detail::ResolveResourceLocale(environment, *resources);
+    spec.component_semantics.state_description =
+        detail::ResolveString(StringVariant(strings::progress_in_progress), *resources, locale);
+  }
+}
+
+void ApplyProgressCircleDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const ProgressCircleStyle style =
+      ResolveStyleOverride<ProgressCircleStyle>(environment).value_or(detail::DefaultProgressCircleStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(ProgressCircleStyleBinding), detail::MakeErasedLayoutValue(style));
+  spec.properties.frame.width = std::max(0.0F, style.size);
+  spec.properties.frame.height = std::max(0.0F, style.size);
+  ResolveProgressStateDescription(spec, environment);
+}
+
+void ApplyProgressBarDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const ProgressBarStyle style =
+      ResolveStyleOverride<ProgressBarStyle>(environment).value_or(detail::DefaultProgressBarStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(ProgressBarStyleBinding), detail::MakeErasedLayoutValue(style));
+  spec.properties.frame.width = std::max(0.0F, style.width);
+  spec.properties.frame.height = std::max(0.0F, style.height);
+  ResolveProgressStateDescription(spec, environment);
+}
+
+void ApplySliderDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
+  const SliderStyle style = ResolveStyleOverride<SliderStyle>(environment).value_or(detail::DefaultSliderStyle(theme));
+  spec.layout_values.insert_or_assign(typeid(SliderStyleBinding), detail::MakeErasedLayoutValue(style));
+  spec.properties.frame.width = std::max(0.0F, style.width);
+  spec.properties.frame.height = std::max(0.0F, style.height);
+  spec.properties.corner_radii = std::max(0.0F, style.height * 0.5F);
+  if (style.focus_ring.has_value()) {
+    ValidateFocusRing(*style.focus_ring);
+    spec.properties.focus_ring = *style.focus_ring;
+  }
+  spec.properties.disabled_opacity = 1.0F;
+}
+
+std::shared_ptr<detail::ViewSpec> MakeTextSpec(StringVariant value, TextRole role) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
+  spec->defaults = ApplyTextDefaults;
   spec->text = std::move(value);
   spec->text_role = role;
   spec->component_semantics.role = SemanticRole::Text;
-  spec->component_semantics.label = spec->text;
   return spec;
 }
 
@@ -2180,49 +2235,43 @@ void ActivateClick(const detail::EventBindings& bindings) {
   detail::EmitEvent<ViewEvents::Click>(bindings);
 }
 
-std::shared_ptr<detail::ViewSpec> MakeButtonSpec(std::string label) {
+std::shared_ptr<detail::ViewSpec> MakeButtonSpec(StringVariant label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Button);
+  spec->defaults = ApplyButtonDefaults;
   spec->text = std::move(label);
   spec->focusable = true;
   spec->activation = ActivateClick;
   spec->component_semantics.role = SemanticRole::Button;
-  spec->component_semantics.label = spec->text;
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(detail::ResolvedImageAsset icon, std::string semantic_label) {
-  if (semantic_label.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
-    throw std::invalid_argument("HuxerUI IconButton requires a non-empty semantic label");
-  }
+std::shared_ptr<detail::ViewSpec> MakeIconButtonSpec(ImageVariant icon, StringVariant semantic_label) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::IconButton);
+  spec->defaults = ApplyIconButtonDefaults;
   spec->text = std::move(semantic_label);
-  spec->image_properties.SetResolvedAsset(std::move(icon));
+  spec->image_properties.SetImage(std::move(icon));
   spec->focusable = true;
   spec->activation = ActivateClick;
   spec->component_semantics.role = SemanticRole::Button;
-  spec->component_semantics.label = spec->text;
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
 std::shared_ptr<detail::ViewSpec> MakeChipSpec(
-    std::string label,
+    StringVariant label,
     std::optional<bool> selection,
-    std::optional<detail::ResolvedImageAsset> icon = std::nullopt
+    std::optional<ImageVariant> icon = std::nullopt
 ) {
-  if (icon.has_value() && label.empty()) {
-    throw std::invalid_argument("HuxerUI Chip with an icon requires a non-empty label");
-  }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Chip);
+  spec->defaults = ApplyChipDefaults;
   spec->text = std::move(label);
   if (icon.has_value()) {
-    spec->image_properties.SetResolvedAsset(std::move(*icon));
+    spec->image_properties.SetImage(std::move(*icon));
   }
   spec->focusable = true;
   spec->chip_selection = selection;
   spec->component_semantics.role = SemanticRole::Button;
-  spec->component_semantics.label = spec->text;
   spec->component_semantics.selected = selection;
   if (selection.has_value()) {
     const bool selected = *selection;
@@ -2233,12 +2282,13 @@ std::shared_ptr<detail::ViewSpec> MakeChipSpec(
   } else {
     spec->activation = ActivateClick;
   }
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
 std::shared_ptr<detail::ViewSpec> MakeDividerSpec(Axis axis) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Divider);
+  spec->defaults = ApplyDividerDefaults;
   spec->layout_values.insert_or_assign(typeid(detail::DividerAxisBinding), detail::MakeErasedLayoutValue(axis));
   return spec;
 }
@@ -2252,45 +2302,50 @@ MakeSegmentedButtonSpec(std::vector<SegmentedButtonItem> items, std::size_t sele
     throw std::invalid_argument("HuxerUI SegmentedButton selected index is out of range");
   }
 
-  std::vector<ResolvedSegmentedButtonItem> resolved_items;
-  resolved_items.reserve(items.size());
-  for (SegmentedButtonItem& item : items) {
-    ResolvedSegmentedButtonItem resolved{
-        detail::SegmentedButtonItemAccess::ResolveLabel(item),
-        detail::SegmentedButtonItemAccess::ResolveIcon(item),
-        detail::SegmentedButtonItemAccess::ShowsLabel(item),
-    };
-    const bool show_label = resolved.show_label;
-    const std::string& label = resolved.label;
-    const std::optional<detail::ResolvedImageAsset>& icon = resolved.icon;
-    if (label.empty()) {
+  for (const SegmentedButtonItem& item : items) {
+    if (detail::SegmentedButtonItemAccess::HasBlankLiteralLabel(item)) {
       throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
     }
-    if (!show_label && !icon.has_value()) {
+    if (!detail::SegmentedButtonItemAccess::ShowsLabel(item) &&
+        !detail::SegmentedButtonItemAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI icon-only SegmentedButton item requires an icon and semantic label");
     }
-    resolved_items.push_back(std::move(resolved));
+    detail::SegmentedButtonItemAccess::ValidateIcon(item);
   }
 
-  return detail::MakeScopeSpec([items = std::move(resolved_items), selected_index]() -> View {
+  return detail::MakeScopeSpec([items = std::move(items), selected_index]() -> View {
+    std::vector<ResolvedSegmentedButtonItem> resolved_items;
+    resolved_items.reserve(items.size());
+    for (SegmentedButtonItem item : items) {
+      ResolvedSegmentedButtonItem resolved{
+          detail::SegmentedButtonItemAccess::ResolveLabel(item),
+          detail::SegmentedButtonItemAccess::ResolveIcon(item),
+          detail::SegmentedButtonItemAccess::ShowsLabel(item),
+      };
+      if (resolved.label.empty()) {
+        throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
+      }
+      resolved_items.push_back(std::move(resolved));
+    }
+
     const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
-    const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+    const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
     const SegmentedButtonStyle style =
         ResolveStyleOverride<SegmentedButtonStyle>(environment).value_or(detail::DefaultSegmentedButtonStyle(theme));
     const EventEmitter events = UseEvents();
 
     std::vector<View> segments;
-    segments.reserve(items.size());
-    for (std::size_t index = 0; index < items.size(); ++index) {
+    segments.reserve(resolved_items.size());
+    for (std::size_t index = 0; index < resolved_items.size(); ++index) {
       segments.push_back(
           std::move(SegmentedButtonLabel(
-                        items[index].label,
-                        items[index].icon,
-                        items[index].show_label,
+                        resolved_items[index].label,
+                        resolved_items[index].icon,
+                        resolved_items[index].show_label,
                         style,
                         index == selected_index,
                         index,
-                        items.size()
+                        resolved_items.size()
                     ))
               .OnClick([events, index, selected_index] {
                 if (index != selected_index) {
@@ -2316,16 +2371,20 @@ MakeSegmentedButtonSpec(std::vector<StringVariant> labels, std::size_t selected_
 }
 
 std::shared_ptr<detail::ViewSpec>
-MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked, std::string label = {}) {
-  VectorAsset checkmark =
-      visual_kind == ToggleVisualKind::Checkbox ? UseVectorImage(images::check) : VectorAsset{};
+MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked, StringVariant label = {}) {
   auto spec = std::make_shared<detail::ViewSpec>(kind);
+  if (visual_kind == ToggleVisualKind::Checkbox) {
+    spec->defaults = ApplyCheckboxDefaults;
+  } else if (visual_kind == ToggleVisualKind::RadioButton) {
+    spec->defaults = ApplyRadioButtonDefaults;
+  } else {
+    spec->defaults = ApplySwitchDefaults;
+  }
   spec->text = std::move(label);
   spec->focusable = true;
   spec->component_semantics.role = visual_kind == ToggleVisualKind::Checkbox      ? SemanticRole::Checkbox
                                    : visual_kind == ToggleVisualKind::RadioButton ? SemanticRole::RadioButton
                                                                                   : SemanticRole::Switch;
-  spec->component_semantics.label = spec->text;
   spec->component_semantics.checked = checked ? SemanticCheckedState::Checked : SemanticCheckedState::Unchecked;
   spec->activation = [visual_kind, checked](const detail::EventBindings& bindings) {
     detail::EmitEvent<ViewEvents::Click>(bindings);
@@ -2334,10 +2393,14 @@ MakeToggleSpec(detail::NodeKind kind, ToggleVisualKind visual_kind, bool checked
     }
     detail::EmitEvent<ToggleEvents::Changed>(bindings, !checked);
   };
-  spec->retained_modifiers.push_back(
-      detail::MakeModifierSpec(ToggleVisual{visual_kind, checked, std::move(checkmark)})
+  spec->modifiers.push_back(
+      detail::MakeModifierSpec(ToggleVisual{
+          visual_kind,
+          checked,
+          visual_kind == ToggleVisualKind::Checkbox ? std::optional<ImageVariant>{images::check} : std::nullopt,
+      })
   );
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(detail::DefaultIndication{}));
   return spec;
 }
 
@@ -2356,14 +2419,13 @@ std::shared_ptr<detail::ViewSpec> MakeProgressCircleSpec(std::optional<float> pr
     progress = NormalizeProgress(*progress);
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressCircle);
+  spec->defaults = ApplyProgressCircleDefaults;
   spec->component_semantics.role = SemanticRole::ProgressIndicator;
   spec->component_semantics.busy = !progress.has_value();
   if (progress.has_value()) {
     spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
-  } else {
-    spec->component_semantics.state_description = UseString(strings::progress_in_progress);
   }
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(ProgressCircleVisual{progress}));
   return spec;
 }
 
@@ -2372,22 +2434,22 @@ std::shared_ptr<detail::ViewSpec> MakeProgressBarSpec(std::optional<float> progr
     progress = NormalizeProgress(*progress);
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::ProgressBar);
+  spec->defaults = ApplyProgressBarDefaults;
   spec->component_semantics.role = SemanticRole::ProgressIndicator;
   spec->component_semantics.busy = !progress.has_value();
   if (progress.has_value()) {
     spec->component_semantics.range = SemanticRange{0.0, 1.0, *progress, std::nullopt};
-  } else {
-    spec->component_semantics.state_description = UseString(strings::progress_in_progress);
   }
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(ProgressBarVisual{progress}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(ProgressBarVisual{progress}));
   return spec;
 }
 
 std::shared_ptr<detail::ViewSpec> MakeSliderSpec(float value) {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Slider);
+  spec->defaults = ApplySliderDefaults;
   spec->focusable = true;
   spec->component_semantics.role = SemanticRole::Slider;
-  spec->retained_modifiers.push_back(detail::MakeModifierSpec(SliderVisual{value, 0.0F, 1.0F, std::nullopt}));
+  spec->modifiers.push_back(detail::MakeModifierSpec(SliderVisual{value, 0.0F, 1.0F, std::nullopt}));
   return spec;
 }
 
@@ -2414,40 +2476,47 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
     throw std::invalid_argument("HuxerUI Tabs selected index is out of range");
   }
 
-  std::vector<ResolvedTabItem> resolved_items;
-  resolved_items.reserve(items.size());
-  for (TabItem& item : items) {
-    ResolvedTabItem resolved{
-        detail::TabItemAccess::ResolveLabel(item),
-        detail::TabItemAccess::ResolveIcon(item),
-        detail::TabItemAccess::ShowsLabel(item),
-        detail::TabItemAccess::IsEnabled(item),
-    };
-    if (resolved.label.empty()) {
+  for (const TabItem& item : items) {
+    if (detail::TabItemAccess::HasBlankLiteralLabel(item)) {
       throw std::invalid_argument("HuxerUI Tabs item requires a non-empty semantic label");
     }
-    if (!resolved.show_label && !resolved.icon.has_value()) {
+    if (!detail::TabItemAccess::ShowsLabel(item) && !detail::TabItemAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI icon-only Tabs item requires an icon and semantic label");
     }
-    resolved_items.push_back(std::move(resolved));
+    detail::TabItemAccess::ValidateIcon(item);
   }
 
-  return detail::MakeScopeSpec([items = std::move(resolved_items), selected_index]() -> View {
+  return detail::MakeScopeSpec([items = std::move(items), selected_index]() -> View {
+    std::vector<ResolvedTabItem> resolved_items;
+    resolved_items.reserve(items.size());
+    for (TabItem item : items) {
+      ResolvedTabItem resolved{
+          detail::TabItemAccess::ResolveLabel(item),
+          detail::TabItemAccess::ResolveIcon(item),
+          detail::TabItemAccess::ShowsLabel(item),
+          detail::TabItemAccess::IsEnabled(item),
+      };
+      if (resolved.label.empty()) {
+        throw std::invalid_argument("HuxerUI Tabs item requires a non-empty semantic label");
+      }
+      resolved_items.push_back(std::move(resolved));
+    }
+
     const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
-    const ThemeSpec theme = detail::ResolveThemeSpec(environment);
+    const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
     const TabsStyle style = ResolveStyleOverride<TabsStyle>(environment).value_or(detail::DefaultTabsStyle(theme));
     const ScrollController scroll_controller = UseScrollController();
     const EventEmitter events = UseEvents();
 
     std::vector<View> labels;
-    labels.reserve(items.size());
+    labels.reserve(resolved_items.size());
     std::vector<bool> enabled_items;
-    enabled_items.reserve(items.size());
-    for (std::size_t index = 0; index < items.size(); ++index) {
-      const bool enabled = items[index].enabled;
+    enabled_items.reserve(resolved_items.size());
+    for (std::size_t index = 0; index < resolved_items.size(); ++index) {
+      const bool enabled = resolved_items[index].enabled;
       enabled_items.push_back(enabled);
       labels.push_back(
-          std::move(TabLabel(items[index], style, index == selected_index, index))
+          std::move(TabLabel(resolved_items[index], style, index == selected_index, index))
               .OnClick([events, index, selected_index] {
                 if (index != selected_index) {
                   events.Emit<TabsEvents::Changed>(index);
@@ -2561,6 +2630,87 @@ const detail::ModifierDescriptor& Grow::Descriptor() {
 
 namespace detail {
 
+ViewSpec CompileViewSpec(
+    const ViewSpec& declaration,
+    const std::shared_ptr<const Environment>& environment,
+    AppResources& resources
+) {
+  std::optional<Locale> locale;
+  const auto resource_locale = [&]() -> const Locale& {
+    if (!locale.has_value()) {
+      locale = ResolveResourceLocale(environment, resources);
+    }
+    return *locale;
+  };
+  const auto compile_fill = [&resources, &resource_locale](const VisualFill& fill) {
+    return ResolveVisualFill(
+        fill, resources, NeedsResourceResolution(fill) ? resource_locale() : Locale::Default()
+    );
+  };
+  ViewSpec compiled(declaration.kind);
+  compiled.key = declaration.key;
+  compiled.text = NeedsResourceResolution(declaration.text)
+                      ? StringVariant{ResolveString(declaration.text, resources, resource_locale())}
+                      : declaration.text;
+  compiled.text_role = declaration.text_role;
+  compiled.properties = declaration.properties;
+  compiled.component_semantics = declaration.component_semantics;
+  compiled.author_semantics = declaration.author_semantics;
+  compiled.scope_factory = declaration.scope_factory;
+  compiled.canvas_painter = declaration.canvas_painter;
+  compiled.image_properties = declaration.image_properties;
+  if (const auto* resource = std::get_if<ImageResource>(&compiled.image_properties.source)) {
+    compiled.image_properties.SetResolvedAsset(ResolveImage(ImageVariant{*resource}, resources, resource_locale()));
+  }
+  if (compiled.image_properties.tint.has_value() && !compiled.image_properties.IsVector()) {
+    throw std::invalid_argument("HuxerUI image Tint is supported for vector images only");
+  }
+  compiled.platform_view = declaration.platform_view;
+  compiled.layout_descriptor = declaration.layout_descriptor;
+  compiled.virtual_layout_descriptor = declaration.virtual_layout_descriptor;
+  compiled.event_bindings = declaration.event_bindings;
+  compiled.activation = declaration.activation;
+  compiled.defaults = declaration.defaults;
+  compiled.modifiers.reserve(declaration.modifiers.size());
+  compiled.default_indication = declaration.default_indication;
+  compiled.chip_selection = declaration.chip_selection;
+  compiled.pointer_events_enabled = declaration.pointer_events_enabled;
+  compiled.local_enabled = declaration.local_enabled;
+  compiled.focusable = declaration.focusable;
+  compiled.trap_focus = declaration.trap_focus;
+  compiled.layout_values = declaration.layout_values;
+  if (compiled.kind != NodeKind::Environment) {
+    ApplyInteractionDefaults(compiled, environment);
+  }
+  if (compiled.defaults != nullptr) {
+    compiled.defaults(compiled, environment);
+  }
+  for (const ModifierSpec& declaration_modifier : declaration.modifiers) {
+    if (declaration_modifier.descriptor == nullptr || !declaration_modifier.value) {
+      throw std::logic_error("HuxerUI modifier descriptor and value must not be empty");
+    }
+    ModifierSpec compiled_modifier = declaration_modifier;
+    if (declaration_modifier.descriptor->compile != nullptr) {
+      declaration_modifier.descriptor->compile(compiled, compiled_modifier, environment, resources);
+    }
+    if (!compiled_modifier.value) {
+      throw std::logic_error("HuxerUI compiled modifier value must not be empty");
+    }
+    if (compiled_modifier.descriptor->create_extension != nullptr) {
+      compiled.modifiers.push_back(std::move(compiled_modifier));
+    }
+  }
+
+  if (compiled.properties.background.has_value()) {
+    compiled.properties.background = compile_fill(*compiled.properties.background);
+  }
+  if (compiled.properties.disabled_background.has_value()) {
+    compiled.properties.disabled_background = compile_fill(*compiled.properties.disabled_background);
+  }
+
+  return compiled;
+}
+
 std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory) {
   if (!factory) {
     throw std::invalid_argument("HuxerUI scope factory must not be empty");
@@ -2624,29 +2774,6 @@ std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& l
 } // namespace detail
 
 View::View(std::shared_ptr<detail::ViewSpec> spec) : spec_(std::move(spec)) {
-  if (spec_) {
-    spec_->environment = detail::CurrentEnvironment();
-    ApplyThemeDefaults(*spec_);
-    const bool uses_default_indication = std::ranges::any_of(
-        spec_->retained_modifiers,
-        [](const detail::ModifierSpec& modifier) {
-          return detail::IsDefaultIndicationDescriptor(modifier.descriptor);
-        }
-    );
-    if (uses_default_indication) {
-      Indication indication = spec_->default_indication.value_or(
-          detail::ResolveThemeSpec(spec_->environment).interactions.indication
-      );
-      spec_->default_indication = ResolveIndication(std::move(indication));
-    } else if (spec_->default_indication.has_value()) {
-      spec_->default_indication = ResolveIndication(std::move(*spec_->default_indication));
-    }
-    for (detail::ModifierSpec& modifier : spec_->retained_modifiers) {
-      if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
-        modifier = detail::MakeModifierSpec(detail::DefaultIndication{spec_->default_indication});
-      }
-    }
-  }
 }
 
 void View::SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler) {
@@ -2660,10 +2787,7 @@ void View::SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue v
 }
 
 void View::AddDefaultIndication() {
-  Indication indication = spec_->default_indication.value_or(
-      detail::ResolveThemeSpec(spec_->environment).interactions.indication
-  );
-  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{ResolveIndication(std::move(indication))}));
+  AddModifier(detail::MakeModifierSpec(detail::DefaultIndication{}));
 }
 
 void View::AddModifier(detail::ModifierSpec modifier) {
@@ -2673,27 +2797,17 @@ void View::AddModifier(detail::ModifierSpec modifier) {
   if (modifier.descriptor->create_extension == nullptr && modifier.descriptor->update_extension != nullptr) {
     throw std::invalid_argument("HuxerUI modifier extension update requires extension creation");
   }
-  if (modifier.descriptor->apply == nullptr && modifier.descriptor->create_extension == nullptr) {
-    throw std::invalid_argument("HuxerUI modifier descriptor must apply or create a node extension");
-  }
-  if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {
-    modifier = detail::MakeModifierSpec(ResolveIndication(*static_cast<const Indication*>(modifier.value.get())));
-  } else if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
-    detail::DefaultIndication value = *static_cast<const detail::DefaultIndication*>(modifier.value.get());
-    Indication indication = value.value.value_or(
-        spec_->default_indication.value_or(detail::ResolveThemeSpec(spec_->environment).interactions.indication)
-    );
-    value.value = ResolveIndication(std::move(indication));
-    modifier = detail::MakeModifierSpec(std::move(value));
+  if (modifier.descriptor->compile == nullptr && modifier.descriptor->create_extension == nullptr) {
+    throw std::invalid_argument("HuxerUI modifier descriptor must compile or create a node extension");
   }
   EnsureUniqueSpec();
   if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {
-    std::erase_if(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
+    std::erase_if(spec_->modifiers, [](const detail::ModifierSpec& existing) {
       return detail::IsDefaultIndicationDescriptor(existing.descriptor);
     });
   } else if (detail::IsDefaultIndicationDescriptor(modifier.descriptor)) {
     const bool already_has_indication =
-        std::ranges::any_of(spec_->retained_modifiers, [](const detail::ModifierSpec& existing) {
+        std::ranges::any_of(spec_->modifiers, [](const detail::ModifierSpec& existing) {
           return detail::IsDefaultIndicationDescriptor(existing.descriptor) ||
                  detail::IsExplicitIndicationDescriptor(existing.descriptor);
         });
@@ -2701,13 +2815,7 @@ void View::AddModifier(detail::ModifierSpec modifier) {
       return;
     }
   }
-  if (modifier.descriptor->apply != nullptr) {
-    modifier.descriptor->apply(*spec_, modifier.value.get());
-  }
-  if (modifier.descriptor->create_extension == nullptr) {
-    return;
-  }
-  spec_->retained_modifiers.push_back(std::move(modifier));
+  spec_->modifiers.push_back(std::move(modifier));
 }
 
 void View::SetModifier(detail::ModifierSpec modifier) {
@@ -2715,38 +2823,34 @@ void View::SetModifier(detail::ModifierSpec modifier) {
     throw std::invalid_argument("HuxerUI retained modifier descriptor and value must not be empty");
   }
   EnsureUniqueSpec();
-  const auto found = std::ranges::find_if(spec_->retained_modifiers, [&modifier](const detail::ModifierSpec& existing) {
+  const auto found = std::ranges::find_if(spec_->modifiers, [&modifier](const detail::ModifierSpec& existing) {
     return existing.descriptor == modifier.descriptor;
   });
-  if (found == spec_->retained_modifiers.end()) {
-    spec_->retained_modifiers.push_back(std::move(modifier));
+  if (found == spec_->modifiers.end()) {
+    spec_->modifiers.push_back(std::move(modifier));
   } else {
     *found = std::move(modifier);
   }
 }
 
-std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ImageSource image) {
-  const bool has_value = std::visit([](const auto& asset) { return asset.HasValue(); }, image);
-  if (!has_value) {
-    throw std::invalid_argument("HuxerUI image view asset must not be empty");
-  }
+std::shared_ptr<detail::ViewSpec> MakeImageSpec(ImageVariant image) {
+  detail::ValidateImageVariant(image);
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
-  spec->image_properties.source = std::move(image);
+  spec->image_properties.SetImage(std::move(image));
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeImageSpec(detail::ResolvedImageAsset image) {
-  return std::visit(
-      [](auto&& asset) {
-        return MakeImageSpec(detail::ImageSource{std::forward<decltype(asset)>(asset)});
-      },
-      std::move(image)
-  );
+std::shared_ptr<detail::ViewSpec> MakeExternalTextureSpec(ExternalTexture texture) {
+  if (!texture.HasValue()) {
+    throw std::invalid_argument("HuxerUI image view asset must not be empty");
+  }
+  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
+  spec->image_properties.source = std::move(texture);
+  return spec;
 }
 
 void View::SetTextStyle(TextStyle style) {
-  EnsureUniqueSpec();
-  spec_->properties.text_style = std::move(style);
+  AddModifier(detail::MakeModifierSpec(TextStyleProperty{std::move(style)}));
 }
 
 void View::SetImageFit(ImageFit fit) {
@@ -2773,7 +2877,8 @@ void View::SetImageSampling(ImageSampling sampling) {
 
 void View::SetImageTint(std::optional<Color> tint) {
   EnsureUniqueSpec();
-  if (!spec_->image_properties.IsVector()) {
+  if (!spec_->image_properties.IsVector() &&
+      !std::holds_alternative<ImageResource>(spec_->image_properties.source)) {
     throw std::invalid_argument("HuxerUI image Tint is supported for vector images only");
   }
   spec_->image_properties.tint = tint;
@@ -2829,133 +2934,61 @@ void View::EnsureUniqueSpec() {
   }
 }
 
-Text::Text(StringResource resource, TextRole role) : Text(UseString(std::move(resource)), role) {}
-
-Text::Text(std::string value, TextRole role) : View(MakeTextSpec(std::move(value), role)) {}
-
-Text::Text(std::string_view value, TextRole role) : Text(std::string(value), role) {}
-
-Text::Text(const char* value, TextRole role) : Text(value == nullptr ? std::string{} : std::string(value), role) {}
+Text::Text(StringVariant value, TextRole role) : View(MakeTextSpec(std::move(value), role)) {}
 
 Text Text::Style(TextStyle style) && {
   SetTextStyle(std::move(style));
   return std::move(*this);
 }
 
-Button::Button(StringResource resource) : Button(UseString(std::move(resource))) {}
+Button::Button(StringVariant label) : View(MakeButtonSpec(std::move(label))) {}
 
-Button::Button(std::string label) : View(MakeButtonSpec(std::move(label))) {}
+IconButton::IconButton(ImageVariant icon, StringVariant semantic_label)
+    : detail::TypedView<IconButton>([&] {
+        detail::ValidateImageVariant(icon);
+        if (detail::IsBlankStringVariantLiteral(semantic_label)) {
+          throw std::invalid_argument("HuxerUI IconButton requires a non-empty semantic label");
+        }
+        return MakeIconButtonSpec(std::move(icon), std::move(semantic_label));
+      }()) {}
 
-Button::Button(std::string_view label) : Button(std::string(label)) {}
+Chip::Chip(StringVariant label) : detail::TypedView<Chip>(MakeChipSpec(std::move(label), std::nullopt)) {}
 
-Button::Button(const char* label) : Button(label == nullptr ? std::string{} : std::string(label)) {}
-
-IconButton::IconButton(ImageResource icon, StringVariant semantic_label)
-    : detail::TypedView<IconButton>(MakeIconButtonSpec(
-          ResolveControlIcon(std::move(icon)),
-          UseString(std::move(semantic_label))
-      )) {}
-
-IconButton::IconButton(ImageAsset icon, StringVariant semantic_label)
-    : detail::TypedView<IconButton>(MakeIconButtonSpec(
-          ResolveControlIcon(std::move(icon)),
-          UseString(std::move(semantic_label))
-      )) {}
-
-IconButton::IconButton(VectorAsset icon, StringVariant semantic_label)
-    : detail::TypedView<IconButton>(MakeIconButtonSpec(
-          ResolveControlIcon(std::move(icon)),
-          UseString(std::move(semantic_label))
-      )) {}
-
-Chip::Chip(StringResource resource) : Chip(UseString(std::move(resource))) {}
-
-Chip::Chip(std::string label) : detail::TypedView<Chip>(MakeChipSpec(std::move(label), std::nullopt)) {}
-
-Chip::Chip(std::string_view label) : Chip(std::string(label)) {}
-
-Chip::Chip(const char* label) : Chip(label == nullptr ? std::string{} : std::string(label)) {}
-
-Chip::Chip(StringResource resource, bool selected) : Chip(UseString(std::move(resource)), selected) {}
-
-Chip::Chip(std::string label, bool selected)
+Chip::Chip(StringVariant label, bool selected)
     : detail::TypedView<Chip>(MakeChipSpec(std::move(label), selected)) {}
 
-Chip::Chip(std::string_view label, bool selected) : Chip(std::string(label), selected) {}
+Chip::Chip(ImageVariant icon, StringVariant label)
+    : detail::TypedView<Chip>([&] {
+        detail::ValidateImageVariant(icon);
+        if (detail::IsBlankStringVariantLiteral(label)) {
+          throw std::invalid_argument("HuxerUI Chip with an icon requires a non-empty label");
+        }
+        return MakeChipSpec(std::move(label), std::nullopt, std::move(icon));
+      }()) {}
 
-Chip::Chip(const char* label, bool selected)
-    : Chip(label == nullptr ? std::string{} : std::string(label), selected) {}
-
-Chip::Chip(ImageResource icon, StringVariant label)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          std::nullopt,
-          ResolveControlIcon(std::move(icon))
-      )) {}
-
-Chip::Chip(ImageAsset icon, StringVariant label)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          std::nullopt,
-          ResolveControlIcon(std::move(icon))
-      )) {}
-
-Chip::Chip(VectorAsset icon, StringVariant label)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          std::nullopt,
-          ResolveControlIcon(std::move(icon))
-      )) {}
-
-Chip::Chip(ImageResource icon, StringVariant label, bool selected)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          selected,
-          ResolveControlIcon(std::move(icon))
-      )) {}
-
-Chip::Chip(ImageAsset icon, StringVariant label, bool selected)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          selected,
-          ResolveControlIcon(std::move(icon))
-      )) {}
-
-Chip::Chip(VectorAsset icon, StringVariant label, bool selected)
-    : detail::TypedView<Chip>(MakeChipSpec(
-          UseString(std::move(label)),
-          selected,
-          ResolveControlIcon(std::move(icon))
-      )) {}
+Chip::Chip(ImageVariant icon, StringVariant label, bool selected)
+    : detail::TypedView<Chip>([&] {
+        detail::ValidateImageVariant(icon);
+        if (detail::IsBlankStringVariantLiteral(label)) {
+          throw std::invalid_argument("HuxerUI Chip with an icon requires a non-empty label");
+        }
+        return MakeChipSpec(std::move(label), selected, std::move(icon));
+      }()) {}
 
 Divider::Divider(Axis axis) : View(MakeDividerSpec(axis)) {}
 
-SegmentedButtonItem::SegmentedButtonItem(StringVariant label)
-    : SegmentedButtonItem(Icon{std::monostate{}}, std::move(label), true) {}
+SegmentedButtonItem::SegmentedButtonItem(StringVariant label) : label_(std::move(label)) {}
 
-SegmentedButtonItem::SegmentedButtonItem(ImageResource icon, StringVariant label)
-    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-SegmentedButtonItem::SegmentedButtonItem(ImageAsset icon, StringVariant label)
-    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-SegmentedButtonItem::SegmentedButtonItem(VectorAsset icon, StringVariant label)
-    : SegmentedButtonItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-SegmentedButtonItem SegmentedButtonItem::IconOnly(ImageResource icon, StringVariant semantic_label) {
-  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+SegmentedButtonItem::SegmentedButtonItem(ImageVariant icon, StringVariant label)
+    : icon_(std::move(icon)), label_(std::move(label)) {
+  detail::ValidateImageVariant(*icon_);
 }
 
-SegmentedButtonItem SegmentedButtonItem::IconOnly(ImageAsset icon, StringVariant semantic_label) {
-  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+SegmentedButtonItem SegmentedButtonItem::IconOnly(ImageVariant icon, StringVariant semantic_label) {
+  SegmentedButtonItem item(std::move(icon), std::move(semantic_label));
+  item.show_label_ = false;
+  return item;
 }
-
-SegmentedButtonItem SegmentedButtonItem::IconOnly(VectorAsset icon, StringVariant semantic_label) {
-  return SegmentedButtonItem(Icon{std::move(icon)}, std::move(semantic_label), false);
-}
-
-SegmentedButtonItem::SegmentedButtonItem(Icon icon, StringVariant label, bool show_label)
-    : icon_(std::move(icon)), label_(std::move(label)), show_label_(show_label) {}
 
 SegmentedButton::SegmentedButton(std::vector<StringVariant> labels, std::size_t selected_index)
     : detail::TypedView<SegmentedButton>(MakeSegmentedButtonSpec(std::move(labels), selected_index)) {}
@@ -2963,28 +2996,17 @@ SegmentedButton::SegmentedButton(std::vector<StringVariant> labels, std::size_t 
 SegmentedButton::SegmentedButton(std::vector<SegmentedButtonItem> items, std::size_t selected_index)
     : detail::TypedView<SegmentedButton>(MakeSegmentedButtonSpec(std::move(items), selected_index)) {}
 
-TabItem::TabItem(StringVariant label) : TabItem(Icon{std::monostate{}}, std::move(label), true) {}
+TabItem::TabItem(StringVariant label) : label_(std::move(label)) {}
 
-TabItem::TabItem(ImageResource icon, StringVariant label) : TabItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-TabItem::TabItem(ImageAsset icon, StringVariant label) : TabItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-TabItem::TabItem(VectorAsset icon, StringVariant label) : TabItem(Icon{std::move(icon)}, std::move(label), true) {}
-
-TabItem TabItem::IconOnly(ImageResource icon, StringVariant semantic_label) {
-  return TabItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+TabItem::TabItem(ImageVariant icon, StringVariant label) : icon_(std::move(icon)), label_(std::move(label)) {
+  detail::ValidateImageVariant(*icon_);
 }
 
-TabItem TabItem::IconOnly(ImageAsset icon, StringVariant semantic_label) {
-  return TabItem(Icon{std::move(icon)}, std::move(semantic_label), false);
+TabItem TabItem::IconOnly(ImageVariant icon, StringVariant semantic_label) {
+  TabItem item(std::move(icon), std::move(semantic_label));
+  item.show_label_ = false;
+  return item;
 }
-
-TabItem TabItem::IconOnly(VectorAsset icon, StringVariant semantic_label) {
-  return TabItem(Icon{std::move(icon)}, std::move(semantic_label), false);
-}
-
-TabItem::TabItem(Icon icon, StringVariant label, bool show_label)
-    : icon_(std::move(icon)), label_(std::move(label)), show_label_(show_label) {}
 
 TabItem TabItem::Enabled(bool enabled) && {
   enabled_ = enabled;
@@ -2997,13 +3019,9 @@ Tabs::Tabs(std::vector<StringVariant> labels, std::size_t selected_index)
 Tabs::Tabs(std::vector<TabItem> items, std::size_t selected_index)
     : detail::TypedView<Tabs>(MakeTabsSpec(std::move(items), selected_index)) {}
 
-Image::Image(ImageResource resource) : View(MakeImageSpec(detail::UseImageResource(std::move(resource)))) {}
+Image::Image(ImageVariant image) : View(MakeImageSpec(std::move(image))) {}
 
-Image::Image(ImageAsset asset) : View(MakeImageSpec(detail::ImageSource{std::move(asset)})) {}
-
-Image::Image(VectorAsset asset) : View(MakeImageSpec(detail::ImageSource{std::move(asset)})) {}
-
-Image::Image(ExternalTexture texture) : View(MakeImageSpec(detail::ImageSource{std::move(texture)})) {}
+Image::Image(ExternalTexture texture) : View(MakeExternalTextureSpec(std::move(texture))) {}
 
 Image Image::Fit(ImageFit fit) && {
   SetImageFit(fit);
@@ -3033,7 +3051,7 @@ Checkbox::Checkbox(StringVariant label, bool checked)
           detail::NodeKind::Checkbox,
           ToggleVisualKind::Checkbox,
           checked,
-          UseString(std::move(label))
+          std::move(label)
       )) {}
 
 RadioButton::RadioButton(bool selected)
@@ -3046,7 +3064,7 @@ RadioButton::RadioButton(StringVariant label, bool selected)
           detail::NodeKind::RadioButton,
           ToggleVisualKind::RadioButton,
           selected,
-          UseString(std::move(label))
+          std::move(label)
       )) {}
 
 Switch::Switch(bool checked)
@@ -3057,7 +3075,7 @@ Switch::Switch(StringVariant label, bool checked)
           detail::NodeKind::Switch,
           ToggleVisualKind::Switch,
           checked,
-          UseString(std::move(label))
+          std::move(label)
       )) {}
 
 ProgressCircle::ProgressCircle() : detail::TypedView<ProgressCircle>(MakeProgressCircleSpec(std::nullopt)) {}

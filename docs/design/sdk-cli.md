@@ -149,9 +149,9 @@ The application declaration remains shared:
 using namespace huxerui;
 
 View App() {
-  return MaterialTheme([] {
-    return Text("Hello, HuxerUI");
-  });
+  return MaterialTheme {
+    Text("Hello, HuxerUI"),
+  };
 }
 
 const Application application{App};
@@ -657,9 +657,9 @@ The preview installs the same public RootHook that a consuming application uses:
 using namespace huxerui;
 
 View App() {
-  return MaterialTheme([] {
-    return camera_kit::CameraPreview();
-  });
+  return MaterialTheme {
+    camera_kit::CameraPreview(),
+  };
 }
 
 const Application application{

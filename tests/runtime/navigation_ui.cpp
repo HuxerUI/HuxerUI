@@ -54,15 +54,13 @@ View DynamicNavigationPaneApp() {
 }
 
 View MaterialNavigationBarApp() {
-  return MaterialTheme([] {
-    return huxerui::NavigationBar({huxerui::NavigationItem(NavigationTestIcon(), "Home")}, 0);
-  });
+  return MaterialTheme {huxerui::NavigationBar({huxerui::NavigationItem(NavigationTestIcon(), "Home")}, 0)};
 }
 
 View MaterialNavigationPaneApp() {
-  return MaterialTheme([] {
-    return huxerui::NavigationPane({huxerui::NavigationItem(NavigationTestIcon(), "Home")}, 0, true);
-  });
+  return MaterialTheme {
+    huxerui::NavigationPane({huxerui::NavigationItem(NavigationTestIcon(), "Home")}, 0, true),
+  };
 }
 
 View TopAppBarApp() {
@@ -105,11 +103,22 @@ View NarrowTopAppBarApp() {
 }
 
 View MaterialTopAppBarApp() {
-  return MaterialTheme([] {
-    return Column {
+  return MaterialTheme {
+    Column {
       TopAppBar("Material"),
-    }.With(CrossAlign(CrossAxisAlignment::Stretch));
-  });
+    }.With(CrossAlign(CrossAxisAlignment::Stretch)),
+  };
+}
+
+View MaterialDrawerApp() {
+  return MaterialTheme {
+    huxerui::DrawerLayout {
+      Text("Material content"),
+      huxerui::StartDrawer {
+        Text("Material drawer"),
+      }.Open(true),
+    },
+  };
 }
 
 View DrawerApp() {
@@ -782,6 +791,20 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(pane_indicator != nullptr);
   REQUIRE(pane_indicator->LayoutSize().height == 56.0F);
   REQUIRE(pane_indicator->properties.corner_radii.top_left == 28.0F);
+
+  TestPlatform drawer_platform;
+  Runtime drawer_runtime(MaterialDrawerApp, drawer_platform);
+  drawer_runtime.SetWindowMetrics({.viewport = {800.0F, 240.0F}});
+  drawer_runtime.BuildFrame();
+  const detail::MountedNode* drawer_root = drawer_runtime.RootNode();
+  REQUIRE(drawer_root != nullptr);
+  const detail::MountedNode* drawer = FindBackgroundContaining(
+      *drawer_root,
+      material_drawer.background,
+      "Material drawer"
+  );
+  REQUIRE(drawer != nullptr);
+  REQUIRE(drawer->LayoutSize().width == material_drawer.preferred_width);
 }
 
 } // namespace huxerui::test

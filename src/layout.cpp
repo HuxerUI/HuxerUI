@@ -575,6 +575,7 @@ Size MeasureNode(
     break;
   }
   case NodeKind::Scope:
+  case NodeKind::Environment:
     content_size = MeasureScopeChild(node, content_constraints, layout_state);
     break;
   case NodeKind::SelectionArea:
@@ -693,6 +694,7 @@ void LayoutNode(MountedNode& node, Point offset) {
     }
     break;
   case NodeKind::Scope:
+  case NodeKind::Environment:
   case NodeKind::SelectionArea:
     for (auto& child : node.children) {
       LayoutNode(*child, content_origin);

@@ -81,9 +81,7 @@ private:
   std::variant<std::string, StringResource> value_;
   std::vector<std::string> arguments_;
 
-  friend bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
-  friend std::string UseString(const StringVariant& value);
-  friend std::string UseString(StringVariant&& value);
+  friend class detail::ResourceAccess;
 };
 
 class RawResource final : public ResourceId {
@@ -185,6 +183,9 @@ private:
   friend class detail::ResourceAccess;
 };
 
+// ExternalTexture remains separate because it is a live platform surface rather than an application image value.
+using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
+
 class PlatformResources {
 public:
   virtual ~PlatformResources() = default;
@@ -200,8 +201,6 @@ VectorAsset UseVectorImage(ImageResource resource);
 
 namespace detail {
 
-std::string UseStringArguments(const StringResource& resource, std::span<const std::string> arguments);
-
 template <class Value> std::string FormatResourceArgument(Value&& value) {
   std::ostringstream stream;
   stream.imbue(std::locale::classic());
@@ -209,20 +208,20 @@ template <class Value> std::string FormatResourceArgument(Value&& value) {
   return stream.str();
 }
 
+template <class... Arguments> std::vector<std::string> FormatResourceArguments(Arguments&&... arguments) {
+  return {
+      FormatResourceArgument(std::forward<Arguments>(arguments))...,
+  };
+}
+
 } // namespace detail
 
 template <class... Arguments> std::string UseString(StringResource resource, Arguments&&... arguments) {
-  const std::vector<std::string> formatted{
-      detail::FormatResourceArgument(std::forward<Arguments>(arguments))...,
-  };
-  return detail::UseStringArguments(resource, formatted);
+  return UseString(StringVariant::Format(std::move(resource), std::forward<Arguments>(arguments)...));
 }
 
 template <class... Arguments> StringVariant StringVariant::Format(StringResource resource, Arguments&&... arguments) {
-  std::vector<std::string> formatted{
-      detail::FormatResourceArgument(std::forward<Arguments>(arguments))...,
-  };
-  return StringVariant(std::move(resource), std::move(formatted));
+  return StringVariant(std::move(resource), detail::FormatResourceArguments(std::forward<Arguments>(arguments)...));
 }
 
 } // namespace huxerui

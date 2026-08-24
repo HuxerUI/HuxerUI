@@ -75,6 +75,8 @@ struct NavigationEnvironment {
   static NavigationEnvironment Default() {
     return {};
   }
+
+  bool operator==(const NavigationEnvironment&) const = default;
 };
 
 struct NavigationStateValue {
@@ -808,8 +810,11 @@ private:
 
 const ModifierDescriptor& NavigationPageModifier::Descriptor() {
   static const ModifierDescriptor descriptor{
-      [](ViewSpec& spec, const void* value) {
-        const auto& modifier = *static_cast<const NavigationPageModifier*>(value);
+      [](ViewSpec& spec,
+         ModifierSpec& compiled_modifier,
+         const std::shared_ptr<const Environment>&,
+         AppResources&) {
+        const auto& modifier = *static_cast<const NavigationPageModifier*>(compiled_modifier.value.get());
         spec.local_enabled = modifier.state && modifier.state->ActiveEntryId() == modifier.entry_id;
         // Covered pages are disabled for interaction, not visually styled as disabled controls.
         spec.properties.disabled_opacity = 1.0F;
@@ -932,7 +937,7 @@ View BuildNavigationView(
   std::vector<View> pages;
   pages.reserve(state->Entries().size());
   for (const NavigationEntry& entry : state->Entries()) {
-    View page = ProvideEnvironment(environment, [factory = entry.factory] { return factory(); });
+    View page = ProvideEnvironment(environment, Scope(entry.factory));
     pages.push_back(
         Stack{
             std::move(page),

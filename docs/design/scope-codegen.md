@@ -4,6 +4,8 @@ Status: initial implementation
 
 This document defines an opt-in CMake integration that transforms functions marked with `[[huxerui::scope]]` into the existing explicit HuxerUI scope form. The marker declares an independent local state and recomposition boundary. The transformation is build-time syntax sugar and does not introduce a new runtime scope, state model, or recomposition path.
 
+[View Composition and Environment Design](view-composition.md) proposes a coordinated breaking migration from this marker to `[[huxerui::composable]]` after the Environment-independent ViewSpec foundation. The current implementation and this document remain authoritative until that migration is implemented; the proposed marker must not be treated as available API yet.
+
 ## Goals
 
 - Let functions declare a local scope with ordinary C++ function-body syntax.

@@ -895,20 +895,52 @@ ThemeSpec ThemeSpec::Default() {
   return FlatLightThemeSpec();
 }
 
+namespace {
+
+View MakeThemeView(ThemeDefinition definition, View content) {
+  Environment environment;
+  detail::ApplyThemeDefinition(environment, definition);
+  return ProvideEnvironment(std::move(environment), std::move(content));
+}
+
+} // namespace
+
+Theme::Theme(ThemeDefinition definition, View content)
+    : detail::TypedView<Theme>(MakeThemeView(std::move(definition), std::move(content))) {}
+
+FlatTheme::FlatTheme(View content)
+    : detail::TypedView<FlatTheme>(MakeThemeView(FlatThemeDefinition(), std::move(content))) {}
+
+FlatTheme::FlatTheme(ThemeSpec theme, View content)
+    : detail::TypedView<FlatTheme>(MakeThemeView(FlatThemeDefinition(std::move(theme)), std::move(content))) {}
+
+FlatDarkTheme::FlatDarkTheme(View content)
+    : detail::TypedView<FlatDarkTheme>(MakeThemeView(FlatDarkThemeDefinition(), std::move(content))) {}
+
+MaterialTheme::MaterialTheme(View content)
+    : detail::TypedView<MaterialTheme>(MakeThemeView(MaterialThemeDefinition(), std::move(content))) {}
+
+MaterialTheme::MaterialTheme(ThemeSpec theme, View content)
+    : detail::TypedView<MaterialTheme>(MakeThemeView(MaterialThemeDefinition(std::move(theme)), std::move(content))) {}
+
+MaterialDarkTheme::MaterialDarkTheme(View content)
+    : detail::TypedView<MaterialDarkTheme>(MakeThemeView(MaterialDarkThemeDefinition(), std::move(content))) {}
+
 namespace detail {
 
 void ApplyThemeDefinition(Environment& environment, const ThemeDefinition& definition) {
   MergeEnvironment(environment, definition.overrides_);
 }
 
-ThemeSpec ResolveThemeSpec(std::shared_ptr<const Environment> environment) {
+const ThemeSpec& ResolveThemeSpec(std::shared_ptr<const Environment> environment) {
   if (const std::any* value = FindEnvironmentValue(std::move(environment), typeid(ThemeSpec))) {
     if (const auto* theme = std::any_cast<ThemeSpec>(value)) {
       return *theme;
     }
     throw std::logic_error("HuxerUI theme environment value has an invalid type");
   }
-  return ThemeSpec::Default();
+  static const ThemeSpec default_theme = ThemeSpec::Default();
+  return default_theme;
 }
 
 const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key) {

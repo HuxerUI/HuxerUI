@@ -110,7 +110,7 @@ View App() {
 }
 
 View PresentationRoot() {
-  return MaterialTheme(App);
+  return MaterialTheme {Scope(App)};
 }
 
 const Application application{

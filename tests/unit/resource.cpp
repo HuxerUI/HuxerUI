@@ -30,6 +30,9 @@ static_assert(std::is_constructible_v<StringVariant, std::string>);
 static_assert(std::is_constructible_v<StringVariant, std::string_view>);
 static_assert(std::is_constructible_v<StringVariant, const char*>);
 static_assert(std::is_constructible_v<StringVariant, StringResource>);
+static_assert(std::is_constructible_v<ImageVariant, ImageResource>);
+static_assert(std::is_constructible_v<ImageVariant, ImageAsset>);
+static_assert(std::is_constructible_v<ImageVariant, VectorAsset>);
 
 void AppendU32(std::vector<std::byte>& bytes, std::uint32_t value) {
   for (unsigned shift = 0; shift < 32; shift += 8) {
@@ -99,6 +102,17 @@ TEST_CASE("StringVariantComparesLiteralAndDeferredResourceValues") {
       StringVariant::Format(StringResource("app", "strings/files"), 3) ==
       StringVariant::Format(StringResource("app", "strings/files"), 4)
   );
+}
+
+TEST_CASE("ImageVariantPreservesResourceAndResolvedImageValues") {
+  const ImageResource resource("app", "images/logo");
+  REQUIRE(std::get<ImageResource>(ImageVariant(resource)) == resource);
+
+  const ImageAsset raster = ImageAsset::FromEncoded(huxerui::test::MakeTestPng(2, 1));
+  REQUIRE(std::get<ImageAsset>(ImageVariant(raster)) == raster);
+
+  const VectorAsset vector = VectorAsset::Create({1.0F, 1.0F}, [](VectorBuilder&) {});
+  REQUIRE(std::get<VectorAsset>(ImageVariant(vector)) == vector);
 }
 
 TEST_CASE("LocaleNormalizesCommonLanguageTags") {

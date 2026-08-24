@@ -198,29 +198,20 @@ private:
   static Construction Build(StringVariant title, std::optional<View> leading, std::vector<View> actions);
   void UpdateConfiguration();
 
-  TopAppBarStyle style_;
   TopAppBarTitleAlignment title_alignment_ = TopAppBarTitleAlignment::Start;
 };
 
 class NavigationItem final {
 public:
   explicit NavigationItem(StringVariant label);
-  NavigationItem(ImageResource icon, StringVariant label);
-  NavigationItem(ImageAsset icon, StringVariant label);
-  NavigationItem(VectorAsset icon, StringVariant label);
+  NavigationItem(ImageVariant icon, StringVariant label);
 
-  NavigationItem SelectedIcon(ImageResource icon) &&;
-  NavigationItem SelectedIcon(ImageAsset icon) &&;
-  NavigationItem SelectedIcon(VectorAsset icon) &&;
+  NavigationItem SelectedIcon(ImageVariant icon) &&;
   NavigationItem Enabled(bool enabled) &&;
 
 private:
-  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
-
-  NavigationItem(Icon icon, StringVariant label);
-
-  Icon icon_;
-  Icon selected_icon_;
+  std::optional<ImageVariant> icon_;
+  std::optional<ImageVariant> selected_icon_;
   StringVariant label_;
   bool enabled_ = true;
 
@@ -276,7 +267,6 @@ public:
 
 private:
   bool open_ = false;
-  DrawerStyle style_;
 
   friend class DrawerLayout;
 };
@@ -298,7 +288,6 @@ public:
 
 private:
   bool open_ = false;
-  DrawerStyle style_;
 
   friend class DrawerLayout;
 };

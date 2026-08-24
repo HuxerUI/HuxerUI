@@ -613,7 +613,7 @@ const ValidationResult validation = Validate(
 return TextField(email).Validation(validation);
 ```
 
-`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending` and retains its message as a StringVariant until TextField composition. TextField consumes the resolved result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. It does not reject an edit, mutate the controlled value, or decide whether validation runs on change, focus loss, or submission. Those trigger policies remain application state and can later be coordinated by a Form layer without changing TextField.
+`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending` and retains its message as a StringVariant until mounted reconciliation. TextField consumes the resolved result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. It does not reject an edit, mutate the controlled value, or decide whether validation runs on change, focus loss, or submission. Those trigger policies remain application state and can later be coordinated by a Form layer without changing TextField.
 
 Synchronous rules return a `ValidationResult` and `Validate()` stops at the first result that is not valid. `Required` and `EmailAddress` use `validation_required` and `validation_email` from the built-in `huxerui` resource domain unless the application supplies another StringVariant. Custom callables remain equally supported. `Pending` is supplied by asynchronous application state and may display a neutral supporting message without the invalid border; TextField does not own asynchronous work.
 

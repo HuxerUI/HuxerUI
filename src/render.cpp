@@ -90,8 +90,10 @@ void PaintImage(
           using Asset = std::decay_t<decltype(asset)>;
           if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, ExternalTexture>) {
             context.DrawImageRect(asset, source, destination, properties.sampling, opacity);
-          } else {
+          } else if constexpr (std::same_as<Asset, VectorAsset>) {
             context.DrawImageRect(asset, source, destination, vector_tint, opacity);
+          } else {
+            throw std::logic_error("HuxerUI unresolved image resource reached retained paint recording");
           }
         },
         properties.source

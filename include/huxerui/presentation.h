@@ -513,14 +513,10 @@ struct MenuSection {};
 class MenuItem {
 public:
   MenuItem(StringVariant label, std::function<void()> on_item_click);
-  MenuItem(ImageResource icon, StringVariant label, std::function<void()> on_item_click);
-  MenuItem(ImageAsset icon, StringVariant label, std::function<void()> on_item_click);
-  MenuItem(VectorAsset icon, StringVariant label, std::function<void()> on_item_click);
+  MenuItem(ImageVariant icon, StringVariant label, std::function<void()> on_item_click);
 
   MenuItem(StringVariant label, std::vector<MenuEntry> children);
-  MenuItem(ImageResource icon, StringVariant label, std::vector<MenuEntry> children);
-  MenuItem(ImageAsset icon, StringVariant label, std::vector<MenuEntry> children);
-  MenuItem(VectorAsset icon, StringVariant label, std::vector<MenuEntry> children);
+  MenuItem(ImageVariant icon, StringVariant label, std::vector<MenuEntry> children);
 
   MenuItem(const MenuItem& other);
   MenuItem(MenuItem&& other) noexcept;
@@ -533,14 +529,10 @@ public:
   MenuItem IconTint(Color tint) &&;
 
 private:
-  using Icon = std::variant<std::monostate, ImageResource, ImageAsset, VectorAsset>;
   using Destination = std::variant<std::function<void()>, std::vector<MenuEntry>>;
 
-  MenuItem(StringVariant label, Icon icon, std::function<void()> on_item_click);
-  MenuItem(StringVariant label, Icon icon, std::vector<MenuEntry> children);
-
   StringVariant label_;
-  Icon icon_;
+  std::optional<ImageVariant> icon_;
   Destination destination_;
   bool enabled_ = true;
   std::optional<bool> checked_;

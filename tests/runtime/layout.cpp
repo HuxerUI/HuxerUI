@@ -613,9 +613,24 @@ TEST_CASE("TestFrameConstraintsRespectParentAndBoundContainers") {
 }
 
 TEST_CASE("TestFrameConstraintValidation") {
-  REQUIRE_THROWS_AS(Text("A").With(Frame{.width = -1.0F}), std::invalid_argument);
-  REQUIRE_THROWS_AS(Text("A").With(Frame{.min_width = 50.0F, .max_width = 40.0F}), std::invalid_argument);
-  REQUIRE_THROWS_AS(Text("A").With(Frame{.min_height = 50.0F}, Frame{.max_height = 40.0F}), std::invalid_argument);
+  {
+    TestPlatform platform;
+    Runtime runtime{[] { return Text("A").With(Frame{.width = -1.0F}); }, platform};
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  }
+  {
+    TestPlatform platform;
+    Runtime runtime{[] { return Text("A").With(Frame{.min_width = 50.0F, .max_width = 40.0F}); }, platform};
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  }
+  {
+    TestPlatform platform;
+    Runtime runtime{
+        [] { return Text("A").With(Frame{.min_height = 50.0F}, Frame{.max_height = 40.0F}); },
+        platform,
+    };
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  }
 }
 
 TEST_CASE("TestFlowWrapsAndAlignsChildrenWithinLines") {
