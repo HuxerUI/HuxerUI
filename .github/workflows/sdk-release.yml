@@ -236,8 +236,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container: ubuntu:20.04
     env:
-      CC: gcc-11
-      CXX: g++-11
+      CC: gcc-14
+      CXX: g++-14
       PKG_CONFIG_PATH: /opt/huxerui-linux-baseline/lib/pkgconfig
       LD_LIBRARY_PATH: /opt/huxerui-linux-baseline/lib
     steps:
@@ -258,7 +258,7 @@ jobs:
             software-properties-common fontconfig fonts-dejavu-core
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-11 g++-11
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
           python3 -m pip install cmake==3.31.10 meson==1.11.0
       - name: Build baseline system dependencies
         run: >-
