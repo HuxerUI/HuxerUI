@@ -10,12 +10,18 @@ on:
         description: Release tag to create or reuse
         required: true
         type: string
+      validation_only:
+        description: Build and validate artifacts without creating a tag or release
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.validation_only && github.sha || github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
 concurrency:
   group: sdk-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
@@ -42,7 +48,7 @@ jobs:
           -DOUTPUT_FILE=${GITHUB_OUTPUT}
           -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
       - name: Create release tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.validation_only == false
         run: |
           if git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
             existing_commit="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
@@ -64,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
       - name: Prepare Android tools
         run: >-
           chmod +x
@@ -117,7 +123,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
       - name: Prepare Web tools
         run: >-
           chmod +x
@@ -179,7 +185,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
@@ -286,14 +292,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container: ubuntu:20.04
     env:
-      CC: gcc-11
-      CXX: g++-11
+      CC: gcc-14
+      CXX: g++-14
       PKG_CONFIG_PATH: /opt/huxerui-linux-baseline/lib/pkgconfig
       LD_LIBRARY_PATH: /opt/huxerui-linux-baseline/lib
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
@@ -304,18 +310,18 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
+            binutils ca-certificates gdb git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
             libgles2-mesa-dev libglib2.0-dev libgnutls28-dev libmount-dev libnghttp2-dev \
             libpcre2-dev libpsl-dev libselinux1-dev libsqlite3-dev libx11-dev libxext-dev \
             libxkbcommon-dev libxml2-dev libxrandr-dev ninja-build pkg-config python3-pip \
             software-properties-common fontconfig fonts-dejavu-core
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-11 g++-11
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
           python3 -m pip install cmake==3.31.10 meson==1.11.0
       - name: Build baseline system dependencies
         run: >-
-          sh .github/scripts/build_linux_release_dependencies.sh
+          sh .github/workflows/scripts/build_linux_release_dependencies.sh
           /opt/huxerui-linux-baseline
           "${RUNNER_TEMP}/huxerui-linux-dependencies"
       - name: Prepare executables
@@ -337,14 +343,29 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: bash .github/workflows/scripts/run_linux_tests.sh build
+      - name: Collect Linux failure diagnostics
+        if: failure()
+        run: >-
+          bash .github/workflows/scripts/collect_linux_test_diagnostics.sh
+          build
+          "${RUNNER_TEMP}/huxerui-linux-test-diagnostics"
+          "${GITHUB_WORKSPACE}"
+      - name: Upload Linux failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-diagnostics-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/huxerui-linux-test-diagnostics
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate Linux binary compatibility
         run: |
-          sh .github/scripts/check_linux_binary_compatibility.sh \
+          sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
             build/lib/libhuxerui.so \
             build/bin/huxerui
           HUXERUI_MAX_GLIBC=2.17 HUXERUI_REQUIRE_STATIC_CXX=true \
-            sh .github/scripts/check_linux_binary_compatibility.sh \
+            sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
             tools/prebuilt/linux/${{ matrix.architecture }}/hcg \
             tools/prebuilt/linux/${{ matrix.architecture }}/hrc
       - name: Package
@@ -367,6 +388,7 @@ jobs:
 
   publish:
     name: Publish release
+    if: github.event_name != 'workflow_dispatch' || inputs.validation_only == false
     needs:
       - validate
       - build
@@ -377,7 +399,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REF }}
       - name: Download SDK archives
         uses: actions/download-artifact@v4
         with:

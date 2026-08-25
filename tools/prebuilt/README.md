@@ -19,7 +19,7 @@ Prebuilt executables must be rebuilt from the matching tool source whenever that
 
 Linux x86_64 and aarch64 tools require no GLIBC symbol newer than 2.17 and statically link the GNU C++ runtime.
 Linux uses `aarch64` for 64-bit Arm packages and directories, while Apple platforms use `arm64`.
-Release CI applies that stricter tool contract through `.github/scripts/check_linux_binary_compatibility.sh` so a newer build host cannot silently raise their glibc baseline or add a GLIBCXX runtime requirement.
+Release CI applies that stricter tool contract through `.github/workflows/scripts/check_linux_binary_compatibility.sh` so a newer build host cannot silently raise their glibc baseline or add a GLIBCXX runtime requirement.
 
 ## macOS distribution
 

@@ -146,8 +146,8 @@ Following the Windows and macOS distribution model, Linux x86_64 and aarch64 hos
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
 The relocatable Linux SDK supports installed CLI projects and exports both canonical CMake targets without retaining build-tree paths.
 Shared consumers load `HuxerUI::huxerui` without requiring pkg-config development metadata; static consumers request `COMPONENTS static` and resolve the packaged archive closure plus the system development packages through pkg-config.
-Linux release binaries target glibc 2.31, GLIBCXX 3.4.29, and CXXABI 1.3.13 or older symbol versions.
-Release CI builds them with GCC 11 in an Ubuntu 20.04 environment and rejects ELF outputs that exceed those symbol-version ceilings.
+Linux release binaries target glibc 2.31, GLIBCXX 3.4.32, and CXXABI 1.3.15 or older symbol versions.
+Release CI builds them with GCC 14 in an Ubuntu 20.04 environment and rejects ELF outputs that exceed those symbol-version ceilings.
 Because Ubuntu 20.04 does not package libsoup 3, CI builds GLib 2.70.5 and libsoup 3.0.7 into a private link-time prefix; those libraries are not bundled into the SDK, and consumers continue to resolve the documented system dependencies.
 The distributed Linux host tools statically link the GNU C++ runtime and therefore do not add a target-system GLIBCXX dependency.
 
