@@ -208,7 +208,7 @@ Tabs publishes one TabList collection whose real retained item nodes expose the 
 The visual label and icon do not create duplicate semantic descendants.
 Selection changes preserve semantic item identity while updating the controlled selected state.
 
-`TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content; those responsibilities belong to a future navigation container rather than this selection control.
+`TabsStyle` owns label, indicator, and divider appearance; item metrics; indication; indicator motion; and the theme's width policy. Flat tabs keep their content widths and use an item-wide indicator. Material primary tabs divide available width equally until their natural content needs horizontal scrolling, use a 3 dp content-wide indicator with a 24 dp minimum width, and draw the standard divider when the row does not overflow. Tabs does not mount, cache, or transition page content. [IndexedPages](design/indexed-pages.md) assigns retained peer content to a separate controlled container without giving Tabs page-history ownership.
 
 ## TopAppBar
 

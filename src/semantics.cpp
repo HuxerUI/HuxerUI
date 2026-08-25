@@ -463,7 +463,7 @@ void Runtime::BuildSemantics() {
                          Rect visible_bounds,
                          bool has_scroll_ancestor,
                          const VirtualItemSemanticContext* virtual_item) -> NodeIds {
-    if (layer_is_exiting(mounted)) {
+    if (!mounted.participates_in_layout || layer_is_exiting(mounted)) {
       return {};
     }
     detail::SemanticPatch resolved = mounted.component_semantics;

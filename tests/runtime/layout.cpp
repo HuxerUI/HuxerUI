@@ -12,6 +12,7 @@ State<bool> use_column_layout;
 State<bool> use_long_cached_text;
 State<bool> expand_cached_scope;
 State<bool> update_opaque_layout_value;
+State<std::size_t> indexed_page_selection;
 ImageAsset layout_test_image;
 ImageFit layout_test_image_fit = ImageFit::Contain;
 HorizontalAlignment layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
@@ -348,6 +349,28 @@ View ScopedCachedLayoutApp() {
   };
 }
 
+View IndexedCounterPage(std::string label) {
+  HUXERUI_SCOPE({
+    auto count = UseState(0);
+    return Column {
+      Text::Format("{} {}", label, count),
+      Button("Increment " + label).OnClick([count] { count += 1; }),
+    };
+  });
+}
+
+View IndexedPagesApp() {
+  auto selected = UseState<std::size_t>(0);
+  indexed_page_selection = selected;
+  return IndexedPages(
+      {
+          IndexedCounterPage("First"),
+          IndexedCounterPage("Second"),
+      },
+      selected
+  );
+}
+
 TEST_CASE("TestMainAndCrossAxisAlignment") {
   TestPlatform platform;
   Runtime runtime{AxisAlignmentApp, platform};
@@ -362,6 +385,68 @@ TEST_CASE("TestMainAndCrossAxisAlignment") {
   REQUIRE(root->children[0]->layout_offset.y == 0.0F);
   REQUIRE(root->children[1]->layout_offset.x == 40.0F);
   REQUIRE(root->children[1]->layout_offset.y == 80.0F);
+}
+
+TEST_CASE("IndexedPages validates its page set and selection") {
+  REQUIRE_THROWS_AS(IndexedPages({}, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(IndexedPages({Text("Page")}, 1), std::invalid_argument);
+  REQUIRE_THROWS_AS(IndexedPages({View{}}, 0), std::invalid_argument);
+}
+
+TEST_CASE("IndexedPages retains every page and presents only the selected page") {
+  TestPlatform platform;
+  Runtime runtime{IndexedPagesApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  const FlattenedScene& initial = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 2);
+  const std::uint64_t first_identity = root->children[0]->identity;
+  const std::uint64_t second_identity = root->children[1]->identity;
+  REQUIRE(root->children[0]->participates_in_layout);
+  REQUIRE_FALSE(root->children[1]->participates_in_layout);
+  REQUIRE(ContainsText(initial, "First 0"));
+  REQUIRE_FALSE(ContainsText(initial, "Second 0"));
+  REQUIRE(runtime.LastCommit().semantic_frame != nullptr);
+  const auto has_semantic_label = [&runtime](std::string_view label) {
+    return std::ranges::any_of(runtime.LastCommit().semantic_frame->nodes, [label](const SemanticNode& node) {
+      return node.label == label;
+    });
+  };
+  REQUIRE(has_semantic_label("Increment First"));
+  REQUIRE_FALSE(has_semantic_label("Increment Second"));
+
+  const std::uint64_t measure_revision = root->measure_revision;
+  const std::uint64_t layout_revision = root->layout_revision;
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision == measure_revision);
+  REQUIRE(root->layout_revision == layout_revision);
+
+  const Rect first_button = root->children[0]->children[0]->children[1]->PresentationBounds();
+  ClickAt(runtime, {first_button.x + first_button.width * 0.5F, first_button.y + first_button.height * 0.5F});
+  REQUIRE(ContainsText(runtime.BuildFrame(), "First 1"));
+
+  indexed_page_selection = 1;
+  const FlattenedScene& second = runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->children[0]->identity == first_identity);
+  REQUIRE(root->children[1]->identity == second_identity);
+  REQUIRE_FALSE(root->children[0]->participates_in_layout);
+  REQUIRE(root->children[1]->participates_in_layout);
+  REQUIRE_FALSE(ContainsText(second, "First 1"));
+  REQUIRE(ContainsText(second, "Second 0"));
+  REQUIRE_FALSE(has_semantic_label("Increment First"));
+  REQUIRE(has_semantic_label("Increment Second"));
+
+  indexed_page_selection = 0;
+  const FlattenedScene& restored = runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->children[0]->identity == first_identity);
+  REQUIRE(root->children[1]->identity == second_identity);
+  REQUIRE(ContainsText(restored, "First 1"));
+  REQUIRE_FALSE(ContainsText(restored, "Second 0"));
 }
 
 TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {

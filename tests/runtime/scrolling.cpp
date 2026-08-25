@@ -10,8 +10,11 @@ ScrollController controlled_view_scroll;
 ScrollController horizontal_view_scroll;
 ScrollController example_scroll;
 ScrollController scoped_grow_scroll;
+ScrollController first_indexed_page_scroll;
+ScrollController second_indexed_page_scroll;
 State<bool> scoped_scroll_content_changed;
 State<float> scoped_scroll_content_height;
+State<std::size_t> indexed_scroll_page;
 int scroll_observer_compositions = 0;
 
 View ScrollViewApp() {
@@ -148,6 +151,35 @@ View ScopedScrollViewApp() {
       },
     }.Controller(scroll).With(huxerui::Grow{}),
   }.With(huxerui::CrossAlign{CrossAxisAlignment::Stretch});
+}
+
+View IndexedScrollablePage(std::size_t index) {
+  HUXERUI_SCOPE({
+    auto scroll = UseScrollController();
+    if (index == 0) {
+      first_indexed_page_scroll = scroll;
+    } else {
+      second_indexed_page_scroll = scroll;
+    }
+    return ScrollView {
+      Column {
+        Text::Format("Page {}", index),
+        Spacer().With(huxerui::Frame{100.0F, 300.0F}),
+      },
+    }.Controller(scroll);
+  });
+}
+
+View IndexedScrollingApp() {
+  auto selected = UseState<std::size_t>(0);
+  indexed_scroll_page = selected;
+  return IndexedPages(
+      {
+          IndexedScrollablePage(0),
+          IndexedScrollablePage(1),
+      },
+      selected
+  );
 }
 
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
@@ -405,6 +437,31 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
   REQUIRE(runtime.RootNode()->scroll_state->offset_y == 50.0F);
   REQUIRE(controlled_view_scroll.Offset() == 50.0F);
   REQUIRE(!controlled_view_scroll.ScrollToItem(std::size_t{3}));
+}
+
+TEST_CASE("IndexedPages retains an independent ScrollView offset for each page") {
+  TestPlatform platform;
+  Runtime runtime{IndexedScrollingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(first_indexed_page_scroll.IsConnected());
+  REQUIRE_FALSE(second_indexed_page_scroll.IsConnected());
+  REQUIRE(first_indexed_page_scroll.ScrollTo(60.0F));
+  runtime.BuildFrame();
+  REQUIRE(first_indexed_page_scroll.Offset() == 60.0F);
+
+  indexed_scroll_page = 1;
+  runtime.BuildFrame();
+  REQUIRE(second_indexed_page_scroll.IsConnected());
+  REQUIRE(second_indexed_page_scroll.ScrollTo(35.0F));
+  runtime.BuildFrame();
+  REQUIRE(second_indexed_page_scroll.Offset() == 35.0F);
+
+  indexed_scroll_page = 0;
+  runtime.BuildFrame();
+  REQUIRE(first_indexed_page_scroll.Offset() == 60.0F);
+  REQUIRE(second_indexed_page_scroll.Offset() == 35.0F);
 }
 
 TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {

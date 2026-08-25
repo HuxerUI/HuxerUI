@@ -194,7 +194,7 @@ public:
 private:
   static void
   CollectTextNodes(detail::MountedNode& owner, detail::MountedNode& node, std::vector<detail::MountedNode*>& nodes) {
-    if (&node != &owner && node.kind == detail::NodeKind::SelectionArea) {
+    if (&node != &owner && (!node.participates_in_layout || node.kind == detail::NodeKind::SelectionArea)) {
       return;
     }
     if (node.kind == detail::NodeKind::Text) {
@@ -211,7 +211,7 @@ private:
       detail::MountedNode& node,
       std::unordered_map<std::uint64_t, detail::MountedNode*>& nodes
   ) {
-    if (&node != &owner && node.kind == detail::NodeKind::SelectionArea) {
+    if (&node != &owner && (!node.participates_in_layout || node.kind == detail::NodeKind::SelectionArea)) {
       return;
     }
     if (node.kind == detail::NodeKind::Text) {

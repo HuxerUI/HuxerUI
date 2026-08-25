@@ -383,17 +383,12 @@ View GalleryTools(std::size_t selected_page, State<std::size_t> theme_family, St
   );
 }
 
-View GalleryPage(std::size_t selected_page) {
-  switch (selected_page) {
-  case controls_page:
-    return ControlsDemo();
-  case layout_page:
-    return LayoutDemo();
-  case motion_page:
-    return MotionDemo();
-  default:
-    return ControlsDemo();
-  }
+View GalleryPage(View content, float padding) {
+  return ScrollView {
+    Column {
+      std::move(content),
+    }.With(Padding(padding), CrossAlign(CrossAxisAlignment::Stretch))
+  }.With(ScrollBar());
 }
 
 [[huxerui::composable]]
@@ -435,11 +430,14 @@ View GalleryMain(
           .With(Foreground(theme.colors.on_surface_variant)),
       Tabs({"Controls", "Layout", "Motion"}, selected_page.Get())
           .OnChanged([selected_page](std::size_t index) { selected_page = index; }),
-      ScrollView {
-        Column {
-          GalleryPage(selected_page.Get()),
-        }.With(Padding(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
-      }.With(ScrollBar(), Grow()),
+      IndexedPages(
+          {
+              GalleryPage(ControlsDemo(), theme.spacing.small),
+              GalleryPage(LayoutDemo(), theme.spacing.small),
+              GalleryPage(MotionDemo(), theme.spacing.small),
+          },
+          selected_page
+      ).With(Grow()),
     }.With(
         Padding(theme.spacing.large),
         Spacing(theme.spacing.medium),

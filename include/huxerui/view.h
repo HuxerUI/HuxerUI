@@ -3,6 +3,7 @@
 #include <any>
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -849,6 +850,19 @@ public:
 class Stack final : public Layout<Stack> {
 public:
   using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+};
+
+class IndexedPages final : public Layout<IndexedPages> {
+public:
+  IndexedPages(std::initializer_list<View> pages, std::size_t selected_index)
+      : IndexedPages(std::vector<View>(pages), selected_index) {}
+  IndexedPages(std::initializer_list<View> pages, const State<std::size_t>& selected_index)
+      : IndexedPages(std::vector<View>(pages), selected_index.Get()) {}
+  IndexedPages(std::vector<View> pages, std::size_t selected_index);
+  IndexedPages(std::vector<View> pages, const State<std::size_t>& selected_index)
+      : IndexedPages(std::move(pages), selected_index.Get()) {}
 
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };

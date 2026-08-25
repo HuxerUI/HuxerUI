@@ -17,6 +17,8 @@ Row {
 
 The main axis supports `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, and `SpaceEvenly`. Cross-axis alignment supports `Start`, `Center`, `End`, and `Stretch`. `Stack` uses independent horizontal and vertical alignment.
 
+The [IndexedPages](design/indexed-pages.md) layout presents one controlled page while retaining the mounted state of its peer pages. Each page owns its ScrollView when selections need independent scroll positions.
+
 `Spacer()` grows by default. `Grow(factor)` assigns a proportional share of finite remaining main-axis space:
 
 ```cpp
@@ -232,4 +234,3 @@ A semantically transparent item root defaults to GridCell without replacing an e
 Application layouts derive from `Layout<Derived>` and implement a static `Measure()` function. Custom virtual containers derive from `VirtualLayout<Derived>` and request only the logical items needed for the current viewport.
 
 The runtime continues to own reconciliation, keys, state restoration, clipping, hit testing, scrolling, and cleanup. See [Extending HuxerUI](extending-huxerui.md) for the extension protocols.
-

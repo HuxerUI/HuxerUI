@@ -85,7 +85,7 @@ Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing b
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
 They are controlled selection views: the selected index enters through construction and a requested index leaves through the typed event.
 They do not create pages, retain destination history, or assume that selecting an item always replaces visible content.
-An application may use the selection to switch sibling content, select a tab-owned NavigationStack, or update a typed route path.
+An application may use the selection to control [IndexedPages](indexed-pages.md), select a page-owned NavigationStack, or update a typed route path.
 
 NavigationBar lays destinations along the horizontal axis.
 NavigationPane lays them vertically, supports compact icon-only and expanded icon-and-label presentation, and scrolls when its destinations exceed the viewport.
@@ -650,7 +650,8 @@ Applications that need history to survive a structural replacement hoist the aut
 A future NavigationSplitView is a separate adaptive container rather than a behavior switch inside NavigationStack.
 
 Tabs also remain independent.
-Each tab may own a nested NavigationStack when the tab-content container retains inactive tab subtrees, but Tabs does not acquire page-history ownership.
+Each IndexedPages child may own a nested NavigationStack, but Tabs and IndexedPages do not acquire page-history ownership.
+IndexedPages retains peer page subtrees according to the separate [Indexed Pages Design](indexed-pages.md).
 
 ## Component lifecycle
 

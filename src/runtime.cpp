@@ -238,6 +238,9 @@ Color ResolveCaptionForeground(Color background) noexcept {
 void CollectWindowDragRegionBackground(
     const MountedNode& node, Color inherited_background, float title_bar_height, std::optional<Color>& candidate
 ) {
+  if (!node.participates_in_layout) {
+    return;
+  }
   Color background = inherited_background;
   if (node.properties.background.has_value()) {
     if (const Color* color = std::get_if<Color>(&node.properties.background->Get())) {
@@ -279,6 +282,9 @@ const SystemBarsAppearance* FindSystemBarsAppearance(const MountedNode& node) {
 }
 
 const SystemBarsAppearance* FindApplicationSystemBarsFallback(const MountedNode& node) {
+  if (!node.participates_in_layout) {
+    return nullptr;
+  }
   if (const SystemBarsAppearance* appearance = FindSystemBarsAppearance(node)) {
     return appearance;
   }
@@ -300,6 +306,9 @@ struct SystemBarCandidates {
 void CollectSystemBarCandidates(
     const MountedNode& node, float status_boundary, float navigation_boundary, SystemBarCandidates& candidates
 ) {
+  if (!node.participates_in_layout) {
+    return;
+  }
   if (node.presentation.resolved_opacity > 0.001F && node.properties.system_bars_appearance.has_value()) {
     const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
     const SystemBarsAppearance& appearance = *node.properties.system_bars_appearance;
@@ -843,7 +852,19 @@ void DispatchKey(MountedNode& node, const KeyEvent& event) {
   }
 }
 
+bool RefreshExtensionPresence(MountedNode& node) {
+  bool subtree_has_extensions = !node.extensions.empty();
+  for (auto& child : node.children) {
+    subtree_has_extensions = RefreshExtensionPresence(*child) || subtree_has_extensions;
+  }
+  node.subtree_has_extensions = subtree_has_extensions;
+  return subtree_has_extensions;
+}
+
 void PrepareExtensionGeometry(MountedNode& node) {
+  if (!node.participates_in_layout) {
+    return;
+  }
   if (!node.subtree_has_extensions) {
     if (node.indication_bounds_override.has_value()) {
       node.indication_bounds_override.reset();
@@ -883,8 +904,8 @@ void PrepareExtensionGeometry(MountedNode& node) {
 }
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
-  const bool enabled = parent_enabled && node.local_enabled;
-  const bool applies_disabled_appearance = parent_enabled && !node.local_enabled;
+  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled;
+  const bool applies_disabled_appearance = parent_enabled && node.participates_in_layout && !node.local_enabled;
   const bool disabled_appearance_changed = node.applies_disabled_appearance != applies_disabled_appearance;
   if (disabled_appearance_changed) {
     node.content_paint_dirty = true;
@@ -909,7 +930,7 @@ void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
 }
 
 std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t identity, bool parent_enabled = true) {
-  const bool enabled = parent_enabled && node.local_enabled;
+  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled;
   if (node.identity == identity) {
     return enabled;
   }
@@ -1304,7 +1325,8 @@ bool Runtime::DispatchPlatformViewEvent(
     return false;
   }
   detail::MountedNode* node = FindNode(*state_->mounted_root_, identity);
-  if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view) {
+  if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view ||
+      !node->interaction.enabled) {
     return false;
   }
   const auto event = std::ranges::find(node->platform_view->events, name, &detail::PlatformEventDescriptor::name);
@@ -2034,8 +2056,16 @@ bool Runtime::UpdateNodeExtensions(
     std::optional<double>& next_wakeup,
     bool rebuild_cache
 ) {
+  // Extension presence is a structural cache. Layout participation gates this frame's callbacks without discarding
+  // retained extensions, allowing them to resume when their subtree participates again.
+  if (rebuild_cache) {
+    RefreshExtensionPresence(node);
+  }
   if (!rebuild_cache && !node.subtree_has_extensions) {
     return false;
+  }
+  if (!node.participates_in_layout) {
+    return node.subtree_has_extensions;
   }
 
   node.presentation.local_transform = {};
@@ -2044,12 +2074,10 @@ bool Runtime::UpdateNodeExtensions(
   if (!node.extensions.empty()) {
     node_frame.reduced_motion = node_frame.reduced_motion || node.reduced_motion;
   }
-  bool subtree_has_extensions = false;
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
     }
-    subtree_has_extensions = true;
     if (entry.interaction_sync_pending) {
       entry.extension->OnInteraction(node, node.interaction, std::nullopt);
       entry.interaction_sync_pending = false;
@@ -2062,11 +2090,9 @@ bool Runtime::UpdateNodeExtensions(
   }
 
   for (auto& child : node.children) {
-    subtree_has_extensions =
-        UpdateNodeExtensions(*child, frame, needs_frame, next_wakeup, rebuild_cache) || subtree_has_extensions;
+    UpdateNodeExtensions(*child, frame, needs_frame, next_wakeup, false);
   }
-  node.subtree_has_extensions = subtree_has_extensions;
-  return subtree_has_extensions;
+  return node.subtree_has_extensions;
 }
 
 void Runtime::BindExtensionInvalidation(detail::MountedNode& node) {
@@ -2314,7 +2340,9 @@ void Runtime::InvalidateLayout(detail::MountedNode& mounted) {
 
 bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   if (mounted.kind == NodeKind::Scope && mounted.recompose_scope && mounted.recompose_scope->IsDirty()) {
-    return ComposeScope(mounted);
+    const bool layout_changed = ComposeScope(mounted);
+    mounted.render_structure_dirty = mounted.render_structure_dirty || layout_changed;
+    return layout_changed;
   }
 
   bool layout_changed = false;
@@ -2323,6 +2351,7 @@ bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   }
   if (layout_changed) {
     mounted.measure_dirty = true;
+    mounted.render_structure_dirty = true;
   }
   return layout_changed;
 }
@@ -2485,7 +2514,9 @@ void Runtime::ComposeApplication() {
     }
     if (ReconcileChildren(application_content->children, application_children, state_->root_environment_)) {
       application_content->measure_dirty = true;
+      application_content->render_structure_dirty = true;
       state_->mounted_root_->measure_dirty = true;
+      state_->mounted_root_->render_structure_dirty = true;
     }
     state_->root_scope_->EndComposition();
     scope_composing = false;
@@ -2565,7 +2596,9 @@ void Runtime::ComposeLayers() {
 
     if (ReconcileLayerChildren(layer_stack->children, layer_children)) {
       layer_stack->measure_dirty = true;
+      layer_stack->render_structure_dirty = true;
       state_->mounted_root_->measure_dirty = true;
+      state_->mounted_root_->render_structure_dirty = true;
     }
   } catch (...) {
     InvalidateLayers();
@@ -2701,6 +2734,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     layout_changed = ReconcileChildren(mounted->children, incoming->children, mounted->environment) || layout_changed;
   }
   mounted->measure_dirty = mounted->measure_dirty || layout_changed;
+  mounted->render_structure_dirty = mounted->render_structure_dirty || layout_changed;
   return layout_changed;
 }
 

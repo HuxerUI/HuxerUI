@@ -56,6 +56,7 @@ using huxerui::ForEach;
 using huxerui::FrameCommit;
 using huxerui::GridColumns;
 using huxerui::HorizontalAlignment;
+using huxerui::IndexedPages;
 using huxerui::Key;
 using huxerui::KeyEvent;
 using huxerui::KeyEventType;

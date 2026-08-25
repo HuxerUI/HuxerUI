@@ -172,6 +172,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [Text Input and TextField Design](docs/design/text-input.md) | Shared editing protocol and platform adapter contracts |
 | [Semantics and Accessibility Design](docs/design/semantics.md) | Semantic declarations, committed frames, actions, component defaults, and platform accessibility mapping |
 | [Navigation Design](docs/design/navigation.md) | Page stacks, typed routes, scoped controllers, transitions, Back routing, and Web URL history |
+| [Indexed Pages Design](docs/design/indexed-pages.md) | Retained peer pages, controlled selection, layout participation, and per-page state |
 | [Window Insets and System Bars Design](docs/design/window-insets.md) | Safe-area layout, edge-to-edge content, system-bar theming, and mobile platform mapping |
 | [Window Chrome Design](docs/design/window-chrome.md) | Desktop title-bar ownership, application content, standard controls, and platform fallbacks |
 | [View Composition and Environment Design](docs/design/view-composition.md) | Immediate View declarations, mounted Environment propagation, reconciliation-time compilation, and composable functions |

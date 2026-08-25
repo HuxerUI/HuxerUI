@@ -504,6 +504,11 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
   const Transform2D node_transform =
       ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
   node.presentation.resolved_transform = ComposeTransform(inherited_transform, node_transform);
+  if (!node.participates_in_layout) {
+    node.presentation.render_opacity = 0.0F;
+    node.presentation.resolved_opacity = 0.0F;
+    return;
+  }
   // render_opacity is emitted as this node's group opacity. resolved_opacity is the inherited product used for
   // visibility and descendant geometry without baking ancestor opacity into retained paint commands.
   float render_opacity = std::clamp(node.presentation.local_opacity, 0.0F, 1.0F);
@@ -558,6 +563,42 @@ void PaintFocusRing(const MountedNode& node, PaintContext& context) {
           frame.height + outset * 2.0F,
       },
       ring.color, width, radii);
+}
+
+void HideRenderTree(MountedNode& node) {
+  RenderNode& render_node = node.render_node;
+  // Non-participating subtrees keep their retained RenderNode links so existing invisible PlatformView placements can
+  // preserve native instances. Rebuild those links only after mounted child structure changes.
+  if (!node.render_structure_dirty && !render_node.visible) {
+    return;
+  }
+  std::vector<const RenderNode*> children;
+  children.reserve(node.children.size());
+  for (auto& child : node.children) {
+    HideRenderTree(*child);
+    children.push_back(&child->render_node);
+  }
+  bool changed = false;
+  if (render_node.id != node.identity) {
+    render_node.id = node.identity;
+    changed = true;
+  }
+  if (render_node.opacity != 0.0F) {
+    render_node.opacity = 0.0F;
+    changed = true;
+  }
+  if (render_node.children != children) {
+    render_node.children = std::move(children);
+    changed = true;
+  }
+  if (render_node.visible) {
+    render_node.visible = false;
+    changed = true;
+  }
+  if (changed) {
+    ++render_node.revision;
+  }
+  node.render_structure_dirty = false;
 }
 
 void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
@@ -674,7 +715,11 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   std::vector<const RenderNode*> children;
   children.reserve(node.children.size());
   for (const auto& child : node.children) {
-    PaintNodeWithinClip(*child, child_clip);
+    if (child->participates_in_layout) {
+      PaintNodeWithinClip(*child, child_clip);
+    } else {
+      HideRenderTree(*child);
+    }
     children.push_back(&child->render_node);
   }
   if (extra_child != nullptr) {
@@ -719,6 +764,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   if (changed) {
     ++render_node.revision;
   }
+  node.render_structure_dirty = false;
 }
 
 } // namespace

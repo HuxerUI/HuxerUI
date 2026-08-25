@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <unordered_set>
 
 #include <huxerui/theme.h>
 
@@ -230,7 +231,7 @@ bool ExtensionHandlesHover(MountedNode& node, Point position) {
 }
 
 bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
-  if (!node.pointer_events_enabled) {
+  if (!node.participates_in_layout || !node.pointer_events_enabled) {
     return false;
   }
   const auto local_position = node.presentation.resolved_transform.Inverse(position);
@@ -270,7 +271,7 @@ enum class WindowHitTarget {
 };
 
 WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
-  if (!node.pointer_events_enabled) {
+  if (!node.participates_in_layout || !node.pointer_events_enabled) {
     return WindowHitTarget::None;
   }
   const auto local_position = node.presentation.resolved_transform.Inverse(position);
@@ -378,6 +379,45 @@ void ClampScrollOffsetAndCompleteController(MountedNode& node) {
   const float max_offset = std::max(0.0F, content_extent - viewport_extent);
   scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
   CompleteScrollController(node);
+}
+
+void StopScrollMotionTree(MountedNode& node) {
+  if (node.scroll_state) {
+    node.scroll_state->motion.Stop();
+  }
+  for (auto& child : node.children) {
+    StopScrollMotionTree(*child);
+  }
+}
+
+void CommitLayoutParticipation(MountedNode& node, const std::vector<LayoutResult::Placement>& placements) {
+  // A mounted or measured child is not necessarily part of the committed UI; the parent's placements are the single
+  // source of truth for direct-child participation.
+  const auto placed_in_order = [](const LayoutResult::Placement& placement, const auto& child) {
+    return placement.child == child.get();
+  };
+  const bool all_placed_in_order =
+      placements.size() == node.children.size() && std::ranges::equal(placements, node.children, placed_in_order);
+  if (all_placed_in_order) {
+    for (auto& child : node.children) {
+      child->participates_in_layout = true;
+    }
+    return;
+  }
+
+  std::unordered_set<const huxerui::MountedNode*> placed;
+  placed.reserve(placements.size());
+  for (const LayoutResult::Placement& placement : placements) {
+    placed.insert(placement.child);
+  }
+  for (auto& child : node.children) {
+    const bool participating = placed.contains(child.get());
+    if (child->participates_in_layout && !participating) {
+      // Invisible momentum must not keep scheduling frames or resume later with stale velocity.
+      StopScrollMotionTree(*child);
+    }
+    child->participates_in_layout = participating;
+  }
 }
 
 } // namespace
@@ -571,6 +611,7 @@ Size MeasureNode(
         LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
     LayoutResult result = node.layout_descriptor->measure(context, node, content_constraints);
     content_size = content_constraints.Constrain(result.MeasuredSize());
+    CommitLayoutParticipation(node, result.Placements());
     node.layout_placements = result.Placements();
     break;
   }
@@ -1009,6 +1050,9 @@ namespace {
 bool AdvanceMountedNodeFrameImpl(
     MountedNode& node, const FrameInfo& frame, std::vector<MountedNode*>& scroll_ancestors
 ) {
+  if (!node.participates_in_layout) {
+    return false;
+  }
   const bool scrollable = IsScrollContainer(node);
   if (scrollable) {
     scroll_ancestors.push_back(&node);
@@ -2183,6 +2227,16 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
   }
   result.SetSize({width, height});
   return result;
+}
+
+LayoutResult IndexedPages::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  const std::size_t selected_index = node.LayoutValueOr<detail::IndexedPagesSelection>(node.ChildCount());
+  if (selected_index >= node.ChildCount()) {
+    throw std::logic_error("HuxerUI mounted IndexedPages selected index is out of range");
+  }
+  MountedNode& selected = node.ChildAt(selected_index);
+  const Size size = context.Measure(selected, constraints);
+  return LayoutResult{}.Place(selected, {}).SetSize(constraints.Constrain(size));
 }
 
 } // namespace huxerui

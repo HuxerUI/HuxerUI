@@ -94,6 +94,10 @@ struct ScrollFillViewport {
   using Value = bool;
 };
 
+struct IndexedPagesSelection {
+  using Value = std::size_t;
+};
+
 struct VirtualListItemExtent {
   using Value = float;
 };
@@ -712,6 +716,12 @@ struct MountedNode final : public huxerui::MountedNode {
   bool layout_dirty = true;
   bool content_paint_dirty = true;
   bool foreground_paint_dirty = true;
+  // RenderNode children are retained raw pointers, so a mounted child-structure change must be synchronized even when
+  // this subtree is not currently painted.
+  bool render_structure_dirty = true;
+  // This records whether the immediate parent committed this node in its LayoutResult placements. Effective
+  // participation also requires every ancestor to participate and is intentionally distinct from visual visibility.
+  bool participates_in_layout = true;
   std::unique_ptr<ScrollNodeState> scroll_state;
   std::unique_ptr<VirtualNodeState> virtual_state;
   std::vector<NodeExtensionEntry> extensions;

@@ -37,6 +37,7 @@ struct TestPlatformEvents {
 State<int> platform_view_value;
 State<bool> alternate_platform_view_type;
 State<bool> reverse_platform_views;
+State<std::size_t> indexed_platform_view_page;
 int received_platform_event = 0;
 ExternalTexture platform_view_external_texture;
 ExternalTexture received_platform_texture;
@@ -139,6 +140,21 @@ View CoveredPlatformViewApp() {
   };
 }
 
+View IndexedPlatformViewApp() {
+  auto selected = UseState<std::size_t>(0);
+  indexed_platform_view_page = selected;
+  return IndexedPages(
+      {
+          PlatformView("test/Event")
+              .Events<TestPlatformEvents::Changed>()
+              .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; })
+              .With(Frame{80.0F, 40.0F}),
+          Text("Other page"),
+      },
+      selected
+  );
+}
+
 const PlacePlatformViewCommand& FindPlatformView(const RenderFrame& frame) {
   REQUIRE(frame.scene.root != nullptr);
   const auto find_in_node = [](const auto& self, const RenderNode& node) -> const PlacePlatformViewCommand* {
@@ -159,6 +175,14 @@ const PlacePlatformViewCommand& FindPlatformView(const RenderFrame& frame) {
   const PlacePlatformViewCommand* placement = find_in_node(find_in_node, *frame.scene.root);
   REQUIRE(placement != nullptr);
   return *placement;
+}
+
+const detail::PlatformViewPlacement& FindPlatformViewPlacement(const detail::RenderComposition& composition) {
+  const auto placement = std::ranges::find_if(composition.layers, [](const auto& layer) {
+    return std::holds_alternative<detail::PlatformViewPlacement>(layer);
+  });
+  REQUIRE(placement != composition.layers.end());
+  return std::get<detail::PlatformViewPlacement>(*placement);
 }
 
 TEST_CASE("PlatformViewValidatesItsRegisteredType") {
@@ -350,6 +374,42 @@ TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
   covered.SetWindowMetrics({{300.0F, 200.0F}});
   covered.BuildRenderFrame();
   REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(covered.CoreRuntime(), {20.0F, 20.0F}).has_value());
+}
+
+TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to the current UI") {
+  received_platform_event = 0;
+  TestPlatform platform;
+  Runtime runtime(IndexedPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+
+  const RenderFrame& initial_frame = runtime.BuildRenderFrame();
+  const detail::RenderComposition initial = detail::BuildRenderComposition(initial_frame.scene);
+  const detail::PlatformViewPlacement& initial_placement = FindPlatformViewPlacement(initial);
+  REQUIRE(initial_placement.visible);
+  const std::uint64_t identity = initial_placement.command->Identity();
+
+  indexed_platform_view_page = 1;
+  const FrameCommit& hidden_frame = runtime.BuildCommit();
+  const detail::RenderComposition hidden = detail::BuildRenderComposition(hidden_frame.render_frame.scene);
+  const detail::PlatformViewPlacement& hidden_placement = FindPlatformViewPlacement(hidden);
+  REQUIRE(hidden_placement.command->Identity() == identity);
+  REQUIRE_FALSE(hidden_placement.visible);
+  REQUIRE(std::ranges::none_of(hidden_frame.semantic_frame->nodes, [identity](const SemanticNode& node) {
+    return node.platform_view_identity == identity;
+  }));
+  REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(),
+      identity,
+      "changed",
+      PlatformPayload(std::int64_t{7})
+  ));
+  REQUIRE(received_platform_event == 0);
+
+  indexed_platform_view_page = 0;
+  const detail::RenderComposition restored = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
+  const detail::PlatformViewPlacement& restored_placement = FindPlatformViewPlacement(restored);
+  REQUIRE(restored_placement.command->Identity() == identity);
+  REQUIRE(restored_placement.visible);
 }
 
 TEST_CASE("PlatformModulesOwnAUniquePerSurfaceTypeRegistry") {

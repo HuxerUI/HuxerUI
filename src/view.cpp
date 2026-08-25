@@ -2562,6 +2562,19 @@ std::shared_ptr<detail::ViewSpec> MakeScrollViewSpec(View content) {
   return spec;
 }
 
+std::vector<View> ValidateIndexedPages(std::vector<View> pages, std::size_t selected_index) {
+  if (pages.empty()) {
+    throw std::invalid_argument("HuxerUI IndexedPages requires at least one page");
+  }
+  if (selected_index >= pages.size()) {
+    throw std::invalid_argument("HuxerUI IndexedPages selected index is out of range");
+  }
+  if (std::ranges::any_of(pages, [](const View& page) { return !page; })) {
+    throw std::invalid_argument("HuxerUI IndexedPages pages must not be empty Views");
+  }
+  return pages;
+}
+
 } // namespace
 
 const detail::ModifierDescriptor& Padding::Descriptor() {
@@ -3120,6 +3133,11 @@ Canvas::Canvas(CanvasPainter painter) : View(MakeCanvasSpec(std::move(painter)))
 Scope::Scope(std::function<View()> factory) : View(detail::MakeScopeSpec(std::move(factory))) {}
 
 Spacer::Spacer() : View(MakeSpacerSpec()) {}
+
+IndexedPages::IndexedPages(std::vector<View> pages, std::size_t selected_index)
+    : Layout<IndexedPages>(ValidateIndexedPages(std::move(pages), selected_index)) {
+  SetLayoutValue(typeid(detail::IndexedPagesSelection), selected_index);
+}
 
 ScrollView::ScrollView(View content) : detail::TypedView<ScrollView>(MakeScrollViewSpec(std::move(content))) {}
 
