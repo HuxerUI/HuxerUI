@@ -197,20 +197,6 @@ public:
     }
   }
 
-  void BeginMethodCall() noexcept {
-    // A late method reply can replace the predicted request path, so shutdown must keep this context alive to close it.
-    ++pending_method_calls_;
-  }
-
-  void EndMethodCall() noexcept {
-    if (pending_method_calls_ != 0) {
-      --pending_method_calls_;
-    }
-    if (shutdown_requested_ && pending_method_calls_ == 0) {
-      g_main_loop_quit(loop_);
-    }
-  }
-
   [[nodiscard]] bool Invoke(std::function<void()> callback) noexcept {
     try {
       {
@@ -400,10 +386,7 @@ private:
   }
 
   void RequestStop() noexcept {
-    shutdown_requested_ = true;
-    if (pending_method_calls_ == 0) {
-      g_main_loop_quit(loop_);
-    }
+    g_main_loop_quit(loop_);
   }
 
   void NotifyUnavailable() noexcept {
@@ -430,12 +413,10 @@ private:
   std::condition_variable ready_condition_;
   std::unordered_map<std::uint64_t, std::function<void()>> unavailable_observers_;
   std::uint64_t next_observer_identifier_ = 1;
-  std::size_t pending_method_calls_ = 0;
   std::atomic<bool> available_ = false;
   bool ready_ = false;
   bool running_ = false;
   bool stopping_ = false;
-  bool shutdown_requested_ = false;
 };
 
 std::string UniqueToken() {
@@ -744,9 +725,9 @@ private:
                             : OpenOptions(filter_, multiple_, token);
     const char* method = save_ ? "SaveFile" : "OpenFile";
     const char* title = save_ ? "Save File" : (multiple_ ? "Open Files" : "Open File");
-    auto* operation = new std::shared_ptr<PortalPickerOperation>(shared_from_this());
-    portal_->BeginMethodCall();
-    g_dbus_connection_call(
+    // This runs on the dedicated portal thread with a bounded timeout, avoiding callback-data teardown races during Stop().
+    ErrorHandle error;
+    VariantHandle reply(g_dbus_connection_call_sync(
         portal_->Native(),
         kPortalService,
         kPortalObject,
@@ -757,15 +738,9 @@ private:
         G_DBUS_CALL_FLAGS_NONE,
         kPortalCallTimeoutMs,
         nullptr,
-        [](GObject* source, GAsyncResult* result, gpointer data) {
-          std::unique_ptr<std::shared_ptr<PortalPickerOperation>> operation(
-              static_cast<std::shared_ptr<PortalPickerOperation>*>(data)
-          );
-          (*operation)->MethodFinished(G_DBUS_CONNECTION(source), result);
-          (*operation)->portal_->EndMethodCall();
-        },
-        operation
-    );
+        error.Address()
+    ));
+    MethodFinishedOnPortalThread(reply.Get());
   }
 
   void Subscribe(const std::string& path) {
@@ -834,18 +809,8 @@ private:
     return finished_;
   }
 
-  void MethodFinished(GDBusConnection* connection, GAsyncResult* result) noexcept {
-    try {
-      MethodFinishedOnPortalThread(connection, result);
-    } catch (...) {
-      FailOnPortalThread();
-    }
-  }
-
-  void MethodFinishedOnPortalThread(GDBusConnection* connection, GAsyncResult* result) {
-    ErrorHandle error;
-    VariantHandle reply(g_dbus_connection_call_finish(connection, result, error.Address()));
-    if (reply.Get() == nullptr) {
+  void MethodFinishedOnPortalThread(GVariant* reply) {
+    if (reply == nullptr) {
       if (Finished()) {
         CleanupPortalSubscriptions();
       } else {
@@ -854,7 +819,7 @@ private:
       return;
     }
     const char* returned_path = nullptr;
-    g_variant_get(reply.Get(), "(&o)", &returned_path);
+    g_variant_get(reply, "(&o)", &returned_path);
     if (returned_path == nullptr || returned_path[0] == '\0') {
       FailOnPortalThread();
       return;
