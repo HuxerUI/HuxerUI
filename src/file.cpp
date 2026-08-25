@@ -594,8 +594,10 @@ public:
   }
 
   static FileExecutor& Instance() {
-    static FileExecutor executor;
-    return executor;
+    // Canceled Tasks may leave non-interruptible file operations running during process shutdown. Keep the
+    // process-wide executor alive until operating-system teardown so static destruction never blocks on them.
+    static FileExecutor* executor = new FileExecutor;
+    return *executor;
   }
 
 private:
