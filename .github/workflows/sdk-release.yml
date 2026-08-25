@@ -291,7 +291,7 @@ jobs:
           {
             echo "Core dump limit: $(ulimit -c)"
             echo "Core dump pattern: $(cat /proc/sys/kernel/core_pattern)"
-            ctest --test-dir build --output-on-failure
+            ctest --test-dir build --output-on-failure --timeout 300
           } 2>&1 | tee build/linux-test.log
       - name: Collect Linux failure diagnostics
         if: failure()
@@ -301,6 +301,7 @@ jobs:
           diagnostic_directory="${RUNNER_TEMP}/huxerui-linux-test-diagnostics"
           mkdir -p "${diagnostic_directory}"
           cp build/linux-test.log "${diagnostic_directory}/ctest.log" 2>/dev/null
+          cp build/bin/huxerui_tests "${diagnostic_directory}/huxerui_tests" 2>/dev/null
           {
             uname -a
             printf 'core limit: '
@@ -330,7 +331,7 @@ jobs:
 
           seed="$(sed -n 's/^.*Randomness seeded to: //p' build/linux-test.log 2>/dev/null | tail -n 1)"
           if [[ -n "${seed}" ]] && command -v gdb >/dev/null 2>&1 && [[ -x build/bin/huxerui_tests ]]; then
-            gdb --batch \
+            timeout --signal=INT --kill-after=30s 300s gdb --batch \
               -ex "set pagination off" \
               -ex "set confirm off" \
               -ex "run" \
