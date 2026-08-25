@@ -3077,7 +3077,8 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   });
   REQUIRE(third_keyboard_clicks == 0);
   const FlattenedScene& space_down = runtime.BuildFrame();
-  const Color* keyboard_press = LayerFillColor(huxerui::FlatLightThemeSpec().interactions.indication.press);
+  const ThemeSpec keyboard_theme = huxerui::FlatLightThemeSpec();
+  const Color* keyboard_press = LayerFillColor(keyboard_theme.interactions.indication.press);
   REQUIRE(keyboard_press != nullptr);
   REQUIRE(FindRectWithColor(space_down, *keyboard_press) != nullptr);
 
