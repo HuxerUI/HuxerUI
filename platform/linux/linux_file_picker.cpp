@@ -197,6 +197,19 @@ public:
     }
   }
 
+  void BeginMethodCall() noexcept {
+    ++pending_method_calls_;
+  }
+
+  void EndMethodCall() noexcept {
+    if (pending_method_calls_ != 0) {
+      --pending_method_calls_;
+    }
+    if (shutdown_requested_ && pending_method_calls_ == 0) {
+      g_main_loop_quit(loop_);
+    }
+  }
+
   [[nodiscard]] bool Invoke(std::function<void()> callback) noexcept {
     try {
       {
@@ -386,7 +399,10 @@ private:
   }
 
   void RequestStop() noexcept {
-    g_main_loop_quit(loop_);
+    shutdown_requested_ = true;
+    if (pending_method_calls_ == 0) {
+      g_main_loop_quit(loop_);
+    }
   }
 
   void NotifyUnavailable() noexcept {
@@ -413,10 +429,12 @@ private:
   std::condition_variable ready_condition_;
   std::unordered_map<std::uint64_t, std::function<void()>> unavailable_observers_;
   std::uint64_t next_observer_identifier_ = 1;
+  std::size_t pending_method_calls_ = 0;
   std::atomic<bool> available_ = false;
   bool ready_ = false;
   bool running_ = false;
   bool stopping_ = false;
+  bool shutdown_requested_ = false;
 };
 
 std::string UniqueToken() {
@@ -712,6 +730,7 @@ private:
     }
     {
       std::scoped_lock lock(mutex_);
+      keep_alive_ = shared_from_this();
       request_path_ = expected_path;
     }
     Subscribe(expected_path);
@@ -725,9 +744,9 @@ private:
                             : OpenOptions(filter_, multiple_, token);
     const char* method = save_ ? "SaveFile" : "OpenFile";
     const char* title = save_ ? "Save File" : (multiple_ ? "Open Files" : "Open File");
-    // This runs on the dedicated portal thread with a bounded timeout, avoiding callback-data teardown races during Stop().
-    ErrorHandle error;
-    VariantHandle reply(g_dbus_connection_call_sync(
+    auto* operation = new std::shared_ptr<PortalPickerOperation>(shared_from_this());
+    portal_->BeginMethodCall();
+    g_dbus_connection_call(
         portal_->Native(),
         kPortalService,
         kPortalObject,
@@ -738,13 +757,19 @@ private:
         G_DBUS_CALL_FLAGS_NONE,
         kPortalCallTimeoutMs,
         nullptr,
-        error.Address()
-    ));
-    MethodFinishedOnPortalThread(reply.Get());
+        [](GObject* source, GAsyncResult* result, gpointer data) {
+          std::unique_ptr<std::shared_ptr<PortalPickerOperation>> operation(
+              static_cast<std::shared_ptr<PortalPickerOperation>*>(data)
+          );
+          (*operation)->MethodFinished(G_DBUS_CONNECTION(source), result);
+          (*operation)->portal_->EndMethodCall();
+        },
+        operation
+    );
   }
 
   void Subscribe(const std::string& path) {
-    auto* operation = new std::shared_ptr<PortalPickerOperation>(shared_from_this());
+    auto* operation = new std::weak_ptr<PortalPickerOperation>(shared_from_this());
     subscription_ = g_dbus_connection_signal_subscribe(
         portal_->Native(),
         kPortalService,
@@ -760,12 +785,13 @@ private:
            const gchar*,
            GVariant* parameters,
            gpointer data) {
-          const std::shared_ptr<PortalPickerOperation>& operation =
-              *static_cast<std::shared_ptr<PortalPickerOperation>*>(data);
-          operation->Response(parameters);
+          const auto* weak = static_cast<std::weak_ptr<PortalPickerOperation>*>(data);
+          if (const std::shared_ptr<PortalPickerOperation> operation = weak->lock()) {
+            operation->Response(parameters);
+          }
         },
         operation,
-        [](gpointer data) { delete static_cast<std::shared_ptr<PortalPickerOperation>*>(data); }
+        [](gpointer data) { delete static_cast<std::weak_ptr<PortalPickerOperation>*>(data); }
     );
   }
 
@@ -781,6 +807,11 @@ private:
     if (unavailable_observer_ != 0) {
       portal_->RemoveUnavailableObserver(unavailable_observer_);
       unavailable_observer_ = 0;
+    }
+    std::shared_ptr<PortalPickerOperation> keep_alive;
+    {
+      std::scoped_lock lock(mutex_);
+      keep_alive = std::move(keep_alive_);
     }
   }
 
@@ -809,8 +840,18 @@ private:
     return finished_;
   }
 
-  void MethodFinishedOnPortalThread(GVariant* reply) {
-    if (reply == nullptr) {
+  void MethodFinished(GDBusConnection* connection, GAsyncResult* result) noexcept {
+    try {
+      MethodFinishedOnPortalThread(connection, result);
+    } catch (...) {
+      FailOnPortalThread();
+    }
+  }
+
+  void MethodFinishedOnPortalThread(GDBusConnection* connection, GAsyncResult* result) {
+    ErrorHandle error;
+    VariantHandle reply(g_dbus_connection_call_finish(connection, result, error.Address()));
+    if (reply.Get() == nullptr) {
       if (Finished()) {
         CleanupPortalSubscriptions();
       } else {
@@ -819,7 +860,7 @@ private:
       return;
     }
     const char* returned_path = nullptr;
-    g_variant_get(reply, "(&o)", &returned_path);
+    g_variant_get(reply.Get(), "(&o)", &returned_path);
     if (returned_path == nullptr || returned_path[0] == '\0') {
       FailOnPortalThread();
       return;
@@ -971,6 +1012,7 @@ private:
   mutable std::mutex mutex_;
   FilePickerOpenCompletion open_completion_;
   FilePickerSaveCompletion save_completion_;
+  std::shared_ptr<PortalPickerOperation> keep_alive_;
   std::string request_path_;
   std::string closed_path_;
   guint subscription_ = 0;
