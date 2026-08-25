@@ -250,7 +250,7 @@ Task<Result> RunCallbackOperation(typename CallbackOperationState<Result>::Start
 }
 
 Task<FileResult<std::vector<std::byte>>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state) {
-  co_return co_await RunCallbackOperation<FileResult<std::vector<std::byte>>>(
+  return RunCallbackOperation<FileResult<std::vector<std::byte>>>(
       [state = std::move(state)](FileReferenceBytesCompletion completion) {
         return state->ReadBytes(std::move(completion));
       },
@@ -262,22 +262,36 @@ Task<FileResult<std::vector<std::byte>>> ReadReferenceBytes(std::shared_ptr<File
 }
 
 Task<FileResult<std::string>> ReadReferenceString(std::shared_ptr<FileReferenceState> state) {
-  co_return DecodeFileUtf8(co_await ReadReferenceBytes(std::move(state)));
+  return RunCallbackOperation<FileResult<std::string>>(
+      [state = std::move(state)](std::function<void(FileResult<std::string>)> completion) {
+        return state->ReadBytes([completion = std::move(completion)](FileResult<std::vector<std::byte>> result) mutable {
+          completion(DecodeFileUtf8(std::move(result)));
+        });
+      },
+      FileResult<std::string>(FileError{
+          FileErrorCode::Io,
+          "HuxerUI external file read failed",
+      })
+  );
 }
 
 Task<bool> ImportReference(std::shared_ptr<FileReferenceState> state, File destination, bool overwrite) {
-  co_return co_await RunCallbackOperation<bool>(
+  return RunCallbackOperation<bool>(
       [state = std::move(state), destination = std::move(destination), overwrite](FileReferenceBoolCompletion completion
       ) { return state->ImportTo(destination, overwrite, std::move(completion)); },
       false
   );
 }
 
+Task<bool> FailedBooleanOperation() {
+  co_return false;
+}
+
 Task<bool> ReplaceReference(std::shared_ptr<FileReferenceState> state, File source, bool can_write) {
   if (!can_write) {
-    co_return false;
+    return FailedBooleanOperation();
   }
-  co_return co_await RunCallbackOperation<bool>(
+  return RunCallbackOperation<bool>(
       [state = std::move(state), source = std::move(source)](FileReferenceBoolCompletion completion) {
         return state->ReplaceWith(source, std::move(completion));
       },
@@ -549,12 +563,20 @@ Task<Result> RunPickerRequest(
 
 using SingleFileCompletion = std::function<void(std::optional<FileReference>)>;
 
+Task<std::optional<FileReference>> EmptyFileReference() {
+  co_return std::nullopt;
+}
+
+Task<std::vector<FileReference>> EmptyFileReferences() {
+  co_return std::vector<FileReference>{};
+}
+
 Task<std::optional<FileReference>>
 OpenSingleFile(std::shared_ptr<FilePickerController> controller, FilePickerFilter filter) {
   if (!controller->CanOpenFiles()) {
-    co_return std::nullopt;
+    return EmptyFileReference();
   }
-  co_return co_await RunPickerRequest<std::optional<FileReference>>(
+  return RunPickerRequest<std::optional<FileReference>>(
       std::move(controller),
       [filter = std::move(filter)](FilePickerTransport& transport, SingleFileCompletion completion) mutable {
         return transport.OpenFiles(
@@ -575,9 +597,9 @@ OpenSingleFile(std::shared_ptr<FilePickerController> controller, FilePickerFilte
 Task<std::vector<FileReference>>
 OpenSeveralFiles(std::shared_ptr<FilePickerController> controller, FilePickerFilter filter) {
   if (!controller->CanOpenFiles()) {
-    co_return std::vector<FileReference>{};
+    return EmptyFileReferences();
   }
-  co_return co_await RunPickerRequest<std::vector<FileReference>>(
+  return RunPickerRequest<std::vector<FileReference>>(
       std::move(controller),
       [filter = std::move(filter)](FilePickerTransport& transport, FilePickerOpenCompletion completion) mutable {
         return transport.OpenFiles(std::move(filter), true, std::move(completion));
@@ -587,9 +609,9 @@ OpenSeveralFiles(std::shared_ptr<FilePickerController> controller, FilePickerFil
 
 Task<bool> SaveLocalFile(std::shared_ptr<FilePickerController> controller, File source, SaveFileOptions options) {
   if (!controller->CanSaveFiles()) {
-    co_return false;
+    return FailedBooleanOperation();
   }
-  co_return co_await RunPickerRequest<bool>(
+  return RunPickerRequest<bool>(
       std::move(controller),
       [source = std::move(source),
        options = std::move(options)](FilePickerTransport& transport, FilePickerSaveCompletion completion) mutable {
