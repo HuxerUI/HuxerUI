@@ -308,8 +308,8 @@ private:
 
 namespace detail {
 
-template <class Factory> Task<void> InvokeTaskFactory(Factory factory) {
-  co_await std::invoke(factory);
+template <class Factory> Task<void> InvokeTaskFactory(std::shared_ptr<Factory> factory) {
+  co_await std::invoke(*factory);
 }
 
 } // namespace detail
@@ -324,7 +324,8 @@ public:
     requires std::constructible_from<std::decay_t<Factory>, Factory&&> && std::invocable<std::decay_t<Factory>&> &&
              std::same_as<std::invoke_result_t<std::decay_t<Factory>&>, Task<void>>
   TaskHandle Launch(Factory&& factory) const {
-    return Launch(detail::InvokeTaskFactory(std::decay_t<Factory>(std::forward<Factory>(factory))));
+    using FactoryType = std::decay_t<Factory>;
+    return Launch(detail::InvokeTaskFactory(std::make_shared<FactoryType>(std::forward<Factory>(factory))));
   }
 
 private:

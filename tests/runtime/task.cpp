@@ -411,15 +411,23 @@ TEST_CASE("UnmountClosesTaskScopeAfterLifecycleCleanupAndRejectsLaterLaunch") {
 TEST_CASE("RuntimeDestructionClosesRunningTaskScopes") {
   captured_task_scope = {};
   auto suspension = std::make_shared<ManualSuspensionState>();
+  auto capture = std::make_shared<int>(42);
+  std::weak_ptr<int> weak_capture = capture;
   TestPlatform platform;
   {
     Runtime runtime(TaskScopeApp, platform);
     runtime.BuildFrame();
-    captured_task_scope.Launch(SuspendedTask(suspension));
+    captured_task_scope.Launch([capture, suspension]() -> Task<void> {
+      static_cast<void>(*capture);
+      co_await ManualAwaiter(suspension);
+    });
+    capture.reset();
     platform.RunPlatformModuleTasks();
     REQUIRE_FALSE(suspension->canceled);
+    REQUIRE_FALSE(weak_capture.expired());
   }
   REQUIRE(suspension->canceled);
+  REQUIRE(weak_capture.expired());
 }
 
 TEST_CASE("HuxerUIAwaitableRestoresTaskExecutionToTheOwningUIThread") {
