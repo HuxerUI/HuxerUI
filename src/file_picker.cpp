@@ -213,8 +213,7 @@ template <class Result> class CallbackOperationAwaiter final {
 public:
   using State = CallbackOperationState<Result>;
 
-  CallbackOperationAwaiter(typename State::Starter starter, Result failure)
-      : state_(std::make_shared<State>(std::move(starter), std::move(failure))) {}
+  explicit CallbackOperationAwaiter(std::shared_ptr<State> state) : state_(std::move(state)) {}
 
   ~CallbackOperationAwaiter() {
     if (state_) {
@@ -239,8 +238,15 @@ private:
 };
 
 template <class Result>
+Task<Result> AwaitCallbackOperation(std::shared_ptr<CallbackOperationState<Result>> state) {
+  co_return co_await CallbackOperationAwaiter<Result>(std::move(state));
+}
+
+template <class Result>
 Task<Result> RunCallbackOperation(typename CallbackOperationState<Result>::Starter starter, Result failure) {
-  co_return co_await CallbackOperationAwaiter<Result>(std::move(starter), std::move(failure));
+  return AwaitCallbackOperation<Result>(
+      std::make_shared<CallbackOperationState<Result>>(std::move(starter), std::move(failure))
+  );
 }
 
 Task<FileResult<std::vector<std::byte>>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state) {
@@ -498,8 +504,8 @@ template <class Result> class PickerRequestAwaiter final {
 public:
   using Request = PickerRequest<Result>;
 
-  PickerRequestAwaiter(std::shared_ptr<FilePickerController> controller, typename Request::Starter starter)
-      : controller_(std::move(controller)), request_(std::make_shared<Request>(std::move(starter))) {}
+  PickerRequestAwaiter(std::shared_ptr<FilePickerController> controller, std::shared_ptr<Request> request)
+      : controller_(std::move(controller)), request_(std::move(request)) {}
 
   ~PickerRequestAwaiter() {
     if (request_) {
@@ -526,9 +532,19 @@ private:
 };
 
 template <class Result>
-Task<Result>
-RunPickerRequest(std::shared_ptr<FilePickerController> controller, typename PickerRequest<Result>::Starter starter) {
-  co_return co_await PickerRequestAwaiter<Result>(std::move(controller), std::move(starter));
+Task<Result> AwaitPickerRequest(
+    std::shared_ptr<FilePickerController> controller, std::shared_ptr<PickerRequest<Result>> request
+) {
+  co_return co_await PickerRequestAwaiter<Result>(std::move(controller), std::move(request));
+}
+
+template <class Result>
+Task<Result> RunPickerRequest(
+    std::shared_ptr<FilePickerController> controller, typename PickerRequest<Result>::Starter starter
+) {
+  return AwaitPickerRequest<Result>(
+      std::move(controller), std::make_shared<PickerRequest<Result>>(std::move(starter))
+  );
 }
 
 using SingleFileCompletion = std::function<void(std::optional<FileReference>)>;
