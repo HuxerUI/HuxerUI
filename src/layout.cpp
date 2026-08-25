@@ -658,16 +658,10 @@ Size MeasureNode(
     session.CommitRealization(result.Placements());
     node.virtual_state->realized_placements = result.Placements();
     node.virtual_state->collection_semantics = std::move(collection_semantics);
+    node.virtual_state->pending_scroll_offset = result.CorrectedScrollOffset();
     node.scroll_state->axis = result.ScrollAxis();
     node.scroll_state->content_width = result.ContentSize().width;
     node.scroll_state->content_height = result.ContentSize().height;
-    if (result.CorrectedScrollOffset().has_value()) {
-      if (result.ScrollAxis() == Axis::Vertical) {
-        node.scroll_state->offset_y = *result.CorrectedScrollOffset();
-      } else {
-        node.scroll_state->offset_x = *result.CorrectedScrollOffset();
-      }
-    }
     node.virtual_state->viewport_dirty = false;
     content_size = content_constraints.Constrain(result.MeasuredSize());
     break;
@@ -679,9 +673,6 @@ Size MeasureNode(
       content_size.height + node.resolved_padding.Vertical(),
   };
   node.measured_size = resolved_constraints.Constrain(measured);
-  if (IsScrollContainer(node) && node.kind != NodeKind::ScrollView && node.kind != NodeKind::TextField) {
-    ClampScrollOffsetAndCompleteController(node);
-  }
   node.measured_constraints = constraints;
   node.measured_safe_area = inherited_safe_area;
   node.measured_title_bar = inherited_title_bar;
@@ -750,6 +741,12 @@ void LayoutNode(MountedNode& node, Point offset) {
     // Virtual scrolling changes which items are realized and their viewport-relative placements, so its offset is
     // resolved during layout. A regular ScrollView retains its subtree and moves it with children_transform instead.
     const bool vertical = ScrollAxis(node) == Axis::Vertical;
+    if (node.virtual_state->pending_scroll_offset.has_value()) {
+      float& committed_scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
+      committed_scroll_offset = *node.virtual_state->pending_scroll_offset;
+      node.virtual_state->pending_scroll_offset.reset();
+    }
+    ClampScrollOffsetAndCompleteController(node);
     const float scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
     for (const auto& placement : node.virtual_state->realized_placements) {
       const Point item_offset = vertical ? Point{placement.offset.x, placement.offset.y - scroll_offset}
@@ -1128,20 +1125,20 @@ namespace {
 
 class VirtualListMetrics {
 public:
-  void Prepare(
+  bool Prepare(
       std::size_t item_count,
       Axis axis,
       float spacing,
       std::optional<float> fixed_extent,
       float estimated_extent,
-      bool source_dirty
+      bool reset_measurements
   ) {
     const bool axis_changed = initialized_ && axis_ != axis;
-    const bool structure_changed = !initialized_ || item_count_ != item_count || axis_changed || spacing_ != spacing ||
-                                   fixed_extent_ != fixed_extent || configured_estimate_ != estimated_extent ||
-                                   source_dirty;
-    if (!structure_changed) {
-      return;
+    const bool geometry_changed = !initialized_ || item_count_ != item_count || axis_changed || spacing_ != spacing ||
+                                  fixed_extent_ != fixed_extent || configured_estimate_ != estimated_extent ||
+                                  reset_measurements;
+    if (!geometry_changed) {
+      return false;
     }
 
     item_count_ = item_count;
@@ -1165,6 +1162,7 @@ public:
       keyed_extents_.clear();
     }
     initialized_ = true;
+    return true;
   }
 
   [[nodiscard]] bool Initialized() const noexcept {
@@ -1375,8 +1373,7 @@ public:
       float row_spacing,
       std::optional<float> fixed_row_extent,
       float estimated_row_extent,
-      const std::vector<std::size_t>& spans,
-      bool source_dirty
+      const std::vector<std::size_t>& spans
   ) {
     const bool plan_changed = !initialized_ || item_count_ != item_count || columns_ != columns || spans_ != spans;
     if (plan_changed) {
@@ -1384,8 +1381,8 @@ public:
     }
 
     const bool geometry_changed = plan_changed || track_width_ != track_width || row_spacing_ != row_spacing ||
-                                  fixed_row_extent_ != fixed_row_extent ||
-                                  estimated_row_extent_ != estimated_row_extent || source_dirty;
+                                   fixed_row_extent_ != fixed_row_extent ||
+                                   estimated_row_extent_ != estimated_row_extent;
     rows_.Prepare(row_count_, Axis::Vertical, row_spacing, fixed_row_extent, estimated_row_extent, geometry_changed);
     track_width_ = track_width;
     row_spacing_ = row_spacing;
@@ -1788,17 +1785,16 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
       node.LayoutValueOr<detail::VirtualListCacheExtent>(std::max(200.0F, viewport_extent * 0.5F));
   const std::size_t item_count = context.ItemCount();
 
-  auto& internal_node = static_cast<detail::MountedNode&>(node);
   auto& metrics = node.Cache<VirtualListMetrics>();
   const bool had_metrics = metrics.Initialized();
-  const bool source_dirty = internal_node.virtual_state->source_dirty;
   const bool axis_changed = metrics.Initialized() && metrics.CurrentAxis() != axis;
   const float previous_scroll =
       metrics.Initialized() ? (metrics.CurrentAxis() == Axis::Vertical ? viewport.offset.y : viewport.offset.x) : 0.0F;
   const std::size_t previous_anchor = metrics.Initialized() ? metrics.IndexAt(previous_scroll) : 0;
   const float previous_anchor_delta = metrics.Initialized() ? previous_scroll - metrics.Offset(previous_anchor) : 0.0F;
 
-  metrics.Prepare(item_count, axis, node.Spacing(), fixed_extent, configured_estimate, source_dirty);
+  const bool geometry_changed =
+      metrics.Prepare(item_count, axis, node.Spacing(), fixed_extent, configured_estimate, false);
 
   float scroll_offset = vertical ? viewport.offset.y : viewport.offset.x;
   std::size_t anchor = item_count == 0 ? 0 : std::min(previous_anchor, item_count - 1);
@@ -1806,7 +1802,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
   if (axis_changed) {
     scroll_offset = metrics.Offset(anchor);
     anchor_delta = 0.0F;
-  } else if (!source_dirty || !had_metrics) {
+  } else if (!geometry_changed || !had_metrics) {
     anchor = metrics.IndexAt(scroll_offset);
     anchor_delta = scroll_offset - metrics.Offset(anchor);
   }
@@ -1880,6 +1876,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
 
   scroll_offset = item_count == 0 ? 0.0F : metrics.Offset(std::min(anchor, item_count - 1)) + anchor_delta;
   const float content_extent = metrics.ContentExtent();
+  scroll_offset = std::clamp(scroll_offset, 0.0F, std::max(0.0F, content_extent - viewport_extent));
   const Size measured_size = constraints.Constrain(MakeAxisSize(content_extent, cross_extent, vertical));
   const float measured_cross = LayoutCrossSize(measured_size, vertical);
 
@@ -1953,7 +1950,6 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
   const auto& spans = configured_spans == nullptr ? empty_spans : *configured_spans;
   const std::size_t item_count = context.ItemCount();
 
-  auto& internal_node = static_cast<detail::MountedNode&>(node);
   auto& metrics = node.Cache<VirtualGridMetrics>();
   const bool had_layout = metrics.Initialized();
   const std::size_t previous_row = had_layout && metrics.RowCount() > 0 ? metrics.RowAt(viewport.offset.y) : 0;
@@ -1967,8 +1963,7 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
       row_spacing,
       fixed_row_extent,
       estimated_row_extent,
-      spans,
-      internal_node.virtual_state->source_dirty
+      spans
   );
 
   float scroll_offset = viewport.offset.y;

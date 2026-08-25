@@ -622,8 +622,9 @@ struct VirtualNodeState {
   std::vector<VirtualLayoutResult::Placement> realized_placements;
   std::optional<VirtualCollectionSemantics> collection_semantics;
   std::unique_ptr<VirtualItemStateCache> item_state_cache;
-  bool source_dirty = true;
   bool viewport_dirty = true;
+  // A parent may measure the same child repeatedly; only the candidate selected for layout commits its correction.
+  std::optional<float> pending_scroll_offset;
 };
 
 struct ScrollMotionFrameResult {

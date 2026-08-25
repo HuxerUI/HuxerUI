@@ -11,6 +11,8 @@ State<std::vector<int>> virtual_unkeyed_items;
 StateList<int> virtual_state_items;
 State<bool> variable_height_expanded;
 State<bool> variable_grid_height_expanded;
+State<int> virtual_list_declaration_revision;
+State<int> virtual_grid_declaration_revision;
 State<bool> horizontal_virtual_list;
 ScrollController custom_virtual_scroll;
 
@@ -255,6 +257,23 @@ public:
   }
 };
 
+class RemeasuringVirtualHost final : public Layout<RemeasuringVirtualHost> {
+public:
+  using Layout::Layout;
+
+  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+    LayoutResult result;
+    if (node.ChildCount() == 0) {
+      return result.SetSize(constraints.Constrain({}));
+    }
+    MountedNode& child = node.ChildAt(0);
+    static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 300.0F, 300.0F}));
+    static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 100.0F, 100.0F}));
+    result.Place(child, {});
+    return result.SetSize(constraints.Constrain({100.0F, 300.0F}));
+  }
+};
+
 View StatefulListRow(int index) {
   HUXERUI_SCOPE({
     auto taps = UseState(0);
@@ -326,6 +345,31 @@ View TinyVariableVirtualListApp() {
   return VirtualList(items, [](int index) {
     return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 1.0F}).Key(index);
   });
+}
+
+View RedeclaredVariableVirtualListApp() {
+  auto revision = UseState(0);
+  virtual_list_declaration_revision = revision;
+  const int current_revision = revision.Get();
+  return VirtualList(std::size_t{30}, [current_revision](std::size_t index) {
+    return Scope([current_revision, index] {
+             return Text(std::to_string(current_revision) + ":" + std::to_string(index))
+                 .With(huxerui::Frame{100.0F, 200.0F});
+           })
+        .Key(index);
+  })
+      .EstimatedItemExtent(120.0F)
+      .CacheExtent(0.0F);
+}
+
+View RemeasuredVirtualListApp() {
+  return RemeasuringVirtualHost {
+    VirtualList(std::size_t{30}, [](std::size_t index) {
+      return Text(std::to_string(index)).With(huxerui::Frame{100.0F, 100.0F}).Key(index);
+    })
+        .ItemExtent(100.0F)
+        .CacheExtent(0.0F),
+  };
 }
 
 View FixedHorizontalVirtualListApp() {
@@ -453,6 +497,22 @@ View VariableVirtualGridApp() {
       .Columns(GridColumns::Fixed(2))
       .EstimatedRowExtent(35.0F)
       .RowSpacing(5.0F);
+}
+
+View RedeclaredVariableVirtualGridApp() {
+  auto revision = UseState(0);
+  virtual_grid_declaration_revision = revision;
+  const int current_revision = revision.Get();
+  return VirtualGrid(std::size_t{60}, [current_revision](std::size_t index) {
+    return Scope([current_revision, index] {
+             return Text(std::to_string(current_revision) + ":" + std::to_string(index))
+                 .With(huxerui::Frame{.height = 200.0F});
+           })
+        .Key(index);
+  })
+      .Columns(GridColumns::Fixed(2))
+      .EstimatedRowExtent(120.0F)
+      .CacheExtent(0.0F);
 }
 
 View AdaptiveAxisVirtualListApp() {
@@ -767,6 +827,55 @@ TEST_CASE("TestVariableVirtualListRefinesEstimatedExtent") {
   REQUIRE(root != nullptr);
   REQUIRE(root->scroll_state->content_height == 1000.0F);
   REQUIRE(root->virtual_state->realized_indices.back() >= 99);
+}
+
+TEST_CASE("TestVariableVirtualListRetainsMetricsAcrossItemDeclarationRefresh") {
+  TestPlatform platform;
+  Runtime runtime{RedeclaredVariableVirtualListApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleScrollEvent({{50.0F, 150.0F}, 0.0F, 10000.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const float content_height = root->scroll_state->content_height;
+  const float scroll_offset = root->scroll_state->offset_y;
+  REQUIRE(std::abs(scroll_offset - (content_height - root->ContentBounds().height)) < 0.01F);
+
+  virtual_list_declaration_revision = 1;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->scroll_state->content_height == content_height);
+  REQUIRE(root->scroll_state->offset_y == scroll_offset);
+  const auto last =
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), 29);
+  REQUIRE(last != root->virtual_state->realized_indices.end());
+  const std::size_t position = static_cast<std::size_t>(last - root->virtual_state->realized_indices.begin());
+  REQUIRE(root->children[position]->children.front()->text == "1:29");
+  const float last_end = root->children[position]->layout_offset.y + root->children[position]->bounds.height;
+  REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
+}
+
+TEST_CASE("TestVirtualListCommitsScrollCorrectionAfterFinalParentMeasurement") {
+  TestPlatform platform;
+  Runtime runtime{RemeasuredVirtualListApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleScrollEvent({{50.0F, 50.0F}, 0.0F, 10000.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* list = root->children.front().get();
+  REQUIRE(list->bounds.height == 100.0F);
+  REQUIRE(list->scroll_state->content_height == 3000.0F);
+  REQUIRE(list->scroll_state->offset_y == 2900.0F);
+  REQUIRE_FALSE(list->virtual_state->pending_scroll_offset.has_value());
 }
 
 TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
@@ -1237,6 +1346,36 @@ TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
   REQUIRE(anchored_item != root->virtual_state->realized_indices.end());
   item_four_position = static_cast<std::size_t>(anchored_item - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[item_four_position]->layout_offset.y == 0.0F);
+}
+
+TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
+  TestPlatform platform;
+  Runtime runtime{RedeclaredVariableVirtualGridApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleScrollEvent({{50.0F, 150.0F}, 0.0F, 10000.0F});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  const float content_height = root->scroll_state->content_height;
+  const float scroll_offset = root->scroll_state->offset_y;
+  REQUIRE(std::abs(scroll_offset - (content_height - root->ContentBounds().height)) < 0.01F);
+
+  virtual_grid_declaration_revision = 1;
+  runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  REQUIRE(root->scroll_state->content_height == content_height);
+  REQUIRE(root->scroll_state->offset_y == scroll_offset);
+  const auto last =
+      std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), 59);
+  REQUIRE(last != root->virtual_state->realized_indices.end());
+  const std::size_t position = static_cast<std::size_t>(last - root->virtual_state->realized_indices.begin());
+  REQUIRE(root->children[position]->children.front()->text == "1:59");
+  const float last_end = root->children[position]->layout_offset.y + root->children[position]->bounds.height;
+  REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
 }
 
 TEST_CASE("TestVirtualListAxisChangePreservesAnchorAndIdentity") {

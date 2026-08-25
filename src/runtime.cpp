@@ -2718,7 +2718,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     mounted->virtual_state->dependency_capture->Clear();
     mounted->virtual_state->source = incoming->virtual_items;
     mounted->virtual_state->item_declarations.clear();
-    mounted->virtual_state->source_dirty = true;
+    mounted->virtual_state->pending_scroll_offset.reset();
     if (mounted->virtual_state->item_state_cache) {
       std::erase_if(
           mounted->virtual_state->item_state_cache->indexed,
@@ -3021,12 +3021,14 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
   }
 
   auto& state = *owner_->virtual_state;
+  bool declaration_created = false;
   auto item_declaration = state.item_declarations.find(index);
   if (item_declaration == state.item_declarations.end()) {
     if (!state.source.factory) {
       throw std::logic_error("HuxerUI virtual item factory must not be empty");
     }
     item_declaration = state.item_declarations.emplace(index, state.source.factory(index)).first;
+    declaration_created = true;
   }
   const View& item = item_declaration->second;
   if (!item.spec_) {
@@ -3074,7 +3076,7 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
     }
   }
 
-  if (!node || state.source_dirty) {
+  if (!node || declaration_created) {
     VirtualItemDependencyCapture::Guard dependency_guard{*state.dependency_capture};
     runtime_->Reconcile(node, item.spec_, owner_->environment);
   }
@@ -3161,7 +3163,6 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
 
   owner_->children = std::move(next);
   owner_->virtual_state->realized_indices = std::move(next_indices);
-  owner_->virtual_state->source_dirty = false;
   runtime_->state_->extension_tree_dirty_ = runtime_->state_->extension_tree_dirty_ || structure_changed;
   committed_ = true;
 }

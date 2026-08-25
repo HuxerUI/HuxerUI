@@ -365,7 +365,11 @@ Direct composition API calls inside the raw virtual factory remain invalid becau
 Virtual mounted state retains the owner's effective Environment.
 Realizing or reconciling an item passes that Environment into the normal Runtime path; no special virtual Composer or automatically inserted Scope is introduced.
 Ambient and resource reads performed while a lazy declaration is compiled are retained by the nearest existing declaring RecomposeScope for that VirtualLayout node.
-The retained dependency set is cleared when the virtual source is replaced and does not create a Scope, an Environment observer object, or another composition lifetime for each item.
+Refreshing a compatible virtual source clears its deferred declarations and retained dependency set so realized items reconcile against the latest factory captures.
+This declaration refresh does not invalidate measured item extents: built-in virtual layout metrics reset only when their item count, axis, tracks, spacing, fixed or estimated extents, or span plan changes.
+Remeasured realized items update retained metrics incrementally, while unrealized items continue to use their previous measurement or the configured estimate.
+Candidate measurements do not commit corrected scroll offsets; the final layout placement commits and clamps the correction against the chosen viewport so a parent's provisional measurement cannot truncate scrolling.
+None of these retained records creates a Scope, an Environment observer object, or another composition lifetime for each item.
 
 Each realized item must declare a stable semantic root key.
 Missing or duplicate keys are framework invariant failures rather than an invitation to infer identity from a viewport position.
