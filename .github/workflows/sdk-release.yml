@@ -244,7 +244,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
+            binutils ca-certificates gdb git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
             libgles2-mesa-dev libglib2.0-dev libgnutls28-dev libmount-dev libnghttp2-dev \
             libpcre2-dev libpsl-dev libselinux1-dev libsqlite3-dev libx11-dev libxext-dev \
             libxkbcommon-dev libxml2-dev libxrandr-dev ninja-build pkg-config python3-pip \
@@ -277,7 +277,69 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: bash
+        run: |
+          set -o pipefail
+          ulimit -c unlimited
+          {
+            echo "Core dump limit: $(ulimit -c)"
+            echo "Core dump pattern: $(cat /proc/sys/kernel/core_pattern)"
+            ctest --test-dir build --output-on-failure
+          } 2>&1 | tee build/linux-test.log
+      - name: Collect Linux failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          diagnostic_directory="${RUNNER_TEMP}/huxerui-linux-test-diagnostics"
+          mkdir -p "${diagnostic_directory}"
+          cp build/linux-test.log "${diagnostic_directory}/ctest.log" 2>/dev/null
+          {
+            uname -a
+            printf 'core limit: '
+            ulimit -c
+            printf 'core pattern: '
+            cat /proc/sys/kernel/core_pattern
+            printf 'compiler: '
+            "${CXX}" --version | head -n 1
+          } >"${diagnostic_directory}/environment.txt" 2>&1
+
+          core_index=0
+          while IFS= read -r -d '' core_file; do
+            core_index=$((core_index + 1))
+            copied_core="${diagnostic_directory}/core-${core_index}"
+            cp "${core_file}" "${copied_core}"
+            if command -v gdb >/dev/null 2>&1 && [[ -x build/bin/huxerui_tests ]]; then
+              gdb --batch \
+                -ex "set pagination off" \
+                -ex "thread apply all backtrace full" \
+                build/bin/huxerui_tests "${copied_core}" \
+                >"${diagnostic_directory}/core-${core_index}-backtrace.txt" 2>&1
+            fi
+          done < <(
+            find "${GITHUB_WORKSPACE}" -maxdepth 5 -type f \
+              \( -name core -o -name 'core.[0-9]*' -o -name 'core.huxerui_tests*' \) -print0
+          )
+
+          seed="$(sed -n 's/^.*Randomness seeded to: //p' build/linux-test.log 2>/dev/null | tail -n 1)"
+          if [[ -n "${seed}" ]] && command -v gdb >/dev/null 2>&1 && [[ -x build/bin/huxerui_tests ]]; then
+            gdb --batch \
+              -ex "set pagination off" \
+              -ex "set confirm off" \
+              -ex "run" \
+              -ex "thread apply all backtrace full" \
+              -ex "generate-core-file ${diagnostic_directory}/huxerui_tests-reproduced.core" \
+              --args build/bin/huxerui_tests --rng-seed "${seed}" \
+              >"${diagnostic_directory}/gdb-rerun.txt" 2>&1
+          fi
+      - name: Upload Linux failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-diagnostics-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/huxerui-linux-test-diagnostics
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate Linux binary compatibility
         run: |
           sh .github/scripts/check_linux_binary_compatibility.sh \
