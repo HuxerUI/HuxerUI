@@ -1,6 +1,6 @@
 # Application Activation and Lifecycle Design
 
-Status: application activation foundation, observable lifecycle state, and Windows and Android activation mappings implemented; remaining activation mappings staged
+Status: application activation foundation, observable lifecycle state, and Windows, Android, macOS, and iOS activation mappings implemented; remaining activation mappings staged
 
 This document defines the application-facing boundary for startup activation, subsequent activation, and current application lifecycle state. It covers ownership across the platform application shell, Runtime, composition, files, and navigation without introducing an application session abstraction.
 
@@ -214,16 +214,33 @@ Android document activations keep the provider URI inside `FileReference`. Displ
 
 The full-screen host installs both timing paths automatically. An embedded owner calls `HuxerUIView.setStartupApplicationIntent()` before attachment and forwards later values through `dispatchApplicationIntent()` on the View's UI thread. Recognized values received before attachment are retained until that View creates its Runtime. This queue exists only at the pre-Runtime platform boundary; once the Runtime exists, the shared application service remains the sole delivery source.
 
-The Android `example_runner` uses `singleTop`. When Gradle selects `example_application`, it enables a dedicated Activity alias that declares the `huxerui-example` scheme plus `content://` and `file://` `ACTION_VIEW` values with any MIME type. This allows cold and subsequent URL activation through a browser or `adb` and makes the example available in another application's system Open with chooser without registering other example runner builds as URL or file handlers.
+The Android `example_runner` uses `singleTop`. When Gradle selects `example_application`, it enables a dedicated Activity alias that declares the `huxerui-example` scheme plus `content://` and `file://` `ACTION_VIEW` values with any MIME type. This allows cold and subsequent URL activation through a browser or `adb` and makes the example available in another application's system Open with chooser without registering other example runner builds as URL or file handlers. The example attempts to preview the first activated file as UTF-8 and reports the existing invalid-encoding error when its contents are not valid UTF-8.
+
+## macOS mapping
+
+The AppKit shell installs its application delegate before finishing native launch. `application:openURLs:` input received during `finishLaunching` is fully normalized before Runtime construction: the first activation becomes `StartupActivation()`, while any remaining ordered activations enter the Runtime queue after construction. The same callback submits later input directly to the current Runtime. Consecutive file URLs form one `FileActivation`; non-file URLs remain separate `UrlActivation` values in their native order. A batch containing an invalid value, directory, or failed capability conversion is rejected without submitting a partial prefix.
+
+File activations reuse the security-scoped macOS `FileReference` implementation. The platform decoder retains capabilities and UTF-8 URL values only; it does not inspect routes or copy documents into application storage.
+
+The `example_application` bundle declares the `huxerui-example` custom URL scheme and `public.text` document type in its example-specific Info.plist. General applications own these native declarations through their packaging metadata rather than `AppOptions`.
+
+## iOS mapping
+
+The current UIKit shell is application-delegate based and does not declare scenes. When `UIApplicationLaunchOptionsURLKey` indicates a URL launch, `didFinishLaunchingWithOptions` defers Runtime construction until the corresponding `application:openURL:options:` callback supplies the complete open options. The decoded value then becomes the immutable startup activation before first composition. A later callback submits through the same decoder to the existing Runtime. An open-in-place file URL becomes a one-element `FileActivation` backed by the existing security-scoped iOS `FileReference`; when UIKit requires copying before use, the adapter establishes a private read-only temporary snapshot before the callback returns and retains that snapshot through the same `FileReference` contract. Another URL becomes `UrlActivation`.
+
+The launch-options URL alone does not contain `UIApplicationOpenURLOptionsOpenInPlaceKey`, so it is never used to guess document ownership or suppress the callback that carries that information. Equal URLs opened later remain distinct activations as required by the shared queue.
+
+Temporary activation snapshots do not become application documents. Their directory remains private to the platform reference and is removed after the last shared `FileReference` state is released. Applications still explicitly import a selected document into durable storage through the file API, while `CanWrite()` remains false for a copied activation that cannot write back to its source.
+
+The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. Universal Links, `NSUserActivity`, Associated Domains, scene URL contexts, and multi-window target selection remain separate future work rather than being approximated as custom-scheme callbacks.
 
 ## Remaining platform mapping stages
 
 Hosts without a completed mapping default to `LaunchActivation` and retain the same Runtime submission boundary. Remaining platform work is staged independently:
 
-- iOS launch or scene URL and document contexts.
-- macOS application URL and file-open callbacks.
 - Linux command-line file and URL activation.
 - Web PWA file handling without duplicating browser History.
+- iOS scene URL contexts and Universal Links when scene or associated-domain support is introduced.
 - Future OHOS Ability and Want mapping.
 
 Embedded platform views do not consume an enclosing application shell's activation implicitly. Their owner explicitly chooses the target Runtime.
@@ -250,6 +267,8 @@ The implementation does not add Runtime subclasses, an Access type, a public ser
 - Runtime never interprets application URLs, files, routes, or window policy.
 - Windows forwards only external URL and file payloads; ordinary launches remain independent.
 - Android maps only supported Activity Intents and preserves URI permission boundaries inside `FileReference`.
+- macOS rejects an incomplete native URL batch before submitting any activation from it.
+- iOS uses the complete open-URL options before constructing a URL-launched Runtime and never deduplicates later equal URLs.
 - Lifecycle updates use one validated current value and invalidate only scopes that observe it.
 - A mounted lifecycle handler preserves distinct transitions independently of current-value coalescing.
 - NavigationPath remains the only route-history source of truth.

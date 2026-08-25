@@ -25,6 +25,7 @@
 #include "appkit_renderer.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
+#include "macos_application_internal.h"
 #include "macos_file_internal.h"
 #include "macos_http_internal.h"
 #include "platform_frame_internal.h"
@@ -171,15 +172,27 @@ public:
           });
         }) {}
 
-  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
+  int Run(const Application& application_definition, const WindowOptions& options) {
     @autoreleasepool {
-      runtime_ = &runtime;
       NSApplication* application = [NSApplication sharedApplication];
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
 
       delegate_ = [[HuxerUIApplicationDelegate alloc] init];
       delegate_->huxeruiAdapter = this;
       application.delegate = delegate_;
+
+      [application finishLaunching];
+      ApplicationActivation startup_activation = LaunchActivation{};
+      if (!pending_activations_.empty()) {
+        startup_activation = std::move(pending_activations_.front());
+        pending_activations_.erase(pending_activations_.begin());
+      }
+      Runtime runtime{application_definition, *this, std::move(startup_activation)};
+      runtime_ = &runtime;
+      for (ApplicationActivation& activation : pending_activations_) {
+        runtime.HandleApplicationActivation(std::move(activation));
+      }
+      pending_activations_.clear();
 
       const NSRect frame = NSMakeRect(0.0, 0.0, options.initial_size.width, options.initial_size.height);
       custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
@@ -207,7 +220,7 @@ public:
       }
 
       view_ = [[HuxerUIView alloc] initWithFrame:frame];
-      view_->huxeruiRuntime = &runtime;
+      view_->huxeruiRuntime = runtime_;
       view_->huxeruiAdapter = this;
       [NSNotificationCenter.defaultCenter addObserver:view_
                                              selector:@selector(resourceConfigurationDidChange:)
@@ -223,7 +236,6 @@ public:
       [window_ makeFirstResponder:view_];
       runtime_->UpdateResourceConfiguration(Configuration());
 
-      [application finishLaunching];
       [application activateIgnoringOtherApps:YES];
       UpdateWindowMetrics({
           static_cast<float>(view_.bounds.size.width),
@@ -450,6 +462,23 @@ public:
                : [NSApplication.sharedApplication isActive] ? ApplicationLifecycleState::Active
                                                             : ApplicationLifecycleState::Inactive
     );
+  }
+
+  void OpenURLs(NSArray* urls) noexcept {
+    try {
+      std::optional<std::vector<ApplicationActivation>> activations = DecodeMacApplicationActivations(urls);
+      if (!activations.has_value()) {
+        return;
+      }
+      for (ApplicationActivation& activation : *activations) {
+        if (runtime_ == nullptr) {
+          pending_activations_.push_back(std::move(activation));
+        } else {
+          runtime_->HandleApplicationActivation(std::move(activation));
+        }
+      }
+    } catch (...) {
+    }
   }
 
   void InvalidateTextInputGeometry() {
@@ -713,14 +742,14 @@ private:
   std::unique_ptr<AppKitPlatformViews> platform_views_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
+  std::vector<ApplicationActivation> pending_activations_;
   const RenderFrame* committed_frame_ = nullptr;
 };
 
 int RunPlatformApplication(const Application& application) {
   WindowOptions options = application.options.window;
   MacPlatformAdapter platform;
-  Runtime runtime{application, platform};
-  return platform.Run(runtime, options);
+  return platform.Run(application, options);
 }
 
 } // namespace huxerui::detail
@@ -1015,6 +1044,13 @@ int RunPlatformApplication(const Application& application) {
 @end
 
 @implementation HuxerUIApplicationDelegate
+
+- (void)application:(NSApplication*)application openURLs:(NSArray<NSURL*>*)urls {
+  static_cast<void>(application);
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->OpenURLs(urls);
+  }
+}
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification {
   static_cast<void>(notification);

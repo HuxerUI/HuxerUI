@@ -60,6 +60,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
+            platform/macos_application.mm
             platform/macos_platform_module.mm
             platform/macos_platform_view.mm
             platform/macos_external_texture.mm

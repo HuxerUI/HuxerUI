@@ -1,10 +1,8 @@
 #include <huxerui/huxerui.h>
 
-#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -18,7 +16,7 @@ namespace {
 
 struct TextFilePreview {
   std::string file_name;
-  std::string content{"Open a .txt file with this application to preview its contents."};
+  std::string content{"Open a UTF-8 text document with this application to preview its contents."};
 
   bool operator==(const TextFilePreview&) const = default;
 };
@@ -35,6 +33,8 @@ std::string PlatformActivationHint() {
   return "The huxerui-example URL protocol could not be registered for the current Windows user.";
 #elif defined(__ANDROID__)
   return "Open huxerui-example://documents/42, or choose HuxerUI Application when another app opens a file.";
+#elif defined(__APPLE__)
+  return "Open huxerui-example://documents/42, or open a UTF-8 text document with HuxerUI Application.";
 #else
   return "Platform application shells may map external URLs and files into this activation model.";
 #endif
@@ -45,6 +45,8 @@ std::string PlatformActivationSummary() {
   return "Windows accepts one URL or a command line containing only existing files.";
 #elif defined(__ANDROID__)
   return "Android maps ACTION_VIEW and ACTION_EDIT URLs or document URIs into the current Activity Runtime.";
+#elif defined(__APPLE__)
+  return "Apple application callbacks map registered URL schemes and text documents into the current Runtime.";
 #else
   return "The current platform uses the shared application activation boundary when its shell provides a mapping.";
 #endif
@@ -82,31 +84,12 @@ std::string DescribeLifecycleState(ApplicationLifecycleState state) {
   return "unknown";
 }
 
-bool IsTextFileName(std::string_view name) {
-  constexpr std::string_view extension = ".txt";
-  if (name.size() < extension.size()) {
-    return false;
-  }
-  const std::string_view suffix = name.substr(name.size() - extension.size());
-  for (std::size_t index = 0; index < extension.size(); ++index) {
-    if (static_cast<char>(std::tolower(static_cast<unsigned char>(suffix[index]))) != extension[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-std::optional<FileReference> ActivatedTextFile(const ApplicationActivation& activation) {
+std::optional<FileReference> ActivatedFile(const ApplicationActivation& activation) {
   const auto* files = std::get_if<FileActivation>(&activation);
-  if (files == nullptr) {
+  if (files == nullptr || files->files.empty()) {
     return std::nullopt;
   }
-  for (const FileReference& file : files->files) {
-    if (IsTextFileName(file.Name())) {
-      return file;
-    }
-  }
-  return std::nullopt;
+  return files->files.front();
 }
 
 void UpdateTextFilePreview(
@@ -118,7 +101,7 @@ void UpdateTextFilePreview(
   const std::uint64_t current_generation = generation.Get() + 1;
   generation = current_generation;
 
-  std::optional<FileReference> file = ActivatedTextFile(activation);
+  std::optional<FileReference> file = ActivatedFile(activation);
   if (!file) {
     preview = TextFilePreview{};
     return;
@@ -145,7 +128,7 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
   const ThemeSpec& theme = UseTheme();
   return Column {
     Text("Text file preview", TextRole::Title),
-    Text(preview.file_name.empty() ? "No .txt file activated" : preview.file_name, TextRole::Label)
+    Text(preview.file_name.empty() ? "No text document activated" : preview.file_name, TextRole::Label)
         .With(Foreground(theme.colors.primary)),
     SelectionArea {
       Text(preview.content),

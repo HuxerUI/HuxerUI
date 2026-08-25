@@ -23,6 +23,7 @@ class FilePickerTransport;
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateIosFilePickerTransport(std::function<UIViewController*()> presenter_provider);
 [[nodiscard]] FileReference MakeIosFileReference(NSURL* url);
+[[nodiscard]] FileReference MakeCopiedIosFileReference(NSURL* url);
 #endif
 
 } // namespace huxerui::detail

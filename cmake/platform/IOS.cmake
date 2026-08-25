@@ -1,4 +1,5 @@
 set(HUXERUI_PLATFORM_SOURCE_FILES
+        "${HUXERUI_PROJECT_DIR}/platform/ios/ios_application.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_external_texture.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file_picker.mm"

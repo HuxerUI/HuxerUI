@@ -19,6 +19,7 @@
 
 #include <huxerui/app.h>
 
+#include "ios_application_internal.h"
 #include "ios_file_internal.h"
 #include "ios_http_internal.h"
 #include "uikit_accessibility.h"
@@ -241,7 +242,7 @@ namespace huxerui::detail {
 
 class IosPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
-  IosPlatformAdapter()
+  explicit IosPlatformAdapter(const Application& application)
       : PlatformAdapter([](std::function<void()> task) {
           dispatch_async(dispatch_get_main_queue(), ^{
             try {
@@ -249,72 +250,85 @@ public:
             } catch (...) {
             }
           });
-        }) {}
+        }),
+        application_(application) {}
 
-  int Run(Runtime& runtime) {
+  int Run() {
     if (active_adapter_ != nullptr) {
       throw std::logic_error("HuxerUI iOS application is already running");
     }
-    runtime_ = &runtime;
     active_adapter_ = this;
     char application_name[] = "huxerui";
     char* arguments[] = {application_name, nullptr};
     const int result = UIApplicationMain(1, arguments, nil, NSStringFromClass(HuxerUIIOSApplicationDelegate.class));
     active_adapter_ = nullptr;
-    runtime_ = nullptr;
     return result;
   }
 
-  bool Launch(UIApplication* application) {
-    static_cast<void>(application);
-    if (runtime_ == nullptr) {
+  bool FinishLaunching(NSDictionary* launch_options) noexcept {
+    if (runtime_) {
       return false;
     }
-    runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
 
-    window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    view_controller_ = [[HuxerUIIOSViewController alloc] init];
-    view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
+    if (launch_options[UIApplicationLaunchOptionsURLKey] != nil) {
+      return true;
+    }
+    return StartRuntime(LaunchActivation{});
+  }
 
-    view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
-    view_.translatesAutoresizingMaskIntoConstraints = NO;
-    view_->huxeruiRuntime = runtime_;
-    view_->huxeruiAdapter = this;
-    platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, Modules(), *runtime_);
-    [view_controller_.view addSubview:view_];
-    [NSLayoutConstraint activateConstraints:@[
-      [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
-      [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
-      [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
-      [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
-    ]];
+  bool StartRuntime(ApplicationActivation startup_activation) noexcept {
+    try {
+      runtime_ = std::make_unique<Runtime>(application_, *this, std::move(startup_activation));
+      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
 
-    window_.rootViewController = view_controller_;
-    [window_ makeKeyAndVisible];
-    [view_controller_.view layoutIfNeeded];
+      window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+      view_controller_ = [[HuxerUIIOSViewController alloc] init];
+      view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
 
-    text_input_ = std::make_unique<UIKitTextInput>(*runtime_, view_);
-    accessibility_ = std::make_unique<UIKitAccessibility>(*runtime_, view_, *platform_views_, text_input_->Responder());
-    frame_scheduler_ = [[HuxerUIIOSFrameScheduler alloc] initWithView:view_];
+      view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
+      view_.translatesAutoresizingMaskIntoConstraints = NO;
+      view_->huxeruiRuntime = runtime_.get();
+      view_->huxeruiAdapter = this;
+      platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, Modules(), *runtime_);
+      [view_controller_.view addSubview:view_];
+      [NSLayoutConstraint activateConstraints:@[
+        [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
+        [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
+        [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
+        [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
+      ]];
 
-    NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
-    [notifications addObserver:view_
-                      selector:@selector(huxeruiKeyboardFrameDidChange:)
-                          name:UIKeyboardWillChangeFrameNotification
-                        object:nil];
-    [notifications addObserver:view_
-                      selector:@selector(huxeruiKeyboardFrameDidChange:)
-                          name:UIKeyboardWillHideNotification
-                        object:nil];
-    [notifications addObserver:view_
-                      selector:@selector(huxeruiResourceConfigurationDidChange:)
-                          name:NSCurrentLocaleDidChangeNotification
-                        object:nil];
+      window_.rootViewController = view_controller_;
+      [window_ makeKeyAndVisible];
+      [view_controller_.view layoutIfNeeded];
 
-    runtime_->UpdateResourceConfiguration(Configuration());
-    Resize(view_.bounds.size);
-    RequestFrameAt(Now());
-    return true;
+      text_input_ = std::make_unique<UIKitTextInput>(*runtime_, view_);
+      accessibility_ =
+          std::make_unique<UIKitAccessibility>(*runtime_, view_, *platform_views_, text_input_->Responder());
+      frame_scheduler_ = [[HuxerUIIOSFrameScheduler alloc] initWithView:view_];
+
+      NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
+      [notifications addObserver:view_
+                        selector:@selector(huxeruiKeyboardFrameDidChange:)
+                            name:UIKeyboardWillChangeFrameNotification
+                          object:nil];
+      [notifications addObserver:view_
+                        selector:@selector(huxeruiKeyboardFrameDidChange:)
+                            name:UIKeyboardWillHideNotification
+                          object:nil];
+      [notifications addObserver:view_
+                        selector:@selector(huxeruiResourceConfigurationDidChange:)
+                            name:NSCurrentLocaleDidChangeNotification
+                          object:nil];
+
+      runtime_->UpdateResourceConfiguration(Configuration());
+      Resize(view_.bounds.size);
+      RequestFrameAt(Now());
+      return true;
+    } catch (...) {
+      Shutdown();
+      return false;
+    }
   }
 
   void Shutdown() {
@@ -338,6 +352,7 @@ public:
     view_ = nil;
     view_controller_ = nil;
     window_ = nil;
+    runtime_.reset();
   }
 
   static IosPlatformAdapter* Active() noexcept {
@@ -431,8 +446,33 @@ public:
   }
 
   void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
-    if (runtime_ != nullptr) {
+    if (runtime_) {
       runtime_->UpdateApplicationLifecycleState(lifecycle_state);
+    }
+  }
+
+  void ApplicationDidBecomeActive() {
+    UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+  }
+
+  bool OpenURL(NSURL* url, NSDictionary<UIApplicationOpenURLOptionsKey, id>* options) noexcept {
+    try {
+      NSNumber* open_in_place = options[UIApplicationOpenURLOptionsOpenInPlaceKey];
+      std::optional<ApplicationActivation> activation =
+          DecodeIosApplicationActivation(url, open_in_place == nil || !open_in_place.boolValue);
+      if (!activation.has_value()) {
+        if (!runtime_) {
+          StartRuntime(LaunchActivation{});
+        }
+        return false;
+      }
+      if (!runtime_) {
+        return StartRuntime(std::move(*activation));
+      }
+      runtime_->HandleApplicationActivation(std::move(*activation));
+      return true;
+    } catch (...) {
+      return false;
     }
   }
 
@@ -648,8 +688,9 @@ private:
   }
 
   static inline IosPlatformAdapter* active_adapter_ = nullptr;
+  const Application& application_;
   UIKitRenderer renderer_;
-  Runtime* runtime_ = nullptr;
+  std::unique_ptr<Runtime> runtime_;
   __strong UIWindow* window_ = nil;
   __strong HuxerUIIOSViewController* view_controller_ = nil;
   __strong HuxerUIView* view_ = nil;
@@ -664,9 +705,8 @@ private:
 };
 
 int RunPlatformApplication(const Application& application) {
-  IosPlatformAdapter platform;
-  Runtime runtime{application, platform};
-  return platform.Run(runtime);
+  IosPlatformAdapter platform(application);
+  return platform.Run();
 }
 
 } // namespace huxerui::detail
@@ -871,9 +911,16 @@ int RunPlatformApplication(const Application& application) {
 @implementation HuxerUIIOSApplicationDelegate
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
-  static_cast<void>(launchOptions);
+  static_cast<void>(application);
   huxeruiAdapter = huxerui::detail::IosPlatformAdapter::Active();
-  return huxeruiAdapter != nullptr && huxeruiAdapter->Launch(application);
+  return huxeruiAdapter != nullptr && huxeruiAdapter->FinishLaunching(launchOptions);
+}
+
+- (BOOL)application:(UIApplication*)application
+            openURL:(NSURL*)url
+            options:(NSDictionary<UIApplicationOpenURLOptionsKey, id>*)options {
+  static_cast<void>(application);
+  return huxeruiAdapter != nullptr && huxeruiAdapter->OpenURL(url, options);
 }
 
 - (void)applicationWillTerminate:(UIApplication*)application {
@@ -895,7 +942,7 @@ int RunPlatformApplication(const Application& application) {
 - (void)applicationDidBecomeActive:(UIApplication*)application {
   static_cast<void>(application);
   if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Active);
+    huxeruiAdapter->ApplicationDidBecomeActive();
   }
 }
 

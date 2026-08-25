@@ -171,11 +171,7 @@ bool CopyFile(NSURL* source, NSURL* destination, bool overwrite) {
   return replaced;
 }
 
-bool ImportFile(NSURL* source, const File& destination, bool overwrite) {
-  NSURL* destination_url = FileURL(destination);
-  if (destination_url == nil) {
-    return false;
-  }
+bool CopyCoordinatedFile(NSURL* source, NSURL* destination, bool overwrite) {
   __block bool succeeded = false;
   NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
   NSError* error = nil;
@@ -183,9 +179,17 @@ bool ImportFile(NSURL* source, const File& destination, bool overwrite) {
                                   options:0
                                     error:&error
                                byAccessor:^(NSURL* coordinated_url) {
-                                 succeeded = CopyFile(coordinated_url, destination_url, overwrite);
+                                 succeeded = CopyFile(coordinated_url, destination, overwrite);
                                }];
   return error == nil && succeeded;
+}
+
+bool ImportFile(NSURL* source, const File& destination, bool overwrite) {
+  NSURL* destination_url = FileURL(destination);
+  if (destination_url == nil) {
+    return false;
+  }
+  return CopyCoordinatedFile(source, destination_url, overwrite);
 }
 
 bool ReplaceFile(NSURL* destination, const File& source) {
@@ -439,9 +443,19 @@ class IosFileReferenceState final : public FileReferenceState,
 public:
   explicit IosFileReferenceState(NSURL* url) : url_(url), accessing_([url startAccessingSecurityScopedResource]) {}
 
+  IosFileReferenceState(NSURL* url, NSURL* cleanup_directory) : url_(url), cleanup_directory_(cleanup_directory) {}
+
   ~IosFileReferenceState() override {
     if (accessing_) {
       [url_ stopAccessingSecurityScopedResource];
+    }
+    if (cleanup_directory_ != nil) {
+      __strong NSURL* directory = cleanup_directory_;
+      dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @autoreleasepool {
+          [NSFileManager.defaultManager removeItemAtURL:directory error:nil];
+        }
+      });
     }
   }
 
@@ -481,6 +495,25 @@ public:
     });
     return {};
   }
+
+private:
+  __strong NSURL* url_;
+  __strong NSURL* cleanup_directory_ = nil;
+  bool accessing_ = false;
+};
+
+class SecurityScopedAccess final {
+public:
+  explicit SecurityScopedAccess(NSURL* url) : url_(url), accessing_([url startAccessingSecurityScopedResource]) {}
+
+  ~SecurityScopedAccess() {
+    if (accessing_) {
+      [url_ stopAccessingSecurityScopedResource];
+    }
+  }
+
+  SecurityScopedAccess(const SecurityScopedAccess&) = delete;
+  SecurityScopedAccess& operator=(const SecurityScopedAccess&) = delete;
 
 private:
   __strong NSURL* url_;
@@ -714,6 +747,40 @@ FileReference MakeIosFileReference(NSURL* url) {
   }
   auto state = std::make_shared<IosFileReferenceState>(url);
   return MakeFileReference(ReferenceMetadata(url), std::move(state));
+}
+
+FileReference MakeCopiedIosFileReference(NSURL* url) {
+  if (url == nil || !url.isFileURL) {
+    throw std::logic_error("HuxerUI copied iOS file reference requires a file URL");
+  }
+
+  SecurityScopedAccess access(url);
+  __strong NSURL* directory = nil;
+  try {
+    FileReferenceMetadata metadata = ReferenceMetadata(url);
+    NSURL* temporary_root = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
+    NSString* directory_name = [@"huxerui-activation-" stringByAppendingString:NSUUID.UUID.UUIDString];
+    directory = [temporary_root URLByAppendingPathComponent:directory_name isDirectory:YES];
+    NSError* error = nil;
+    const bool directory_created =
+        [NSFileManager.defaultManager createDirectoryAtURL:directory
+                               withIntermediateDirectories:NO
+                                                attributes:nil
+                                                     error:&error];
+    NSURL* copied_url = [directory URLByAppendingPathComponent:url.lastPathComponent isDirectory:NO];
+    if (!directory_created || !CopyCoordinatedFile(url, copied_url, false)) {
+      throw std::runtime_error("HuxerUI could not copy the temporary iOS document activation");
+    }
+
+    metadata.can_write = false;
+    auto state = std::make_shared<IosFileReferenceState>(copied_url, directory);
+    return MakeFileReference(std::move(metadata), std::move(state));
+  } catch (...) {
+    if (directory != nil) {
+      [NSFileManager.defaultManager removeItemAtURL:directory error:nil];
+    }
+    throw;
+  }
 }
 
 std::shared_ptr<FilePickerTransport> CreateIosFilePickerTransport(std::function<UIViewController*()> presenter_provider
