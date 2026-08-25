@@ -573,9 +573,6 @@ Task<std::vector<FileReference>> EmptyFileReferences() {
 
 Task<std::optional<FileReference>>
 OpenSingleFile(std::shared_ptr<FilePickerController> controller, FilePickerFilter filter) {
-  if (!controller->CanOpenFiles()) {
-    return EmptyFileReference();
-  }
   return RunPickerRequest<std::optional<FileReference>>(
       std::move(controller),
       [filter = std::move(filter)](FilePickerTransport& transport, SingleFileCompletion completion) mutable {
@@ -596,9 +593,6 @@ OpenSingleFile(std::shared_ptr<FilePickerController> controller, FilePickerFilte
 
 Task<std::vector<FileReference>>
 OpenSeveralFiles(std::shared_ptr<FilePickerController> controller, FilePickerFilter filter) {
-  if (!controller->CanOpenFiles()) {
-    return EmptyFileReferences();
-  }
   return RunPickerRequest<std::vector<FileReference>>(
       std::move(controller),
       [filter = std::move(filter)](FilePickerTransport& transport, FilePickerOpenCompletion completion) mutable {
@@ -608,9 +602,6 @@ OpenSeveralFiles(std::shared_ptr<FilePickerController> controller, FilePickerFil
 }
 
 Task<bool> SaveLocalFile(std::shared_ptr<FilePickerController> controller, File source, SaveFileOptions options) {
-  if (!controller->CanSaveFiles()) {
-    return FailedBooleanOperation();
-  }
   return RunPickerRequest<bool>(
       std::move(controller),
       [source = std::move(source),
@@ -692,19 +683,29 @@ bool FilePicker::CanSaveFiles() const noexcept {
   return controller_->CanSaveFiles();
 }
 
+// GCC 11 PR104872 can corrupt moved aggregate temporaries owned by a caller's co_await expression.
 Task<std::optional<FileReference>> FilePicker::OpenFileAsync(FilePickerFilter filter) const {
   detail::ValidateFilter(filter);
-  return detail::OpenSingleFile(controller_, std::move(filter));
+  if (!controller_->CanOpenFiles()) {
+    return detail::EmptyFileReference();
+  }
+  return detail::OpenSingleFile(controller_, filter);
 }
 
 Task<std::vector<FileReference>> FilePicker::OpenFilesAsync(FilePickerFilter filter) const {
   detail::ValidateFilter(filter);
-  return detail::OpenSeveralFiles(controller_, std::move(filter));
+  if (!controller_->CanOpenFiles()) {
+    return detail::EmptyFileReferences();
+  }
+  return detail::OpenSeveralFiles(controller_, filter);
 }
 
 Task<bool> FilePicker::SaveFileAsync(File source, SaveFileOptions options) const {
   detail::ValidateSaveOptions(options);
-  return detail::SaveLocalFile(controller_, std::move(source), std::move(options));
+  if (!controller_->CanSaveFiles()) {
+    return detail::FailedBooleanOperation();
+  }
+  return detail::SaveLocalFile(controller_, std::move(source), options);
 }
 
 } // namespace huxerui
