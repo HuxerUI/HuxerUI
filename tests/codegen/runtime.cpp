@@ -92,6 +92,7 @@ public:
 };
 
 State<int> generated_count;
+State<bool> generated_grow_enabled;
 int generated_compositions = 0;
 
 [[huxerui::composable]] View GeneratedCounter(int initial) {
@@ -103,6 +104,20 @@ int generated_compositions = 0;
 
 View GeneratedApp() {
   return GeneratedCounter(3);
+}
+
+[[huxerui::composable]] View GeneratedGrowContent() {
+  auto grow_enabled = UseState(true);
+  generated_grow_enabled = grow_enabled;
+  return Text("Grow content")
+      .With(huxerui::Frame{.height = 20.0F}, huxerui::Grow{grow_enabled.Get() ? 1.0F : 0.0F});
+}
+
+View GeneratedGrowApp() {
+  return huxerui::Column {
+    Text("Fixed").With(huxerui::Frame{.height = 20.0F}),
+    GeneratedGrowContent(),
+  };
 }
 
 [[nodiscard]] std::string FirstText(const RenderNode& node) {
@@ -151,4 +166,25 @@ TEST_CASE("Generated scopes run in Runtime") {
   REQUIRE(platform.requested_frames > 0);
   REQUIRE(FirstText(runtime.BuildFrame()) == "8");
   REQUIRE(generated_compositions == 2);
+}
+
+TEST_CASE("Generated scopes expose recomposed parent layout values") {
+  TestPlatform platform;
+  Application application{GeneratedGrowApp, {.show_debug_overlay = false}};
+  Runtime runtime{application, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = huxerui::detail::RuntimeAccess::RootNode(runtime);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children[1]->kind == huxerui::detail::NodeKind::Scope);
+  REQUIRE(root->children[1]->bounds.height == 80.0F);
+  REQUIRE(root->children[1]->children[0]->bounds.height == 80.0F);
+
+  generated_grow_enabled = false;
+  runtime.BuildFrame();
+
+  root = huxerui::detail::RuntimeAccess::RootNode(runtime);
+  REQUIRE(root->children[1]->bounds.height == 20.0F);
+  REQUIRE(root->children[1]->children[0]->bounds.height == 20.0F);
 }

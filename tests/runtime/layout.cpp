@@ -64,6 +64,14 @@ struct FlowBreakBefore {
   using Value = bool;
 };
 
+struct LayoutBoundaryEnvironment {
+  static LayoutBoundaryEnvironment Default() {
+    return {};
+  }
+
+  bool operator==(const LayoutBoundaryEnvironment&) const = default;
+};
+
 struct OpaqueLayoutData {
   int value;
 };
@@ -179,6 +187,52 @@ View GrowLayoutApp() {
     Spacer().With(huxerui::Grow{1.0F}),
     Spacer().With(huxerui::Grow{2.0F}),
   };
+}
+
+View ScopeGrowContent() {
+  return Text("Grow content").With(Frame{.height = 20.0F}, Grow{});
+}
+
+View ScopeGrowApp() {
+  return Column {
+    Text("Fixed").With(Frame{.height = 20.0F}),
+    Scope(ScopeGrowContent),
+  };
+}
+
+View ScopeGrowOverrideApp() {
+  return Column {
+    Text("Fixed").With(Frame{.height = 20.0F}),
+    Scope(ScopeGrowContent).With(Grow{0.0F}),
+  };
+}
+
+View EnvironmentScopeGrowApp() {
+  return Column {
+    Text("Fixed").With(Frame{.height = 20.0F}),
+    ProvideEnvironment(LayoutBoundaryEnvironment{}, Scope(ScopeGrowContent)),
+  };
+}
+
+View ScopeLayoutValueApp(bool override_value) {
+  View scoped = Scope([] {
+    return Text("B").With(Frame{40.0F, 10.0F}).LayoutValue<FlowBreakBefore>(true);
+  });
+  if (override_value) {
+    scoped = std::move(scoped).LayoutValue<FlowBreakBefore>(false);
+  }
+  return TestFlow {
+    Text("A").With(Frame{40.0F, 10.0F}),
+    scoped,
+  }.With(Frame{.width = 100.0F});
+}
+
+View ScopeLayoutValueInheritedApp() {
+  return ScopeLayoutValueApp(false);
+}
+
+View ScopeLayoutValueOverrideApp() {
+  return ScopeLayoutValueApp(true);
 }
 
 View StackAlignmentApp() {
@@ -643,6 +697,54 @@ TEST_CASE("TestSpacerAndGrowLayout") {
   REQUIRE(root->children[0]->bounds.width == 100.0F);
   REQUIRE(root->children[1]->layout_offset.x == 100.0F);
   REQUIRE(root->children[1]->bounds.width == 200.0F);
+}
+
+TEST_CASE("Scope and Environment expose effective parent layout values") {
+  TestPlatform platform;
+
+  Runtime scope_runtime{ScopeGrowApp, platform};
+  scope_runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  scope_runtime.BuildFrame();
+  const auto* root = scope_runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children[1]->kind == detail::NodeKind::Scope);
+  REQUIRE(root->children[1]->bounds.height == 80.0F);
+  REQUIRE(root->children[1]->children[0]->bounds.height == 80.0F);
+
+  Runtime override_runtime{ScopeGrowOverrideApp, platform};
+  override_runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  override_runtime.BuildFrame();
+  root = override_runtime.RootNode();
+  REQUIRE(root->children[1]->bounds.height == 20.0F);
+  REQUIRE(root->children[1]->children[0]->bounds.height == 20.0F);
+
+  Runtime environment_runtime{EnvironmentScopeGrowApp, platform};
+  environment_runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  environment_runtime.BuildFrame();
+  root = environment_runtime.RootNode();
+  REQUIRE(root->children[1]->kind == detail::NodeKind::Environment);
+  REQUIRE(root->children[1]->bounds.height == 80.0F);
+  REQUIRE(root->children[1]->children[0]->kind == detail::NodeKind::Scope);
+  REQUIRE(root->children[1]->children[0]->children[0]->bounds.height == 80.0F);
+}
+
+TEST_CASE("Scope layout values use boundary override precedence") {
+  TestPlatform platform;
+
+  Runtime inherited_runtime{ScopeLayoutValueInheritedApp, platform};
+  inherited_runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  inherited_runtime.BuildFrame();
+  const auto* root = inherited_runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children[1]->layout_offset.x == 0.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 10.0F);
+
+  Runtime override_runtime{ScopeLayoutValueOverrideApp, platform};
+  override_runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  override_runtime.BuildFrame();
+  root = override_runtime.RootNode();
+  REQUIRE(root->children[1]->layout_offset.x == 40.0F);
+  REQUIRE(root->children[1]->layout_offset.y == 0.0F);
 }
 
 TEST_CASE("TestStackAndStretchAlignment") {

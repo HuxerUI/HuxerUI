@@ -147,7 +147,7 @@ generic initial values
 
 Each primitive factory supplies one internal component-default operation rather than inserting a synthetic default modifier or relying on a Runtime NodeKind switch.
 Component-specific fluent declarations are recorded separately from generic `.With(...)` modifiers and can parameterize that component's default projection.
-`.LayoutValue(...)` remains a distinct parent-child metadata channel rather than another ViewProperties precedence layer.
+`.LayoutValue(...)` remains a distinct parent-child metadata and component-layout configuration channel rather than another ViewProperties precedence layer.
 Component-owned layout configuration may be completed with resolved Theme values during its default projection, while unrelated declared layout values pass through unchanged.
 ViewSpec compilation starts with fresh generic defaults and applies those channels in the order above.
 The resulting ViewProperties stored on MountedNode remain the authoritative final generic properties, and the temporary compiled ViewSpec is discarded after comparison and commit.
@@ -273,6 +273,36 @@ If the provider unmounts while the layer remains alive, shared ownership preserv
 Root viewport class, locale, accessibility preferences, and root services continue to enter through the root Environment.
 ResourceConfiguration is owned by AppResources and exposes its own CompositionDependency; resource resolution observes that dependency and equal configurations do not notify readers.
 Exact layout constraints and safe-area geometry remain layout inputs rather than raw Environment dependencies.
+
+## Parent layout metadata across composition boundaries
+
+`Grow` is parent layout metadata: a parent layout reads it from a child to decide how that child participates.
+The public `Grow` modifier compiles to a private typed LayoutValue key rather than a ViewProperties field, so it uses the same declaration, reconciliation, and boundary lookup channel as other typed layout data.
+LayoutValue declarations remain on their owning ViewSpec and are not copied between mounted nodes.
+Frame, Padding, visual modifiers, events, semantics, keys, retained modifiers, Spacing, MainAlign, CrossAlign, and Align retain their existing node-local meaning.
+Spacing and the alignment properties remain strongly typed ViewProperties because a layout node reads them as its own generic policy; they are not metadata consumed from that node by its parent.
+
+A Scope exposes an effective parent layout value with boundary-override precedence:
+
+```text
+explicit value on the Scope
+  -> effective value from the Scope's single composed child
+  -> the ordinary default
+```
+
+The presence of the private Grow LayoutValue retains absence separately from an explicit zero.
+`Component().With(Grow(0.0F))` suppresses a Grow value declared by the component root, while a Scope with no explicit Grow exposes the root value.
+Other LayoutValue keys follow the same precedence.
+An empty Scope uses the explicit boundary value when present and otherwise exposes no LayoutValue and a zero Grow factor.
+
+An Environment boundary cannot declare View behavior or parent layout metadata, so it always exposes the effective value from its single child.
+Nested Scope and Environment boundaries resolve recursively without caching or copying the result.
+The mounted child remains the only source for its declarations, and compatible child reconciliation naturally makes changed effective values visible to the next parent measurement.
+
+This rule does not forward or duplicate modifiers.
+A modifier attached to a Scope remains owned by that Scope, and a modifier attached to the composed root remains owned by the root.
+Only effective LayoutValue queries cross the boundary; Grow participates through its private key.
+Runtime composition, retained modifier reconciliation, paint, semantics, hit testing, and Environment ownership do not gain a parallel forwarding path.
 
 ## Theme API
 
@@ -439,6 +469,9 @@ Focused validation must cover:
 - Layers observing exact changes through their captured Environment and retaining its last values after provider teardown.
 - TextSelection overlay, text input, debug overlay, and window controls resolving from the intended Environment.
 - Environment boundary nodes producing no paint, semantics, pointer target, or extra layout geometry.
+- Grow's private LayoutValue and other typed LayoutValue keys crossing generated Scope and Environment boundaries without copying child modifiers.
+- Explicit Scope Grow and LayoutValue declarations overriding component-root values, including an explicit zero Grow factor.
+- Compatible Scope recomposition propagating changed component-root parent layout metadata to ancestor layout.
 - Final-value equality avoiding unnecessary measure, layout, paint, semantics, and retained extension invalidation.
 - ViewSpec compilation exceptions leaving the failing node's mounted values and the previously published frame intact.
 

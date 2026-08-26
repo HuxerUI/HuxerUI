@@ -93,6 +93,10 @@ struct ScrollBarBinding {
   using Value = ScrollBarStyle;
 };
 
+struct GrowFactorBinding {
+  using Value = float;
+};
+
 struct DividerAxisBinding {
   using Value = Axis;
 };
@@ -398,7 +402,6 @@ struct ViewProperties {
   FocusRing focus_ring;
   bool clip_children = false;
   float spacing = 0.0F;
-  float grow = 0.0F;
   MainAxisAlignment main_axis_alignment = MainAxisAlignment::Start;
   CrossAxisAlignment cross_axis_alignment = CrossAxisAlignment::Start;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Start;
@@ -414,7 +417,7 @@ struct ViewProperties {
   [[nodiscard]] bool LayoutEquals(const ViewProperties& other) const {
     return padding == other.padding && safe_area_padding == other.safe_area_padding && frame == other.frame &&
            text_style.font == other.text_style.font && text_layout_options == other.text_layout_options &&
-           spacing == other.spacing && grow == other.grow && main_axis_alignment == other.main_axis_alignment &&
+           spacing == other.spacing && main_axis_alignment == other.main_axis_alignment &&
            cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
            vertical_alignment == other.vertical_alignment;
   }
@@ -821,7 +824,8 @@ protected:
   }
 
   [[nodiscard]] float GrowFactorImpl() const noexcept override {
-    return properties.grow;
+    const float* factor = LayoutValue<GrowFactorBinding>();
+    return factor == nullptr ? 0.0F : *factor;
   }
 
   [[nodiscard]] MainAxisAlignment MainAlignmentImpl() const noexcept override {
@@ -842,7 +846,13 @@ protected:
 
   [[nodiscard]] const std::any* FindLayoutValue(std::type_index key_value) const noexcept override {
     const auto found = layout_values.find(key_value);
-    return found == layout_values.end() ? nullptr : &found->second.value;
+    if (found != layout_values.end()) {
+      return &found->second.value;
+    }
+    if ((kind == NodeKind::Scope || kind == NodeKind::Environment) && children.size() == 1) {
+      return children.front()->FindLayoutValue(key_value);
+    }
+    return nullptr;
   }
 
   std::any& EnsureCacheEntry(std::type_index key_value) override {

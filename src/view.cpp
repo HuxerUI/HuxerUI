@@ -357,7 +357,9 @@ void ApplyGrow(detail::ViewSpec& spec, const Grow& modifier) {
   if (!std::isfinite(modifier.factor) || modifier.factor < 0.0F) {
     throw std::invalid_argument("HuxerUI grow factor must be finite and non-negative");
   }
-  spec.properties.grow = modifier.factor;
+  spec.layout_values.insert_or_assign(
+      typeid(detail::GrowFactorBinding), detail::MakeErasedLayoutValue(modifier.factor)
+  );
 }
 
 void ApplyEnabled(detail::ViewSpec& spec, const Enabled& modifier) {
@@ -2464,7 +2466,7 @@ std::shared_ptr<detail::ViewSpec> MakeCanvasSpec(CanvasPainter painter) {
 
 std::shared_ptr<detail::ViewSpec> MakeSpacerSpec() {
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Spacer);
-  spec->properties.grow = 1.0F;
+  spec->layout_values.emplace(typeid(detail::GrowFactorBinding), detail::MakeErasedLayoutValue(1.0F));
   return spec;
 }
 
