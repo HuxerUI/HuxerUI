@@ -1,7 +1,5 @@
 # Application Activation and Lifecycle Design
 
-Status: application activation foundation, observable lifecycle state, and Windows, Android, macOS, and iOS activation mappings implemented; remaining activation mappings staged
-
 This document defines the application-facing boundary for startup activation, subsequent activation, and current application lifecycle state. It covers ownership across the platform application shell, Runtime, composition, files, and navigation without introducing an application session abstraction.
 
 ## Goals
@@ -134,13 +132,13 @@ ApplicationActivation
     -> NavigationStack
 ```
 
-An application may replace a root path, push into existing history, update an already-open document, open another window in a future multi-window implementation, or reject the activation. `NavigationPath` remains the only route history source of truth.
+An application may replace a root path, push into existing history, update an already-open document, or reject the activation. `NavigationPath` remains the only route history source of truth.
 
 `FileReference` may be retained by a document service while importing or establishing a document session. URL-backed, restorable, and equality-comparable routes store stable document identifiers rather than `FileReference` values.
 
-Browser URL changes remain connected directly to the controlled route path through `BrowserNavigationStack`. Web activation is reserved for inputs outside address-bar history, such as a future PWA File Handling launch queue.
+Browser URL changes remain connected directly to the controlled route path through `BrowserNavigationStack`.
 
-## Ownership and future multi-window support
+## Runtime ownership
 
 There is no public `ApplicationSession`, session identifier, registry, or target selector. A Runtime already defines the composition and delivery boundary required by the shared implementation.
 
@@ -153,7 +151,7 @@ platform activation
     -> internal application service
 ```
 
-Adding multi-window policy later changes the platform shell and window management API, not `ApplicationActivation`, `ApplicationHandle`, or application-owned navigation values.
+Multi-window target selection is not part of the current application API.
 
 ## Application lifecycle
 
@@ -200,7 +198,7 @@ The Windows application shell parses the process command line before constructin
 
 For an external URL or file activation, a new process first looks for a window created by the same executable path. If one exists, the process transfers the original UTF-16 arguments through a bounded `WM_COPYDATA` message and exits. The receiving window validates and resolves the payload into fresh URL or `FileReference` values, submits it through `Runtime::HandleApplicationActivation()`, and lets the existing application handler apply policy. The forwarding process restores and activates the target window.
 
-Ordinary launches are never forwarded, so this mechanism does not impose general single-instance behavior. Multiple ordinary instances remain possible, while an external activation targets one existing instance until future multi-window policy provides a more specific selector.
+Ordinary launches are never forwarded, so this mechanism does not impose general single-instance behavior. Multiple ordinary instances remain possible, while an external activation targets one existing instance.
 
 URL protocol and file-association registration remain application or packaging metadata rather than `AppOptions`. `example_application` registers the `huxerui-example` URL protocol under the current Windows user and demonstrates both cold and subsequent browser activation without administrator access.
 
@@ -232,18 +230,16 @@ The launch-options URL alone does not contain `UIApplicationOpenURLOptionsOpenIn
 
 Temporary activation snapshots do not become application documents. Their directory remains private to the platform reference and is removed after the last shared `FileReference` state is released. Applications still explicitly import a selected document into durable storage through the file API, while `CanWrite()` remains false for a copied activation that cannot write back to its source.
 
-The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. Universal Links, `NSUserActivity`, Associated Domains, scene URL contexts, and multi-window target selection remain separate future work rather than being approximated as custom-scheme callbacks.
+The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. Universal Links, `NSUserActivity`, Associated Domains, scene URL contexts, and multi-window target selection are not part of the current adapter.
 
-## Remaining platform mapping stages
+Hosts without a completed activation mapping deliver `LaunchActivation` and retain the same Runtime submission boundary.
+Embedded platform views do not consume an enclosing application shell's activation implicitly; their owner explicitly chooses the target Runtime.
 
-Hosts without a completed mapping default to `LaunchActivation` and retain the same Runtime submission boundary. Remaining platform work is staged independently:
+## Future work
 
-- Linux command-line file and URL activation.
-- Web PWA file handling without duplicating browser History.
-- iOS scene URL contexts and Universal Links when scene or associated-domain support is introduced.
-- Future OHOS Ability and Want mapping.
-
-Embedded platform views do not consume an enclosing application shell's activation implicitly. Their owner explicitly chooses the target Runtime.
+- Map Linux desktop activation and Web PWA launch inputs through the same shared activation values.
+- Add iOS Universal Links, scene URL contexts, and multi-window target selection when the application shell adopts scenes.
+- Define OHOS activation only through the existing platform normalization boundary.
 
 ## Implementation ownership
 

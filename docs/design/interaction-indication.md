@@ -1,7 +1,5 @@
 # Interaction and Indication Design
 
-Status: Implemented.
-
 This document defines the implemented ownership and public contract for transient interaction state, indication visuals, resource-backed and gradient fills, and their retained paint ordering.
 
 Runtime owns interaction recognition and ordered interaction edges. Retained indication consumes that state without becoming another input recognizer.
@@ -151,7 +149,7 @@ Disabling or deactivating a subtree cancels matching Press sessions before publi
 
 Unmount ends the mounted ownership immediately and discards its transient interaction and indication state; it does not call an extension after that extension's lifetime has ended.
 
-## NodeExtension delivery
+## NodeExtension integration
 
 NodeExtension gains one retained interaction callback:
 
@@ -621,7 +619,7 @@ It does not retain separate visual `SetHovered`, `Press`, and `Release` entry po
 
 Moving the toolbar to ordinary mounted Layer content is a separate architectural decision and is not required for this interaction contract.
 
-## Delivery boundary
+## Implementation boundary
 
 The implementation introduces the shared interaction owner and ordered events, moves indication instances to that state, consolidates `InteractionScheme` and `FocusRing`, preserves compact indication geometry, and establishes state border and corner-radii resolution with two-phase paint ordering.
 

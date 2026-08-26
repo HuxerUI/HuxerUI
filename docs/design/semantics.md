@@ -1,7 +1,5 @@
 # Semantics and Accessibility Design
 
-Status: implemented foundation with staged shared-core completion and deferred platform coverage
-
 This document defines the implemented platform-neutral semantics foundation and records deferred component and platform coverage explicitly.
 
 Semantics is shared Runtime output.
@@ -20,7 +18,7 @@ Renderers do not infer semantics from pixels or PaintCommands.
 
 ## Non-goals
 
-The first implementation does not provide OCR, pixel-derived names, a DOM renderer, a platform View for every HuxerUI View, or platform-specific accessibility properties in shared application code.
+The semantics API does not provide OCR, pixel-derived names, a DOM renderer, a platform View for every HuxerUI View, or platform-specific accessibility properties in shared application code.
 
 It does not expose raw ARIA attributes, Android class names, Apple accessibility traits, UI Automation control types, or AT-SPI interface names.
 
@@ -241,7 +239,7 @@ The accessible name resolves from:
 - The content itself for a Text node.
 
 Value, placeholder, hint, state description, and error remain separate fields.
-Runtime does not concatenate them into the label because native platforms announce and update them differently.
+Runtime does not concatenate them into the label because platform accessibility APIs announce and update them differently.
 
 Whitespace-only names are absent after localization.
 Runtime does not substitute an identifier, resource name, file path, or component type as a user-facing name.
@@ -249,7 +247,7 @@ Runtime does not substitute an identifier, resource name, file path, or componen
 ## Tree construction
 
 `SemanticFrame` contains one synthetic root and a flat owning array of nodes.
-The synthetic root represents the host View and lets application content, layers, and live regions share one native root.
+The synthetic root represents the host View and lets application content, layers, and live regions share one platform accessibility root.
 
 Row, Column, Stack, visual wrappers, padding, backgrounds, indications, and other layout-only nodes are transparent unless they declare meaningful semantics.
 Purely decorative nodes are absent.
@@ -257,7 +255,7 @@ Purely decorative nodes are absent.
 A node is emitted when it has meaningful content, state, actions, collection structure, live-region behavior, or an explicit semantic declaration.
 Runtime derives ShowOnScreen only for descendants that already qualify for emission, so scroll ancestry never makes a layout-only node semantic.
 Semantic order follows committed child order.
-The initial API does not provide arbitrary traversal ordering.
+The public API does not provide arbitrary traversal ordering.
 
 The builder rejects duplicate extension-local child IDs, invalid child geometry, actions without a declared owner or child, and conflicting action routes as framework invariant failures.
 
@@ -437,7 +435,7 @@ Web uses the real PlatformView DOM subtree at the corresponding semantic DOM pos
 Runtime increments the nonzero revision and creates a new `SemanticFrame` only when semantic content, structure, focus, or geometry changes.
 A color-only render frame reuses the previous semantic frame.
 
-The first implementation does not publish a separate change-set type.
+The semantics contract does not publish a separate change-set type.
 An adapter compares retained frames internally when its platform notification API benefits from finer updates.
 
 ## Actions
@@ -565,7 +563,6 @@ The complete editing and security contract remains in [Text Input and TextField 
 ## Components and virtualization
 
 The shared component contract is listed below.
-The delivery-status section distinguishes implemented defaults from defaults completed by the staged work in this document.
 
 | Component | Semantic output |
 |---|---|
@@ -692,11 +689,9 @@ GTK exposes the native top-level surface, while complete role, state, hierarchy,
 
 ### Web
 
-The Web adapter maintains minimal semantic DOM associated with the Canvas.
-It maps meaningful nodes to native HTML semantics and uses ARIA only where HTML is insufficient.
-
-Semantic DOM is not a visual renderer and does not mirror every View.
-It coordinates browser focus with the hidden input and textarea so TextField does not create duplicate keyboard focus targets.
+The Web adapter does not yet project the shared SemanticFrame into semantic DOM.
+The Canvas and hidden text-input elements are excluded from accessibility to avoid exposing duplicate or misleading nodes.
+A future bridge must map meaningful nodes to built-in HTML semantics, use ARIA only where HTML is insufficient, and coordinate browser focus without becoming a visual renderer.
 
 ### Android
 
@@ -761,11 +756,6 @@ The bridge inserts that view at the anchor's semantic sibling position and does 
 HuxerUI slice and clipping views remain non-elements, while the PlatformView continues to own its labels, descendants, editing behavior, and actions.
 The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every platform query observes one coherent frame.
 
-### Future platforms
-
-OHOS consumes the same `SemanticFrame` and action entry point.
-Platform-only native types do not enter shared roles, states, or actions.
-
 ## Invalidation and performance
 
 Semantic dirtiness is separate from paint dirtiness.
@@ -791,7 +781,7 @@ Unchanged frames reuse the immutable shared object, and additional caching is ad
 Runtime construction and action dispatch run on the Runtime UI thread.
 NodeExtension semantic callbacks do not run concurrently with reconciliation, frame construction, or unmount.
 
-Native read-only queries use a retained immutable frame and do not call Runtime for names, children, states, or geometry.
+Platform accessibility queries use a retained immutable frame and do not call Runtime for names, children, states, or geometry.
 Platform actions arriving during frame construction are queued or marshaled and cannot re-enter `BuildFrame()`.
 
 ## Validation
@@ -811,7 +801,7 @@ Current shared tests cover:
 - Slider range actions, invalid payload rejection, shared value validation, and secure TextField redaction.
 - Tabs, NavigationBar, and NavigationPane hierarchy, selection, disabled items, activation, identity stability, and compact or expanded visual modes.
 
-The shared-core completion adds focused coverage in this order:
+Shared tests also cover:
 
 - TextField value, UTF-16 selection, SetText, SetSelection, secure and read-only policy, controlled replacement, active input synchronization, and stale actions.
 - Scroll metrics, nested Scroll, ShowOnScreen, clipping, transforms, and offscreen changes.
@@ -824,26 +814,11 @@ The iOS bridge compiles against the iOS 13 Simulator boundary.
 Physical-device VoiceOver validation covers primary ui_gallery traversal, shared controls, text input, and PlatformView substitution.
 Broader manual coverage for modal isolation, scrolling, live regions, and less common actions remains ongoing.
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.
-Manual validation uses the native screen readers and accessibility inspectors available on each platform.
+Manual validation uses the platform screen readers and accessibility inspectors available on each platform.
 Unavailable platforms and tools remain explicitly unverified.
 
-## Shared-core completion sequence
-
-The shared work is delivered in bounded stages so each contract is validated before platform adapters depend on it:
-
-- Completed: accessible text editing adds `text_selection` and completes TextField actions without changing the TextInputClient protocol.
-- Completed: scrolling and visibility extend ScrollMetrics with Axis, publish Scroll and ShowOnScreen, and compute offscreen without a second public bounds rectangle.
-- Completed: presentation semantics derive Dialog, Menu, Toast, dismissal, live regions, and modal isolation from existing Layer ownership.
-- Completed: collection semantics derive VirtualList and VirtualGrid metadata from the committed VirtualLayoutResult without eagerly composing unrealized content.
-
-After these stages, the shared core answers native read-only queries and routes every advertised action without platform inference.
-Windows UI Automation, AppKit, Android AccessibilityNodeProvider, and UIKit now consume that contract; Linux and Web mappings follow according to platform readiness.
-
-## Delivery status
-
-- Public value types, the `Semantics` modifier, `SemanticFrame`, Runtime-owned stable identity, immutable-frame reuse, secure TextField redaction, TextField value and editing actions, generic scrolling and visibility actions, virtual collection metadata, basic action routing, NodeExtension virtual children, destination-selection semantics, PlatformView semantic anchors, the Windows UI Automation bridge, the macOS AppKit bridge including native anchor substitution, the Android AccessibilityNodeProvider bridge, and the iOS UIKit bridge are implemented.
-- Deferred: extend the platform adapter sequence to Linux and Web, and add Windows TextPattern after the shared text-range geometry contract exists.
-- Deferred: add platform accessibility fixtures for Web.
+Windows UI Automation, AppKit, Android AccessibilityNodeProvider, and UIKit consume the shared contract.
+Linux and Web do not currently provide platform accessibility mappings.
 
 Shared public API and Runtime changes require common tests and every affected platform build available locally.
 Each platform adapter is validated on its platform; unavailable platforms remain unverified.

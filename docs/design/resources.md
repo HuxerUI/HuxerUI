@@ -1,11 +1,8 @@
 # App Resources, Images, and Localization Design
 
-Status: initial implementation with ordered target resource merging
-
 This document defines application resource identity, packaging, resolution, immutable raster and vector image assets, raw assets, the Image component, image painting, locale propagation, and formatted localized strings.
 
-The current implementation includes typed keys, exact generated namespaces, optional generated-header filenames, ordered package merging, target staging, the installed built-in framework resource package, localized Dialog, selection-menu, validation, and window-caption defaults, component-owned check and submenu-chevron vectors, PlatformResources on Windows, macOS, Web, Android, and iOS, Runtime-owned resolution, raw assets, positional localized strings, deferred StringVariant inputs, ImageAsset, VectorAsset, SVG compilation, Image, image painting, platform raster caches, and generated-assets wiring for the repository Android example runner.
-Reusable installed-Android integration, inherited Locale shaping for ordinary application text, localized image discovery, and future platform adapters remain planned.
+The implementation uses typed keys, exact generated namespaces, ordered package merging, the built-in framework package, Runtime-owned resolution, raw assets, positional localized strings, raster and vector image assets, SVG compilation, retained image painting, and renderer-owned image caches.
 
 ## Goals
 
@@ -20,7 +17,7 @@ Reusable installed-Android integration, inherited Locale shaping for ordinary ap
 
 ## Non-goals
 
-The initial implementation does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime library registry.
+The resource API does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime library registry.
 
 Network and platform picker libraries may produce encoded bytes and construct an ImageAsset.
 Android `content://` values, Apple security-scoped URLs, and other platform handles remain platform-service concerns rather than cross-platform file paths.
@@ -295,7 +292,7 @@ Remote URLs remain application or library inputs and do not become package paths
 When system locale or display scale changes, the platform integration calls `Runtime::UpdateResourceConfiguration()` with the new value.
 Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, invalidates root composition, and requests a frame.
 `BuildFrame()` does not poll platform state.
-The initial implementation invalidates root composition, then normal reconciliation limits changed ImageAsset geometry and paint work to the affected nodes.
+Resource configuration changes invalidate root composition, then normal reconciliation limits changed ImageAsset geometry and paint work to the affected nodes.
 Dependency-recorded resource reads and inherited Locale text shaping may later narrow the initial root invalidation without changing the public API.
 
 An explicit Locale Environment value overrides the system locale for its subtree.
@@ -303,7 +300,7 @@ Display scale remains a platform property.
 
 ## Resource variants
 
-The initial implementation supports localized string variants and image scale variants.
+Resource variants support localized strings and image density scales.
 
 Locale fallback removes trailing variants first.
 When a tag includes both script and region, the language-region catalog takes precedence over the language-script catalog before lookup falls back to the language and bundle default:
@@ -337,11 +334,8 @@ Scale variants for one ImageResource must have the same intrinsic logical size:
 pixel size / declared scale
 ```
 
-Localized image discovery remains planned.
-The index and resolver reserve locale metadata so that capability can be added without changing ImageResource.
-
-The versioned index may later add appearance or contrast qualifiers.
-The initial public API does not expose speculative theme-resource abstractions.
+Localized image discovery is not supported.
+The public API does not expose appearance or contrast resource qualifiers.
 
 ## ImageAsset
 
@@ -664,9 +658,9 @@ macOS maps source and destination rectangles while drawing the retained full CGI
 The current Windows, macOS, Android, and iOS backends decode synchronously on the first cache miss.
 The Web backend keeps asynchronous loading and failure state inside its renderer, draws no image while loading, and asks its PlatformAdapter to schedule a frame when decoding completes.
 
-A later preload service may warm platform caches without changing ImageAsset, Image, or DrawImageCommand.
+Preloading is not part of the current public resource API.
 
-## Future platform mapping
+## Platform mapping
 
 The resource and image contracts treat supported platforms as an open-ended set.
 New backends implement PlatformResources and platform image replay without adding platform variants to shared application code.
@@ -696,12 +690,6 @@ iOS reads the reserved resource directory from the application bundle and uses t
 ImageIO produces renderer-owned CGImage values, while the platform adapter reports system Locale and display scale through ResourceConfiguration.
 Security-scoped URLs are platform service inputs whose bytes may be converted to ImageAsset with FromEncoded; they are not package ResourceIds.
 
-### OHOS
-
-OHOS stages the resource index and payload into HAP rawfile storage.
-Its PlatformResources implementation owns resource-manager and rawfile lifetimes, converts reads into shared RawAsset storage, and never exposes platform handles to Runtime.
-The OHOS renderer owns decoded platform image values and platform cache release.
-
 ## Locale
 
 Locale becomes a formal Environment value:
@@ -728,9 +716,9 @@ return ProvideEnvironment(
 );
 ```
 
-The initial implementation publishes Locale for resource lookup, and the Runtime-owned selection overlay applies it to its localized toolbar text.
-Propagating that inherited Locale into otherwise-unspecified Text, TextField, and Canvas shaping options remains planned.
-When added, platform renderers will continue to receive resolved TextShapingOptions and will never read StringResource values.
+Locale applies to resource lookup, and the Runtime-owned selection overlay uses it for localized toolbar text.
+It does not implicitly replace otherwise-unspecified Text, TextField, or Canvas shaping options.
+Platform renderers receive resolved TextShapingOptions and never read StringResource values.
 
 ## Localized strings and formatting
 
@@ -810,20 +798,11 @@ Its StringResource overload retains the resource and arguments so locale resolut
 UseString exposes the same resolution for non-Text consumers.
 StringVariant::Format retains the resource identity and formatted arguments until a deferred consumer is reconciled in its effective Environment.
 
-### Deferred plural and select messages
+### Plural and select messages
 
 Plural and select messages require real locale rules and are not approximated with an English singular-versus-plural branch.
 
-The indexed message format reserves argument references for future syntax such as:
-
-```text
-{0, plural,
-  one {# file}
-  other {# files}
-}
-```
-
-Adding CLDR-backed plural, number, date, currency, or select instructions does not change StringResource or the variadic UseString call surface.
+CLDR-backed plural, number, date, currency, and select instructions are not supported.
 
 ## Framework strings
 
@@ -895,9 +874,15 @@ Image and PaintContext validate non-finite geometry, invalid source rectangles, 
 Public API and runtime diagnostics are English, begin with `HuxerUI`, and include the relevant ResourceId, path, locale, variant, or argument index.
 Resource compilation diagnostics are English and use the `hrc:` CLI prefix.
 
+## Future work
+
+- Add localized image variants without introducing a second resource-selection mechanism.
+- Define inherited locale-aware shaping for ordinary text independently from localized string lookup.
+- Add explicit preload policy only for resources whose asynchronous platform preparation requires it.
+
 ## Validation
 
-The initial implementation has focused shared coverage for:
+Focused shared coverage includes:
 
 - Typed keys, resource-index parsing, and payload-hash validation.
 - Locale normalization and fallback.
@@ -915,26 +900,6 @@ The initial implementation has focused shared coverage for:
 
 Every renderer implements image decode, cropping, destination scaling, sampling, and bounded platform caches.
 Windows common builds and tests, a macOS build on macOS, and Android compilation are required before release.
-
-Future platform and SDK work adds installed-package, ordered target integration, Linux and Web release-packaging validation, iOS archive export, and OHOS as those capabilities become available.
-
-## Delivery sequence
-
-The delivery sequence is:
-
-- Land this design and align SDK, Canvas, Text, and roadmap documentation.
-- Add ResourceId, typed keys, resource index generation, PlatformResources, AppResources, Locale, and package staging.
-- Add RawResource and RawAsset as the smallest byte-loading path and use it to validate the package boundary.
-- Add ImageAsset factories, ImageResource resolution, Image, DrawImageCommand, Canvas replay, and the current Windows, macOS, Android, and iOS platform decoders.
-- Add VectorAsset construction, compiled SVG resources, automatic ImageResource format detection, vector tint, and shared path replay.
-- Add StringResource formatting and locale fallback.
-- Extend `hrc` with exact namespace generation and ordered binary-index merging.
-- Permit repeated target resource roots in CMake and update generated CLI projects to use `resources/images`, `resources/strings`, and `resources/raw`.
-- Add the built-in `huxerui` resource package and migrate framework-rendered Dialog, selection-menu, validation, and window-caption defaults.
-- Migrate the framework-owned check and submenu-chevron vectors required by Checkbox and Menu.
-- Add inherited Locale text shaping. This remains planned.
-
-Each slice updates public headers, standalone-header checks, common tests, platform builds, packaging metadata, examples, and the relevant documentation together.
 
 ## Final design constraints
 

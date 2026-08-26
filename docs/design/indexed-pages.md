@@ -1,7 +1,5 @@
 # Indexed Pages Design
 
-Status: implemented
-
 ## Purpose
 
 IndexedPages presents one page from an ordered set while retaining every page in the mounted application tree.
@@ -86,7 +84,7 @@ Selecting a page whose measurement is dirty measures that page under the current
 
 An equal selection and equal constraints reuse the existing layout cache and do not cause measurement, layout, paint, semantics, or extension invalidation.
 
-The initial implementation switches immediately and adds no cross-page animation.
+IndexedPages switches immediately and adds no cross-page animation.
 
 ## Layout participation
 
@@ -141,7 +139,7 @@ Scroll momentum stops when its page becomes inactive rather than continuing invi
 
 PlatformView mounted nodes keep stable identities.
 
-After a PlatformView has participated, its invisible committed placement keeps the host-native instance retained while its page is inactive; a PlatformView on an initially inactive page may defer native creation until first selection.
+After a PlatformView has participated, its invisible committed placement keeps the platform instance retained while its page is inactive; a PlatformView on an initially inactive page may defer platform creation until first selection.
 
 ExternalTexture usage disappears from the visible scene and follows the existing surface deactivation contract until the page participates again.
 
@@ -210,13 +208,11 @@ IndexedPages provides in-process mounted retention only.
 
 It does not produce a restoration payload and does not restore state after process recreation or a new application session.
 
-A future saveable-state system may use normal page positions and stable View keys as nested restoration identity, while only explicitly saveable values enter the platform payload.
-
 Non-serializable UseState values retained by IndexedPages remain explicitly outside process restoration.
 
-## Deferred capabilities
+## Unsupported capabilities
 
-The initial implementation does not include:
+The public component does not include:
 
 - Swipe gestures or pager physics.
 - Lazy page creation or eviction.

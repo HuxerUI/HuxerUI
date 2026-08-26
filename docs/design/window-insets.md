@@ -1,7 +1,5 @@
 # Window Insets and System Bars Design
 
-Status: implemented for the shared Runtime, Android, and iOS; OHOS remains deferred
-
 This document defines the platform-neutral contract for window metrics, safe-area layout, edge-to-edge content, system-bar backgrounds, and system-bar foreground brightness.
 It covers Android, iOS, and the future OHOS adapter while preserving zero-inset desktop behavior and a compatible Web extension point.
 
@@ -18,7 +16,7 @@ It covers Android, iOS, and the future OHOS adapter while preserving zero-inset 
 
 ## Non-goals
 
-The initial implementation does not provide:
+The public API does not provide:
 
 - A `fullscreen` Boolean that combines layout, system-bar visibility, and immersive input behavior.
 - Public Android, iOS, or OHOS inset categories.
@@ -395,7 +393,7 @@ Platform adapters own:
 - unit conversion.
 - IME occlusion conversion.
 - native status and navigation foreground application.
-- native lifecycle registration and cleanup.
+- platform lifecycle registration and cleanup.
 
 An embedded PlatformView may have no authority over its containing system window.
 In that case the adapter reports geometry but the optional system-bar operation is a no-op unless its native owner installs a window delegate.
@@ -482,20 +480,7 @@ Shared validation is required to cover:
 - Dialog, Toast, Popup, Menu, BottomSheet, barrier, Drawer, and debug placement.
 - IME bottom-inset restoration.
 
-Android validation includes compiling both native ABIs and Java window integration; focused platform tests should continue expanding typed and legacy Insets conversion, display cutouts, navigation modes, IME overlap, foreground API guards, and an embedded HuxerUIView without a Window owner.
+Android validation includes compiling native ABIs and Java window integration, typed and legacy Insets conversion, display cutouts, navigation modes, IME overlap, foreground API guards, and an embedded HuxerUIView without a Window owner.
 
 iOS source changes require an available macOS build to validate UIKit compilation and behavior.
 Until that validation is run, the implementation report must state that iOS remains unverified rather than claiming it passed.
-
-OHOS implementation remains deferred until the repository owns an OHOS adapter, but the adapter must implement this contract without changing the shared API.
-
-## Documentation impact
-
-Implementation updates this document's status and synchronizes:
-
-- Architecture Design for Runtime root and PlatformAdapter ownership.
-- Navigation Design for TopAppBar, NavigationBar, NavigationPane, and Drawer behavior.
-- Theme, Animation, and Presentation for SystemBarsAppearance and safe Layer placement.
-- Platform Support for Android and iOS native behavior.
-- Layout and Scrolling for SafeAreaPadding and layout-time inset access.
-- README when the public API and supported behavior are available.

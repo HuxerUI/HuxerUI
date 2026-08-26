@@ -1,7 +1,5 @@
 # Text Input and TextField Design
 
-Status: implemented foundation with Windows, macOS, Linux, Android, and iOS platform adapters
-
 This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `Runtime` focus ownership, `PlatformAdapter`, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
 The design also defines the extension boundary required by complex editable components. SweetEditor is the reference integration: it should reuse the HuxerUI focus and platform input path without replacing its document model with the built-in TextField state.
@@ -20,7 +18,7 @@ This document records the implemented architecture and the remaining extension d
 - Preserve UTF-8 strings in the public C++ API while using one explicit offset convention across platforms.
 - Grow the validated single-line foundation into multiline editing without changing the platform input protocol.
 
-The initial design deliberately does not include:
+The current design deliberately does not include:
 
 - A second application runtime for text input.
 - A full-document mirror owned by `Runtime` or `PlatformAdapter`.
@@ -205,7 +203,7 @@ The protocol has these semantics:
 
 `CancelComposition` restores the client-owned composition baseline.
 
-`DeleteSurrounding` removes text around the current selection using the explicit unit supplied by the native platform.
+`DeleteSurrounding` removes text around the current selection using the explicit unit supplied by the platform.
 
 The protocol does not include undo grouping, editor transactions, document revision IDs, linked editing, or full text buffers. Those are client concerns.
 
@@ -1021,7 +1019,7 @@ Focus transfer resolves the PlatformView identity from the current committed `Re
 The Runtime remains authoritative for HuxerUI hit-test and focus ordering, while PlatformAdapter remains authoritative for platform focus transfer and platform input dispatch.
 These focus and IME lifecycle messages are internal adapter coordination rather than PlatformModule events.
 A library may emit a typed application event describing a platform focus change, but that event neither starts nor ends a HuxerUI text-input session.
-The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one PlatformView subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global platform focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus, while hardware-keyboard traversal across the PlatformView boundary remains follow-up work.
+The macOS adapter implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one PlatformView subtree, while traversal across its boundary returns to Runtime focus order. Android synchronizes global platform focus changes, Runtime-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and Runtime-directed focus; hardware-keyboard traversal across the PlatformView boundary is not supported.
 This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
 
 ## SweetEditor integration
@@ -1167,7 +1165,7 @@ src/selection_area.cpp
 
 Platform adapters remain in their existing platform directories. Generic input behavior must not move into Windows, Apple, or Android helper libraries.
 
-## Implemented delivery
+## Supported behavior
 
 The foundation contains:
 
@@ -1191,10 +1189,6 @@ The usable control contains:
 - Static selection through `SelectionArea`.
 
 Windows, macOS, Android, and iOS now provide end-to-end native IME adapters.
-
-The extension milestone validates one non-TextField client through a SweetEditor bridge or equivalent fake document client.
-
-Richer iOS selection integration, OHOS, and TSF are incremental features built on the same protocol.
 
 ## Final design constraints
 

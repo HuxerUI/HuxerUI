@@ -1,7 +1,5 @@
 # Incremental Layout and Rendering Design
 
-Status: shared Runtime pipeline implemented; platform partial redraw implemented on Windows and macOS
-
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
 It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
 
@@ -21,8 +19,8 @@ It intentionally removes the legacy absolute-frame and flat-DisplayList runtime 
 - A public application-level API for manually invalidating arbitrary nodes.
 - A second component tree or a Flutter-style public `RenderObject` hierarchy.
 - Renderer-specific objects in shared Runtime state.
-- A general dependency graph in the first implementation.
-- GPU layer promotion, occlusion culling, or partial swap-chain submission in the first implementation.
+- A general dependency graph.
+- GPU layer promotion, occlusion culling, or partial swap-chain submission.
 - A public PlatformView composition mode, PlatformView frame, or application-managed render slice.
 
 ## Implemented foundation
@@ -76,8 +74,6 @@ The mounted tree and render scene have different responsibilities:
 | Platform renderer | Platform resource resolution and scene traversal |
 
 ## PlatformView composition foundation
-
-Status: shared placement and `RenderComposition` derivation implemented; Windows single-surface aperture composition, macOS and Web retained slice surfaces, Android same-Canvas slice replay, and iOS retained UIKit layers implemented; remaining adapter work proposed
 
 PlatformView extends the retained scene without adding another Runtime output tree.
 Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
@@ -180,7 +176,7 @@ A cached layout result is reusable when:
 
 A layout invalidation propagates toward ancestors because a changed child size may change every ancestor that consumes it.
 Propagation stops at the root or at a future explicit layout boundary whose size contract is independent of descendant measurement.
-The initial implementation does not infer such boundaries automatically.
+Runtime does not infer such boundaries automatically.
 
 When an ancestor is visited, unchanged children can still return their cached measurement for identical constraints.
 This keeps the propagation rule conservative without forcing complete subtree measurement.
@@ -316,7 +312,7 @@ It remains true when local paint or an unclipped descendant contributes visible 
 An effective child clip can still make that descendant and therefore the clipped subtree invisible.
 
 `PaintSequence` contains immutable platform-neutral `PaintCommand` values in node-local coordinates.
-`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, external textures, and proposed PlatformView placement boundaries.
+`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, external textures, and PlatformView placement boundaries.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
 Platform renderers traverse `RenderScene`, maintain the platform transform and clip stacks, and replay only the records referenced by the scene.
@@ -553,28 +549,6 @@ Applications do not receive render-node handles, call invalidation methods, or m
 - Presentation changes do not invoke layout.
 - Platform adapters do not branch on concrete components or modifiers.
 - Every platform backend handles every `PaintCommand` explicitly; the shared `RenderComposition` path consumes PlatformView placement before raster replay.
-
-## Implemented adoption sequence
-
-Implemented stages:
-
-- Make every built-in and extension paint path pure, including `TextField`.
-- Store mounted geometry in local coordinates while retaining full-frame layout and flat display-list output.
-- Introduce `PaintContext`, `PaintSequence`, `RenderNode`, `RenderScene`, and `RenderFrame`, then migrate all available platform renderers.
-- Retain clean content and foreground PaintSequences, publish stable node revisions, and expose protected NodeExtension paint invalidation.
-- Calculate DamageRegion from committed scene snapshots, including paint, presentation, clipping, insertion, removal, and child-order changes.
-- Retain local opacity in RenderNode and composite each node's content, children, and foreground as one platform group.
-- Make ordinary ScrollView scrolling update a retained children transform without rewriting child placement.
-- Add layout input caches and conservative ancestor invalidation.
-- Add equality-aware retained modifier and layout-value diffs.
-- Retain clean virtual policy, realization, and placement state, and reuse stable item measurements while scrolling.
-- Consume DamageRegion as platform update bounds on Windows and macOS, while Android uses the same committed scene with full View invalidation.
-- Record node shadows as retained PaintCommands whose resolved caster and blur overflow participate in visibility and damage, while each renderer owns its platform blur resources.
-- Record Canvas callbacks into retained PaintSequences and replay filled, stroked, clipped, and shadowed Paths through every renderer.
-
-The migration stages defined in this document are implemented.
-
-Page transitions and embedded PlatformViews should build on this foundation rather than introduce competing rendering or invalidation paths.
 
 ## Validation
 

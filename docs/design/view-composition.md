@@ -1,7 +1,5 @@
 # View Composition and Environment Design
 
-Status: implemented
-
 This document defines the boundary between immediate View declaration, deferred scope execution, Environment propagation, ViewSpec compilation, and MountedNode reconciliation.
 Direct Environment and Theme content, mounted Environment propagation, and deferred ViewSpec compilation are the intended contract.
 The current implementation uses the precise dependency model in this document and does not retain the former broad mounted-context invalidation path.
@@ -165,7 +163,7 @@ TextField strings and icons, Checkbox checkmarks, and Indication resources use t
 Descriptor equality and layout equality subsequently compare those compiled values, so an Environment change that produces the same final value does not update the retained extension.
 
 The internal entry point is named `CompileViewSpec` rather than introducing a Compiler object or a public compiled configuration type.
-Ordinary custom components continue to compose public primitives and modifiers; this phase does not expose a callback that can mutate private ViewSpec state.
+Ordinary custom components continue to compose public primitives and modifiers; the public surface does not expose a callback that can mutate private ViewSpec state.
 A custom function that directly reads Theme or another ambient value must be marked composable or use an explicit Scope.
 
 ## Reconciliation and commit behavior
@@ -332,9 +330,7 @@ View BrandMark() {
 }
 ```
 
-The direct-content migration removes the old factory-only Theme overloads rather than retaining two competing models.
-
-## Deferred resources
+## Resource resolution
 
 Resource-bearing primitives retain semantic resource values until reconciliation.
 
@@ -349,8 +345,6 @@ Existing resource caches remain responsible for avoiding repeated decoding and p
 
 `UseString()` remains available for composable application logic that genuinely needs an immediate `std::string`, such as branching or constructing a non-Text value.
 Calling it requires a composable context.
-
-The resource audit must include Text, Button, toggles, Tabs, SegmentedButton, navigation controls, Menu, Dialog, Toast, icons, Image, VisualFill, and Indication paths so no constructor performs a hidden ambient lookup.
 
 ## Composable marker
 
@@ -436,18 +430,6 @@ Invalid public Theme, resource, or View configuration remains an early `std::inv
 
 A ViewSpec compilation failure propagates through the existing BuildFrame failure path before that node's mounted values are committed.
 Reconciliation is not a whole-subtree rollback transaction, but a failed frame does not publish a partial semantic frame, RenderScene, layer state, or lifecycle commit.
-
-## Migration
-
-This was delivered as a coordinated breaking migration without retaining the former marker as a compatibility spelling.
-
-The implemented Environment and Theme phases make ViewSpec independent of construction-time Environment, pass mounted context explicitly through mount and reconciliation, and use a transparent Environment node rather than a provider-only Scope.
-Stable mounted Environment identity, typed entry dependencies, transactional updates, and Scope-owned ViewSpec compilation replace the removed broad mounted-context and captured-layer invalidation paths.
-Property, component, resource, layer, TextSelection, virtual-layout, and window-control paths compile against their effective mounted Environment.
-Theme and ProvideEnvironment accept direct View content and do not retain provider-only factories.
-Composable code generation validates direct composition calls and lowers marked functions to the existing Scope runtime model.
-
-No phase introduces a second declaration tree, a public resolved configuration type, or a concrete-component switch in Runtime.
 
 ## Validation
 

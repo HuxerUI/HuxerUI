@@ -1,7 +1,5 @@
 # Animation and Scene Transition Design
 
-Status: implemented foundation with deferred View lifecycle transitions
-
 This document defines one retained motion model for animated values, synchronized presentation properties, component motion, and whole-scene transitions. It deliberately keeps ordinary View insertion and removal outside the initial scene-transition implementation.
 
 ## Goals
@@ -93,7 +91,7 @@ return content.With(
 );
 ```
 
-The initial implementation projects progress onto opacity, offset, scale, and rotation. It does not animate layout, paint command structure, arbitrary callbacks, or clipping. Transforms use a fixed offset, rotation, and scale order and remain one modifier unit in the surrounding modifier order.
+Synchronized presentation transitions project progress onto opacity, offset, scale, and rotation. They do not animate layout, paint command structure, arbitrary callbacks, or clipping. Transforms use a fixed offset, rotation, and scale order and remain one modifier unit in the surrounding modifier order.
 
 Like the existing presentation modifiers, `Transition` affects content, descendants, foreground drawing, clipping, and hit testing without changing measurement or placement.
 
@@ -153,8 +151,6 @@ Ordinary View insertion and removal animation is deferred. It requires an explic
 
 Navigation keeps its own page-stack and Back semantics. It may share timing primitives and controllers, but a scene transition does not push pages, retain navigation scopes, or alter route history.
 
-## Validation and delivery
-
-The implementation proceeds through the public timing model and controller, synchronized presentation transitions, owned frozen scenes, and finally the scene-transition service and examples. Circular reveal reuses the existing child-clip renderer contract.
+## Validation
 
 Focused tests cover controller initialization, zero-duration completion, curve and keyframe validation, delayed and repeated playback, reverse completion semantics, active animation replacement, spring retargeting, reduced motion, synchronized presentation projection, anchor lifecycle, invalid scene springs, viewport cancellation, PlatformView fallback ordering, and frozen plus live scene composition with full damage.

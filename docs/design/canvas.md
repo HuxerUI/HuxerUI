@@ -1,7 +1,5 @@
 # Canvas and Path Design
 
-Status: implemented
-
 This document defines HuxerUI's platform-neutral Path value, custom Canvas component, and their integration with retained PaintSequences.
 
 ## Goals
@@ -103,9 +101,8 @@ Platform renderers convert Path elements to platform geometry while preserving f
 Path shadow masks reuse each backend's existing blur machinery.
 Platform geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
 
-## Deferred capabilities
+## Unsupported capabilities
 
-The initial Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradient path fills, or Path-based pointer hit testing.
-Those capabilities can extend Path or PaintCommand without changing Canvas ownership or invalidation.
+The Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradient path fills, or Path-based pointer hit testing.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
-Rectangle linear and radial gradients use dedicated PaintCommands. A generic Brush abstraction remains deferred until multiple existing shape commands benefit from sharing it.
+Rectangle linear and radial gradients use dedicated PaintCommands; there is no generic Brush abstraction.

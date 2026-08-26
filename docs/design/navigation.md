@@ -1,12 +1,9 @@
 # Navigation Design
 
-Status: factory navigation, typed routed navigation, and Web URL history implemented; activation proposed
+This document defines explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, Back routing, typed route paths, Web URL history, and application activation integration.
 
-This document defines the implemented contract for explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, Back routing, typed route paths, and Web URL history.
-It also defines the proposed external application activation and restoration bridges.
-
-The first implementation is intentionally factory-driven and imperative at the navigation boundary.
-The routed extension preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
+Factory navigation is deliberately factory-driven and imperative at the navigation boundary.
+Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
 
 ## Goals
 
@@ -79,7 +76,7 @@ Applications keep their direct action list intentionally small and use the exist
 A future automatic overflow feature requires a reusable structured command model shared by toolbars, menus, and shortcuts rather than a TopAppBar-only item type.
 
 The [Window Insets and System Bars Design](window-insets.md) gives Runtime one full-window geometry contract.
-TopAppBar consumes its top and horizontal insets when they remain available in edge-to-edge content and contributes its themed background to the status region without duplicating native inset handling.
+TopAppBar consumes its top and horizontal insets when they remain available in edge-to-edge content and contributes its themed background to the status region without duplicating platform inset handling.
 Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing behavior remain deferred until shared nested-scroll coordination exists.
 
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
@@ -225,7 +222,7 @@ View DetailPage(int document_id) {
 }
 ```
 
-The initial API does not return a page identifier because public operations address the logical top of one scoped stack.
+The public API does not return a page identifier because operations address the logical top of one scoped stack.
 LayerId remains necessary for independently addressable window presentation, while navigation does not expose arbitrary removal of middle entries.
 
 Pop-to, reset, and result-returning navigation remain deferred until concrete application use demonstrates the smallest coherent API.
@@ -395,16 +392,15 @@ During a predictive Pop:
 - Cancel restores the current stable state without focus or IME churn.
 - Commit deactivates the outgoing page and completes the Pop.
 
-Runtime should generalize disabled-subtree input cleanup rather than add `DeactivateNavigationInput()` beside the existing Layer-specific path.
+Runtime uses shared disabled-subtree input cleanup rather than a navigation-specific `DeactivateNavigationInput()` path.
 The shared cleanup cancels pointer capture and observers, clears hover, clears focus that belongs to the disabled subtree, and ends an owned text-input session with `TextInputEndReason::FocusLost`.
 
 ## Focus and text input
 
-Leaving a page clears focus when the focused node belongs to the outgoing subtree and stops its native text-input session.
-Returning to a retained page restores its component and scroll state but does not automatically focus its previous TextField or reopen the native keyboard.
+Leaving a page clears focus when the focused node belongs to the outgoing subtree and stops its platform text-input session.
+Returning to a retained page restores its component and scroll state but does not automatically focus its previous TextField or reopen the system keyboard.
 
-Automatic focus restoration would require a generic nested FocusScope contract and could unexpectedly reopen mobile IMEs after Pop.
-It remains separate future work rather than a navigation-specific identity map in Runtime.
+Automatic focus restoration is not supported because it could unexpectedly reopen mobile IMEs after Pop.
 
 Dialogs and other trap-focus Layers continue to use their existing focus restoration semantics.
 Because layers route Back before page navigation, dismissing a dialog restores application focus without changing the page stack.
@@ -480,7 +476,7 @@ The two pages must not own independent animation clocks.
 One shared progress guarantees synchronized page geometry, one completion condition, deterministic cancellation, and direct predictive Back seeking.
 
 Programmatic transitions advance progress through AnimationSpec.
-Predictive Update clamps native progress to `[0, 1]` and sets progress directly.
+Predictive Update clamps platform progress to `[0, 1]` and sets progress directly.
 Cancel retargets the current value to zero, while Commit retargets it to one.
 Tween completion time scales with remaining distance where necessary, and SpringSpec preserves the existing retargeting behavior and velocity rules.
 
@@ -609,20 +605,20 @@ Desktop and Web platforms initially produce Commit-only Back requests:
 - macOS maps Escape through ordinary key dispatch.
 - Web maps Escape through ordinary key dispatch and does not call browser history automatically.
 
-Android uses the richest available native callback while retaining API 23 as the minimum:
+Android uses the richest available platform callback while retaining API 23 as the minimum:
 
 - API 34 and later map `OnBackAnimationCallback` start, progress, cancel, and invoke callbacks to Begin, Update, Cancel, and Commit.
 - API 33 maps `OnBackInvokedCallback` to Commit.
 - API 23 through 32 map the Activity Back callback to Commit.
-- A completely unhandled Commit invokes the Activity's native fallback.
+- A completely unhandled Commit invokes the Activity's platform fallback.
 
 The full-screen HuxerUIActivity owns callback registration and Activity fallback behavior.
 An embedded HuxerUIView exposes the Runtime Back operations but does not finish its containing Activity or assume ownership of another navigation system.
 
-iOS does not install an unconditional edge recognizer in the initial implementation.
+iOS does not install an unconditional edge recognizer.
 A full-screen integration may later map an owned edge-pan gesture to the same BackEvent phases, while an embedded View must not steal a UIViewController navigation controller's interactive-pop gesture.
 
-OHOS and future platforms map their native navigation gestures or commands to the same shared transaction rather than adding platform-specific navigation state.
+OHOS and future platforms map their platform navigation gestures or commands to the same shared transaction rather than adding platform-specific navigation state.
 
 ## Responsive layout
 
@@ -647,7 +643,7 @@ View AppContent() {
 ```
 
 Applications that need history to survive a structural replacement hoist the authoritative domain selection or controlled NavigationPath above that branch.
-A future NavigationSplitView is a separate adaptive container rather than a behavior switch inside NavigationStack.
+There is no `NavigationSplitView`; split layouts are separate adaptive application containers rather than a behavior switch inside NavigationStack.
 
 Tabs also remain independent.
 Each IndexedPages child may own a nested NavigationStack, but Tabs and IndexedPages do not acquire page-history ownership.
@@ -659,14 +655,10 @@ Navigation visibility is not equivalent to component mount state.
 A covered page remains mounted, an exiting page remains mounted until animation completion, and a predictive Pop may be cancelled.
 
 Navigation therefore does not add `OnPageEnter`, `OnPageLeave`, `OnAppear`, or `OnDisappear` callbacks.
-Composition-scoped effects define setup and cleanup around actual mounted lifetime when that roadmap item is implemented.
-
-If applications later need to pause work while a retained page is covered, a read-only navigation activity value may be exposed through Environment and observed by an effect.
-It must not turn navigation callbacks into a second lifecycle system.
+Composition-scoped `Lifecycle` effects define setup and cleanup around actual mounted lifetime.
+Applications that need to pause work while a retained page is covered keep that visibility policy in controlled application state rather than creating a second navigation lifecycle.
 
 ## Typed routed navigation
-
-Status: implemented
 
 Factory navigation is convenient but cannot represent browser URLs, deep links, restoration, or externally controlled history.
 Typed routed navigation adds a data source above the existing resolved-entry engine instead of adding another navigator:
@@ -691,7 +683,7 @@ The terms have distinct meanings:
 - A resolved navigation entry is a private mounted instance with an internal identity, retained scope, and page factory.
 
 HuxerUI does not add a public Scene, Screen, Page, Route, Destination, or NavigationEntry base class.
-Scene already denotes render and whole-scene transition data, while Screen incorrectly implies that every navigation container fills a native window.
+Scene already denotes render and whole-scene transition data, while Screen incorrectly implies that every navigation container fills a platform window.
 Applications may use Screen or Page in their own component function names without adding either concept to the framework type system.
 
 ### Route values
@@ -961,6 +953,12 @@ The policy commits the accepted canonical browser location and the corresponding
 Nested URL routes may resolve to an application-owned aggregate containing a selected top-level destination and one or more nested path values.
 URL segment nesting does not force every visual component function to become a NavigationStack, and responsive layout changes do not alter the route solely because the same destination moves between panes.
 
+## Future work
+
+- Define saveable navigation state without implying that factory-only entries are serializable.
+- Add typed navigation results without introducing a second controller or route registry.
+- Extend adaptive navigation and platform transitions while preserving one authoritative path and application-owned URL policy.
+
 ## Failure and lifetime behavior
 
 Page factories execute during scoped composition and follow the same exception handling as other Scope factories.
@@ -1057,31 +1055,6 @@ Platform validation includes:
 
 Web URL integration requires browser tests for initial deep links, `Push()`, `Replace()`, `SetPath()`, Back, Forward, reload, invalid URLs, canonical encoding, duplicate routes, nested route projections, and suppression of history-update feedback loops.
 Application activation integration requires platform tests for cold-start delivery before first composition, warm delivery on the selected Runtime UI thread, session selection, Open With file capability lifetime, and rejection or routing policy without a committed Root View callback.
-
-## Delivery sequence
-
-The implemented navigation surface delivers TopAppBar, NavigationStack, NavigationController, retained entries, serialized programmatic transitions, Theme motion, generic Back routing, predictive Back on Android API 34, Commit-only fallback paths, and a dedicated navigation example.
-
-The routed extension is delivered in ownership-sized phases.
-The shared foundation now includes:
-
-- Separate navigation sources from private resolved entries without changing factory behavior.
-- Add NavigationPath, routed NavigationStack, RouteNavigationController, path reconciliation, and focused shared tests.
-- Add nearest and root routed-controller resolution through the parent-linked navigation Environment.
-
-The Web integration now includes:
-
-- Decode the initial browser location before resolving the first routed destination.
-- Map controller Push, Replace, Pop, and SetPath to browser History without making URL state authoritative beside NavigationPath.
-- Apply Back and Forward locations without echoing another browser-history mutation.
-- Demonstrate hash-based canonical URLs in the Web navigation example.
-
-The application integration now includes the shared activation boundary and Windows cold-start URL and file mapping. Remaining integration work is:
-
-- Deliver startup and subsequent Open URL and Open Files activations on the remaining supported platforms.
-- Let application-owned activation policy update its NavigationPath without coupling NavigationStack to platform inputs.
-
-Saveable application state, an iOS interactive gesture, split navigation, navigation results, and shared-element transitions remain separate later milestones built on the same resolved-entry engine.
 
 ## Invariants
 

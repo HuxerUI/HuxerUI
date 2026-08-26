@@ -1,26 +1,11 @@
 # Architecture Design
 
-Status: implemented foundation with deferred follow-up work
-
-This document describes the implemented modifier, animation, interaction, theme, presentation, and root extension foundation, followed by explicitly identified follow-up work. Code examples in implemented sections match the current public API.
+This document defines the modifier, animation, interaction, theme, presentation, platform integration, and root extension foundation.
+Code examples match the current public API unless a section explicitly documents an unsupported boundary.
 
 The ViewSpec compilation, Environment dependency, and `[[huxerui::composable]]` function model is specified in [View Composition and Environment Design](view-composition.md).
 
 HuxerUI uses the `Platform` prefix for framework abstractions that cross the shared-runtime boundary, including PlatformAdapter, PlatformView, PlatformModule, and their lifecycle state. Concrete operating-system objects keep their exact API names, such as `UIView`, `NSView`, `HWND`, and `HTMLElement`. Feature and type names do not use `Native` as a synonym for `Platform`; lowercase native remains valid when it describes operating-system behavior or an ecosystem term such as a Java native method or Gradle `externalNativeBuild`.
-
-Current implementation status:
-
-- Generic View modifiers, node extension reconciliation, frame callbacks, pointer observation, foreground painting, and third-party descriptors are implemented.
-- ScrollBar animation, hit testing, dragging, and painting are implemented as a node extension without Runtime feature branches.
-- Typed Environment and direct Theme providers, precise typed dependency propagation, and reconciliation-time Theme stabilization are implemented.
-- RuntimeRoot, LayerStack ordering, independent application and layer invalidation, RootHook services, and typed presentation handles are implemented.
-- Typed startup and subsequent application activations, observable application lifecycle state, mounted ordered lifecycle transitions, the built-in application Root Service, Runtime FIFO delivery, Windows cold-start and same-executable external forwarding, and Android Activity Intent mapping are implemented; remaining activation mappings remain staged.
-- Dialog, BottomSheet, Popup, Menu, and Toast share that LayerStack foundation. Standard Dialog structure and Dialog, BottomSheet, Menu, and Toast visual policy resolve from Theme, and a visible BottomSheet handle owns shared drag-to-dismiss interaction.
-- Named and cubic timing curves, tween, spring, keyframe, and delayed or repeated playback execute through one retained MotionController. Offset, Opacity, Scale, Rotation, synchronized Transition projection, explicit frozen-scene transitions, state-overlay indication, and multi-pointer ripple indication reuse that foundation.
-- Node-local PaintSequence recording and reuse, stable RenderNode ownership and revisions, retained group opacity, RenderScene publication, damage calculation, and renderer traversal are implemented.
-- Platform-neutral semantic declarations, immutable `SemanticFrame` publication, basic component defaults and action routing, NodeExtension virtual semantic children, and platform accessibility bridges on Windows, macOS, Android, and iOS are implemented. Complete component semantics and the remaining platform adapters are follow-up work.
-- Compile-time library acquisition, ordered resource merging, `PlatformPayload`, the low-level PlatformView leaf, `PlacePlatformViewCommand`, shared `RenderComposition` derivation, per-surface factory registration, and the nonvisual `PlatformInstance` Call, Result, Event, Cancel, and Dispose protocol are implemented. `ExternalTexture`, its closed PlatformPayload capability, Image composition, retained frame scheduling, revision damage, and explicit renderer command boundary are implemented. macOS and iOS provide independent `CVPixelBuffer` sources and Core Image frame import, Windows and Linux provide copied RGBA/BGRA pixel sources and Direct2D or Cairo frame import, Android provides a `Bitmap` source and Canvas frame import, and Web provides a WebCodecs `VideoFrame` source and Canvas frame import. Windows, macOS, Web, Android, and iOS provide owning-thread dispatch and PlatformView hosting with shared ordering and focus synchronization; Linux provides owning-thread dispatch for nonvisual PlatformModules. Windows, macOS, Android, and iOS also attach PlatformView accessibility beneath semantic anchors, while the Web accessibility bridge remains proposed. Windows, macOS, Linux, Web, Android, and iOS provide nonvisual timer reference integrations behind one typed Root Service. Applications install library RootHooks explicitly. Production nonvisual PlatformModules, PlatformView hosting and matching bridges on the remaining platforms, and platform dependency projection preserve one shared Runtime and keep platform objects inside platform adapters and platform implementations.
-- General View exit transitions, decay animation, advanced Toast queue policy, and profiler timelines remain follow-up work. Dialog, BottomSheet, Menu, and Toast already retain their Layer entries through component-specific exit motion when their active style enables it.
 
 The design has four goals:
 
@@ -254,7 +239,7 @@ The Task model does not add Runtime branches to State, EventBindings, Lifecycle 
 The complete public and execution contract is defined in [Task and Structured Concurrency Design](tasks.md).
 
 The built-in HttpClient Root Service is the first platform asynchronous API built directly on Task.
-It uses one private HttpTransport capability from PlatformAdapter, preserves HTTP values in shared C++, and resumes native completions through the owning Task execution without routing requests through PlatformModule.
+It uses one private HttpTransport capability from PlatformAdapter, preserves HTTP values in shared C++, and resumes platform completions through the owning Task execution without routing requests through PlatformModule.
 The complete request, cancellation, error, and backend contract is defined in [HTTP Client Design](http.md).
 
 ## NodeExtension lifecycle
@@ -436,8 +421,6 @@ The complete declaration, frame, action, identity, virtualization, security, and
 
 ## Platform content integration
 
-Status: shared payload, PlatformView composition, nonvisual instance protocol, and ExternalTexture rendering implemented; Windows, macOS, Linux, Web, Android, and iOS ExternalTexture production and consumption implemented; production PlatformModules and remaining platform adapters proposed
-
 Libraries provide three platform integration forms:
 
 | Requirement | Integration |
@@ -453,7 +436,7 @@ This does not introduce a Runtime subclass, a public Library base class, platfor
 
 ### Platform payload and instance protocol
 
-Direct registration from Objective-C, Swift, Java, Kotlin, JavaScript, C++, and future platform languages requires one value model that every boundary can represent.
+Direct registration from Objective-C, Swift, Java, Kotlin, JavaScript, C++, and additional platform languages requires one value model that every boundary can represent.
 `PlatformPayload` is an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, bytes, list, string-keyed object, and one closed framework capability kind, `ExternalTexture`.
 The capability kind does not admit arbitrary objects.
 Objects require unique keys and compare independently of insertion order; encoders preserve the distinction between integers, doubles, strings, and bytes rather than routing through JSON.
@@ -475,7 +458,7 @@ Boundary bridges preserve these kinds directly rather than relying on implicit c
 Decoders require the declared kind and range instead of converting a string to a number, truncating a double to an integer, or treating bytes as text.
 Platform ExternalTexture bridge phases represent the value with an unforgeable framework wrapper retaining the same opaque source state; they never expose or reconstruct it from a numeric identity.
 
-The shared public surface stays focused as the phases land:
+The shared public surface remains focused:
 
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
@@ -591,13 +574,11 @@ The shared protocol and deterministic dispatcher fixture are implemented and tes
 Windows posts a private message to its owning application HWND, macOS configures asynchronous main-queue delivery, Linux attaches idle sources to its owning GLib main context, Web queues work through the browser event loop, Android dispatches through its owning `HuxerUIView`, and iOS configures asynchronous main-queue delivery.
 The Windows dispatcher accepts work before that HWND exists because Runtime installs RootHooks before the adapter creates its window, then schedules the queued batch when the window attaches; shutdown drops late platform callbacks without retaining the destroyed HWND.
 `example_platform_module` registers a thread-pool timer on Windows, a Foundation timer on Apple platforms, a `timerfd` timer on Linux, an Emscripten interval on Web, and a Java scheduled timer on Android behind one typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
-Other production adapters and concrete product libraries remain proposed.
-
 ### PlatformView
 
 PlatformView is a real built-in leaf View rather than a modifier.
 Runtime owns its mounted identity, compatible reconciliation, measurement, final geometry, visibility, hit-testing boundary, focus participation, semantic anchor, and unmount timing.
-The platform adapter owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or future platform object.
+The platform adapter owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or equivalent platform object.
 
 The low-level declaration has only the registered type, complete controlled properties, and supported event keys:
 
@@ -689,7 +670,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | --- | --- |
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
-| Linux | GTK PlatformView hosting remains proposed. A conforming implementation must retain ordered GTK siblings and HuxerUI raster slices without depending on an X11-only child-window or XComposite path. |
+| Linux | PlatformView hosting is not implemented. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
@@ -703,13 +684,11 @@ Current shared tests cover payload invariants, per-surface registration, leaf la
 The macOS integration fixture covers PlatformView creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, focus synchronization, accessibility identity resolution, removal, stale-event rejection, and disposal.
 Android focused tests cover semantic-anchor encoding, while the Android PlatformView example and device validation cover PlatformView creation, controlled updates, slice ordering, hit testing, focus and IME transfer, platform accessibility attachment, removal, and recreation.
 The Windows integration fixture covers PlatformView creation and update, retained identity across hiding, nested HWND focus and UI Automation resolution, stale-event rejection, presentation-delayed retirement, remount, and deterministic disposal.
-Later composition phases add content-child-foreground order, nested rectangular clips, visibility, and equivalent adapter coverage as those behaviors land.
 Each available platform adds an integration fixture with HuxerUI content below and above one PlatformView, verifies frontmost pointer ownership, platform focus and IME transfer, accessibility traversal through the anchor, retained platform state across recomposition and temporary hiding, and deterministic teardown.
-Future surface-specific tests cover Android `SurfaceView` rejection and X11 child-window composition. Web integration coverage still needs automated DOM stacking, platform event, focus-boundary, and disposal checks across supported browsers.
+Android integration rejects `SurfaceView` where system composition cannot preserve the shared order.
+Web integration validation covers DOM stacking, platform events, focus boundaries, and disposal across supported browsers.
 
 #### Windows PlatformView composition
-
-Status: implemented
 
 The default Windows 10 adapter uses one premultiplied-alpha DirectComposition surface as the complete HuxerUI composition plane whenever the committed scene contains PlatformViews.
 It does not create one HWND, swap chain, bitmap, or DirectComposition surface per HuxerUI slice.
@@ -763,8 +742,6 @@ Rotation, path clipping, cross-boundary group opacity, backdrop effects, and oth
 The Windows 7 compatibility renderer does not silently flatten PlatformViews into a global foreground or background plane; a Windows 7 session that requests this DirectComposition capability fails with an explicit unavailable-capability diagnostic.
 
 ### ExternalTexture
-
-Status: shared value, payload, Image, rendering command, scheduling, and damage implemented; macOS, Linux, Web, Android, iOS, and Windows platform sources and frame import implemented
 
 `ExternalTexture` is a copyable platform-neutral consumer value representing one live visual source.
 It exposes fixed logical intrinsic size, stable identity equality, and validity, while its shared opaque state retains platform-owned frame production and lifetime data.
@@ -867,14 +844,6 @@ Runtime destruction releases RenderScene and platform-content frames before Root
 ExternalTexture is visual content, not a PlatformView interaction or accessibility subtree.
 Image semantics apply unless the library supplies a more specific HuxerUI semantic declaration, and controls layered over a Camera preview remain ordinary HuxerUI nodes.
 
-Implementation proceeds through reviewable stages:
-
-- The shared protocol has added `ExternalTexture`, the closed PlatformPayload kind, public-header coverage, and focused value and payload tests without adding a registry.
-- Shared rendering has added the Image input, DrawExternalTextureCommand, Runtime dependency snapshots, coalesced frame scheduling, damage invalidation, and explicit renderer command handling.
-- macOS, Linux, Web, Android, iOS, and Windows supply independent platform sources, latest-frame mailboxes, renderer-owned caches, and PlatformModule examples.
-
-Every stage ends with focused tests, the affected current-host build, `git diff --check`, and owner review before the next stage begins.
-
 ## Animation model
 
 Animation separates immutable timing policy, retained scalar execution, synchronized presentation projection, component motion, and explicit whole-scene transitions. The complete contract is defined in [Animation and Scene Transition Design](animation.md).
@@ -883,43 +852,11 @@ Animation separates immutable timing policy, retained scalar execution, synchron
 
 Explicit scene transitions freeze only committed render data. The new mounted tree becomes authoritative for input, focus, text input, semantics, and window appearance immediately; the frozen old scene has no logical lifecycle.
 
-### Deferred View lifecycle transition model
+### View lifecycle transitions
 
-`TransitionSpec` is a proposed insertion and removal model, not a current public API:
-
-```cpp
-TransitionSpec{
-    .enter = {
-        FadeTransition{
-            TweenSpec{.duration = 0.18},
-        },
-        ScaleTransition{
-            .from = 0.96F,
-        },
-    },
-    .exit = {
-        FadeTransition{
-            TweenSpec{.duration = 0.14},
-        },
-    },
-};
-```
-
-When a node with an exit transition disappears from the incoming tree, it enters a retained exit state:
-
-```text
-remove from the logical composition
-    ↓
-stop normal input delivery
-    ↓
-retain mounted presentation state
-    ↓
-run the exit transition
-    ↓
-unmount after completion
-```
-
-Dialog, BottomSheet, Menu, and Toast apply this lifecycle to Layer entries through a shared internal transition state when their active style enables motion. They reuse `AnimationSpec`, `MotionController`, frame scheduling, reduced-motion resolution, and retained presentation properties rather than introducing a second animation engine. General View insertion and removal transitions remain proposed.
+General View insertion and removal transitions are not part of the public API.
+Dialog, BottomSheet, Menu, and Toast retain Layer entries through their component-owned exit motion and reuse the shared animation engine.
+Future work may generalize lifecycle transitions only after identity, interruption, retained-state ownership, and reduced-motion behavior have one shared contract.
 
 ### Reduced motion
 
@@ -928,7 +865,7 @@ Accessibility and platform preferences enter through Environment. Theme motion r
 ## Interaction and indication
 
 The complete interaction-state, indication, visual-fill, and retained paint contract is specified in [Interaction and Indication Design](interaction-indication.md).
-The implemented repeated-tap, long-press, drag, recognition, and pointer-ownership model, together with the proposed multi-pointer transform stage, is specified separately in [Gesture Recognition and Arbitration Design](gestures.md).
+The repeated-tap, long-press, drag, recognition, and pointer-ownership model is specified separately in [Gesture Recognition and Arbitration Design](gestures.md).
 
 Pointer input follows one shared pipeline:
 
@@ -1311,7 +1248,7 @@ A RootHook installs per-window services or persistent global components before t
 using RootHook = std::function<void(RootContext&)>;
 ```
 
-The implemented `RootContext` has two capabilities:
+`RootContext` exposes root services, layers, and registered platform modules:
 
 ```cpp
 class RootContext {
@@ -1320,14 +1257,6 @@ public:
   void Provide(std::shared_ptr<Service> service);
 
   LayerController& Layers();
-};
-```
-
-The proposed PlatformModule phase adds one narrow library-author capability without exposing Runtime or PlatformAdapter:
-
-```cpp
-class RootContext {
-public:
   PlatformModules& Modules();
 };
 ```
@@ -1400,8 +1329,6 @@ RootHook does not provide:
 
 ## Theme-driven presentation policy
 
-Status: implemented for standard Dialog and theme-owned Tooltip, Dialog, BottomSheet, Menu, and Toast presentation policy
-
 The shared LayerStack foundation owns presentation lifetime, ordering, focus, barriers, Cancel routing, outside-press handling, Environment capture, and removal. It must not also define a single visual structure for every Theme.
 
 Presentation is divided into three contracts:
@@ -1432,7 +1359,7 @@ The framework composes these semantic values through ordinary HuxerUI Views. A T
 
 `PresentationMotion` is a public Theme value shared by presentation styles, while motion execution remains private to presentation. An absent optional motion disables the transition; otherwise neutral scale and slide values express a fade, and non-neutral values add scale or placement-relative translation without a second motion-kind hierarchy. The implementation interpolates opacity, scale, translation, and transform origin through `AnimationSpec`, retained Layer transition state, and presentation properties. Dialog, Menu, and Toast derive motion from their styles; BottomSheet maps its component-specific motion values into the same private executor.
 
-Menu motion direction and transform origin derive from the requested anchor placement. Making the origin follow a runtime fallback to the opposite side remains follow-up work because the resolved side currently belongs to LayerStack layout rather than the semantic Menu request.
+Menu motion direction and transform origin derive from the requested anchor placement. The origin does not follow a runtime fallback to the opposite side because the resolved side belongs to LayerStack layout rather than the semantic Menu request.
 
 Theme policy does not erase semantic component identity:
 
@@ -1698,19 +1625,4 @@ The current design does not introduce:
 - Process-global Toast or Dialog singletons.
 - Dynamic RootHook installation and removal.
 - Arbitrary numeric layer z-index.
-- Animated Theme interpolation in the initial implementation.
-
-## Implemented adoption sequence
-
-The foundation was introduced through the following sequence:
-
-- Add the generic modifier descriptor and node extension reconciliation.
-- Move ScrollBar frame, pointer, and paint state into a node extension.
-- Add generic invalidation flags and prune inactive frame subtrees.
-- Add typed hierarchical Environment values and direct Theme providers.
-- Add the synthetic RuntimeRoot and shared layer stack.
-- Add RootHook service installation.
-- Build Dialog and Toast on the layer stack.
-- Separate application and LayerStack composition, add level ordering, and build BottomSheet, Popup, Menu, and DebugOverlay on the shared controller.
-- Add interaction indications and public animation values.
-- Migrate common View styling to `With()` modifier values.
+- Automatic interpolation of an entire Theme.

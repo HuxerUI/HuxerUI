@@ -1,37 +1,36 @@
 # Roadmap
 
-The current foundation includes shared state and recomposition, composition-scoped Lifecycle and structured TaskScope concurrency, responsive viewport classes, local measurement and layout invalidation, retained subtree rendering, shared damage tracking, native partial redraw on Windows and macOS, custom and built-in layout, virtualized containers, retained modifiers, animation, scrolling, Tabs, selection navigation, shared accessibility semantics for controls, presentation, scrolling, destination selection, and virtual collections, Windows UI Automation, macOS AppKit, Android AccessibilityNodeProvider, and iOS UIKit bridges, application drawers, navigation stacks and predictive Back, themes, shadows, Canvas and Path drawing, typed app resources, Image, layers, controlled text editing, typed nonvisual PlatformModules on Windows, macOS, Linux, Web, Android, and iOS, installable platform-specific CMake targets, CLI project generation, diagnostics, Android and iOS device discovery, and Windows, macOS, Linux, Web, Android, and iOS platform build, launch, and backend integration.
+This roadmap records intended capability areas, not committed release dates.
+Current behavior is documented in the user guides, while detailed constraints live in the design reference.
 
-Runtime foundation work:
+## Accessibility
 
-- Composite key paths
-- Layout priority and intrinsic-size queries
+- Add platform accessibility bridges for Linux and Web.
+- Expand platform text-editing and collection mappings where the shared semantic contract already provides the required data.
+- Keep accessibility behavior derived from one shared `SemanticFrame` rather than platform-specific component logic.
 
-Framework capability work:
+## Platform integration
 
-- Plural messages and inherited Locale text shaping for ordinary text content
-- Demand-driven PaintCommand expansion for gradients and advanced strokes
-- Shape and path-based clipping modifiers
-- Multi-pointer transform and remaining component gesture migrations following the implemented single-pointer foundation in [Gesture Recognition and Arbitration Design](design/gestures.md)
-- Saveable state, decay animation, ordinary View lifecycle transitions, and overscroll effects
-- Complete component, modal, collection, navigation, virtualization, and platform adapter coverage for the implemented `SemanticFrame` foundation following the [Semantics and Accessibility Design](design/semantics.md)
+- Add Linux `PlatformView` hosting while preserving shared composition ordering.
+- Complete iOS archive export, distribution signing, and embeddable host integration.
+- Add an OHOS backend through the existing platform boundaries.
 
-SDK, platform integration, and distribution work:
+## Interaction and animation
 
-- Signed HuxerUI Android releases on Maven Central
-- CLI package and platform artifact collection
-- Typed PlatformModules with explicit application-installed RootHooks, `PlatformPayload` calls, results, events, and platform dependency projection
-- PlatformView hosting on Linux, Web accessibility attachment, and remaining cross-platform integration coverage
-- Versioned SDK distribution and signing support
-- iOS archive export, distribution signing, and embeddable UIView integration
-- OHOS backend
-- Web semantics and accessibility, browser integration tests, release packaging, and mobile IME validation following the [Web Platform Design](design/web.md)
+- Extend gesture arbitration to multi-pointer transforms and typed drag-and-drop.
+- Add ordinary View lifecycle transitions and overscroll effects without introducing per-component Runtime branches.
+- Expand paint primitives only when a production component or application requires them.
 
-The completed Runtime invalidation foundation supports retained Canvas drawing and enables page-transition and PlatformView expansion.
-App resources and Image follow the ownership, packaging, caching, and localization constraints in [App Resources, Images, and Localization Design](design/resources.md).
-Page stacks, transition ownership, Back routing, typed route paths, and Web URL history follow the [Navigation Design](design/navigation.md).
-Retained timing, synchronized presentation properties, and explicit frozen-scene transitions follow the [Animation and Scene Transition Design](design/animation.md).
-Accessibility proceeds from shared semantic declarations and the immutable `SemanticFrame` through component defaults before platform adapters.
-SDK delivery proceeds from the installable CMake foundation through CLI workflows and library integration before PlatformView coverage and versioned distribution.
+## Navigation and restoration
 
-Detailed design constraints and delivery sequences live in [`docs/design`](design/).
+- Define saveable application and navigation state without making factory-only routes serializable by implication.
+- Add typed navigation results and richer adaptive navigation only when they preserve the existing single path of truth.
+- Extend platform activation and deep-link integration while keeping URL and route policy application-owned.
+
+## Resources and distribution
+
+- Add localized image selection, inherited locale-aware text shaping, and explicit resource preload policy.
+- Publish signed platform packages where the platform ecosystem requires them.
+- Extend SDK packaging and signing without duplicating build policy in generated projects.
+
+Implementation proposals must update the relevant design document before changing public API or ownership boundaries.

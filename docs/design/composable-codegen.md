@@ -1,7 +1,5 @@
 # Composable Code Generation Design
 
-Status: implemented
-
 This document defines the opt-in CMake integration that transforms functions marked with `[[huxerui::composable]]` into the existing explicit HuxerUI scope form.
 The marker declares an independent local state and recomposition boundary.
 The transformation is build-time syntax sugar and does not introduce a new runtime scope, state model, or recomposition path.
@@ -113,11 +111,11 @@ Combining a hash of the absolute input path with the original source basename pr
 The integration is opt-in per target.
 HuxerUI application and library helpers enable it for their source targets, while linking `HuxerUI::huxerui` alone does not transform consumer sources.
 Codegen-enabled targets suppress the compiler warning for unknown C++ attributes so editors that consume the CMake compilation database accept the composable marker in original sources.
-Unsupported header definitions remain outside the initial transformation contract.
+Unsupported header definitions remain outside the transformation contract.
 
-## Initial transformer
+## Transformer
 
-The first implementation uses two layers:
+The implementation uses a lightweight lexical transformation:
 
 - Exact marker matching locates `[[huxerui::composable]]`.
 - A lightweight C++ lexical scanner locates and matches the marked function body.
@@ -188,7 +186,7 @@ Diagnostics should include:
 - Original file path.
 - Marker line and column.
 - A concise reason the function is unsupported or malformed.
-- The relevant first-version restriction when one applies.
+- The relevant transformer restriction when one applies.
 
 Representative errors include:
 
@@ -200,13 +198,13 @@ counter.cpp:52:16: composition function UseState() must be called from a [[huxer
 
 The generated source is retained after a failure that occurs during C++ compilation so developers can inspect the transformation.
 
-## Initial restrictions
+## Restrictions
 
 The CMake integration scans and transforms composable definitions in `.cpp`, `.cc`, and `.cxx` files.
 Headers are not scanned and must not contain composable definitions.
 It supports ordinary free functions and non-template member functions whose bodies can be located without preprocessing their syntax.
 
-The first version does not support:
+The transformer does not support:
 
 - Function templates.
 - Composable coroutine functions.
@@ -230,7 +228,7 @@ This means:
 - A referenced `this` is captured as a pointer under C++20 rules.
 - Move-only values cannot be captured when the resulting scope factory must be stored in the current copyable `std::function<View()>`.
 
-The transformer may add targeted diagnostics for unsupported captures later. The first version documents these constraints and otherwise relies on normal C++ compilation of the generated wrapper.
+The transformer may add targeted diagnostics for unsupported captures later. The current contract documents these constraints and otherwise relies on normal C++ compilation of the generated wrapper.
 
 ## Interaction with explicit scopes
 
@@ -288,9 +286,10 @@ CMake integration tests should cover:
 
 Runtime tests should verify that generated components have the same state isolation, dependency tracking, local recomposition, key behavior, and lazy state restoration as their explicit-scope equivalents.
 
-## Future evolution
+## Transformer boundary
 
-The lightweight scanner is an intentional first version, not a commitment to parse all future C++ syntax. If real usage requires header definitions, templates, complex constraints, or macro-aware transformation, the implementation can move to a Clang-based frontend while preserving:
+The public component syntax and runtime model do not depend on the transformer implementation.
+Any replacement must preserve:
 
 ```cpp
 [[huxerui::composable]]
@@ -301,5 +300,3 @@ and:
 ```cmake
 huxerui_enable_codegen(target)
 ```
-
-The public component syntax and runtime model do not depend on which transformer implementation is used.

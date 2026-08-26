@@ -180,7 +180,7 @@ The parent observes the exception from `co_await` and may catch it, update State
 
 A launched root `Task<void>` has no asynchronous result consumer.
 An exception that escapes that root is an uncaught application error and terminates the process after the coroutine frame is released.
-The initial API does not add an error callback, failure State, Task result query, or AsyncResult wrapper.
+The public API does not add an error callback, failure State, Task result query, or AsyncResult wrapper.
 
 Lifecycle setup exceptions continue to propagate from `Runtime::BuildFrame()`.
 Lifecycle accepts an ordinary `void` cleanup callable; cleanup runs inside the framework's non-throwing teardown boundary, so an exception escaping cleanup terminates the process.

@@ -24,7 +24,7 @@ HuxerUI's public identity is fixed:
 - CMake targets: `HuxerUI::huxerui` and `HuxerUI::huxerui_static`.
 - Composable functions: `[[huxerui::composable]]`.
 - Application declaration: `huxerui::Application`.
-- Native application entry: `huxerui::RunApplication()`.
+- Platform application entry: `huxerui::RunApplication()`.
 
 Do not restore an old identity or add legacy aliases without an explicitly approved compatibility policy. When a breaking public API change is approved, migrate headers, implementation, tests, examples, and documentation together and remove the old entry point.
 
@@ -70,7 +70,7 @@ Use `.clang-format` as the reference baseline for non-DSL code:
 - Bind pointer and reference markers to the type: `Type* value` and `Type& value`.
 - Do not automatically sort includes.
 
-Do not run clang-format unless formatting is necessary for the requested change. Never apply it to whole files or UI DSL declarations. The formatter does not preserve HuxerUI DSL layout, including chained `.With(...)` placement and indentation, so format touched UI declarations manually according to the rules below. When formatting is explicitly necessary, limit it to the smallest non-DSL range changed by the task.
+Run clang-format only when the requested change requires it, and limit it to the smallest non-DSL range. Never apply it to whole files or UI DSL declarations because it does not preserve chained `.With(...)` layout.
 
 Follow local naming:
 
@@ -102,23 +102,19 @@ return Column {
 
 Apply the same style to production UI, tests, examples, README, and design snippets:
 
-- Align closing braces and parentheses with their opening construct.
-- Split nested structural closures instead of leaving endings such as `}}})))`.
-- Keep trailing commas on child expressions and multiline arguments where local style permits.
-- Keep component-specific fluent configuration vertically chained.
+- Align closing braces and parentheses, and split dense endings such as `}}})))`.
+- Keep trailing commas where local style permits and component-specific fluent configuration vertically chained.
 - Distinguish `Column { ... }` UI syntax from `Frame{.height = 160.0F}` aggregate initialization.
-- Do not add wrappers, lambdas, or temporaries solely to conceal poorly formatted nesting.
-- Normalize only blocks touched by the task.
+- Do not add wrappers, lambdas, or temporaries to conceal formatting; normalize only touched blocks.
 
 Example targets use the `example_` prefix and a semantic snake-case name. A new example lives in `examples/<snake_case_name>/`, uses `huxerui_add_example`, has its own `CMakeLists.txt`, and is registered in `examples/CMakeLists.txt`.
+An example teaches one primary capability; `example_ui_gallery` remains the compact overview. Examples use public API, controlled state, stable keys for dynamic stateful items, and layouts usable across configured viewports.
 
 ## Architecture and ownership
 
-The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and RenderScene generation. Platform adapters own native lifecycle, frame scheduling, event conversion, text services, clipboard integration, and RenderScene rendering.
+The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and RenderScene generation. Each platform host view uses one shared `Runtime` and one `PlatformAdapter`, which owns platform lifecycle, frame scheduling, event conversion, text services, clipboard integration, and scene rendering. Runtime never depends on operating-system types; do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
 
-Use one shared `Runtime` implementation and one `PlatformAdapter` boundary per native host view. Do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
-
-The shared runtime does not depend on native platform types. Add a native capability only for a genuine native service; fix behavior at the narrowest layer that owns it.
+Add a platform capability only for a genuine platform service, and fix behavior at the narrowest layer that owns it.
 
 Public headers live in `include/huxerui`; implementation-only headers live in `src` or their platform directory. Every public header:
 
@@ -134,8 +130,6 @@ Use forward declarations only when a complete type is unnecessary. Keep include 
 Do not create a public header per trivial control or grow `view.h` with unrelated services, platform types, or rendering machinery. A new cross-platform public header updates `<huxerui/huxerui.h>`, public header checks, packaging metadata when applicable, and public documentation. Platform-specific public headers remain explicit includes and update their available-host header checks, packaging metadata when applicable, and public documentation.
 
 Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep a type in `src/internal.h` only when Runtime subsystems genuinely share it.
-
-Detailed architecture belongs in [Architecture Design](docs/design/architecture.md), text editing contracts in [Text Input and TextField Design](docs/design/text-input.md), code generation in [Composable Code Generation Design](docs/design/composable-codegen.md), and SDK or library planning in [SDK, CLI, Platform Shell, and Library Design](docs/design/sdk-cli.md).
 
 ## Public API and state
 
@@ -196,13 +190,15 @@ PaintCommands contain platform-neutral immutable drawing data only. A new comman
 
 Environment is typed hierarchical propagation, Theme is its visual specialization, and root services own per-window capabilities. Use layers only for content outside the application tree while preserving captured Environment, modal focus, and restoration.
 
-Input behavior remains shared. Platform adapters convert native pointer, key, scroll, clipboard, and text-input operations without duplicating component state machines.
+Input behavior remains shared. Platform adapters convert host pointer, key, scroll, clipboard, and text-input operations without duplicating component state machines.
 
 TextField is controlled by complete `TextEditingValue`. Preserve selection, affinity, composition, session identity, revision semantics, secure-data policy, and the distinction between UTF-8 bytes, UTF-16 units, Unicode scalars, and grapheme clusters. Validation reports application-owned domain state and does not filter edits.
 
 ## Platform constraints
 
-Treat supported platforms as an open-ended set. Shared API or semantic changes audit every affected current platform and future adapter boundary. Build every affected platform available in the current environment and report unavailable or unverified platforms.
+Treat supported platforms as an open-ended set; shared contracts must not encode a closed platform list.
+
+UIKit and AppKit UI, text-input, and frame-scheduling work stays on the main thread. Apple platform code preserves ARC-compatible ownership, balances Core Foundation and Core Graphics Create/Copy objects, and converts UIKit or AppKit coordinates at the host boundary.
 
 ### Android
 
@@ -214,15 +210,11 @@ The minimum Android API is 23. Guard newer APIs or obtain approval to raise it.
 
 ### iOS
 
-iOS platform configuration lives in `cmake/platform/IOS.cmake`. Register new UIKit sources and frameworks there.
-
-Keep UIKit application lifecycle, `UITextInput`, and `CADisplayLink` work on the main thread. Preserve ARC-compatible ownership, balance Core Foundation and Core Graphics Create/Copy objects, and convert native coordinates at the View boundary. The minimum deployment target is iOS 13.
+iOS platform configuration lives in `cmake/platform/IOS.cmake`. Register UIKit sources and frameworks there. The minimum deployment target is iOS 13.
 
 ### macOS
 
-macOS platform configuration lives in `cmake/platform/MacOS.cmake`. Register new AppKit sources and frameworks there.
-
-Keep AppKit work and `NSTextInputClient` interaction on the main thread. Preserve ARC-compatible ownership, balance Core Foundation and Core Graphics Create/Copy objects, and convert native coordinates at the host boundary.
+macOS platform configuration lives in `cmake/platform/MacOS.cmake`. Register AppKit sources and frameworks there.
 
 ### Windows
 
@@ -232,13 +224,13 @@ Keep shared layout in DIPs and convert pixels, screen coordinates, DPI, UTF-16, 
 
 ### Linux
 
-Linux platform configuration lives in `cmake/platform/Linux.cmake`; source files live under `platform/linux/`. GTK 4 owns the native window, event loop, input controllers, clipboard, and backend selection. Pango owns text layout and Cairo replays the platform-neutral RenderScene into the GTK drawing surface. GTK 4, GIO, and libsoup 3 resolve through pkg-config and remain distribution-owned dependencies.
+Linux platform configuration lives in `cmake/platform/Linux.cmake`; source files live under `platform/linux/`. GTK 4 owns the window, event loop, input controllers, clipboard, and backend selection. Pango owns text layout and Cairo replays the platform-neutral RenderScene into the GTK drawing surface. GTK 4, GIO, and libsoup 3 resolve through pkg-config and remain distribution-owned dependencies.
 
-Include `linux_internal.h` before any huxerui header in Linux sources so the platform boundary stays consistent across translation units. Keep shared layout in DIPs and convert native scale and IME geometry at the GTK host boundary. Use `GMainContext` for frame scheduling and UI-thread dispatch, `GtkIMContext` for composition and surrounding text, and GDK to obtain backend-specific handles only for optional native-service integration. Do not add X11, Wayland, EGL, or window-manager protocol logic to shared Runtime code. Clipboard and portal operations may use bounded nested GLib loops only when the synchronous shared interface requires them; every such wait has cancellation and a timeout.
+Include `linux_internal.h` before any huxerui header in Linux sources so the platform boundary stays consistent across translation units. Keep shared layout in DIPs and convert GDK scale and IME geometry at the GTK host boundary. Use `GMainContext` for frame scheduling and UI-thread dispatch, `GtkIMContext` for composition and surrounding text, and GDK to obtain backend-specific handles only for optional platform-service integration. Do not add X11, Wayland, EGL, or window-manager protocol logic to shared Runtime code. Clipboard and portal operations may use bounded nested GLib loops only when the synchronous shared interface requires them; every such wait has cancellation and a timeout.
 
 Add equivalent focused guidance when a new backend gains repository-owned implementation.
 
-## Build, validation, and documentation
+## Build and validation
 
 Use C++20 with extensions disabled. Preserve `-Wall -Wextra -Wpedantic` and MSVC `/W4 /permissive-`.
 
@@ -250,11 +242,9 @@ Host tools in `tools/prebuilt/<host>/<architecture>` run on the development host
 
 Place tests by ownership under `tests/unit`, `tests/runtime`, `tests/platform`, or `tests/codegen`. Tests verify public outcomes and invariants rather than private steps. Cover mount, compatible recomposition, replacement, unmount, keyed movement, Cancel and disabled input paths, deterministic animation time, and exception categories where relevant.
 
-Use the project's existing configured build directory and native host toolchain. Do not let a generic command silently select another compiler, generator, ABI, or binary format.
+Use the existing compatible build directory and host platform toolchain; do not delete owner-managed output or let a generic command select another compiler, generator, ABI, or binary format.
 
-Validate the current host by default. Build another platform only when the change affects that platform's adapter, build configuration, packaged artifact, or shared boundary requiring platform verification, or when the owner requests it.
-
-After every platform-scoped change, explicitly assess whether shared CMake, CLI, packaging, public headers, or Runtime code can affect another platform. Test every affected platform available in the current environment and report each unavailable platform; a platform guard alone is not evidence that other platforms are unaffected.
+Validate the current host by default. Build other platforms when requested or when changes affect their adapter, configuration, packaged artifact, or a shared boundary. Audit platform-scoped changes for effects through shared CMake, CLI, packaging, public headers, and Runtime; test every affected platform available locally, report unavailable platforms, and never treat a platform guard as proof of isolation.
 
 Treat a confirmed host-specific test limitation as unavailable validation rather than a product regression. Report the limitation and run the closest valid target instead of repeatedly invoking an incompatible toolchain or assertion.
 
@@ -266,14 +256,24 @@ Validation depth is proportional to the affected contract:
 - Layout or virtualization: geometry, constraints, state restoration, and common tests.
 - Modifier or NodeExtension: reconciliation, scheduling, input, paint order, and animation.
 - PaintCommand: command tests, every renderer audit, and every available platform build.
-- Text input or TextLayout: reducer, TextField, Runtime session, native adapter, common, and affected platform tests.
+- Text input or TextLayout: reducer, TextField, Runtime session, platform adapter, common, and affected platform tests.
 - Codegen: transform, generated Runtime behavior, common build, and required host tools.
 - CMake or packaging: an incremental build plus a separate clean configure and build.
 
-Use an existing compatible build directory and do not delete owner-managed output to repair configuration.
-
-Public API or behavior changes update the relevant user and design documentation. Update README when the project overview, supported platforms, quick start, documentation index, or example list changes.
-
-Proposed or deferred work is marked clearly. An example teaches one primary capability; `example_ui_gallery` remains the compact overview. Examples use public API, controlled state, stable keys for dynamic stateful items, and layouts usable across configured viewports.
-
 Finish with `git diff --check` and `git status --short`. Report important files, exact validation outcomes, unavailable platforms, remaining limitations, and whether anything was staged or committed. Never claim an unexecuted target, architecture, platform, or test passed.
+
+## Documentation
+
+Documentation has distinct ownership:
+
+- `README.md` is the concise project landing page with installation, first-use, platform, and documentation entry points.
+- `docs/guide/` documents current public SDK behavior for application developers.
+- `docs/development/` documents repository builds, validation, and SDK packaging.
+- `docs/design/` records internal architecture, ownership, invariants, and unsupported boundaries.
+- `docs/roadmap.md` summarizes future capability areas without promising release dates.
+
+Public API or behavior changes update the owning user and design documents. Update README only when its project overview, installation, first-use flow, supported platforms, or top-level documentation links change; keep details in the owning document.
+
+Keep current behavior separate from explicitly marked future work. Do not retain implementation-stage logs, completed migration sequences, superseded proposals, or historical status inventories as current documentation. When adding, moving, or removing documents, update `docs/README.md` and the relevant section index in the same change.
+
+Subsystem contracts belong in [Architecture](docs/design/architecture.md), [Text Input and TextField](docs/design/text-input.md), [Composable Code Generation](docs/design/composable-codegen.md), and [SDK, CLI, Platform Shell, and Library](docs/design/sdk-cli.md).

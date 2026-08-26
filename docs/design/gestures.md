@@ -1,9 +1,7 @@
 # Gesture Recognition and Arbitration Design
 
-Status: single-pointer gestures implemented; multi-pointer transform deferred
-
 This document defines the shared gesture-recognition, ownership-resolution, and cancellation model.
-Pointer recognition, repeated taps, long presses, and single-pointer drags are implemented; multi-pointer transform and remaining component migrations are staged.
+Pointer recognition, repeated taps, long presses, and single-pointer drags share one ownership path.
 The model extends the interaction foundation without adding general event capture and bubbling or exposing raw pointer capture to applications.
 
 The mounted interaction and indication contract remains defined by [Interaction and Indication Design](interaction-indication.md).
@@ -11,7 +9,7 @@ PlatformView composition and initial input ownership remain defined by [Architec
 
 ## Goals
 
-- Recognize repeated taps, long presses, single-pointer drags, and multi-pointer transforms in the shared Runtime.
+- Recognize repeated taps, long presses, and single-pointer drags in the shared Runtime.
 - Give Click, scrolling, public gesture modifiers, and retained pointer extensions one deterministic competition model.
 - Keep every physical pointer sequence exclusively owned by HuxerUI or one PlatformView after its Down event.
 - Continue delivery to an accepted recognizer outside its node bounds until completion or cancellation.
@@ -301,70 +299,6 @@ The design does not add `FlingGesture`.
 Drag reports terminal velocity, while the consumer decides whether that velocity starts retained motion.
 Scroll containers pass it to `ScrollPhysics`; minimum velocity, maximum velocity, deceleration, and overscroll remain scrolling policy rather than gesture settings.
 
-## Multi-pointer transform
-
-`TransformGesture` combines translation, scale, and rotation for a pointer group:
-
-```cpp
-return Canvas(content)
-    .With(TransformGesture{})
-    .On<TransformEvents::Changed>([transform](const TransformEvent& event) {
-      transform = {
-          .translation = event.translation,
-          .scale = event.scale,
-          .rotation = event.rotation,
-      };
-    });
-```
-
-Its public values are conceptually:
-
-```cpp
-struct TransformGesture {
-  bool translation_enabled = true;
-  bool scale_enabled = true;
-  bool rotation_enabled = true;
-  std::optional<float> minimum_translation;
-  std::optional<float> minimum_scale_change;
-  std::optional<float> minimum_rotation;
-
-  bool operator==(const TransformGesture&) const = default;
-};
-
-struct TransformEvent {
-  Point centroid;
-  Point window_centroid;
-  Point translation;
-  Point translation_delta;
-  float scale = 1.0F;
-  float scale_delta = 1.0F;
-  float rotation = 0.0F;
-  float rotation_delta = 0.0F;
-  std::size_t pointer_count = 0;
-};
-
-struct TransformEvents {
-  struct Started : Event<const TransformEvent&> {};
-  struct Changed : Event<const TransformEvent&> {};
-  struct Ended : Event<const TransformEvent&> {};
-  struct Canceled : Event<const TransformEvent&> {};
-};
-```
-
-At least two HuxerUI-owned pointers whose routes contain the same mounted Transform modifier are required.
-PointerSessions whose routes contain that stable modifier identity share one private `TransformGestureRecognizer`.
-The recognizer accepts when any enabled dimension crosses its threshold and then becomes the owner of every member session.
-Scale begins at `1.0F`, rotation uses radians, and translation begins at zero.
-
-Runtime finds a compatible pending or accepted Transform recognizer by scanning the existing active PointerSessions rather than maintaining a group registry.
-The sessions and owner fields share that recognizer because it has one real lifetime spanning all member pointer sequences.
-Single-pointer recognizers use the same private ownership representation without introducing a second recognizer interface.
-
-Adding or removing a member pointer rebases current geometry while preserving cumulative output so the visible transform does not jump.
-Dropping below two pointers ends an accepted transform and does not degrade it into a one-pointer Drag.
-A Drag that already won cannot be stolen by a later second pointer.
-When Transform accepts, Runtime first installs it as the owner of every member session, rejects the other recognizers in those sessions, cancels their raw targets, and then publishes Started and Changed.
-
 ## Coordinates and settings
 
 Gesture events expose a frozen node-local coordinate and the current window coordinate.
@@ -372,7 +306,6 @@ Runtime captures the node transform when the recognizer is created and uses it f
 Moving or transforming the target in response to its events therefore does not feed back into later local deltas.
 
 Distances use logical pixels, translation velocities use logical pixels per second, scale is multiplicative, and rotation uses radians.
-Transform recognition computes pointer geometry in window space before projecting translation into the frozen local space.
 
 Recognition defaults belong to one Runtime-level value rather than Theme, Environment, or mounted nodes:
 
@@ -386,7 +319,7 @@ struct GestureSettings {
 ```
 
 PlatformAdapter supplies available system values and shared fallbacks for unavailable settings.
-The macOS adapter maps the system double-click interval; adapters without a stable native equivalent retain the shared fallback.
+The macOS adapter maps the system double-click interval; adapters without a stable platform equivalent retain the shared fallback.
 Individual modifiers override only their optional fields.
 Each new recognizer snapshots its effective values, so compatible modifier updates do not reinterpret an active sequence.
 
@@ -446,7 +379,7 @@ The committed RenderComposition decides initial ownership before Runtime creates
 
 ```text
 PlatformView wins Down
-    → the native hierarchy owns the complete sequence
+    → the platform hierarchy owns the complete sequence
     → Runtime creates no HuxerUI session
 
 HuxerUI wins Down
@@ -455,7 +388,6 @@ HuxerUI wins Down
 ```
 
 Ownership never transfers across the PlatformView boundary after Down.
-Every Transform member pointer must independently belong to HuxerUI.
 Platform adapters keep host-level delivery active until physical Up, Cancel, capture loss, or device loss; shared Runtime alone chooses the gesture owner.
 
 ## Layers
@@ -515,7 +447,7 @@ Compatible modifier reconciliation preserves mounted recognizer identity and cur
 
 Gesture modifiers do not synthesize semantics because physical motion does not identify the application operation.
 A Slider continues to expose adjustable semantics, a reorderable collection provides suitable custom actions, and a transformable Canvas provides equivalent controls when the operation is essential.
-MultiTap, LongPress, Drag, or Transform must not be the only way to perform an important action without an accessible alternative.
+MultiTap, LongPress, or Drag must not be the only way to perform an important action without an accessible alternative.
 
 ## Performance
 
@@ -524,18 +456,22 @@ Each active pointer owns one bounded session and a recognition list proportional
 Movement sampling uses fixed-capacity storage, and long-press recognition schedules one deadline instead of continuous frames.
 Pointer movement changes retained recognizer state directly; only application handlers that update State schedule recomposition.
 
+## Future work
+
+Multi-pointer transform recognition and typed drag-and-drop may extend the same ownership arbitration.
+They must not introduce a second pointer router, public recognizer hierarchy, or platform-specific component behavior.
+
 ## Type and implementation ownership
 
 The public surface adds only independently meaningful values:
 
-- `MultiTapGesture`, `LongPressGesture`, `DragGesture`, and later `TransformGesture` are retained modifiers.
+- `MultiTapGesture`, `LongPressGesture`, and `DragGesture` are retained modifiers.
 - Their event payloads carry different semantic data and remain separate values instead of inheriting from a generic gesture-event base.
 - Their grouped event keys follow the existing ViewEvents, SliderEvents, and TabsEvents convention.
 - GestureSettings contains only shared recognition defaults.
 
 Ownership resolution, recognizers, tap accumulation, routes, quarantine, and movement samples remain private implementation details.
 There is no public recognizer base class, gesture controller, ownership handle, capture token, result wrapper, event phase, event context, or generic gesture payload.
-PointerSession stores private shared recognizer ownership because one Transform recognizer can span several sessions; this is the existing session graph's ownership mechanism rather than a public abstraction or group registry.
 
 Implementation ownership is focused:
 
@@ -544,21 +480,9 @@ Implementation ownership is focused:
 - One focused private header owns the recognizer contract used by gesture modifiers, pointer routing, and scrolling.
 - `src/runtime_pointer_interaction.cpp` owns PointerSession, raw delivery, ownership resolution, and quarantine.
 - Existing scrolling code owns delta consumption and momentum after its recognizer accepts.
-- Platform adapters own timestamps, pointer identifiers, host-level sequence delivery, cancellation, and native settings mapping.
+- Platform adapters own timestamps, pointer identifiers, host-level sequence delivery, cancellation, and platform settings mapping.
 
-Runtime dispatches the private recognizer capability and never checks for LongPress, Drag, Transform, Drawer, BottomSheet, Slider, or another concrete component kind.
+Runtime dispatches the private recognizer capability and never checks for LongPress, Drag, Drawer, BottomSheet, Slider, or another concrete component kind.
 The existing generic checks for semantic activation, scrolling capability, and NodeExtension pointer capability create their respective internal recognizers.
 
-## Delivery sequence
-
-Implementation proceeds in independently reviewable stages:
-
-- Implemented: refactor current Click, raw pointer events, scrolling recognition, NodeExtension pointer behavior, and text-selection pointer handling onto PointerSession and shared ownership resolution without adding public gesture API.
-- Implemented: add GestureSettings, normalized timing, MultiTapGesture, LongPressGesture, and DragGesture as recognizers on the established path.
-- Implemented: migrate Tooltip touch long press to a focused recognizer while keeping immediate Drawer, BottomSheet, and ScrollBar interactions on the NodeExtension pointer adapter.
-- Add TransformGesture, pointer groups, and multi-pointer capture-loss coverage on every supported adapter.
-- Design typed DragSource, DropTarget, payload transfer, previews, and native drag-and-drop separately.
-
-The pointer-core stage must preserve existing Click, raw event, focus, interaction, scrolling, momentum, and NodeExtension outcomes before new public behavior is added.
-Later stages validate deterministic nesting, movement outside bounds, cancellation, quarantine, disable, layer dismissal and pointer policies, multiple pointer IDs, PlatformView exclusivity, and compatible modifier reconciliation.
-Platform tests additionally verify that one physical sequence cannot reach both a PlatformView and HuxerUI.
+Platform tests verify that one physical sequence cannot reach both a PlatformView and HuxerUI.

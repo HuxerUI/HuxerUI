@@ -1,12 +1,10 @@
 # HTTP Client Design
 
-## Status
-
 The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent Windows, macOS, iOS, Linux, Android, and Web backends are implemented.
 
 ## Goals
 
-HuxerUI provides one small HTTP API that composes with Task and retains each platform's native networking stack.
+HuxerUI provides one small HTTP API that composes with Task and retains each platform's networking stack.
 The shared layer owns portable request values, response values, validation, error categories, Task resumption, and cancellation races.
 Platform adapters own URL loading, TLS, proxy integration, connection reuse, redirects, timeout enforcement, and conversion to owned C++ response values.
 
@@ -83,7 +81,7 @@ public:
 
 Request and response bodies are binary-safe byte strings.
 HttpClient does not infer an encoding, parse JSON, construct form bodies, or decode application payloads.
-Header entries remain a sequence because repeated field names are meaningful, although a platform may combine fields when its native response API no longer exposes individual lines.
+Header entries remain a sequence because repeated field names are meaningful, although a platform may combine fields when its response API no longer exposes individual lines.
 
 URLs must be absolute HTTP or HTTPS URLs.
 GET and HEAD requests reject non-empty bodies.
@@ -129,7 +127,7 @@ The HTTP result model does not add a generic Result, AsyncResult, or second Task
 ## Ownership and cancellation
 
 HttpClient is a per-Runtime Root Service and owns a shared private HttpTransport.
-The transport may retain a process or adapter-level native session so requests reuse native connection pools.
+The transport may retain a process or adapter-level session so requests reuse transport connection pools.
 Every Send call copies that shared transport into the lazy Task before returning, so the coroutine does not retain a raw HttpClient pointer.
 
 The HTTP awaiter binds its continuation to the current Task execution.
@@ -166,7 +164,7 @@ public:
 
 Start takes ownership of the complete request and returns an optional cancellation operation.
 The completion receives one owned platform-neutral HttpResult and may run on any thread.
-Native callbacks never retain a coroutine handle, Runtime pointer, or awaiter directly.
+Transport callbacks never retain a coroutine handle, Runtime pointer, or awaiter directly.
 
 macOS uses an ephemeral NSURLSession with URLSessionDataTask.
 It disables persistent cookies and URL caching, keeps connection reuse inside the session, applies the request deadline, cancels the data task during Task cancellation, and converts the final HTTP response and body into owned C++ values.
@@ -180,7 +178,7 @@ WinHTTP callbacks advance send, response, and buffered-read phases without occup
 Closing the request handle is the single cancellation path, and callback context remains alive until WinHTTP reports `HANDLE_CLOSING`.
 A private thread-pool deadline covers the complete operation rather than restarting for each WinHTTP phase.
 Windows 10 and later use the operating system automatic proxy configuration, while Windows 7 compatibility builds retain WinHTTP's default proxy mode.
-The backend disables persistent cookies, requests native gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
+The backend disables persistent cookies, requests transport-managed gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
 The Linux backend uses one libsoup 3 Session on a dedicated GLib network thread, preserving system proxy and trust-store behavior without entering the GTK UI context.
 It buffers responses through the asynchronous send-and-read API, enforces the complete request deadline with a GLib timeout source, and cancels requests through GCancellable.
 The distribution-provided libsoup 3 development package and its GLib/GIO dependencies are manually installed system dependencies rather than FetchContent inputs.
@@ -192,13 +190,13 @@ HuxerUI does not add Android Internet permission from CMake, weaken Apple transp
 ## Deliberate limits
 
 Send buffers the complete request and response bodies in memory and is intended for ordinary API requests.
-The initial API does not include streaming uploads, streaming downloads, progress callbacks, resumable transfers, background transfer, WebSocket, retry policy, interceptors, certificate pinning, a framework Cookie Jar, or persistent HTTP caching.
-Future streaming or file-transfer APIs should remain separate operations instead of changing the ownership of HttpResponse::body.
+The HTTP API does not include streaming uploads, streaming downloads, progress callbacks, resumable transfers, background transfer, WebSocket, retry policy, interceptors, certificate pinning, a framework Cookie Jar, or persistent HTTP caching.
+Streaming and file-transfer APIs remain separate operations instead of changing the ownership of `HttpResponse::body`.
 
 ## Validation
 
 Shared tests use a deterministic fake HttpTransport to verify request preservation, response delivery, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
 Each platform phase adds its implementation to the corresponding platform build and validates that platform without claiming unexecuted backends.
-Windows transport tests use a deterministic loopback server to verify native request and response conversion plus the complete-operation deadline.
+Windows transport tests use a deterministic loopback server to verify WinHTTP request and response conversion plus the complete-operation deadline.
 Linux transport tests use a deterministic loopback server to verify binary bodies, repeated headers, redirects, errors, cancellation, deadlines, races, and shutdown.
 `example_http` provides the Windows, macOS, iOS, Linux, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.

@@ -1,7 +1,5 @@
 # File and Application Storage Design
 
-## Status
-
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
 The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, bounded platform asynchronous executor, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
 The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
@@ -20,7 +18,7 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 
 ## Non-goals
 
-The initial implementation does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, URI schemes, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, directory pickers, or a document-provider abstraction.
+The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, URI schemes, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, directory pickers, or a document-provider abstraction.
 
 It also does not persist picker grants across process launches or add drag-and-drop, clipboard, recent-file, or share-sheet APIs.
 Those capabilities may reuse `FileReference` later without expanding the initial picker contract.
@@ -195,7 +193,7 @@ public:
 };
 ```
 
-The initial API has no `FileResult<void>` specialization.
+The public API has no `FileResult<void>` specialization.
 Mutating operations return `bool`; `FileResult<T>` remains limited to metadata, enumeration, and reads where empty output is valid and cannot represent failure.
 
 Calling `Value()` on an error or `Error()` on a value throws `std::logic_error`.
@@ -211,13 +209,13 @@ Operational failures never escape these result-returning methods as filesystem e
 [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
 ```
 
-The initial operations read the complete file into memory.
+Read operations load the complete file into memory.
 An empty vector or string is a successful empty file, which is why reads retain `FileResult<T>`.
 The implementation reports a file that cannot fit in the owned result as `TooLarge` before allocating an invalid buffer.
 
 `ReadString()` defines text as UTF-8.
 It accepts and removes one leading UTF-8 byte-order mark, rejects invalid UTF-8 with `InvalidEncoding`, and does not transform line endings.
-Additional encodings and line-oriented APIs are not part of the initial surface.
+Additional encodings and line-oriented APIs are not part of the public surface.
 
 ## Writing and appending
 
@@ -247,9 +245,9 @@ They require the parent directory to exist and return `false` for a directory ta
 String writes validate UTF-8, write no byte-order mark, and perform no newline conversion.
 Invalid string input is caller configuration and throws `std::invalid_argument` before starting either a synchronous or asynchronous operation.
 
-The initial API does not add write options, implicit parent creation, or atomic replacement.
+The public API does not add write options, implicit parent creation, or atomic replacement.
 Code creates parents explicitly with `CreateDirectories()`.
-A future atomic-write operation should be named explicitly instead of adding an ambiguous option to every write.
+Atomic write is not supported; it would require a separate explicitly named operation rather than an ambiguous option on every write.
 
 ## Directories and deletion
 
@@ -298,7 +296,7 @@ The single Boolean argument directly expresses whether an existing destination m
 The API does not introduce an `ExistingFilePolicy` enum for that binary choice.
 
 The initial `CopyTo()` copies one ordinary file and does not recursively copy directories.
-A later directory-copy operation should be named separately so a seemingly small call cannot hide an unbounded traversal.
+Directory copy is not supported because the current copy operation must not hide an unbounded traversal.
 
 `MoveTo()` uses the local filesystem's platform move operation and returns `false` when it cannot complete that operation.
 It does not silently turn a cross-device move into copy followed by deletion.
@@ -346,7 +344,7 @@ Application storage must use the semantic application directories rather than de
 The application directories are created and validated before the service is published.
 Platform shells determine their application identity from bundle, package, or executable metadata rather than adding another identifier to the static `Application` declaration.
 
-The initial API does not expose a cross-platform Documents directory.
+The public API does not expose a cross-platform Documents directory.
 User-visible documents and granted external locations use the separate `FileReference` and `FilePicker` contracts below rather than an unrestricted local path.
 
 ## External file references
@@ -391,7 +389,7 @@ Neither operation exposes a platform path or silently grants broader access.
 
 Each value retains shared private platform state.
 Copying a value retains the grant, and destruction of the last copy releases process-scoped resources such as Apple security-scope access, Android provider state, or a browser handle.
-The initial API does not serialize references or promise that a grant remains valid after application restart.
+The public API does not serialize references or promise that a grant remains valid after application restart.
 
 ## File picker
 
@@ -438,11 +436,11 @@ Malformed filters or suggested names throw `std::invalid_argument` before platfo
 
 User cancellation is an ordinary outcome, not an error.
 Single selection returns `std::nullopt`, multiple selection returns an empty vector, and saving returns `false` when the user cancels.
-An unsupported or failed platform operation produces the same empty or false outcome in the initial compact API; capability predicates let applications avoid presenting unavailable actions.
+An unsupported or failed platform operation produces the same empty or false outcome in the current compact API; capability predicates let applications avoid presenting unavailable actions.
 
 `SaveFileAsync()` streams from a local `File` to the destination selected by the platform picker.
 The platform interface owns overwrite confirmation, so the common operation does not add another overwrite argument.
-Saving bytes or strings directly is outside the initial surface; code may write an application temporary file and save that file explicitly.
+Saving bytes or strings directly is outside the public surface; code may write an application temporary file and save that file explicitly.
 
 Only one picker presentation may be active for a Runtime.
 Concurrent requests are serialized in call order.
@@ -476,8 +474,8 @@ It owns immutable application-directory values and registers those roots with pr
 Each `File` stores only a normalized absolute UTF-8 local path and remains usable after its originating `FileSystem` handle or component has gone out of scope.
 Local operations are private implementation functions rather than a polymorphic provider interface.
 
-The initial public `FileSystem` is final.
-The initial API does not add filesystem registration, mount names, URL schemes, or a public `ZipFileSystem` subclass merely to reserve that possibility.
+The public `FileSystem` is final.
+The API does not add filesystem registration, mount names, URL schemes, or a public `ZipFileSystem` subclass merely to reserve that possibility.
 An archive or virtual filesystem requires a separate deliberate public design rather than an unused local-file abstraction.
 
 ## Synchronous and asynchronous execution
@@ -559,7 +557,7 @@ When GTK uses its X11 backend, the current native window is encoded as `x11:<hex
 One unpredictable handle token is used per request, the predicted Request path is subscribed before the method call, and a backend-returned legacy path replaces that subscription when necessary.
 Task cancellation completes the transport operation immediately and closes the portal Request so Runtime-level picker serialization can advance without waiting for a Response that will not arrive after Close.
 Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
-Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared bounded native file executor.
+Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared bounded platform file executor.
 Saving reports success only after the source file has been copied over the portal-confirmed destination.
 This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
 
@@ -587,7 +585,7 @@ Application code starts the picker directly from a click or equivalent event and
 A browser dialog cannot generally be dismissed by script, so Task cancellation detaches the HuxerUI continuation while the transport waits for the platform picker to settle before advancing the shared presentation queue.
 
 Handle and browser `File` lifetimes follow the corresponding `FileReference` and remain session scoped.
-This phase does not persist granted handles in IndexedDB or add browser-specific permission methods to the public API.
+The Web backend does not persist granted handles in IndexedDB or add browser-specific permission methods to the public API.
 
 ### Storage identity and directories
 
@@ -657,7 +655,7 @@ The queue retains a persistent mutation until its synchronization callback retur
 IDBFS automatic persistence is not the Task completion mechanism because it does not expose the result of the particular durable operation to that Task.
 Explicit synchronization keeps storage failures observable through the existing `bool` or `FileResult<T>` outcome without adding a Web-specific result type.
 After a persistent mutation has begun, the implementation attempts synchronization even when a compound virtual operation reports failure because part of that operation may already have changed the mounted tree.
-The initial implementation does not add an in-memory rollback transaction for partially completed filesystem operations.
+The implementation does not add an in-memory rollback transaction for partially completed filesystem operations.
 
 Canceling the owning Task detaches its continuation but does not discard an operation or synchronization already in progress.
 The queue may finish that work to preserve filesystem ordering, while retired application code is never resumed.
@@ -687,15 +685,11 @@ Shared lexical tests cover UTF-8, roots, relative construction, parent traversal
 Shared local-file tests use isolated temporary directories to cover empty and non-empty reads, UTF-8 validation, enumeration, metadata, writing, appending, directory creation, deletion protection, copy and move overwrite behavior, Task cancellation, Runtime teardown, and UI-thread resumption.
 
 Shared fake picker and reference tests cover single and multiple selection, active and queued cancellation, unsupported capabilities, filter validation, serialized presentation, grant retention, import and replacement, and UI-thread resumption.
-Each platform picker phase adds revoked-access, Runtime-teardown, platform dismissal, and grant-cleanup coverage appropriate to that platform.
+Platform picker coverage includes revoked access, Runtime teardown, platform dismissal, and grant cleanup where applicable.
 
 Linux picker integration tests use `GTestDBus` with a private bus and fake `org.freedesktop.portal.Desktop` service.
 They cover capability probing, optional X11 parenting, filter and suggested-name wire values, predicted and returned Request handles, success and failure responses, URI validation, cancellation with Request.Close, late responses, metadata, reference I/O, and completed save copies without displaying desktop UI.
 
-Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, platform picker mapping, platform failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
+Each platform verifies its application-directory mapping, Unicode conversion, protected roots, picker mapping, failure mapping, asynchronous execution, and grant cleanup without claiming unavailable behavior.
 
-Web storage validation should additionally cover initial restoration before Runtime mounting, persistence across page reloads, temporary-data loss across reloads, isolation between two storage keys on one origin, rejection of synchronous persistent mutation without an in-memory change, serialized asynchronous persistence, IndexedDB failure mapping, cancellation, Runtime teardown, and reuse of one initialized mount by multiple Runtime instances.
-
-## Remaining delivery sequence
-
-- Expand Web browser integration coverage for persistence failure, storage eviction, and multiple sessions without changing the shared file contract.
+Web storage validation covers initial restoration before Runtime mounting, persistence across page reloads, temporary-data loss across reloads, isolation between storage keys, serialized persistence, failure mapping, cancellation, Runtime teardown, and reuse of one initialized mount by multiple Runtime instances.

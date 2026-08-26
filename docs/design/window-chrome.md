@@ -1,7 +1,5 @@
 # Window Chrome Design
 
-Status: shared contract plus Windows, macOS, and Linux Custom modes implemented
-
 This document defines desktop window-chrome ownership, application-defined title-bar content, standard window controls, drag hit testing, and platform fallback behavior.
 It complements the mobile-oriented [Window Insets and System Bars Design](window-insets.md) without changing safe-area semantics.
 
@@ -17,7 +15,7 @@ It complements the mobile-oriented [Window Insets and System Bars Design](window
 
 ## Non-goals
 
-The initial Custom implementation does not provide:
+Custom mode does not provide:
 
 - Runtime switching between System and Custom chrome.
 - Application interception of native close requests beyond existing platform behavior.
@@ -205,7 +203,7 @@ Commands request system window operations rather than mutating shared Runtime st
 `Close()` follows the same native close-request path as a standard caption control.
 
 Framework caption controls use this same command boundary and do not call platform implementation helpers directly.
-Observable placement, full-screen control, and capability queries should be added only when an application-facing use case requires them; they are not prerequisites for the initial commands.
+Observable placement, full-screen control, and capability queries are not part of the current window command API.
 
 ## Drag regions
 
@@ -299,7 +297,7 @@ HuxerUI passes the original mouse-down event to `performWindowDragWithEvent:` an
 Traffic-light clicks remain native and do not round-trip through Runtime.
 Application-invoked `UseWindow()` commands map directly to AppKit minimize, zoom or restore, and close operations; maximize means the macOS zoomed state rather than full screen.
 
-Removing or replacing traffic lights is outside the initial Custom contract.
+Removing or replacing traffic lights is outside the Custom contract.
 It can be considered later as an explicit advanced policy rather than changing the platform default.
 
 System mode retains the ordinary AppKit title bar and submits no title-bar metrics.
@@ -349,7 +347,7 @@ Platform completion also audits:
 
 Activation visuals, high-contrast integration, and exhaustive keyboard and system-menu validation remain follow-up Windows work.
 
-## Implementation status
+## Platform mapping
 
 The shared API exposes only `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
 The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
@@ -382,9 +380,3 @@ macOS tests isolate preferred and native title-bar height, traffic-light vertica
 Manual macOS validation remains required for system window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
 Linux tests isolate metric resolution, preferred-height flooring, viewport clamping, caption-control reservation, and maximized-state propagation.
 Manual Linux validation covers GTK decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on each supported GDK backend.
-
-## Delivery order
-
-The shared contract and Windows Custom implementation form the first delivery.
-The macOS implementation forms the second delivery and retains native traffic lights.
-Linux Custom mode is delivered under the same two-mode contract through GTK 4.
