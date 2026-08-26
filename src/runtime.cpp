@@ -989,25 +989,9 @@ bool ContainsNodeIdentity(const MountedNode& node, std::uint64_t identity) {
 }
 
 bool PointerSessionReferencesNode(const PointerSession& session, const MountedNode& root) {
-  const auto contains = [&root](const std::optional<std::uint64_t>& identity) {
-    return identity.has_value() && ContainsNodeIdentity(root, *identity);
-  };
-  const std::optional<std::uint64_t> interaction_identity =
-      session.interaction.has_value() ? std::optional{session.interaction->node_identity} : std::nullopt;
-  if (contains(session.target_identity) || contains(interaction_identity) || contains(session.pending_focus_identity) ||
-      contains(session.active_scroll_node)) {
-    return true;
-  }
-  if (session.extension_capture.has_value() &&
-      ContainsNodeIdentity(root, session.extension_capture->node_identity)) {
-    return true;
-  }
-  return std::ranges::any_of(session.scroll_chain, [&root](std::uint64_t identity) {
-           return ContainsNodeIdentity(root, identity);
-         }) ||
-         std::ranges::any_of(session.extension_observers, [&root](const NodeExtensionHandle& observer) {
-           return ContainsNodeIdentity(root, observer.node_identity);
-         });
+  return std::ranges::any_of(session.route, [&root](std::uint64_t identity) {
+    return ContainsNodeIdentity(root, identity);
+  });
 }
 
 bool RouteBackTarget(MountedNode& node, const BackEvent& event, BackTarget& target, bool& already_dispatched) {
@@ -1054,6 +1038,8 @@ using namespace detail;
 
 Runtime::Runtime(const Application& application, PlatformAdapter& platform, ApplicationActivation startup_activation) {
   ValidateViewportBreakpoints(application.options.viewport_breakpoints);
+  const GestureSettings gesture_settings = platform.GestureDefaults();
+  detail::ValidateGestureSettings(gesture_settings);
   const WindowOptions& window_options = application.options.window;
   if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
       !std::isfinite(window_options.initial_size.height) || window_options.initial_size.height <= 0.0F) {
@@ -1080,6 +1066,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       std::move(window)
   );
   state_->application_service_ = std::make_shared<ApplicationService>(*this, std::move(startup_activation));
+  state_->gesture_settings_ = gesture_settings;
   state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
@@ -1540,6 +1527,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     RequestFrame();
   }
   RefreshTextInputSession();
+  AdvancePointerRecognition(frame.timestamp);
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
   AdvanceTextSelectionLongPress(frame.timestamp);
@@ -1686,27 +1674,35 @@ void Runtime::RefreshInteractionTree() {
 
   std::vector<PointerEvent> cancellations;
   for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
-    const auto inactive = [this](std::optional<std::uint64_t> identity) {
-      if (!identity.has_value()) {
-        return false;
-      }
-      const std::optional<bool> enabled = DeclaredEnabled(*state_->mounted_root_, *identity);
-      return !enabled.value_or(false);
-    };
-    const std::optional<std::uint64_t> interaction_identity =
-        session.interaction.has_value() ? std::optional{session.interaction->node_identity} : std::nullopt;
-    bool references_inactive = inactive(session.target_identity) || inactive(interaction_identity) ||
-                               inactive(session.pending_focus_identity) || inactive(session.active_scroll_node);
-    if (session.extension_capture.has_value()) {
-      references_inactive = references_inactive || inactive(session.extension_capture->node_identity);
-    }
-    references_inactive =
-        references_inactive ||
-        std::ranges::any_of(session.scroll_chain, [&inactive](std::uint64_t identity) { return inactive(identity); }) ||
-        std::ranges::any_of(session.extension_observers, [&inactive](const detail::NodeExtensionHandle& observer) {
-          return inactive(observer.node_identity);
+    const bool references_inactive = std::ranges::any_of(session.route, [this](std::uint64_t identity) {
+      return !DeclaredEnabled(*state_->mounted_root_, identity).value_or(false);
+    });
+    const bool recognition_removed =
+        std::ranges::any_of(session.recognitions, [this](const PointerRecognition& recognition) {
+          if (!recognition.started) {
+            return false;
+          }
+          if (const auto* extension = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
+            return FindExtension(*state_->mounted_root_, extension->extension) == nullptr;
+          }
+          if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
+            return FindExtension(*state_->mounted_root_, gesture->extension) == nullptr;
+          }
+          if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
+            return std::ranges::any_of(
+                tap->consumers,
+                [this](const GestureRecognitionState& consumer) {
+                  return FindExtension(*state_->mounted_root_, consumer.extension) == nullptr;
+                }
+            );
+          }
+          if (const auto* selection = std::get_if<TextSelectionRecognitionState>(&recognition.state)) {
+            detail::MountedNode* node = FindNode(*state_->mounted_root_, selection->node_identity);
+            return node == nullptr || FindTextSelectionClient(*node) == nullptr;
+          }
+          return false;
         });
-    if (references_inactive) {
+    if (!session.quarantined && (references_inactive || recognition_removed)) {
       cancellations.push_back(
           PointerEvent{
               PointerEventType::Cancel,
@@ -1718,8 +1714,7 @@ void Runtime::RefreshInteractionTree() {
     }
   }
   for (const PointerEvent& cancellation : cancellations) {
-    HandlePointerCancel(cancellation);
-    TrackTouchTextSelectionGesture(cancellation);
+    QuarantinePointerSession(cancellation.pointer_id, cancellation);
   }
   if (state_->keyboard_activation_identity_.has_value() && state_->keyboard_press_id_.has_value()) {
     const std::optional<bool> enabled =
@@ -2284,8 +2279,7 @@ void Runtime::DeactivateLayerInput(LayerId id) {
     }
   }
   for (const PointerEvent& cancellation : cancellations) {
-    HandlePointerCancel(cancellation);
-    TrackTouchTextSelectionGesture(cancellation);
+    QuarantinePointerSession(cancellation.pointer_id, cancellation);
   }
 
   std::erase_if(state_->hovered_extensions_, [this, layer](const detail::NodeExtensionHandle& hovered) {

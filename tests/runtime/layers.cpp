@@ -30,6 +30,9 @@ int popup_focus_clicks = 0;
 int parent_menu_clicks = 0;
 int exiting_layer_clicks = 0;
 int exiting_layer_pointer_cancels = 0;
+int quarantined_background_pointer_ups = 0;
+LayerId reentrant_drag_layer;
+std::vector<std::string> reentrant_drag_events;
 constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
 constexpr Color section_separator_color = Color::Rgb(210, 70, 40);
 constexpr Color bottom_sheet_width_color = Color::Rgb(35, 125, 175);
@@ -118,6 +121,26 @@ View ExitingLayerInputContent() {
       .With(huxerui::Frame{100.0F, 36.0F})
       .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++exiting_layer_pointer_cancels; })
       .OnClick([] { ++exiting_layer_clicks; });
+}
+
+View LayerPointerQuarantineApp() {
+  HUXERUI_SCOPE({
+    layer_dialogs = UseDialog();
+    return Button("background input")
+        .With(huxerui::Frame{240.0F, 160.0F})
+        .On<ViewEvents::PointerUp>([](const PointerEvent&) { ++quarantined_background_pointer_ups; });
+  });
+}
+
+View ReentrantDragLayerContent() {
+  return Text("reentrant drag")
+      .With(huxerui::Frame{100.0F, 40.0F}, DragGesture{})
+      .On<DragEvents::Started>([](const DragEvent&) {
+        reentrant_drag_events.emplace_back("started");
+        raw_layers->Dismiss(reentrant_drag_layer);
+      })
+      .On<DragEvents::Changed>([](const DragEvent&) { reentrant_drag_events.emplace_back("changed"); })
+      .On<DragEvents::Canceled>([](const DragEvent&) { reentrant_drag_events.emplace_back("canceled"); });
 }
 
 struct LayerEnvironmentValue {
@@ -1349,6 +1372,60 @@ TEST_CASE("TestExitingLayerCancelsInputUntilRemoval") {
   runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Tab});
   runtime.HandleKeyEvent(KeyEvent{KeyEventType::Down, Key::Enter});
   REQUIRE(layer_background_clicks == 1);
+}
+
+TEST_CASE("TestExitingLayerQuarantinesThePhysicalPointerSequence") {
+  layer_dialogs.reset();
+  exiting_layer_pointer_cancels = 0;
+  quarantined_background_pointer_ups = 0;
+
+  TestPlatform platform;
+  Runtime runtime{LayerPointerQuarantineApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  const LayerId dialog = layer_dialogs->Show(ExitingLayerInputContent);
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  const std::optional<Rect> button = FindPresentedTextRect(runtime.BuildFrame(), "exiting input");
+  REQUIRE(button.has_value());
+  const Point pointer{
+      button->x + button->width * 0.5F,
+      button->y + button->height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 127, pointer});
+  REQUIRE(layer_dialogs->Dismiss(dialog));
+  REQUIRE(exiting_layer_pointer_cancels == 1);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Up, 127, pointer});
+  REQUIRE(quarantined_background_pointer_ups == 0);
+}
+
+TEST_CASE("TestDragStartLayerDismissalDoesNotPublishAfterCancellation") {
+  raw_layers.reset();
+  reentrant_drag_events.clear();
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.root_hooks.push_back([](RootContext& root) { raw_layers = root.Layers(); });
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform, std::move(options)};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  reentrant_drag_layer = raw_layers->Attach({}, ReentrantDragLayerContent);
+  const std::optional<Rect> target = FindPresentedTextRect(runtime.BuildFrame(), "reentrant drag");
+  REQUIRE(target.has_value());
+  const Point pointer{
+      target->x + target->width * 0.5F,
+      target->y + target->height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 128, pointer});
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Move, 128, {pointer.x + 20.0F, pointer.y}});
+
+  REQUIRE(reentrant_drag_events == std::vector<std::string>{"started", "canceled"});
 }
 
 TEST_CASE("TestDebugOverlayUsesSystemLayerScope") {

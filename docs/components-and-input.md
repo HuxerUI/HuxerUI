@@ -71,6 +71,31 @@ CustomControl()
     .On<ViewEvents::KeyDown>(HandleKey);
 ```
 
+## Gestures
+
+`MultiTapGesture`, `LongPressGesture`, and `DragGesture` are retained modifiers with typed lifecycle events:
+
+```cpp
+return Canvas(content)
+    .With(DragGesture{.axis = Axis::Horizontal})
+    .On<DragEvents::Changed>([](const DragEvent& event) {
+      MoveTo(event.translation);
+    })
+    .On<DragEvents::Ended>([](const DragEvent& event) {
+      StartMotion(event.velocity);
+    });
+```
+
+MultiTap shares the successful physical tap recognizer with Click, so adding it does not delay or suppress ordinary activation.
+LongPress reports Started after its deadline, Ended on release, and Canceled only after an accepted sequence is interrupted.
+Drag reports local origin, position, delta, translation, release velocity, and the current window position; an accepted Drag keeps receiving the sequence outside its original bounds.
+Setting `minimum_press_duration` creates long-press-then-drag behavior without another gesture-composition API.
+Disabled nodes do not recognize gestures, and important operations still require an accessible semantic action rather than relying on physical motion alone.
+
+Platform adapters may override `GestureDefaults()` to supply native recognition tolerances and timing.
+Each pointer sequence snapshots its effective settings and target transform when it starts, so compatible recomposition and target movement do not reinterpret an active gesture.
+See [Gesture Recognition and Arbitration Design](design/gestures.md) for competition, raw pointer ordering, cancellation, and ownership details.
+
 ## IconButton
 
 IconButton is the standard momentary action when the visible content is only an icon:

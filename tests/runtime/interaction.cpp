@@ -1,5 +1,7 @@
 #include "runtime_test_support.h"
 
+#include <stdexcept>
+
 namespace huxerui::test {
 
 std::vector<PointerEvent> received_pointer_events;
@@ -18,6 +20,8 @@ State<bool> alternate_default_indication;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 int covered_pointer_clicks = 0;
+int exceptional_pointer_cancels = 0;
+int exceptional_pointer_ups = 0;
 std::vector<std::pair<InteractionState, InteractionEvent>> recorded_interactions;
 int stable_extension_updates = 0;
 
@@ -136,6 +140,14 @@ View PointerInputApp() {
           .On<ViewEvents::PointerCancel>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .OnClick([] { ++pointer_clicks; }),
   };
+}
+
+View ExceptionalPointerInputApp() {
+  return Button("exceptional pointer")
+      .With(huxerui::Frame{100.0F, 40.0F})
+      .On<ViewEvents::PointerDown>([](const PointerEvent&) { throw std::runtime_error("pointer input failed"); })
+      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++exceptional_pointer_cancels; })
+      .On<ViewEvents::PointerUp>([](const PointerEvent&) { ++exceptional_pointer_ups; });
 }
 
 View ExtensionPointerTargetApp() {
@@ -462,6 +474,22 @@ TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {
 
   ClickAt(runtime, {50.0F, 20.0F}, 122);
   REQUIRE(covered_pointer_clicks == 0);
+}
+
+TEST_CASE("TestPointerExceptionQuarantinesThePhysicalSequence") {
+  exceptional_pointer_cancels = 0;
+  exceptional_pointer_ups = 0;
+
+  TestPlatform platform;
+  Runtime runtime{ExceptionalPointerInputApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(runtime.HandlePointerEvent({PointerEventType::Down, 123, {50.0F, 20.0F}}), std::runtime_error);
+  REQUIRE(exceptional_pointer_cancels == 1);
+
+  runtime.HandlePointerEvent({PointerEventType::Up, 123, {50.0F, 20.0F}});
+  REQUIRE(exceptional_pointer_ups == 0);
 }
 
 TEST_CASE("TestRuntimePublishesOrderedInteractionEvents") {

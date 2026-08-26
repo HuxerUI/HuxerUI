@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
+#include <huxerui/gesture.h>
 
 #include "appkit_accessibility.h"
 #include "appkit_platform_view.h"
@@ -160,6 +161,15 @@ double TimevalSeconds(const timeval& value) noexcept {
 
 namespace huxerui::detail {
 
+GestureSettings MacGestureDefaults() noexcept {
+  GestureSettings settings;
+  const double double_click_interval = [NSEvent doubleClickInterval];
+  if (std::isfinite(double_click_interval) && double_click_interval > 0.0) {
+    settings.multi_tap_interval = std::chrono::duration<double>{double_click_interval};
+  }
+  return settings;
+}
+
 class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
   MacPlatformAdapter()
@@ -270,6 +280,10 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  GestureSettings GestureDefaults() const noexcept override {
+    return MacGestureDefaults();
   }
 
   void RequestWindowCommand(WindowCommand command) override {

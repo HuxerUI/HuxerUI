@@ -12,7 +12,7 @@ Framework capability work:
 - Plural messages and inherited Locale text shaping for ordinary text content
 - Demand-driven PaintCommand expansion for gradients and advanced strokes
 - Shape and path-based clipping modifiers
-- Event capture, bubbling, and explicit pointer capture
+- Multi-pointer transform and remaining component gesture migrations following the implemented single-pointer foundation in [Gesture Recognition and Arbitration Design](design/gestures.md)
 - Saveable state, decay animation, ordinary View lifecycle transitions, and overscroll effects
 - Complete component, modal, collection, navigation, virtualization, and platform adapter coverage for the implemented `SemanticFrame` foundation following the [Semantics and Accessibility Design](design/semantics.md)
 

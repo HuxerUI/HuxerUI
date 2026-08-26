@@ -21,7 +21,12 @@ class Runtime;
 class SemanticBuilder;
 class TextInputClient;
 class TextSelectionClient;
+struct GestureSettings;
 struct SemanticAction;
+
+namespace detail {
+class GestureRecognizer;
+}
 
 struct FrameInfo {
   double timestamp = 0.0;
@@ -173,6 +178,10 @@ protected:
   }
 
 private:
+  virtual std::unique_ptr<detail::GestureRecognizer> CreateGestureRecognizer(
+      MountedNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings
+  );
+
   void BindPaintInvalidation(std::function<void(PaintInvalidation)> callback) {
     invalidate_paint_ = std::move(callback);
   }

@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include <huxerui/theme.h>
 
@@ -340,6 +341,49 @@ static std::shared_ptr<TooltipService> TooltipServiceFor(const huxerui::MountedN
   return *service;
 }
 
+class TooltipExtension;
+
+class TooltipTouchRecognizer final : public GestureRecognizer {
+public:
+  TooltipTouchRecognizer(const PointerEvent& event, double timestamp, const TooltipStyle& style, float movement_slop)
+      : origin_(event.position), deadline_(timestamp + style.long_press_delay), movement_slop_(movement_slop) {}
+
+  GestureDecision Update(const GestureRecognizerInput& input) override {
+    if (input.event.type == PointerEventType::Move &&
+        std::hypot(input.event.position.x - origin_.x, input.event.position.y - origin_.y) >= movement_slop_) {
+      deadline_.reset();
+      return GestureDecision::Reject;
+    }
+    if (input.event.type == PointerEventType::Up || input.event.type == PointerEventType::Cancel) {
+      deadline_.reset();
+      return GestureDecision::Reject;
+    }
+    return GestureDecision::Continue;
+  }
+
+  std::optional<double> Deadline() const noexcept override {
+    return deadline_;
+  }
+
+  GestureDecision AdvanceDeadline(double timestamp) override {
+    if (!deadline_.has_value() || timestamp < *deadline_) {
+      return GestureDecision::Continue;
+    }
+    deadline_.reset();
+    return GestureDecision::Accept;
+  }
+
+  void Accepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) override;
+  void UpdateAccepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) override;
+  void Canceled(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) override;
+
+private:
+  Point origin_;
+  std::optional<double> deadline_;
+  float movement_slop_ = 0.0F;
+  bool owns_touch_ = false;
+};
+
 class TooltipExtension final : public NodeExtension {
 public:
   TooltipExtension(huxerui::MountedNode& node, const TooltipConfiguration& modifier)
@@ -374,7 +418,7 @@ public:
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     target_->focus_visible = mounted.interaction.enabled && mounted.interaction.focus_visible;
     if (!target_->anchor_hovered && !target_->surface_hovered && !target_->focus_visible &&
-        !touch_pointer_.has_value()) {
+        active_touch_pointers_.empty()) {
       target_->blocked = false;
     }
 
@@ -385,26 +429,16 @@ public:
       }
     };
 
-    if (touch_pointer_.has_value() && !long_press_recognized_) {
-      if (!long_press_deadline_.has_value()) {
-        long_press_deadline_ = frame.timestamp + style_.long_press_delay;
-      }
-      if (frame.timestamp >= *long_press_deadline_) {
-        long_press_recognized_ = true;
-        Show();
-      } else {
-        wake_at(*long_press_deadline_);
-      }
-    }
-
     if (touch_duration_pending_) {
       touch_visible_until_ = frame.timestamp + style_.touch_show_duration;
       touch_duration_pending_ = false;
     }
     const bool touch_visible =
         long_press_recognized_ &&
-        (touch_pointer_.has_value() || (touch_visible_until_.has_value() && frame.timestamp < *touch_visible_until_));
-    if (!touch_pointer_.has_value() && touch_visible_until_.has_value() && frame.timestamp < *touch_visible_until_) {
+        (!active_touch_pointers_.empty() ||
+         (touch_visible_until_.has_value() && frame.timestamp < *touch_visible_until_));
+    if (active_touch_pointers_.empty() && touch_visible_until_.has_value() &&
+        frame.timestamp < *touch_visible_until_) {
       wake_at(*touch_visible_until_);
     }
 
@@ -414,7 +448,7 @@ public:
       hide_deadline_.reset();
       if (target_->focus_visible && !target_->blocked) {
         Show();
-      } else if (!touch_pointer_.has_value() && (target_->anchor_hovered || target_->surface_hovered) &&
+      } else if (active_touch_pointers_.empty() && (target_->anchor_hovered || target_->surface_hovered) &&
                  !target_->blocked) {
         if (!hover_deadline_.has_value()) {
           hover_deadline_ = frame.timestamp + style_.hover_delay;
@@ -443,7 +477,7 @@ public:
       }
     }
 
-    if (!target_->visible && !touch_pointer_.has_value() &&
+    if (!target_->visible && active_touch_pointers_.empty() &&
         (!touch_visible_until_.has_value() || frame.timestamp >= *touch_visible_until_)) {
       long_press_recognized_ = false;
       touch_visible_until_.reset();
@@ -493,46 +527,11 @@ public:
   }
 
   PointerResult OnPointer(huxerui::MountedNode& node, const PointerEvent& event) override {
-    if (event.type == PointerEventType::Down) {
-      Hide(event.device_kind != PointerDeviceKind::Touch);
-      if (event.device_kind != PointerDeviceKind::Touch || !node.IsEnabled()) {
-        return PointerResult::Ignored;
-      }
-      touch_pointer_ = event.pointer_id;
-      touch_origin_ = event.position;
-      long_press_deadline_.reset();
-      long_press_recognized_ = false;
-      touch_visible_until_.reset();
-      touch_duration_pending_ = false;
-      return PointerResult::Observe;
+    static_cast<void>(node);
+    if (event.type == PointerEventType::Down && event.device_kind != PointerDeviceKind::Touch) {
+      Hide(true);
     }
-    if (!touch_pointer_.has_value() || *touch_pointer_ != event.pointer_id) {
-      return PointerResult::Ignored;
-    }
-    if (event.type == PointerEventType::Move && !long_press_recognized_ &&
-        std::hypot(event.position.x - touch_origin_.x, event.position.y - touch_origin_.y) >= touch_gesture_slop) {
-      ResetTouch();
-      return PointerResult::Ignored;
-    }
-    if (event.type == PointerEventType::Up) {
-      const bool recognized = long_press_recognized_;
-      touch_pointer_.reset();
-      long_press_deadline_.reset();
-      touch_duration_pending_ = recognized;
-      return recognized ? PointerResult::CancelTarget : PointerResult::Ignored;
-    }
-    if (event.type == PointerEventType::Cancel) {
-      const bool recognized = long_press_recognized_;
-      ResetTouch();
-      touch_duration_pending_ = false;
-      if (recognized) {
-        long_press_recognized_ = false;
-        touch_visible_until_.reset();
-        Hide(false);
-      }
-      return PointerResult::Handled;
-    }
-    return long_press_recognized_ ? PointerResult::CancelTarget : PointerResult::Observe;
+    return PointerResult::Ignored;
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
@@ -542,6 +541,58 @@ public:
   }
 
 private:
+  std::unique_ptr<GestureRecognizer>
+  CreateGestureRecognizer(huxerui::MountedNode& node, const PointerEvent& event, double timestamp,
+                          const GestureSettings& settings) override {
+    if (event.device_kind != PointerDeviceKind::Touch || !node.IsEnabled()) {
+      return {};
+    }
+    if (active_touch_pointers_.empty()) {
+      Hide(false);
+      long_press_recognized_ = false;
+      touch_visible_until_.reset();
+      touch_duration_pending_ = false;
+    }
+    return std::make_unique<TooltipTouchRecognizer>(event, timestamp, style_, settings.pointer_slop);
+  }
+
+  bool BeginTouch(std::int64_t pointer_id) {
+    if (std::ranges::find(active_touch_pointers_, pointer_id) != active_touch_pointers_.end()) {
+      return false;
+    }
+    active_touch_pointers_.push_back(pointer_id);
+    long_press_recognized_ = true;
+    Show();
+    return true;
+  }
+
+  void EndTouch(std::int64_t pointer_id) {
+    const auto active = std::ranges::find(active_touch_pointers_, pointer_id);
+    if (active == active_touch_pointers_.end()) {
+      return;
+    }
+    active_touch_pointers_.erase(active);
+    if (active_touch_pointers_.empty()) {
+      touch_duration_pending_ = true;
+      InvalidatePaint();
+    }
+  }
+
+  void CancelTouch(std::int64_t pointer_id) {
+    const auto active = std::ranges::find(active_touch_pointers_, pointer_id);
+    if (active == active_touch_pointers_.end()) {
+      return;
+    }
+    active_touch_pointers_.erase(active);
+    if (!active_touch_pointers_.empty()) {
+      return;
+    }
+    touch_duration_pending_ = false;
+    long_press_recognized_ = false;
+    touch_visible_until_.reset();
+    Hide(false);
+  }
+
   void Show() {
     hover_deadline_.reset();
     service_->Show(target_, message_, style_, environment_);
@@ -555,28 +606,43 @@ private:
     }
   }
 
-  void ResetTouch() {
-    touch_pointer_.reset();
-    long_press_deadline_.reset();
-    if (!long_press_recognized_) {
-      touch_visible_until_.reset();
-    }
-  }
-
   std::shared_ptr<TooltipService> service_;
   std::shared_ptr<TooltipTargetState> target_;
   std::shared_ptr<const Environment> environment_;
   std::string message_;
   TooltipStyle style_;
-  std::optional<std::int64_t> touch_pointer_;
-  Point touch_origin_;
+  std::vector<std::int64_t> active_touch_pointers_;
   std::optional<double> hover_deadline_;
   std::optional<double> hide_deadline_;
-  std::optional<double> long_press_deadline_;
   std::optional<double> touch_visible_until_;
   bool long_press_recognized_ = false;
   bool touch_duration_pending_ = false;
+
+  friend class TooltipTouchRecognizer;
 };
+
+void TooltipTouchRecognizer::Accepted(MountedNode&, NodeExtension& extension,
+                                      const GestureRecognizerInput& input) {
+  owns_touch_ = static_cast<TooltipExtension&>(extension).BeginTouch(input.event.pointer_id);
+}
+
+void TooltipTouchRecognizer::UpdateAccepted(MountedNode&, NodeExtension& extension,
+                                            const GestureRecognizerInput& input) {
+  if (!owns_touch_ || input.event.type != PointerEventType::Up) {
+    return;
+  }
+  owns_touch_ = false;
+  static_cast<TooltipExtension&>(extension).EndTouch(input.event.pointer_id);
+}
+
+void TooltipTouchRecognizer::Canceled(MountedNode&, NodeExtension& extension,
+                                      const GestureRecognizerInput& input) {
+  if (!owns_touch_) {
+    return;
+  }
+  owns_touch_ = false;
+  static_cast<TooltipExtension&>(extension).CancelTouch(input.event.pointer_id);
+}
 
 void InstallTooltip(RootContext& root) {
   root.Provide(std::make_shared<TooltipService>(root.Layers()));

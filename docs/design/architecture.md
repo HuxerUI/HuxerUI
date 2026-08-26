@@ -927,6 +927,7 @@ Accessibility and platform preferences enter through Environment. Theme motion r
 ## Interaction and indication
 
 The complete interaction-state, indication, visual-fill, and retained paint contract is specified in [Interaction and Indication Design](interaction-indication.md).
+The implemented repeated-tap, long-press, drag, recognition, and pointer-ownership model, together with the proposed multi-pointer transform stage, is specified separately in [Gesture Recognition and Arbitration Design](gestures.md).
 
 Pointer input follows one shared pipeline:
 

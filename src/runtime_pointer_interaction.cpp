@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <utility>
 
 namespace huxerui::detail {
@@ -174,6 +175,42 @@ PointerEvent LocalPointerEvent(const MountedNode& node, const PointerEvent& even
   return local;
 }
 
+GestureRecognizerInput GestureInput(const GestureRecognitionState& retained, const PointerEvent& event,
+                                    double timestamp) {
+  PointerEvent local = event;
+  if (const std::optional<Point> position = retained.frozen_node_to_window.Inverse(event.position)) {
+    local.position = *position;
+  }
+  return {local, event.position, timestamp};
+}
+
+std::optional<std::uint64_t> PointerRecognitionNodeIdentity(const PointerRecognition& recognition) {
+  if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
+    return tap->node_identity;
+  }
+  if (const auto* extension = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
+    return extension->extension.node_identity;
+  }
+  if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
+    return gesture->extension.node_identity;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> RecognitionOwnerIndex(const PointerSession& session) {
+  if (!session.owner.has_value()) {
+    return std::nullopt;
+  }
+  if (const auto* index = std::get_if<std::size_t>(&*session.owner)) {
+    return *index;
+  }
+  return std::nullopt;
+}
+
+bool TextSelectionOverlayOwnsPointer(const PointerSession& session) {
+  return session.owner.has_value() && std::holds_alternative<TextSelectionOverlayOwner>(*session.owner);
+}
+
 } // namespace
 
 void UpdateInteraction(MountedNode& node, InteractionState state, std::optional<InteractionEvent> event) {
@@ -273,76 +310,361 @@ void Runtime::EndPointerInteraction(PointerSession& session, InteractionEvent::T
   }
 }
 
-void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& event) {
-  EndPointerInteraction(session, InteractionEvent::Type::Cancel, event);
-  if (session.target_identity.has_value()) {
-    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.target_identity)) {
-      PointerEvent cancel = event;
-      cancel.type = PointerEventType::Cancel;
-      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancel);
-    }
-    session.target_identity.reset();
-  }
+void Runtime::CancelPointerSession(PointerSession& session, const PointerEvent& event) {
+  const std::optional<std::uint64_t> raw_target =
+      session.raw_target_started ? session.raw_target_identity : std::nullopt;
+  const bool overlay_owned = TextSelectionOverlayOwnsPointer(session);
+  session.owner.reset();
+  session.raw_target_started = false;
+  session.raw_target_identity.reset();
   session.focus_pending = false;
   session.pending_focus_identity.reset();
-  session.scroll_chain.clear();
+
+  PointerEvent cancellation = event;
+  cancellation.type = PointerEventType::Cancel;
+  EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
+  for (PointerRecognition& recognition : session.recognitions) {
+    CancelPointerRecognition(recognition, cancellation);
+  }
+  if (overlay_owned) {
+    HandleTextSelectionOverlayPointer(cancellation);
+  }
+  if (raw_target.has_value()) {
+    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target)) {
+      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancellation);
+    }
+  }
+}
+
+void Runtime::QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event) {
+  const auto found = state_->pointer_sessions_.find(pointer_id);
+  if (found == state_->pointer_sessions_.end() || found->second.quarantined) {
+    return;
+  }
+  found->second.quarantined = true;
+  CancelPointerSession(found->second, event);
+}
+
+void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& event) {
+  const std::optional<std::uint64_t> raw_target =
+      session.raw_target_started ? session.raw_target_identity : std::nullopt;
+  session.raw_target_started = false;
+  session.raw_target_identity.reset();
+  session.focus_pending = false;
+  session.pending_focus_identity.reset();
+
+  PointerEvent cancellation = event;
+  cancellation.type = PointerEventType::Cancel;
+  EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
+  if (raw_target.has_value()) {
+    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target)) {
+      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancellation);
+    }
+  }
   RequestFrame();
 }
 
-void Runtime::ReleaseScrollGesture(PointerSession& session) {
-  if (!session.active_scroll_node.has_value()) {
+void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const PointerEvent& event) {
+  if (!recognition.started) {
     return;
   }
-  if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *session.active_scroll_node)) {
-    SetScrollGesture(*node, false);
-  }
-  session.active_scroll_node.reset();
-}
-
-bool Runtime::DispatchExtensionObservers(PointerSession& session, const PointerEvent& event, bool clear) {
-  bool cancel_target = false;
-  for (const NodeExtensionHandle& observer : session.extension_observers) {
-    NodeExtension* extension = FindExtension(*state_->mounted_root_, observer);
-    detail::MountedNode* node = FindNode(*state_->mounted_root_, observer.node_identity);
+  recognition.started = false;
+  const double timestamp = state_->platform_->Now();
+  const auto cancel_gesture = [&](GestureRecognitionState& retained) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, retained.extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, retained.extension.node_identity);
+    if (extension && node && retained.recognizer) {
+      retained.recognizer->Canceled(*node, *extension, GestureInput(retained, event, timestamp));
+    }
+  };
+  if (auto* extension_state = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_state->extension);
+    detail::MountedNode* node =
+        FindNode(*state_->mounted_root_, extension_state->extension.node_identity);
     if (extension && node) {
-      cancel_target = extension->OnPointer(*node, LocalPointerEvent(*node, event)) ==
-                          NodeExtension::PointerResult::CancelTarget ||
-                      cancel_target;
+      extension->OnPointer(*node, LocalPointerEvent(*node, event));
+      RequestFrame();
     }
+  } else if (auto* scroll_state = std::get_if<ScrollRecognitionState>(&recognition.state)) {
+    const std::optional<std::uint64_t> active_node = std::exchange(scroll_state->active_node, std::nullopt);
+    if (active_node.has_value()) {
+      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *active_node)) {
+        SetScrollGesture(*node, false);
+      }
+    }
+  } else if (auto* tap_state = std::get_if<TapRecognitionState>(&recognition.state)) {
+    for (GestureRecognitionState& consumer : tap_state->consumers) {
+      cancel_gesture(consumer);
+    }
+  } else if (auto* gesture_state = std::get_if<GestureRecognitionState>(&recognition.state)) {
+    cancel_gesture(*gesture_state);
+  } else if (std::holds_alternative<TextSelectionRecognitionState>(recognition.state)) {
+    TrackTouchTextSelectionGesture(event);
   }
-  if (clear) {
-    session.extension_observers.clear();
-  }
-  return cancel_target;
 }
 
-std::optional<std::size_t> Runtime::FindScrollCandidate(const PointerSession& session, Axis axis, float delta) {
-  for (std::size_t index = 0; index < session.scroll_chain.size(); ++index) {
-    detail::MountedNode* candidate = FindNode(*state_->mounted_root_, session.scroll_chain[index]);
-    if (candidate && candidate->interaction.enabled && ScrollAxis(*candidate) == axis &&
-        CanScrollNode(*candidate, delta)) {
-      return index;
+void Runtime::ResolvePointerRecognition(PointerSession& session, std::size_t index, const PointerEvent& event,
+                                        std::optional<double> timestamp) {
+  if (session.owner.has_value() || index >= session.recognitions.size()) {
+    return;
+  }
+  session.owner = index;
+  session.recognitions[index].started = true;
+  const bool tap = std::holds_alternative<TapRecognitionState>(session.recognitions[index].state);
+  const bool immediate_extension = event.type == PointerEventType::Down &&
+                                   std::holds_alternative<ExtensionRecognitionState>(session.recognitions[index].state);
+  if (!tap) {
+    if (immediate_extension) {
+      EndPointerInteraction(session, InteractionEvent::Type::Cancel, event);
+      session.raw_target_identity.reset();
+      session.raw_target_started = false;
+    } else {
+      CancelPointerTarget(session, event);
     }
   }
-  return std::nullopt;
+  PointerEvent cancellation = event;
+  cancellation.type = PointerEventType::Cancel;
+  for (std::size_t other_index = 0; other_index < session.recognitions.size(); ++other_index) {
+    if (other_index != index) {
+      CancelPointerRecognition(session.recognitions[other_index], cancellation);
+    }
+  }
+  if (const auto* extension = std::get_if<ExtensionRecognitionState>(&session.recognitions[index].state);
+      extension && event.type == PointerEventType::Down && !session.interaction.has_value()) {
+    BeginPointerInteraction(session, extension->extension.node_identity, event);
+  }
+  if (auto* gesture = std::get_if<GestureRecognitionState>(&session.recognitions[index].state)) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, gesture->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, gesture->extension.node_identity);
+    if (extension && node && gesture->recognizer) {
+      gesture->recognizer->Accepted(*node, *extension,
+                                    GestureInput(*gesture, event, timestamp.value_or(state_->platform_->Now())));
+    }
+  }
 }
 
-std::vector<detail::MountedNode*> Runtime::ApplyDragScroll(PointerSession& session, float delta) {
-  if (!session.drag_axis.has_value() || delta == 0.0F) {
+GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::size_t index,
+                                                  const PointerEvent& event) {
+  if (index >= session.recognitions.size()) {
+    return GestureDecision::Reject;
+  }
+  PointerRecognition& recognition = session.recognitions[index];
+  if (auto* extension_state = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_state->extension);
+    detail::MountedNode* node =
+        FindNode(*state_->mounted_root_, extension_state->extension.node_identity);
+    if (!extension || !node || !node->interaction.enabled) {
+      return GestureDecision::Reject;
+    }
+    recognition.started = true;
+    const NodeExtension::PointerResult result = extension->OnPointer(*node, LocalPointerEvent(*node, event));
+    if (result != NodeExtension::PointerResult::Ignored) {
+      RequestFrame();
+    }
+    if (event.type == PointerEventType::Down) {
+      if (result == NodeExtension::PointerResult::Capture || result == NodeExtension::PointerResult::Handled ||
+          result == NodeExtension::PointerResult::CancelTarget) {
+        return GestureDecision::Accept;
+      }
+      return result == NodeExtension::PointerResult::Observe ? GestureDecision::Continue : GestureDecision::Reject;
+    }
+    if (result == NodeExtension::PointerResult::CancelTarget) {
+      return GestureDecision::Accept;
+    }
+    return event.type == PointerEventType::Cancel || event.type == PointerEventType::Up
+               ? GestureDecision::Reject
+               : GestureDecision::Continue;
+  }
+  if (auto* gesture_state = std::get_if<GestureRecognitionState>(&recognition.state)) {
+    GestureRecognitionState& retained = *gesture_state;
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, retained.extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, retained.extension.node_identity);
+    if (!extension || !node || !node->interaction.enabled || !retained.recognizer) {
+      return GestureDecision::Reject;
+    }
+    recognition.started = true;
+    const GestureRecognizerInput input = GestureInput(retained, event, state_->platform_->Now());
+    if (RecognitionOwnerIndex(session) == std::optional{index}) {
+      retained.recognizer->UpdateAccepted(*node, *extension, input);
+      return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
+                 ? GestureDecision::Reject
+                 : GestureDecision::Continue;
+    }
+    return retained.recognizer->Update(input);
+  }
+  if (auto* scroll_state = std::get_if<ScrollRecognitionState>(&recognition.state)) {
+    recognition.started = true;
+    if (event.type != PointerEventType::Move) {
+      return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
+                 ? GestureDecision::Reject
+                 : GestureDecision::Continue;
+    }
+    const float distance_x = event.position.x - session.down_position.x;
+    const float distance_y = event.position.y - session.down_position.y;
+    if (std::max(std::abs(distance_x), std::abs(distance_y)) < detail::touch_gesture_slop) {
+      return GestureDecision::Continue;
+    }
+    const Axis dominant_axis = std::abs(distance_y) >= std::abs(distance_x) ? Axis::Vertical : Axis::Horizontal;
+    if (dominant_axis != scroll_state->axis) {
+      return GestureDecision::Continue;
+    }
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, scroll_state->node_identity);
+    const float delta = PointerDelta(session.down_position, event.position, scroll_state->axis);
+    return node && node->interaction.enabled && CanScrollNode(*node, delta) ? GestureDecision::Accept
+                                                                           : GestureDecision::Continue;
+  }
+  if (auto* tap_state = std::get_if<TapRecognitionState>(&recognition.state)) {
+    recognition.started = true;
+    if (event.type != PointerEventType::Up) {
+      return event.type == PointerEventType::Cancel ? GestureDecision::Reject : GestureDecision::Continue;
+    }
+
+    detail::MountedNode* released = HitTestPointer(*state_->mounted_root_, event.position);
+    tap_state->activates = tap_state->activates && released && released->interaction.enabled &&
+                           released->identity == tap_state->node_identity;
+
+    std::vector<detail::MountedNode*> route;
+    const bool has_route = BuildPointerRoute(*state_->mounted_root_, event.position, route);
+    const auto owner = has_route
+                           ? std::ranges::find_if(route, [&](const detail::MountedNode* node) {
+                               return node->identity == tap_state->node_identity;
+                             })
+                           : route.end();
+    std::erase_if(tap_state->consumers, [&](const GestureRecognitionState& consumer) {
+      NodeExtension* extension = FindExtension(*state_->mounted_root_, consumer.extension);
+      detail::MountedNode* node = FindNode(*state_->mounted_root_, consumer.extension.node_identity);
+      const bool remains_on_route = owner != route.end() && *owner == node;
+      const auto local_position = remains_on_route
+                                      ? node->presentation.resolved_transform.Inverse(event.position)
+                                      : std::nullopt;
+      const bool valid = remains_on_route && node->interaction.enabled && extension &&
+                         local_position.has_value() && extension->HitTest(**owner, *local_position);
+      if (!valid && extension && node && consumer.recognizer) {
+        PointerEvent cancellation = event;
+        cancellation.type = PointerEventType::Cancel;
+        consumer.recognizer->Canceled(*node, *extension,
+                                      GestureInput(consumer, cancellation, state_->platform_->Now()));
+      }
+      return !valid;
+    });
+    return tap_state->activates || !tap_state->consumers.empty() ? GestureDecision::Accept
+                                                                 : GestureDecision::Reject;
+  }
+  recognition.started = true;
+  return event.type == PointerEventType::Cancel ? GestureDecision::Reject : GestureDecision::Continue;
+}
+
+void Runtime::PublishTap(TapRecognitionState& tap, const PointerEvent& event) {
+  const double timestamp = state_->platform_->Now();
+  for (GestureRecognitionState& consumer : tap.consumers) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, consumer.extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, consumer.extension.node_identity);
+    if (extension && node && consumer.recognizer) {
+      consumer.recognizer->TapAccepted(*node, *extension, GestureInput(consumer, event, timestamp));
+    }
+  }
+  if (tap.activates) {
+    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, tap.node_identity);
+        target && target->interaction.enabled) {
+      ActivateNode(*target);
+    }
+  }
+}
+
+void Runtime::AdvancePointerRecognition(double timestamp) {
+  struct RecognitionDeadline {
+    double deadline = 0.0;
+    std::int64_t pointer_id = 0;
+    std::size_t recognition_index = 0;
+  };
+
+  while (true) {
+    std::optional<RecognitionDeadline> due;
+    std::optional<double> next_deadline;
+    for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
+      if (session.quarantined || session.owner.has_value()) {
+        continue;
+      }
+      for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
+        const PointerRecognition& recognition = session.recognitions[index];
+        const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state);
+        if (!recognition.started || !gesture || !gesture->recognizer) {
+          continue;
+        }
+        const std::optional<double> deadline = gesture->recognizer->Deadline();
+        if (!deadline.has_value()) {
+          continue;
+        }
+        if (*deadline <= timestamp) {
+          const RecognitionDeadline current{*deadline, pointer_id, index};
+          if (!due.has_value() || current.deadline < due->deadline ||
+              (current.deadline == due->deadline && current.pointer_id < due->pointer_id) ||
+              (current.deadline == due->deadline && current.pointer_id == due->pointer_id &&
+               current.recognition_index < due->recognition_index)) {
+            due = current;
+          }
+        } else if (!next_deadline.has_value() || *deadline < *next_deadline) {
+          next_deadline = *deadline;
+        }
+      }
+    }
+
+    if (!due.has_value()) {
+      if (next_deadline.has_value()) {
+        RequestFrameAfter(*next_deadline - state_->platform_->Now());
+      }
+      return;
+    }
+
+    const auto session = state_->pointer_sessions_.find(due->pointer_id);
+    if (session == state_->pointer_sessions_.end() || session->second.quarantined ||
+        session->second.owner.has_value() || due->recognition_index >= session->second.recognitions.size()) {
+      continue;
+    }
+    PointerRecognition& recognition = session->second.recognitions[due->recognition_index];
+    auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state);
+    if (!recognition.started || !gesture || !gesture->recognizer) {
+      continue;
+    }
+    const GestureDecision decision = gesture->recognizer->AdvanceDeadline(timestamp);
+    PointerEvent event{
+        PointerEventType::Move,
+        due->pointer_id,
+        session->second.last_position,
+        session->second.device_kind,
+    };
+    if (decision == GestureDecision::Accept) {
+      ResolvePointerRecognition(session->second, due->recognition_index, event, timestamp);
+    } else if (decision == GestureDecision::Reject) {
+      event.type = PointerEventType::Cancel;
+      CancelPointerRecognition(recognition, event);
+    } else if (gesture->recognizer->Deadline().has_value() &&
+               *gesture->recognizer->Deadline() <= timestamp) {
+      throw std::logic_error("HuxerUI gesture recognizer did not consume its elapsed deadline");
+    }
+  }
+}
+
+std::vector<detail::MountedNode*> Runtime::ApplyDragScroll(const PointerSession& session,
+                                                          ScrollRecognitionState& scroll, float delta) {
+  if (delta == 0.0F) {
     return {};
   }
 
   std::vector<detail::MountedNode*> changed;
   float remaining = delta;
-  for (std::size_t index = session.active_scroll; index < session.scroll_chain.size(); ++index) {
-    detail::MountedNode* candidate = FindNode(*state_->mounted_root_, session.scroll_chain[index]);
-    if (!candidate || !candidate->interaction.enabled || ScrollAxis(*candidate) != *session.drag_axis) {
+  const auto origin = std::ranges::find(session.route, scroll.node_identity);
+  if (origin == session.route.end()) {
+    return changed;
+  }
+  for (auto identity = std::make_reverse_iterator(origin + 1); identity != session.route.rend(); ++identity) {
+    detail::MountedNode* candidate = FindNode(*state_->mounted_root_, *identity);
+    if (!candidate || !candidate->interaction.enabled || ScrollAxis(*candidate) != scroll.axis) {
       continue;
     }
     const float consumed = ScrollNodeBy(*candidate, remaining);
     if (consumed != 0.0F) {
       changed.push_back(candidate);
-      session.active_scroll = index;
       remaining -= consumed;
     }
     if (std::abs(remaining) < 0.001F) {
@@ -356,31 +678,60 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
   if (!state_->mounted_root_) {
     return;
   }
-  if (HandleTextSelectionOverlayPointer(event)) {
-    RefreshTextInputSession();
-    return;
-  }
 
-  switch (event.type) {
-  case PointerEventType::Down:
-    HandlePointerDown(event);
-    break;
-  case PointerEventType::Move:
-    HandlePointerMove(event);
-    break;
-  case PointerEventType::Cancel:
-    HandlePointerCancel(event);
-    break;
-  case PointerEventType::Up:
-    HandlePointerUp(event);
-    break;
+  try {
+    const auto active = state_->pointer_sessions_.find(event.pointer_id);
+    if (active != state_->pointer_sessions_.end() && TextSelectionOverlayOwnsPointer(active->second)) {
+      HandleTextSelectionOverlayPointer(event);
+      if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
+        state_->pointer_sessions_.erase(active);
+      }
+      RefreshTextInputSession();
+      return;
+    }
+    if (active == state_->pointer_sessions_.end() && HandleTextSelectionOverlayPointer(event)) {
+      if (event.type == PointerEventType::Down) {
+        PointerSession session;
+        session.down_position = event.position;
+        session.last_position = event.position;
+        session.device_kind = event.device_kind;
+        session.owner = TextSelectionOverlayOwner{};
+        state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
+      }
+      RefreshTextInputSession();
+      return;
+    }
+
+    switch (event.type) {
+    case PointerEventType::Down:
+      HandlePointerDown(event);
+      break;
+    case PointerEventType::Move:
+      HandlePointerMove(event);
+      break;
+    case PointerEventType::Cancel:
+      HandlePointerCancel(event);
+      break;
+    case PointerEventType::Up:
+      HandlePointerUp(event);
+      break;
+    }
+    RefreshTextInputSession();
+  } catch (...) {
+    PointerEvent cancellation = event;
+    cancellation.type = PointerEventType::Cancel;
+    try {
+      QuarantinePointerSession(event.pointer_id, cancellation);
+    } catch (...) {
+    }
+    if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
+      state_->pointer_sessions_.erase(event.pointer_id);
+    }
+    throw;
   }
-  HandleTextSelectionClick(event);
-  TrackTouchTextSelectionGesture(event);
-  RefreshTextInputSession();
 }
 
-bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, bool record_tap) {
+bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position) {
   if (!session.focus_pending) {
     return false;
   }
@@ -402,14 +753,6 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, b
     session_to_show = state_->text_input_session_->session_id;
   }
   SetFocusedNode(pending, false);
-  if (record_tap && pending.has_value()) {
-    if (detail::MountedNode* focused = FindNode(*state_->mounted_root_, *pending);
-        focused && detail::FindTextSelectionClient(*focused)) {
-      state_->text_selection_gesture_.previous_tap_time = state_->platform_->Now();
-      state_->text_selection_gesture_.previous_tap_position = position;
-      state_->text_selection_gesture_.previous_tap_node = pending;
-    }
-  }
   if (session_to_show.has_value()) {
     if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
       text_input->RequestShow(*session_to_show);
@@ -421,25 +764,11 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position, b
 void Runtime::HandlePointerDown(const PointerEvent& event) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured != state_->pointer_sessions_.end()) {
-    const std::optional<std::uint64_t> previous_identity = captured->second.target_identity;
     PointerEvent cancel = event;
     cancel.type = PointerEventType::Cancel;
-    EndPointerInteraction(captured->second, InteractionEvent::Type::Cancel, cancel);
-    DispatchExtensionObservers(captured->second, cancel, true);
-    if (captured->second.extension_capture.has_value()) {
-      const NodeExtensionHandle extension_capture = *captured->second.extension_capture;
-      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture)) {
-        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, extension_capture.node_identity)) {
-          extension->OnPointer(*node, LocalPointerEvent(*node, cancel));
-        }
-      }
+    if (!captured->second.quarantined) {
+      CancelPointerSession(captured->second, cancel);
     }
-    if (previous_identity.has_value()) {
-      if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *previous_identity)) {
-        EmitEvent<ViewEvents::PointerCancel>(previous->event_bindings, cancel);
-      }
-    }
-    ReleaseScrollGesture(captured->second);
     state_->pointer_sessions_.erase(captured);
   }
 
@@ -454,11 +783,16 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   }
 
   PointerSession session;
+  session.route.reserve(route.size());
+  for (const detail::MountedNode* node : route) {
+    session.route.push_back(node->identity);
+  }
   session.down_position = event.position;
   session.last_position = event.position;
   session.device_kind = event.device_kind;
+  const double timestamp = state_->platform_->Now();
   if (event.device_kind == PointerDeviceKind::Touch) {
-    RecordScrollVelocitySample(session, event.position, state_->platform_->Now());
+    RecordScrollVelocitySample(session, event.position, timestamp);
   }
   const std::optional<std::uint64_t> focus_target = ResolvePointerFocusTarget(route);
   if (event.device_kind == PointerDeviceKind::Touch) {
@@ -467,18 +801,22 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   } else {
     SetFocusedNode(focus_target, false);
   }
+
+  std::optional<std::uint64_t> raw_target;
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    if (!session.target_identity.has_value() && (*node)->interaction.enabled && HandlesPointerEvents(**node)) {
-      session.target_identity = (*node)->identity;
-    }
-    if ((*node)->interaction.enabled && IsScrollContainer(**node) &&
-        (!(*node)->scroll_state->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
-      session.scroll_chain.push_back((*node)->identity);
+    if (!raw_target.has_value() && (*node)->interaction.enabled && HandlesPointerEvents(**node)) {
+      raw_target = (*node)->identity;
     }
   }
+  session.raw_target_identity = raw_target;
 
-  bool extension_handled = false;
-  for (auto node = route.rbegin(); node != route.rend() && !extension_handled; ++node) {
+  for (auto node = route.rbegin(); node != route.rend(); ++node) {
+    TapRecognitionState tap{
+        .node_identity = (*node)->identity,
+        .activates = raw_target == std::optional{(*node)->identity} &&
+                     (static_cast<bool>((*node)->activation) ||
+                      HasEventBinding<ViewEvents::Click>((*node)->event_bindings)),
+    };
     for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
       if (!(*node)->interaction.enabled) {
         continue;
@@ -488,66 +826,111 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       if (!entry.extension || !local_position.has_value() || !entry.extension->HitTest(**node, *local_position)) {
         continue;
       }
-      const PointerEvent local_event = LocalPointerEvent(**node, event);
-      const NodeExtension::PointerResult result = entry.extension->OnPointer(**node, local_event);
-      if (result == NodeExtension::PointerResult::Ignored) {
-        continue;
-      }
-      if (result == NodeExtension::PointerResult::Observe) {
-        session.extension_observers.push_back(
-            NodeExtensionHandle{
-                (*node)->identity,
-                index - 1,
-                entry.descriptor,
-            }
-        );
-        RequestFrame();
-        continue;
-      }
-      extension_handled = true;
-      session.target_identity.reset();
-      if (result == NodeExtension::PointerResult::Capture) {
-        session.extension_capture = NodeExtensionHandle{
-            (*node)->identity,
-            index - 1,
-            entry.descriptor,
+      const NodeExtensionHandle handle{
+          (*node)->identity,
+          index - 1,
+          entry.descriptor,
+      };
+      PointerEvent local_event = event;
+      local_event.position = *local_position;
+      std::unique_ptr<GestureRecognizer> gesture = entry.extension->CreateGestureRecognizer(
+          **node, local_event, timestamp, state_->gesture_settings_
+      );
+      if (gesture) {
+        GestureRecognitionState retained{
+            handle,
+            std::shared_ptr<GestureRecognizer>(std::move(gesture)),
+            (*node)->presentation.resolved_transform,
         };
+        if (retained.recognizer->SharesTap()) {
+          tap.consumers.push_back(std::move(retained));
+        } else {
+          session.recognitions.push_back(PointerRecognition{std::move(retained)});
+        }
+      } else {
+        session.recognitions.push_back(PointerRecognition{ExtensionRecognitionState{handle}});
       }
-      RequestFrame();
-      break;
+    }
+    if (focus_target == std::optional{(*node)->identity} && detail::FindTextSelectionClient(**node)) {
+      session.recognitions.push_back(PointerRecognition{
+          TextSelectionRecognitionState{.node_identity = (*node)->identity},
+      });
+    }
+    if (tap.activates || !tap.consumers.empty()) {
+      session.recognitions.push_back(PointerRecognition{std::move(tap)});
+    }
+    if ((*node)->interaction.enabled && IsScrollContainer(**node) &&
+        (!(*node)->scroll_state->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
+      session.recognitions.push_back(PointerRecognition{ScrollRecognitionState{
+          .node_identity = (*node)->identity,
+          .axis = ScrollAxis(**node),
+      }});
     }
   }
 
-  if (extension_handled && !session.extension_capture.has_value()) {
-    PointerEvent cancel = event;
-    cancel.type = PointerEventType::Cancel;
-    DispatchExtensionObservers(session, cancel, true);
-    if (!session.focus_pending) {
-      return;
-    }
-  }
-  if (!session.target_identity.has_value() && session.scroll_chain.empty() && !session.extension_capture.has_value() &&
-      session.extension_observers.empty() && !session.focus_pending) {
+  if (!session.raw_target_identity.has_value() && session.recognitions.empty() && !session.focus_pending) {
     return;
   }
 
-  const std::optional<std::uint64_t> target_identity = session.target_identity;
-  std::optional<std::uint64_t> interaction_identity = target_identity;
-  if (!interaction_identity.has_value() && session.extension_capture.has_value()) {
-    interaction_identity = session.extension_capture->node_identity;
+  auto [inserted, unused] = state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
+  static_cast<void>(unused);
+  HandleTextSelectionClick(event);
+  inserted = state_->pointer_sessions_.find(event.pointer_id);
+  if (inserted == state_->pointer_sessions_.end() || inserted->second.quarantined ||
+      inserted->second.owner.has_value()) {
+    return;
   }
-  if (!interaction_identity.has_value() && !session.extension_observers.empty()) {
-    interaction_identity = session.extension_observers.front().node_identity;
-  }
-  if (interaction_identity.has_value()) {
-    BeginPointerInteraction(session, *interaction_identity, event);
-  }
-  state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
-  if (target_identity.has_value()) {
-    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *target_identity)) {
-      EmitEvent<ViewEvents::PointerDown>(target->event_bindings, event);
+  const std::size_t recognition_count = inserted->second.recognitions.size();
+  for (std::size_t index = 0; index < recognition_count; ++index) {
+    const GestureDecision decision = UpdatePointerRecognition(inserted->second, index, event);
+    inserted = state_->pointer_sessions_.find(event.pointer_id);
+    if (inserted == state_->pointer_sessions_.end() || inserted->second.quarantined) {
+      return;
+    }
+    if (decision == GestureDecision::Accept) {
+      ResolvePointerRecognition(inserted->second, index, event);
+      break;
+    }
+    if (decision == GestureDecision::Reject) {
+      inserted->second.recognitions[index].started = false;
     }
   }
+  inserted = state_->pointer_sessions_.find(event.pointer_id);
+  if (inserted == state_->pointer_sessions_.end() || inserted->second.quarantined) {
+    return;
+  }
+  if (!inserted->second.owner.has_value()) {
+    std::optional<std::uint64_t> interaction_identity = inserted->second.raw_target_identity;
+    if (!interaction_identity.has_value()) {
+      const auto recognition = std::ranges::find_if(
+          inserted->second.recognitions,
+          [](const PointerRecognition& recognition) {
+            return recognition.started && PointerRecognitionNodeIdentity(recognition).has_value();
+          }
+      );
+      if (recognition != inserted->second.recognitions.end()) {
+        interaction_identity = PointerRecognitionNodeIdentity(*recognition);
+      }
+    }
+    if (interaction_identity.has_value()) {
+      BeginPointerInteraction(inserted->second, *interaction_identity, event);
+    }
+    if (inserted->second.raw_target_identity.has_value()) {
+      const std::uint64_t target_identity = *inserted->second.raw_target_identity;
+      inserted->second.raw_target_started = true;
+      if (detail::MountedNode* target = FindNode(*state_->mounted_root_, target_identity)) {
+        EmitEvent<ViewEvents::PointerDown>(target->event_bindings, event);
+      }
+    }
+    inserted = state_->pointer_sessions_.find(event.pointer_id);
+    if (inserted != state_->pointer_sessions_.end() && !inserted->second.quarantined &&
+        std::ranges::any_of(inserted->second.recognitions, [](const PointerRecognition& recognition) {
+          return recognition.started && std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
+        })) {
+      TrackTouchTextSelectionGesture(event);
+    }
+  }
+  AdvancePointerRecognition(timestamp);
 }
 
 void Runtime::HandlePointerMove(const PointerEvent& event) {
@@ -564,107 +947,76 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   }
 
   PointerSession& session = captured->second;
-  const bool cancel_target = DispatchExtensionObservers(session, event, false);
-  if (cancel_target) {
-    CancelPointerTarget(session, event);
-  }
-  if (session.extension_capture.has_value()) {
-    const NodeExtensionHandle extension_capture = *session.extension_capture;
-    NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture);
-    detail::MountedNode* node = FindNode(*state_->mounted_root_, extension_capture.node_identity);
-    if (!extension || !node) {
-      EndPointerInteraction(session, InteractionEvent::Type::Cancel, event);
-      ReleaseScrollGesture(session);
-      state_->pointer_sessions_.erase(captured);
-      return;
-    }
-    if (extension->OnPointer(*node, LocalPointerEvent(*node, event)) != NodeExtension::PointerResult::Ignored) {
-      RequestFrame();
-    }
-    session.last_position = event.position;
+  if (session.quarantined) {
     return;
   }
 
   if (session.device_kind == PointerDeviceKind::Touch) {
     RecordScrollVelocitySample(session, event.position, state_->platform_->Now());
-  }
-
-  if (!session.drag_axis.has_value()) {
-    if (session.target_identity.has_value()) {
-      if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.target_identity)) {
-        EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
-      } else {
-        EndPointerInteraction(session, InteractionEvent::Type::Cancel, event);
-        session.target_identity.reset();
-      }
-    }
-
     const float distance_x = event.position.x - session.down_position.x;
     const float distance_y = event.position.y - session.down_position.y;
-    if (std::max(std::abs(distance_x), std::abs(distance_y)) < detail::touch_gesture_slop) {
-      session.last_position = event.position;
-      return;
-    }
-    if (session.device_kind == PointerDeviceKind::Touch) {
+    if (!session.owner.has_value() &&
+        std::max(std::abs(distance_x), std::abs(distance_y)) >= detail::touch_gesture_slop) {
       session.focus_pending = false;
       session.pending_focus_identity.reset();
     }
+  }
 
-    const Axis axis = std::abs(distance_y) >= std::abs(distance_x) ? Axis::Vertical : Axis::Horizontal;
-    const float delta = PointerDelta(session.down_position, event.position, axis);
-    const std::optional<std::size_t> scroll_candidate = FindScrollCandidate(session, axis, delta);
-    if (!scroll_candidate.has_value()) {
-      session.last_position = event.position;
-      return;
+  const auto apply_scroll = [&](ScrollRecognitionState& scroll, float delta) {
+    const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, scroll, delta);
+    for (detail::MountedNode* node : scrolled) {
+      NotifyScrollActivity(*node, ScrollActivitySource::External);
     }
-
-    EndPointerInteraction(session, InteractionEvent::Type::Cancel, event);
-    if (session.target_identity.has_value()) {
-      if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.target_identity)) {
-        PointerEvent cancel = event;
-        cancel.type = PointerEventType::Cancel;
-        EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancel);
-      }
-      session.target_identity.reset();
-    }
-    PointerEvent cancel = event;
-    cancel.type = PointerEventType::Cancel;
-    DispatchExtensionObservers(session, cancel, true);
-
-    session.drag_axis = axis;
-    session.active_scroll = *scroll_candidate;
-    const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
-    if (!scrolled.empty()) {
-      for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
-        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
-          NotifyScrollActivity(*node, ScrollActivitySource::External);
+    if (!scrolled.empty() && scroll.active_node != std::optional{scrolled.back()->identity}) {
+      if (scroll.active_node.has_value()) {
+        if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *scroll.active_node)) {
+          SetScrollGesture(*previous, false);
         }
       }
-      detail::MountedNode& active = *scrolled.back();
-      session.active_scroll_node = active.identity;
-      SetScrollGesture(active, true);
+      scroll.active_node = scrolled.back()->identity;
+      SetScrollGesture(*scrolled.back(), true);
+    }
+  };
+
+  if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
+    PointerRecognition& recognition = session.recognitions[*owner];
+    if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
+      apply_scroll(*scroll, PointerDelta(session.last_position, event.position, scroll->axis));
+    } else {
+      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
     }
     session.last_position = event.position;
     return;
   }
 
-  const float delta = PointerDelta(session.last_position, event.position, *session.drag_axis);
-  const std::vector<detail::MountedNode*> scrolled = ApplyDragScroll(session, delta);
-  if (!scrolled.empty()) {
-    for (std::size_t index = 0; index <= session.active_scroll && index < session.scroll_chain.size(); ++index) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, session.scroll_chain[index])) {
-        NotifyScrollActivity(*node, ScrollActivitySource::External);
-      }
+  if (std::ranges::any_of(session.recognitions, [](const PointerRecognition& recognition) {
+        return recognition.started && std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
+      })) {
+    TrackTouchTextSelectionGesture(event);
+  }
+  for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
+    if (!session.recognitions[index].started) {
+      continue;
     }
-    detail::MountedNode& active = *scrolled.back();
-    if (session.active_scroll_node != active.identity) {
-      if (session.active_scroll_node.has_value()) {
-        if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *session.active_scroll_node)) {
-          SetScrollGesture(*previous, false);
-        }
-      }
-      session.active_scroll_node = active.identity;
-      SetScrollGesture(active, true);
+    const GestureDecision decision = UpdatePointerRecognition(session, index, event);
+    if (decision == GestureDecision::Reject) {
+      session.recognitions[index].started = false;
+      continue;
+    }
+    if (decision != GestureDecision::Accept) {
+      continue;
+    }
+    ResolvePointerRecognition(session, index, event);
+    if (auto* scroll = std::get_if<ScrollRecognitionState>(&session.recognitions[index].state)) {
+      apply_scroll(*scroll, PointerDelta(session.down_position, event.position, scroll->axis));
+    }
+    break;
+  }
+  if (!session.owner.has_value() && session.raw_target_started && session.raw_target_identity.has_value()) {
+    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.raw_target_identity)) {
+      EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
+    } else {
+      CancelPointerTarget(session, event);
     }
   }
   session.last_position = event.position;
@@ -694,25 +1046,10 @@ void Runtime::HandlePointerCancel(const PointerEvent& event) {
   if (captured == state_->pointer_sessions_.end()) {
     return;
   }
-  const std::optional<std::uint64_t> identity = captured->second.target_identity;
-  EndPointerInteraction(captured->second, InteractionEvent::Type::Cancel, event);
-  DispatchExtensionObservers(captured->second, event, true);
-  if (captured->second.extension_capture.has_value()) {
-    const NodeExtensionHandle extension_capture = *captured->second.extension_capture;
-    if (NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, extension_capture.node_identity)) {
-        extension->OnPointer(*node, LocalPointerEvent(*node, event));
-      }
-    }
-    RequestFrame();
+  if (!captured->second.quarantined) {
+    CancelPointerSession(captured->second, event);
   }
-  ReleaseScrollGesture(captured->second);
   state_->pointer_sessions_.erase(captured);
-  if (identity.has_value()) {
-    if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *identity)) {
-      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, event);
-    }
-  }
 }
 
 void Runtime::HandlePointerUp(const PointerEvent& event) {
@@ -727,40 +1064,94 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     }
     return;
   }
-
-  EndPointerInteraction(captured->second, InteractionEvent::Type::Release, event);
-  const bool cancel_target = DispatchExtensionObservers(captured->second, event, true);
-  if (captured->second.extension_capture.has_value()) {
-    const NodeExtensionHandle extension_capture = *captured->second.extension_capture;
-    if (NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_capture)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, extension_capture.node_identity)) {
-        extension->OnPointer(*node, LocalPointerEvent(*node, event));
-      }
-    }
-    CommitPendingTouchFocus(captured->second, event.position, true);
-    ReleaseScrollGesture(captured->second);
+  if (captured->second.quarantined) {
     state_->pointer_sessions_.erase(captured);
     if (SupportsHover(event.device_kind)) {
       UpdateHoveredExtensions(event.position);
     }
-    RequestFrame();
     return;
   }
 
-  if (cancel_target) {
-    CancelPointerTarget(captured->second, event);
+  PointerSession& session = captured->second;
+  std::optional<std::uint64_t> momentum_identity;
+  std::optional<float> scroll_velocity;
+  if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
+    PointerRecognition& recognition = session.recognitions[*owner];
+    if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
+      momentum_identity = scroll->active_node;
+      if (session.device_kind == PointerDeviceKind::Touch) {
+        scroll_velocity = EstimateScrollVelocity(session, scroll->axis, state_->platform_->Now());
+      }
+      if (scroll->active_node.has_value()) {
+        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *scroll->active_node)) {
+          SetScrollGesture(*node, false);
+        }
+        scroll->active_node.reset();
+      }
+    } else {
+      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
+      if (std::holds_alternative<ExtensionRecognitionState>(recognition.state)) {
+        CommitPendingTouchFocus(session, event.position);
+      }
+    }
+    EndPointerInteraction(session, InteractionEvent::Type::Release, event);
+    recognition.started = false;
+  } else {
+    EndPointerInteraction(session, InteractionEvent::Type::Release, event);
+    for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
+      PointerRecognition& recognition = session.recognitions[index];
+      if (!recognition.started || std::holds_alternative<TapRecognitionState>(recognition.state) ||
+          std::holds_alternative<TextSelectionRecognitionState>(recognition.state) ||
+          std::holds_alternative<ScrollRecognitionState>(recognition.state)) {
+        continue;
+      }
+      const GestureDecision decision = UpdatePointerRecognition(session, index, event);
+      if (decision == GestureDecision::Accept) {
+        ResolvePointerRecognition(session, index, event);
+        break;
+      }
+      recognition.started = false;
+    }
+    if (!session.owner.has_value()) {
+      CommitPendingTouchFocus(session, event.position);
+      const auto text_selection =
+          std::ranges::find_if(session.recognitions, [](const PointerRecognition& recognition) {
+            return recognition.started &&
+                   std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
+          });
+      if (text_selection != session.recognitions.end() && TrackTouchTextSelectionGesture(event)) {
+        const std::size_t index = static_cast<std::size_t>(text_selection - session.recognitions.begin());
+        ResolvePointerRecognition(session, index, event);
+        SelectFocusedTextWord(event.position);
+      }
+    }
+    if (!session.owner.has_value()) {
+      const std::optional<std::uint64_t> raw_target = session.raw_target_identity;
+      if (session.raw_target_started && raw_target.has_value()) {
+        if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target);
+            target && target->interaction.enabled) {
+          EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
+        }
+      }
+      for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
+        if (!session.recognitions[index].started ||
+            !std::holds_alternative<TapRecognitionState>(session.recognitions[index].state)) {
+          continue;
+        }
+        const GestureDecision decision = UpdatePointerRecognition(session, index, event);
+        if (decision == GestureDecision::Accept) {
+          ResolvePointerRecognition(session, index, event);
+          PublishTap(std::get<TapRecognitionState>(session.recognitions[index].state), event);
+          break;
+        } else {
+          PointerEvent cancellation = event;
+          cancellation.type = PointerEventType::Cancel;
+          CancelPointerRecognition(session.recognitions[index], cancellation);
+        }
+      }
+    }
   }
-  const std::optional<std::uint64_t> identity = captured->second.target_identity;
-  const bool was_dragging = captured->second.drag_axis.has_value();
-  const std::optional<std::uint64_t> momentum_identity = captured->second.active_scroll_node;
-  const std::optional<float> scroll_velocity =
-      was_dragging && captured->second.device_kind == PointerDeviceKind::Touch
-          ? EstimateScrollVelocity(captured->second, *captured->second.drag_axis, state_->platform_->Now())
-          : std::nullopt;
-  if (!was_dragging) {
-    CommitPendingTouchFocus(captured->second, event.position, true);
-  }
-  ReleaseScrollGesture(captured->second);
+
   state_->pointer_sessions_.erase(captured);
   if (scroll_velocity.has_value() && momentum_identity.has_value()) {
     if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *momentum_identity);
@@ -771,20 +1162,6 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   }
   if (SupportsHover(event.device_kind)) {
     UpdateHoveredExtensions(event.position);
-  }
-  if (was_dragging || !identity.has_value()) {
-    return;
-  }
-
-  detail::MountedNode* target = FindNode(*state_->mounted_root_, *identity);
-  if (!target || !target->interaction.enabled) {
-    return;
-  }
-
-  EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
-  if (detail::MountedNode* released = HitTestPointer(*state_->mounted_root_, event.position);
-      released && released->interaction.enabled && released->identity == *identity) {
-    ActivateNode(*target);
   }
 }
 

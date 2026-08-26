@@ -35,6 +35,7 @@ namespace huxerui {
 class FileSystem;
 class FilePicker;
 class PlatformResources;
+struct GestureSettings;
 struct ResourceConfiguration;
 
 struct LaunchActivation {
@@ -167,6 +168,7 @@ public:
 
   virtual void RequestFrameAt(double deadline) = 0;
   virtual double Now() const noexcept = 0;
+  virtual GestureSettings GestureDefaults() const noexcept;
   virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(
       std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
   );
@@ -226,9 +228,13 @@ namespace detail {
 const Application& CurrentApplication();
 int RunPlatformApplication(const Application& application);
 
+enum class GestureDecision;
 struct NodeExtensionHandle;
 struct MountedNode;
+struct PointerRecognition;
 struct PointerSession;
+struct ScrollRecognitionState;
+struct TapRecognitionState;
 struct RuntimeAccess;
 struct SceneTransitionRequest;
 class SceneTransitionService;
@@ -306,17 +312,23 @@ private:
                                const PointerEvent& event);
   void EndPointerInteraction(detail::PointerSession& session, InteractionEvent::Type type,
                              const PointerEvent& event);
+  void CancelPointerSession(detail::PointerSession& session, const PointerEvent& event);
+  void QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event);
   void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
-  void ReleaseScrollGesture(detail::PointerSession& session);
-  bool DispatchExtensionObservers(detail::PointerSession& session, const PointerEvent& event, bool clear);
-  [[nodiscard]] std::optional<std::size_t>
-  FindScrollCandidate(const detail::PointerSession& session, Axis axis, float delta);
-  std::vector<detail::MountedNode*> ApplyDragScroll(detail::PointerSession& session, float delta);
+  void CancelPointerRecognition(detail::PointerRecognition& recognition, const PointerEvent& event);
+  void ResolvePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event,
+                                 std::optional<double> timestamp = std::nullopt);
+  void PublishTap(detail::TapRecognitionState& tap, const PointerEvent& event);
+  void AdvancePointerRecognition(double timestamp);
+  [[nodiscard]] detail::GestureDecision
+  UpdatePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event);
+  std::vector<detail::MountedNode*> ApplyDragScroll(const detail::PointerSession& session,
+                                                    detail::ScrollRecognitionState& scroll, float delta);
   void HandlePointerDown(const PointerEvent& event);
   void HandlePointerMove(const PointerEvent& event);
   void HandlePointerCancel(const PointerEvent& event);
   void HandlePointerUp(const PointerEvent& event);
-  bool CommitPendingTouchFocus(detail::PointerSession& session, Point position, bool record_tap = false);
+  bool CommitPendingTouchFocus(detail::PointerSession& session, Point position);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void UpdateHoveredExtensions(Point position);
   void RefreshInteractionTree();
@@ -330,7 +342,7 @@ private:
   bool QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const;
   bool HandleTextSelectionOverlayPointer(const PointerEvent& event);
   void HandleTextSelectionClick(const PointerEvent& event);
-  void TrackTouchTextSelectionGesture(const PointerEvent& event);
+  bool TrackTouchTextSelectionGesture(const PointerEvent& event);
   void AdvanceTextSelectionLongPress(double timestamp);
   void AdvanceTextSelectionOverlay(const FrameInfo& frame);
   void PaintTextSelectionOverlay();

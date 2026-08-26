@@ -1,4 +1,5 @@
 #include <huxerui/app.h>
+#include <huxerui/gesture.h>
 
 #include <algorithm>
 #include <memory>
@@ -27,6 +28,10 @@ PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
 
 PlatformAdapter::~PlatformAdapter() {
   external_texture_surface_->Close();
+}
+
+GestureSettings PlatformAdapter::GestureDefaults() const noexcept {
+  return {};
 }
 
 std::shared_ptr<FileSystem> PlatformAdapter::CreateFileSystem() {

@@ -166,6 +166,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | [File and Application Storage Design](docs/design/files.md) | Local files, application directories, external references, file pickers, and Task-based I/O |
 | [Incremental Layout and Rendering Design](docs/design/incremental-rendering.md) | Local geometry, invalidation, retained rendering, and damage |
 | [Interaction and Indication Design](docs/design/interaction-indication.md) | Unified transient interaction state, indication visuals, fills, and paint ordering |
+| [Gesture Recognition and Arbitration Design](docs/design/gestures.md) | Repeated taps, long press, drag, transform, competition, and pointer ownership |
 | [Canvas and Path Design](docs/design/canvas.md) | Vector paths, custom drawing, platform replay, and invalidation |
 | [Text and Font Design](docs/design/text.md) | Fonts, styles, measurement, paragraph drawing, and exact text runs |
 | [App Resources, Images, and Localization Design](docs/design/resources.md) | Typed resources, Image, raw assets, packaging, locale, and formatted strings |
@@ -199,6 +200,7 @@ See [Platform Support](docs/platform-support.md) for backend responsibilities an
 | `example_environment` | Typed defaults, inheritance, and nested overrides |
 | `example_application` | Current and ordered application lifecycle plus cold and subsequent URL or file activation |
 | `example_lifecycle` | Component setup, dependency restarts, and unmount cleanup |
+| `example_gestures` | Multi-tap, long press, drag lifecycle, frozen coordinates, and pointer ownership |
 | `example_task` | Coroutine tasks, structured cancellation, Lifecycle launch, and direct State updates |
 | `example_http` | Windows, macOS, iOS, Linux, Android, and Web platform HTTP requests, Task resumption, response status, and transport errors |
 | `example_files` | macOS, Linux, iOS, Android, and Web application directories, UTF-8 local files, external pickers, asynchronous operations, persistence, and Task resumption |

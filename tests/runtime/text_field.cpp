@@ -3110,6 +3110,23 @@ TEST_CASE("TestFocusedSingleLineTextFieldAllowsAncestorWheelScrollUntilEditingRe
   REQUIRE(text_field_scroll.Metrics().offset < 60.0F);
 }
 
+TEST_CASE("TestTouchMovementDoesNotFocusANonScrollableTextField") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{TextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 719, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 719, {40.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 719, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+
+  REQUIRE(text_input.started_sessions.empty());
+  REQUIRE(text_input.show_requests.empty());
+}
+
 TEST_CASE("TestTouchScrollOverTextFieldDoesNotFocusOrStartTextInput") {
   ResetTextFieldState();
   TextFieldPlatformInput text_input;

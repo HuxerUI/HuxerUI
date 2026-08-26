@@ -297,6 +297,25 @@ TEST_CASE("TestTooltipTouchCancellationDismissesVisibleSurface") {
   REQUIRE(FindText(runtime.BuildFrame(), "Plain tooltip") == nullptr);
 }
 
+TEST_CASE("TestTooltipRetainsTouchOwnershipUntilEveryAcceptedPointerEnds") {
+  TestPlatform platform;
+  Runtime runtime{PlainTooltipApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 12, {40.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Down, 13, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.51);
+  runtime.BuildFrame();
+  REQUIRE(FindText(runtime.BuildFrame(), "Plain tooltip") != nullptr);
+
+  runtime.HandlePointerEvent({PointerEventType::Up, 12, {40.0F, 20.0F}, PointerDeviceKind::Touch});
+  REQUIRE(FindText(runtime.BuildFrame(), "Plain tooltip") != nullptr);
+
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 13, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  REQUIRE(FindText(runtime.BuildFrame(), "Plain tooltip") == nullptr);
+}
+
 TEST_CASE("TestTooltipPreservesOrdinaryTouchActivation") {
   tooltip_clicks = 0;
   TestPlatform platform;

@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 
 #include <catch2/catch_amalgamated.hpp>
 
@@ -18,6 +18,12 @@ NSURL* MakeActivationTemporaryDirectory() {
 }
 
 } // namespace
+
+TEST_CASE("MacGestureDefaultsUseTheSystemDoubleClickInterval") {
+  const GestureSettings settings = detail::MacGestureDefaults();
+
+  REQUIRE(settings.multi_tap_interval.count() == Catch::Approx([NSEvent doubleClickInterval]));
+}
 
 TEST_CASE("MacApplicationActivationPreservesOrderedUrlsAndFileCapabilities") {
   @autoreleasepool {

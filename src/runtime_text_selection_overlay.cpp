@@ -99,8 +99,6 @@ void Runtime::ShowTextSelectionOverlay(bool show_handles) {
   overlay.dragging = false;
   overlay.show_handles = show_handles;
   overlay.dismissing = false;
-  gesture.long_press_pending = false;
-  gesture.tap_pending = false;
   gesture.previous_tap_time.reset();
   gesture.previous_tap_node.reset();
   overlay.pointer_id.reset();

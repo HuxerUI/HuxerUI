@@ -23,6 +23,7 @@
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
 #include <huxerui/indication.h>
+#include <huxerui/gesture.h>
 #include <huxerui/lifecycle.h>
 #include <huxerui/platform_view.h>
 #include <huxerui/resource.h>
@@ -31,6 +32,20 @@
 #include <huxerui/view.h>
 
 #include "geometry_internal.h"
+
+namespace huxerui::detail {
+
+struct NodeExtensionHandle {
+  std::uint64_t node_identity = 0;
+  std::size_t extension_index = 0;
+  const ModifierDescriptor* descriptor = nullptr;
+
+  bool operator==(const NodeExtensionHandle&) const = default;
+};
+
+} // namespace huxerui::detail
+
+#include "gesture_internal.h"
 #include "semantics_internal.h"
 
 namespace huxerui::detail {
@@ -1138,14 +1153,6 @@ struct ScrollBarGeometry {
   float thumb_travel = 0.0F;
 };
 
-struct NodeExtensionHandle {
-  std::uint64_t node_identity = 0;
-  std::size_t extension_index = 0;
-  const ModifierDescriptor* descriptor = nullptr;
-
-  bool operator==(const NodeExtensionHandle&) const = default;
-};
-
 struct SemanticExtensionRoute {
   NodeExtensionHandle extension;
   std::uint64_t local_id = 0;
@@ -1160,36 +1167,6 @@ struct SemanticActionRoute {
 };
 
 inline constexpr float touch_gesture_slop = 6.0F;
-
-struct ActivePointerInteraction {
-  std::uint64_t node_identity = 0;
-  std::uint64_t press_id = 0;
-};
-
-struct ScrollVelocitySample {
-  Point position;
-  double timestamp = 0.0;
-};
-
-struct PointerSession {
-  std::optional<std::uint64_t> target_identity;
-  // Pointer dispatch and interaction ownership are distinct when a retained gesture captures or observes the stream.
-  std::optional<ActivePointerInteraction> interaction;
-  std::optional<std::uint64_t> pending_focus_identity;
-  std::vector<std::uint64_t> scroll_chain;
-  Point down_position;
-  Point last_position;
-  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
-  // A short fixed history makes release velocity resilient to a small final Move without allocating per gesture.
-  std::array<ScrollVelocitySample, 8> scroll_velocity_samples;
-  std::size_t scroll_velocity_sample_count = 0;
-  bool focus_pending = false;
-  std::optional<Axis> drag_axis;
-  std::size_t active_scroll = 0;
-  std::optional<std::uint64_t> active_scroll_node;
-  std::optional<NodeExtensionHandle> extension_capture;
-  std::vector<NodeExtensionHandle> extension_observers;
-};
 
 struct ActiveTextInputSession {
   struct GeometrySnapshot {
@@ -1209,16 +1186,6 @@ struct ActiveTextInputSession {
 };
 
 struct TextSelectionGestureState {
-  bool long_press_pending = false;
-  std::int64_t long_press_pointer_id = 0;
-  Point long_press_position;
-  double long_press_deadline = 0.0;
-  bool tap_pending = false;
-  std::int64_t tap_pointer_id = 0;
-  Point tap_position;
-  bool double_tap_pending = false;
-  std::int64_t double_tap_pointer_id = 0;
-  std::optional<std::uint64_t> double_tap_node;
   std::optional<double> previous_tap_time;
   Point previous_tap_position;
   std::optional<std::uint64_t> previous_tap_node;
@@ -1322,6 +1289,7 @@ struct Runtime::State {
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::shared_ptr<detail::WindowService> window_service_;
   std::shared_ptr<detail::SceneTransitionService> scene_transition_service_;
+  GestureSettings gesture_settings_;
   std::optional<detail::ActiveSceneTransition> scene_transition_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;

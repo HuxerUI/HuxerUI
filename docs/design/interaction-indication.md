@@ -5,6 +5,7 @@ Status: Implemented.
 This document defines the implemented ownership and public contract for transient interaction state, indication visuals, resource-backed and gradient fills, and their retained paint ordering.
 
 Runtime owns interaction recognition and ordered interaction edges. Retained indication consumes that state without becoming another input recognizer.
+The shared gesture-recognition and competition model is specified separately in [Gesture Recognition and Arbitration Design](gestures.md).
 
 ## Goals
 
@@ -23,7 +24,7 @@ Runtime owns interaction recognition and ordered interaction edges. Retained ind
 - Arbitrary Views and function painters are not Theme fill values.
 - `ExternalTexture` is not a Theme fill because it has a producer lifetime and independent frame scheduling.
 - Focus-ring brushes and gradient strokes remain deferred until the shared stroke commands gain that capability deliberately.
-- A generic dragged state remains deferred until the shared gesture contract owns drag acceptance and cancellation.
+- InteractionState does not add a generic dragged flag; Drag lifecycle is reported by its typed events and consumers retain any operation-specific state.
 - State-driven foreground replacement remains component-specific because a node cannot reliably recolor arbitrary descendant content.
 - Unbounded effects remain custom `NodeExtension` behavior; built-in ripple is clipped to its indication geometry.
 - Platform high-contrast adaptation remains an Environment and Theme concern rather than another interaction state.

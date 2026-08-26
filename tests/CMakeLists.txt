@@ -33,6 +33,7 @@ add_executable(huxerui_tests
         runtime/composition.cpp
         runtime/file.cpp
         runtime/file_picker.cpp
+        runtime/gestures.cpp
         runtime/http.cpp
         runtime/interaction.cpp
         runtime/layers.cpp
@@ -164,6 +165,7 @@ set(HUXERUI_PUBLIC_HEADERS
         external_texture.h
         file.h
         geometry.h
+        gesture.h
         http.h
         huxerui.h
         indication.h
