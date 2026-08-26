@@ -4,10 +4,9 @@
 #include "runtime_test_support.h"
 #include "timer.h"
 
-#include <poll.h>
+#include <glib.h>
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -40,21 +39,14 @@ template <class Predicate>
 bool RunDispatcherUntil(
     detail::LinuxUIThreadDispatcher& dispatcher, Predicate&& predicate, std::chrono::milliseconds timeout
 ) {
+  static_cast<void>(dispatcher);
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!std::invoke(predicate) && std::chrono::steady_clock::now() < deadline) {
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
-    pollfd descriptor{.fd = dispatcher.FileDescriptor(), .events = POLLIN, .revents = 0};
-    const int result = poll(&descriptor, 1, std::max(1, static_cast<int>(remaining.count())));
-    if (result < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      return false;
+    while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
     }
-    if ((descriptor.revents & (POLLIN | POLLERR | POLLHUP)) != 0) {
-      dispatcher.RunPending();
-    }
+    std::this_thread::sleep_for(1ms);
+  }
+  while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
   }
   return std::invoke(predicate);
 }
@@ -63,7 +55,7 @@ void RunDispatcherFor(detail::LinuxUIThreadDispatcher& dispatcher, std::chrono::
   static_cast<void>(RunDispatcherUntil(dispatcher, [] { return false; }, duration));
 }
 
-TEST_CASE("LinuxUIThreadDispatcherWakesPollAndPreservesOrder") {
+TEST_CASE("LinuxUIThreadDispatcherWakesMainContextAndPreservesOrder") {
   detail::LinuxUIThreadDispatcher dispatcher;
   UIThreadDispatcher post = dispatcher.Bind();
   const std::thread::id ui_thread = std::this_thread::get_id();
@@ -192,7 +184,8 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
     REQUIRE(RunDispatcherUntil(dispatcher, [&] { return first_replaced && second_completed && ticked; }, 1s));
 
     static_cast<void>(timer->Stop([](PlatformResult<std::monostate>) {}));
-    dispatcher.RunPending();
+    while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
+    }
     const PlatformRequestId cancelled = timer->Start(
         100ms,
         [&](std::uint64_t) { cancelled_ticked = true; },

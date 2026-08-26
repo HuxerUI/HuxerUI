@@ -555,7 +555,7 @@ Otherwise it uses `<system-temporary-directory>/huxerui-<effective-uid>/<executa
 An unsafe existing fallback directory fails initialization rather than being reused.
 Renaming the executable selects different storage, and executable files with the same name share one per-user application directory.
 Its picker transport uses `org.freedesktop.portal.FileChooser` through GDBus on a dedicated GLib main-context thread and reports both capabilities as unavailable when the session bus or portal service cannot be reached.
-The current X11 window is encoded as `x11:<hex-xid>` for the portal parent, or as an empty parent before the window is ready.
+When GTK uses its X11 backend, the current native window is encoded as `x11:<hex-xid>` for the portal parent; other GDK backends and requests made before realization use an empty parent.
 One unpredictable handle token is used per request, the predicted Request path is subscribed before the method call, and a backend-returned legacy path replaces that subscription when necessary.
 Task cancellation completes the transport operation immediately and closes the portal Request so Runtime-level picker serialization can advance without waiting for a Response that will not arrive after Close.
 Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
@@ -690,7 +690,7 @@ Shared fake picker and reference tests cover single and multiple selection, acti
 Each platform picker phase adds revoked-access, Runtime-teardown, platform dismissal, and grant-cleanup coverage appropriate to that platform.
 
 Linux picker integration tests use `GTestDBus` with a private bus and fake `org.freedesktop.portal.Desktop` service.
-They cover capability probing, X11 parenting, filter and suggested-name wire values, predicted and returned Request handles, success and failure responses, URI validation, cancellation with Request.Close, late responses, metadata, reference I/O, and completed save copies without displaying desktop UI.
+They cover capability probing, optional X11 parenting, filter and suggested-name wire values, predicted and returned Request handles, success and failure responses, URI validation, cancellation with Request.Close, late responses, metadata, reference I/O, and completed save copies without displaying desktop UI.
 
 Each platform phase verifies its application-directory mapping, Unicode conversion, protected roots, platform picker mapping, platform failure mapping, asynchronous execution, and grant cleanup without claiming unavailable implementations.
 

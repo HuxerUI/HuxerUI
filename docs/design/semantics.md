@@ -687,8 +687,8 @@ AppKit calls and Runtime actions remain on the main thread.
 
 ### Linux
 
-The X11 adapter exposes roles, states, hierarchy, component geometry, actions, values, selection, text, and collections through AT-SPI over D-Bus.
-AT-SPI events follow committed revision changes, and actions return to the X11 Runtime thread.
+The GTK host does not yet project the shared SemanticFrame into an AT-SPI subtree.
+GTK exposes the native top-level surface, while complete role, state, hierarchy, geometry, action, value, selection, text, collection, and event mapping remains deferred.
 
 ### Web
 

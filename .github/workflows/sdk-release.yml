@@ -290,12 +290,10 @@ jobs:
           - runner: ubuntu-24.04-arm
             architecture: aarch64
     runs-on: ${{ matrix.runner }}
-    container: ubuntu:20.04
+    container: ubuntu:22.04
     env:
       CC: gcc-14
       CXX: g++-14
-      PKG_CONFIG_PATH: /opt/huxerui-linux-baseline/lib/pkgconfig
-      LD_LIBRARY_PATH: /opt/huxerui-linux-baseline/lib
     steps:
       - uses: actions/checkout@v5
         with:
@@ -310,20 +308,12 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates gdb git gperf libbrotli-dev libegl1-mesa-dev libffi-dev \
-            libgles2-mesa-dev libglib2.0-dev libgnutls28-dev libmount-dev libnghttp2-dev \
-            libpcre2-dev libpsl-dev libselinux1-dev libsqlite3-dev libx11-dev libxext-dev \
-            libxkbcommon-dev libxml2-dev libxrandr-dev ninja-build pkg-config python3-pip \
-            software-properties-common fontconfig fonts-dejavu-core
+            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libgtk-4-dev \
+            libsoup-3.0-dev ninja-build pkg-config python3-pip software-properties-common
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
-          python3 -m pip install cmake==3.31.10 meson==1.11.0
-      - name: Build baseline system dependencies
-        run: >-
-          sh .github/workflows/scripts/build_linux_release_dependencies.sh
-          /opt/huxerui-linux-baseline
-          "${RUNNER_TEMP}/huxerui-linux-dependencies"
+          python3 -m pip install cmake==3.31.10
       - name: Prepare executables
         run: >-
           chmod +x

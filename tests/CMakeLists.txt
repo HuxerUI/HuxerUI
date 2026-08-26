@@ -108,7 +108,6 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/linux_timer.cpp"
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
-            platform/linux_damage.cpp
             platform/linux_external_texture.cpp
             platform/linux_file.cpp
             platform/linux_file_picker.cpp

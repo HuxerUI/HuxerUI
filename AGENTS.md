@@ -232,9 +232,9 @@ Keep shared layout in DIPs and convert pixels, screen coordinates, DPI, UTF-16, 
 
 ### Linux
 
-Linux platform configuration lives in `cmake/platform/Linux.cmake`; source files live under `platform/linux/`. The graphics and text stack (Cairo, fontconfig, pixman, FreeType, HarfBuzz, libpng, libjpeg, zlib, expat) is fetched from pinned git tags and built as static libraries through FetchContent and meson-driven ExternalProject into a staging prefix; X11, xkbcommon, EGL, and OpenGL ES 2 resolve through pkg-config.
+Linux platform configuration lives in `cmake/platform/Linux.cmake`; source files live under `platform/linux/`. GTK 4 owns the native window, event loop, input controllers, clipboard, and backend selection. Pango owns text layout and Cairo replays the platform-neutral RenderScene into the GTK drawing surface. GTK 4, GIO, and libsoup 3 resolve through pkg-config and remain distribution-owned dependencies.
 
-Include `linux_internal.h` before any huxerui header in Linux sources: Xlib defines C macros (`None`, `Bool`, `True`, `False`, `Status`) that collide with shared enumerators, and the header undefines them after including X headers. Keep the shared layout in DIPs and convert pixels, DPI, and IME geometry at the host boundary. The renderer rasterizes PaintCommands with Cairo into a retained bitmap and presents it through an EGL/OpenGL ES swap; keep damage-limited Cairo redraw and whole-bitmap or damaged-row presentation. X11 clipboard transfers and XIM composition are event-driven: never block the event loop without a timeout.
+Include `linux_internal.h` before any huxerui header in Linux sources so the platform boundary stays consistent across translation units. Keep shared layout in DIPs and convert native scale and IME geometry at the GTK host boundary. Use `GMainContext` for frame scheduling and UI-thread dispatch, `GtkIMContext` for composition and surrounding text, and GDK to obtain backend-specific handles only for optional native-service integration. Do not add X11, Wayland, EGL, or window-manager protocol logic to shared Runtime code. Clipboard and portal operations may use bounded nested GLib loops only when the synchronous shared interface requires them; every such wait has cancellation and a timeout.
 
 Add equivalent focused guidance when a new backend gains repository-owned implementation.
 

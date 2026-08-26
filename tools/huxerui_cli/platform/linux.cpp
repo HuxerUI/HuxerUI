@@ -32,12 +32,7 @@ public:
       return diagnostics;
     }
     static constexpr std::array packages{
-        std::string_view{"x11"},
-        std::string_view{"xext"},
-        std::string_view{"xkbcommon"},
-        std::string_view{"xrandr"},
-        std::string_view{"egl"},
-        std::string_view{"glesv2"},
+        std::string_view{"gtk4"},
         std::string_view{"gio-2.0"},
         std::string_view{"libsoup-3.0"},
     };
@@ -75,7 +70,7 @@ public:
     }
     if (missing_package) {
       actions.push_back({
-          "Install the required X11, xkbcommon, EGL, GLES2, GIO, and libsoup 3 development packages",
+          "Install the required GTK 4, GIO, and libsoup 3 development packages",
           std::nullopt,
       });
     }

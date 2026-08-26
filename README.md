@@ -14,7 +14,7 @@ HuxerUI brings a functional, declarative UI model to C++20. Windows, macOS, Linu
 
 | Declarative C++ | Shared Runtime | Platform Integration |
 |---|---|---|
-| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Win32, AppKit, X11, an Emscripten Canvas, Android View, or UIKit while preserving platform services. |
+| Compose interfaces with ordinary C++ functions, typed state, events, themes, and modifiers. | Reuse one implementation of reconciliation, layout, interaction, virtualization, animation, and text editing. | Integrate through Win32, AppKit, GTK 4, an Emscripten Canvas, Android View, or UIKit while preserving platform services. |
 
 HuxerUI includes Row, Column, Flow, Stack, ScrollView, virtual lists and grids, responsive viewport classes, Tabs, NavigationBar, NavigationPane, DrawerLayout, factory and typed routed NavigationStack flows, controlled text editing, selection, validation, Flat and Material themes, retained animation, shadows, Canvas and Path drawing, typed app resources, Image, Toast, Dialog, BottomSheet, Popup, Menu, custom layouts, and typed extension points.
 
@@ -81,7 +81,7 @@ huxerui_add_app(my_app
 
 Build the repository on macOS or Linux:
 
-Linux requires system development packages, including libsoup 3, to be installed before CMake configuration; see [Getting Started](docs/getting-started.md#build-the-repository) for distribution-specific commands.
+Linux requires GTK 4 and libsoup 3 development packages before CMake configuration; see [Getting Started](docs/getting-started.md#build-the-repository) for distribution-specific commands.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -130,7 +130,7 @@ See [Getting Started](docs/getting-started.md) for application setup, platform b
 |---|---|---|
 | Windows | Supported | Win32, D3D11, Direct2D, DirectWrite |
 | macOS | Supported | AppKit, CoreGraphics, CoreText, NSTextInputClient |
-| Linux | Supported | X11, Cairo, EGL/OpenGL ES, FreeType, HarfBuzz, XIM, optional Fcitx5 DBus preedit |
+| Linux | Supported | GTK 4, GDK, Pango, Cairo, GtkIMContext |
 | Web | Supported | Emscripten, WebAssembly, Canvas 2D, browser text input |
 | Android | Supported | View, Canvas, StaticLayout, InputConnection |
 | iOS | Supported | UIKit, CoreGraphics, CoreText, UITextInput |

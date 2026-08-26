@@ -4,7 +4,9 @@
 #include <gio/gio.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -20,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "file_internal.h"
@@ -134,13 +138,126 @@ struct PortalCall {
   bool has_current_filter = false;
 };
 
+class PrivateSessionBus final {
+public:
+  PrivateSessionBus() {
+    constexpr const char* config = R"xml(<busconfig>
+  <type>session</type>
+  <listen>unix:tmpdir=/tmp</listen>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+)xml";
+    GError* error = nullptr;
+    gchar* config_path = nullptr;
+    const gint config_descriptor = g_file_open_tmp("huxerui-test-bus-XXXXXX", &config_path, &error);
+    if (config_descriptor < 0) {
+      const std::string message = error != nullptr && error->message != nullptr
+                                      ? error->message
+                                      : "Failed to create the private D-Bus configuration";
+      if (error != nullptr) {
+        g_error_free(error);
+      }
+      throw std::runtime_error(message);
+    }
+    close(config_descriptor);
+    if (!g_file_set_contents(config_path, config, -1, &error)) {
+      const std::string message = error != nullptr && error->message != nullptr
+                                      ? error->message
+                                      : "Failed to write the private D-Bus configuration";
+      if (error != nullptr) {
+        g_error_free(error);
+      }
+      unlink(config_path);
+      g_free(config_path);
+      throw std::runtime_error(message);
+    }
+
+    const char* daemon = g_getenv("G_TEST_DBUS_DAEMON");
+    const std::string config_argument = "--config-file=" + std::string(config_path);
+    gchar* arguments[] = {
+        const_cast<gchar*>(daemon != nullptr ? daemon : "dbus-daemon"),
+        const_cast<gchar*>("--nofork"),
+        const_cast<gchar*>("--nopidfile"),
+        const_cast<gchar*>("--print-address=1"),
+        const_cast<gchar*>(config_argument.c_str()),
+        nullptr,
+    };
+    gint output = -1;
+    const GSpawnFlags flags = static_cast<GSpawnFlags>(
+        G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDERR_TO_DEV_NULL
+    );
+    const gboolean spawned = g_spawn_async_with_pipes(
+        nullptr, arguments, nullptr, flags, nullptr, nullptr, &pid_, nullptr, &output, nullptr, &error
+    );
+    if (!spawned) {
+      const std::string message =
+          error != nullptr && error->message != nullptr ? error->message : "Failed to start the private D-Bus daemon";
+      if (error != nullptr) {
+        g_error_free(error);
+      }
+      unlink(config_path);
+      g_free(config_path);
+      throw std::runtime_error(message);
+    }
+
+    std::array<char, 4096> buffer{};
+    while (address_.find('\n') == std::string::npos) {
+      const ssize_t count = read(output, buffer.data(), buffer.size());
+      if (count > 0) {
+        address_.append(buffer.data(), static_cast<std::size_t>(count));
+        continue;
+      }
+      if (count < 0 && errno == EINTR) {
+        continue;
+      }
+      close(output);
+      Stop();
+      unlink(config_path);
+      g_free(config_path);
+      throw std::runtime_error("The private D-Bus daemon did not publish its address");
+    }
+    close(output);
+    address_.resize(address_.find('\n'));
+    unlink(config_path);
+    g_free(config_path);
+  }
+
+  ~PrivateSessionBus() {
+    Stop();
+  }
+
+  PrivateSessionBus(const PrivateSessionBus&) = delete;
+  PrivateSessionBus& operator=(const PrivateSessionBus&) = delete;
+
+  [[nodiscard]] const std::string& Address() const noexcept {
+    return address_;
+  }
+
+private:
+  void Stop() noexcept {
+    if (pid_ == 0) {
+      return;
+    }
+    static_cast<void>(kill(pid_, SIGTERM));
+    int status = 0;
+    while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
+    }
+    g_spawn_close_pid(pid_);
+    pid_ = 0;
+  }
+
+  GPid pid_ = 0;
+  std::string address_;
+};
+
 class FakePortal final {
 public:
   FakePortal()
-      : bus_(g_test_dbus_new(G_TEST_DBUS_NONE)), context_(g_main_context_new()),
-        loop_(g_main_loop_new(context_, false)) {
-    g_test_dbus_up(bus_);
-    address_ = g_test_dbus_get_bus_address(bus_);
+      : address_(bus_.Address()), context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)) {
     thread_ = std::thread([this] { Run(); });
     std::unique_lock lock(mutex_);
     ready_condition_.wait(lock, [this] { return ready_; });
@@ -163,8 +280,6 @@ public:
     thread_.join();
     g_main_loop_unref(loop_);
     g_main_context_unref(context_);
-    g_test_dbus_down(bus_);
-    g_object_unref(bus_);
   }
 
   FakePortal(const FakePortal&) = delete;
@@ -566,7 +681,7 @@ private:
     condition_.notify_all();
   }
 
-  GTestDBus* bus_ = nullptr;
+  PrivateSessionBus bus_;
   std::string address_;
   GMainContext* context_ = nullptr;
   GMainLoop* loop_ = nullptr;
@@ -677,12 +792,8 @@ TEST_CASE("LinuxFilePickerFormatsX11ParentAndRejectsAnUnavailablePortal") {
   REQUIRE(detail::LinuxPortalParentWindow(0).empty());
   REQUIRE(detail::LinuxPortalParentWindow(0x12ABUL) == "x11:12ab");
 
-  GTestDBus* bus = g_test_dbus_new(G_TEST_DBUS_NONE);
-  g_test_dbus_up(bus);
-  const std::string address = g_test_dbus_get_bus_address(bus);
-  REQUIRE_FALSE(detail::CreateLinuxFilePickerTransport([] { return 0UL; }, address));
-  g_test_dbus_down(bus);
-  g_object_unref(bus);
+  PrivateSessionBus bus;
+  REQUIRE_FALSE(detail::CreateLinuxFilePickerTransport([] { return 0UL; }, bus.Address()));
 }
 
 TEST_CASE("LinuxFilePickerCompletesAnActiveRequestWhenThePortalDisappears") {

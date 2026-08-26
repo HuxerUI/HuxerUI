@@ -990,22 +990,20 @@ TSF can replace or augment the adapter later without changing Runtime, TextInput
 
 ## Linux adapter
 
-The X11 host keeps XIM as the generic input-method fallback.
-When the process selects Fcitx and the optional `Fcitx5GClient` development package is available at build time, the adapter creates a Fcitx DBus input context because the default Fcitx XIM styles expose candidate placement without exposing application-rendered preedit callbacks.
+The GTK host owns one `GtkIMMulticontext` for its drawing area and lets GTK select the active desktop input-method module.
+Key events enter the input context before the shared direct-key path; accepted events produce preedit or commit callbacks, while declined events continue through Runtime key handling in order.
 
-The Fcitx path:
+The bridge:
 
-- Sends each key through a bounded-time asynchronous Fcitx request and returns declined or forwarded events to the shared direct-key path in event-loop order.
-- Keeps the XIM context unfocused while the non-secure Fcitx context owns focus so the two frontends cannot reset each other's composition.
-- Maps formatted preedit updates to `UpdateComposition`, converting the Fcitx UTF-8 byte cursor to the common UTF-16 offset space.
-- Maps committed strings to `CommitText` and clears local composition bookkeeping only after Runtime accepts the command.
-- Publishes bounded non-secure surrounding text in UTF-8 byte coordinates and maps adjacent Fcitx deletion requests to Unicode-code-point `DeleteSurrounding` commands.
-- Publishes the transformed caret rectangle in X11 root coordinates while leaving candidate rendering with Fcitx.
-- Integrates the GLib DBus sources into the X11 `poll()` wait set so input-method callbacks wake the event loop without periodic polling.
-- Bypasses both Fcitx and XIM for secure sessions, leaving direct key text and editing keys on the shared path and never publishing secure surrounding text.
+- Maps `preedit-start`, `preedit-changed`, and `preedit-end` to the shared composition command sequence.
+- Converts GTK UTF-8 byte positions to the common UTF-16 offset space without splitting a code point or surrogate pair.
+- Maps committed UTF-8 text to `CommitText` and clears local composition bookkeeping after Runtime processes the command.
+- Publishes bounded non-secure surrounding text with both cursor and anchor positions and maps `delete-surrounding` to Unicode-code-point deletion.
+- Updates the native candidate location from the latest transformed caret geometry.
+- Maps input purpose, autocorrection, capitalization, and secure-entry policy to GTK input purpose and hint values.
+- Disables inline preedit and surrounding-text publication for secure sessions while retaining native password input purpose and private-input hints.
 
-If the Fcitx client library is unavailable, the build remains supported and uses XIM.
-XIM callback composition is rendered inline when the active input method advertises `XIMPreeditCallbacks`; position and root styles retain their native candidate-window behavior.
+The implementation does not contain separate XIM, IBus, or Fcitx state machines. GTK's input-method module boundary owns those desktop-specific protocols.
 
 ## PlatformView focus
 

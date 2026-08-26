@@ -13,12 +13,9 @@ public:
 
   LinuxUIThreadDispatcher(const LinuxUIThreadDispatcher&) = delete;
   LinuxUIThreadDispatcher& operator=(const LinuxUIThreadDispatcher&) = delete;
-  LinuxUIThreadDispatcher(LinuxUIThreadDispatcher&&) = delete;
-  LinuxUIThreadDispatcher& operator=(LinuxUIThreadDispatcher&&) = delete;
 
   [[nodiscard]] UIThreadDispatcher Bind() const;
-  [[nodiscard]] int FileDescriptor() const noexcept;
-  void RunPending();
+  void Shutdown() noexcept;
 
 private:
   struct State;
