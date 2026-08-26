@@ -209,7 +209,7 @@ public:
       renderer_.Initialize();
       CreateWindow(options);
       runtime_->UpdateResourceConfiguration(Configuration());
-      UpdateRuntimeViewport();
+      UpdateRuntimeViewport(options.initial_size);
       running_ = true;
       gtk_window_present(window_);
       gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
@@ -466,6 +466,7 @@ private:
     gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
     gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
     gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));
+    g_signal_connect(drawing_area_, "destroy", G_CALLBACK(ClientWidgetDestroyed), this);
     text_input_.SetClientWidget(GTK_WIDGET(drawing_area_));
 
     g_signal_connect(window_, "close-request", G_CALLBACK(CloseRequested), this);
@@ -560,14 +561,10 @@ private:
     }
   }
 
-  void UpdateRuntimeViewport() {
-    if (runtime_ == nullptr || drawing_area_ == nullptr) {
+  void UpdateRuntimeViewport(Size viewport) {
+    if (runtime_ == nullptr || viewport.width <= 0.0F || viewport.height <= 0.0F) {
       return;
     }
-    const Size viewport{
-        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
-        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
-    };
     WindowMetrics metrics{.viewport = viewport, .safe_area = {}, .title_bar = std::nullopt};
     if (custom_chrome_) {
       metrics.title_bar = ResolveLinuxTitleBarMetrics(
@@ -575,6 +572,16 @@ private:
       );
     }
     runtime_->SetWindowMetrics(metrics);
+  }
+
+  void UpdateRuntimeViewport() {
+    if (drawing_area_ == nullptr) {
+      return;
+    }
+    UpdateRuntimeViewport({
+        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
+        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
+    });
   }
 
   void AttachToplevelState() {
@@ -722,15 +729,25 @@ private:
     return G_SOURCE_REMOVE;
   }
 
-  static void Draw(GtkDrawingArea*, cairo_t* context, int, int, gpointer data) {
+  static void Draw(GtkDrawingArea*, cairo_t* context, int width, int height, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.UpdateRuntimeViewport();
+    self.UpdateRuntimeViewport({static_cast<float>(width), static_cast<float>(height)});
     self.DrawFrame(context);
   }
 
   static gboolean CloseRequested(GtkWindow*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->running_ = false;
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.text_input_.Reset();
+    self.running_ = false;
     return FALSE;
+  }
+
+  static void ClientWidgetDestroyed(GtkWidget* widget, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.text_input_.Reset();
+    if (self.drawing_area_ != nullptr && GTK_WIDGET(self.drawing_area_) == widget) {
+      self.drawing_area_ = nullptr;
+    }
   }
 
   static void Destroyed(GtkWidget*, gpointer data) {

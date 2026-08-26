@@ -297,6 +297,13 @@ void LinuxTextInput::SetRuntime(Runtime* runtime) noexcept {
 }
 
 void LinuxTextInput::SetClientWidget(GtkWidget* widget) {
+  if (state_->widget == widget) {
+    return;
+  }
+  if (state_->widget != nullptr) {
+    gtk_im_context_focus_out(state_->context);
+    gtk_im_context_set_client_widget(state_->context, nullptr);
+  }
   state_->widget = widget;
   gtk_im_context_set_client_widget(state_->context, widget);
 }
@@ -314,7 +321,7 @@ void LinuxTextInput::SetFocus(bool focused) {
 }
 
 void LinuxTextInput::Reset() noexcept {
-  if (state_->context != nullptr) {
+  if (state_->context != nullptr && state_->widget != nullptr) {
     gtk_im_context_reset(state_->context);
     gtk_im_context_focus_out(state_->context);
     gtk_im_context_set_client_widget(state_->context, nullptr);
@@ -322,6 +329,7 @@ void LinuxTextInput::Reset() noexcept {
   state_->widget = nullptr;
   state_->runtime = nullptr;
   state_->session_id = 0;
+  state_->focused = false;
   state_->composing = false;
 }
 
