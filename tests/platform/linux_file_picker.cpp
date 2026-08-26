@@ -20,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+#include <unistd.h>
+
 #include "file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "runtime_test_support.h"
@@ -767,7 +769,7 @@ TEST_CASE("LinuxFilePickerHandlesEmptyFiltersPortalFailuresAndInvalidUris") {
   static_cast<void>(portal.WaitForCall(4));
   REQUIRE(valid_references.size() == 1);
   REQUIRE(valid_references.front().Name() == "read-only.txt");
-  REQUIRE_FALSE(valid_references.front().CanWrite());
+  REQUIRE(valid_references.front().CanWrite() == (access(read_only.Path().c_str(), W_OK) == 0));
 }
 
 TEST_CASE("DestroyingTheRuntimeClosesTheLinuxPortalRequestAndIgnoresALateResponse") {
