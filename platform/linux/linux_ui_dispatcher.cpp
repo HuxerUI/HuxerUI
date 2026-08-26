@@ -1,96 +1,85 @@
-#include "linux_internal.h"
-
 #include "linux_ui_dispatcher.h"
 
-#include <sys/eventfd.h>
-#include <unistd.h>
+#include <glib.h>
 
-#include <cerrno>
-#include <cstdint>
-#include <deque>
 #include <functional>
 #include <mutex>
-#include <stdexcept>
-#include <system_error>
 #include <utility>
 
 namespace huxerui::detail {
 
 struct LinuxUIThreadDispatcher::State {
-  State() : event_fd(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
-    if (event_fd < 0) {
-      throw std::system_error(errno, std::generic_category(), "HuxerUI could not create the Linux UI event handle");
-    }
-  }
+  State() : context(g_main_context_ref(g_main_context_default())) {}
 
   ~State() {
-    if (event_fd >= 0) {
-      close(event_fd);
-    }
+    g_main_context_unref(context);
   }
 
-  void Post(std::function<void()> task) {
+  struct PendingTask {
+    std::weak_ptr<State> state;
+    std::function<void()> task;
+  };
+
+  void Post(const std::shared_ptr<State>& self, std::function<void()> task) {
+    {
+      std::lock_guard lock(mutex);
+      if (!active) {
+        return;
+      }
+    }
+    GSource* source = g_idle_source_new();
+    auto* pending = new PendingTask{self, std::move(task)};
+    g_source_set_callback(
+        source,
+        [](gpointer data) -> gboolean {
+          auto& pending_task = *static_cast<PendingTask*>(data);
+          const std::shared_ptr<State> state = pending_task.state.lock();
+          if (!state) {
+            return G_SOURCE_REMOVE;
+          }
+          {
+            std::lock_guard lock(state->mutex);
+            if (!state->active) {
+              return G_SOURCE_REMOVE;
+            }
+          }
+          try {
+            pending_task.task();
+          } catch (...) {
+          }
+          return G_SOURCE_REMOVE;
+        },
+        pending,
+        [](gpointer data) { delete static_cast<PendingTask*>(data); }
+    );
+    g_source_attach(source, context);
+    g_source_unref(source);
+    g_main_context_wakeup(context);
+  }
+
+  void Shutdown() noexcept {
     std::lock_guard lock(mutex);
-    tasks.push_back(std::move(task));
-
-    constexpr std::uint64_t wake = 1;
-    while (write(event_fd, &wake, sizeof(wake)) < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      if (errno == EAGAIN) {
-        return;
-      }
-      tasks.pop_back();
-      throw std::system_error(errno, std::generic_category(), "HuxerUI could not wake the Linux UI thread");
-    }
+    active = false;
   }
 
-  void DrainWakeCount() {
-    std::uint64_t count = 0;
-    while (read(event_fd, &count, sizeof(count)) < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      if (errno == EAGAIN) {
-        return;
-      }
-      throw std::system_error(errno, std::generic_category(), "HuxerUI could not read the Linux UI event handle");
-    }
-  }
-
-  int event_fd = -1;
+  GMainContext* context = nullptr;
   std::mutex mutex;
-  std::deque<std::function<void()>> tasks;
+  bool active = true;
 };
 
 LinuxUIThreadDispatcher::LinuxUIThreadDispatcher() : state_(std::make_shared<State>()) {}
 
-LinuxUIThreadDispatcher::~LinuxUIThreadDispatcher() = default;
+LinuxUIThreadDispatcher::~LinuxUIThreadDispatcher() {
+  Shutdown();
+}
 
 UIThreadDispatcher LinuxUIThreadDispatcher::Bind() const {
   const std::shared_ptr<State> state = state_;
-  return [state](std::function<void()> task) { state->Post(std::move(task)); };
+  return [state](std::function<void()> task) { state->Post(state, std::move(task)); };
 }
 
-int LinuxUIThreadDispatcher::FileDescriptor() const noexcept {
-  return state_->event_fd;
-}
-
-void LinuxUIThreadDispatcher::RunPending() {
-  state_->DrainWakeCount();
-
-  std::deque<std::function<void()>> pending;
-  {
-    std::lock_guard lock(state_->mutex);
-    pending.swap(state_->tasks);
-  }
-  for (const auto& task : pending) {
-    try {
-      task();
-    } catch (...) {
-    }
-  }
+void LinuxUIThreadDispatcher::Shutdown() noexcept {
+  state_->Shutdown();
 }
 
 } // namespace huxerui::detail

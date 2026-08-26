@@ -1,6 +1,6 @@
 # Incremental Layout and Rendering Design
 
-Status: shared Runtime pipeline implemented; platform partial redraw implemented on Windows, macOS, and Linux
+Status: shared Runtime pipeline implemented; platform partial redraw implemented on Windows and macOS
 
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
 It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
@@ -48,8 +48,8 @@ The implementation remains conservative in several areas:
 - Transform-only and opacity-only presentation changes retain PaintSequences.
 - Equality-comparable retained modifier values skip unchanged updates when their node inputs are also unchanged; other values update conservatively.
 - Geometry-dependent extensions prepare value snapshots after final presentation resolution and invalidate foreground paint only when those snapshots change.
-- Windows, macOS, and Linux invalidate conservative platform update bounds derived from DamageRegion.
-- Android still calculates shared DamageRegion output, but the View backend invalidates and replays the full platform surface because current Android View invalidation ignores dirty rectangles.
+- Windows and macOS invalidate conservative platform update bounds derived from DamageRegion.
+- Linux and Android still calculate shared DamageRegion output, but their current toolkit surfaces invalidate and replay the full platform surface.
 
 ## Current pipeline
 
@@ -515,7 +515,7 @@ Shadow commands include their resolved caster and complete blur overflow.
 Unknown or renderer-dependent overflow falls back to the host viewport.
 
 The Android View backend currently ignores regional damage at the platform invalidation boundary and redraws the full surface.
-The Linux backend restricts Cairo redraw to the damage bounds and presents the retained bitmap whole.
+The Linux GTK backend currently lets GTK coalesce invalidation and replays the committed RenderScene for each Cairo draw.
 Other future platform implementations may initially redraw the full surface.
 The shared runtime must still calculate and test damage correctly so a renderer can adopt partial redraw without changing component behavior.
 

@@ -105,39 +105,6 @@ install(FILES
         RENAME HuxerUIWebFileSystem.js
 )
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if (TARGET ${HUXERUI_STATIC_LIB_NAME})
-        install(FILES ${HUXERUI_LINUX_STATIC_DEPENDENCY_FILES}
-                DESTINATION "${CMAKE_INSTALL_LIBDIR}/huxerui/deps")
-    endif ()
-    include(FetchContent)
-    foreach (HUXERUI_LINUX_DEPENDENCY IN ITEMS
-            zlib expat libpng libjpeg-turbo freetype harfbuzz pixman fontconfig cairo)
-        FetchContent_GetProperties(${HUXERUI_LINUX_DEPENDENCY})
-    endforeach ()
-    install(FILES "${zlib_SOURCE_DIR}/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/zlib")
-    install(FILES "${expat_SOURCE_DIR}/COPYING"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/expat")
-    install(FILES "${libpng_SOURCE_DIR}/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libpng")
-    install(FILES "${libjpeg-turbo_SOURCE_DIR}/LICENSE.md"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/libjpeg-turbo")
-    install(FILES "${freetype_SOURCE_DIR}/LICENSE.TXT" "${freetype_SOURCE_DIR}/docs/FTL.TXT"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/freetype")
-    install(FILES "${harfbuzz_SOURCE_DIR}/COPYING"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/harfbuzz")
-    install(FILES "${pixman_SOURCE_DIR}/COPYING"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/pixman")
-    install(FILES "${fontconfig_SOURCE_DIR}/COPYING"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/fontconfig")
-    install(FILES
-            "${cairo_SOURCE_DIR}/COPYING"
-            "${cairo_SOURCE_DIR}/COPYING-LGPL-2.1"
-            "${cairo_SOURCE_DIR}/COPYING-MPL-1.1"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/licenses/cairo")
-endif ()
-
 if (TARGET huxerui_cli)
     install(TARGETS huxerui_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()

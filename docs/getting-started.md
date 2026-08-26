@@ -141,35 +141,29 @@ ctest --test-dir build --output-on-failure
 Linux:
 
 Linux system and build dependencies must be installed before configuring the project; CMake does not download them.
-The following commands install the required compiler, build tools, X11/EGL libraries, and libsoup 3 development files on common distributions.
+The following commands install the required compiler, build tools, GTK 4, and libsoup 3 development files on common distributions.
 
 Debian or Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install build-essential cmake git pkg-config meson ninja-build gperf nasm libglib2.0-dev \
-    libx11-dev libxext-dev libxkbcommon-dev libxrandr-dev \
-    libegl1-mesa-dev libgles2-mesa-dev libsoup-3.0-dev
+sudo apt-get install build-essential cmake git ninja-build pkg-config libgtk-4-dev libsoup-3.0-dev
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install gcc-c++ cmake git pkgconf-pkg-config meson ninja-build gperf nasm glib2-devel \
-    libX11-devel libXext-devel libxkbcommon-devel libXrandr-devel \
-    libglvnd-devel libsoup3-devel
+sudo dnf install gcc-c++ cmake git ninja-build pkgconf-pkg-config gtk4-devel libsoup3-devel
 ```
 
 Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel cmake git pkgconf meson ninja gperf nasm \
-    libx11 libxext libxkbcommon libxrandr libglvnd glib2 libsoup3
+sudo pacman -S --needed base-devel cmake git ninja pkgconf gtk4 libsoup3
 ```
 
-`gio-2.0` and `libsoup-3.0` are required system dynamic libraries and are not part of HuxerUI's fetched static dependency stack.
+`gtk4`, `gio-2.0`, and `libsoup-3.0` are required system libraries and are not fetched or bundled by HuxerUI.
 The selected packages must provide their pkg-config metadata, headers, and shared libraries; TLS support is installed through the distribution dependencies.
-The fetched Fontconfig build requires Meson 1.11.0 or newer; distributions with an older Meson package need a newer user-managed installation on `PATH`.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -177,11 +171,10 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The Linux backend resolves the manually installed X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 packages through pkg-config.
-Source-checkout builds fetch the pinned Cairo, FreeType, HarfBuzz, fontconfig, pixman, libpng, libjpeg, zlib, and expat stack and require the upstream build tools reported by CMake.
+The Linux backend resolves GTK 4, GIO, and libsoup 3 through pkg-config. GTK's own package supplies the GDK backend, Pango text stack, Cairo integration, and image decoding dependencies.
 Host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/` and CMake stops configuration when a matching host package is unavailable.
 An installed SDK imports both framework targets by default, and `huxerui_add_app` selects `HuxerUI::huxerui_static`.
-A shared-only consumer uses `find_package(HuxerUI CONFIG REQUIRED COMPONENTS shared)` and links `HuxerUI::huxerui` without resolving the static archive closure.
+A shared-only consumer uses `find_package(HuxerUI CONFIG REQUIRED COMPONENTS shared)` and links `HuxerUI::huxerui` without resolving the static target's pkg-config dependencies.
 A static consumer requests `COMPONENTS static` before linking `HuxerUI::huxerui_static`; that component requires the Linux development packages because their dynamic libraries remain distribution-owned.
 
 Windows:

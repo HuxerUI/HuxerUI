@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | Windows | Win32 | DirectWrite | Direct2D | Keyboard and IMM32 adapter | Planned |
 | macOS | AppKit | CoreText | CoreGraphics | NSTextInputClient | NSURLSession |
-| Linux | X11 Window | FreeType and HarfBuzz | Cairo and EGL/OpenGL ES | XIM | libsoup 3 |
+| Linux | GTK 4 window | Pango | Cairo on GTK | GtkIMContext | libsoup 3 |
 | Web | Browser Canvas | Canvas TextMetrics | Canvas 2D | Hidden input, textarea, and composition events | Fetch |
 | Android | Android View | StaticLayout | Canvas | InputConnection and IME | HttpURLConnection |
 | iOS | UIKit View | CoreText | CoreGraphics | UITextInput | NSURLSession |
@@ -56,8 +56,8 @@ They traverse the committed `RenderScene` in `commit.render_frame` and do not du
 Runtime uses it for invalidations outside frame construction; work discovered while building is returned through `FrameCommit::next_frame_deadline`.
 The platform adapter presents the committed frame before scheduling that deadline, which prevents continuous animation from starving the platform paint phase.
 Windows and macOS translate `DamageRegion` into platform invalidation bounds.
-Android receives the same committed damage but invalidates the complete `HuxerUIView` because current Android View APIs ignore dirty rectangles.
-All three backends replay only the committed scene during platform paint callbacks.
+Linux and Android receive the same committed damage but currently invalidate their complete toolkit surfaces.
+Every backend replays only the committed scene during platform paint callbacks.
 Exact `DrawTextRunsCommand` geometry is supplied by TextMeasurer and is not replaced by renderer-side layout decisions.
 Font, layout, and decoded-image caches are platform-owned and bounded; see [Text and Font Design](design/text.md) and [App Resources, Images, and Localization Design](design/resources.md).
 When the debug performance panel is open, `PlatformAdapter::QueryProcessMetrics()` optionally reports cumulative process CPU time, a current process-memory footprint, and logical processor count. Android reports proportional set size (PSS); Windows and macOS report their current working-set or resident-set values. Runtime owns the sampling lifecycle and derives interval CPU utilization while platform-specific metric collection remains behind the adapter boundary.
@@ -119,37 +119,36 @@ Example targets build as application bundles and can be launched from `build/bin
 
 ## Linux
 
-The Linux backend creates an X11 window, measures text with FreeType and HarfBuzz, rasterizes shared PaintCommands with Cairo into a retained device-pixel bitmap, and presents it through an EGL/OpenGL ES 2 swap.
-Top-level X11 focus updates the shared application lifecycle to `Active` or `Inactive`, while unmapping the window changes it to `Background`.
-Partial Runtime damage limits Cairo redraw to the affected pixel bounds; the retained bitmap is then presented whole or as damaged rows, matching the Windows cost model of a retained scene bitmap plus swap-chain presentation.
+The Linux backend creates a GTK 4 window and one drawing area per Runtime. GTK owns native backend selection, event delivery, lifecycle notifications, scaling, and frame invalidation.
+Pango measures and shapes text, while Cairo replays the shared RenderScene directly into the GTK-provided drawing context.
+Top-level GTK focus updates the shared application lifecycle to `Active` or `Inactive`, while minimization or unmapping changes it to `Background`.
+Runtime damage remains available to the platform boundary, but GTK currently owns redraw coalescing and the Cairo renderer replays the committed scene for each requested draw.
 Canvas Paths map to Cairo path geometry for fill, stroke, clipping, and blurred shadow masks.
-Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), locale and `Xft.dpi` changes update the Runtime resource configuration, and libpng/libjpeg decoding produces Cairo bitmap cache entries with a bounded byte budget.
+Packaged resources are read from the executable-specific `<name>.resources` directory (overridable with `HUXERUI_RESOURCES_DIR`), GTK scale and GLib locale data update the Runtime resource configuration, and GdkPixbuf decodes images for the renderer cache.
 FileSystem uses the executable filename as its application identity, maps durable and cache files through `XDG_DATA_HOME` and `XDG_CACHE_HOME` with standard home-directory fallbacks, and obtains the executable directory from `/proc/self/exe` rather than the working directory.
 Temporary files use an owner-only application child under a valid `XDG_RUNTIME_DIR`, or an owner-only `huxerui-<uid>` subtree of the system temporary directory when the runtime directory is unavailable or unsafe.
-FilePicker uses `org.freedesktop.portal.FileChooser` on the session D-Bus and passes the current X11 window as an `x11:<hex-xid>` parent when available.
+FilePicker uses `org.freedesktop.portal.FileChooser` on the session D-Bus and passes the current `x11:<hex-xid>` parent when GTK is running on X11; other GDK backends currently use an unparented portal request.
 Portal `file://` results remain private inside FileReference, while reads, imports, replacements, and completed save copies reuse the shared bounded file executor.
 The picker capabilities are unavailable when the session bus or xdg-desktop-portal service cannot be reached; the backend does not fall back to GTK or Qt dialogs.
 
-Text input uses the X Input Method protocol with full preedit callbacks, mirroring the Windows IMM32 adapter; when no input method is available the backend degrades gracefully to direct key text.
-Clipboard reads and writes use the X11 `CLIPBOARD` selection with UTF-8 string transfers.
-Nonvisual PlatformModule results and events enter a thread-safe FIFO and wake the X11 event loop through `eventfd`, so application callbacks run asynchronously on the Runtime thread without producer-thread reentry.
+Text input uses `GtkIMMulticontext`, including preedit, commit, surrounding-text retrieval and deletion, UTF-8 to UTF-16 conversion, secure-input hints, and caret geometry.
+Clipboard reads and writes use GDK's UTF-8 clipboard API with a cancellable one-second bound on synchronous reads.
+Linux PlatformView hosting and GTK accessibility mapping remain unavailable; the renderer rejects a PlatformView placement instead of silently flattening or misordering platform content.
+Until that mapping exists, the adapter defaults `GTK_A11Y` to `none` before GTK initialization so it does not publish a misleading host-only tree or connect to AT-SPI, while preserving an explicit backend selected by the application environment.
+Nonvisual PlatformModule results and events attach idle sources to the owning `GMainContext`, so application callbacks run asynchronously on the Runtime thread without producer-thread reentry.
 `linux::ExternalTextureSource` accepts borrowed, untagged sRGB RGBA8888 or BGRA8888 pixel spans with explicit dimensions and row stride from any producer thread.
 Publish validates and copies each frame into a bounded latest-wins mailbox, converting straight alpha to Cairo's premultiplied ARGB32 representation so the producer may immediately reuse its buffer.
 The Cairo renderer acquires one coherent frame per physical draw, retains the last acquired frame, applies Image cropping, sampling, transforms, clipping, and opacity, and releases inactive cache entries.
 This path is bounded and does not claim zero-copy or direct DMA-BUF import.
 The Linux `example_platform_module` registers a platform-neutral timer factory backed by `timerfd` and a background RGBA color stream, exposing the same typed Root Services and disposal behavior as the other supported platform implementations.
-HttpClient uses one libsoup 3 Session on a dedicated GLib network thread, preserving connection reuse, redirects, system proxy configuration, and the system TLS trust store without adding network descriptors to the X11 event loop.
+HttpClient uses one libsoup 3 Session on a dedicated GLib network thread, preserving connection reuse, redirects, system proxy configuration, and the system TLS trust store without entering the GTK UI context.
 Requests and responses remain complete in-memory values, GCancellable backs Task cancellation, and a GLib timeout source enforces the complete request deadline.
-X11, Xext, XKB common, XRandR, EGL, OpenGL ES 2, GIO, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download them.
-Source-checkout builds fetch only the pinned graphics, text, image, and compression libraries used by the renderer.
+GTK 4, GIO, and libsoup 3 are manually installed system dependencies resolved through pkg-config; source-checkout builds do not download or stage a private Linux graphics stack.
 Following the Windows and macOS distribution model, Linux x86_64 and aarch64 host tools are distributed as prebuilt executables under `tools/prebuilt/linux/<architecture>/`.
 The CLI records Linux enablement under `platform/linux`, builds the root CMake application in `.huxerui/build/linux/<profile>`, and launches the exact executable recorded by generated application integration metadata.
 The relocatable Linux SDK supports installed CLI projects and exports both canonical CMake targets without retaining build-tree paths.
-Shared consumers load `HuxerUI::huxerui` without requiring pkg-config development metadata; static consumers request `COMPONENTS static` and resolve the packaged archive closure plus the system development packages through pkg-config.
-Linux release binaries target glibc 2.31, GLIBCXX 3.4.32, and CXXABI 1.3.15 or older symbol versions.
-Release CI builds them with GCC 14 in an Ubuntu 20.04 environment and rejects ELF outputs that exceed those symbol-version ceilings.
-Because Ubuntu 20.04 does not package libsoup 3, CI builds GLib 2.70.5 and libsoup 3.0.7 into a private link-time prefix; those libraries are not bundled into the SDK, and consumers continue to resolve the documented system dependencies.
-The distributed Linux host tools statically link the GNU C++ runtime and therefore do not add a target-system GLIBCXX dependency.
+Shared consumers load `HuxerUI::huxerui` without resolving private archive metadata; static consumers request `COMPONENTS static` and resolve the GTK 4, GIO, and libsoup 3 system packages through pkg-config.
+Release packaging must target a distribution baseline that provides the documented GTK 4 and libsoup 3 versions; the previous Ubuntu 20.04 private GLib/libsoup staging path no longer applies.
 
 ## Web
 

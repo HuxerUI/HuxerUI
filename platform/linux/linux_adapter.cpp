@@ -1,22 +1,19 @@
-#include <X11/Xatom.h>
-#include <X11/XKBlib.h>
-#include <X11/Xutil.h>
-#include <X11/extensions/Xrandr.h>
-#include <X11/keysym.h>
+#include "linux_internal.h"
 
-#include <poll.h>
+#include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/x11/gdkx.h>
+#endif
+
 #include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <array>
-#include <cerrno>
 #include <chrono>
-#include <clocale>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -28,10 +25,14 @@
 #include <utility>
 #include <vector>
 
-#include "linux_internal.h"
-
 #include <huxerui/app.h>
+#include <huxerui/clipboard.h>
+#include <huxerui/file.h>
+#include <huxerui/resource.h>
+#include <huxerui/window.h>
 
+#include "file_internal.h"
+#include "http_internal.h"
 #include "linux_file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
@@ -43,167 +44,185 @@
 #include "text_layout_internal.h"
 
 namespace huxerui::detail {
-
 namespace {
 
-constexpr float kDipsPerInch = 96.0F;
-constexpr double kClipboardTimeoutSeconds = 0.5;
-constexpr Time kDoubleClickTimeMs = 400;
-constexpr float kDoubleClickSlop = 4.0F;
-constexpr unsigned int kScrollLeftButton = 6;
-constexpr unsigned int kScrollRightButton = 7;
-// Motif WM hints flag requesting that the window manager drop server decorations.
-constexpr unsigned long kMwmHintsDecorations = 1UL << 1;
+constexpr float kDipsPerScrollStep = 40.0F;
+constexpr float kResizeBorderDips = 6.0F;
 
-struct MotifWmHints {
-  unsigned long flags;
-  unsigned long functions;
-  unsigned long decorations;
-  long input_mode;
-  unsigned long status;
-};
-
-Key TranslateKey(KeySym keysym) {
-  switch (keysym) {
-  case XK_Tab:
+Key TranslateKey(guint key_value) noexcept {
+  switch (key_value) {
+  case GDK_KEY_Shift_L:
+  case GDK_KEY_Shift_R:
+    return Key::Shift;
+  case GDK_KEY_Control_L:
+  case GDK_KEY_Control_R:
+    return Key::Control;
+  case GDK_KEY_Alt_L:
+  case GDK_KEY_Alt_R:
+    return Key::Alt;
+  case GDK_KEY_Meta_L:
+  case GDK_KEY_Meta_R:
+  case GDK_KEY_Super_L:
+  case GDK_KEY_Super_R:
+    return Key::Meta;
+  case GDK_KEY_Tab:
+  case GDK_KEY_ISO_Left_Tab:
     return Key::Tab;
-  case XK_Return:
-  case XK_KP_Enter:
+  case GDK_KEY_Return:
+  case GDK_KEY_KP_Enter:
     return Key::Enter;
-  case XK_space:
+  case GDK_KEY_space:
     return Key::Space;
-  case XK_Escape:
+  case GDK_KEY_Escape:
     return Key::Escape;
-  case XK_BackSpace:
+  case GDK_KEY_BackSpace:
     return Key::Backspace;
-  case XK_Delete:
+  case GDK_KEY_Delete:
+  case GDK_KEY_KP_Delete:
     return Key::Delete;
-  case XK_Left:
+  case GDK_KEY_Left:
+  case GDK_KEY_KP_Left:
     return Key::ArrowLeft;
-  case XK_Right:
+  case GDK_KEY_Right:
+  case GDK_KEY_KP_Right:
     return Key::ArrowRight;
-  case XK_Up:
+  case GDK_KEY_Up:
+  case GDK_KEY_KP_Up:
     return Key::ArrowUp;
-  case XK_Down:
+  case GDK_KEY_Down:
+  case GDK_KEY_KP_Down:
     return Key::ArrowDown;
-  case XK_Home:
+  case GDK_KEY_Home:
+  case GDK_KEY_KP_Home:
     return Key::Home;
-  case XK_End:
+  case GDK_KEY_End:
+  case GDK_KEY_KP_End:
     return Key::End;
-  case XK_Page_Up:
+  case GDK_KEY_Page_Up:
+  case GDK_KEY_KP_Page_Up:
     return Key::PageUp;
-  case XK_Page_Down:
+  case GDK_KEY_Page_Down:
+  case GDK_KEY_KP_Page_Down:
     return Key::PageDown;
-  case XK_a:
-  case XK_A:
+  case GDK_KEY_a:
+  case GDK_KEY_A:
     return Key::A;
-  case XK_c:
-  case XK_C:
+  case GDK_KEY_c:
+  case GDK_KEY_C:
     return Key::C;
-  case XK_v:
-  case XK_V:
+  case GDK_KEY_v:
+  case GDK_KEY_V:
     return Key::V;
-  case XK_x:
-  case XK_X:
+  case GDK_KEY_x:
+  case GDK_KEY_X:
     return Key::X;
-  case XK_y:
-  case XK_Y:
+  case GDK_KEY_y:
+  case GDK_KEY_Y:
     return Key::Y;
-  case XK_z:
-  case XK_Z:
+  case GDK_KEY_z:
+  case GDK_KEY_Z:
     return Key::Z;
   default:
     return Key::Unknown;
   }
 }
 
-KeyModifiers CurrentKeyModifiers(unsigned int state) noexcept {
+KeyModifiers TranslateModifiers(GdkModifierType state) noexcept {
   return {
-      (state & ShiftMask) != 0,
-      (state & ControlMask) != 0,
-      (state & Mod1Mask) != 0,
-      (state & Mod4Mask) != 0,
+      (state & GDK_SHIFT_MASK) != 0,
+      (state & GDK_CONTROL_MASK) != 0,
+      (state & GDK_ALT_MASK) != 0,
+      (state & GDK_SUPER_MASK) != 0 || (state & GDK_META_MASK) != 0,
   };
 }
 
-int XErrorHandler(Display* display, XErrorEvent* error) {
-  static_cast<void>(display);
-  static_cast<void>(error);
-  return 0;
-}
-
-void ConfigureDetectableAutoRepeat(Display* display) noexcept {
-  static_cast<void>(XkbSetDetectableAutoRepeat(display, 0, nullptr));
-}
-
-std::string StripControlCharacters(std::string_view text) {
-  std::string result;
-  result.reserve(text.size());
-  for (const char character : text) {
-    const unsigned char byte = static_cast<unsigned char>(character);
-    if (byte < 0x80 && (byte < 0x20 || byte == 0x7F)) {
-      continue;
-    }
-    result.push_back(character);
+std::string KeyText(guint key_value, GdkModifierType state) {
+  if ((state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK)) != 0) {
+    return {};
   }
-  return result;
+  const gunichar character = gdk_keyval_to_unicode(key_value);
+  if (character == 0 || !g_unichar_isprint(character)) {
+    return {};
+  }
+  char buffer[7]{};
+  const int length = g_unichar_to_utf8(character, buffer);
+  return std::string(buffer, static_cast<std::size_t>(length));
+}
+
+std::optional<GdkSurfaceEdge> ResizeEdge(Point point, Size viewport, bool maximized) noexcept {
+  if (maximized || viewport.width <= 0.0F || viewport.height <= 0.0F) {
+    return std::nullopt;
+  }
+  const bool left = point.x <= kResizeBorderDips;
+  const bool right = point.x >= viewport.width - kResizeBorderDips;
+  const bool top = point.y <= kResizeBorderDips;
+  const bool bottom = point.y >= viewport.height - kResizeBorderDips;
+  if (top && left) {
+    return GDK_SURFACE_EDGE_NORTH_WEST;
+  }
+  if (top && right) {
+    return GDK_SURFACE_EDGE_NORTH_EAST;
+  }
+  if (bottom && left) {
+    return GDK_SURFACE_EDGE_SOUTH_WEST;
+  }
+  if (bottom && right) {
+    return GDK_SURFACE_EDGE_SOUTH_EAST;
+  }
+  if (left) {
+    return GDK_SURFACE_EDGE_WEST;
+  }
+  if (right) {
+    return GDK_SURFACE_EDGE_EAST;
+  }
+  if (top) {
+    return GDK_SURFACE_EDGE_NORTH;
+  }
+  if (bottom) {
+    return GDK_SURFACE_EDGE_SOUTH;
+  }
+  return std::nullopt;
+}
+
+std::shared_ptr<LinuxUIThreadDispatcher> InitializeGtk() {
+  if (g_getenv("GTK_A11Y") == nullptr) {
+    // The Linux adapter does not yet publish Runtime semantics through GTK. Avoid exposing a misleading host-only
+    // accessibility tree, while preserving an explicit backend selected by the application or its environment.
+    static_cast<void>(g_setenv("GTK_A11Y", "none", FALSE));
+  }
+  if (gtk_init_check() == FALSE) {
+    throw std::runtime_error("HuxerUI Linux could not initialize GTK");
+  }
+  return std::make_shared<LinuxUIThreadDispatcher>();
 }
 
 } // namespace
 
-class LinuxPlatformAdapter final : public huxerui::PlatformAdapter,
-                                   public huxerui::PlatformClipboard,
-                                   public huxerui::PlatformResources {
+class LinuxPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
-  LinuxPlatformAdapter() : LinuxPlatformAdapter(std::make_shared<LinuxUIThreadDispatcher>()) {}
+  LinuxPlatformAdapter() : LinuxPlatformAdapter(InitializeGtk()) {}
 
-  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
+  int Run(Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     text_input_.SetRuntime(runtime_);
-
-    display_ = XOpenDisplay(nullptr);
-    if (display_ == nullptr) {
-      throw std::runtime_error("HuxerUI could not open the X display");
-    }
-    XSetErrorHandler(XErrorHandler);
-    dpi_ = ReadDpi();
-    int randr_error_base_ = 0;
-    XRRQueryExtension(display_, &randr_event_base_, &randr_error_base_);
-    XRRSelectInput(
-        display_,
-        DefaultRootWindow(display_),
-        RRScreenChangeNotifyMask | RRCrtcChangeNotifyMask | RROutputChangeNotifyMask | RROutputPropertyNotifyMask
-    );
-
     try {
-      // Initialize EGL before the window exists so the window can be created with
-      // a matching visual; without EGL the window falls back to the default visual.
-      if (display_ != nullptr) {
-        static_cast<void>(renderer_.InitializePresentation(display_));
-      }
-      CreateApplicationWindow(options);
-      text_input_.SetDisplayAndWindow(display_, window_);
-      text_input_.SetDpiScale(DpiScale());
       renderer_.Initialize();
-      renderer_.Resize(display_, window_, width_, height_, dpi_);
-      XMapWindow(display_, window_);
-      XFlush(display_);
-
-      RefreshWindowState();
+      CreateWindow(options);
       runtime_->UpdateResourceConfiguration(Configuration());
       UpdateRuntimeViewport();
-
       running_ = true;
+      gtk_window_present(window_);
+      gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
       RequestFrameAt(Now());
-      RunEventLoop();
-
-      const int exit_code = 0;
+      while (running_) {
+        g_main_context_iteration(nullptr, TRUE);
+      }
       Cleanup();
       runtime_ = nullptr;
       if (failure_) {
         std::rethrow_exception(failure_);
       }
-      return exit_code;
+      return 0;
     } catch (...) {
       Cleanup();
       runtime_ = nullptr;
@@ -212,30 +231,9 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), window_ != 0)) {
+    if (const std::optional<double> scheduled =
+            frame_state_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
       ScheduleFrame(*scheduled);
-    }
-  }
-
-  void RequestWindowCommand(huxerui::WindowCommand command) override {
-    switch (command) {
-    case huxerui::WindowCommand::Minimize:
-      XIconifyWindow(display_, window_, screen_);
-      XFlush(display_);
-      break;
-    case huxerui::WindowCommand::Maximize:
-      SetWindowMaximized(true);
-      break;
-    case huxerui::WindowCommand::Restore:
-      SetWindowMaximized(false);
-      break;
-    case huxerui::WindowCommand::ToggleMaximize:
-      ReadMaximizedState();
-      SetWindowMaximized(!maximized_);
-      break;
-    case huxerui::WindowCommand::Close:
-      RequestClose();
-      break;
     }
   }
 
@@ -248,7 +246,9 @@ public:
     return renderer_.Metrics(font);
   }
 
-  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) override {
+  TextRunMetrics MeasureRun(
+      std::string_view text, const TextStyle& style, const TextShapingOptions& options
+  ) override {
     return renderer_.MeasureRun(text, style, options);
   }
 
@@ -281,7 +281,7 @@ public:
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
-    return CreateLinuxFilePickerTransport([this] { return static_cast<unsigned long>(window_); });
+    return CreateLinuxFilePickerTransport([this] { return X11WindowId(); });
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
@@ -293,34 +293,62 @@ public:
     if (getrusage(RUSAGE_SELF, &usage) != 0) {
       return std::nullopt;
     }
+    std::ifstream statm("/proc/self/statm");
+    std::uint64_t total_pages = 0;
     std::uint64_t resident_pages = 0;
-    try {
-      std::ifstream statm("/proc/self/statm");
-      std::uint64_t total_pages = 0;
-      if (!(statm >> total_pages >> resident_pages)) {
-        return std::nullopt;
-      }
-      static_cast<void>(total_pages);
-    } catch (...) {
+    if (!(statm >> total_pages >> resident_pages)) {
       return std::nullopt;
     }
+    static_cast<void>(total_pages);
     const long page_size = sysconf(_SC_PAGESIZE);
     const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (page_size <= 0) {
       return std::nullopt;
     }
-    const auto timeval_seconds = [](const timeval& value) {
+    const auto seconds = [](const timeval& value) {
       return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1'000'000.0;
     };
     return ProcessMetrics{
-        .cpu_time_seconds = timeval_seconds(usage.ru_utime) + timeval_seconds(usage.ru_stime),
+        .cpu_time_seconds = seconds(usage.ru_utime) + seconds(usage.ru_stime),
         .memory_usage_bytes = resident_pages * static_cast<std::uint64_t>(page_size),
         .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
     };
   }
 
+  void RequestWindowCommand(WindowCommand command) override {
+    if (window_ == nullptr) {
+      return;
+    }
+    switch (command) {
+    case WindowCommand::Minimize:
+      gtk_window_minimize(window_);
+      break;
+    case WindowCommand::Maximize:
+      gtk_window_maximize(window_);
+      break;
+    case WindowCommand::Restore:
+      gtk_window_unmaximize(window_);
+      break;
+    case WindowCommand::ToggleMaximize:
+      gtk_window_is_maximized(window_) ? gtk_window_unmaximize(window_) : gtk_window_maximize(window_);
+      break;
+    case WindowCommand::Close:
+      gtk_window_close(window_);
+      break;
+    }
+  }
+
   ResourceConfiguration Configuration() const override {
-    return {SystemLocale(), DpiScale()};
+    const char* const* languages = g_get_language_names();
+    std::string language = languages != nullptr && languages[0] != nullptr ? languages[0] : "en";
+    if (const std::size_t dot = language.find('.'); dot != std::string::npos) {
+      language.resize(dot);
+    }
+    std::replace(language.begin(), language.end(), '_', '-');
+    const float scale = drawing_area_ != nullptr
+                            ? static_cast<float>(gtk_widget_get_scale_factor(GTK_WIDGET(drawing_area_)))
+                            : 1.0F;
+    return {Locale::FromLanguageTag(std::move(language)), std::max(1.0F, scale)};
   }
 
   RawAsset Read(std::string_view package_path) override {
@@ -346,1066 +374,532 @@ public:
   }
 
   std::optional<std::string> ReadText() override {
-    if (display_ == nullptr || window_ == 0 || clipboard_read_in_progress_) {
+    if (drawing_area_ == nullptr || clipboard_read_active_) {
       return std::nullopt;
     }
-    clipboard_read_in_progress_ = true;
-    clipboard_read_pending_ = true;
-    clipboard_read_result_.reset();
-    XConvertSelection(display_, clipboard_atom_, utf8_string_atom_, clipboard_property_, window_, CurrentTime);
-    XFlush(display_);
+    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
+    GdkClipboard* clipboard = gdk_display_get_clipboard(display);
+    struct ReadState {
+      ~ReadState() {
+        g_object_unref(cancellable);
+        g_main_loop_unref(loop);
+      }
 
-    const double deadline = Now() + kClipboardTimeoutSeconds;
-    const int connection = ConnectionNumber(display_);
-    while (clipboard_read_pending_ && running_ && Now() < deadline) {
-      const double remaining_seconds = std::min(kClipboardTimeoutSeconds, deadline - Now());
-      const int timeout_ms = std::max(1, static_cast<int>(remaining_seconds * 1000.0));
-      pollfd descriptor{};
-      descriptor.fd = connection;
-      descriptor.events = POLLIN;
-      if (poll(&descriptor, 1, timeout_ms) <= 0) {
-        continue;
-      }
-      while (clipboard_read_pending_ && XPending(display_) > 0) {
-        XEvent event;
-        XNextEvent(display_, &event);
-        try {
-          DispatchEvent(event);
-        } catch (...) {
-          if (!failure_) {
-            failure_ = std::current_exception();
+      GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
+      GCancellable* cancellable = g_cancellable_new();
+      std::optional<std::string> value;
+      bool finished = false;
+      bool timed_out = false;
+    };
+    auto state = std::make_shared<ReadState>();
+    clipboard_read_active_ = true;
+    gdk_clipboard_read_text_async(
+        clipboard,
+        state->cancellable,
+        [](GObject* source, GAsyncResult* result, gpointer data) {
+          std::unique_ptr<std::shared_ptr<ReadState>> owner(
+              static_cast<std::shared_ptr<ReadState>*>(data)
+          );
+          const std::shared_ptr<ReadState>& read = *owner;
+          GError* error = nullptr;
+          char* text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), result, &error);
+          if (text != nullptr) {
+            if (!read->timed_out) {
+              read->value = text;
+            }
+            g_free(text);
           }
-          clipboard_read_pending_ = false;
-          break;
-        }
-      }
+          if (error != nullptr) {
+            g_error_free(error);
+          }
+          read->finished = true;
+          g_main_loop_quit(read->loop);
+        },
+        new std::shared_ptr<ReadState>(state)
+    );
+    const guint timeout = g_timeout_add_once(
+        1000,
+        [](gpointer data) {
+          auto& read = *static_cast<ReadState*>(data);
+          if (!read.finished) {
+            read.timed_out = true;
+            g_cancellable_cancel(read.cancellable);
+            g_main_loop_quit(read.loop);
+          }
+        },
+        state.get()
+    );
+    g_main_loop_run(state->loop);
+    if (!state->timed_out) {
+      g_source_remove(timeout);
     }
-    clipboard_read_pending_ = false;
-    clipboard_read_in_progress_ = false;
-    return std::move(clipboard_read_result_);
+    clipboard_read_active_ = false;
+    return std::move(state->value);
   }
 
   bool WriteText(std::string_view text) override {
-    if (display_ == nullptr || window_ == 0) {
+    if (drawing_area_ == nullptr) {
       return false;
     }
-    clipboard_text_.assign(text);
-    XSetSelectionOwner(display_, clipboard_atom_, window_, CurrentTime);
-    XFlush(display_);
+    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
+    gdk_clipboard_set_text(gdk_display_get_clipboard(display), std::string(text).c_str());
     return true;
   }
 
 private:
-  explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher)
-      : PlatformAdapter(ui_dispatcher->Bind()), ui_dispatcher_(std::move(ui_dispatcher)) {}
+  explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> dispatcher)
+      : PlatformAdapter(dispatcher->Bind()), ui_dispatcher_(std::move(dispatcher)) {}
 
-  void ScheduleFrame(double deadline) {
-    if (!scheduled_frame_deadline_.has_value() || deadline < *scheduled_frame_deadline_) {
-      scheduled_frame_deadline_ = deadline;
-    }
-  }
-
-  void CreateApplicationWindow(const WindowOptions& options) {
-    const float scale = DpiScale();
-    width_ = std::max(1, static_cast<int>(std::lround(options.initial_size.width * scale)));
-    height_ = std::max(1, static_cast<int>(std::lround(options.initial_size.height * scale)));
+  void CreateWindow(const WindowOptions& options) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
     custom_title_bar_height_ = options.title_bar_height;
-
-    screen_ = DefaultScreen(display_);
-    const Window root = DefaultRootWindow(display_);
-
-    // EGL window surfaces require a window whose visual matches the EGLConfig.
-    // Create the window with the renderer's X visual and colormap when EGL
-    // is available, and fall back to the default visual otherwise.
-    XVisualInfo* presentation_visual = nullptr;
-    int depth = DefaultDepth(display_, screen_);
-    if (renderer_.HasPresentation() && renderer_.XVisualId() != 0) {
-      XVisualInfo visual_info_template{};
-      visual_info_template.visualid = static_cast<VisualID>(renderer_.XVisualId());
-      int visual_count = 0;
-      XVisualInfo* visuals = XGetVisualInfo(display_, VisualIDMask, &visual_info_template, &visual_count);
-      if (visuals != nullptr) {
-        presentation_visual = visuals;
-        depth = presentation_visual->depth;
-        colormap_ = XCreateColormap(display_, root, presentation_visual->visual, AllocNone);
-      }
-    }
-
-    XSetWindowAttributes attributes{};
-    attributes.background_pixel = BlackPixel(display_, screen_);
-    attributes.border_pixel = WhitePixel(display_, screen_);
-    attributes.colormap = colormap_;
-    attributes.event_mask =
-        StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask | PropertyChangeMask;
-    unsigned long value_mask = CWBackPixel | CWBorderPixel | CWEventMask;
-    if (colormap_ != 0) {
-      value_mask |= CWColormap;
-    }
-    window_ = XCreateWindow(
-        display_,
-        root,
-        0,
-        0,
-        static_cast<unsigned int>(width_),
-        static_cast<unsigned int>(height_),
-        0,
-        depth,
-        InputOutput,
-        presentation_visual != nullptr ? presentation_visual->visual : DefaultVisual(display_, screen_),
-        value_mask,
-        &attributes
-    );
-    if (presentation_visual != nullptr) {
-      XFree(presentation_visual);
-    }
-    if (window_ == 0) {
-      throw std::runtime_error("HuxerUI could not create its X11 application window");
-    }
-
-    XStoreName(display_, window_, options.title.c_str());
-    XClassHint class_hint{};
-    const char* resource_name = "huxerui";
-    const char* resource_class = "Huxerui";
-    class_hint.res_name = const_cast<char*>(resource_name);
-    class_hint.res_class = const_cast<char*>(resource_class);
-    static_cast<void>(XSetClassHint(display_, window_, &class_hint));
-
-    wm_protocols_ = XInternAtom(display_, "WM_PROTOCOLS", 0);
-    wm_delete_window_ = XInternAtom(display_, "WM_DELETE_WINDOW", 0);
-    XSetWMProtocols(display_, window_, &wm_delete_window_, 1);
-
-    motif_wm_hints_ = XInternAtom(display_, "_MOTIF_WM_HINTS", 0);
-    net_wm_state_ = XInternAtom(display_, "_NET_WM_STATE", 0);
-    net_wm_state_max_h_ = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_HORZ", 0);
-    net_wm_state_max_v_ = XInternAtom(display_, "_NET_WM_STATE_MAXIMIZED_VERT", 0);
-    net_wm_moveresize_ = XInternAtom(display_, "_NET_WM_MOVERESIZE", 0);
-    net_frame_extents_ = XInternAtom(display_, "_NET_FRAME_EXTENTS", 0);
-
-    if (custom_chrome_) {
-      MotifWmHints hints{};
-      hints.flags = kMwmHintsDecorations;
-      hints.decorations = 0;
-      XChangeProperty(
-          display_,
-          window_,
-          motif_wm_hints_,
-          motif_wm_hints_,
-          32,
-          PropModeReplace,
-          reinterpret_cast<const unsigned char*>(&hints),
-          5
-      );
-    }
-
-    XSelectInput(
-        display_,
+    window_ = GTK_WINDOW(gtk_window_new());
+    gtk_window_set_title(window_, options.title.c_str());
+    gtk_window_set_default_size(
         window_,
-        StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-            ExposureMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask | PropertyChangeMask
+        std::max(1, static_cast<int>(std::lround(options.initial_size.width))),
+        std::max(1, static_cast<int>(std::lround(options.initial_size.height)))
     );
+    gtk_window_set_decorated(window_, !custom_chrome_);
 
-    clipboard_atom_ = XInternAtom(display_, "CLIPBOARD", 0);
-    utf8_string_atom_ = XInternAtom(display_, "UTF8_STRING", 0);
-    targets_atom_ = XInternAtom(display_, "TARGETS", 0);
-    clipboard_property_ = XInternAtom(display_, "HUXERUI_CLIPBOARD_TRANSFER", 0);
+    drawing_area_ = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
+    gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
+    gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));
+    text_input_.SetClientWidget(GTK_WIDGET(drawing_area_));
 
-    ConfigureDetectableAutoRepeat(display_);
+    g_signal_connect(window_, "close-request", G_CALLBACK(CloseRequested), this);
+    g_signal_connect(window_, "destroy", G_CALLBACK(Destroyed), this);
+    g_signal_connect(window_, "map", G_CALLBACK(WindowMapped), this);
+    g_signal_connect(window_, "unmap", G_CALLBACK(WindowUnmapped), this);
+    g_signal_connect(window_, "notify::is-active", G_CALLBACK(WindowActiveChanged), this);
+    g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowMaximizedChanged), this);
+    g_signal_connect(drawing_area_, "notify::scale-factor", G_CALLBACK(ScaleChanged), this);
+
+    GtkGesture* click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+    g_signal_connect(click, "pressed", G_CALLBACK(PointerPressed), this);
+    g_signal_connect(click, "released", G_CALLBACK(PointerReleased), this);
+    g_signal_connect(click, "cancel", G_CALLBACK(PointerCanceled), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), GTK_EVENT_CONTROLLER(click));
+
+    GtkEventController* motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "enter", G_CALLBACK(PointerEntered), this);
+    g_signal_connect(motion, "motion", G_CALLBACK(PointerMoved), this);
+    g_signal_connect(motion, "leave", G_CALLBACK(PointerLeft), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), motion);
+
+    GtkEventController* scroll = gtk_event_controller_scroll_new(
+        static_cast<GtkEventControllerScrollFlags>(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES |
+                                                   GTK_EVENT_CONTROLLER_SCROLL_DISCRETE)
+    );
+    g_signal_connect(scroll, "scroll", G_CALLBACK(Scrolled), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), scroll);
+
+    GtkEventController* key = gtk_event_controller_key_new();
+    g_signal_connect(key, "key-pressed", G_CALLBACK(KeyPressed), this);
+    g_signal_connect(key, "key-released", G_CALLBACK(KeyReleased), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), key);
+
+    GtkEventController* focus = gtk_event_controller_focus_new();
+    g_signal_connect(focus, "enter", G_CALLBACK(FocusEntered), this);
+    g_signal_connect(focus, "leave", G_CALLBACK(FocusLeft), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), focus);
   }
 
-  float ReadDpi() const noexcept {
-    const char* value = XGetDefault(display_, "Xft", "dpi");
-    if (value != nullptr) {
-      char* end = nullptr;
-      const double parsed = std::strtod(value, &end);
-      if (end != value && std::isfinite(parsed) && parsed > 0.0) {
-        return static_cast<float>(parsed);
-      }
+  void ScheduleFrame(double deadline) {
+    if (frame_source_ != 0) {
+      g_source_remove(frame_source_);
+      frame_source_ = 0;
     }
-    return RandrPhysicalDpi();
+    const double milliseconds = std::ceil(std::max(0.0, deadline - Now()) * 1000.0);
+    const guint delay = static_cast<guint>(
+        std::clamp(milliseconds, 0.0, static_cast<double>(std::numeric_limits<guint>::max()))
+    );
+    frame_source_ = delay == 0
+                        ? g_idle_add_full(G_PRIORITY_HIGH_IDLE, FrameReady, this, nullptr)
+                        : g_timeout_add_full(G_PRIORITY_HIGH, std::max(1U, delay), FrameReady, this, nullptr);
   }
 
-  float RandrPhysicalDpi() const noexcept {
-    int event_base = 0;
-    int error_base = 0;
-    if (XRRQueryExtension(display_, &event_base, &error_base) == 0) {
-      return kDipsPerInch;
-    }
-    XRRScreenResources* resources = XRRGetScreenResourcesCurrent(display_, DefaultRootWindow(display_));
-    if (resources == nullptr) {
-      return kDipsPerInch;
-    }
-    XRROutputInfo* primary = nullptr;
-    const RROutput primary_output = XRRGetOutputPrimary(display_, DefaultRootWindow(display_));
-    for (int index = 0; index < resources->noutput; ++index) {
-      if (resources->outputs[index] == primary_output) {
-        primary = XRRGetOutputInfo(display_, resources, resources->outputs[index]);
-        break;
-      }
-    }
-    if (primary == nullptr && resources->noutput > 0) {
-      primary = XRRGetOutputInfo(display_, resources, resources->outputs[0]);
-    }
-    float dpi = kDipsPerInch;
-    if (primary != nullptr && primary->mm_width > 0 && primary->mm_height > 0 && primary->crtc != 0) {
-      XRRCrtcInfo* crtc = XRRGetCrtcInfo(display_, resources, primary->crtc);
-      if (crtc != nullptr) {
-        const bool rotated = (crtc->rotation & (RR_Rotate_90 | RR_Rotate_270)) != 0;
-        const int pixels_x = crtc->width;
-        const int pixels_y = crtc->height;
-        if (pixels_x > 0 && pixels_y > 0) {
-          const float dpi_x = 25.4F * static_cast<float>(pixels_x) / static_cast<float>(primary->mm_width);
-          const float dpi_y = 25.4F * static_cast<float>(pixels_y) / static_cast<float>(primary->mm_height);
-          dpi = rotated ? std::min(dpi_x, dpi_y) : std::max(dpi_x, dpi_y);
-        }
-        XRRFreeCrtcInfo(crtc);
-      }
-    }
-    if (primary != nullptr) {
-      XRRFreeOutputInfo(primary);
-    }
-    XRRFreeScreenResources(resources);
-    return dpi > 0.0F ? dpi : kDipsPerInch;
-  }
-
-  Locale SystemLocale() const {
-    std::string tag;
-    if (setlocale(LC_ALL, "") != nullptr) {
-      const char* ctype = setlocale(LC_CTYPE, nullptr);
-      if (ctype != nullptr) {
-        tag = ctype;
-      }
-    }
-    if (tag.empty() || tag == "C" || tag == "POSIX") {
-      const char* lang = std::getenv("LANG");
-      if (lang != nullptr) {
-        tag = lang;
-      }
-    }
-    if (tag.empty() || tag == "C" || tag == "POSIX") {
-      return Locale::Default();
-    }
-    const std::size_t dot = tag.find('.');
-    if (dot != std::string::npos) {
-      tag.resize(dot);
-    }
-    return Locale::FromLanguageTag(std::move(tag));
-  }
-
-  std::filesystem::path ResourceRoot() const {
-    if (const char* override_dir = std::getenv("HUXERUI_RESOURCES_DIR")) {
-      return std::filesystem::path(override_dir);
-    }
-    std::filesystem::path resource_root(ResolveLinuxExecutablePath());
-    resource_root.replace_extension(".resources");
-    return resource_root;
-  }
-
-  void RunEventLoop() {
-    const int connection = ConnectionNumber(display_);
-    while (running_) {
-      int timeout_ms = ResolveLinuxPollTimeout(scheduled_frame_deadline_, Now());
-
-      poll_descriptors_.clear();
-      poll_descriptors_.push_back({.fd = connection, .events = POLLIN, .revents = 0});
-      poll_descriptors_.push_back({.fd = ui_dispatcher_->FileDescriptor(), .events = POLLIN, .revents = 0});
-      timeout_ms = text_input_.PreparePoll(poll_descriptors_, timeout_ms);
-      const int poll_result = poll(poll_descriptors_.data(), poll_descriptors_.size(), timeout_ms);
-      text_input_.DispatchPoll(poll_descriptors_, poll_result >= 0);
-      if (poll_result < 0) {
-        if (errno == EINTR) {
-          continue;
-        }
-        if (!failure_) {
-          failure_ = std::make_exception_ptr(std::runtime_error("HuxerUI Linux X11 event poll failed"));
-        }
-        break;
-      }
-
-      text_input_.TakeDeferredKeyEvents(deferred_key_events_);
-      for (LinuxDeferredKeyEvent& event : deferred_key_events_) {
-        DispatchDeferredKeyEvent(event);
-      }
-
-      if ((poll_descriptors_[1].revents & (POLLIN | POLLERR | POLLHUP)) != 0) {
-        try {
-          ui_dispatcher_->RunPending();
-        } catch (...) {
-          if (!failure_) {
-            failure_ = std::current_exception();
-          }
-          running_ = false;
-        }
-      }
-
-      while (running_ && XPending(display_) > 0) {
-        XEvent event;
-        XNextEvent(display_, &event);
-        try {
-          DispatchEvent(event);
-        } catch (...) {
-          if (!failure_) {
-            failure_ = std::current_exception();
-          }
-          running_ = false;
-          break;
-        }
-      }
-      if (!running_) {
-        break;
-      }
-
-      if (scheduled_frame_deadline_.has_value() && *scheduled_frame_deadline_ <= Now()) {
-        RenderCommittedFrame(CommitFrameAndInvalidate());
-      }
-      XFlush(display_);
-    }
-  }
-
-  void DispatchEvent(XEvent& event) {
-    if (text_input_.FilterEvent(event)) {
+  void CommitFrame() {
+    frame_source_ = 0;
+    if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
       return;
     }
-    switch (event.type) {
-    case ClientMessage:
-      HandleClientMessage(event.xclient);
-      break;
-    case ConfigureNotify:
-      HandleConfigureNotify(event.xconfigure);
-      break;
-    case Expose:
-      HandleExpose(event.xexpose);
-      break;
-    case DestroyNotify:
-      if (event.xdestroywindow.window == window_) {
-        window_ = 0;
-        running_ = false;
-      }
-      break;
-    case ButtonPress:
-      HandleButtonPress(event.xbutton);
-      break;
-    case ButtonRelease:
-      HandleButtonRelease(event.xbutton);
-      break;
-    case MotionNotify:
-      HandleMotionNotify(event.xmotion);
-      break;
-    case LeaveNotify:
-      HandleLeaveNotify(event.xcrossing);
-      break;
-    case KeyPress:
-      HandleKeyPress(event);
-      break;
-    case KeyRelease:
-      HandleKeyRelease(event);
-      break;
-    case FocusIn:
-      if (event.xfocus.detail != NotifyInferior) {
-        window_focused_ = true;
-        runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Active);
-      }
-      text_input_.SetFocus(true);
-      break;
-    case FocusOut:
-      if (event.xfocus.detail != NotifyInferior) {
-        window_focused_ = false;
-        runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
-      }
-      text_input_.SetFocus(false);
-      break;
-    case MapNotify:
-      runtime_->UpdateApplicationLifecycleState(
-          window_focused_ ? huxerui::ApplicationLifecycleState::Active
-                          : huxerui::ApplicationLifecycleState::Inactive
-      );
-      break;
-    case UnmapNotify:
-      runtime_->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Background);
-      break;
-    case MappingNotify: {
-      XMappingEvent mapping = event.xmapping;
-      XRefreshKeyboardMapping(&mapping);
-      break;
+    const FrameCommit& commit = runtime_->BuildFrame();
+    committed_frame_ = &commit.render_frame;
+    frame_state_.MarkPaintPending();
+    gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
+    if (commit.next_frame_deadline.has_value()) {
+      RequestFrameAt(*commit.next_frame_deadline);
     }
-    case SelectionRequest:
-      HandleSelectionRequest(event.xselectionrequest);
-      break;
-    case SelectionNotify:
-      HandleSelectionNotify(event.xselection);
-      break;
-    case SelectionClear:
-      clipboard_text_.clear();
-      break;
-    case PropertyNotify:
-      HandlePropertyNotify(event.xproperty);
-      break;
-    default:
-      if (randr_event_base_ != 0 && event.type - randr_event_base_ == RRScreenChangeNotify) {
-        XRRUpdateConfiguration(&event);
-        HandleDisplayChange();
-      } else if (randr_event_base_ != 0 && event.type - randr_event_base_ == RRNotify) {
-        XRRUpdateConfiguration(&event);
-        HandleDisplayChange();
-      }
-      break;
+    FlushDeferredFrame();
+  }
+
+  void FlushDeferredFrame() {
+    if (const std::optional<double> deadline = frame_state_.TakeDeferred(drawing_area_ != nullptr && running_)) {
+      ScheduleFrame(*deadline);
     }
   }
 
-  void HandleClientMessage(const XClientMessageEvent& event) {
-    if (event.message_type == wm_protocols_ && static_cast<Atom>(event.data.l[0]) == wm_delete_window_) {
+  void DrawFrame(cairo_t* context) {
+    if (committed_frame_ == nullptr) {
+      return;
+    }
+    frame_state_.BeginPaint();
+    try {
+      renderer_.Draw(context, *committed_frame_);
+    } catch (...) {
+      if (!failure_) {
+        failure_ = std::current_exception();
+      }
       running_ = false;
     }
-  }
-
-  void SetWindowMaximized(bool add) {
-    if (display_ == nullptr || window_ == 0) {
-      return;
-    }
-    XClientMessageEvent event{};
-    event.type = ClientMessage;
-    event.window = window_;
-    event.message_type = net_wm_state_;
-    event.format = 32;
-    event.data.l[0] = add ? 1 : 0;
-    event.data.l[1] = static_cast<long>(net_wm_state_max_h_);
-    event.data.l[2] = static_cast<long>(net_wm_state_max_v_);
-    event.data.l[3] = 0;
-    event.data.l[4] = 0;
-    XEvent send_event{};
-    send_event.xclient = event;
-    XSendEvent(
-        display_,
-        DefaultRootWindow(display_),
-        0,
-        SubstructureRedirectMask | SubstructureNotifyMask,
-        &send_event
-    );
-    XFlush(display_);
-  }
-
-  void RequestClose() {
-    if (display_ == nullptr || window_ == 0) {
-      return;
-    }
-    XClientMessageEvent event{};
-    event.type = ClientMessage;
-    event.window = window_;
-    event.message_type = wm_protocols_;
-    event.format = 32;
-    event.data.l[0] = static_cast<long>(wm_delete_window_);
-    event.data.l[1] = CurrentTime;
-    event.data.l[2] = 0;
-    event.data.l[3] = 0;
-    event.data.l[4] = 0;
-    XEvent send_event{};
-    send_event.xclient = event;
-    XSendEvent(display_, window_, 0, NoEventMask, &send_event);
-    XFlush(display_);
-  }
-
-  void HandleConfigureNotify(const XConfigureEvent& event) {
-    if (event.width == width_ && event.height == height_) {
-      return;
-    }
-    width_ = event.width;
-    height_ = event.height;
-    text_input_.SetDpiScale(DpiScale());
-    renderer_.Resize(display_, window_, width_, height_, dpi_);
-    UpdateRuntimeViewport();
-    RequestFrameAt(Now());
-  }
-
-  void HandlePropertyNotify(const XPropertyEvent& event) {
-    if (event.window != window_ || event.state != PropertyNewValue) {
-      return;
-    }
-    if (event.atom == net_wm_state_) {
-      const bool was_maximized = maximized_;
-      ReadMaximizedState();
-      if (maximized_ != was_maximized) {
-        UpdateRuntimeViewport();
-      }
-    } else if (event.atom == net_frame_extents_) {
-      ReadFrameExtents();
+    if (const std::optional<double> deadline = frame_state_.EndPaint(drawing_area_ != nullptr && running_)) {
+      ScheduleFrame(*deadline);
     }
   }
 
-  void ReadMaximizedState() {
-    if (display_ == nullptr || window_ == 0) {
+  void UpdateRuntimeViewport() {
+    if (runtime_ == nullptr || drawing_area_ == nullptr) {
       return;
     }
-    Atom actual_type = 0;
-    int actual_format = 0;
-    unsigned long item_count = 0;
-    unsigned long bytes_after = 0;
-    unsigned char* data = nullptr;
-    const int status = XGetWindowProperty(
-        display_,
-        window_,
-        net_wm_state_,
-        0,
-        64,
-        0,
-        XA_ATOM,
-        &actual_type,
-        &actual_format,
-        &item_count,
-        &bytes_after,
-        &data
-    );
-    if (status == 0 && data != nullptr && actual_type == XA_ATOM && actual_format == 32) {
-      const auto* atoms = reinterpret_cast<const Atom*>(data);
-      maximized_ = LinuxMaximizedFromAtoms(
-          std::vector<Atom>(atoms, atoms + item_count), net_wm_state_max_h_, net_wm_state_max_v_
+    const Size viewport{
+        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
+        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
+    };
+    WindowMetrics metrics{.viewport = viewport, .safe_area = {}, .title_bar = std::nullopt};
+    if (custom_chrome_) {
+      metrics.title_bar = ResolveLinuxTitleBarMetrics(
+          custom_title_bar_height_, viewport, window_ != nullptr && gtk_window_is_maximized(window_)
       );
     }
-    if (data != nullptr) {
-      XFree(data);
+    runtime_->SetWindowMetrics(metrics);
+  }
+
+  void AttachToplevelState() {
+    if (window_ == nullptr) {
+      return;
+    }
+    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
+    GdkToplevel* toplevel = surface != nullptr && GDK_IS_TOPLEVEL(surface) ? GDK_TOPLEVEL(surface) : nullptr;
+    if (toplevel == toplevel_) {
+      return;
+    }
+    DetachToplevelState();
+    toplevel_ = toplevel;
+    if (toplevel_ != nullptr) {
+      toplevel_state_handler_ =
+          g_signal_connect(toplevel_, "notify::state", G_CALLBACK(ToplevelStateChanged), this);
     }
   }
 
-  void ReadFrameExtents() {
-    if (display_ == nullptr || window_ == 0) {
+  void DetachToplevelState() noexcept {
+    if (toplevel_ != nullptr && toplevel_state_handler_ != 0) {
+      g_signal_handler_disconnect(toplevel_, toplevel_state_handler_);
+    }
+    toplevel_ = nullptr;
+    toplevel_state_handler_ = 0;
+  }
+
+  void UpdateLifecycleState() {
+    if (runtime_ == nullptr || window_ == nullptr) {
       return;
     }
-    Atom actual_type = 0;
-    int actual_format = 0;
-    unsigned long item_count = 0;
-    unsigned long bytes_after = 0;
-    unsigned char* data = nullptr;
-    const int status = XGetWindowProperty(
-        display_,
-        window_,
-        net_frame_extents_,
-        0,
-        4,
-        0,
-        XA_CARDINAL,
-        &actual_type,
-        &actual_format,
-        &item_count,
-        &bytes_after,
-        &data
+    const bool mapped = gtk_widget_get_mapped(GTK_WIDGET(window_)) != FALSE;
+    const bool active = gtk_window_is_active(window_) != FALSE;
+    const bool minimized = toplevel_ != nullptr &&
+                           (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
+    runtime_->UpdateApplicationLifecycleState(
+        ResolveLinuxApplicationLifecycleState(mapped, active, minimized)
     );
-    if (status == 0 && data != nullptr && actual_format == 32 && item_count >= 4) {
-      frame_extents_ =
-          LinuxReadFrameExtents(static_cast<const long*>(static_cast<const void*>(data)), static_cast<int>(item_count));
-    }
-    if (data != nullptr) {
-      XFree(data);
-    }
   }
 
-  void RefreshWindowState() {
-    if (display_ == nullptr || window_ == 0) {
-      return;
-    }
-    ReadMaximizedState();
-    ReadFrameExtents();
-  }
-
-  void HandleExpose(const XExposeEvent& event) {
-    expose_pending_ = true;
-    if (event.count == 0) {
-      RequestFrameAt(Now());
-    }
-  }
-
-  void HandleButtonPress(const XButtonEvent& event) {
-    if (event.button == Button4 || event.button == Button5 || event.button == kScrollLeftButton ||
-        event.button == kScrollRightButton) {
-      HandleScrollButton(event);
-      return;
-    }
-    if (event.button != Button1) {
-      return;
-    }
-    suppress_pointer_ = false;
-    if (TryBeginWindowManagerOperation(event)) {
-      suppress_pointer_ = true;
-      return;
-    }
-    pointer_down_ = true;
-    const Point position = ClientPoint(event.x, event.y);
-    SendPointer(PointerEventType::Down, position, ComputeClickCount(event.button, position, event.time));
-  }
-
-  void HandleButtonRelease(const XButtonEvent& event) {
-    // The press began a X11 window operation, so the matching release belongs
-    // to the window manager and must not be forwarded to the runtime.
-    if (suppress_pointer_) {
-      suppress_pointer_ = false;
-      return;
-    }
-    if (event.button != Button1) {
-      return;
-    }
-    pointer_down_ = false;
-    SendPointer(PointerEventType::Up, ClientPoint(event.x, event.y));
-  }
-
-  bool TryBeginWindowManagerOperation(const XButtonEvent& event) {
-    if (!custom_chrome_) {
+  bool BeginWindowOperation(GtkGestureClick* gesture, Point point) {
+    if (!custom_chrome_ || window_ == nullptr || runtime_ == nullptr) {
       return false;
     }
-    const Point position = ClientPoint(event.x, event.y);
-    const float scale = DpiScale();
-    const Size viewport{static_cast<float>(width_) / scale, static_cast<float>(height_) / scale};
-    const WindowTitleBarMetrics title = ResolveLinuxTitleBarMetrics(custom_title_bar_height_, viewport, maximized_);
-    const float border = LinuxResizeBorderDips(frame_extents_, scale, kLinuxResizeBorderDips);
-    const Rect caption_bounds{viewport.width - title.right_inset, 0.0F, title.right_inset, title.height};
-    const LinuxResizeDirection direction =
-        ResolveLinuxResizeDirection(position, border, viewport, maximized_, caption_bounds);
-    if (direction != LinuxResizeDirection::None) {
-      InitiateWindowMoveResize(event, static_cast<long>(direction));
+    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
+    if (surface == nullptr || !GDK_IS_TOPLEVEL(surface)) {
+      return false;
+    }
+    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
+    GdkDevice* device = gtk_event_controller_get_current_event_device(GTK_EVENT_CONTROLLER(gesture));
+    if (event == nullptr || device == nullptr) {
+      return false;
+    }
+    const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    const guint32 time = gdk_event_get_time(event);
+    const Size viewport{
+        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
+        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
+    };
+    if (const std::optional<GdkSurfaceEdge> edge =
+            ResizeEdge(point, viewport, gtk_window_is_maximized(window_) != FALSE)) {
+      gdk_toplevel_begin_resize(GDK_TOPLEVEL(surface), *edge, device, static_cast<int>(button), point.x, point.y, time);
       return true;
     }
-    if (runtime_ != nullptr && runtime_->IsWindowDragRegion(position)) {
-      InitiateWindowMoveResize(event, static_cast<long>(LinuxResizeDirection::Move));
+    if (runtime_->IsWindowDragRegion(point)) {
+      gdk_toplevel_begin_move(GDK_TOPLEVEL(surface), device, static_cast<int>(button), point.x, point.y, time);
       return true;
     }
     return false;
   }
 
-  void InitiateWindowMoveResize(const XButtonEvent& event, long direction) {
-    if (display_ == nullptr || window_ == 0) {
-      return;
-    }
-    XClientMessageEvent message{};
-    message.type = ClientMessage;
-    message.window = window_;
-    message.message_type = net_wm_moveresize_;
-    message.format = 32;
-    message.data.l[0] = event.x_root;
-    message.data.l[1] = event.y_root;
-    message.data.l[2] = direction;
-    message.data.l[3] = event.button;
-    message.data.l[4] = event.time;
-    XEvent send_event{};
-    send_event.xclient = message;
-    XSendEvent(
-        display_,
-        DefaultRootWindow(display_),
-        0,
-        SubstructureRedirectMask | SubstructureNotifyMask,
-        &send_event
-    );
-    XFlush(display_);
-  }
-
-  void HandleScrollButton(const XButtonEvent& event) {
+  void SendPointer(PointerEventType type, Point position, std::uint32_t clicks = 1) {
     if (runtime_ == nullptr) {
       return;
     }
-    float delta_x = 0.0F;
-    float delta_y = 0.0F;
-    switch (event.button) {
-    case Button4:
-      delta_y = -120.0F;
-      break;
-    case Button5:
-      delta_y = 120.0F;
-      break;
-    case kScrollLeftButton:
-      delta_x = -120.0F;
-      break;
-    case kScrollRightButton:
-      delta_x = 120.0F;
-      break;
-    default:
-      return;
-    }
-    runtime_->HandleScrollEvent({
-        ClientPoint(event.x, event.y),
-        delta_x,
-        delta_y,
-    });
+    last_pointer_position_ = position;
+    runtime_->HandlePointerEvent({type, 0, position, PointerDeviceKind::Mouse, clicks});
   }
 
-  void HandleMotionNotify(const XMotionEvent& event) {
-    SendPointer(PointerEventType::Move, ClientPoint(event.x, event.y));
-  }
-
-  void HandleLeaveNotify(const XCrossingEvent& event) {
-    static_cast<void>(event);
+  void CancelPointer() {
+    suppress_pointer_release_ = false;
     if (!pointer_down_) {
-      SendPointer(PointerEventType::Cancel, last_pointer_position_);
-    }
-  }
-
-  std::uint32_t ComputeClickCount(unsigned int button, const Point& position, Time time) noexcept {
-    const bool same_button = last_click_button_ != 0 && button == last_click_button_;
-    const bool same_position = std::abs(position.x - last_click_position_.x) <= kDoubleClickSlop &&
-                               std::abs(position.y - last_click_position_.y) <= kDoubleClickSlop;
-    const bool within_time =
-        last_click_time_ != 0 && time >= last_click_time_ && (time - last_click_time_) <= kDoubleClickTimeMs;
-    const std::uint32_t count = same_button && same_position && within_time ? last_click_count_ + 1U : 1U;
-    last_click_button_ = button;
-    last_click_position_ = position;
-    last_click_time_ = time;
-    last_click_count_ = count;
-    return count;
-  }
-
-  void HandleKeyPress(XEvent& xevent) {
-    const XimKeyEventResult input_result = text_input_.HandleXKeyEvent(xevent);
-    if (input_result == XimKeyEventResult::Consumed) {
       return;
     }
-    DispatchKeyPress(xevent.xkey, input_result);
+    pointer_down_ = false;
+    SendPointer(PointerEventType::Cancel, last_pointer_position_);
   }
 
-  void DispatchKeyPress(XKeyEvent& event, XimKeyEventResult input_result) {
-    const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
-    const bool repeat = key_pressed_[event.keycode] != 0;
-    key_pressed_[event.keycode] = 1;
-    const std::string text =
-        input_result == XimKeyEventResult::DispatchWithoutText ? std::string{} : TranslateKeyText(event);
-    SendKey(KeyEventType::Down, keysym, event.state, text, repeat);
-  }
-
-  void HandleKeyRelease(XEvent& xevent) {
-    XKeyEvent& event = xevent.xkey;
-    key_pressed_[event.keycode] = 0;
-    if (text_input_.HandleXKeyEvent(xevent) == XimKeyEventResult::Consumed) {
-      return;
-    }
-    DispatchKeyRelease(event);
-  }
-
-  void DispatchKeyRelease(XKeyEvent& event) {
-    const KeySym keysym = XLookupKeysym(const_cast<XKeyEvent*>(&event), 0);
-    SendKey(KeyEventType::Up, keysym, event.state, {}, false);
-  }
-
-  void DispatchDeferredKeyEvent(LinuxDeferredKeyEvent& deferred) {
-    if (deferred.event.type == KeyPress) {
-      DispatchKeyPress(deferred.event.xkey, deferred.result);
-    } else if (deferred.event.type == KeyRelease) {
-      key_pressed_[deferred.event.xkey.keycode] = 0;
-      DispatchKeyRelease(deferred.event.xkey);
-    }
-  }
-
-  std::string TranslateKeyText(const XKeyEvent& event) const {
-    if (const XIC xic = text_input_.InputContext(); xic != nullptr) {
-      char buffer[64];
-      std::vector<char> grown;
-      const char* result_data = buffer;
-      KeySym keysym = NoSymbol;
-      int status = 0;
-      int length =
-          Xutf8LookupString(xic, const_cast<XKeyEvent*>(&event), buffer, sizeof(buffer), &keysym, &status);
-      if (status == XBufferOverflow) {
-        const std::size_t needed = static_cast<std::size_t>(std::abs(length)) + 1;
-        if (needed > sizeof(buffer)) {
-          grown.resize(needed);
-          length =
-              Xutf8LookupString(xic, const_cast<XKeyEvent*>(&event), grown.data(), grown.size(), &keysym, &status);
-          result_data = grown.data();
-        }
-      }
-      if (length > 0) {
-        return StripControlCharacters(std::string_view(result_data, static_cast<std::size_t>(length)));
-      }
-      return {};
-    }
-    char buffer[64];
-    KeySym keysym = NoSymbol;
-    const int length = XLookupString(const_cast<XKeyEvent*>(&event), buffer, sizeof(buffer), &keysym, nullptr);
-    if (length <= 0) {
-      return {};
-    }
-    std::string result;
-    for (int i = 0; i < length; ++i) {
-      const unsigned char byte = static_cast<unsigned char>(buffer[i]);
-      if (byte >= 0x20 && byte < 0x7F) {
-        result.push_back(static_cast<char>(byte));
-      } else if (byte >= 0xA0) {
-        result.push_back(static_cast<char>(0xC0 | (byte >> 6)));
-        result.push_back(static_cast<char>(0x80 | (byte & 0x3F)));
-      }
-    }
-    return result;
-  }
-
-  void SendKey(KeyEventType type, KeySym keysym, unsigned int state, std::string text, bool repeat) {
+  void SendKey(KeyEventType type, guint key_value, GdkModifierType state, bool repeat = false) {
     if (runtime_ == nullptr) {
       return;
     }
     runtime_->HandleKeyEvent({
         type,
-        TranslateKey(keysym),
-        std::move(text),
-        CurrentKeyModifiers(state),
+        TranslateKey(key_value),
+        type == KeyEventType::Down ? KeyText(key_value, state) : std::string{},
+        TranslateModifiers(state),
         repeat,
     });
   }
 
-  void SendPointer(PointerEventType type, Point position, std::uint32_t click_count = 1) {
-    if (runtime_ == nullptr) {
-      return;
+  std::filesystem::path ResourceRoot() const {
+    if (const char* override_directory = std::getenv("HUXERUI_RESOURCES_DIR")) {
+      return std::filesystem::path(override_directory);
     }
-    last_pointer_position_ = position;
-    runtime_->HandlePointerEvent({
-        type,
-        0,
-        position,
-        PointerDeviceKind::Mouse,
-        click_count,
-    });
+    std::filesystem::path root(ResolveLinuxExecutablePath());
+    root.replace_extension(".resources");
+    return root;
   }
 
-  Point ClientPoint(int x, int y) const noexcept {
-    const float scale = DpiScale();
-    return {
-        static_cast<float>(x) / scale,
-        static_cast<float>(y) / scale,
-    };
-  }
-
-  float DpiScale() const noexcept {
-    return std::max(dpi_, 1.0F) / kDipsPerInch;
-  }
-
-  void UpdateRuntimeViewport() {
-    if (runtime_ == nullptr || window_ == 0) {
-      return;
+  unsigned long X11WindowId() const noexcept {
+#ifdef GDK_WINDOWING_X11
+    if (window_ != nullptr) {
+      GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
+      if (surface != nullptr && GDK_IS_X11_SURFACE(surface)) {
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        return gdk_x11_surface_get_xid(surface);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+      }
     }
-    const float scale = DpiScale();
-    WindowMetrics metrics{
-        .viewport = {static_cast<float>(width_) / scale, static_cast<float>(height_) / scale},
-        .safe_area = {},
-        .title_bar = std::nullopt,
-    };
-    if (custom_chrome_) {
-      metrics.title_bar = ResolveLinuxTitleBarMetrics(custom_title_bar_height_, metrics.viewport, maximized_);
-    }
-    runtime_->SetWindowMetrics(metrics);
-  }
-
-  void HandleDisplayChange() {
-    const float new_dpi = ReadDpi();
-    if (std::abs(new_dpi - dpi_) < 0.5F) {
-      return;
-    }
-    dpi_ = new_dpi;
-    renderer_.DpiChanged(display_, window_, dpi_);
-    text_input_.SetDpiScale(DpiScale());
-    runtime_->UpdateResourceConfiguration(Configuration());
-    UpdateRuntimeViewport();
-    RequestFrameAt(Now());
-  }
-
-  const RenderFrame* CommitFrameAndInvalidate() {
-    scheduled_frame_deadline_.reset();
-    if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
-      return nullptr;
-    }
-    const FrameCommit& commit = runtime_->BuildFrame();
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
-    FlushDeferredFrame();
-    return &commit.render_frame;
-  }
-
-  void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(window_ != 0)) {
-      ScheduleFrame(*deadline);
-    }
-  }
-
-  void RenderCommittedFrame(const RenderFrame* frame) {
-    if (frame == nullptr || window_ == 0) {
-      return;
-    }
-    LinuxDamageRegion resolved = ResolveLinuxDamage(frame->damage, DpiScale(), width_, height_);
-    const LinuxFrameRenderAction action =
-        ResolveLinuxFrameRenderAction(resolved, expose_pending_, renderer_.CanPresentRetained());
-    if (action == LinuxFrameRenderAction::Skip) {
-      return;
-    }
-
-    frame_state_.BeginPaint();
-    std::vector<XRectangle> rects = std::move(resolved.rects);
-    if (action == LinuxFrameRenderAction::Repaint && rects.empty()) {
-      rects.assign(1, XRectangle{0, 0, static_cast<unsigned short>(width_), static_cast<unsigned short>(height_)});
-    }
-    const LinuxRenderResult result =
-        action == LinuxFrameRenderAction::PresentRetained
-            ? renderer_.PresentRetained()
-            : renderer_.Render(display_, window_, dpi_, *frame, rects.data(), static_cast<unsigned long>(rects.size()));
-    if (result == LinuxRenderResult::Presented) {
-      expose_pending_ = false;
-    }
-    if (result == LinuxRenderResult::Recreate) {
-      expose_pending_ = true;
-      RequestFrameAt(Now());
-    }
-    if (const std::optional<double> deadline = frame_state_.EndPaint(window_ != 0)) {
-      ScheduleFrame(*deadline);
-    }
-  }
-
-  void HandleSelectionRequest(const XSelectionRequestEvent& request) {
-    if (display_ == nullptr) {
-      return;
-    }
-    XSelectionEvent reply{};
-    reply.type = SelectionNotify;
-    reply.display = display_;
-    reply.requestor = request.requestor;
-    reply.selection = request.selection;
-    reply.target = request.target;
-    reply.time = request.time;
-
-    if (request.target == targets_atom_) {
-      reply.property = request.property;
-      const Atom supported[] = {targets_atom_, utf8_string_atom_, XA_STRING};
-      XChangeProperty(
-          display_,
-          request.requestor,
-          request.property,
-          XA_ATOM,
-          32,
-          PropModeReplace,
-          reinterpret_cast<const unsigned char*>(supported),
-          static_cast<int>(std::size(supported))
-      );
-    } else if (request.target == utf8_string_atom_ || request.target == XA_STRING) {
-      reply.property = request.property;
-      XChangeProperty(
-          display_,
-          request.requestor,
-          request.property,
-          request.target,
-          8,
-          PropModeReplace,
-          reinterpret_cast<const unsigned char*>(clipboard_text_.data()),
-          static_cast<int>(clipboard_text_.size())
-      );
-    } else {
-      reply.property = 0;
-    }
-    XSendEvent(display_, request.requestor, 0, 0, reinterpret_cast<XEvent*>(&reply));
-  }
-
-  void HandleSelectionNotify(const XSelectionEvent& event) {
-    if (!clipboard_read_pending_) {
-      return;
-    }
-    if (event.property == 0) {
-      clipboard_read_pending_ = false;
-      clipboard_read_result_.reset();
-      return;
-    }
-    Atom actual_type = 0;
-    int actual_format = 0;
-    unsigned long item_count = 0;
-    unsigned long bytes_after = 0;
-    unsigned char* data = nullptr;
-    const int status = XGetWindowProperty(
-        display_,
-        window_,
-        event.property,
-        0,
-        std::numeric_limits<long>::max(),
-        1,
-        AnyPropertyType,
-        &actual_type,
-        &actual_format,
-        &item_count,
-        &bytes_after,
-        &data
-    );
-    if (status == 0 && data != nullptr && actual_format == 8 && item_count > 0) {
-      clipboard_read_result_ = std::string(reinterpret_cast<const char*>(data), item_count);
-    } else {
-      clipboard_read_result_.reset();
-    }
-    if (data != nullptr) {
-      XFree(data);
-    }
-    clipboard_read_pending_ = false;
+#endif
+    return 0;
   }
 
   void Cleanup() noexcept {
+    if (frame_source_ != 0) {
+      g_source_remove(frame_source_);
+      frame_source_ = 0;
+    }
+    ui_dispatcher_->Shutdown();
     text_input_.Reset();
-    // The EGL surface is bound to the window, so tear it down while the window
-    // is still alive and release the colormap after the window is destroyed.
+    DetachToplevelState();
+    key_tracker_.Reset();
+    committed_frame_ = nullptr;
     renderer_.Discard();
-    if (window_ != 0) {
-      XDestroyWindow(display_, window_);
-      window_ = 0;
-    }
-    if (colormap_ != 0) {
-      XFreeColormap(display_, colormap_);
-      colormap_ = 0;
-    }
-    if (display_ != nullptr) {
-      XCloseDisplay(display_);
-      display_ = nullptr;
+    if (window_ != nullptr) {
+      gtk_window_destroy(window_);
+      window_ = nullptr;
+      drawing_area_ = nullptr;
     }
   }
 
-  huxerui::Runtime* runtime_ = nullptr;
-  Display* display_ = nullptr;
-  Window window_ = 0;
-  Colormap colormap_ = 0;
-  int width_ = 0;
-  int height_ = 0;
-  float dpi_ = kDipsPerInch;
-  int randr_event_base_ = 0;
-  bool key_pressed_[256] = {};
-  Atom wm_protocols_ = 0;
-  Atom wm_delete_window_ = 0;
-  Atom clipboard_atom_ = 0;
-  Atom utf8_string_atom_ = 0;
-  Atom targets_atom_ = 0;
-  Atom clipboard_property_ = 0;
-  bool custom_chrome_ = false;
-  float custom_title_bar_height_ = 0.0F;
-  bool maximized_ = false;
-  int screen_ = 0;
-  LinuxFrameExtents frame_extents_;
-  Atom motif_wm_hints_ = 0;
-  Atom net_wm_state_ = 0;
-  Atom net_wm_state_max_h_ = 0;
-  Atom net_wm_state_max_v_ = 0;
-  Atom net_wm_moveresize_ = 0;
-  Atom net_frame_extents_ = 0;
+  static gboolean FrameReady(gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->CommitFrame();
+    return G_SOURCE_REMOVE;
+  }
+
+  static void Draw(GtkDrawingArea*, cairo_t* context, int, int, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.UpdateRuntimeViewport();
+    self.DrawFrame(context);
+  }
+
+  static gboolean CloseRequested(GtkWindow*, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->running_ = false;
+    return FALSE;
+  }
+
+  static void Destroyed(GtkWidget*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.CancelPointer();
+    self.key_tracker_.Reset();
+    self.running_ = false;
+    self.toplevel_ = nullptr;
+    self.toplevel_state_handler_ = 0;
+    self.window_ = nullptr;
+    self.drawing_area_ = nullptr;
+  }
+
+  static void WindowMapped(GtkWidget*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.AttachToplevelState();
+    self.UpdateLifecycleState();
+  }
+
+  static void WindowUnmapped(GtkWidget*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.CancelPointer();
+    self.key_tracker_.Reset();
+    self.UpdateLifecycleState();
+  }
+
+  static void WindowActiveChanged(GObject*, GParamSpec*, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->UpdateLifecycleState();
+  }
+
+  static void ToplevelStateChanged(GObject*, GParamSpec*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.UpdateLifecycleState();
+    self.UpdateRuntimeViewport();
+  }
+
+  static void WindowMaximizedChanged(GObject*, GParamSpec*, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->UpdateRuntimeViewport();
+  }
+
+  static void ScaleChanged(GObject*, GParamSpec*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    if (self.runtime_ != nullptr) {
+      self.runtime_->UpdateResourceConfiguration(self.Configuration());
+      self.UpdateRuntimeViewport();
+      self.RequestFrameAt(self.Now());
+    }
+  }
+
+  static void PointerPressed(GtkGestureClick* gesture, int presses, double x, double y, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.suppress_pointer_release_ = false;
+    const Point point{static_cast<float>(x), static_cast<float>(y)};
+    if (self.BeginWindowOperation(gesture, point)) {
+      self.suppress_pointer_release_ = true;
+      return;
+    }
+    self.pointer_down_ = true;
+    self.SendPointer(PointerEventType::Down, point, static_cast<std::uint32_t>(std::max(1, presses)));
+  }
+
+  static void PointerReleased(GtkGestureClick*, int, double x, double y, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    if (self.suppress_pointer_release_) {
+      self.suppress_pointer_release_ = false;
+      return;
+    }
+    if (!self.pointer_down_) {
+      return;
+    }
+    self.pointer_down_ = false;
+    self.SendPointer(PointerEventType::Up, {static_cast<float>(x), static_cast<float>(y)});
+  }
+
+  static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->CancelPointer();
+  }
+
+  static void PointerEntered(GtkEventControllerMotion*, double x, double y, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
+        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
+    );
+  }
+
+  static void PointerMoved(GtkEventControllerMotion*, double x, double y, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
+        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
+    );
+  }
+
+  static void PointerLeft(GtkEventControllerMotion*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    if (!self.pointer_down_) {
+      self.SendPointer(PointerEventType::Cancel, self.last_pointer_position_);
+    }
+  }
+
+  static gboolean Scrolled(GtkEventControllerScroll*, double dx, double dy, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    if (self.runtime_ != nullptr) {
+      self.runtime_->HandleScrollEvent({
+          self.last_pointer_position_,
+          static_cast<float>(dx * kDipsPerScrollStep),
+          static_cast<float>(dy * kDipsPerScrollStep),
+      });
+    }
+    return TRUE;
+  }
+
+  static gboolean KeyPressed(
+      GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
+  ) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
+    const LinuxKeyPressResult press =
+        self.key_tracker_.Press(key_code, self.text_input_.FilterKeyEvent(event));
+    if (!press.dispatch) {
+      return TRUE;
+    }
+    self.SendKey(KeyEventType::Down, key_value, state, press.repeat);
+    return FALSE;
+  }
+
+  static void KeyReleased(
+      GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
+  ) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
+    if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
+      self.SendKey(KeyEventType::Up, key_value, state);
+    }
+  }
+
+  static void FocusEntered(GtkEventControllerFocus*, gpointer data) {
+    static_cast<LinuxPlatformAdapter*>(data)->text_input_.SetFocus(true);
+  }
+
+  static void FocusLeft(GtkEventControllerFocus*, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.text_input_.SetFocus(false);
+    self.key_tracker_.Reset();
+  }
+
   std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
+  Runtime* runtime_ = nullptr;
+  GtkWindow* window_ = nullptr;
+  GtkDrawingArea* drawing_area_ = nullptr;
+  GdkToplevel* toplevel_ = nullptr;
+  gulong toplevel_state_handler_ = 0;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
-  std::vector<pollfd> poll_descriptors_;
-  std::vector<LinuxDeferredKeyEvent> deferred_key_events_;
   PlatformFrameState frame_state_;
-  std::optional<double> scheduled_frame_deadline_;
-  bool expose_pending_ = false;
+  const RenderFrame* committed_frame_ = nullptr;
+  guint frame_source_ = 0;
   bool running_ = false;
-  bool window_focused_ = false;
+  bool custom_chrome_ = false;
+  float custom_title_bar_height_ = 0.0F;
   bool pointer_down_ = false;
-  bool suppress_pointer_ = false;
+  bool suppress_pointer_release_ = false;
+  bool clipboard_read_active_ = false;
   Point last_pointer_position_;
-  std::uint32_t last_click_count_ = 0;
-  unsigned int last_click_button_ = 0;
-  Time last_click_time_ = 0;
-  Point last_click_position_;
-  std::string clipboard_text_;
-  bool clipboard_read_pending_ = false;
-  bool clipboard_read_in_progress_ = false;
-  std::optional<std::string> clipboard_read_result_;
+  LinuxKeyTracker key_tracker_;
   std::exception_ptr failure_;
 };
 
 int RunPlatformApplication(const Application& application) {
-  WindowOptions options = application.options.window;
   LinuxPlatformAdapter platform;
   Runtime runtime{application, platform};
-  return platform.Run(runtime, options);
+  return platform.Run(runtime, application.options.window);
 }
 
 } // namespace huxerui::detail

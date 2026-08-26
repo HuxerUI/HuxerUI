@@ -200,7 +200,6 @@ void PaintDataGraphic(PaintContext& paint, Size size, const ColorScheme& colors,
       }
   );
   paint.PopClip();
-  paint.DrawPathShadow(line, WithAlpha(colors.primary, 0.30F), {0.0F, 4.0F}, 10.0F);
   paint.StrokePath(line, colors.primary, 4.0F, StrokeCap::Round, StrokeJoin::Round);
   paint.DrawCircle({right, final_y}, 7.0F, colors.background);
   paint.DrawCircle({right, final_y}, 4.0F, colors.primary);
@@ -482,11 +481,19 @@ View TextInputDemo() {
 [[huxerui::composable]]
 View GalleryDialogCard(State<bool> visible) {
   const ThemeSpec& theme = UseTheme();
+  const DialogStyle& style = UseEnvironment<DialogStyle>();
   return Column {
     Text("Declarative dialog", TextRole::Title),
     Text("The Dialog retained modifier follows application state."),
     Button("Close").OnClick([visible] { visible = false; }),
-  }.With(Padding(theme.spacing.large), Spacing(theme.spacing.medium));
+  }.With(
+      Frame{.min_width = style.minimum_width, .max_width = style.maximum_width},
+      Padding(theme.spacing.large),
+      Spacing(theme.spacing.medium),
+      Background(style.background),
+      CornerRadius(style.corner_radius),
+      style.shadow
+  );
 }
 
 [[huxerui::composable]]

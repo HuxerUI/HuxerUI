@@ -1,5 +1,6 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -10,6 +11,160 @@
 #include "text_layout_internal.h"
 
 namespace huxerui::test {
+
+TEST_CASE("LinuxRendererReplaysPaintCommandsIntoCairoSurface") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 8.0F, 8.0F});
+  paint.DrawRect({1.0F, 1.0F, 6.0F, 6.0F}, Color::Rgb(255, 0, 0));
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 8, 8);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE(pixels[4 * 8 + 4] == 0xFFFF0000U);
+  REQUIRE(pixels[0] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
+  paint.DrawArc({24.0F, 24.0F}, 4.0F, 0.0F, 1.5707963F, Color::White(), 2.0F);
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  cairo_move_to(context, 0.0, 0.0);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE(pixels[12 * 32 + 14] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
+  paint.DrawBorder({20.0F, 20.0F, 10.0F, 10.0F}, Color::White(), 2.0F);
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  cairo_move_to(context, 2.0, 2.0);
+  cairo_line_to(context, 12.0, 12.0);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE(pixels[7 * 32 + 7] == 0U);
+  REQUIRE((pixels[20 * 32 + 24] >> 24U) > 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererDrawsNegativeArcSweepCounterclockwise") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
+  paint.DrawArc({16.0F, 16.0F}, 8.0F, 0.0F, -1.5707963F, Color::White(), 3.0F);
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE((pixels[10 * 32 + 22] >> 24U) > 0U);
+  REQUIRE(pixels[22 * 32 + 22] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererBlurredRectShadowExcludesTheCasterInterior") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 40.0F, 40.0F});
+  paint.DrawShadow({12.0F, 12.0F, 16.0F, 16.0F}, Color::Black(), {}, 6.0F);
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 40, 40);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE((pixels[20 * 40 + 10] >> 24U) > 0U);
+  REQUIRE(pixels[20 * 40 + 20] == 0U);
+  REQUIRE(pixels[0] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererBlurredPathShadowExcludesTheShiftedCasterInterior") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  Path path;
+  path.MoveTo({12.0F, 12.0F})
+      .LineTo({28.0F, 12.0F})
+      .LineTo({28.0F, 28.0F})
+      .LineTo({12.0F, 28.0F})
+      .Close();
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 48.0F, 40.0F});
+  paint.DrawPathShadow(path, Color::Black(), {4.0F, 0.0F}, 6.0F);
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 48, 40);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE((pixels[20 * 48 + 14] >> 24U) > 0U);
+  REQUIRE(pixels[20 * 48 + 20] == 0U);
+  REQUIRE(pixels[0] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
 
 TEST_CASE("LinuxUnboundedTextMeasurementIgnoresParagraphAlignment") {
   detail::LinuxRenderer renderer;
@@ -76,6 +231,22 @@ TEST_CASE("LinuxTextLayoutHonorsExplicitDirection") {
   REQUIRE(left_to_right->CaretRect(3, TextAffinity::Downstream).x > 0.0F);
   REQUIRE(right_to_left->CaretRect(0, TextAffinity::Downstream).x > 0.0F);
   REQUIRE(right_to_left->CaretRect(3, TextAffinity::Downstream).x == 0.0F);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxTextLayoutReturnsDisjointRangesForMixedDirectionText") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const std::unique_ptr<detail::TextLayout> layout =
+      renderer.CreateTextLayout("abc \u05D0\u05D1\u05D2 def", style, 300.0F, {.wrap = TextWrap::NoWrap});
+  const std::vector<Rect> rects = layout->RangeRects({1, 6});
+
+  REQUIRE(rects.size() == 2);
+  REQUIRE(rects[0].width > 0.0F);
+  REQUIRE(rects[1].width > 0.0F);
+  REQUIRE_FALSE(rects[0].Intersects(rects[1]));
   renderer.Discard();
 }
 
@@ -235,17 +406,6 @@ TEST_CASE("LinuxTextLayoutHitTestStaysWithinUtf16Length") {
   renderer.Discard();
 }
 
-TEST_CASE("LinuxRendererFreshInstanceHasNoPresentationState") {
-  // A freshly constructed renderer must report no EGL state; the adapter probes
-  // this headlessly before creating an X window.
-  detail::LinuxRenderer renderer;
-  REQUIRE_FALSE(renderer.HasPresentation());
-  REQUIRE_FALSE(renderer.CanPresentRetained());
-  REQUIRE(renderer.PresentRetained() == detail::LinuxRenderResult::Skipped);
-  REQUIRE(renderer.XVisualId() == 0);
-  renderer.Discard();
-}
-
 TEST_CASE("LinuxRendererDiscardOnFreshInstanceIsNoOp") {
   detail::LinuxRenderer renderer;
   renderer.Discard();
@@ -338,8 +498,7 @@ TEST_CASE("LinuxParagraphCacheSurvivesEviction") {
 }
 
 TEST_CASE("LinuxRendererRepeatedLifecycleIsStable") {
-  // Three full Initialize/Metrics/Discard cycles exercise FcInit/FcFini
-  // refcounting and ~State teardown of the hashed caches without crashing.
+  // Repeated Pango/Cairo state creation and teardown must remain independent.
   detail::LinuxRenderer first;
   first.Initialize();
   REQUIRE(first.Metrics(Font::System(14.0F)).ascent > 0.0F);

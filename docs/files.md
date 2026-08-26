@@ -141,7 +141,7 @@ Selected filesystem paths remain private to `FileReference`; reads, imports, rep
 Extensions and MIME types are translated into advisory system filters, while unsupported MIME mappings widen the filter rather than hiding valid files.
 
 On Linux, opening and saving use `org.freedesktop.portal.FileChooser` on the session D-Bus without a GTK or Qt fallback.
-The adapter supplies the current X11 window identifier when available, retains returned `file://` locations privately inside `FileReference`, and performs reads, imports, replacements, and save copies on the shared bounded file executor.
+The adapter supplies the current X11 window identifier when GTK is using its X11 backend, retains returned `file://` locations privately inside `FileReference`, and performs reads, imports, replacements, and save copies on the shared bounded file executor.
 If the session bus or xdg-desktop-portal service is unavailable, both picker capability predicates return `false` while local `FileSystem` access remains available.
 Canceling an active Task closes the corresponding portal Request so the next serialized picker operation can begin.
 

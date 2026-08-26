@@ -587,7 +587,7 @@ void InstallAudio(RootContext& root) {
 The resulting service owns the `PlatformInstance`, encodes typed calls, decodes results and events, and closes the instance from its destructor.
 An application-wide platform engine may remain shared behind several per-window instances, but each Runtime retains only its own identities, subscriptions, and typed services.
 The shared protocol and deterministic dispatcher fixture are implemented and tested.
-Windows posts a private message to its owning application HWND, macOS configures asynchronous main-queue delivery, Linux wakes its X11 event loop through `eventfd`, Web queues work through the browser event loop, Android dispatches through its owning `HuxerUIView`, and iOS configures asynchronous main-queue delivery.
+Windows posts a private message to its owning application HWND, macOS configures asynchronous main-queue delivery, Linux attaches idle sources to its owning GLib main context, Web queues work through the browser event loop, Android dispatches through its owning `HuxerUIView`, and iOS configures asynchronous main-queue delivery.
 The Windows dispatcher accepts work before that HWND exists because Runtime installs RootHooks before the adapter creates its window, then schedules the queued batch when the window attaches; shutdown drops late platform callbacks without retaining the destroyed HWND.
 `example_platform_module` registers a thread-pool timer on Windows, a Foundation timer on Apple platforms, a `timerfd` timer on Linux, an Emscripten interval on Web, and a Java scheduled timer on Android behind one typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
 Other production adapters and concrete product libraries remain proposed.
@@ -688,7 +688,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | --- | --- |
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
-| Linux/X11 | The adapter uses ordered child windows with suitable ARGB composition or redirects platform child content through XComposite. A server without the required composition capability cannot host that PlatformView. |
+| Linux | GTK PlatformView hosting remains proposed. A conforming implementation must retain ordered GTK siblings and HuxerUI raster slices without depending on an X11-only child-window or XComposite path. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |

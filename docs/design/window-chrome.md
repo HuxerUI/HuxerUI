@@ -306,27 +306,25 @@ System mode retains the ordinary AppKit title bar and submits no title-bar metri
 
 ## Linux mapping
 
-The current Linux backend uses X11.
-Custom mode removes server-side decorations through `_MOTIF_WM_HINTS` with `MWM_HINTS_DECORATIONS` and zero decorations.
-The window remains window-manager managed rather than override-redirect, so taskbar presence, snap, and window-manager keybindings keep working.
+The Linux backend uses GTK 4 and delegates native surface behavior to the active GDK backend.
+Custom mode disables GTK's system decorations while retaining an ordinary managed top-level window, so taskbar presence, snap, and window-manager keybindings keep working.
 
 The framework renders the standard minimize, maximize or restore, and close controls in a `WindowControlsLayout` layer.
-Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three times 46 DIP, matching the Windows modern interaction width because X11 has no native caption system metric.
+Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three times 46 DIP, matching the Windows modern interaction width because GTK does not expose a portable native caption-button metric for a custom client area.
 
 Linux metric resolution prefers `AppOptions::window.title_bar_height`, enforces a 32-DIP minimum height, clamps to the viewport, reports zero left inset, caps the right inset at the viewport width, and tracks the maximized state.
 
-Native drag and edge or corner resize send `_NET_WM_MOVERESIZE` client messages to the root window from the pointer button event, using root-relative coordinates, the pointer button, and the event time.
-Hit testing mirrors the Windows `HTCAPTION` approach: caption-control bounds first, then resize edges, then `Runtime::IsWindowDragRegion()`, then normal client handling.
+Native drag and edge or corner resize use `gdk_toplevel_begin_move()` and `gdk_toplevel_begin_resize()` with the device, button, local coordinates, and timestamp from the initiating GTK gesture.
+Hit testing resolves resize edges before `Runtime::IsWindowDragRegion()`, while shared caption controls consume their own pointer input before a drag can begin.
 
-The resize border prefers the window-manager-reported `_NET_FRAME_EXTENTS` subscribed through `PropertyNotify` and falls back to a fixed 6-DIP border; resize edges are skipped while maximized.
+The custom client area uses a fixed 6-DIP resize border and skips resize edges while maximized.
 
-Maximize, restore, and toggle use EWMH `_NET_WM_STATE` with `_NET_WM_STATE_MAXIMIZED_HORZ` and `_NET_WM_STATE_MAXIMIZED_VERT`, minimize uses `XIconifyWindow`, and close reuses the `WM_DELETE_WINDOW` protocol path.
-The maximized state is tracked through `PropertyNotify` on `_NET_WM_STATE` and drives the caption glyph swap through the shared `maximize_state_changed` path.
+Minimize, maximize, restore, toggle, and close use the corresponding `GtkWindow` operations.
+The GTK maximized property drives the caption glyph swap through the shared `maximize_state_changed` path.
 
 System mode is unchanged and submits no title-bar metrics.
 
-A future Wayland backend negotiates decorations through `xdg-decoration`.
-Client-side movement and resize use `xdg_toplevel` requests with the seat and serial from the initiating pointer event; they never depend on global pointer coordinates.
+These operations remain backend-neutral inside HuxerUI; GTK maps them to the active X11 or Wayland surface protocol.
 
 ## Other platforms
 
@@ -358,7 +356,7 @@ The removed Windows Extended experiment has no compatibility alias or retained D
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
 macOS Custom mode uses full-size AppKit content, AppKit traffic lights, converted left-side control geometry, AppKit dragging, and system window commands.
-Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, `_MOTIF_WM_HINTS` decoration removal, `_NET_WM_MOVERESIZE` drag and resize, EWMH and `XIconifyWindow` commands, and `PropertyNotify`-tracked maximized state.
+Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, GTK decoration policy and window commands, GDK move and resize operations, and GTK-tracked maximized state.
 
 ## Testing
 
@@ -382,11 +380,11 @@ High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still re
 
 macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
 Manual macOS validation remains required for system window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
-Linux tests isolate metric resolution, resize-direction edge semantics including maximized skip and caption-bounds exclusion and viewport clamping, maximized-state atom detection, and frame-extents fallback.
-Manual Linux validation currently covers decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on KWin.
+Linux tests isolate metric resolution, preferred-height flooring, viewport clamping, caption-control reservation, and maximized-state propagation.
+Manual Linux validation covers GTK decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on each supported GDK backend.
 
 ## Delivery order
 
 The shared contract and Windows Custom implementation form the first delivery.
 The macOS implementation forms the second delivery and retains native traffic lights.
-Linux Custom mode is delivered under the same two-mode contract, while Wayland remains later platform work.
+Linux Custom mode is delivered under the same two-mode contract through GTK 4.

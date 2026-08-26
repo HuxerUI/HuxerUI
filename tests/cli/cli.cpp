@@ -1170,6 +1170,12 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
       );
     };
     REQUIRE(has_linux_diagnostic("pkg-config"));
+    REQUIRE(has_linux_diagnostic("pkg:gtk4"));
+    REQUIRE(has_linux_diagnostic("pkg:gio-2.0"));
+    REQUIRE(has_linux_diagnostic("pkg:libsoup-3.0"));
+    REQUIRE_FALSE(has_linux_diagnostic("pkg:x11"));
+    REQUIRE_FALSE(has_linux_diagnostic("pkg:egl"));
+    REQUIRE_FALSE(has_linux_diagnostic("pkg:glesv2"));
     REQUIRE_FALSE(has_linux_diagnostic("meson"));
     REQUIRE_FALSE(has_linux_diagnostic("ninja"));
     REQUIRE_FALSE(has_linux_diagnostic("gperf"));
