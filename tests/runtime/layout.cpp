@@ -22,6 +22,18 @@ Size layout_test_image_frame{100.0F, 100.0F};
 VectorAsset layout_test_vector;
 ExternalTexture layout_test_external_texture;
 
+class CountingTextPlatform final : public TestPlatform {
+public:
+  TextLayoutMetrics MeasureText(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    ++measure_text_calls;
+    return TestPlatform::MeasureText(text, style, max_width, options);
+  }
+
+  std::size_t measure_text_calls = 0;
+};
+
 View ImageLayoutApp() {
   return Column {
     Image(layout_test_image)
@@ -184,6 +196,19 @@ View StretchLayoutApp() {
   return Column {
     Text("A").With(huxerui::Frame{20.0F, 20.0F}),
   }.With(huxerui::CrossAlign{CrossAxisAlignment::Stretch});
+}
+
+View NestedStretchLayoutApp() {
+  return Column {
+    Column {
+      Column {
+        Text("Measured once"),
+        Spacer().With(Frame{.height = 1.0F}),
+      }.With(CrossAlign{CrossAxisAlignment::Stretch}),
+      Spacer().With(Frame{.height = 1.0F}),
+    }.With(CrossAlign{CrossAxisAlignment::Stretch}),
+    Spacer().With(Frame{.height = 1.0F}),
+  }.With(CrossAlign{CrossAxisAlignment::Stretch});
 }
 
 View WrappedTextApp() {
@@ -637,6 +662,26 @@ TEST_CASE("TestStackAndStretchAlignment") {
 
   root = stretch_runtime.RootNode();
   REQUIRE(root->children[0]->bounds.width == 120.0F);
+}
+
+TEST_CASE("TestTightCrossAxisAvoidsNestedStretchRemeasurement") {
+  CountingTextPlatform platform;
+  AppOptions options;
+  options.show_debug_overlay = false;
+  Runtime runtime{NestedStretchLayoutApp, platform, std::move(options)};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->bounds.width == 120.0F);
+  REQUIRE(root->children.size() == 2);
+  REQUIRE(root->children[0]->bounds.width == 120.0F);
+  REQUIRE(root->children[0]->children.size() == 2);
+  REQUIRE(root->children[0]->children[0]->bounds.width == 120.0F);
+  REQUIRE(root->children[0]->children[0]->children.size() == 2);
+  REQUIRE(root->children[0]->children[0]->children[0]->bounds.width == 120.0F);
+  REQUIRE(platform.measure_text_calls == 1);
 }
 
 TEST_CASE("TestWrappedTextMeasurement") {

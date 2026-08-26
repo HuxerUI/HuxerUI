@@ -32,6 +32,7 @@ Mounted nodes store local bounds, parent-relative offsets, stable RenderNodes, a
 Ordinary mounted nodes also retain their input Constraints, measured size, placements, layout revisions, and measure and layout dirty state.
 Reconciliation compares built-in layout inputs by value and propagates changed child layout toward the root.
 An unchanged subtree reuses its measurement when its Constraints are equal, and an unchanged placement does not revisit its descendants.
+Linear layouts measure stretching children directly with the final cross-axis constraint when that axis is already tight; they retain the intrinsic-size pass only when the parent constraint leaves the stretched extent unresolved.
 Clean PaintSequences are retained across frames; declarative paint input changes, size and focus changes, and explicit NodeExtension invalidation rerecord only the affected sequence.
 RenderNodes retain local opacity, and platform renderers composite each node's content, children, and foreground as one group while replaying source-color PaintSequences.
 Each PaintSequence has a recording revision, and Runtime compares a lightweight snapshot of the committed scene to derive frame damage without retaining duplicate commands.

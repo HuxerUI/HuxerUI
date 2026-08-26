@@ -1691,21 +1691,27 @@ void MeasureFlowLine(
 
 LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constraints constraints, bool vertical) {
   const Constraints loose = constraints.Loose();
+  const bool stretch = node.CrossAlignment() == CrossAxisAlignment::Stretch;
+  const float minimum_cross = MinimumCross(constraints, vertical);
+  const float maximum_cross = MaximumCross(constraints, vertical);
+  const bool tight_cross = stretch && std::isfinite(maximum_cross) && minimum_cross == maximum_cross;
+  const Constraints initial = tight_cross ? TightCross(loose, vertical, maximum_cross) : loose;
   float total_grow = 0.0F;
 
   for (MountedNode& child : node.Children()) {
-    static_cast<void>(context.Measure(child, loose));
+    // A tight cross axis already determines the stretch result. Measuring loose first would recursively double the
+    // work of every nested stretching linear layout without contributing another layout decision.
+    static_cast<void>(context.Measure(child, initial));
     total_grow += child.GrowFactor();
   }
 
-  const bool stretch = node.CrossAlignment() == CrossAxisAlignment::Stretch;
   float target_cross = std::clamp(
       MaxCrossSize(node, vertical),
-      MinimumCross(constraints, vertical),
-      MaximumCross(constraints, vertical)
+      minimum_cross,
+      maximum_cross
   );
 
-  if (stretch) {
+  if (stretch && !tight_cross) {
     for (MountedNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, TightCross(loose, vertical, target_cross)));
     }
@@ -1746,8 +1752,8 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   if (!stretch) {
     target_cross = std::clamp(
         MaxCrossSize(node, vertical),
-        MinimumCross(constraints, vertical),
-        MaximumCross(constraints, vertical)
+        minimum_cross,
+        maximum_cross
     );
   }
 
