@@ -358,6 +358,9 @@ HUXERUI_HOME/
       android/
         HuxerUI.aar
         <abi>/libhuxerui.so
+      ios/HuxerUI.xcframework/             # macOS SDK only
+        ios-arm64/
+        ios-arm64_x86_64-simulator/
       web/emscripten-4.0.19/libhuxerui.a
     resources/
     tools/<host>/<architecture>/
@@ -387,13 +390,14 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 Platform build systems consume platform artifacts through their normal mechanisms:
 
 - Android uses a Java-only AAR plus ABI-specific shared libraries imported by the installed CMake package.
-- macOS and iOS may use signed XCFramework and Swift Package artifacts where platform-package integration is required.
+- macOS uses its host libraries, while the macOS SDK carries a static iOS XCFramework for device and Simulator application-core builds.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
 - Web uses the Emscripten 4.0.19 static library from the selected SDK while configuring the application root through `emcmake`.
 
 Platform packages do not duplicate common application policy or introduce another runtime resource store.
 Android may substitute the repository Gradle library explicitly for source development, while installed and source CMake paths preserve the same canonical HuxerUI targets.
-Windows, macOS, Linux, Web, and Android consume the installed package through the same canonical CMake targets, while iOS accepts source or a compatible installed prefix.
+Windows, macOS, Linux, Web, Android, and iOS consume the installed package through the same canonical CMake targets.
+An installed iOS build selects the matching device or Simulator slice from the XCFramework carried only by the macOS SDK.
 
 ### Installers
 
@@ -417,9 +421,10 @@ macOS defaults to `~/Library/Developer/HuxerUI`, Linux defaults to `~/.local/sha
 Publication uses a sibling staging directory and preserves the prior valid SDK until the new SDK and environment selection succeed.
 Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
 A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
-The release workflow first builds the reusable Android and Web target artifacts, then builds Windows x86_64, macOS arm64, macOS x86_64, Linux x86_64, and Linux aarch64 SDK archives independently, runs each host's configured tests, applies Linux binary compatibility gates, and transfers only the expected archives and checksums to the publication job.
+The release workflow first builds the reusable Android and Web target artifacts and the static iOS device and Simulator XCFramework, then builds Windows x86_64, macOS arm64, macOS x86_64, Linux x86_64, and Linux aarch64 SDK archives independently, runs each host's configured tests, applies Linux binary compatibility gates, and transfers only the expected archives and checksums to the publication job.
+The iOS XCFramework is an intermediate SDK assembly artifact rather than an independent release asset, and only the macOS archives contain it.
 Repository-local `scripts/package_sdk.ps1` and `scripts/package_sdk.sh` provide the corresponding one-command developer workflow.
-They always build Android and Web artifacts internally before packaging the current host SDK; intermediate artifact paths are implementation details rather than public parameters.
+They always build Android and Web artifacts internally before packaging the current host SDK, and macOS packaging additionally builds the iOS XCFramework; intermediate artifact paths are implementation details rather than public parameters.
 That job adds both installer entry points, verifies the exact asset set and every checksum, creates or reuses the tag's GitHub Release as a draft, and makes it public only after all assets upload successfully.
 An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
 CMake install rules are the single file-layout source of truth.
@@ -824,7 +829,7 @@ The implemented CMake integration already rejects invalid URL schemes, absent re
 ## Future work
 
 - Automate signed platform package publication where a platform ecosystem requires it.
-- Add iOS distribution export and public embedding workflows without changing the application-core contract.
+- Add iOS application distribution export and public UIView embedding workflows without changing the application-core contract.
 - Add an OHOS shell and SDK artifact through the same CMake, CLI, and packaging ownership boundaries.
 
 ## Errors, security, and reproducibility
@@ -850,7 +855,7 @@ The current workflow is covered by:
 - CLI Android shell tests for root-CMake configuration, Gradle-owned platform values, source or installed SDK selection, library attachment, application launch identity, and artifact collection.
 - CMake library validation for URL policy, full commit revisions, unambiguous origins, predeclared targets, ordered library graph roots and resources, and explicit runtime Root Service installation.
 - Installed Windows, macOS, and Linux consumer tests that install the SDK, run the installed CLI, create a project, and build it without source-tree lookup.
-- SDK archive tests that verify checksums, the canonical extracted layout, embedded Android and Web artifacts, host-tool isolation, and executable-relative CLI discovery.
+- SDK archive tests that verify checksums, the canonical extracted layout, embedded Android and Web artifacts, macOS-only iOS slices, host-tool isolation, and executable-relative CLI discovery.
 - macOS and Linux installer tests that cover custom paths, profile preservation, repeat installation, failed-upgrade rollback, invalid checksums, unrelated directories, and uninstall.
 - SDK release tests that reject invalid version tags, incomplete or unexpected asset sets, and mismatched archive checksums before publication.
 - Existing common, header, code-generation, platform, and example builds.

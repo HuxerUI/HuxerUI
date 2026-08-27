@@ -124,7 +124,25 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
         endif ()
     endforeach ()
 
-    foreach (platform IN ITEMS android web)
+    set(TARGET_PLATFORM_CONSUMERS android web)
+    if (HOST_SYSTEM STREQUAL "macos")
+        foreach (required_path IN ITEMS
+                "share/huxerui/platform/ios/HuxerUI.xcframework/Info.plist"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/Headers/huxerui/huxerui.h"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/libhuxerui_static.a"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/Headers/huxerui/huxerui.h"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/libhuxerui_static.a"
+        )
+            if (NOT EXISTS "${SDK_ROOT}/${required_path}")
+                message(FATAL_ERROR "macOS SDK archive is missing ${required_path}")
+            endif ()
+        endforeach ()
+        list(APPEND TARGET_PLATFORM_CONSUMERS ios-device ios-simulator)
+    elseif (EXISTS "${SDK_ROOT}/share/huxerui/platform/ios")
+        message(FATAL_ERROR "Non-macOS SDK archive contains iOS artifacts")
+    endif ()
+
+    foreach (platform IN LISTS TARGET_PLATFORM_CONSUMERS)
         set(CONSUMER_SOURCE "${TEST_ROOT}/${platform}-consumer")
         set(CONSUMER_BUILD "${TEST_ROOT}/${platform}-consumer-build")
         file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
@@ -136,11 +154,28 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
             set(EXPECTED_LIBRARY
                     "${SDK_ROOT}/share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
             )
-        else ()
+        elseif (platform STREQUAL "web")
             set(PLATFORM_CONFIGURATION "set(EMSCRIPTEN TRUE)\nset(CMAKE_SIZEOF_VOID_P 4)")
             set(PLATFORM_ASSERTION)
             set(EXPECTED_LIBRARY
                     "${SDK_ROOT}/share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
+            )
+        else ()
+            if (platform STREQUAL "ios-simulator")
+                set(IOS_SYSROOT iphonesimulator)
+                set(IOS_SLICE ios-arm64_x86_64-simulator)
+            else ()
+                set(IOS_SYSROOT iphoneos)
+                set(IOS_SLICE ios-arm64)
+            endif ()
+            set(PLATFORM_CONFIGURATION
+                    "set(IOS TRUE)\nset(CMAKE_OSX_SYSROOT ${IOS_SYSROOT})"
+            )
+            set(PLATFORM_ASSERTION
+                    "if (NOT TARGET HuxerUI::huxerui_static)\n  message(FATAL_ERROR \"iOS SDK does not expose HuxerUI::huxerui_static\")\nendif ()"
+            )
+            set(EXPECTED_LIBRARY
+                    "${SDK_ROOT}/share/huxerui/platform/ios/HuxerUI.xcframework/${IOS_SLICE}/libhuxerui_static.a"
             )
         endif ()
         file(WRITE "${CONSUMER_SOURCE}/CMakeLists.txt"
@@ -166,6 +201,7 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
             )
         endif ()
     endforeach ()
+    unset(TARGET_PLATFORM_CONSUMERS)
 endif ()
 
 file(GLOB HOST_DIRECTORIES

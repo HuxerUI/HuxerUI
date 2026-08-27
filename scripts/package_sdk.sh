@@ -7,8 +7,9 @@ usage() {
 Usage: package_sdk.sh [--build-dir <path>] [--output-dir <path>]
                       [--configuration Debug|Release] [--jobs <count>]
 
-Builds Android and Web target artifacts, then packages a complete SDK for the
-current host. Android SDK/NDK, Java, and Emscripten 4.0.19 must be installed.
+Builds Android and Web target artifacts, plus iOS on macOS, then packages a
+complete SDK for the current host. Android SDK/NDK, Java, and Emscripten 4.0.19
+must be installed. macOS packaging also requires Xcode.
 EOF
 }
 
@@ -69,6 +70,7 @@ esac
 case "$(uname -s)" in
 MINGW* | MSYS* | CYGWIN*) fail "use scripts/package_sdk.ps1 on Windows" ;;
 esac
+host_system=$(uname -s)
 
 for command_name in cmake cpack java jar emcmake emcc; do
   command -v "$command_name" >/dev/null 2>&1 || fail "'$command_name' is required on PATH"
@@ -90,6 +92,7 @@ platform_artifact_root="$build_directory/platform-artifacts"
 android_extract_directory="$build_directory/android-aar"
 web_build_directory="$build_directory/web"
 host_build_directory="$build_directory/host"
+ios_build_directory="$build_directory/ios"
 
 reset_owned_directory() {
   owned_path=$1
@@ -112,6 +115,10 @@ reset_owned_directory "$platform_artifact_root"
 reset_owned_directory "$android_extract_directory"
 reset_owned_directory "$web_build_directory"
 reset_owned_directory "$host_build_directory"
+if [ "$host_system" = Darwin ]; then
+  command -v xcodebuild >/dev/null 2>&1 || fail "'xcodebuild' is required on PATH"
+  reset_owned_directory "$ios_build_directory"
+fi
 
 web_version=$(sed -n 's/^set(HUXERUI_WEB_EMSCRIPTEN_VERSION "\([^"]*\)").*/\1/p' \
   "$source_directory/cmake/HuxerUISdk.cmake")
@@ -163,6 +170,15 @@ web_library="$web_build_directory/lib/libhuxerui_static.a"
 web_artifact_directory="$platform_artifact_root/web/emscripten-$web_version"
 mkdir -p -- "$web_artifact_directory"
 cp -- "$web_library" "$web_artifact_directory/libhuxerui.a"
+
+if [ "$host_system" = Darwin ]; then
+  run sh "$source_directory/scripts/build_ios_xcframework.sh" \
+    "$source_directory" \
+    "$ios_build_directory" \
+    "$platform_artifact_root/ios/HuxerUI.xcframework" \
+    "$configuration" \
+    "$jobs"
+fi
 
 run cmake -S "$source_directory" -B "$host_build_directory" \
   "-DCMAKE_BUILD_TYPE=$configuration" \

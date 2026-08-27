@@ -132,6 +132,27 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
             DESTINATION
             "${CMAKE_INSTALL_DATADIR}/huxerui/platform/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
     )
+    if (APPLE AND NOT IOS)
+        set(HUXERUI_IOS_XCFRAMEWORK
+                "${HUXERUI_SDK_ARTIFACT_ROOT}/ios/HuxerUI.xcframework"
+        )
+        foreach (HUXERUI_REQUIRED_IOS_ARTIFACT IN ITEMS
+                "${HUXERUI_IOS_XCFRAMEWORK}/Info.plist"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/huxerui/huxerui.h"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/libhuxerui_static.a"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/huxerui/huxerui.h"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/libhuxerui_static.a"
+        )
+            if (NOT EXISTS "${HUXERUI_REQUIRED_IOS_ARTIFACT}")
+                message(FATAL_ERROR
+                        "HuxerUI SDK iOS artifact is missing: ${HUXERUI_REQUIRED_IOS_ARTIFACT}"
+                )
+            endif ()
+        endforeach ()
+        install(DIRECTORY "${HUXERUI_IOS_XCFRAMEWORK}"
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/platform/ios"
+        )
+    endif ()
 endif ()
 
 _huxerui_resolve_host(HUXERUI_INSTALL_HOST_SYSTEM HUXERUI_INSTALL_HOST_ARCHITECTURE)

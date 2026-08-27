@@ -153,12 +153,41 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  ios-artifacts:
+    name: Build iOS SDK artifacts
+    needs: validate
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Prepare iOS tools
+        run: >-
+          chmod +x
+          tools/prebuilt/macos/arm64/hcg
+          tools/prebuilt/macos/arm64/hrc
+      - name: Build iOS artifacts
+        run: >-
+          sh scripts/build_ios_xcframework.sh
+          "${{ github.workspace }}"
+          "${{ runner.temp }}/huxerui-ios-build"
+          "${{ runner.temp }}/huxerui-platform-artifacts/ios/HuxerUI.xcframework"
+          Release
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-artifacts-ios
+          path: ${{ runner.temp }}/huxerui-platform-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build ${{ matrix.display_name }} ${{ matrix.architecture }}
     needs:
       - validate
       - android-artifacts
       - web-artifacts
+      - ios-artifacts
     strategy:
       fail-fast: false
       matrix:
