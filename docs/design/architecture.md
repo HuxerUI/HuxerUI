@@ -330,6 +330,8 @@ This phase lets geometry-dependent extensions retain value snapshots without sto
 
 During either paint callback, extensions append node-local PaintCommands through `PaintContext`.
 Runtime stores the resulting content or foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene.
+Corner radii remain declaration values until a concrete paint, clip, path, shadow caster, or hit-test rectangle is known.
+The shared geometry boundary scales overconstrained radii proportionally, so fills, borders, descendant clips, and pointer containment apply the same circular-corner normalization on every renderer.
 Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants.
 `PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds.
 Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.

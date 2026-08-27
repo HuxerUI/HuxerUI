@@ -751,6 +751,45 @@ View LayoutDemo() {
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
     GallerySection(
+        "Shape geometry",
+        "Corner radii resolve against final bounds; the full shape produces circles and capsules "
+        "consistently across platforms.",
+        Column {
+          Row {
+            Stack {
+              Text("Full").With(Foreground(theme.colors.on_primary)),
+            }.With(
+                Frame{.width = 48.0F, .height = 48.0F},
+                Background(theme.colors.primary),
+                CornerRadius(theme.shapes.full),
+                Align(HorizontalAlignment::Center, VerticalAlignment::Center)
+            ),
+            Stack {
+              Text("Adaptive capsule").With(Foreground(theme.colors.on_secondary_container)),
+            }.With(
+                Frame{.height = 48.0F},
+                Padding(EdgeInsets::Symmetric(theme.spacing.medium, 0.0F)),
+                Background(theme.colors.secondary_container),
+                CornerRadius(theme.shapes.full),
+                Align(HorizontalAlignment::Start, VerticalAlignment::Center),
+                Grow()
+            ),
+          }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
+          Row {
+            Text("SECURE SESSION").With(Foreground(theme.colors.primary)),
+            Spacer().With(Grow()),
+            Text("256-bit encrypted").With(Foreground(theme.colors.on_surface_variant)),
+          }.With(
+              Frame{.height = 40.0F},
+              Padding(EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small)),
+              Background(theme.colors.surface_container_low),
+              Border{theme.colors.outline, 1.0F},
+              CornerRadius(theme.shapes.full),
+              CrossAlign(CrossAxisAlignment::Center)
+          ),
+        }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
+    ),
+    GallerySection(
         "Stack and retained pages",
         "Stack overlays aligned children; IndexedPages retains peers while presenting one selected child.",
         Column {

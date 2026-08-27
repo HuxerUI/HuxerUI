@@ -193,10 +193,11 @@ Rect RenderClipBounds(const RenderClip& clip) {
 std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
   std::vector<RenderClip> clips;
   if (node.properties.clip_children) {
-    if (node.resolved_corner_radii.IsUniform()) {
-      clips.emplace_back(PushClipCommand{node.bounds, std::max(0.0F, node.resolved_corner_radii.top_left)});
+    const CornerRadii corner_radii = NormalizeCornerRadii(node.bounds, node.resolved_corner_radii);
+    if (corner_radii.IsUniform()) {
+      clips.emplace_back(PushClipCommand{node.bounds, corner_radii.top_left});
     } else {
-      clips.emplace_back(PushPathClipCommand{Path::RoundedRect(node.bounds, node.resolved_corner_radii)});
+      clips.emplace_back(PushPathClipCommand{Path::RoundedRect(node.bounds, corner_radii)});
     }
   }
   if (IsScrollContainer(node)) {

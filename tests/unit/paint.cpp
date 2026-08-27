@@ -72,6 +72,36 @@ TEST_CASE("PaintContextBuildsAnImmutableLocalSequence") {
   REQUIRE_THROWS_AS(context.DrawRect({}, Color::White()), std::logic_error);
 }
 
+TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
+  const Rect pill{10.0F, 20.0F, 120.0F, 20.0F};
+  const LinearGradient linear{
+      .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+  };
+  const RadialGradient radial{
+      .radius = {0.5F, 0.5F},
+      .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+  };
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 160.0F, 80.0F}};
+  context.DrawRect(pill, Color::White(), CornerRadii{10000.0F});
+  context.DrawLinearGradient(pill, linear, CornerRadii{10000.0F});
+  context.DrawRadialGradient(pill, radial, CornerRadii{10000.0F});
+  context.DrawBorder(pill, Color::Black(), 2.0F, CornerRadii{10000.0F});
+  context.DrawShadow(pill, Color::Black(), {}, 4.0F, 2.0F, CornerRadii{10000.0F});
+  context.PushClip(pill, CornerRadii{10000.0F});
+  context.PopClip();
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 7);
+  REQUIRE(std::get<DrawRectCommand>(sequence.Commands()[0]).corner_radius == 10.0F);
+  REQUIRE(std::get<DrawLinearGradientCommand>(sequence.Commands()[1]).corner_radius == 10.0F);
+  REQUIRE(std::get<DrawRadialGradientCommand>(sequence.Commands()[2]).corner_radius == 10.0F);
+  REQUIRE(std::get<DrawBorderCommand>(sequence.Commands()[3]).corner_radius == 10.0F);
+  REQUIRE(detail::ResolveShadow(std::get<DrawShadowCommand>(sequence.Commands()[4])).corner_radius == 12.0F);
+  REQUIRE(std::get<PushClipCommand>(sequence.Commands()[5]).corner_radius == 10.0F);
+  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[6]));
+}
+
 TEST_CASE("PaintContextRecordsPlatformNeutralGradients") {
   const LinearGradient linear{
       .start = {0.0F, 0.0F},

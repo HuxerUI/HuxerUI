@@ -99,6 +99,7 @@ void PaintContext::DrawRect(Rect rect, Color color, CornerRadii corner_radii) {
   RequireRect(rect);
   RequireColor(color);
   RequireCornerRadii(corner_radii);
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (corner_radii.IsUniform()) {
     sequence_.commands_.emplace_back(DrawRectCommand{rect, color, corner_radii.top_left});
     Include(rect);
@@ -115,6 +116,7 @@ void PaintContext::DrawLinearGradient(Rect rect, LinearGradient gradient, Corner
     throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
   }
   RequireGradientStops(gradient.stops);
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
   }
@@ -135,6 +137,7 @@ void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, Corner
     throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
   }
   RequireGradientStops(gradient.stops);
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
   }
@@ -426,6 +429,7 @@ void PaintContext::DrawBorder(Rect rect, Color color, float width, CornerRadii c
   RequireColor(color);
   RequireNonNegative(width, "HuxerUI paint border width must be finite and non-negative");
   RequireCornerRadii(corner_radii);
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     const float inset = width * 0.5F;
     const Rect centerline{
@@ -570,6 +574,7 @@ void PaintContext::PushClip(Rect rect, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
   RequireCornerRadii(corner_radii);
+  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushPathClip(Path::RoundedRect(rect, corner_radii));
     return;

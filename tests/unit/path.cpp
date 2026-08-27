@@ -78,6 +78,18 @@ TEST_CASE("RoundedRectUsesCubicCircularCorners") {
   REQUIRE(path.Bounds() == Rect{10.0F, 20.0F, 80.0F, 60.0F});
 }
 
+TEST_CASE("RoundedRectScalesOverconstrainedCornerRadiiProportionally") {
+  constexpr float scale = 2.0F / 7.0F;
+  const Path path = Path::RoundedRect({0.0F, 0.0F, 120.0F, 40.0F}, {80.0F, 40.0F, 20.0F, 60.0F});
+  const auto elements = detail::PathAccess::Elements(path);
+
+  REQUIRE(elements[0].points[0].x == Catch::Approx(80.0F * scale));
+  REQUIRE(elements[1].points[0].x == Catch::Approx(120.0F - 40.0F * scale));
+  REQUIRE(elements[3].points[0].y == Catch::Approx(40.0F - 20.0F * scale));
+  REQUIRE(elements[5].points[0].x == Catch::Approx(60.0F * scale));
+  REQUIRE(path.Bounds() == Rect{0.0F, 0.0F, 120.0F, 40.0F});
+}
+
 TEST_CASE("MovedFromPathRemainsAnEmptyReusableValue") {
   Path source;
   source.MoveTo({1.0F, 2.0F}).LineTo({3.0F, 4.0F});

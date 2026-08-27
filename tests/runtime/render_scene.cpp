@@ -175,6 +175,12 @@ View AsymmetricClipChildrenApp() {
   }.With(Frame{80.0F, 80.0F}, CornerRadius{CornerRadii::Top(20.0F)}, ClipChildren{});
 }
 
+View FullCornerClipChildrenApp() {
+  return Stack {
+    Spacer().With(Frame{120.0F, 40.0F}),
+  }.With(Frame{120.0F, 40.0F}, Background{Color::White()}, CornerRadius{10000.0F}, ClipChildren{});
+}
+
 View AnimatedClipChildrenApp() {
   return Button("animated clip")
       .OnClick([] {})
@@ -432,6 +438,27 @@ TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
   const auto* child_clip = std::get_if<PushPathClipCommand>(&render_node->child_clips.front());
   REQUIRE(child_clip != nullptr);
   REQUIRE(child_clip->path.Bounds() == mounted->bounds);
+}
+
+TEST_CASE("FullCornerRadiusProducesMatchingCapsulePaintAndChildClip") {
+  TestPlatform platform;
+  Runtime runtime{FullCornerClipChildrenApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
+
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE(frame.scene.root != nullptr);
+  const detail::MountedNode* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  const RenderNode* render_node = FindRenderNode(*frame.scene.root, mounted->identity);
+  REQUIRE(render_node != nullptr);
+  REQUIRE(render_node->content.Commands().size() == 1);
+  const auto* background = std::get_if<DrawRectCommand>(&render_node->content.Commands().front());
+  REQUIRE(background != nullptr);
+  REQUIRE(background->corner_radius == 20.0F);
+  REQUIRE(render_node->child_clips.size() == 1);
+  const auto* child_clip = std::get_if<PushClipCommand>(&render_node->child_clips.front());
+  REQUIRE(child_clip != nullptr);
+  REQUIRE(child_clip->corner_radius == 20.0F);
 }
 
 TEST_CASE("ClipChildrenUsesTheResolvedIndicationCornerRadii") {
