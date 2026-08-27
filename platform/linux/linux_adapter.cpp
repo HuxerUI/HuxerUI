@@ -417,17 +417,20 @@ public:
         },
         new std::shared_ptr<ReadState>(state)
     );
-    const guint timeout = g_timeout_add_once(
+    const guint timeout = g_timeout_add_full(
+        G_PRIORITY_DEFAULT,
         1000,
-        [](gpointer data) {
+        [](gpointer data) -> gboolean {
           auto& read = *static_cast<ReadState*>(data);
           if (!read.finished) {
             read.timed_out = true;
             g_cancellable_cancel(read.cancellable);
             g_main_loop_quit(read.loop);
           }
+          return G_SOURCE_REMOVE;
         },
-        state.get()
+        state.get(),
+        nullptr
     );
     g_main_loop_run(state->loop);
     if (!state->timed_out) {
