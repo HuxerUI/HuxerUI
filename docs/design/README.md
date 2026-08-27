@@ -11,6 +11,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Incremental Layout and Rendering](incremental-rendering.md): retained geometry, invalidation, scene construction, and damage.
 - [Interaction and Indication](interaction-indication.md): interaction facts, visuals, paint ordering, and customization.
 - [Gesture Recognition and Arbitration](gestures.md): recognition, competition, ownership, velocity, and cancellation.
+- [Typed Drag-and-Drop](drag-drop.md): typed payloads, targets, previews, auto-scroll, and cancellation.
 - [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, and frozen scenes.
 
 ## Application structure

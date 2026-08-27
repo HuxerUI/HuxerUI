@@ -1,14 +1,22 @@
 #pragma once
 
 #include <chrono>
+#include <concepts>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <type_traits>
+#include <typeindex>
+#include <utility>
 
 #include <huxerui/event.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
 
 namespace huxerui {
+
+class View;
 
 // Platform-provided recognition defaults used when a gesture does not declare an explicit override.
 struct GestureSettings {
@@ -143,6 +151,140 @@ struct DragEvents {
   struct Ended : Event<const DragEvent&> {};
   // Emitted when an accepted drag loses ownership without a normal Up.
   struct Canceled : Event<const DragEvent&> {};
+};
+
+// Describes one target-relative update during a typed drag-and-drop session.
+struct DropEvent {
+  // Pointer sequence that owns the drag-and-drop session.
+  std::int64_t pointer_id = 0;
+  // Device kind reported by the owning pointer sequence.
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  // Current position in the receiving DropTarget node's local logical coordinate space.
+  Point position;
+  // Current position in host-window logical coordinates.
+  Point window_position;
+
+  bool operator==(const DropEvent&) const = default;
+};
+
+// Describes normal completion of a drag source, including whether a target accepted the drop.
+struct DragDropResult {
+  DragEvent drag;
+  bool dropped = false;
+
+  bool operator==(const DragDropResult&) const = default;
+};
+
+// Typed lifecycle event keys emitted by DragSource.
+struct DragSourceEvents {
+  struct Started : Event<const DragEvent&> {};
+  struct Changed : Event<const DragEvent&> {};
+  struct Ended : Event<const DragDropResult&> {};
+  struct Canceled : Event<const DragEvent&> {};
+};
+
+// Typed lifecycle event keys emitted by a compatible DropTarget.
+template <class T>
+  requires std::same_as<T, std::remove_cvref_t<T>>
+struct DropEvents {
+  struct Entered : Event<const T&, const DropEvent&> {};
+  struct Moved : Event<const T&, const DropEvent&> {};
+  struct Exited : Event<const T&, const DropEvent&> {};
+  struct Dropped : Event<const T&, const DropEvent&> {};
+};
+
+namespace detail {
+
+class DragSourceExtension;
+class DropTargetExtension;
+
+struct DropTargetDispatch {
+  using Function = void (*)(const EventBindings&, const void*, const DropEvent&);
+
+  Function entered = nullptr;
+  Function moved = nullptr;
+  Function exited = nullptr;
+  Function dropped = nullptr;
+};
+
+} // namespace detail
+
+// Starts a typed drag-and-drop session after its DragGesture wins pointer ownership.
+class DragSource {
+public:
+  template <class T>
+    requires std::same_as<T, std::remove_cvref_t<T>>
+  explicit DragSource(T payload, DragGesture gesture = {})
+      : DragSource(typeid(T), std::make_shared<const T>(std::move(payload)), {}, std::move(gesture)) {}
+
+  template <class T>
+    requires std::same_as<T, std::remove_cvref_t<T>>
+  DragSource(T payload, std::function<View()> preview, DragGesture gesture = {})
+      : DragSource(
+            typeid(T), std::make_shared<const T>(std::move(payload)), std::move(preview), std::move(gesture)
+        ) {}
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+private:
+  DragSource(std::type_index payload_type, std::shared_ptr<const void> payload, std::function<View()> preview,
+             DragGesture gesture);
+
+  std::type_index payload_type_ = typeid(void);
+  std::shared_ptr<const void> payload_;
+  std::function<View()> preview_;
+  DragGesture gesture_;
+
+  friend class detail::DragSourceExtension;
+};
+
+// Accepts exact typed payloads from DragSource without participating in pointer ownership recognition.
+class DropTarget {
+public:
+  template <class T>
+    requires std::same_as<T, std::remove_cvref_t<T>>
+  static DropTarget Accepts() {
+    return Accepts<T>([](const T&) { return true; });
+  }
+
+  template <class T, class Predicate>
+    requires std::same_as<T, std::remove_cvref_t<T>> && std::copy_constructible<Predicate> &&
+             std::predicate<Predicate&, const T&>
+  static DropTarget Accepts(Predicate predicate) {
+    const detail::DropTargetDispatch dispatch{
+        [](const detail::EventBindings& bindings, const void* payload, const DropEvent& event) {
+          detail::EmitEvent<typename DropEvents<T>::Entered>(bindings, *static_cast<const T*>(payload), event);
+        },
+        [](const detail::EventBindings& bindings, const void* payload, const DropEvent& event) {
+          detail::EmitEvent<typename DropEvents<T>::Moved>(bindings, *static_cast<const T*>(payload), event);
+        },
+        [](const detail::EventBindings& bindings, const void* payload, const DropEvent& event) {
+          detail::EmitEvent<typename DropEvents<T>::Exited>(bindings, *static_cast<const T*>(payload), event);
+        },
+        [](const detail::EventBindings& bindings, const void* payload, const DropEvent& event) {
+          detail::EmitEvent<typename DropEvents<T>::Dropped>(bindings, *static_cast<const T*>(payload), event);
+        },
+    };
+    return DropTarget{
+        typeid(T),
+        [predicate = std::move(predicate)](const void* payload) mutable {
+          return std::invoke(predicate, *static_cast<const T*>(payload));
+        },
+        dispatch,
+    };
+  }
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+private:
+  DropTarget(std::type_index payload_type, std::function<bool(const void*)> accepts,
+             detail::DropTargetDispatch dispatch);
+
+  std::type_index payload_type_ = typeid(void);
+  std::function<bool(const void*)> accepts_;
+  detail::DropTargetDispatch dispatch_;
+
+  friend class detail::DropTargetExtension;
 };
 
 // Recognizes the combined translation, scale, and rotation of two or more pointers.

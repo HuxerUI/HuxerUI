@@ -25,6 +25,8 @@ struct GestureSettings;
 struct SemanticAction;
 
 namespace detail {
+struct DragSourceCapability;
+struct DropTargetCapability;
 class GestureRecognizer;
 }
 
@@ -182,6 +184,10 @@ private:
       MountedNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings,
       Transform2D frozen_node_to_window
   );
+
+  [[nodiscard]] virtual const detail::DragSourceCapability* GetDragSourceCapability() const noexcept;
+
+  [[nodiscard]] virtual const detail::DropTargetCapability* GetDropTargetCapability() const noexcept;
 
   void BindPaintInvalidation(std::function<void(PaintInvalidation)> callback) {
     invalidate_paint_ = std::move(callback);

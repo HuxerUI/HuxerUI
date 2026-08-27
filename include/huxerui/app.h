@@ -32,6 +32,8 @@
 
 namespace huxerui {
 
+struct DragEvent;
+
 class FileSystem;
 class FilePicker;
 class PlatformResources;
@@ -231,6 +233,9 @@ int RunPlatformApplication(const Application& application);
 enum class GestureDecision;
 class GestureRecognizer;
 struct NodeExtensionHandle;
+struct ActiveDropTarget;
+struct DragDropSession;
+struct DragSourceRecognitionState;
 struct MountedNode;
 struct PointerRecognition;
 struct PointerSession;
@@ -317,6 +322,15 @@ private:
   void QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event);
   void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
   void CancelPointerRecognition(detail::PointerRecognition& recognition, const PointerEvent& event);
+  void BeginDragDrop(detail::PointerSession& session, detail::DragSourceRecognitionState& recognition);
+  void UpdateDragDrop(detail::PointerSession& session, const DragEvent& drag);
+  void UpdateDropTarget(detail::PointerSession& session, const DragEvent& drag, bool emit_moved);
+  void FinishDragDrop(detail::PointerSession& session, const DragEvent& drag);
+  void CancelDragDrop(detail::PointerSession& session, const DragEvent& drag);
+  void AdvanceDragDrop(const FrameInfo& frame);
+  void AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame);
+  [[nodiscard]] std::optional<detail::ActiveDropTarget>
+  ResolveDropTarget(const detail::DragDropSession& session, Point window_position) const;
   [[nodiscard]] bool ResolveSharedGestureRecognition(const std::shared_ptr<detail::GestureRecognizer>& recognizer,
     std::size_t index, const PointerEvent& event, std::optional<double> timestamp);
   void ResolvePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event,

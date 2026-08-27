@@ -117,6 +117,22 @@ The application retains the authoritative accumulated transform.
 Gesture callbacks receive stable logical coordinates and explicit cancellation.
 Do not combine raw pointer handling with a built-in recognizer to recreate the same state machine.
 
+`DragSource` transfers an immutable application value to one exact typed `DropTarget` while preserving the ordinary DragGesture recognition rules.
+The application handles `DropEvents<T>::Dropped` to perform the authoritative data mutation.
+An optional preview is ordinary View content presented in a non-interactive Layer.
+
+```cpp
+return CardView(card)
+    .With(DragSource(CardTransfer{card.id}))
+    .On<DragSourceEvents::Ended>([](const DragDropResult& result) {
+      ReportDropResult(result.dropped);
+    });
+```
+
+Use a long-press DragGesture configuration for reorder behavior inside scrolling content.
+Drag-and-drop is in-process; native files, URLs, and PlatformView targets are not inferred from an application payload.
+See [Typed Drag-and-Drop Design](../design/drag-drop.md) for ownership, target selection, preview, and auto-scroll behavior.
+
 ## TextField
 
 `TextField` is controlled by a complete `TextEditingValue`, not only a string.

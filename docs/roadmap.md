@@ -17,7 +17,6 @@ Current behavior is documented in the user guides, while detailed constraints li
 
 ## Interaction and animation
 
-- Extend the gesture foundation with typed drag-and-drop.
 - Add ordinary View lifecycle transitions and overscroll effects without introducing per-component Runtime branches.
 - Expand paint primitives only when a production component or application requires them.
 

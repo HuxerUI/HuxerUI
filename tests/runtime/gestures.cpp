@@ -24,6 +24,33 @@ State<bool> gesture_target_enabled;
 State<bool> gesture_modifier_present;
 bool throw_on_gesture_cancel = false;
 bool throw_on_transform_started = false;
+bool drag_drop_completed = false;
+State<std::string> drag_drop_payload;
+State<bool> drop_target_accepts;
+State<bool> drop_target_uses_string;
+State<bool> drag_source_present;
+State<bool> drop_target_present;
+bool throw_on_drop_predicate = false;
+bool throw_on_drop_entered = false;
+std::optional<DropEvent> last_drop_event;
+std::optional<ScrollController> drag_drop_scroll;
+
+struct MoveOnlyDropPredicate {
+  MoveOnlyDropPredicate() = default;
+  MoveOnlyDropPredicate(const MoveOnlyDropPredicate&) = delete;
+  MoveOnlyDropPredicate(MoveOnlyDropPredicate&&) = default;
+
+  bool operator()(const std::string&) const {
+    return true;
+  }
+};
+
+template <class Predicate>
+concept AcceptsStringDropPredicate = requires(Predicate predicate) {
+  DropTarget::Accepts<std::string>(std::move(predicate));
+};
+
+static_assert(!AcceptsStringDropPredicate<MoveOnlyDropPredicate>);
 
 View MultiTapApp() {
   return Button("multi tap")
@@ -205,6 +232,246 @@ View GestureLifecycleApp() {
       .On<DragEvents::Ended>([](const DragEvent&) { gesture_events.emplace_back("ended"); });
 }
 
+View DragDropApp() {
+  return Row {
+    Text("source")
+        .With(huxerui::Frame{80.0F, 60.0F}, DragSource(std::string{"document"}))
+        .On<DragSourceEvents::Started>([](const DragEvent&) { gesture_events.emplace_back("source started"); })
+        .On<DragSourceEvents::Changed>([](const DragEvent&) { gesture_events.emplace_back("source changed"); })
+        .On<DragSourceEvents::Ended>([](const DragDropResult& result) {
+          drag_drop_completed = result.dropped;
+          gesture_events.emplace_back("source ended");
+        })
+        .On<DragSourceEvents::Canceled>([](const DragEvent&) { gesture_events.emplace_back("source canceled"); }),
+    Text("target")
+        .With(huxerui::Frame{80.0F, 60.0F}, DropTarget::Accepts<std::string>())
+        .On<DropEvents<std::string>::Entered>([](const std::string& payload, const DropEvent&) {
+          gesture_events.emplace_back("entered " + payload);
+        })
+        .On<DropEvents<std::string>::Moved>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("moved");
+        })
+        .On<DropEvents<std::string>::Exited>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("exited");
+        })
+        .On<DropEvents<std::string>::Dropped>([](const std::string& payload, const DropEvent&) {
+          gesture_events.emplace_back("dropped " + payload);
+        }),
+  };
+}
+
+View DragDropPreviewApp() {
+  return Row {
+    Text("source")
+        .With(
+            huxerui::Frame{80.0F, 60.0F},
+            DragSource(std::string{"document"}, [] {
+              return Text("drag preview")
+                  .With(DropTarget::Accepts<std::string>())
+                  .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+                    gesture_events.emplace_back("preview entered");
+                  });
+            })
+        ),
+    Text("target")
+        .With(huxerui::Frame{80.0F, 60.0F}, DropTarget::Accepts<std::string>())
+        .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("target entered");
+        }),
+  };
+}
+
+View SnapshotDragDropApp() {
+  auto payload = UseState(std::string{"original"});
+  drag_drop_payload = payload;
+  return Row {
+    Text("source").With(huxerui::Frame{80.0F, 60.0F}, DragSource(payload.Get())),
+    Text("target")
+        .With(huxerui::Frame{80.0F, 60.0F}, DropTarget::Accepts<std::string>())
+        .On<DropEvents<std::string>::Dropped>([](const std::string& value, const DropEvent& event) {
+          gesture_events.push_back(value);
+          last_drop_event = event;
+        }),
+  };
+}
+
+View NestedDropTargetApp() {
+  return Column {
+    Text("inner")
+        .With(
+            huxerui::Frame{100.0F, 60.0F},
+            DropTarget::Accepts<std::string>([](const std::string&) { return false; })
+        ),
+  }.With(huxerui::Frame{100.0F, 60.0F}, DropTarget::Accepts<std::string>())
+      .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+        gesture_events.emplace_back("ancestor entered");
+      });
+}
+
+View NestedDropTargetRoot() {
+  return Row {
+    Text("source").With(huxerui::Frame{80.0F, 60.0F}, DragSource(std::string{"payload"})),
+    NestedDropTargetApp(),
+  };
+}
+
+View AutoScrollDragDropApp() {
+  auto scroll = UseScrollController();
+  drag_drop_scroll = scroll;
+  return Row {
+    Text("source").With(huxerui::Frame{60.0F, 100.0F}, DragSource(std::string{"payload"})),
+    ScrollView {
+      Text("scroll target").With(
+          huxerui::Frame{100.0F, 300.0F},
+          DropTarget::Accepts<std::string>()
+      ),
+    }.Controller(scroll).With(huxerui::Frame{100.0F, 100.0F}),
+  };
+}
+
+View WrongTypeDragDropApp() {
+  return Row {
+    Text("source")
+        .With(huxerui::Frame{80.0F, 60.0F}, DragSource(7))
+        .On<DragSourceEvents::Ended>([](const DragDropResult& result) {
+          drag_drop_completed = result.dropped;
+          gesture_events.emplace_back("ended");
+        }),
+    Text("target")
+        .With(huxerui::Frame{80.0F, 60.0F}, DropTarget::Accepts<std::string>())
+        .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("entered");
+        }),
+  };
+}
+
+View UpdatingDropTargetApp() {
+  auto accepts = UseState(true);
+  drop_target_accepts = accepts;
+  return Row {
+    Text("source").With(huxerui::Frame{80.0F, 60.0F}, DragSource(std::string{"payload"})),
+    Text("target")
+        .With(
+            huxerui::Frame{80.0F, 60.0F},
+            DropTarget::Accepts<std::string>([accepted = accepts.Get()](const std::string&) { return accepted; })
+        )
+        .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("entered");
+        })
+        .On<DropEvents<std::string>::Exited>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("exited");
+        }),
+  };
+}
+
+View RetypedDropTargetApp() {
+  auto uses_string = UseState(true);
+  drop_target_uses_string = uses_string;
+  View target = Text("target")
+                    .With(huxerui::Frame{80.0F, 60.0F})
+                    .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+                      gesture_events.emplace_back("string entered");
+                    })
+                    .On<DropEvents<std::string>::Exited>([](const std::string& value, const DropEvent&) {
+                      gesture_events.emplace_back("string exited " + value);
+                    })
+                    .On<DropEvents<int>::Exited>([](const int&, const DropEvent&) {
+                      gesture_events.emplace_back("int exited");
+                    });
+  target = uses_string.Get() ? std::move(target).With(DropTarget::Accepts<std::string>())
+                             : std::move(target).With(DropTarget::Accepts<int>());
+  return Row {
+    Text("source").With(huxerui::Frame{80.0F, 60.0F}, DragSource(std::string{"payload"})),
+    std::move(target),
+  };
+}
+
+View TransformedDragPreviewApp() {
+  return Text("scaled source").With(
+      huxerui::Frame{80.0F, 60.0F},
+      Scale{2.0F, huxerui::TransformOrigin{0.0F, 0.0F}},
+      DragSource(std::string{"payload"}, [] { return Text("transformed preview"); })
+  );
+}
+
+View DragDropLifecycleApp() {
+  auto source_present = UseState(true);
+  auto target_present = UseState(true);
+  drag_source_present = source_present;
+  drop_target_present = target_present;
+
+  View source = Text("source placeholder").With(huxerui::Frame{80.0F, 60.0F});
+  if (source_present.Get()) {
+    source = Text("source")
+                 .With(
+                     huxerui::Frame{80.0F, 60.0F},
+                     DragSource(std::string{"payload"}, [] { return Text("lifecycle preview"); })
+                 )
+                 .On<DragSourceEvents::Started>([](const DragEvent&) {
+                   gesture_events.emplace_back("source started");
+                 })
+                 .On<DragSourceEvents::Ended>([](const DragDropResult& result) {
+                   drag_drop_completed = result.dropped;
+                   gesture_events.emplace_back("source ended");
+                 })
+                 .On<DragSourceEvents::Canceled>([](const DragEvent&) {
+                   gesture_events.emplace_back("source canceled");
+                 });
+  }
+
+  View target = Text("target placeholder").With(huxerui::Frame{80.0F, 60.0F});
+  if (target_present.Get()) {
+    target = Text("target")
+                 .With(huxerui::Frame{80.0F, 60.0F}, DropTarget::Accepts<std::string>())
+                 .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+                   gesture_events.emplace_back("target entered");
+                 })
+                 .On<DropEvents<std::string>::Exited>([](const std::string&, const DropEvent&) {
+                   gesture_events.emplace_back("target exited");
+                 });
+  }
+
+  return Row {
+    std::move(source),
+    std::move(target),
+  };
+}
+
+View ThrowingDragDropApp() {
+  return Row {
+    Text("source")
+        .With(
+            huxerui::Frame{80.0F, 60.0F},
+            DragSource(std::string{"payload"}, [] { return Text("throwing preview"); })
+        )
+        .On<DragSourceEvents::Started>([](const DragEvent&) {
+          gesture_events.emplace_back("source started");
+        })
+        .On<DragSourceEvents::Canceled>([](const DragEvent&) {
+          gesture_events.emplace_back("source canceled");
+        }),
+    Text("target")
+        .With(
+            huxerui::Frame{80.0F, 60.0F},
+            DropTarget::Accepts<std::string>([](const std::string&) {
+              if (throw_on_drop_predicate) {
+                throw std::runtime_error("drop predicate failed");
+              }
+              return true;
+            })
+        )
+        .On<DropEvents<std::string>::Entered>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("target entered");
+          if (throw_on_drop_entered) {
+            throw std::runtime_error("drop entered failed");
+          }
+        })
+        .On<DropEvents<std::string>::Exited>([](const std::string&, const DropEvent&) {
+          gesture_events.emplace_back("target exited");
+        }),
+  };
+}
+
 class GesturePlatform final : public TestPlatform {
 public:
   GestureSettings GestureDefaults() const noexcept override {
@@ -227,6 +494,11 @@ void ResetGestureEvents() {
   gesture_clicks = 0;
   pointer_cancels = 0;
   throw_on_transform_started = false;
+  throw_on_drop_predicate = false;
+  throw_on_drop_entered = false;
+  drag_drop_completed = false;
+  last_drop_event.reset();
+  drag_drop_scroll.reset();
 }
 
 } // namespace
@@ -579,6 +851,267 @@ TEST_CASE("Nested gestures resolve in deterministic deepest-node order") {
   Pointer(runtime, PointerEventType::Move, 15, {30.0F, 20.0F});
 
   REQUIRE(gesture_events == std::vector<std::string>{"child"});
+}
+
+TEST_CASE("Typed drag-and-drop preserves source and target lifecycle order") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{DragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 30, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 30, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 30, {120.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 30, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{
+                                "source started",
+                                "source changed",
+                                "entered document",
+                                "dropped document",
+                                "source ended",
+                            });
+  REQUIRE(drag_drop_completed);
+}
+
+TEST_CASE("Cancel exits the active drop target before canceling the source") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{DragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 31, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 31, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 31, {120.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Cancel, 31, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{
+                                "source started",
+                                "source changed",
+                                "entered document",
+                                "exited",
+                                "source canceled",
+                            });
+  REQUIRE_FALSE(drag_drop_completed);
+}
+
+TEST_CASE("DragSource snapshots its payload at pointer Down and reports target-local coordinates") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{SnapshotDragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 32, {20.0F, 30.0F});
+  drag_drop_payload = "updated";
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Move, 32, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 32, {120.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 32, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"original"});
+  REQUIRE(last_drop_event.has_value());
+  REQUIRE(last_drop_event->position == Point{40.0F, 30.0F});
+  REQUIRE(last_drop_event->window_position == Point{120.0F, 30.0F});
+}
+
+TEST_CASE("A rejecting nested target falls back to a compatible ancestor") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{NestedDropTargetRoot, platform};
+  runtime.SetWindowMetrics({.viewport = {180.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 33, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 33, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 33, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"ancestor entered"});
+}
+
+TEST_CASE("Drag preview is a transient layer dismissed with the session") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{DragDropPreviewApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 34, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 34, {40.0F, 30.0F});
+  REQUIRE(ContainsText(runtime.BuildFrame(), "drag preview"));
+  Pointer(runtime, PointerEventType::Move, 34, {120.0F, 30.0F});
+  REQUIRE(gesture_events == std::vector<std::string>{"target entered"});
+
+  Pointer(runtime, PointerEventType::Cancel, 34, {120.0F, 30.0F});
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "drag preview"));
+}
+
+TEST_CASE("A compatible target enables stationary edge auto-scroll through its ancestor route") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{AutoScrollDragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 35, {20.0F, 50.0F});
+  Pointer(runtime, PointerEventType::Move, 35, {40.0F, 50.0F});
+  Pointer(runtime, PointerEventType::Move, 35, {100.0F, 96.0F});
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+
+  REQUIRE(drag_drop_scroll.has_value());
+  REQUIRE(drag_drop_scroll->Offset() > 0.0F);
+}
+
+TEST_CASE("DropTarget requires exact payload type identity") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{WrongTypeDragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 36, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 36, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 36, {120.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 36, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"ended"});
+  REQUIRE_FALSE(drag_drop_completed);
+}
+
+TEST_CASE("An active target uses its latest compatible predicate") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{UpdatingDropTargetApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 37, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 37, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 37, {120.0F, 30.0F});
+  drop_target_accepts = false;
+  runtime.BuildFrame();
+
+  REQUIRE(gesture_events == std::vector<std::string>{"entered", "exited"});
+}
+
+TEST_CASE("An active target retains typed exit dispatch when its declaration changes type") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{RetypedDropTargetApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 38, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 38, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 38, {120.0F, 30.0F});
+  drop_target_uses_string = false;
+  runtime.BuildFrame();
+
+  REQUIRE(gesture_events == std::vector<std::string>{"string entered", "string exited payload"});
+}
+
+TEST_CASE("Drag preview converts a transformed source grab point into window space") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformedDragPreviewApp, platform};
+  runtime.SetWindowMetrics({.viewport = {400.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 39, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 39, {40.0F, 30.0F});
+  const std::optional<Rect> preview = FindPresentedTextRect(runtime.BuildFrame(), "transformed preview");
+
+  REQUIRE(preview.has_value());
+  REQUIRE(preview->x == Catch::Approx(20.0F));
+}
+
+TEST_CASE("Removing an active DragSource closes its target and preview without calling an unmounted handler") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{DragDropLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 41, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 41, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 41, {120.0F, 30.0F});
+  drag_source_present = false;
+  runtime.BuildFrame();
+
+  REQUIRE(gesture_events == std::vector<std::string>{"source started", "target entered", "target exited"});
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "lifecycle preview"));
+  Pointer(runtime, PointerEventType::Up, 41, {120.0F, 30.0F});
+  REQUIRE(gesture_events == std::vector<std::string>{"source started", "target entered", "target exited"});
+}
+
+TEST_CASE("Removing an active DropTarget clears it while the source remains owned") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{DragDropLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 42, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 42, {40.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 42, {120.0F, 30.0F});
+  drop_target_present = false;
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Up, 42, {120.0F, 30.0F});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"source started", "target entered", "source ended"});
+  REQUIRE_FALSE(drag_drop_completed);
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "lifecycle preview"));
+}
+
+TEST_CASE("A throwing DropTarget predicate quarantines the transfer and dismisses its preview") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{ThrowingDragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 43, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 43, {40.0F, 30.0F});
+  throw_on_drop_predicate = true;
+  REQUIRE_THROWS_AS(
+      runtime.HandlePointerEvent({PointerEventType::Move, 43, {120.0F, 30.0F}}),
+      std::runtime_error
+  );
+  throw_on_drop_predicate = false;
+
+  REQUIRE(gesture_events == std::vector<std::string>{"source started", "source canceled"});
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "throwing preview"));
+  Pointer(runtime, PointerEventType::Up, 43, {120.0F, 30.0F});
+  REQUIRE(gesture_events == std::vector<std::string>{"source started", "source canceled"});
+}
+
+TEST_CASE("A throwing DropTarget event exits the committed target before canceling the source") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{ThrowingDragDropApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 44, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 44, {40.0F, 30.0F});
+  throw_on_drop_entered = true;
+  REQUIRE_THROWS_AS(
+      runtime.HandlePointerEvent({PointerEventType::Move, 44, {120.0F, 30.0F}}),
+      std::runtime_error
+  );
+  throw_on_drop_entered = false;
+
+  REQUIRE(gesture_events == std::vector<std::string>{
+                                "source started",
+                                "target entered",
+                                "target exited",
+                                "source canceled",
+                            });
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "throwing preview"));
+  Pointer(runtime, PointerEventType::Up, 44, {120.0F, 30.0F});
 }
 
 TEST_CASE("Disabled nodes do not create gesture recognizers") {

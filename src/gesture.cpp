@@ -254,16 +254,17 @@ private:
   LongPressGesture gesture_;
 };
 
-class DragRecognizer final : public detail::GestureRecognizer {
+class DragRecognizer final : public detail::DragSourceRecognizer {
 public:
   DragRecognizer(const DragGesture& gesture, const GestureSettings& settings, const PointerEvent& event,
-                 double timestamp)
+                 double timestamp, bool publish_events = true)
       : axis_(gesture.axis),
         minimum_distance_(gesture.minimum_distance.value_or(settings.pointer_slop)),
         delayed_tolerance_(settings.pointer_slop),
         down_origin_(event.position),
         origin_(event.position),
-        previous_(event.position) {
+        previous_(event.position),
+        publish_events_(publish_events) {
     if (gesture.minimum_press_duration.has_value() && gesture.minimum_press_duration->count() > 0.0) {
       deadline_ = timestamp + gesture.minimum_press_duration->count();
     }
@@ -326,10 +327,16 @@ public:
       sample_count_ = 0;
       Record(origin_, input.timestamp);
     }
-    detail::EmitEvent<DragEvents::Started>(node.event_bindings, BuildEvent(input, {}));
+    current_event_ = BuildEvent(input, {});
+    if (publish_events_) {
+      detail::EmitEvent<DragEvents::Started>(node.event_bindings, current_event_);
+    }
     const Point translation = Difference(Constrain(input.event.position), origin_);
     if (accepted_ && !accepted_from_deadline_ && (translation.x != 0.0F || translation.y != 0.0F)) {
-      detail::EmitEvent<DragEvents::Changed>(node.event_bindings, BuildEvent(input, translation));
+      if (publish_events_) {
+        current_event_ = BuildEvent(input, translation);
+        detail::EmitEvent<DragEvents::Changed>(node.event_bindings, current_event_);
+      }
       previous_ = Constrain(input.event.position);
     }
   }
@@ -342,12 +349,17 @@ public:
     Record(input.event.position, input.timestamp);
     const Point position = Constrain(input.event.position);
     const Point delta = Difference(position, previous_);
+    current_event_ = BuildEvent(input, delta);
     if (input.event.type == PointerEventType::Move) {
-      detail::EmitEvent<DragEvents::Changed>(node.event_bindings, BuildEvent(input, delta));
+      if (publish_events_) {
+        detail::EmitEvent<DragEvents::Changed>(node.event_bindings, current_event_);
+      }
       previous_ = position;
     } else if (input.event.type == PointerEventType::Up) {
       accepted_ = false;
-      detail::EmitEvent<DragEvents::Ended>(node.event_bindings, BuildEvent(input, delta));
+      if (publish_events_) {
+        detail::EmitEvent<DragEvents::Ended>(node.event_bindings, current_event_);
+      }
     }
   }
 
@@ -356,7 +368,14 @@ public:
       return;
     }
     accepted_ = false;
-    detail::EmitEvent<DragEvents::Canceled>(node.event_bindings, BuildEvent(input, {}));
+    current_event_ = BuildEvent(input, {});
+    if (publish_events_) {
+      detail::EmitEvent<DragEvents::Canceled>(node.event_bindings, current_event_);
+    }
+  }
+
+  const DragEvent& CurrentEvent() const noexcept override {
+    return current_event_;
   }
 
 private:
@@ -443,6 +462,8 @@ private:
   std::size_t sample_count_ = 0;
   bool accepted_ = false;
   bool accepted_from_deadline_ = false;
+  bool publish_events_ = true;
+  DragEvent current_event_;
 };
 
 class DragExtension final : public NodeExtension {
@@ -711,10 +732,105 @@ private:
 
 } // namespace
 
+namespace detail {
+
+class DragSourceExtension final : public NodeExtension {
+public:
+  DragSourceExtension(huxerui::MountedNode&, const DragSource& source) {
+    UpdateCapability(source);
+  }
+
+  void Update(huxerui::MountedNode&, const DragSource& source) {
+    UpdateCapability(source);
+  }
+
+  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+    return node.IsEnabled() && node.Bounds().Contains(position);
+  }
+
+private:
+  std::shared_ptr<GestureRecognizer>
+  CreateGestureRecognizer(huxerui::MountedNode&, const PointerEvent& event, double timestamp,
+                          const GestureSettings& settings, Transform2D) override {
+    return std::make_shared<DragRecognizer>(gesture_, settings, event, timestamp, false);
+  }
+
+  const DragSourceCapability* GetDragSourceCapability() const noexcept override {
+    return &capability_;
+  }
+
+  void UpdateCapability(const DragSource& source) {
+    Validate(source.gesture_);
+    gesture_ = source.gesture_;
+    capability_.payload_type = source.payload_type_;
+    capability_.payload = source.payload_;
+    capability_.preview = source.preview_;
+  }
+
+  DragGesture gesture_;
+  DragSourceCapability capability_;
+};
+
+class DropTargetExtension final : public NodeExtension {
+public:
+  DropTargetExtension(huxerui::MountedNode&, const DropTarget& target) {
+    UpdateCapability(target);
+  }
+
+  void Update(huxerui::MountedNode&, const DropTarget& target) {
+    UpdateCapability(target);
+  }
+
+  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+    return node.IsEnabled() && node.Bounds().Contains(position);
+  }
+
+private:
+  const DropTargetCapability* GetDropTargetCapability() const noexcept override {
+    return &capability_;
+  }
+
+  void UpdateCapability(const DropTarget& target) {
+    capability_.payload_type = target.payload_type_;
+    capability_.accepts = target.accepts_;
+    capability_.dispatch = target.dispatch_;
+  }
+
+  DropTargetCapability capability_;
+};
+
+} // namespace detail
+
 std::shared_ptr<detail::GestureRecognizer>
 NodeExtension::CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings&,
                                        Transform2D) {
   return {};
+}
+
+const detail::DragSourceCapability* NodeExtension::GetDragSourceCapability() const noexcept {
+  return nullptr;
+}
+
+const detail::DropTargetCapability* NodeExtension::GetDropTargetCapability() const noexcept {
+  return nullptr;
+}
+
+DragSource::DragSource(std::type_index payload_type, std::shared_ptr<const void> payload,
+                       std::function<View()> preview, DragGesture gesture)
+    : payload_type_(payload_type), payload_(std::move(payload)), preview_(std::move(preview)),
+      gesture_(std::move(gesture)) {
+  if (!payload_) {
+    throw std::invalid_argument("HuxerUI drag source payload must not be empty");
+  }
+  Validate(gesture_);
+}
+
+DropTarget::DropTarget(std::type_index payload_type, std::function<bool(const void*)> accepts,
+                       detail::DropTargetDispatch dispatch)
+    : payload_type_(payload_type), accepts_(std::move(accepts)), dispatch_(dispatch) {
+  if (!accepts_) {
+    throw std::invalid_argument("HuxerUI drop target predicate must not be empty");
+  }
 }
 
 const detail::ModifierDescriptor& MultiTapGesture::Descriptor() {
@@ -727,6 +843,14 @@ const detail::ModifierDescriptor& LongPressGesture::Descriptor() {
 
 const detail::ModifierDescriptor& DragGesture::Descriptor() {
   return detail::ModifierDescriptorFor<DragGesture, DragExtension>();
+}
+
+const detail::ModifierDescriptor& DragSource::Descriptor() {
+  return detail::ModifierDescriptorFor<DragSource, detail::DragSourceExtension>();
+}
+
+const detail::ModifierDescriptor& DropTarget::Descriptor() {
+  return detail::ModifierDescriptorFor<DropTarget, detail::DropTargetExtension>();
 }
 
 const detail::ModifierDescriptor& TransformGesture::Descriptor() {

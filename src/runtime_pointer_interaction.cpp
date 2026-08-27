@@ -184,6 +184,35 @@ GestureRecognizerInput GestureInput(const GestureRecognitionState& retained, con
   return {local, event.position, timestamp};
 }
 
+GestureRecognizerInput GestureInput(const DragSourceRecognitionState& retained, const PointerEvent& event,
+                                    double timestamp) {
+  PointerEvent local = event;
+  if (const std::optional<Point> position = retained.frozen_node_to_window.Inverse(event.position)) {
+    local.position = *position;
+  }
+  return {local, event.position, timestamp};
+}
+
+DropEvent LocalDropEvent(const MountedNode& node, const DragEvent& drag) {
+  Point local = drag.window_position;
+  if (const std::optional<Point> position = node.presentation.resolved_transform.Inverse(drag.window_position)) {
+    local = *position;
+  }
+  return {drag.pointer_id, drag.device_kind, local, drag.window_position};
+}
+
+LayerPlacement DragPreviewPlacement(Point position, Point grab_offset) {
+  return {
+      .kind = LayerPlacementKind::Anchored,
+      .anchor = {position.x, position.y, 0.0F, 0.0F},
+      .preferred_side = LayerAnchorSide::Below,
+      .alignment = LayerAnchorAlignment::Start,
+      .gap = 0.0F,
+      .viewport_margin = 8.0F,
+      .offset = {-grab_offset.x, -grab_offset.y},
+  };
+}
+
 std::optional<std::uint64_t> PointerRecognitionNodeIdentity(const PointerRecognition& recognition) {
   if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
     return tap->node_identity;
@@ -193,6 +222,9 @@ std::optional<std::uint64_t> PointerRecognitionNodeIdentity(const PointerRecogni
   }
   if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
     return gesture->extension.node_identity;
+  }
+  if (const auto* source = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+    return source->extension.node_identity;
   }
   return std::nullopt;
 }
@@ -326,6 +358,18 @@ void Runtime::CancelPointerSession(PointerSession& session, const PointerEvent& 
   for (PointerRecognition& recognition : session.recognitions) {
     CancelPointerRecognition(recognition, cancellation);
   }
+  if (session.drag_drop.has_value()) {
+    const auto source = std::ranges::find_if(session.recognitions, [&](const PointerRecognition& recognition) {
+      const auto* state = std::get_if<DragSourceRecognitionState>(&recognition.state);
+      return state && state->extension == session.drag_drop->source;
+    });
+    if (source != session.recognitions.end()) {
+      const auto& source_state = std::get<DragSourceRecognitionState>(source->state);
+      if (source_state.recognizer) {
+        CancelDragDrop(session, source_state.recognizer->CurrentEvent());
+      }
+    }
+  }
   if (overlay_owned) {
     HandleTextSelectionOverlayPointer(cancellation);
   }
@@ -364,6 +408,318 @@ void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& e
   RequestFrame();
 }
 
+std::optional<ActiveDropTarget> Runtime::ResolveDropTarget(const DragDropSession& session,
+                                                          Point window_position) const {
+  std::vector<detail::MountedNode*> route;
+  const bool has_route =
+      state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, window_position, route);
+  if (!has_route) {
+    return std::nullopt;
+  }
+  for (auto node = route.rbegin(); node != route.rend(); ++node) {
+    if (!(*node)->interaction.enabled) {
+      continue;
+    }
+    for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
+      NodeExtensionEntry& entry = (*node)->extensions[index - 1];
+      if (!entry.extension) {
+        continue;
+      }
+      const DropTargetCapability* capability = entry.extension->GetDropTargetCapability();
+      if (!capability || capability->payload_type != session.payload_type || !capability->accepts ||
+          !capability->accepts(session.payload.get())) {
+        continue;
+      }
+      return ActiveDropTarget{
+          NodeExtensionHandle{(*node)->identity, index - 1, entry.descriptor},
+          capability->dispatch,
+      };
+    }
+  }
+  return std::nullopt;
+}
+
+void Runtime::BeginDragDrop(PointerSession& session, DragSourceRecognitionState& recognition) {
+  const DragEvent drag = recognition.recognizer->CurrentEvent();
+  session.drag_drop = DragDropSession{
+      .source = recognition.extension,
+      .payload_type = recognition.source.payload_type,
+      .payload = recognition.source.payload,
+      .drag = drag,
+  };
+  DragDropSession& drag_drop = *session.drag_drop;
+  if (recognition.source.preview) {
+    const std::function<View()> preview = recognition.source.preview;
+    detail::MountedNode* source = FindNode(*state_->mounted_root_, recognition.extension.node_identity);
+    const Point transformed_origin = recognition.frozen_node_to_window.Apply({});
+    const Point transformed_grab = recognition.frozen_node_to_window.Apply(drag.origin);
+    drag_drop.preview_grab_offset = transformed_grab - transformed_origin;
+    drag_drop.preview_layer = state_->layer_controller_.AttachCaptured(
+        LayerOptions{.level = LayerLevel::Notification, .pointer_policy = LayerPointerPolicy::PassThrough},
+        [preview] {
+          return preview().With(Semantics{
+              .descendants = SemanticDescendantPolicy::Exclude,
+              .hidden = true,
+          });
+        },
+        recognition.environment ? recognition.environment
+                                : (source ? source->environment : state_->root_environment_),
+        DragPreviewPlacement(drag.window_position, drag_drop.preview_grab_offset)
+    );
+  }
+  drag_drop.target = ResolveDropTarget(drag_drop, drag.window_position);
+
+  if (detail::MountedNode* source = FindNode(*state_->mounted_root_, recognition.extension.node_identity)) {
+    EmitEvent<DragSourceEvents::Started>(source->event_bindings, drag);
+  }
+  if (!session.drag_drop.has_value() || !session.drag_drop->target.has_value()) {
+    return;
+  }
+  session.drag_drop->target_entered = true;
+  const ActiveDropTarget active = *session.drag_drop->target;
+  const NodeExtensionHandle target_handle = active.extension;
+  NodeExtension* extension = FindExtension(*state_->mounted_root_, target_handle);
+  detail::MountedNode* target = FindNode(*state_->mounted_root_, target_handle.node_identity);
+  if (target && extension && active.dispatch.entered) {
+    active.dispatch.entered(
+        target->event_bindings, session.drag_drop->payload.get(), LocalDropEvent(*target, drag)
+    );
+  }
+  RequestFrame();
+}
+
+void Runtime::UpdateDragDrop(PointerSession& session, const DragEvent& drag) {
+  if (!session.drag_drop.has_value()) {
+    return;
+  }
+  DragDropSession& drag_drop = *session.drag_drop;
+  drag_drop.drag = drag;
+  if (drag_drop.preview_layer.has_value()) {
+    state_->layer_controller_.UpdatePlacement(
+        *drag_drop.preview_layer, DragPreviewPlacement(drag.window_position, drag_drop.preview_grab_offset)
+    );
+  }
+
+  if (detail::MountedNode* source = FindNode(*state_->mounted_root_, drag_drop.source.node_identity)) {
+    EmitEvent<DragSourceEvents::Changed>(source->event_bindings, drag);
+  }
+  if (!session.drag_drop.has_value()) {
+    return;
+  }
+
+  UpdateDropTarget(session, drag, true);
+  if (session.drag_drop.has_value() && session.drag_drop->target.has_value()) {
+    RequestFrame();
+  }
+}
+
+void Runtime::UpdateDropTarget(PointerSession& session, const DragEvent& drag, bool emit_moved) {
+  if (!session.drag_drop.has_value()) {
+    return;
+  }
+  const std::optional<ActiveDropTarget> previous =
+      session.drag_drop->target_entered ? session.drag_drop->target : std::nullopt;
+  const std::optional<ActiveDropTarget> next = ResolveDropTarget(*session.drag_drop, drag.window_position);
+  const std::shared_ptr<const void> payload = session.drag_drop->payload;
+  session.drag_drop->target = next;
+  session.drag_drop->target_entered = false;
+  const auto dispatch = [&](const ActiveDropTarget& active, DropTargetDispatch::Function function) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, active.extension);
+    detail::MountedNode* target = FindNode(*state_->mounted_root_, active.extension.node_identity);
+    if (target && extension && function) {
+      function(target->event_bindings, payload.get(), LocalDropEvent(*target, drag));
+    }
+  };
+  if (previous == next) {
+    if (next.has_value()) {
+      session.drag_drop->target_entered = true;
+    }
+    if (emit_moved && next.has_value()) {
+      dispatch(*next, next->dispatch.moved);
+    }
+    return;
+  }
+  if (previous.has_value()) {
+    dispatch(*previous, previous->dispatch.exited);
+  }
+  if (next.has_value() && session.drag_drop.has_value()) {
+    session.drag_drop->target_entered = true;
+    dispatch(*next, next->dispatch.entered);
+  }
+}
+
+void Runtime::AdvanceDragDrop(const FrameInfo& frame) {
+  std::vector<std::int64_t> pointer_ids;
+  pointer_ids.reserve(state_->pointer_sessions_.size());
+  for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
+    if (!session.quarantined && session.drag_drop.has_value()) {
+      pointer_ids.push_back(pointer_id);
+    }
+  }
+  for (const std::int64_t pointer_id : pointer_ids) {
+    try {
+      AdvanceDragDropSession(pointer_id, frame);
+    } catch (...) {
+      const auto active = state_->pointer_sessions_.find(pointer_id);
+      if (active != state_->pointer_sessions_.end() && !active->second.quarantined) {
+        active->second.quarantined = true;
+        try {
+          CancelPointerSession(
+              active->second,
+              PointerEvent{
+                  PointerEventType::Cancel,
+                  pointer_id,
+                  active->second.last_position,
+                  active->second.device_kind,
+              }
+          );
+        } catch (...) {
+        }
+      }
+      throw;
+    }
+  }
+}
+
+void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame) {
+  constexpr float edge_extent = 32.0F;
+  constexpr float maximum_speed = 640.0F;
+  auto found = state_->pointer_sessions_.find(pointer_id);
+  if (found == state_->pointer_sessions_.end()) {
+    return;
+  }
+  PointerSession& session = found->second;
+  if (session.quarantined || !session.drag_drop.has_value()) {
+    return;
+  }
+  const DragEvent drag = session.drag_drop->drag;
+  UpdateDropTarget(session, drag, false);
+  found = state_->pointer_sessions_.find(pointer_id);
+  if (found == state_->pointer_sessions_.end() || found->second.quarantined ||
+      !found->second.drag_drop.has_value() || !found->second.drag_drop->target.has_value()) {
+    return;
+  }
+  DragDropSession& drag_drop = *found->second.drag_drop;
+
+  std::vector<detail::MountedNode*> route;
+  const bool has_route = BuildPointerRoute(*state_->mounted_root_, drag_drop.drag.window_position, route);
+  if (!has_route) {
+    return;
+  }
+  const auto target = std::ranges::find(route, drag_drop.target->extension.node_identity,
+                                        &detail::MountedNode::identity);
+  if (target == route.end()) {
+    return;
+  }
+  for (auto candidate = std::make_reverse_iterator(target + 1); candidate != route.rend(); ++candidate) {
+    detail::MountedNode* node = *candidate;
+    if (!node->interaction.enabled || !IsScrollContainer(*node)) {
+      continue;
+    }
+    const std::optional<Point> local =
+        node->presentation.resolved_transform.Inverse(drag_drop.drag.window_position);
+    if (!local.has_value()) {
+      continue;
+    }
+    const Axis axis = ScrollAxis(*node);
+    const Rect viewport = ScrollViewport(*node);
+    const float position = axis == Axis::Vertical ? local->y : local->x;
+    const float start = axis == Axis::Vertical ? viewport.y : viewport.x;
+    const float extent = axis == Axis::Vertical ? viewport.height : viewport.width;
+    const float end = start + extent;
+    const float edge = std::min(edge_extent, extent * 0.5F);
+    float intensity = 0.0F;
+    if (position < start + edge) {
+      intensity = -std::clamp((start + edge - position) / edge, 0.0F, 1.0F);
+    } else if (position > end - edge) {
+      intensity = std::clamp((position - (end - edge)) / edge, 0.0F, 1.0F);
+    }
+    if (intensity == 0.0F || !CanScrollNode(*node, intensity)) {
+      continue;
+    }
+    if (frame.delta_time <= 0.0) {
+      RequestFrame();
+      break;
+    }
+    const float delta = intensity * maximum_speed * static_cast<float>(frame.delta_time);
+    const float consumed = ScrollNodeBy(*node, delta);
+    if (consumed != 0.0F) {
+      NotifyScrollActivity(*node, ScrollActivitySource::External);
+      RequestFrame();
+    }
+    if (std::abs(consumed - delta) < 0.001F) {
+      break;
+    }
+  }
+}
+
+void Runtime::FinishDragDrop(PointerSession& session, const DragEvent& drag) {
+  if (!session.drag_drop.has_value()) {
+    return;
+  }
+  const std::optional<ActiveDropTarget> previous =
+      session.drag_drop->target_entered ? session.drag_drop->target : std::nullopt;
+  const std::optional<ActiveDropTarget> target = ResolveDropTarget(*session.drag_drop, drag.window_position);
+  DragDropSession completed = std::move(*session.drag_drop);
+  completed.target = target;
+  session.drag_drop.reset();
+  if (completed.preview_layer.has_value()) {
+    state_->layer_controller_.Dismiss(*completed.preview_layer);
+  }
+
+  const auto dispatch = [&](const ActiveDropTarget& active, DropTargetDispatch::Function function) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, active.extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, active.extension.node_identity);
+    if (node && extension && function) {
+      function(node->event_bindings, completed.payload.get(), LocalDropEvent(*node, drag));
+    }
+  };
+  if (previous != target && previous.has_value()) {
+    dispatch(*previous, previous->dispatch.exited);
+  }
+  if (previous != target && target.has_value()) {
+    dispatch(*target, target->dispatch.entered);
+  }
+
+  bool dropped = false;
+  if (completed.target.has_value()) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, completed.target->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, completed.target->extension.node_identity);
+    if (node && extension && completed.target->dispatch.dropped) {
+      dropped = true;
+      completed.target->dispatch.dropped(
+          node->event_bindings, completed.payload.get(), LocalDropEvent(*node, drag)
+      );
+    }
+  }
+  if (detail::MountedNode* source = FindNode(*state_->mounted_root_, completed.source.node_identity)) {
+    EmitEvent<DragSourceEvents::Ended>(source->event_bindings, DragDropResult{drag, dropped});
+  }
+}
+
+void Runtime::CancelDragDrop(PointerSession& session, const DragEvent& drag) {
+  if (!session.drag_drop.has_value()) {
+    return;
+  }
+  DragDropSession canceled = std::move(*session.drag_drop);
+  session.drag_drop.reset();
+  if (canceled.preview_layer.has_value()) {
+    state_->layer_controller_.Dismiss(*canceled.preview_layer);
+  }
+  if (canceled.target.has_value() && canceled.target_entered) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, canceled.target->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, canceled.target->extension.node_identity);
+    if (node && extension && canceled.target->dispatch.exited) {
+      canceled.target->dispatch.exited(
+          node->event_bindings, canceled.payload.get(), LocalDropEvent(*node, drag)
+      );
+    }
+  }
+  if (detail::MountedNode* source = FindNode(*state_->mounted_root_, canceled.source.node_identity)) {
+    EmitEvent<DragSourceEvents::Canceled>(source->event_bindings, drag);
+  }
+}
+
 void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const PointerEvent& event) {
   if (!recognition.started) {
     return;
@@ -398,6 +754,12 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
     }
   } else if (auto* gesture_state = std::get_if<GestureRecognitionState>(&recognition.state)) {
     cancel_gesture(*gesture_state);
+  } else if (auto* source_state = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, source_state->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, source_state->extension.node_identity);
+    if (extension && node && source_state->recognizer) {
+      source_state->recognizer->Canceled(*node, *extension, GestureInput(*source_state, event, timestamp));
+    }
   } else if (std::holds_alternative<TextSelectionRecognitionState>(recognition.state)) {
     TrackTouchTextSelectionGesture(event);
   }
@@ -555,6 +917,14 @@ void Runtime::ResolvePointerRecognition(PointerSession& session, std::size_t ind
       gesture->recognizer->Accepted(*node, *extension,
                                     GestureInput(*gesture, event, timestamp.value_or(state_->platform_->Now())));
     }
+  } else if (auto* source = std::get_if<DragSourceRecognitionState>(&session.recognitions[index].state)) {
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, source->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, source->extension.node_identity);
+    if (extension && node && source->recognizer) {
+      source->recognizer->Accepted(*node, *extension,
+                                   GestureInput(*source, event, timestamp.value_or(state_->platform_->Now())));
+      BeginDragDrop(session, *source);
+    }
   }
 }
 
@@ -601,6 +971,28 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
     const GestureRecognizerInput input = GestureInput(retained, event, state_->platform_->Now());
     if (RecognitionOwnerIndex(session) == std::optional{index}) {
       retained.recognizer->UpdateAccepted(*node, *extension, input);
+      return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
+                 ? GestureDecision::Reject
+                 : GestureDecision::Continue;
+    }
+    return retained.recognizer->Update(input);
+  }
+  if (auto* source_state = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+    DragSourceRecognitionState& retained = *source_state;
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, retained.extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, retained.extension.node_identity);
+    if (!extension || !node || !node->interaction.enabled || !retained.recognizer) {
+      return GestureDecision::Reject;
+    }
+    recognition.started = true;
+    const GestureRecognizerInput input = GestureInput(retained, event, state_->platform_->Now());
+    if (RecognitionOwnerIndex(session) == std::optional{index}) {
+      retained.recognizer->UpdateAccepted(*node, *extension, input);
+      if (event.type == PointerEventType::Move) {
+        UpdateDragDrop(session, retained.recognizer->CurrentEvent());
+      } else if (event.type == PointerEventType::Up) {
+        FinishDragDrop(session, retained.recognizer->CurrentEvent());
+      }
       return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
                  ? GestureDecision::Reject
                  : GestureDecision::Continue;
@@ -702,11 +1094,16 @@ void Runtime::AdvancePointerRecognition(double timestamp) {
       }
       for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
         const PointerRecognition& recognition = session.recognitions[index];
-        const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state);
-        if (!recognition.started || !gesture || !gesture->recognizer) {
+        const GestureRecognizer* recognizer = nullptr;
+        if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
+          recognizer = gesture->recognizer.get();
+        } else if (const auto* source = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+          recognizer = source->recognizer.get();
+        }
+        if (!recognition.started || !recognizer) {
           continue;
         }
-        const std::optional<double> deadline = gesture->recognizer->Deadline();
+        const std::optional<double> deadline = recognizer->Deadline();
         if (!deadline.has_value()) {
           continue;
         }
@@ -737,11 +1134,16 @@ void Runtime::AdvancePointerRecognition(double timestamp) {
       continue;
     }
     PointerRecognition& recognition = session->second.recognitions[due->recognition_index];
-    auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state);
-    if (!recognition.started || !gesture || !gesture->recognizer) {
+    GestureRecognizer* recognizer = nullptr;
+    if (auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
+      recognizer = gesture->recognizer.get();
+    } else if (auto* source = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+      recognizer = source->recognizer.get();
+    }
+    if (!recognition.started || !recognizer) {
       continue;
     }
-    const GestureDecision decision = gesture->recognizer->AdvanceDeadline(timestamp);
+    const GestureDecision decision = recognizer->AdvanceDeadline(timestamp);
     PointerEvent event{
         PointerEventType::Move,
         due->pointer_id,
@@ -753,8 +1155,7 @@ void Runtime::AdvancePointerRecognition(double timestamp) {
     } else if (decision == GestureDecision::Reject) {
       event.type = PointerEventType::Cancel;
       CancelPointerRecognition(recognition, event);
-    } else if (gesture->recognizer->Deadline().has_value() &&
-               *gesture->recognizer->Deadline() <= timestamp) {
+    } else if (recognizer->Deadline().has_value() && *recognizer->Deadline() <= timestamp) {
       throw std::logic_error("HuxerUI gesture recognizer did not consume its elapsed deadline");
     }
   }
@@ -952,16 +1353,31 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
           **node, local_event, timestamp, state_->gesture_settings_, (*node)->presentation.resolved_transform
       );
       if (gesture) {
-        GestureRecognitionState retained{
-            handle,
-            std::move(gesture),
-            (*node)->presentation.resolved_transform,
-        };
-        if (retained.recognizer->SharesTap()) {
-          tap.consumers.push_back(std::move(retained));
+        const DragSourceCapability* source = entry.extension->GetDragSourceCapability();
+        std::shared_ptr<DragSourceRecognizer> source_recognizer =
+            source ? std::dynamic_pointer_cast<DragSourceRecognizer>(gesture) : nullptr;
+        if (source && source_recognizer) {
+          session.recognitions.push_back(PointerRecognition{DragSourceRecognitionState{
+              handle,
+              std::move(source_recognizer),
+              (*node)->presentation.resolved_transform,
+              *source,
+              (*node)->environment,
+          }});
         } else {
-          session.recognitions.push_back(PointerRecognition{std::move(retained)});
+          GestureRecognitionState retained{
+              handle,
+              std::move(gesture),
+              (*node)->presentation.resolved_transform,
+          };
+          if (retained.recognizer->SharesTap()) {
+            tap.consumers.push_back(std::move(retained));
+          } else {
+            session.recognitions.push_back(PointerRecognition{std::move(retained)});
+          }
         }
+      } else if (entry.extension->GetDropTargetCapability()) {
+        continue;
       } else {
         session.recognitions.push_back(PointerRecognition{ExtensionRecognitionState{handle}});
       }

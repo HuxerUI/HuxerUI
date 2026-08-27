@@ -24,7 +24,7 @@ PlatformView composition and initial input ownership remain defined by [Architec
 - It does not expose application-facing pointer-capture, release, or transfer handles.
 - It does not add `OnTap()`, `OnDrag()`, or other View convenience members.
 - It does not define public recognizer priority, simultaneous recognition, failure dependencies, or a gesture-composition DSL.
-- It does not define typed payload drag-and-drop, DropTarget behavior, or platform drag sessions.
+- Typed in-process drag-and-drop is defined separately and does not add another recognition path.
 - It does not infer accessibility semantics from arbitrary gestures.
 - It does not add concrete component branches to Runtime.
 
@@ -515,11 +515,6 @@ Ownership resolution has no work while no pointer sequence is active.
 Each active pointer owns one bounded session and a recognition list proportional to its mounted hit route.
 Movement sampling uses fixed-capacity storage, and long-press recognition schedules one deadline instead of continuous frames.
 Pointer movement changes retained recognizer state directly; only application handlers that update State schedule recomposition.
-
-## Future work
-
-Typed drag-and-drop may extend the same ownership arbitration.
-It must not introduce a second pointer router, public recognizer hierarchy, or platform-specific component behavior.
 
 ## Type and implementation ownership
 

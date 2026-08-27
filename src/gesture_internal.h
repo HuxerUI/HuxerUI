@@ -3,12 +3,16 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <typeindex>
 #include <variant>
 #include <vector>
 
 #include <huxerui/event.h>
+#include <huxerui/gesture.h>
+#include <huxerui/layer.h>
 #include <huxerui/modifier.h>
 
 namespace huxerui::detail {
@@ -106,10 +110,37 @@ public:
   }
 };
 
+// DragSource recognizers expose their latest immutable event snapshot so Runtime can order source and target output
+// around session ownership, preview dismissal, and drop completion without adding callbacks to the generic recognizer.
+class DragSourceRecognizer : public GestureRecognizer {
+public:
+  [[nodiscard]] virtual const DragEvent& CurrentEvent() const noexcept = 0;
+};
+
+struct DragSourceCapability {
+  std::type_index payload_type = typeid(void);
+  std::shared_ptr<const void> payload;
+  std::function<View()> preview;
+};
+
+struct DropTargetCapability {
+  std::type_index payload_type = typeid(void);
+  std::function<bool(const void*)> accepts;
+  DropTargetDispatch dispatch;
+};
+
 struct GestureRecognitionState {
   NodeExtensionHandle extension;
   std::shared_ptr<GestureRecognizer> recognizer;
   Transform2D frozen_node_to_window;
+};
+
+struct DragSourceRecognitionState {
+  NodeExtensionHandle extension;
+  std::shared_ptr<DragSourceRecognizer> recognizer;
+  Transform2D frozen_node_to_window;
+  DragSourceCapability source;
+  std::shared_ptr<const Environment> environment;
 };
 
 struct TapRecognitionState {
@@ -145,6 +176,7 @@ using PointerRecognitionState = std::variant<
     ScrollRecognitionState,
     ExtensionRecognitionState,
     GestureRecognitionState,
+    DragSourceRecognitionState,
     TextSelectionRecognitionState>;
 
 struct PointerRecognition {
@@ -165,6 +197,30 @@ struct ScrollVelocitySample {
   double timestamp = 0.0;
 };
 
+struct ActiveDropTarget {
+  NodeExtensionHandle extension;
+  // Exited must retain the event type that admitted this target even if compatible reconciliation changes its type.
+  DropTargetDispatch dispatch;
+
+  bool operator==(const ActiveDropTarget& other) const noexcept {
+    return extension == other.extension;
+  }
+};
+
+struct DragDropSession {
+  NodeExtensionHandle source;
+  std::type_index payload_type = typeid(void);
+  std::shared_ptr<const void> payload;
+  DragEvent drag;
+  std::optional<ActiveDropTarget> target;
+  // A target is committed before Entered is invoked; this flag prevents cancellation from publishing Exited when an
+  // earlier source or target callback failed before Entered began.
+  bool target_entered = false;
+  std::optional<LayerId> preview_layer;
+  // Layer placement is window-relative, so the frozen source transform resolves the local grab point once.
+  Point preview_grab_offset;
+};
+
 struct PointerSession {
   // The committed Down route is retained for ownership validation and ancestor-based recognition.
   std::vector<std::uint64_t> route;
@@ -175,6 +231,7 @@ struct PointerSession {
   std::vector<PointerRecognition> recognitions;
   std::optional<PointerOwner> owner;
   std::optional<ActivePointerInteraction> interaction;
+  std::optional<DragDropSession> drag_drop;
   std::optional<std::uint64_t> pending_focus_identity;
   Point down_position;
   Point last_position;

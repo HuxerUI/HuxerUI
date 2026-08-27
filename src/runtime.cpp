@@ -1528,6 +1528,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   }
   RefreshTextInputSession();
   AdvancePointerRecognition(frame.timestamp);
+  AdvanceDragDrop(frame);
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
   AdvanceTextSelectionLongPress(frame.timestamp);
@@ -1687,6 +1688,9 @@ void Runtime::RefreshInteractionTree() {
           }
           if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
             return FindExtension(*state_->mounted_root_, gesture->extension) == nullptr;
+          }
+          if (const auto* source = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
+            return FindExtension(*state_->mounted_root_, source->extension) == nullptr;
           }
           if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
             return std::ranges::any_of(
