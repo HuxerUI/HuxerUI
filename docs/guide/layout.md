@@ -11,7 +11,8 @@ Application code normally expresses intent with built-in containers and modifier
 - `Row` and `Column` arrange children along one axis.
 - `Stack` overlays children.
 - `Flow` wraps children across lines.
-- `Box` supplies a simple single-child surface.
+- `Spacer` consumes remaining main-axis space in a `Row` or `Column`.
+- `IndexedPages` retains pages while measuring and placing the selected page.
 - `ScrollView` makes one ordinary subtree scrollable.
 - `VirtualList` and `VirtualGrid` materialize only required logical items.
 

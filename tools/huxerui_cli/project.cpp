@@ -187,6 +187,37 @@ void CreateResourceDirectories(const std::filesystem::path& root) {
   std::filesystem::create_directories(root / "resources/raw");
 }
 
+std::filesystem::path AgentSkillRoot(AgentSkillDirectory directory) {
+  switch (directory) {
+  case AgentSkillDirectory::Shared:
+    return ".agents/skills";
+  case AgentSkillDirectory::Claude:
+    return ".claude/skills";
+  case AgentSkillDirectory::ZCode:
+    return ".zcode/skills";
+  }
+  throw std::logic_error("HuxerUI CLI encountered an unknown agent skill directory");
+}
+
+void CopyApplicationDevelopmentSkill(
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& skill_source,
+    std::span<const AgentSkillDirectory> directories
+) {
+  if (directories.empty()) {
+    return;
+  }
+  if (!std::filesystem::is_regular_file(skill_source / "SKILL.md")) {
+    throw std::runtime_error("HuxerUI SDK application development skill is missing: " + skill_source.string());
+  }
+  for (const AgentSkillDirectory directory : directories) {
+    const std::filesystem::path destination =
+        project_root / AgentSkillRoot(directory) / skill_source.filename();
+    std::filesystem::create_directories(destination.parent_path());
+    std::filesystem::copy(skill_source, destination, std::filesystem::copy_options::recursive);
+  }
+}
+
 std::string ReadFile(const std::filesystem::path& path) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
@@ -441,7 +472,9 @@ void CreateProject(
     const std::filesystem::path& destination,
     ProjectKind kind,
     const ProjectTemplateContext& context,
-    std::span<const PlatformDriver* const> platforms
+    std::span<const PlatformDriver* const> platforms,
+    const std::filesystem::path& skill_source,
+    std::span<const AgentSkillDirectory> agent_skill_directories
 ) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
@@ -480,6 +513,7 @@ void CreateProject(
       WriteFiles(temporary / "examples/preview/platform" / platform->Id(), platform->CreateShell(preview));
     }
   }
+  CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
 
   std::filesystem::rename(temporary, destination);
   cleanup.Commit();

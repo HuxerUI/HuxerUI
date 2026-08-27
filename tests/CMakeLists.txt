@@ -365,6 +365,10 @@ if (TARGET huxerui_cli_core)
             cli/cli.cpp
     )
     target_compile_features(huxerui_cli_tests PRIVATE cxx_std_20)
+    file(TO_CMAKE_PATH "${HUXERUI_PROJECT_DIR}" HUXERUI_TEST_SOURCE_DIRECTORY)
+    target_compile_definitions(huxerui_cli_tests PRIVATE
+            HUXERUI_TEST_SOURCE_DIRECTORY="${HUXERUI_TEST_SOURCE_DIRECTORY}"
+    )
     target_compile_options(huxerui_cli_tests PRIVATE
             "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
             "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"

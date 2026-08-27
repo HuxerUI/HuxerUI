@@ -189,7 +189,7 @@ Each call supplies a root and a `NAMESPACE` value that is both the resource doma
 `huxerui_add_app` registers the framework package first and then the compact `RESOURCES resources` application root.
 An application that needs to replace selected framework defaults adds a later root with `NAMESPACE huxerui`; no bundle metadata is required.
 
-The current install already contains public headers, platform libraries, the precompiled framework resource package, CMake helpers, the CLI, and host code generators.
+The current install already contains public headers, platform libraries, the precompiled framework resource package, CMake helpers, the CLI, host code generators, and the canonical HuxerUI application-development Skill.
 Formal releases preserve that single-SDK contract while platform package managers carry the artifacts they own.
 Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and always run on the development host, independently of the target architecture.
 
@@ -221,8 +221,8 @@ The CLI never parses `CMakeLists.txt` as source text.
 The implemented command surface is:
 
 ```text
-huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>]
-huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>]
+huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui devices [platform]
@@ -233,6 +233,11 @@ huxerui open ios
 
 A platform list is comma-separated or `all`.
 `all` means every platform driver known to the current CLI for `create` and every enabled application platform for project commands.
+An agent list is comma-separated and selects where the SDK's application-development Skill is copied into a new project.
+The accepted identifiers are `codex`, `claude`, `antigravity`, `opencode`, `command-code`, `omp`, `dsh`, and `zcode`.
+`codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` map to `.agents/skills`; `claude` maps to `.claude/skills`; and `zcode` maps to `.zcode/skills`.
+The default is `codex`; `all` selects the three distinct directories, and `none` disables Skill creation.
+An explicit list replaces the default, and aliases that share a directory are deduplicated.
 
 ### Create and platform add
 
@@ -354,6 +359,7 @@ HUXERUI_HOME/
     huxerui_static_debug.lib            # Windows Debug static library
     cmake/HuxerUI/
   share/huxerui/
+    skills/huxerui-app-development/
     platform/
       android/
         HuxerUI.aar
@@ -480,6 +486,8 @@ CMakeRC compiles that tree into the CLI, and the internal template loader render
 The installed CLI therefore remains a single executable and never searches the current directory, source checkout, or SDK for template files at runtime.
 These CLI templates are build-time tool resources and are independent of the application-facing `resources.bin` package.
 Empty scaffold files and directories remain explicit generator structure because an embedded filesystem cannot represent an empty directory.
+The application-development Skill is not a project template: the SDK installs its canonical directory under `share/huxerui/skills`, and `create` copies that directory transactionally into each selected Agent location.
+The CLI never symlinks the SDK Skill into an application project, so the generated project remains portable and can customize its own copy.
 
 ### Windows
 
@@ -573,8 +581,8 @@ CameraKit/
 Project scaffolding distinguishes the application and library shapes explicitly:
 
 ```text
-huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>]
-huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>]
+huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 ```
 
 Library names do not require a `huxerui-` prefix and may use uppercase ASCII letters.
@@ -855,7 +863,7 @@ The current workflow is covered by:
 - CLI Android shell tests for root-CMake configuration, Gradle-owned platform values, source or installed SDK selection, library attachment, application launch identity, and artifact collection.
 - CMake library validation for URL policy, full commit revisions, unambiguous origins, predeclared targets, ordered library graph roots and resources, and explicit runtime Root Service installation.
 - Installed Windows, macOS, and Linux consumer tests that install the SDK, run the installed CLI, create a project, and build it without source-tree lookup.
-- SDK archive tests that verify checksums, the canonical extracted layout, embedded Android and Web artifacts, macOS-only iOS slices, host-tool isolation, and executable-relative CLI discovery.
+- SDK archive tests that verify checksums, the canonical extracted layout, the application-development Skill, embedded Android and Web artifacts, macOS-only iOS slices, host-tool isolation, and executable-relative CLI discovery.
 - macOS and Linux installer tests that cover custom paths, profile preservation, repeat installation, failed-upgrade rollback, invalid checksums, unrelated directories, and uninstall.
 - SDK release tests that reject invalid version tags, incomplete or unexpected asset sets, and mismatched archive checksums before publication.
 - Existing common, header, code-generation, platform, and example builds.

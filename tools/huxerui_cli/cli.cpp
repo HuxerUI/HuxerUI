@@ -1,6 +1,7 @@
 #include "cli.h"
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <istream>
@@ -9,6 +10,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "platform.h"
@@ -25,11 +27,29 @@ public:
 
 constexpr std::string_view version = HUXERUI_CLI_VERSION;
 
+struct AgentSkillMapping {
+  std::string_view id;
+  AgentSkillDirectory directory;
+};
+
+constexpr std::array agent_skill_mappings{
+    AgentSkillMapping{"codex", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"claude", AgentSkillDirectory::Claude},
+    AgentSkillMapping{"antigravity", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"opencode", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"command-code", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"omp", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"dsh", AgentSkillDirectory::Shared},
+    AgentSkillMapping{"zcode", AgentSkillDirectory::ZCode},
+};
+
 void PrintHelp(std::ostream& output) {
   output << "HuxerUI project and platform tool\n\n"
          << "Usage:\n"
-         << "  huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
-         << "  huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>]\n"
+         << "  huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] "
+            "[--agent <agent-list>]\n"
+         << "  huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>] "
+            "[--agent <agent-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui setup <platform-list> [--yes]\n"
@@ -39,12 +59,20 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>]\n"
          << "  huxerui open ios\n"
          << "  huxerui --version\n\n"
-         << "A platform list is a comma-separated list or all.\n";
+         << "A platform list is a comma-separated list or all.\n"
+         << "An agent list is comma-separated and supports ";
+  for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
+    if (index > 0) {
+      output << ", ";
+    }
+    output << agent_skill_mappings[index].id;
+  }
+  output << ", all, or none.\n";
 }
 
-std::vector<std::string_view> SplitPlatformList(std::string_view value) {
+std::vector<std::string_view> SplitList(std::string_view value, std::string_view kind) {
   if (value.empty()) {
-    throw UsageError("platform list cannot be empty");
+    throw UsageError(std::string(kind) + " list cannot be empty");
   }
 
   std::vector<std::string_view> ids;
@@ -54,7 +82,7 @@ std::vector<std::string_view> SplitPlatformList(std::string_view value) {
     const std::size_t end = separator == std::string_view::npos ? value.size() : separator;
     const std::string_view id = value.substr(start, end - start);
     if (id.empty()) {
-      throw UsageError("platform list contains an empty platform");
+      throw UsageError(std::string(kind) + " list contains an empty " + std::string(kind));
     }
     ids.push_back(id);
     if (separator == std::string_view::npos) {
@@ -66,7 +94,7 @@ std::vector<std::string_view> SplitPlatformList(std::string_view value) {
 }
 
 std::vector<const PlatformDriver*> ResolvePlatforms(std::string_view value) {
-  const std::vector<std::string_view> requested = SplitPlatformList(value);
+  const std::vector<std::string_view> requested = SplitList(value, "platform");
   if (std::find(requested.begin(), requested.end(), "all") != requested.end()) {
     if (requested.size() != 1) {
       throw UsageError("all cannot be combined with another platform");
@@ -89,6 +117,37 @@ std::vector<const PlatformDriver*> ResolvePlatforms(std::string_view value) {
     }
   }
   return platforms;
+}
+
+std::vector<AgentSkillDirectory> ResolveAgentSkillDirectories(std::string_view value) {
+  const std::vector<std::string_view> requested = SplitList(value, "agent");
+  const bool all = std::find(requested.begin(), requested.end(), "all") != requested.end();
+  const bool none = std::find(requested.begin(), requested.end(), "none") != requested.end();
+  if (all || none) {
+    if (requested.size() != 1) {
+      throw UsageError(std::string(all ? "all" : "none") + " cannot be combined with another agent");
+    }
+    if (none) {
+      return {};
+    }
+    return {AgentSkillDirectory::Shared, AgentSkillDirectory::Claude, AgentSkillDirectory::ZCode};
+  }
+
+  std::vector<AgentSkillDirectory> directories;
+  for (const std::string_view id : requested) {
+    const auto mapping = std::find_if(
+        agent_skill_mappings.begin(), agent_skill_mappings.end(), [id](const AgentSkillMapping& candidate) {
+          return candidate.id == id;
+        }
+    );
+    if (mapping == agent_skill_mappings.end()) {
+      throw UsageError("unknown agent: " + std::string(id));
+    }
+    if (std::find(directories.begin(), directories.end(), mapping->directory) == directories.end()) {
+      directories.push_back(mapping->directory);
+    }
+  }
+  return directories;
 }
 
 std::optional<Project> TryDiscoverProject(const std::filesystem::path& start) {
@@ -285,7 +344,10 @@ int RunSetup(
 }
 
 int RunCreate(
-    std::span<const std::string_view> arguments, const std::filesystem::path& working_directory, std::ostream& output
+    std::span<const std::string_view> arguments,
+    const std::filesystem::path& working_directory,
+    const std::filesystem::path& huxerui_home,
+    std::ostream& output
 ) {
   if (arguments.size() < 3) {
     throw UsageError("create requires app or library and a project name");
@@ -309,13 +371,15 @@ int RunCreate(
 
   std::optional<std::string_view> project_id;
   std::optional<std::string_view> platform_list;
+  std::string_view agent_list = "codex";
   bool platform_specified = false;
+  bool agent_specified = false;
   if (kind == ProjectKind::App) {
     platform_list = "all";
   }
   for (std::size_t index = 3; index < arguments.size(); ++index) {
     const std::string_view argument = arguments[index];
-    if (argument != "-p" && argument != "--platform" && argument != "--id") {
+    if (argument != "-p" && argument != "--platform" && argument != "--id" && argument != "--agent") {
       throw UsageError("unexpected create argument: " + std::string(arguments[index]));
     }
     if (++index >= arguments.size()) {
@@ -326,12 +390,18 @@ int RunCreate(
         throw UsageError("--id may be specified only once");
       }
       project_id = arguments[index];
-    } else {
+    } else if (argument == "-p" || argument == "--platform") {
       if (platform_specified) {
         throw UsageError("--platform may be specified only once");
       }
       platform_list = arguments[index];
       platform_specified = true;
+    } else {
+      if (agent_specified) {
+        throw UsageError("--agent may be specified only once");
+      }
+      agent_list = arguments[index];
+      agent_specified = true;
     }
   }
 
@@ -343,8 +413,12 @@ int RunCreate(
                                              : MakeProjectTemplateContext(arguments[2], project_id.value_or(""));
   const std::vector<const PlatformDriver*> platforms =
       platform_list ? ResolvePlatforms(*platform_list) : std::vector<const PlatformDriver*>{};
+  const std::vector<AgentSkillDirectory> agent_skill_directories = ResolveAgentSkillDirectories(agent_list);
+  const std::filesystem::path skill_source = agent_skill_directories.empty()
+                                                 ? std::filesystem::path{}
+                                                 : ResolveApplicationDevelopmentSkill(huxerui_home);
   const std::filesystem::path destination = working_directory / context.project_name;
-  CreateProject(destination, kind, context, platforms);
+  CreateProject(destination, kind, context, platforms, skill_source, agent_skill_directories);
 
   output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << "\nPlatforms:";
   for (const PlatformDriver* platform : platforms) {
@@ -903,7 +977,7 @@ int Run(
       return 0;
     }
     if (arguments[0] == "create") {
-      return RunCreate(arguments, working_directory, output);
+      return RunCreate(arguments, working_directory, sdk.home, output);
     }
     if (arguments[0] == "platform") {
       return RunPlatform(arguments, working_directory, output);

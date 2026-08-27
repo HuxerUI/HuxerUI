@@ -1,7 +1,7 @@
 # Installation
 
 HuxerUI releases provide portable SDK archives and installers for desktop development hosts.
-The SDK contains public headers, CMake package files, host tools, the `huxerui` CLI, framework resources, and target artifacts required by supported project platforms.
+The SDK contains public headers, CMake package files, host tools, the `huxerui` CLI, framework resources, the HuxerUI application-development Skill, and target artifacts required by supported project platforms.
 
 ## Windows
 

@@ -1,0 +1,35 @@
+# Public API Index
+
+This is a navigation index, not a replacement for the active SDK's public headers.
+
+| Area | Primary public names | Main reference | Authority |
+| --- | --- | --- | --- |
+| App and lifecycle | `Application`, `AppOptions`, `RunApplication`, `UseApplication`, `ApplicationActivation`, `ApplicationLifecycleState`, `Lifecycle` | [fundamentals.md](fundamentals.md) | `app.h`, `lifecycle.h` |
+| Tasks | `Task`, `TaskScope`, `UseTaskScope`, `Delay` | [fundamentals.md](fundamentals.md) | `task.h` |
+| View and composition | `View`, `Scope`, `[[huxerui::composable]]`, `ForEach` | [fundamentals.md](fundamentals.md) | `view.h` |
+| State | `State`, `StateList`, `UseState`, `UseStateList` | [fundamentals.md](fundamentals.md) | `state.h` |
+| Environment | `Environment`, `ProvideEnvironment`, `UseEnvironment`, `UseViewportClass` | [fundamentals.md](fundamentals.md) | `environment.h` |
+| Events | `Event`, `On`, `OnClick`, `UseEvents` | [fundamentals.md](fundamentals.md) | `event.h` |
+| Containers | `Column`, `Row`, `Flow`, `Stack`, `IndexedPages`, `Spacer` | [layout-and-ui.md](layout-and-ui.md) | `view.h` |
+| Controls | `Button`, `IconButton`, toggles, `TextField`, tabs, progress, slider | [components.md](components.md) | `view.h` |
+| Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `MountedNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
+| Virtual layout | `VirtualLayout`, `VirtualLayoutContext`, `VirtualList`, `VirtualGrid` | [layout-and-ui.md](layout-and-ui.md) | `virtual_layout.h`, `view.h` |
+| Scrolling | `ScrollView`, `ScrollController`, `UseScrollController`, `ScrollPhysics`, `ScrollBar` | [layout-and-ui.md](layout-and-ui.md) | `scroll.h`, `modifier.h`, `view.h` |
+| Gestures | multi-tap, long press, drag, transform, typed drag-and-drop | [gestures-and-drag-drop.md](gestures-and-drag-drop.md) | `gesture.h`, `geometry.h` |
+| Modifiers | `ViewModifier`, built-in property modifiers, retained modifiers | [modifiers.md](modifiers.md) | `modifier.h` |
+| Retained behavior | `NodeExtension`, `FrameInfo`, invalidation and input hooks | [node-extensions.md](node-extensions.md) | `modifier.h` |
+| Theme | Flat/Material boundaries, `ThemeSpec`, typed style overrides, `ThemeDefinition` | [theme-animation-presentation.md](theme-animation-presentation.md) | `theme.h`, `navigation.h`, `presentation.h` |
+| Interaction visual | `Indication`, `IndicationLayer`, `RippleEffect`, `FocusRing` | [theme-animation-presentation.md](theme-animation-presentation.md) | `indication.h` |
+| Animation | specs, `MotionController`, animated modifiers, `SceneTransitionHandle` | [theme-animation-presentation.md](theme-animation-presentation.md) | `animation.h` |
+| Presentation | toast, dialog, bottom sheet, popup, menu, tooltip | [theme-animation-presentation.md](theme-animation-presentation.md) | `presentation.h`, `layer.h` |
+| Text input | `TextEditingValue`, configuration, field limits, `ValidationResult`, `Validate` | [text-input-and-semantics.md](text-input-and-semantics.md) | `text_input.h`, `view.h`, `validation.h` |
+| Semantics | `Semantics`, `SemanticBuilder`, semantic roles/actions | [text-input-and-semantics.md](text-input-and-semantics.md) | `semantics.h` |
+| Resources | string/image/raw resources, `UseString`, `UseImage`, `UseVectorImage`, `UseRawResource` | [resources-files-network.md](resources-files-network.md) | `resource.h` |
+| Files and network | `Bytes`, `File`, `FileReference`, `FilePicker`, `FileSystem`, `HttpClient` | [resources-files-network.md](resources-files-network.md) | `data.h`, `file.h`, `http.h` |
+| Navigation | `NavigationPath`, routed `NavigationStack`, controllers, browser codec | [navigation-and-window.md](navigation-and-window.md) | `navigation.h`, `web/navigation.h` |
+| Window | `WindowContentMode`, `WindowChromeMode`, safe area, system bars, title bar, `UseWindow` | [navigation-and-window.md](navigation-and-window.md) | `window.h` |
+| Paint | `Color`, `VisualFill`, `Canvas`, `PaintContext`, `UseTextMeasurer`, `Path`, gradients, images, vectors | [canvas-paint-and-images.md](canvas-paint-and-images.md) | `color.h`, `paint.h`, `text.h`, `vector.h` |
+| Platform services | payload, typed methods/events, instances, root registration | [platform-modules.md](platform-modules.md) | `platform_module.h`, `root.h` |
+| Platform controls | `PlatformView`, platform factories | [platform-views.md](platform-views.md) | `platform_view.h`, platform headers |
+| External frames | `ExternalTexture`, platform `ExternalTextureSource` | [canvas-paint-and-images.md](canvas-paint-and-images.md) | `external_texture.h`, platform headers |
+| CMake/CLI | package targets, `huxerui_add_app`, codegen, resources, CLI | [project-workflow.md](project-workflow.md) | installed package and CLI |

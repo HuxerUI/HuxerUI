@@ -170,6 +170,13 @@ execute_process(
 if (NOT CREATE_RESULT EQUAL 0)
     message(FATAL_ERROR "Installed CLI project creation failed:\n${CREATE_OUTPUT}${CREATE_ERROR}")
 endif ()
+if (NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/SKILL.md")
+    message(FATAL_ERROR "Installed CLI did not create the default HuxerUI application development skill")
+endif ()
+if (NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/project-workflow.md" OR
+    NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/resources-files-network.md")
+    message(FATAL_ERROR "Installed CLI created an incomplete HuxerUI application development skill")
+endif ()
 
 set(APP_SOURCE "${PROJECT_ROOT}/src/app.cpp")
 file(READ "${APP_SOURCE}" APP_SOURCE_CONTENT)

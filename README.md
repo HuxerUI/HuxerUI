@@ -42,7 +42,8 @@ huxerui run windows
 ```
 
 Replace `windows` with a platform enabled for the project and available on the current host.
-The generated project contains shared C++ sources, packaged resources, and source-controlled platform shells.
+The generated project contains shared C++ sources, packaged resources, source-controlled platform shells, and the
+HuxerUI application-development Skill under `.agents/skills` by default.
 
 ```cpp
 #include <huxerui/huxerui.h>

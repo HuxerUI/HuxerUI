@@ -53,7 +53,11 @@ Invocation Invoke(const std::filesystem::path& directory, std::initializer_list<
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input("n\n");
-  const int result = huxerui::cli::Run(values, directory, {}, input, output, error);
+  huxerui::cli::SdkLocation sdk;
+  if (!values.empty() && values.front() == "create") {
+    sdk = {HUXERUI_TEST_SOURCE_DIRECTORY, huxerui::cli::SdkLocationSource::Executable};
+  }
+  const int result = huxerui::cli::Run(values, directory, sdk, input, output, error);
   return {result, output.str(), error.str()};
 }
 
@@ -87,6 +91,27 @@ bool IsExecutable(const std::filesystem::path& path) {
                          std::filesystem::perms::others_exec)) != std::filesystem::perms::none;
 }
 #endif
+
+TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(temporary.Path(), {"--help"});
+
+  REQUIRE(invocation.result == 0);
+  for (const std::string_view agent : {
+           std::string_view{"codex"},
+           std::string_view{"claude"},
+           std::string_view{"antigravity"},
+           std::string_view{"opencode"},
+           std::string_view{"command-code"},
+           std::string_view{"omp"},
+           std::string_view{"dsh"},
+           std::string_view{"zcode"},
+       }) {
+    REQUIRE(invocation.output.find(agent) != std::string::npos);
+  }
+  REQUIRE(invocation.output.find("all") != std::string::npos);
+  REQUIRE(invocation.output.find("none") != std::string::npos);
+}
 
 TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
   const huxerui::cli::ProjectTemplateContext context =
@@ -142,6 +167,15 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(std::filesystem::is_directory(project / "resources/images"));
   REQUIRE(std::filesystem::is_directory(project / "resources/raw"));
   REQUIRE(std::filesystem::is_regular_file(project / "resources/strings/default.properties"));
+  REQUIRE(std::filesystem::is_regular_file(
+      project / ".agents/skills/huxerui-app-development/SKILL.md"
+  ));
+  REQUIRE(std::filesystem::is_regular_file(
+      project / ".agents/skills/huxerui-app-development/references/project-workflow.md"
+  ));
+  REQUIRE(std::filesystem::is_regular_file(
+      project / ".agents/skills/huxerui-app-development/references/resources-files-network.md"
+  ));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/main.cpp"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/app.manifest"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/settings.gradle"));
@@ -306,6 +340,60 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
 }
 
+TEST_CASE("HuxerUICliCreatesSkillsForSelectedAgents") {
+  TemporaryDirectory temporary;
+  const Invocation selected = Invoke(
+      temporary.Path(),
+      {"create", "app", "selected", "--platform", "windows", "--agent", "claude,zcode"}
+  );
+
+  REQUIRE(selected.result == 0);
+  const std::filesystem::path selected_project = temporary.Path() / "selected";
+  REQUIRE(std::filesystem::is_regular_file(
+      selected_project / ".claude/skills/huxerui-app-development/SKILL.md"
+  ));
+  REQUIRE(std::filesystem::is_regular_file(
+      selected_project / ".zcode/skills/huxerui-app-development/SKILL.md"
+  ));
+  REQUIRE_FALSE(std::filesystem::exists(selected_project / ".agents"));
+
+  const Invocation portable = Invoke(
+      temporary.Path(),
+      {
+          "create",
+          "app",
+          "portable",
+          "--platform",
+          "windows",
+          "--agent",
+          "codex,antigravity,opencode,command-code,omp,dsh",
+      }
+  );
+
+  REQUIRE(portable.result == 0);
+  const std::filesystem::path portable_project = temporary.Path() / "portable";
+  REQUIRE(std::filesystem::is_regular_file(
+      portable_project / ".agents/skills/huxerui-app-development/SKILL.md"
+  ));
+  REQUIRE_FALSE(std::filesystem::exists(portable_project / ".claude"));
+  REQUIRE_FALSE(std::filesystem::exists(portable_project / ".zcode"));
+
+  const Invocation all =
+      Invoke(temporary.Path(), {"create", "app", "all", "--platform", "windows", "--agent", "all"});
+  REQUIRE(all.result == 0);
+  const std::filesystem::path all_project = temporary.Path() / "all";
+  REQUIRE(std::filesystem::is_regular_file(all_project / ".agents/skills/huxerui-app-development/SKILL.md"));
+  REQUIRE(std::filesystem::is_regular_file(all_project / ".claude/skills/huxerui-app-development/SKILL.md"));
+  REQUIRE(std::filesystem::is_regular_file(all_project / ".zcode/skills/huxerui-app-development/SKILL.md"));
+
+  const Invocation disabled =
+      Invoke(temporary.Path(), {"create", "app", "disabled", "--platform", "windows", "--agent", "none"});
+  REQUIRE(disabled.result == 0);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "disabled/.agents"));
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "disabled/.claude"));
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "disabled/.zcode"));
+}
+
 TEST_CASE("HuxerUICliCreatesCommonOnlyLibrariesWithoutPlatformShells") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"create", "library", "AudioTools"});
@@ -408,6 +496,28 @@ TEST_CASE("HuxerUICliRejectsUnknownPlatformsAsUsageErrors") {
   REQUIRE(invocation.result == 2);
   REQUIRE(invocation.error.find("unknown platform: plan9") != std::string::npos);
   REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "sample"));
+}
+
+TEST_CASE("HuxerUICliRejectsInvalidAgentLists") {
+  TemporaryDirectory temporary;
+  const Invocation unknown =
+      Invoke(temporary.Path(), {"create", "app", "unknown", "--platform", "windows", "--agent", "other"});
+  REQUIRE(unknown.result == 2);
+  REQUIRE(unknown.error.find("unknown agent: other") != std::string::npos);
+
+  const Invocation combined = Invoke(
+      temporary.Path(),
+      {"create", "app", "combined", "--platform", "windows", "--agent", "all,claude"}
+  );
+  REQUIRE(combined.result == 2);
+  REQUIRE(combined.error.find("all cannot be combined with another agent") != std::string::npos);
+
+  const Invocation disabled = Invoke(
+      temporary.Path(),
+      {"create", "app", "disabled", "--platform", "windows", "--agent", "none,codex"}
+  );
+  REQUIRE(disabled.result == 2);
+  REQUIRE(disabled.error.find("none cannot be combined with another agent") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {

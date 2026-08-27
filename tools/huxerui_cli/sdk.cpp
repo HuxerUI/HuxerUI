@@ -39,14 +39,34 @@ std::filesystem::path InstalledCMakeDirectory(const std::filesystem::path& root)
   return {};
 }
 
+enum class SdkLayout {
+  Source,
+  Installed,
+};
+
+std::filesystem::path ApplicationDevelopmentSkillDirectory(
+    const std::filesystem::path& huxerui_home, SdkLayout layout
+) {
+  if (layout == SdkLayout::Installed) {
+    return huxerui_home / "share/huxerui/skills/huxerui-app-development";
+  }
+  return huxerui_home / "skills/huxerui-app-development";
+}
+
 bool IsSdkHome(const std::filesystem::path& path) {
   const bool has_headers = std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h");
   const bool source = std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
                       std::filesystem::is_directory(path / "tools/prebuilt") &&
-                      std::filesystem::is_directory(path / "resources");
+                      std::filesystem::is_directory(path / "resources") &&
+                      std::filesystem::is_directory(
+                          ApplicationDevelopmentSkillDirectory(path, SdkLayout::Source)
+                      );
   const bool installed = !InstalledCMakeDirectory(path).empty() &&
                          std::filesystem::is_directory(path / "share/huxerui/tools") &&
-                         std::filesystem::is_regular_file(path / "share/huxerui/resources/huxerui/resources.bin");
+                         std::filesystem::is_regular_file(path / "share/huxerui/resources/huxerui/resources.bin") &&
+                         std::filesystem::is_directory(
+                             ApplicationDevelopmentSkillDirectory(path, SdkLayout::Installed)
+                         );
   return has_headers && (source || installed);
 }
 
@@ -106,6 +126,19 @@ SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
     }
   }
   return {};
+}
+
+std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home) {
+  if (huxerui_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
+  }
+  for (const SdkLayout layout : {SdkLayout::Installed, SdkLayout::Source}) {
+    const std::filesystem::path skill = ApplicationDevelopmentSkillDirectory(huxerui_home, layout);
+    if (std::filesystem::is_regular_file(skill / "SKILL.md")) {
+      return skill;
+    }
+  }
+  throw std::runtime_error("HuxerUI SDK application development skill is missing");
 }
 
 std::string_view SdkLocationSourceName(SdkLocationSource source) noexcept {

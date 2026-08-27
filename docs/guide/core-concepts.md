@@ -4,6 +4,7 @@
 
 A component is an ordinary C++ function returning `View`.
 Calling it declares the desired interface; persistent state belongs to the mounted runtime tree rather than the transient `View` value.
+`View` is a lightweight copy-on-write value, so application code normally passes and returns it by value without explicit moves.
 
 ```cpp
 View AccountActions() {
@@ -16,6 +17,8 @@ View AccountActions() {
 
 Containers use braces for child declarations.
 Generic behavior is applied with `.With(...)`, typed events with `.On<EventKey>(...)`, parent-child metadata with `.LayoutValue<Key>(...)`, and stable identity with `.Key(...)`.
+These fluent APIs are rvalue-qualified, but a newly constructed component is already a temporary.
+Use `std::move` only when consuming a named View to call such an API; do not move temporary expressions, every container child, or a local return value.
 
 ## Composition and state
 

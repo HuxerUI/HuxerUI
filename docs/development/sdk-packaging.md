@@ -44,7 +44,7 @@ Packaging output belongs in a build directory and must not be written into the s
 
 ## Validate an archive
 
-Every SDK must contain the CLI, host code generators, public headers, framework resources, CMake package metadata, host libraries, Android artifacts, and the pinned Web library.
+Every SDK must contain the CLI, host code generators, public headers, framework resources, the canonical application-development Skill under `share/huxerui/skills`, CMake package metadata, host libraries, Android artifacts, and the pinned Web library.
 The macOS SDK must also contain `share/huxerui/platform/ios/HuxerUI.xcframework` with `ios-arm64` and `ios-arm64_x86_64-simulator` slices; Windows and Linux SDKs do not carry iOS binaries.
 Install the archive into a temporary prefix and validate at least:
 
@@ -53,6 +53,8 @@ huxerui doctor
 huxerui create app sdk_smoke --platform <host>,web,android
 huxerui build <host>
 ```
+
+The generated smoke project must contain `.agents/skills/huxerui-app-development/SKILL.md` copied from the installed SDK.
 
 On macOS, also create an iOS-only smoke project and run `huxerui build ios --profile release` so the installed XCFramework participates in a complete Simulator application-core build.
 

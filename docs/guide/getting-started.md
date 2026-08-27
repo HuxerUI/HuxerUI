@@ -10,8 +10,17 @@ huxerui create app hello_huxer --id dev.example.hello --platform windows,macos,l
 cd hello_huxer
 ```
 
-The command creates shared sources under `src`, resources under `resources`, and the requested platform shells.
+The command creates shared sources under `src`, resources under `resources`, the requested platform shells, and the HuxerUI application-development Skill under `.agents/skills`.
 Only build platforms supported by the current development host.
+
+Use `--agent` to select a different Agent Skill directory:
+
+```bash
+huxerui create app hello_huxer --platform windows --agent claude,zcode
+```
+
+`codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` share `.agents/skills`; `claude` uses `.claude/skills`; and `zcode` uses `.zcode/skills`.
+The default is `codex`, `all` writes all three directories, and `none` omits the Skill.
 
 Add another shell later with:
 
@@ -137,8 +146,8 @@ return Column {
 ## Project commands
 
 ```text
-huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>]
-huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>]
+huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]

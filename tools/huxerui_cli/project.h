@@ -16,6 +16,12 @@ enum class ProjectKind {
   Library,
 };
 
+enum class AgentSkillDirectory {
+  Shared,
+  Claude,
+  ZCode,
+};
+
 struct Project {
   std::filesystem::path root;
   std::vector<std::string> platforms;
@@ -37,7 +43,9 @@ void CreateProject(
     const std::filesystem::path& destination,
     ProjectKind kind,
     const ProjectTemplateContext& context,
-    std::span<const PlatformDriver* const> platforms
+    std::span<const PlatformDriver* const> platforms,
+    const std::filesystem::path& skill_source,
+    std::span<const AgentSkillDirectory> agent_skill_directories
 );
 void AddProjectPlatforms(
     const Project& project,
