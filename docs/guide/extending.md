@@ -80,6 +80,8 @@ Install custom root behavior through the existing RootHook boundary rather than 
 
 `PlatformModule` exposes a typed nonvisual platform service to shared application code.
 The application-facing service owns typed requests, results, and events; the platform implementation owns operating-system objects and UI-thread delivery.
+`PlatformPayload` uses the top-level `Bytes` type for owned binary payloads, while `AsBytes()` returns a borrowed `std::span<const std::byte>`.
+Keep strings for valid UTF-8 text and bytes for encoding-independent data; `PlatformPayload` does not convert between them.
 
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
 Use ExternalTexture when a producer supplies image frames rather than an interactive platform view.

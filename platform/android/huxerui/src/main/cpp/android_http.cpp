@@ -291,11 +291,8 @@ public:
           MakeStringArray(environment, string_class.Get(), request.headers, true);
       android::LocalRef<jobjectArray> header_values =
           MakeStringArray(environment, string_class.Get(), request.headers, false);
-      const std::span<const std::byte> body(
-          reinterpret_cast<const std::byte*>(request.body.data()),
-          request.body.size()
-      );
-      android::LocalRef<jbyteArray> java_body = android::BytesToJavaByteArray(environment, body);
+      android::LocalRef<jbyteArray> java_body =
+          android::BytesToJavaByteArray(environment, std::span<const std::byte>(request.body));
       if (!url || !method || !java_body) {
         throw std::runtime_error("HuxerUI Android HTTP request values could not be allocated");
       }
@@ -406,10 +403,7 @@ HttpResult MakeAndroidHttpResult(
           android::JavaStringToUtf8(environment, value.Get()),
       });
     }
-    const std::vector<std::byte> bytes = android::JavaByteArrayToBytes(environment, body);
-    if (!bytes.empty()) {
-      response.body.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    }
+    response.body = android::JavaByteArrayToBytes(environment, body);
     return HttpResult(std::move(response));
   }
   case AndroidHttpResult::Timeout:

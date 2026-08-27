@@ -22,7 +22,7 @@ TEST_CASE("PlatformPayloadPreservesSupportedKinds") {
       {"integer", std::int64_t{42}},
       {"double", 2.5},
       {"string", "value"},
-      {"bytes", PlatformPayload::Bytes{std::byte{1}, std::byte{2}}},
+      {"bytes", Bytes{std::byte{1}, std::byte{2}}},
       {"list", PlatformPayload::List{nullptr, false}},
   };
 

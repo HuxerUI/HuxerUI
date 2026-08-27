@@ -138,8 +138,10 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
         )
         foreach (HUXERUI_REQUIRED_IOS_ARTIFACT IN ITEMS
                 "${HUXERUI_IOS_XCFRAMEWORK}/Info.plist"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/huxerui/data.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/huxerui/huxerui.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/libhuxerui_static.a"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/huxerui/data.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/huxerui/huxerui.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/libhuxerui_static.a"
         )

@@ -23,6 +23,15 @@
 namespace huxerui::test {
 namespace {
 
+Bytes BytesFromString(std::string_view value) {
+  Bytes bytes;
+  bytes.reserve(value.size());
+  for (const char character : value) {
+    bytes.push_back(static_cast<std::byte>(character));
+  }
+  return bytes;
+}
+
 class WinsockRuntime final {
 public:
   WinsockRuntime() {
@@ -225,7 +234,7 @@ TEST_CASE("WindowsHttpTransportPreservesRequestAndResponseData") {
           .url = server.Url("/items?source=test"),
           .method = HttpMethod::Post,
           .headers = {{"Content-Type", "application/octet-stream"}, {"X-Trace", "winhttp"}},
-          .body = request_body,
+          .body = BytesFromString(request_body),
           .timeout = std::chrono::seconds{5},
       },
       [&completion](HttpResult result) { completion.Complete(std::move(result)); }
@@ -244,7 +253,7 @@ TEST_CASE("WindowsHttpTransportPreservesRequestAndResponseData") {
   const HttpResponse& response = result.Response();
   REQUIRE(response.status_code == 201);
   REQUIRE(response.url == server.Url("/items?source=test"));
-  REQUIRE(response.body == response_body);
+  REQUIRE(response.body == BytesFromString(response_body));
   REQUIRE(std::count(response.headers.begin(), response.headers.end(), HttpHeader{"X-Test", "first"}) == 1);
   REQUIRE(std::count(response.headers.begin(), response.headers.end(), HttpHeader{"X-Test", "second"}) == 1);
 }

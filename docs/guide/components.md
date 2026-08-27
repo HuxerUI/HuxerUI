@@ -12,6 +12,10 @@ Use `TextRole` for theme typography or provide an explicit `TextStyle`.
 `Image` also accepts `ExternalTexture` through a separate overload because a live platform texture is not an application image value.
 Configure fit, alignment, sampling, and tint with typed methods.
 
+`ImageAsset::FromEncoded(Bytes)` and `RawAsset::FromBytes(Bytes)` take ownership of encoded or arbitrary binary data.
+Use `CopyEncoded(std::span<const std::byte>)` and `CopyBytes(std::span<const std::byte>)` when the source is borrowed.
+The returned byte views remain standard immutable spans rather than introducing another view type.
+
 `Canvas` and `Path` provide custom platform-neutral drawing that is replayed by every renderer.
 
 ## Buttons and selection controls

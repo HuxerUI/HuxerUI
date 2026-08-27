@@ -544,11 +544,11 @@ public:
   std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
     const File file = file_;
     EnqueueFileOperation([file, completion = std::move(completion)]() mutable {
-      FileResult<std::vector<std::byte>> result = [&] {
+      FileResult<Bytes> result = [&] {
         try {
           return file.ReadBytes();
         } catch (...) {
-          return FileResult<std::vector<std::byte>>(FileError{
+          return FileResult<Bytes>(FileError{
               FileErrorCode::Io,
               "HuxerUI Linux external file read failed",
           });

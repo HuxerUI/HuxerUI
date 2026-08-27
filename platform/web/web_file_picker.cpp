@@ -594,7 +594,7 @@ public:
 
     if (canceled_) {
       if (bytes_completion) {
-        bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+        bytes_completion(FileResult<Bytes>(FileError{
             FileErrorCode::Io,
             "HuxerUI external file operation was canceled",
         }));
@@ -610,16 +610,16 @@ public:
         if (kind == web_file_result_bytes) {
           const val bytes = result["bytes"];
           const std::size_t size = bytes["byteLength"].as<std::size_t>();
-          std::vector<std::byte> value(size);
+          Bytes value(size);
           if (size != 0) {
             val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(value.data())))
                 .call<void>("set", bytes);
           }
-          bytes_completion(FileResult<std::vector<std::byte>>(std::move(value)));
+          bytes_completion(FileResult<Bytes>(std::move(value)));
           return;
         }
         const int error_code = kind == web_file_result_error ? result["errorCode"].as<int>() : web_file_error_io;
-        bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+        bytes_completion(FileResult<Bytes>(FileError{
             ToFileErrorCode(error_code),
             ErrorMessage(result),
         }));
@@ -630,7 +630,7 @@ public:
       }
     } catch (...) {
       if (bytes_completion) {
-        bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+        bytes_completion(FileResult<Bytes>(FileError{
             FileErrorCode::Io,
             "HuxerUI external file result is invalid",
         }));

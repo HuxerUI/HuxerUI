@@ -17,8 +17,8 @@ namespace huxerui::test {
 
 namespace {
 
-std::vector<std::byte> Bytes(std::string_view value) {
-  std::vector<std::byte> bytes;
+Bytes BytesFromString(std::string_view value) {
+  Bytes bytes;
   bytes.reserve(value.size());
   for (const char character : value) {
     bytes.push_back(static_cast<std::byte>(character));
@@ -28,11 +28,11 @@ std::vector<std::byte> Bytes(std::string_view value) {
 
 class TestFileReferenceState final : public detail::FileReferenceState {
 public:
-  explicit TestFileReferenceState(std::vector<std::byte> bytes) : bytes(std::move(bytes)) {}
+  explicit TestFileReferenceState(Bytes bytes) : bytes(std::move(bytes)) {}
 
   std::function<void()> ReadBytes(detail::FileReferenceBytesCompletion completion) override {
     ++read_count;
-    completion(FileResult<std::vector<std::byte>>(bytes));
+    completion(FileResult<Bytes>(bytes));
     return {};
   }
 
@@ -50,7 +50,7 @@ public:
     return {};
   }
 
-  std::vector<std::byte> bytes;
+  Bytes bytes;
   int read_count = 0;
   std::optional<File> imported_to;
   bool imported_with_overwrite = false;
@@ -62,7 +62,7 @@ public:
 FileReference MakeReference(
     std::string name = "document.txt",
     bool can_write = true,
-    std::shared_ptr<TestFileReferenceState> state = std::make_shared<TestFileReferenceState>(Bytes("content"))
+    std::shared_ptr<TestFileReferenceState> state = std::make_shared<TestFileReferenceState>(BytesFromString("content"))
 ) {
   const std::size_t size = state->bytes.size();
   return detail::MakeFileReference(
@@ -198,7 +198,7 @@ TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   Runtime runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
-  auto state = std::make_shared<TestFileReferenceState>(Bytes("\xEF\xBB\xBFhello"));
+  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("\xEF\xBB\xBFhello"));
   std::weak_ptr<TestFileReferenceState> weak_state = state;
   FileReference reference = MakeReference("report.txt", true, state);
   FileReference copy = reference;
@@ -236,7 +236,7 @@ TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
   Runtime runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
-  auto state = std::make_shared<TestFileReferenceState>(Bytes("read only"));
+  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("read only"));
   FileReference reference = MakeReference("readonly.txt", false, state);
   file_picker_tasks.Launch([reference]() -> Task<void> {
     replaced_reference = co_await reference.ReplaceWithAsync(File("/tmp/replacement.txt"));
@@ -296,7 +296,7 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
   REQUIRE_THROWS_AS(
       detail::MakeFileReference(
           {.name = "document.txt", .content_type = "text/*"},
-          std::make_shared<TestFileReferenceState>(Bytes("content"))
+          std::make_shared<TestFileReferenceState>(BytesFromString("content"))
       ),
       std::logic_error
   );

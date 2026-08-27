@@ -100,8 +100,8 @@ bool SameFileURL(NSURL* first, NSURL* second) {
   return first != nil && second != nil && [first.URLByStandardizingPath isEqual:second.URLByStandardizingPath];
 }
 
-FileResult<std::vector<std::byte>> ReadFile(NSURL* url) {
-  __block std::optional<FileResult<std::vector<std::byte>>> result;
+FileResult<Bytes> ReadFile(NSURL* url) {
+  __block std::optional<FileResult<Bytes>> result;
   NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
   NSError* coordination_error = nil;
   [coordinator coordinateReadingItemAtURL:url
@@ -116,7 +116,7 @@ FileResult<std::vector<std::byte>> ReadFile(NSURL* url) {
                                    result.emplace(FileFailure(error, "HuxerUI external file read failed"));
                                    return;
                                  }
-                                 std::vector<std::byte> bytes(data.length);
+                                 Bytes bytes(data.length);
                                  if (data.length != 0) {
                                    std::memcpy(bytes.data(), data.bytes, data.length);
                                  }
@@ -125,8 +125,7 @@ FileResult<std::vector<std::byte>> ReadFile(NSURL* url) {
   if (result.has_value()) {
     return std::move(*result);
   }
-  return FileResult<std::vector<std::byte>>(FileFailure(coordination_error, "HuxerUI external file coordination failed")
-  );
+  return FileResult<Bytes>(FileFailure(coordination_error, "HuxerUI external file coordination failed"));
 }
 
 bool CopyFile(NSURL* source, NSURL* destination, bool overwrite) {
@@ -466,7 +465,7 @@ public:
         try {
           completion(ReadFile(self->url_));
         } catch (...) {
-          completion(FileResult<std::vector<std::byte>>(FileError{
+          completion(FileResult<Bytes>(FileError{
               FileErrorCode::Io,
               "HuxerUI external file read failed",
           }));

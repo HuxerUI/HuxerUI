@@ -349,9 +349,9 @@ private:
       }
 
       gsize size = 0;
-      const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &size));
+      const auto* data = static_cast<const std::byte*>(g_bytes_get_data(bytes, &size));
       if (data != nullptr && size != 0) {
-        response.body.assign(data, size);
+        response.body.assign(data, data + size);
       }
       return HttpResult(std::move(response));
     } catch (...) {

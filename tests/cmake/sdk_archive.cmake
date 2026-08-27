@@ -57,6 +57,7 @@ file(TO_NATIVE_PATH "${SDK_ROOT}" SDK_ROOT_NATIVE)
 foreach (required_path IN ITEMS
         "LICENSE"
         "${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}"
+        "include/huxerui/data.h"
         "include/huxerui/huxerui.h"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIConfig.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUISharedTargets.cmake"
@@ -128,8 +129,10 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
     if (HOST_SYSTEM STREQUAL "macos")
         foreach (required_path IN ITEMS
                 "share/huxerui/platform/ios/HuxerUI.xcframework/Info.plist"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/Headers/huxerui/data.h"
                 "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/Headers/huxerui/huxerui.h"
                 "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/libhuxerui_static.a"
+                "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/Headers/huxerui/data.h"
                 "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/Headers/huxerui/huxerui.h"
                 "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/libhuxerui_static.a"
         )

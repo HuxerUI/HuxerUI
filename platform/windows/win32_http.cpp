@@ -659,7 +659,8 @@ private:
       if (finished_) {
         return;
       }
-      response_.body.append(static_cast<const char*>(bytes), byte_count);
+      const auto* body = static_cast<const std::byte*>(bytes);
+      response_.body.insert(response_.body.end(), body, body + byte_count);
     }
     ReadBody();
   }

@@ -34,6 +34,15 @@ namespace {
 
 using namespace std::chrono_literals;
 
+Bytes BytesFromString(std::string_view value) {
+  Bytes bytes;
+  bytes.reserve(value.size());
+  for (const char character : value) {
+    bytes.push_back(static_cast<std::byte>(character));
+  }
+  return bytes;
+}
+
 void CloseSocket(int socket) noexcept {
   if (socket >= 0) {
     close(socket);
@@ -267,7 +276,7 @@ std::string JoinedHeaderValues(const HttpResponse& response, std::string_view re
 } // namespace
 
 TEST_CASE("Linux HTTP transport preserves buffered requests and responses") {
-  const std::string response_body("reply\0bytes", 11);
+  const std::string response_body{'r', 'e', 'p', 'l', 'y', '\0', static_cast<char>(0xFF), 'b', 'y', 't', 'e', 's'};
   LoopbackHttpServer server({[&response_body](int socket, const std::string&) {
     SendResponse(socket, 201, "Created", {{"X-Repeat", "first"}, {"X-Repeat", "second"}}, response_body);
   }});
@@ -279,7 +288,7 @@ TEST_CASE("Linux HTTP transport preserves buffered requests and responses") {
           .url = server.Url("/items"),
           .method = HttpMethod::Post,
           .headers = {{"Content-Type", "application/octet-stream"}, {"X-Trace", "first"}, {"X-Trace", "second"}},
-          .body = request_body,
+          .body = BytesFromString(request_body),
           .timeout = 2s,
       }
   );
@@ -290,7 +299,7 @@ TEST_CASE("Linux HTTP transport preserves buffered requests and responses") {
   const HttpResponse& response = result.Response();
   REQUIRE(response.status_code == 201);
   REQUIRE(response.url == server.Url("/items"));
-  REQUIRE(response.body == response_body);
+  REQUIRE(response.body == BytesFromString(response_body));
   const std::string repeated_values = JoinedHeaderValues(response, "X-Repeat");
   REQUIRE(repeated_values.find("first") != std::string::npos);
   REQUIRE(repeated_values.find("second") != std::string::npos);
@@ -316,7 +325,7 @@ TEST_CASE("Linux HTTP transport follows redirects and returns HTTP error statuse
   REQUIRE(result.HasResponse());
   REQUIRE(result.Response().status_code == 404);
   REQUIRE(result.Response().url == server.Url("/missing"));
-  REQUIRE(result.Response().body == "missing");
+  REQUIRE(result.Response().body == BytesFromString("missing"));
   REQUIRE(server.WaitForRequests(2));
   REQUIRE(server.Request(0).starts_with("GET /redirect HTTP/1.1\r\n"));
   REQUIRE(server.Request(1).starts_with("GET /missing HTTP/1.1\r\n"));

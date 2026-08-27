@@ -792,7 +792,7 @@ Camera normally provides a Camera service plus ExternalTexture preview, while Au
 The application retrieves services through their typed `UseXxx()` helpers; there is no generic library-service lookup.
 
 PlatformView and nonvisual PlatformModule instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
-PlatformPayload is the only dynamic in-process cross-language representation and is restricted to null, scalar, bytes, list, string-keyed object data, and the closed framework capability ExternalTexture.
+PlatformPayload is the only dynamic in-process cross-language representation and is restricted to null, scalar, `Bytes`, list, string-keyed object data, and the closed framework capability ExternalTexture.
 Concrete library headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
 Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an ExternalTexture value only retains the opaque platform-owned source state.
 

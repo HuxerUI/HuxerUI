@@ -6,7 +6,8 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include <vector>
+
+#include <huxerui/data.h>
 
 #if defined(__ANDROID__)
 #include <jni.h>
@@ -86,6 +87,6 @@ private:
 [[nodiscard]] LocalRef<jstring> Utf8ToJavaString(JNIEnv* environment, std::string_view value);
 [[nodiscard]] std::string JavaStringToUtf8(JNIEnv* environment, jstring value);
 [[nodiscard]] LocalRef<jbyteArray> BytesToJavaByteArray(JNIEnv* environment, std::span<const std::byte> value);
-[[nodiscard]] std::vector<std::byte> JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value);
+[[nodiscard]] Bytes JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value);
 
 } // namespace huxerui::android

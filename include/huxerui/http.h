@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/data.h>
 #include <huxerui/task.h>
 
 namespace huxerui {
@@ -36,7 +37,7 @@ struct HttpRequest {
   std::string url;
   HttpMethod method = HttpMethod::Get;
   std::vector<HttpHeader> headers;
-  std::string body;
+  Bytes body;
   std::optional<std::chrono::milliseconds> timeout = std::chrono::milliseconds{30000};
 };
 
@@ -44,7 +45,7 @@ struct HttpResponse {
   std::string url;
   int status_code = 0;
   std::vector<HttpHeader> headers;
-  std::string body;
+  Bytes body;
 
   bool operator==(const HttpResponse&) const = default;
 };
