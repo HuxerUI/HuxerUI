@@ -403,11 +403,126 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
   }
 }
 
+bool Runtime::ResolveSharedGestureRecognition(const std::shared_ptr<GestureRecognizer>& recognizer,
+                                              std::size_t index, const PointerEvent& event,
+                                              std::optional<double> timestamp) {
+  struct SharedRecognition {
+    std::int64_t pointer_id = 0;
+    std::size_t index = 0;
+    bool newly_owned = false;
+  };
+  std::vector<SharedRecognition> shared;
+  for (const auto& [pointer_id, pointer_session] : state_->pointer_sessions_) {
+    if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(pointer_session)) {
+      if (*owner >= pointer_session.recognitions.size()) {
+        continue;
+      }
+      const auto* gesture =
+          std::get_if<GestureRecognitionState>(&pointer_session.recognitions[*owner].state);
+      if (gesture && gesture->recognizer == recognizer) {
+        shared.push_back({pointer_id, *owner, false});
+      }
+      continue;
+    }
+    for (std::size_t recognition_index = 0; recognition_index < pointer_session.recognitions.size();
+         ++recognition_index) {
+      const PointerRecognition& recognition = pointer_session.recognitions[recognition_index];
+      const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state);
+      if (recognition.started && gesture && gesture->recognizer == recognizer) {
+        shared.push_back({pointer_id, recognition_index, true});
+        break;
+      }
+    }
+  }
+
+  if (shared.size() <= 1) {
+    return false;
+  }
+
+  std::ranges::sort(shared, {}, &SharedRecognition::pointer_id);
+  // Commit every PointerSession owner before cancellation callbacks can observe or invalidate the mounted tree.
+  for (const SharedRecognition& participant : shared) {
+    const auto found = state_->pointer_sessions_.find(participant.pointer_id);
+    if (found != state_->pointer_sessions_.end() && participant.newly_owned &&
+        participant.index < found->second.recognitions.size()) {
+      found->second.owner = participant.index;
+      found->second.recognitions[participant.index].started = true;
+    }
+  }
+
+  try {
+    for (const SharedRecognition& participant : shared) {
+      if (!participant.newly_owned) {
+        continue;
+      }
+      const auto found = state_->pointer_sessions_.find(participant.pointer_id);
+      if (found == state_->pointer_sessions_.end() || participant.index >= found->second.recognitions.size()) {
+        continue;
+      }
+      const PointerEvent cancellation{
+          PointerEventType::Cancel,
+          participant.pointer_id,
+          found->second.last_position,
+          found->second.device_kind,
+      };
+      CancelPointerTarget(found->second, cancellation);
+      for (std::size_t other_index = 0; other_index < found->second.recognitions.size(); ++other_index) {
+        if (other_index != participant.index) {
+          CancelPointerRecognition(found->second.recognitions[other_index], cancellation);
+        }
+      }
+    }
+
+    const auto current = state_->pointer_sessions_.find(event.pointer_id);
+    if (current == state_->pointer_sessions_.end() || index >= current->second.recognitions.size() ||
+        RecognitionOwnerIndex(current->second) != std::optional{index}) {
+      return true;
+    }
+    auto* gesture = std::get_if<GestureRecognitionState>(&current->second.recognitions[index].state);
+    if (!gesture || gesture->recognizer != recognizer) {
+      return true;
+    }
+    NodeExtension* extension = FindExtension(*state_->mounted_root_, gesture->extension);
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, gesture->extension.node_identity);
+    if (extension && node) {
+      gesture->recognizer->Accepted(*node, *extension,
+                                    GestureInput(*gesture, event, timestamp.value_or(state_->platform_->Now())));
+    }
+  } catch (...) {
+    for (const SharedRecognition& participant : shared) {
+      const auto found = state_->pointer_sessions_.find(participant.pointer_id);
+      if (found == state_->pointer_sessions_.end() || found->second.quarantined) {
+        continue;
+      }
+      found->second.quarantined = true;
+      try {
+        const PointerEvent cancellation{
+            PointerEventType::Cancel,
+            participant.pointer_id,
+            found->second.last_position,
+            found->second.device_kind,
+        };
+        CancelPointerSession(found->second, cancellation);
+      } catch (...) {
+      }
+    }
+    throw;
+  }
+  return true;
+}
+
 void Runtime::ResolvePointerRecognition(PointerSession& session, std::size_t index, const PointerEvent& event,
                                         std::optional<double> timestamp) {
   if (session.owner.has_value() || index >= session.recognitions.size()) {
     return;
   }
+
+  if (const auto* selected = std::get_if<GestureRecognitionState>(&session.recognitions[index].state);
+      selected && selected->recognizer &&
+      ResolveSharedGestureRecognition(selected->recognizer, index, event, timestamp)) {
+    return;
+  }
+
   session.owner = index;
   session.recognitions[index].started = true;
   const bool tap = std::holds_alternative<TapRecognitionState>(session.recognitions[index].state);
@@ -833,13 +948,13 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       };
       PointerEvent local_event = event;
       local_event.position = *local_position;
-      std::unique_ptr<GestureRecognizer> gesture = entry.extension->CreateGestureRecognizer(
-          **node, local_event, timestamp, state_->gesture_settings_
+      std::shared_ptr<GestureRecognizer> gesture = entry.extension->CreateGestureRecognizer(
+          **node, local_event, timestamp, state_->gesture_settings_, (*node)->presentation.resolved_transform
       );
       if (gesture) {
         GestureRecognitionState retained{
             handle,
-            std::shared_ptr<GestureRecognizer>(std::move(gesture)),
+            std::move(gesture),
             (*node)->presentation.resolved_transform,
         };
         if (retained.recognizer->SharesTap()) {

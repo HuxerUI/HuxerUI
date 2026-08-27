@@ -541,9 +541,9 @@ public:
   }
 
 private:
-  std::unique_ptr<GestureRecognizer>
+  std::shared_ptr<GestureRecognizer>
   CreateGestureRecognizer(huxerui::MountedNode& node, const PointerEvent& event, double timestamp,
-                          const GestureSettings& settings) override {
+                          const GestureSettings& settings, Transform2D) override {
     if (event.device_kind != PointerDeviceKind::Touch || !node.IsEnabled()) {
       return {};
     }
@@ -553,7 +553,7 @@ private:
       touch_visible_until_.reset();
       touch_duration_pending_ = false;
     }
-    return std::make_unique<TooltipTouchRecognizer>(event, timestamp, style_, settings.pointer_slop);
+    return std::make_shared<TooltipTouchRecognizer>(event, timestamp, style_, settings.pointer_slop);
   }
 
   bool BeginTouch(std::int64_t pointer_id) {

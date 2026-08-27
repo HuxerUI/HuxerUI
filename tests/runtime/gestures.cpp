@@ -1,7 +1,9 @@
 #include "runtime_test_support.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -12,6 +14,8 @@ namespace {
 
 std::vector<std::string> gesture_events;
 std::vector<DragEvent> drag_events;
+std::vector<TransformEvent> transform_events;
+std::vector<PointerEvent> canceled_pointer_events;
 int gesture_clicks = 0;
 int pointer_cancels = 0;
 State<float> drag_minimum;
@@ -19,6 +23,7 @@ State<Point> moving_drag_offset;
 State<bool> gesture_target_enabled;
 State<bool> gesture_modifier_present;
 bool throw_on_gesture_cancel = false;
+bool throw_on_transform_started = false;
 
 View MultiTapApp() {
   return Button("multi tap")
@@ -88,6 +93,44 @@ View DragApp() {
         drag_events.push_back(event);
       })
       .OnClick([] { ++gesture_clicks; });
+}
+
+View TransformApp() {
+  return Button("transform")
+      .With(huxerui::Frame{160.0F, 100.0F}, TransformGesture{})
+      .On<ViewEvents::PointerCancel>([](const PointerEvent& event) {
+        ++pointer_cancels;
+        canceled_pointer_events.push_back(event);
+      })
+      .On<TransformEvents::Started>([](const TransformEvent& event) {
+        gesture_events.emplace_back("started");
+        transform_events.push_back(event);
+        if (throw_on_transform_started) {
+          throw std::runtime_error("transform start failed");
+        }
+      })
+      .On<TransformEvents::Changed>([](const TransformEvent& event) {
+        gesture_events.emplace_back("changed");
+        transform_events.push_back(event);
+      })
+      .On<TransformEvents::Ended>([](const TransformEvent& event) {
+        gesture_events.emplace_back("ended");
+        transform_events.push_back(event);
+      })
+      .On<TransformEvents::Canceled>([](const TransformEvent& event) {
+        gesture_events.emplace_back("canceled");
+        transform_events.push_back(event);
+      })
+      .OnClick([] { ++gesture_clicks; });
+}
+
+View TransformLifecycleApp() {
+  auto enabled = UseState(true);
+  gesture_target_enabled = enabled;
+  return Text("transform lifecycle")
+      .With(huxerui::Frame{160.0F, 100.0F}, Enabled(enabled.Get()), TransformGesture{})
+      .On<TransformEvents::Started>([](const TransformEvent&) { gesture_events.emplace_back("started"); })
+      .On<TransformEvents::Canceled>([](const TransformEvent&) { gesture_events.emplace_back("canceled"); });
 }
 
 View DelayedDragApp() {
@@ -179,8 +222,11 @@ void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, P
 void ResetGestureEvents() {
   gesture_events.clear();
   drag_events.clear();
+  transform_events.clear();
+  canceled_pointer_events.clear();
   gesture_clicks = 0;
   pointer_cancels = 0;
+  throw_on_transform_started = false;
 }
 
 } // namespace
@@ -333,6 +379,143 @@ TEST_CASE("Delayed Drag starts with a rebased zero translation") {
 
   Pointer(runtime, PointerEventType::Move, 10, {32.0F, 30.0F}, PointerDeviceKind::Touch);
   REQUIRE(drag_events.back().delta == Point{10.0F, 0.0F});
+}
+
+TEST_CASE("Transform atomically owns both pointers and reports incremental geometry") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 30, {20.0F, 30.0F}, PointerDeviceKind::Touch);
+  REQUIRE(transform_events.empty());
+  Pointer(runtime, PointerEventType::Down, 31, {60.0F, 30.0F}, PointerDeviceKind::Touch);
+
+  REQUIRE(gesture_events == std::vector<std::string>{"started"});
+  REQUIRE(canceled_pointer_events.size() == 1);
+  REQUIRE(canceled_pointer_events.front().type == PointerEventType::Cancel);
+  REQUIRE(canceled_pointer_events.front().pointer_id == 30);
+  REQUIRE(canceled_pointer_events.front().position == Point{20.0F, 30.0F});
+  REQUIRE(canceled_pointer_events.front().device_kind == PointerDeviceKind::Touch);
+  REQUIRE(transform_events.front().pointer_count == 2);
+  REQUIRE(transform_events.front().centroid == Point{40.0F, 30.0F});
+  REQUIRE(transform_events.front().pan == Point{});
+  REQUIRE(transform_events.front().scale == 1.0F);
+
+  Pointer(runtime, PointerEventType::Move, 31, {80.0F, 30.0F}, PointerDeviceKind::Touch);
+  REQUIRE(transform_events.back().pan == Point{10.0F, 0.0F});
+  REQUIRE(transform_events.back().scale == Catch::Approx(1.5F));
+  REQUIRE(transform_events.back().rotation == Catch::Approx(0.0F));
+
+  Pointer(runtime, PointerEventType::Move, 30, {30.0F, 30.0F}, PointerDeviceKind::Touch);
+  REQUIRE(transform_events.back().pan == Point{5.0F, 0.0F});
+  REQUIRE(transform_events.back().scale == Catch::Approx(5.0F / 6.0F));
+
+  Pointer(runtime, PointerEventType::Move, 31, {55.0F, 55.0F}, PointerDeviceKind::Touch);
+  REQUIRE(transform_events.back().pan == Point{-12.5F, 12.5F});
+  REQUIRE(transform_events.back().scale == Catch::Approx(std::sqrt(0.5F)));
+  REQUIRE(transform_events.back().rotation == Catch::Approx(std::numbers::pi_v<float> / 4.0F));
+
+  Pointer(runtime, PointerEventType::Up, 31, {55.0F, 55.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events ==
+          std::vector<std::string>{"started", "changed", "changed", "changed", "ended"});
+  REQUIRE(transform_events.back().pointer_count == 1);
+  REQUIRE(pointer_cancels == 1);
+  REQUIRE(gesture_clicks == 0);
+
+  Pointer(runtime, PointerEventType::Up, 30, {30.0F, 30.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events ==
+          std::vector<std::string>{"started", "changed", "changed", "changed", "ended"});
+  REQUIRE(gesture_clicks == 0);
+}
+
+TEST_CASE("Transform rebases pointer-set changes and cancels the shared recognition once") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 32, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Down, 33, {60.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Down, 34, {100.0F, 40.0F}, PointerDeviceKind::Touch);
+
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "changed"});
+  REQUIRE(transform_events.back().pointer_count == 3);
+  REQUIRE(transform_events.back().pan == Point{});
+  REQUIRE(transform_events.back().scale == 1.0F);
+  REQUIRE(transform_events.back().rotation == 0.0F);
+
+  Pointer(runtime, PointerEventType::Up, 34, {100.0F, 40.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "changed", "changed"});
+  REQUIRE(transform_events.back().pointer_count == 2);
+  REQUIRE(transform_events.back().pan == Point{});
+
+  Pointer(runtime, PointerEventType::Cancel, 32, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Cancel, 33, {60.0F, 40.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "changed", "changed", "canceled"});
+  REQUIRE(transform_events.back().pointer_count == 2);
+}
+
+TEST_CASE("Transform does not combine pointers from different device kinds") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 35, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Down, 36, {60.0F, 40.0F}, PointerDeviceKind::Pen);
+  Pointer(runtime, PointerEventType::Up, 36, {60.0F, 40.0F}, PointerDeviceKind::Pen);
+  Pointer(runtime, PointerEventType::Up, 35, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+
+  REQUIRE(transform_events.empty());
+  REQUIRE(gesture_clicks == 2);
+}
+
+TEST_CASE("Disabling an active Transform cancels its shared recognition once") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 37, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Down, 38, {60.0F, 40.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events == std::vector<std::string>{"started"});
+
+  gesture_target_enabled = false;
+  runtime.BuildFrame();
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "canceled"});
+
+  Pointer(runtime, PointerEventType::Move, 37, {30.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Cancel, 37, {30.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Cancel, 38, {60.0F, 40.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "canceled"});
+}
+
+TEST_CASE("A throwing Transform handler quarantines every owned pointer") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{TransformApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 39, {20.0F, 40.0F}, PointerDeviceKind::Touch);
+  throw_on_transform_started = true;
+  REQUIRE_THROWS_AS(
+      Pointer(runtime, PointerEventType::Down, 40, {60.0F, 40.0F}, PointerDeviceKind::Touch),
+      std::runtime_error
+  );
+  throw_on_transform_started = false;
+
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "canceled"});
+  Pointer(runtime, PointerEventType::Move, 39, {30.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Move, 40, {70.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Cancel, 39, {30.0F, 40.0F}, PointerDeviceKind::Touch);
+  Pointer(runtime, PointerEventType::Cancel, 40, {70.0F, 40.0F}, PointerDeviceKind::Touch);
+  REQUIRE(gesture_events == std::vector<std::string>{"started", "canceled"});
 }
 
 TEST_CASE("Gesture defaults are snapshotted from PlatformAdapter") {

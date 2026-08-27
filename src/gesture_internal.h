@@ -65,11 +65,12 @@ public:
     return GestureDecision::Continue;
   }
 
-  // Runtime calls Accepted at most once after storing this recognizer as the session owner, canceling every competing
-  // recognizer, and canceling ordinary raw-pointer delivery. The input is the event that accepted the recognizer. For
-  // deadline acceptance, Runtime synthesizes a Move carrying the session's last committed position and device kind.
-  // Implementations normally publish Started here and must commit terminal bookkeeping before invoking handlers
-  // because a handler may recompose or unmount the owner.
+  // Runtime calls Accepted after storing this recognizer as the session owner, canceling every competing recognizer,
+  // and canceling ordinary raw-pointer delivery. A recognizer shared by several PointerSessions may receive it again
+  // after another session joins; all affected owners are committed before either callback form runs. The input is the
+  // event that accepted the recognizer. For deadline acceptance, Runtime synthesizes a Move carrying the session's
+  // last committed position and device kind. Implementations must commit bookkeeping before invoking handlers because
+  // a handler may recompose or unmount the owner.
   virtual void Accepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
     static_cast<void>(node);
     static_cast<void>(extension);

@@ -1,7 +1,7 @@
 # Gesture Recognition and Arbitration Design
 
 This document defines the shared gesture-recognition, ownership-resolution, and cancellation model.
-Pointer recognition, repeated taps, long presses, and single-pointer drags share one ownership path.
+Pointer recognition, repeated taps, long presses, single-pointer drags, and multi-pointer transforms share one ownership path.
 The model extends the interaction foundation without adding general event capture and bubbling or exposing raw pointer capture to applications.
 
 The mounted interaction and indication contract remains defined by [Interaction and Indication Design](interaction-indication.md).
@@ -9,7 +9,7 @@ PlatformView composition and initial input ownership remain defined by [Architec
 
 ## Goals
 
-- Recognize repeated taps, long presses, and single-pointer drags in the shared Runtime.
+- Recognize repeated taps, long presses, single-pointer drags, and multi-pointer transforms in the shared Runtime.
 - Give Click, scrolling, public gesture modifiers, and retained pointer extensions one deterministic competition model.
 - Keep every physical pointer sequence exclusively owned by HuxerUI or one PlatformView after its Down event.
 - Continue delivery to an accepted recognizer outside its node bounds until completion or cancellation.
@@ -43,9 +43,9 @@ PointerSession
         ↓
 pointer recognition
         ↓
-one owner
+one recognition owner
         ↓
-Click / Drag / LongPress / Scroll / retained pointer extension
+Click / Drag / LongPress / Transform / Scroll / retained pointer extension
 ```
 
 Raw pointer events are the only side branch:
@@ -82,8 +82,12 @@ Reject
 ```
 
 Ownership resolution is the Runtime algorithm that dispatches the recognition states stored by PointerSession; it is not another retained object or state type.
-The algorithm deactivates rejected recognitions and records at most one owner.
+The algorithm deactivates rejected recognitions and records at most one owner per PointerSession.
 It does not need separate Possible, Accepted, Rejected, Completed, and Canceled state objects because those states follow directly from pending recognition, the owner field, and session termination.
+
+Ordinary recognizers belong to one PointerSession.
+A multi-pointer recognizer may be referenced by several sessions, while each session still stores its own recognition index as owner.
+Runtime resolves every session that references the same recognizer before publishing output, so shared recognition does not require a pointer-group registry, a second router, or another public ownership type.
 
 Recognitions are collected from the deepest mounted node toward the root.
 Retained-modifier recognitions on the same node follow reverse declaration order, matching existing topmost extension dispatch.
@@ -299,6 +303,62 @@ The design does not add `FlingGesture`.
 Drag reports terminal velocity, while the consumer decides whether that velocity starts retained motion.
 Scroll containers pass it to `ScrollPhysics`; minimum velocity, maximum velocity, deceleration, and overscroll remain scrolling policy rather than gesture settings.
 
+## Multi-pointer transform
+
+`TransformGesture` recognizes pan, scale, and rotation from two or more compatible pointers:
+
+```cpp
+return Canvas(content)
+    .With(TransformGesture{})
+    .On<TransformEvents::Changed>([=](const TransformEvent& event) {
+      offset += event.pan;
+      scale *= event.scale;
+      rotation += event.rotation;
+    });
+```
+
+Its public values are conceptually:
+
+```cpp
+struct TransformGesture {
+  bool operator==(const TransformGesture&) const = default;
+};
+
+struct TransformEvent {
+  PointerDeviceKind device_kind = PointerDeviceKind::Touch;
+  std::uint32_t pointer_count = 0;
+  Point centroid;
+  Point window_centroid;
+  Point pan;
+  float scale = 1.0F;
+  float rotation = 0.0F;
+};
+
+struct TransformEvents {
+  struct Started : Event<const TransformEvent&> {};
+  struct Changed : Event<const TransformEvent&> {};
+  struct Ended : Event<const TransformEvent&> {};
+  struct Canceled : Event<const TransformEvent&> {};
+};
+```
+
+The first pointer keeps Transform pending and may still become Click, Drag, Scroll, or another owner.
+A second pointer of the same device kind that reaches the same mounted Transform modifier accepts immediately and atomically gives that recognition ownership of both PointerSessions.
+An already accepted single-pointer owner cannot be transferred into Transform when another pointer arrives.
+
+Transform values are incremental.
+`pan` is the local centroid displacement since the previous update, `scale` is the multiplicative spread change with an identity value of one, and `rotation` is the angular change in radians.
+Positive rotation follows HuxerUI's downward Y axis and is clockwise.
+Applications retain their authoritative accumulated transform rather than receiving a second framework-owned transform value.
+
+Adding a third or later pointer rebases the calculation and emits an identity Changed event with the new pointer count.
+Removing a pointer while at least two remain does the same.
+Dropping below two pointers emits Ended and quarantines the remaining physical sequence so it cannot become a new Click, Drag, Scroll, or PlatformView interaction.
+Platform Cancel, ownership invalidation, or an exception cancels the complete shared recognition once.
+
+The recognizer calculates its centroid from all active pointers, scale from their root-mean-square distance around that centroid, and rotation from matched centered pointer vectors.
+It freezes the owning node coordinate transform when the first pointer starts and rebases geometry whenever the participating pointer set changes, preventing target motion or pointer-count changes from feeding discontinuities back into later deltas.
+
 ## Coordinates and settings
 
 Gesture events expose a frozen node-local coordinate and the current window coordinate.
@@ -458,19 +518,19 @@ Pointer movement changes retained recognizer state directly; only application ha
 
 ## Future work
 
-Multi-pointer transform recognition and typed drag-and-drop may extend the same ownership arbitration.
-They must not introduce a second pointer router, public recognizer hierarchy, or platform-specific component behavior.
+Typed drag-and-drop may extend the same ownership arbitration.
+It must not introduce a second pointer router, public recognizer hierarchy, or platform-specific component behavior.
 
 ## Type and implementation ownership
 
 The public surface adds only independently meaningful values:
 
-- `MultiTapGesture`, `LongPressGesture`, and `DragGesture` are retained modifiers.
+- `MultiTapGesture`, `LongPressGesture`, `DragGesture`, and `TransformGesture` are retained modifiers.
 - Their event payloads carry different semantic data and remain separate values instead of inheriting from a generic gesture-event base.
 - Their grouped event keys follow the existing ViewEvents, SliderEvents, and TabsEvents convention.
 - GestureSettings contains only shared recognition defaults.
 
-Ownership resolution, recognizers, tap accumulation, routes, quarantine, and movement samples remain private implementation details.
+Ownership resolution, shared recognizer identity, tap accumulation, routes, quarantine, and movement samples remain private implementation details.
 There is no public recognizer base class, gesture controller, ownership handle, capture token, result wrapper, event phase, event context, or generic gesture payload.
 
 Implementation ownership is focused:

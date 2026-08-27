@@ -16,6 +16,50 @@ struct Point {
   float x = 0.0F;
   float y = 0.0F;
 
+  constexpr Point& operator+=(Point other) noexcept {
+    x += other.x;
+    y += other.y;
+    return *this;
+  }
+
+  constexpr Point& operator-=(Point other) noexcept {
+    x -= other.x;
+    y -= other.y;
+    return *this;
+  }
+
+  constexpr Point& operator*=(float scalar) noexcept {
+    x *= scalar;
+    y *= scalar;
+    return *this;
+  }
+
+  constexpr Point& operator/=(float scalar) noexcept {
+    x /= scalar;
+    y /= scalar;
+    return *this;
+  }
+
+  friend constexpr Point operator+(Point left, Point right) noexcept {
+    return left += right;
+  }
+
+  friend constexpr Point operator-(Point left, Point right) noexcept {
+    return left -= right;
+  }
+
+  friend constexpr Point operator*(Point point, float scalar) noexcept {
+    return point *= scalar;
+  }
+
+  friend constexpr Point operator*(float scalar, Point point) noexcept {
+    return point *= scalar;
+  }
+
+  friend constexpr Point operator/(Point point, float scalar) noexcept {
+    return point /= scalar;
+  }
+
   bool operator==(const Point&) const = default;
 };
 

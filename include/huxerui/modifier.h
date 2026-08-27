@@ -178,8 +178,9 @@ protected:
   }
 
 private:
-  virtual std::unique_ptr<detail::GestureRecognizer> CreateGestureRecognizer(
-      MountedNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings
+  virtual std::shared_ptr<detail::GestureRecognizer> CreateGestureRecognizer(
+      MountedNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings,
+      Transform2D frozen_node_to_window
   );
 
   void BindPaintInvalidation(std::function<void(PaintInvalidation)> callback) {

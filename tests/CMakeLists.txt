@@ -14,6 +14,7 @@ add_executable(huxerui_tests
         unit/application.cpp
         unit/external_texture.cpp
         unit/file.cpp
+        unit/geometry.cpp
         unit/platform_frame.cpp
         unit/paint.cpp
         unit/path.cpp

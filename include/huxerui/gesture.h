@@ -145,4 +145,43 @@ struct DragEvents {
   struct Canceled : Event<const DragEvent&> {};
 };
 
+// Recognizes the combined translation, scale, and rotation of two or more pointers.
+struct TransformGesture {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const TransformGesture&) const = default;
+};
+
+// Describes one incremental update from a recognized TransformGesture.
+struct TransformEvent {
+  // Device kind shared by every pointer in the transform.
+  PointerDeviceKind device_kind = PointerDeviceKind::Touch;
+  // Number of physical pointers participating after this lifecycle transition.
+  std::uint32_t pointer_count = 0;
+  // Current centroid in the modifier owner's frozen node-local logical coordinate space.
+  Point centroid;
+  // Current centroid in host-window logical coordinates.
+  Point window_centroid;
+  // Node-local centroid displacement since the preceding update.
+  Point pan;
+  // Multiplicative spread change since the preceding update. One is the identity value.
+  float scale = 1.0F;
+  // Angular change since the preceding update, in radians. Positive values rotate clockwise.
+  float rotation = 0.0F;
+
+  bool operator==(const TransformEvent&) const = default;
+};
+
+// Typed lifecycle event keys emitted after a TransformGesture owns at least two pointers.
+struct TransformEvents {
+  // Emitted once when the second compatible pointer accepts the transform.
+  struct Started : Event<const TransformEvent&> {};
+  // Emitted for geometry changes and identity rebases after the participating pointer set changes.
+  struct Changed : Event<const TransformEvent&> {};
+  // Emitted when a normal pointer Up leaves fewer than two participating pointers.
+  struct Ended : Event<const TransformEvent&> {};
+  // Emitted once when an accepted transform is canceled without normal completion.
+  struct Canceled : Event<const TransformEvent&> {};
+};
+
 } // namespace huxerui

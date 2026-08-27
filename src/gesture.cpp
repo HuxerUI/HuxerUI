@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "internal.h"
 
@@ -134,9 +135,10 @@ public:
   }
 
 private:
-  std::unique_ptr<detail::GestureRecognizer>
-  CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings& settings) override {
-    return std::make_unique<MultiTapRecognizer>(gesture_, settings);
+  std::shared_ptr<detail::GestureRecognizer>
+  CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings& settings,
+                          Transform2D) override {
+    return std::make_shared<MultiTapRecognizer>(gesture_, settings);
   }
 
   MultiTapGesture gesture_;
@@ -243,10 +245,10 @@ public:
   }
 
 private:
-  std::unique_ptr<detail::GestureRecognizer>
+  std::shared_ptr<detail::GestureRecognizer>
   CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double timestamp,
-                          const GestureSettings& settings) override {
-    return std::make_unique<LongPressRecognizer>(gesture_, settings, event, timestamp);
+                          const GestureSettings& settings, Transform2D) override {
+    return std::make_shared<LongPressRecognizer>(gesture_, settings, event, timestamp);
   }
 
   LongPressGesture gesture_;
@@ -459,19 +461,259 @@ public:
   }
 
 private:
-  std::unique_ptr<detail::GestureRecognizer>
+  std::shared_ptr<detail::GestureRecognizer>
   CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double timestamp,
-                          const GestureSettings& settings) override {
-    return std::make_unique<DragRecognizer>(gesture_, settings, event, timestamp);
+                          const GestureSettings& settings, Transform2D) override {
+    return std::make_shared<DragRecognizer>(gesture_, settings, event, timestamp);
   }
 
   DragGesture gesture_;
 };
 
+class TransformRecognizer final : public detail::GestureRecognizer {
+public:
+  TransformRecognizer(PointerDeviceKind device_kind, Transform2D frozen_node_to_window)
+      : device_kind_(device_kind), frozen_node_to_window_(frozen_node_to_window) {}
+
+  [[nodiscard]] bool CanJoin(PointerDeviceKind device_kind) const noexcept {
+    return !closed_ && device_kind == device_kind_;
+  }
+
+  detail::GestureDecision Update(const detail::GestureRecognizerInput& input) override {
+    if (!CanJoin(input.event.device_kind)) {
+      return detail::GestureDecision::Reject;
+    }
+    if (input.event.type == PointerEventType::Down) {
+      contacts_.push_back({input.event.pointer_id, input.window_position});
+      return contacts_.size() >= 2 ? detail::GestureDecision::Accept : detail::GestureDecision::Continue;
+    }
+
+    Contact* contact = FindContact(input.event.pointer_id);
+    if (!contact) {
+      return detail::GestureDecision::Reject;
+    }
+    contact->position = input.window_position;
+    if (input.event.type == PointerEventType::Up || input.event.type == PointerEventType::Cancel) {
+      std::erase_if(contacts_, [&](const Contact& value) { return value.pointer_id == input.event.pointer_id; });
+      return detail::GestureDecision::Reject;
+    }
+    return active_ ? detail::GestureDecision::Accept : detail::GestureDecision::Continue;
+  }
+
+  void Accepted(detail::MountedNode& node, NodeExtension&, const detail::GestureRecognizerInput&) override {
+    if (closed_ || contacts_.size() < 2) {
+      return;
+    }
+    Rebase();
+    const TransformEvent event = IdentityEvent();
+    if (active_) {
+      detail::EmitEvent<TransformEvents::Changed>(node.event_bindings, event);
+      return;
+    }
+    active_ = true;
+    detail::EmitEvent<TransformEvents::Started>(node.event_bindings, event);
+  }
+
+  void UpdateAccepted(detail::MountedNode& node, NodeExtension&,
+                      const detail::GestureRecognizerInput& input) override {
+    if (!active_ || closed_) {
+      return;
+    }
+    Contact* contact = FindContact(input.event.pointer_id);
+    if (!contact) {
+      return;
+    }
+    contact->position = input.window_position;
+    if (input.event.type == PointerEventType::Move) {
+      const TransformEvent event = DeltaEvent();
+      Rebase();
+      detail::EmitEvent<TransformEvents::Changed>(node.event_bindings, event);
+      return;
+    }
+    if (input.event.type != PointerEventType::Up) {
+      return;
+    }
+
+    std::erase_if(contacts_, [&](const Contact& value) { return value.pointer_id == input.event.pointer_id; });
+    if (contacts_.size() >= 2) {
+      Rebase();
+      detail::EmitEvent<TransformEvents::Changed>(node.event_bindings, IdentityEvent());
+      return;
+    }
+
+    const TransformEvent event = IdentityEvent();
+    active_ = false;
+    closed_ = true;
+    contacts_.clear();
+    previous_contacts_.clear();
+    detail::EmitEvent<TransformEvents::Ended>(node.event_bindings, event);
+  }
+
+  void Canceled(detail::MountedNode& node, NodeExtension&,
+                const detail::GestureRecognizerInput& input) override {
+    if (!active_) {
+      std::erase_if(contacts_, [&](const Contact& value) { return value.pointer_id == input.event.pointer_id; });
+      return;
+    }
+    if (Contact* contact = FindContact(input.event.pointer_id)) {
+      contact->position = input.window_position;
+    }
+    const TransformEvent event = IdentityEvent();
+    active_ = false;
+    closed_ = true;
+    contacts_.clear();
+    previous_contacts_.clear();
+    detail::EmitEvent<TransformEvents::Canceled>(node.event_bindings, event);
+  }
+
+private:
+  struct Contact {
+    std::int64_t pointer_id = 0;
+    Point position;
+  };
+
+  struct Geometry {
+    Point centroid;
+    float mean_square_radius = 0.0F;
+  };
+
+  Contact* FindContact(std::int64_t pointer_id) {
+    const auto found = std::ranges::find(contacts_, pointer_id, &Contact::pointer_id);
+    return found == contacts_.end() ? nullptr : &*found;
+  }
+
+  static Geometry Measure(const std::vector<Contact>& contacts) {
+    Geometry geometry;
+    if (contacts.empty()) {
+      return geometry;
+    }
+    for (const Contact& contact : contacts) {
+      geometry.centroid.x += contact.position.x;
+      geometry.centroid.y += contact.position.y;
+    }
+    const float count = static_cast<float>(contacts.size());
+    geometry.centroid.x /= count;
+    geometry.centroid.y /= count;
+    for (const Contact& contact : contacts) {
+      const float x = contact.position.x - geometry.centroid.x;
+      const float y = contact.position.y - geometry.centroid.y;
+      geometry.mean_square_radius += x * x + y * y;
+    }
+    geometry.mean_square_radius /= count;
+    return geometry;
+  }
+
+  Point Local(Point window_position) const {
+    return frozen_node_to_window_.Inverse(window_position).value_or(window_position);
+  }
+
+  TransformEvent IdentityEvent() const {
+    const Point window_centroid = Measure(contacts_).centroid;
+    return {
+        device_kind_,
+        static_cast<std::uint32_t>(contacts_.size()),
+        Local(window_centroid),
+        window_centroid,
+        {},
+        1.0F,
+        0.0F,
+    };
+  }
+
+  TransformEvent DeltaEvent() const {
+    if (contacts_.size() != previous_contacts_.size() || contacts_.size() < 2) {
+      return IdentityEvent();
+    }
+    const Geometry previous = Measure(previous_contacts_);
+    const Geometry current = Measure(contacts_);
+    float dot = 0.0F;
+    float cross = 0.0F;
+    for (std::size_t index = 0; index < contacts_.size(); ++index) {
+      const Point from{
+          previous_contacts_[index].position.x - previous.centroid.x,
+          previous_contacts_[index].position.y - previous.centroid.y,
+      };
+      const Point to{
+          contacts_[index].position.x - current.centroid.x,
+          contacts_[index].position.y - current.centroid.y,
+      };
+      dot += from.x * to.x + from.y * to.y;
+      cross += from.x * to.y - from.y * to.x;
+    }
+    const float scale = previous.mean_square_radius > 0.000001F
+                            ? std::sqrt(current.mean_square_radius / previous.mean_square_radius)
+                            : 1.0F;
+    const float rotation = std::abs(dot) > 0.000001F || std::abs(cross) > 0.000001F
+                               ? std::atan2(cross, dot)
+                               : 0.0F;
+    const Point previous_local = Local(previous.centroid);
+    const Point current_local = Local(current.centroid);
+    return {
+        device_kind_,
+        static_cast<std::uint32_t>(contacts_.size()),
+        current_local,
+        current.centroid,
+        {current_local.x - previous_local.x, current_local.y - previous_local.y},
+        scale,
+        rotation,
+    };
+  }
+
+  void Rebase() {
+    previous_contacts_ = contacts_;
+  }
+
+  PointerDeviceKind device_kind_ = PointerDeviceKind::Touch;
+  Transform2D frozen_node_to_window_;
+  std::vector<Contact> contacts_;
+  std::vector<Contact> previous_contacts_;
+  bool active_ = false;
+  bool closed_ = false;
+};
+
+class TransformExtension final : public NodeExtension {
+public:
+  TransformExtension(MountedNode&, const TransformGesture&) {}
+
+  void Update(MountedNode&, const TransformGesture&) {}
+
+  bool HitTest(MountedNode& node, Point position) const override {
+    return node.IsEnabled() && node.Bounds().Contains(position);
+  }
+
+private:
+  static std::size_t DeviceIndex(PointerDeviceKind device_kind) {
+    switch (device_kind) {
+    case PointerDeviceKind::Mouse:
+      return 0;
+    case PointerDeviceKind::Touch:
+      return 1;
+    case PointerDeviceKind::Pen:
+      return 2;
+    }
+    throw std::logic_error("HuxerUI pointer device kind is invalid");
+  }
+
+  std::shared_ptr<detail::GestureRecognizer>
+  CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double, const GestureSettings&,
+                          Transform2D frozen_node_to_window) override {
+    const std::size_t device_index = DeviceIndex(event.device_kind);
+    std::shared_ptr<TransformRecognizer> recognizer = recognizers_[device_index].lock();
+    if (!recognizer || !recognizer->CanJoin(event.device_kind)) {
+      recognizer = std::make_shared<TransformRecognizer>(event.device_kind, frozen_node_to_window);
+      recognizers_[device_index] = recognizer;
+    }
+    return recognizer;
+  }
+
+  std::array<std::weak_ptr<TransformRecognizer>, 3> recognizers_;
+};
+
 } // namespace
 
-std::unique_ptr<detail::GestureRecognizer>
-NodeExtension::CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings&) {
+std::shared_ptr<detail::GestureRecognizer>
+NodeExtension::CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings&,
+                                       Transform2D) {
   return {};
 }
 
@@ -485,6 +727,10 @@ const detail::ModifierDescriptor& LongPressGesture::Descriptor() {
 
 const detail::ModifierDescriptor& DragGesture::Descriptor() {
   return detail::ModifierDescriptorFor<DragGesture, DragExtension>();
+}
+
+const detail::ModifierDescriptor& TransformGesture::Descriptor() {
+  return detail::ModifierDescriptorFor<TransformGesture, TransformExtension>();
 }
 
 namespace detail {

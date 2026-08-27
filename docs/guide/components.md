@@ -102,6 +102,18 @@ See [Navigation Design](../design/navigation.md) for controller, transition, Bac
 Built-in controls and scrolling use the shared gesture arbitration system.
 Custom content can observe clicks, repeated taps, long press, drag, and multi-pointer transform through typed gesture modifiers.
 
+```cpp
+return Canvas(content)
+    .With(TransformGesture{})
+    .On<TransformEvents::Changed>([=](const TransformEvent& event) {
+      offset += event.pan;
+      scale *= event.scale;
+      rotation += event.rotation;
+    });
+```
+
+Transform events report incremental pan, scale, and clockwise rotation around the current centroid.
+The application retains the authoritative accumulated transform.
 Gesture callbacks receive stable logical coordinates and explicit cancellation.
 Do not combine raw pointer handling with a built-in recognizer to recreate the same state machine.
 

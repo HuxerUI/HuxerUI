@@ -229,6 +229,7 @@ const Application& CurrentApplication();
 int RunPlatformApplication(const Application& application);
 
 enum class GestureDecision;
+class GestureRecognizer;
 struct NodeExtensionHandle;
 struct MountedNode;
 struct PointerRecognition;
@@ -316,6 +317,8 @@ private:
   void QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event);
   void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
   void CancelPointerRecognition(detail::PointerRecognition& recognition, const PointerEvent& event);
+  [[nodiscard]] bool ResolveSharedGestureRecognition(const std::shared_ptr<detail::GestureRecognizer>& recognizer,
+    std::size_t index, const PointerEvent& event, std::optional<double> timestamp);
   void ResolvePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event,
                                  std::optional<double> timestamp = std::nullopt);
   void PublishTap(detail::TapRecognitionState& tap, const PointerEvent& event);
