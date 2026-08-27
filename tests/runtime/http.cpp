@@ -2,10 +2,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -15,6 +17,15 @@
 namespace huxerui::test {
 
 namespace {
+
+Bytes BytesFromString(std::string_view value) {
+  Bytes bytes;
+  bytes.reserve(value.size());
+  for (const char character : value) {
+    bytes.push_back(static_cast<std::byte>(character));
+  }
+  return bytes;
+}
 
 class ManualHttpTransport final : public detail::HttpTransport {
 public:
@@ -163,6 +174,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
+  const Bytes request_body{std::byte{'{'}, std::byte{0}, std::byte{0xFF}, std::byte{'}'}};
 
   http_tasks.Launch(CaptureHttpResult(
       http_client,
@@ -175,7 +187,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
                   {"X-Trace", "first"},
                   {"X-Trace", "second"},
               },
-          .body = "{}",
+          .body = request_body,
           .timeout = std::chrono::milliseconds{5000},
       }
   ));
@@ -193,7 +205,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
            {"X-Trace", "second"},
        })
   );
-  REQUIRE(request.body == "{}");
+  REQUIRE(request.body == request_body);
   REQUIRE(request.timeout == std::chrono::milliseconds{5000});
 
   std::thread completion([&platform] {
@@ -203,7 +215,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
             .url = "https://example.test/items/42",
             .status_code = 201,
             .headers = {{"Content-Type", "application/json"}},
-            .body = "{\"id\":42}",
+            .body = Bytes{std::byte{'{'}, std::byte{0}, std::byte{0xFF}, std::byte{'}'}},
         })
     );
   });
@@ -213,7 +225,7 @@ TEST_CASE("HttpClientSendsTypedRequestsAndResumesWithResponsesOnTheUIThread") {
   platform.RunPlatformModuleTasks();
   REQUIRE(http_response.has_value());
   REQUIRE(http_response->status_code == 201);
-  REQUIRE(http_response->body == "{\"id\":42}");
+  REQUIRE((http_response->body == Bytes{std::byte{'{'}, std::byte{0}, std::byte{0xFF}, std::byte{'}'}}));
   REQUIRE(http_resume_thread == ui_thread);
 }
 
@@ -223,7 +235,7 @@ TEST_CASE("HttpClientHandlesImmediateTransportCompletion") {
   platform.transport->CompleteImmediately(HttpResult(HttpResponse{
       .url = "https://example.test/immediate",
       .status_code = 200,
-      .body = "immediate",
+      .body = BytesFromString("immediate"),
   }));
   Runtime runtime(HttpApp, platform);
   runtime.BuildFrame();
@@ -233,7 +245,7 @@ TEST_CASE("HttpClientHandlesImmediateTransportCompletion") {
 
   REQUIRE(http_completions == 1);
   REQUIRE(http_response.has_value());
-  REQUIRE(http_response->body == "immediate");
+  REQUIRE(http_response->body == BytesFromString("immediate"));
   REQUIRE_FALSE(platform.transport->Canceled(0));
 }
 
@@ -251,7 +263,7 @@ TEST_CASE("HttpClientAcceptsOnlyTheFirstTransportCompletion") {
       HttpResult(HttpResponse{
           .url = "https://example.test/duplicate",
           .status_code = 200,
-          .body = "first",
+          .body = BytesFromString("first"),
       })
   );
   platform.transport->Complete(
@@ -259,14 +271,14 @@ TEST_CASE("HttpClientAcceptsOnlyTheFirstTransportCompletion") {
       HttpResult(HttpResponse{
           .url = "https://example.test/duplicate",
           .status_code = 200,
-          .body = "second",
+          .body = BytesFromString("second"),
       })
   );
   platform.RunPlatformModuleTasks();
 
   REQUIRE(http_completions == 1);
   REQUIRE(http_response.has_value());
-  REQUIRE(http_response->body == "first");
+  REQUIRE(http_response->body == BytesFromString("first"));
 }
 
 TEST_CASE("HttpClientMapsTransportFailuresWithoutTreatingHttpStatusesAsErrors") {
@@ -300,7 +312,7 @@ TEST_CASE("HttpClientCancellationStopsThePlatformRequestAndDropsLateCompletion")
       HttpResult(HttpResponse{
           .url = "https://example.test/slow",
           .status_code = 200,
-          .body = "late",
+          .body = BytesFromString("late"),
       })
   );
   platform.RunPlatformModuleTasks();
@@ -317,7 +329,7 @@ TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
   REQUIRE_NOTHROW(static_cast<void>(http_client->Send({.url = "HTTPS://example.test"})));
   REQUIRE_THROWS_AS(static_cast<void>(http_client->Send({.url = "file:///tmp/value"})), std::invalid_argument);
   REQUIRE_THROWS_AS(
-      static_cast<void>(http_client->Send({.url = "https://example.test", .body = "body"})),
+      static_cast<void>(http_client->Send({.url = "https://example.test", .body = BytesFromString("body")})),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(

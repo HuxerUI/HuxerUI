@@ -12,6 +12,7 @@ add_executable(huxerui_tests
         unit/animation.cpp
         support/builtin_resources.cpp
         unit/application.cpp
+        unit/data.cpp
         unit/external_texture.cpp
         unit/file.cpp
         unit/geometry.cpp
@@ -161,6 +162,7 @@ set(HUXERUI_PUBLIC_HEADERS
         app.h
         clipboard.h
         color.h
+        data.h
         environment.h
         event.h
         external_texture.h

@@ -1,9 +1,14 @@
 #include <huxerui/huxerui.h>
 
+#include <cstddef>
+#include <span>
 #include <string>
-#include <utility>
 
 using namespace huxerui;
+
+std::string Utf8Text(std::span<const std::byte> bytes) {
+  return bytes.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
 
 struct LoadingState {
   bool loading {false};
@@ -35,7 +40,7 @@ View HttpContent() {
             HttpResponse& response = result.Response();
             loading = {
               false, "HTTP " + std::to_string(response.status_code) + " · " + response.url,
-              response.body.empty() ? "(empty response body)" : std::move(response.body)
+              response.body.empty() ? "(empty response body)" : Utf8Text(response.body)
             };
           } else {
             loading = {false, "Request failed", result.Error().message};

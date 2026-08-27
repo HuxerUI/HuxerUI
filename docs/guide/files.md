@@ -34,7 +34,18 @@ Task<FileResult<std::string>> LoadSettings(const std::shared_ptr<FileSystem>& fi
 }
 ```
 
-Use byte operations for arbitrary payloads and text operations only for UTF-8 content.
+Use `Bytes` from `<huxerui/data.h>` for owned binary data and `std::span<const std::byte>` for borrowed binary input.
+Use byte operations for arbitrary payloads and string operations only for UTF-8 content.
+
+```cpp
+Task<FileResult<Bytes>> LoadPayload(const std::shared_ptr<FileSystem>& files) {
+  File file(files->Directories().data_directory, "payload.bin");
+  co_return co_await file.ReadBytesAsync();
+}
+```
+
+Synchronous `WriteBytes()` and `AppendBytes()` borrow a span only for the call.
+Their asynchronous counterparts take `Bytes` by value so the operation owns the storage while suspended.
 
 ## External files
 

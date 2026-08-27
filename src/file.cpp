@@ -311,50 +311,50 @@ FileResult<FileInfo> Stat(std::string_view path) {
   return FileResult<FileInfo>(std::move(info));
 }
 
-FileResult<std::vector<std::byte>> ReadBytes(std::string_view path) {
+FileResult<Bytes> ReadBytes(std::string_view path) {
   const fs::path platform_path = PlatformPath(path);
   std::error_code error;
   const fs::file_status status = fs::status(platform_path, error);
   if (error) {
-    return Failure<std::vector<std::byte>>("read", error);
+    return Failure<Bytes>("read", error);
   }
   if (!fs::exists(status)) {
-    return Failure<std::vector<std::byte>>(FileErrorCode::NotFound, "HuxerUI file read found no file");
+    return Failure<Bytes>(FileErrorCode::NotFound, "HuxerUI file read found no file");
   }
   if (fs::is_directory(status)) {
-    return Failure<std::vector<std::byte>>(FileErrorCode::IsDirectory, "HuxerUI cannot read a directory as a file");
+    return Failure<Bytes>(FileErrorCode::IsDirectory, "HuxerUI cannot read a directory as a file");
   }
   if (!fs::is_regular_file(status)) {
-    return Failure<std::vector<std::byte>>(FileErrorCode::Unsupported, "HuxerUI cannot read this file type");
+    return Failure<Bytes>(FileErrorCode::Unsupported, "HuxerUI cannot read this file type");
   }
 
   const std::uintmax_t size = fs::file_size(platform_path, error);
   if (error) {
-    return Failure<std::vector<std::byte>>("size query", error);
+    return Failure<Bytes>("size query", error);
   }
-  if (size > static_cast<std::uintmax_t>(std::vector<std::byte>{}.max_size()) ||
+  if (size > static_cast<std::uintmax_t>(Bytes{}.max_size()) ||
       size > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max()) ||
       size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
-    return Failure<std::vector<std::byte>>(FileErrorCode::TooLarge, "HuxerUI file is too large to read into memory");
+    return Failure<Bytes>(FileErrorCode::TooLarge, "HuxerUI file is too large to read into memory");
   }
 
   errno = 0;
   std::ifstream stream(platform_path, std::ios::binary);
   if (!stream) {
-    return Failure<std::vector<std::byte>>("open for reading", StreamError());
+    return Failure<Bytes>("open for reading", StreamError());
   }
-  std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+  Bytes bytes(static_cast<std::size_t>(size));
   if (!bytes.empty()) {
     stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (stream.gcount() != static_cast<std::streamsize>(bytes.size())) {
-      return Failure<std::vector<std::byte>>(FileErrorCode::Io, "HuxerUI file changed while it was being read");
+      return Failure<Bytes>(FileErrorCode::Io, "HuxerUI file changed while it was being read");
     }
   }
   const std::ifstream::int_type trailing = stream.peek();
   if (stream.bad() || trailing != std::char_traits<char>::eof()) {
-    return Failure<std::vector<std::byte>>(FileErrorCode::Io, "HuxerUI file changed while it was being read");
+    return Failure<Bytes>(FileErrorCode::Io, "HuxerUI file changed while it was being read");
   }
-  return FileResult<std::vector<std::byte>>(std::move(bytes));
+  return FileResult<Bytes>(std::move(bytes));
 }
 
 bool WriteBytes(std::string_view path, std::span<const std::byte> bytes, bool append) {
@@ -792,11 +792,11 @@ void EnqueueFileOperation(std::function<void()> operation) {
 }
 #endif
 
-FileResult<std::string> DecodeFileUtf8(FileResult<std::vector<std::byte>> bytes) {
+FileResult<std::string> DecodeFileUtf8(FileResult<Bytes> bytes) {
   if (!bytes.Succeeded()) {
     return FileResult<std::string>(std::move(bytes).Error());
   }
-  std::vector<std::byte> value = std::move(bytes).Value();
+  Bytes value = std::move(bytes).Value();
   std::size_t offset = 0;
   if (value.size() >= 3 && value[0] == std::byte{0xEF} && value[1] == std::byte{0xBB} && value[2] == std::byte{0xBF}) {
     offset = 3;
@@ -916,12 +916,12 @@ Task<FileResult<FileInfo>> File::StatAsync() const {
   return detail::RunFileOperation<FileResult<FileInfo>>([file = *this] { return file.Stat(); });
 }
 
-FileResult<std::vector<std::byte>> File::ReadBytes() const {
+FileResult<Bytes> File::ReadBytes() const {
   return detail::ReadBytes(path_);
 }
 
-Task<FileResult<std::vector<std::byte>>> File::ReadBytesAsync() const {
-  return detail::RunFileOperation<FileResult<std::vector<std::byte>>>([file = *this] { return file.ReadBytes(); });
+Task<FileResult<Bytes>> File::ReadBytesAsync() const {
+  return detail::RunFileOperation<FileResult<Bytes>>([file = *this] { return file.ReadBytes(); });
 }
 
 FileResult<std::string> File::ReadString() const {
@@ -936,7 +936,7 @@ bool File::WriteBytes(std::span<const std::byte> bytes) const {
   return detail::WriteBytes(path_, bytes, false);
 }
 
-Task<bool> File::WriteBytesAsync(std::vector<std::byte> bytes) const {
+Task<bool> File::WriteBytesAsync(Bytes bytes) const {
   const bool persist = detail::RequiresPersistence(path_);
   return detail::RunFileOperation<bool>(
       [file = *this, bytes = std::move(bytes)] { return file.WriteBytes(std::span<const std::byte>(bytes)); },
@@ -962,7 +962,7 @@ bool File::AppendBytes(std::span<const std::byte> bytes) const {
   return detail::WriteBytes(path_, bytes, true);
 }
 
-Task<bool> File::AppendBytesAsync(std::vector<std::byte> bytes) const {
+Task<bool> File::AppendBytesAsync(Bytes bytes) const {
   const bool persist = detail::RequiresPersistence(path_);
   return detail::RunFileOperation<bool>(
       [file = *this, bytes = std::move(bytes)] { return file.AppendBytes(std::span<const std::byte>(bytes)); },

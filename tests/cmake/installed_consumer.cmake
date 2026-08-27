@@ -61,7 +61,7 @@ foreach (CONSUMER_LINKAGE IN ITEMS shared static default both)
     set(CONSUMER_BUILD "${TEST_ROOT}/consumer-${CONSUMER_LINKAGE}-build")
     file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
     file(WRITE "${CONSUMER_SOURCE}/main.cpp"
-            "#include <huxerui/huxerui.h>\nint main() { huxerui::View view; return view ? 1 : 0; }\n")
+            "#include <huxerui/huxerui.h>\nint main() { huxerui::Bytes bytes{std::byte{1}}; huxerui::View view; return view ? static_cast<int>(bytes.size()) : 0; }\n")
     set(CONSUMER_COMPONENT)
     set(CONSUMER_CONFIGURE_ARGUMENTS)
     if (CONSUMER_LINKAGE STREQUAL "shared")

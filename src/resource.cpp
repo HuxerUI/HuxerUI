@@ -282,13 +282,13 @@ Locale Locale::Default() {
   return Locale("en");
 }
 
-RawAsset RawAsset::FromBytes(std::vector<std::byte> bytes, std::string mime_type) {
-  auto storage = std::make_shared<const std::vector<std::byte>>(std::move(bytes));
+RawAsset RawAsset::FromBytes(huxerui::Bytes bytes, std::string mime_type) {
+  auto storage = std::make_shared<const huxerui::Bytes>(std::move(bytes));
   return FromSharedBytes(storage, storage->data(), storage->size(), std::move(mime_type));
 }
 
 RawAsset RawAsset::CopyBytes(std::span<const std::byte> bytes, std::string mime_type) {
-  return FromBytes(std::vector<std::byte>(bytes.begin(), bytes.end()), std::move(mime_type));
+  return FromBytes(huxerui::Bytes(bytes.begin(), bytes.end()), std::move(mime_type));
 }
 
 RawAsset RawAsset::FromSharedBytes(
@@ -345,7 +345,7 @@ ImageAsset ImageAsset::FromFile(const std::filesystem::path& path, float scale) 
   return FromEncoded(std::move(bytes), scale);
 }
 
-ImageAsset ImageAsset::FromEncoded(std::vector<std::byte> bytes, float scale) {
+ImageAsset ImageAsset::FromEncoded(Bytes bytes, float scale) {
   return FromRawAsset(RawAsset::FromBytes(std::move(bytes)), scale);
 }
 

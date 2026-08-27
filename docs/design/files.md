@@ -202,15 +202,15 @@ Operational failures never escape these result-returning methods as filesystem e
 ## Reading
 
 ```cpp
-[[nodiscard]] FileResult<std::vector<std::byte>> ReadBytes() const;
-[[nodiscard]] Task<FileResult<std::vector<std::byte>>> ReadBytesAsync() const;
+[[nodiscard]] FileResult<Bytes> ReadBytes() const;
+[[nodiscard]] Task<FileResult<Bytes>> ReadBytesAsync() const;
 
 [[nodiscard]] FileResult<std::string> ReadString() const;
 [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
 ```
 
 Read operations load the complete file into memory.
-An empty vector or string is a successful empty file, which is why reads retain `FileResult<T>`.
+An empty `Bytes` or string value is a successful empty file, which is why reads retain `FileResult<T>`.
 The implementation reports a file that cannot fit in the owned result as `TooLarge` before allocating an invalid buffer.
 
 `ReadString()` defines text as UTF-8.
@@ -223,13 +223,13 @@ Mutating operations report whether they reached their documented target state:
 
 ```cpp
 [[nodiscard]] bool WriteBytes(std::span<const std::byte> bytes) const;
-[[nodiscard]] Task<bool> WriteBytesAsync(std::vector<std::byte> bytes) const;
+[[nodiscard]] Task<bool> WriteBytesAsync(Bytes bytes) const;
 
 [[nodiscard]] bool WriteString(std::string_view value) const;
 [[nodiscard]] Task<bool> WriteStringAsync(std::string value) const;
 
 [[nodiscard]] bool AppendBytes(std::span<const std::byte> bytes) const;
-[[nodiscard]] Task<bool> AppendBytesAsync(std::vector<std::byte> bytes) const;
+[[nodiscard]] Task<bool> AppendBytesAsync(Bytes bytes) const;
 
 [[nodiscard]] bool AppendString(std::string_view value) const;
 [[nodiscard]] Task<bool> AppendStringAsync(std::string value) const;
@@ -365,7 +365,7 @@ public:
   [[nodiscard]] std::optional<std::string> ContentType() const;
   [[nodiscard]] bool CanWrite() const noexcept;
 
-  [[nodiscard]] Task<FileResult<std::vector<std::byte>>> ReadBytesAsync() const;
+  [[nodiscard]] Task<FileResult<Bytes>> ReadBytesAsync() const;
   [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
   [[nodiscard]] Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
   [[nodiscard]] Task<bool> ReplaceWithAsync(File source) const;

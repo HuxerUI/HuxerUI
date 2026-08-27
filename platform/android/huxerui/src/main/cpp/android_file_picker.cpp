@@ -156,15 +156,15 @@ public:
     if (bytes_completion) {
       try {
         if (static_cast<AndroidReferenceResult>(result) == AndroidReferenceResult::Bytes && bytes != nullptr) {
-          bytes_completion(FileResult<std::vector<std::byte>>(android::JavaByteArrayToBytes(environment, bytes)));
+          bytes_completion(FileResult<Bytes>(android::JavaByteArrayToBytes(environment, bytes)));
           return;
         }
-        bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+        bytes_completion(FileResult<Bytes>(FileError{
             ToFileErrorCode(error_code),
             JavaStringOrFallback(environment, message, "HuxerUI external file read failed"),
         }));
       } catch (...) {
-        bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+        bytes_completion(FileResult<Bytes>(FileError{
             FileErrorCode::Io,
             "HuxerUI external file result could not be decoded",
         }));
@@ -190,7 +190,7 @@ public:
       bool_completion = std::move(bool_completion_);
     }
     if (bytes_completion) {
-      bytes_completion(FileResult<std::vector<std::byte>>(FileError{
+      bytes_completion(FileResult<Bytes>(FileError{
           FileErrorCode::Io,
           "HuxerUI Android external file operation could not be started",
       }));
@@ -415,7 +415,7 @@ private:
     JNIEnv* environment = attached.Get();
     if (environment == nullptr) {
       if constexpr (std::is_same_v<Completion, FileReferenceBytesCompletion>) {
-        completion(FileResult<std::vector<std::byte>>(FileError{
+        completion(FileResult<Bytes>(FileError{
             FileErrorCode::Io,
             "HuxerUI Android external file operation could not access JNI",
         }));

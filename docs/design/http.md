@@ -35,7 +35,7 @@ struct HttpRequest {
   std::string url;
   HttpMethod method = HttpMethod::Get;
   std::vector<HttpHeader> headers;
-  std::string body;
+  Bytes body;
   std::optional<std::chrono::milliseconds> timeout =
       std::chrono::milliseconds{30000};
 };
@@ -44,7 +44,7 @@ struct HttpResponse {
   std::string url;
   int status_code = 0;
   std::vector<HttpHeader> headers;
-  std::string body;
+  Bytes body;
 };
 
 enum class HttpErrorCode {
@@ -79,7 +79,8 @@ public:
 };
 ```
 
-Request and response bodies are binary-safe byte strings.
+Request and response bodies are owned binary values using `Bytes` from `<huxerui/data.h>`.
+They preserve embedded null bytes and byte sequences that are not valid UTF-8.
 HttpClient does not infer an encoding, parse JSON, construct form bodies, or decode application payloads.
 Header entries remain a sequence because repeated field names are meaningful, although a platform may combine fields when its response API no longer exposes individual lines.
 
@@ -95,6 +96,12 @@ Runtime installs one HttpClient Root Service before application RootHooks run.
 Components retrieve it through the existing typed service function and launch requests through their existing TaskScope:
 
 ```cpp
+std::string Utf8Text(std::span<const std::byte> bytes) {
+  return bytes.empty()
+      ? std::string{}
+      : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
 [[huxerui::composable]]
 View RepositoryPage() {
   auto http = UseService<HttpClient>();
@@ -109,7 +116,7 @@ View RepositoryPage() {
       });
       if (request.HasResponse()) {
         HttpResponse response = std::move(request).Response();
-        result = response.body;
+        result = Utf8Text(response.body);
       } else {
         result = request.Error().message;
       }
@@ -117,6 +124,9 @@ View RepositoryPage() {
   });
 }
 ```
+
+This example's API contract declares a UTF-8 JSON response.
+Applications remain responsible for selecting and validating the encoding when converting response bytes to text.
 
 HTTP status codes, including 4xx and 5xx, produce an HttpResult containing HttpResponse.
 Transport failures, timeout, and an unavailable platform transport produce an HttpResult containing HttpError.
@@ -195,7 +205,7 @@ Streaming and file-transfer APIs remain separate operations instead of changing 
 
 ## Validation
 
-Shared tests use a deterministic fake HttpTransport to verify request preservation, response delivery, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
+Shared tests use a deterministic fake HttpTransport to verify arbitrary binary request and response preservation, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
 Each platform phase adds its implementation to the corresponding platform build and validates that platform without claiming unexecuted backends.
 Windows transport tests use a deterministic loopback server to verify WinHTTP request and response conversion plus the complete-operation deadline.
 Linux transport tests use a deterministic loopback server to verify binary bodies, repeated headers, redirects, errors, cancellation, deadlines, races, and shutdown.

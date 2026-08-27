@@ -355,7 +355,7 @@ public:
   ImageAsset() = default;
 
   static ImageAsset FromFile(const std::filesystem::path& path, float scale = 1.0F);
-  static ImageAsset FromEncoded(std::vector<std::byte> bytes, float scale = 1.0F);
+  static ImageAsset FromEncoded(Bytes bytes, float scale = 1.0F);
   static ImageAsset CopyEncoded(std::span<const std::byte> bytes, float scale = 1.0F);
 
   [[nodiscard]] std::span<const std::byte> EncodedBytes() const noexcept;
@@ -431,7 +431,7 @@ class RawAsset {
 public:
   RawAsset() = default;
 
-  static RawAsset FromBytes(std::vector<std::byte> bytes, std::string mime_type = {});
+  static RawAsset FromBytes(Bytes bytes, std::string mime_type = {});
   static RawAsset CopyBytes(std::span<const std::byte> bytes, std::string mime_type = {});
   static RawAsset FromSharedBytes(
       std::shared_ptr<const void> owner,

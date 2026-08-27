@@ -4,6 +4,7 @@
 #include <huxerui/app.h>
 #include <huxerui/clipboard.h>
 #include <huxerui/color.h>
+#include <huxerui/data.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/external_texture.h>

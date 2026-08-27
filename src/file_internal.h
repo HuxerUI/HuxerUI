@@ -18,7 +18,7 @@ struct FileReferenceMetadata {
   bool can_write = false;
 };
 
-using FileReferenceBytesCompletion = std::function<void(FileResult<std::vector<std::byte>>)>;
+using FileReferenceBytesCompletion = std::function<void(FileResult<Bytes>)>;
 using FileReferenceBoolCompletion = std::function<void(bool)>;
 
 class FileReferenceState {
@@ -54,7 +54,7 @@ struct FileSystemPaths {
 [[nodiscard]] std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths);
 [[nodiscard]] FileReference
 MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
-[[nodiscard]] FileResult<std::string> DecodeFileUtf8(FileResult<std::vector<std::byte>> bytes);
+[[nodiscard]] FileResult<std::string> DecodeFileUtf8(FileResult<Bytes> bytes);
 [[nodiscard]] bool IsValidFileUtf8(std::string_view text) noexcept;
 
 #if defined(__EMSCRIPTEN__)

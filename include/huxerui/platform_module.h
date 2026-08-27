@@ -18,6 +18,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/data.h>
 #include <huxerui/event.h>
 #include <huxerui/external_texture.h>
 
@@ -39,7 +40,6 @@ enum class PlatformPayloadKind {
 
 class PlatformPayload {
 public:
-  using Bytes = std::vector<std::byte>;
   using List = std::vector<PlatformPayload>;
   using Object = std::map<std::string, PlatformPayload, std::less<>>;
 

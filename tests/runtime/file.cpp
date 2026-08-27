@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -117,6 +118,7 @@ private:
 std::shared_ptr<FileSystem> file_system;
 TaskScope file_tasks;
 std::string async_text;
+Bytes async_bytes;
 std::thread::id file_resume_thread;
 bool file_task_complete = false;
 bool canceled_file_task_continued = false;
@@ -131,6 +133,7 @@ void ResetFileState() {
   file_system.reset();
   file_tasks = {};
   async_text.clear();
+  async_bytes.clear();
   file_resume_thread = {};
   file_task_complete = false;
   canceled_file_task_continued = false;
@@ -168,6 +171,31 @@ TEST_CASE("RuntimeInstallsFileSystemAndFileAsyncOperationsResumeOnTheUIThread") 
   platform.RunUntil([] { return file_task_complete; });
   REQUIRE(async_text == "async value");
   REQUIRE(file_resume_thread == ui_thread);
+}
+
+TEST_CASE("FileAsyncByteOperationsRetainOwnedBinaryDataUntilCompletion") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Paths());
+  Runtime runtime(FileApp, platform);
+  runtime.BuildFrame();
+
+  File file = file_system->Directories().data_directory.Child("async.bin");
+  file_tasks.Launch([file]() -> Task<void> {
+    if (!co_await file.WriteBytesAsync(Bytes{std::byte{0}, std::byte{0xFF}}) ||
+        !co_await file.AppendBytesAsync(Bytes{std::byte{'a'}, std::byte{0}})) {
+      file_task_complete = true;
+      co_return;
+    }
+    FileResult<Bytes> result = co_await file.ReadBytesAsync();
+    if (result.Succeeded()) {
+      async_bytes = std::move(result).Value();
+    }
+    file_task_complete = true;
+  });
+
+  platform.RunUntil([] { return file_task_complete; });
+  REQUIRE((async_bytes == Bytes{std::byte{0}, std::byte{0xFF}, std::byte{'a'}, std::byte{0}}));
 }
 
 TEST_CASE("CancelingAFileTaskDropsItsContinuation") {

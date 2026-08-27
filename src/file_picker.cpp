@@ -243,12 +243,12 @@ Task<Result> RunCallbackOperation(typename CallbackOperationState<Result>::Start
   co_return co_await CallbackOperationAwaiter<Result>(std::move(starter), std::move(failure));
 }
 
-Task<FileResult<std::vector<std::byte>>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state) {
-  co_return co_await RunCallbackOperation<FileResult<std::vector<std::byte>>>(
+Task<FileResult<Bytes>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state) {
+  co_return co_await RunCallbackOperation<FileResult<Bytes>>(
       [state = std::move(state)](FileReferenceBytesCompletion completion) {
         return state->ReadBytes(std::move(completion));
       },
-      FileResult<std::vector<std::byte>>(FileError{
+      FileResult<Bytes>(FileError{
           FileErrorCode::Io,
           "HuxerUI external file read failed",
       })
@@ -623,7 +623,7 @@ bool FileReference::CanWrite() const noexcept {
   return can_write_;
 }
 
-Task<FileResult<std::vector<std::byte>>> FileReference::ReadBytesAsync() const {
+Task<FileResult<Bytes>> FileReference::ReadBytesAsync() const {
   return detail::ReadReferenceBytes(state_);
 }
 

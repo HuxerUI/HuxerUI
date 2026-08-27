@@ -156,13 +156,13 @@ LocalRef<jbyteArray> BytesToJavaByteArray(JNIEnv* environment, std::span<const s
   return LocalRef<jbyteArray>(environment, result);
 }
 
-std::vector<std::byte> JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value) {
+Bytes JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value) {
   RequireEnvironment(environment);
   if (value == nullptr) {
     throw std::invalid_argument("HuxerUI Android Java byte array must not be null");
   }
   const jsize length = environment->GetArrayLength(value);
-  std::vector<std::byte> result(static_cast<std::size_t>(length));
+  Bytes result(static_cast<std::size_t>(length));
   if (length > 0) {
     environment->GetByteArrayRegion(value, 0, length, reinterpret_cast<jbyte*>(result.data()));
   }

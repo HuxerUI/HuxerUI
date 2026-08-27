@@ -191,7 +191,8 @@ private:
         });
       }
       if (data != nil && data.length != 0) {
-        result.body.assign(static_cast<const char*>(data.bytes), data.length);
+        const auto* bytes = static_cast<const std::byte*>(data.bytes);
+        result.body.assign(bytes, bytes + data.length);
       }
       Finish(HttpResult(std::move(result)), false);
     }

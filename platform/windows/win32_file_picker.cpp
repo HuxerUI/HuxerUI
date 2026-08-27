@@ -207,7 +207,7 @@ public:
     auto retained_completion = std::make_shared<FileReferenceBytesCompletion>(std::move(completion));
     try {
       EnqueueFileOperation([self, retained_completion] {
-        FileResult<std::vector<std::byte>> result(ReferenceReadFailure());
+        FileResult<Bytes> result(ReferenceReadFailure());
         try {
           result = self->file_.ReadBytes();
         } catch (...) {
@@ -215,7 +215,7 @@ public:
         (*retained_completion)(std::move(result));
       });
     } catch (...) {
-      (*retained_completion)(FileResult<std::vector<std::byte>>(ReferenceReadFailure()));
+      (*retained_completion)(FileResult<Bytes>(ReferenceReadFailure()));
     }
     return {};
   }

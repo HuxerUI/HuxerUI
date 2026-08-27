@@ -437,7 +437,7 @@ This does not introduce a Runtime subclass, a public Library base class, platfor
 ### Platform payload and instance protocol
 
 Direct registration from Objective-C, Swift, Java, Kotlin, JavaScript, C++, and additional platform languages requires one value model that every boundary can represent.
-`PlatformPayload` is an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, bytes, list, string-keyed object, and one closed framework capability kind, `ExternalTexture`.
+`PlatformPayload` is an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and one closed framework capability kind, `ExternalTexture`.
 The capability kind does not admit arbitrary objects.
 Objects require unique keys and compare independently of insertion order; encoders preserve the distinction between integers, doubles, strings, and bytes rather than routing through JSON.
 Strings and object keys must be valid UTF-8, doubles must be finite, and positive and negative zero compare equal.
@@ -450,7 +450,7 @@ Boundary bridges preserve these kinds directly rather than relying on implicit c
 
 | Boundary | Scalars | Bytes and containers |
 | --- | --- | --- |
-| C++, Windows, and Linux | `bool`, `std::int64_t`, `double`, and UTF-8 string alternatives | Owned bytes, list, and object alternatives |
+| C++, Windows, and Linux | `bool`, `std::int64_t`, `double`, and UTF-8 string alternatives | `huxerui::Bytes`, list, and object alternatives |
 | Objective-C and Swift | Kind-preserving NSNumber values and NSString | NSData, NSArray, and NSDictionary with NSString keys |
 | Java and Kotlin | Boolean, Long, Double, and String | byte array, List, and String-keyed Map |
 | JavaScript and future JS-hosted adapters | Boolean, BigInt, Number, and string | Uint8Array, Array, and a prototype-free string-keyed object |
@@ -460,6 +460,7 @@ Platform ExternalTexture bridge phases represent the value with an unforgeable f
 
 The shared public surface remains focused:
 
+- `<huxerui/data.h>` owns the cross-subsystem `Bytes` alias and depends only on standard byte-container facilities.
 - `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
 - `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
 - `<huxerui/external_texture.h>` owns the platform-neutral `ExternalTexture` consumer value; platform-specific headers own frame producers.

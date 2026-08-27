@@ -129,8 +129,17 @@ TEST_CASE("FilePerformsSynchronousLocalFileAndDirectoryOperations") {
   REQUIRE(moved.Delete());
   REQUIRE(moved.Delete());
 
+  File binary = directory.Child("binary.bin");
+  const Bytes prefix{std::byte{0}, std::byte{0xFF}};
+  const Bytes suffix{std::byte{'a'}, std::byte{0}};
+  REQUIRE(binary.WriteBytes(prefix));
+  REQUIRE(binary.AppendBytes(suffix));
+  FileResult<Bytes> binary_result = binary.ReadBytes();
+  REQUIRE(binary_result.Succeeded());
+  REQUIRE((binary_result.Value() == Bytes{std::byte{0}, std::byte{0xFF}, std::byte{'a'}, std::byte{0}}));
+
   File bom = directory.Child("bom.txt");
-  const std::vector<std::byte> bom_bytes{
+  const Bytes bom_bytes{
       std::byte{0xEF},
       std::byte{0xBB},
       std::byte{0xBF},
@@ -141,7 +150,7 @@ TEST_CASE("FilePerformsSynchronousLocalFileAndDirectoryOperations") {
   REQUIRE(bom.ReadString().Value() == "ok");
 
   File invalid = directory.Child("invalid.txt");
-  const std::vector<std::byte> invalid_bytes{std::byte{0xFF}};
+  const Bytes invalid_bytes{std::byte{0xFF}};
   REQUIRE(invalid.WriteBytes(invalid_bytes));
   REQUIRE_FALSE(invalid.ReadString().Succeeded());
   REQUIRE(invalid.ReadString().Error().code == FileErrorCode::InvalidEncoding);
