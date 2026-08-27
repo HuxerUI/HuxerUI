@@ -9,6 +9,7 @@
 
 #include "huxerui_builtin_resources.h"
 #include "internal.h"
+#include "numeric_constants.h"
 #include "resource_internal.h"
 #include "indication_internal.h"
 #include "text_field_internal.h"
@@ -451,7 +452,7 @@ float CubicBezierProgress(float progress, float x1, float y1, float x2, float y2
   }
   float lower = 0.0F;
   float upper = 1.0F;
-  for (int iteration = 0; iteration < 16; ++iteration) {
+  for (int iteration = 0; iteration < detail::bezier_bisection_iterations; ++iteration) {
     const float parameter = (lower + upper) * 0.5F;
     if (CubicBezierCoordinate(parameter, x1, x2) < target) {
       lower = parameter;
@@ -637,7 +638,7 @@ private:
   }
 
   void PaintRadioButton(const MountedNode& node, PaintContext& context) const {
-    constexpr float full_circle = 6.28318530717958647692F;
+    constexpr float full_circle = detail::two_pi;
     const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const float progress = progress_.Value();
     const bool disabled = UsesDisabledVisualState(node);
@@ -1713,8 +1714,8 @@ private:
       return;
     }
     const double interval_count = std::ceil(static_cast<double>(maximum_ - minimum_) / *step_);
-    if (!std::isfinite(interval_count) || interval_count <= 1.0 || interval_count > 512.0 ||
-        track.width / static_cast<float>(interval_count) < tick_size * 1.5F) {
+    if (!std::isfinite(interval_count) || interval_count <= 1.0 || interval_count > detail::tick_max_interval_count ||
+        track.width / static_cast<float>(interval_count) < tick_size * detail::tick_min_spacing_scale) {
       return;
     }
     const float radius = tick_size * 0.5F;

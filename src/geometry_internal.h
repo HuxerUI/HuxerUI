@@ -6,6 +6,8 @@
 
 #include <huxerui/geometry.h>
 
+#include "numeric_constants.h"
+
 namespace huxerui::detail {
 
 inline Transform2D ComposeTransform(const Transform2D& outer, const Transform2D& inner) noexcept {
@@ -32,7 +34,7 @@ inline Transform2D TranslationTransform(Point offset) noexcept {
 
 inline std::optional<Transform2D> InverseTransform(const Transform2D& transform) noexcept {
   const float determinant = transform.m11 * transform.m22 - transform.m12 * transform.m21;
-  if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
+  if (!std::isfinite(determinant) || std::abs(determinant) <= transform_epsilon) {
     return std::nullopt;
   }
   const float inverse_m11 = transform.m22 / determinant;

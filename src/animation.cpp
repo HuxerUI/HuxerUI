@@ -8,6 +8,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "numeric_constants.h"
 
 namespace huxerui {
 
@@ -24,10 +25,10 @@ double EvaluateCubicBezier(const CubicBezierCurve& curve, double progress) {
   };
 
   double parameter = progress;
-  for (int iteration = 0; iteration < 8; ++iteration) {
+  for (int iteration = 0; iteration < detail::newton_max_iterations; ++iteration) {
     const double error = coordinate(parameter, curve.X1(), curve.X2()) - progress;
     const double slope = derivative(parameter, curve.X1(), curve.X2());
-    if (std::abs(error) < 1.0e-7 || std::abs(slope) < 1.0e-7) {
+    if (std::abs(error) < detail::bezier_convergence_epsilon || std::abs(slope) < detail::bezier_convergence_epsilon) {
       break;
     }
     parameter = std::clamp(parameter - error / slope, 0.0, 1.0);
@@ -35,9 +36,9 @@ double EvaluateCubicBezier(const CubicBezierCurve& curve, double progress) {
 
   double low = 0.0;
   double high = 1.0;
-  for (int iteration = 0; iteration < 12; ++iteration) {
+  for (int iteration = 0; iteration < detail::bisection_max_iterations; ++iteration) {
     const double x = coordinate(parameter, curve.X1(), curve.X2());
-    if (std::abs(x - progress) < 1.0e-7) {
+    if (std::abs(x - progress) < detail::bezier_convergence_epsilon) {
       break;
     }
     if (x < progress) {
@@ -156,7 +157,7 @@ EvaluateSpring(const SpringSpec& spring, float start, float target, float start_
   double resolved_displacement = displacement;
   double resolved_velocity = velocity;
 
-  if (damping_ratio < 1.0 - 1.0e-5) {
+  if (damping_ratio < 1.0 - detail::critical_damping_epsilon) {
     const double damped_frequency = angular_frequency * std::sqrt(1.0 - damping_ratio * damping_ratio);
     const double a = displacement;
     const double b = (velocity + damping_ratio * angular_frequency * displacement) / damped_frequency;
@@ -166,7 +167,7 @@ EvaluateSpring(const SpringSpec& spring, float start, float target, float start_
     resolved_displacement = exponential * (a * cosine + b * sine);
     resolved_velocity = exponential * (-damping_ratio * angular_frequency * (a * cosine + b * sine) -
                                        a * damped_frequency * sine + b * damped_frequency * cosine);
-  } else if (damping_ratio <= 1.0 + 1.0e-5) {
+  } else if (damping_ratio <= 1.0 + detail::critical_damping_epsilon) {
     const double a = displacement;
     const double b = velocity + angular_frequency * displacement;
     const double exponential = std::exp(-angular_frequency * elapsed);
@@ -367,8 +368,7 @@ public:
   NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const MotionAdvanceResult result = degrees_.Advance(frame);
-    constexpr float degrees_to_radians = 3.14159265358979323846F / 180.0F;
-    const float radians = degrees_.Value() * degrees_to_radians;
+    const float radians = degrees_.Value() * detail::degrees_to_radians_factor;
     const float cosine = std::cos(radians);
     const float sine = std::sin(radians);
     const Transform2D rotation{
@@ -555,7 +555,7 @@ MotionAdvanceResult MotionController::Advance(const FrameInfo& frame) noexcept {
     const auto [resolved_value, resolved_velocity] = EvaluateSpring(*spring, start_, target_, start_velocity_, elapsed);
     value_ = resolved_value;
     velocity_ = resolved_velocity;
-    if (std::abs(target_ - value_) < 0.001F && std::abs(velocity_) < 0.001F) {
+    if (std::abs(target_ - value_) < detail::progress_epsilon && std::abs(velocity_) < detail::progress_epsilon) {
       Finish(target_);
     }
     return {value_ != previous_value, running_, std::nullopt};

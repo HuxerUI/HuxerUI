@@ -11,6 +11,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "numeric_constants.h"
 #include "window_internal.h"
 
 namespace huxerui::detail {
@@ -18,7 +19,7 @@ namespace huxerui::detail {
 namespace {
 
 Path CircularClip(Point center, float radius) {
-  constexpr float cubic_circle = 0.5522847498F;
+  constexpr float cubic_circle = cubic_circle_kappa;
   const float control = radius * cubic_circle;
   Path path;
   path.MoveTo({center.x + radius, center.y})

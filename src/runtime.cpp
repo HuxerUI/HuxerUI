@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "numeric_constants.h"
 #include "application_internal.h"
 #include "external_texture_internal.h"
 #include "resource_internal.h"
@@ -16,6 +17,16 @@
 namespace huxerui::detail {
 
 namespace {
+
+// sRGB transfer function and relative luminance coefficients for system bar contrast.
+constexpr float srgb_linear_threshold = 0.04045F;
+constexpr float srgb_linear_divisor = 12.92F;
+constexpr float srgb_offset = 0.055F;
+constexpr float srgb_offset_denominator = 1.055F;
+constexpr float srgb_gamma = 2.4F;
+constexpr float relative_luminance_red = 0.2126F;
+constexpr float relative_luminance_green = 0.7152F;
+constexpr float relative_luminance_blue = 0.0722F;
 
 int LayerLevelRank(LayerLevel level) noexcept {
   switch (level) {
@@ -216,17 +227,18 @@ Color CompositeOver(Color foreground, Color background) noexcept {
 
 float LinearColorChannel(float value) noexcept {
   value = std::clamp(value, 0.0F, 1.0F);
-  return value <= 0.04045F ? value / 12.92F : std::pow((value + 0.055F) / 1.055F, 2.4F);
+  return value <= srgb_linear_threshold ? value / srgb_linear_divisor
+                                        : std::pow((value + srgb_offset) / srgb_offset_denominator, srgb_gamma);
 }
 
 SystemBarContentBrightness ResolveBrightness(SystemBarContentBrightness configured, Color background) noexcept {
   if (configured != SystemBarContentBrightness::Automatic) {
     return configured;
   }
-  const float luminance = 0.2126F * LinearColorChannel(background.red) +
-                          0.7152F * LinearColorChannel(background.green) +
-                          0.0722F * LinearColorChannel(background.blue);
-  return luminance > 0.45F ? SystemBarContentBrightness::Dark : SystemBarContentBrightness::Light;
+  const float luminance = relative_luminance_red * LinearColorChannel(background.red) +
+                          relative_luminance_green * LinearColorChannel(background.green) +
+                          relative_luminance_blue * LinearColorChannel(background.blue);
+  return luminance > luminance_threshold ? SystemBarContentBrightness::Dark : SystemBarContentBrightness::Light;
 }
 
 Color ResolveCaptionForeground(Color background) noexcept {
@@ -247,7 +259,7 @@ void CollectWindowDragRegionBackground(
       background = CompositeOver(*color, inherited_background);
     }
   }
-  if (node.properties.window_drag_region && node.presentation.resolved_opacity > 0.001F) {
+  if (node.properties.window_drag_region && node.presentation.resolved_opacity > progress_epsilon) {
     const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
     if (bounds.y < title_bar_height && bounds.y + bounds.height > 0.0F) {
       candidate = background;
@@ -309,7 +321,7 @@ void CollectSystemBarCandidates(
   if (!node.participates_in_layout) {
     return;
   }
-  if (node.presentation.resolved_opacity > 0.001F && node.properties.system_bars_appearance.has_value()) {
+  if (node.presentation.resolved_opacity > progress_epsilon && node.properties.system_bars_appearance.has_value()) {
     const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
     const SystemBarsAppearance& appearance = *node.properties.system_bars_appearance;
     if (appearance.status_bar_background.alpha > 0.0F && bounds.y <= status_boundary + 0.5F &&

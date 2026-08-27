@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "numeric_constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,7 +50,7 @@ void RecordScrollVelocitySample(PointerSession& session, Point position, double 
 }
 
 std::optional<float> EstimateScrollVelocity(const PointerSession& session, Axis axis, double release_timestamp) {
-  constexpr double maximum_sample_age = 0.1;
+  constexpr double maximum_sample_age = velocity_sample_max_age;
   if (session.scroll_velocity_sample_count < 2 || !std::isfinite(release_timestamp)) {
     return std::nullopt;
   }
@@ -149,7 +150,7 @@ std::optional<float> EstimateScrollVelocity(const PointerSession& session, Axis 
                : std::nullopt;
   }
 
-  constexpr double maximum_extrapolation_ratio = 2.0;
+  constexpr double maximum_extrapolation_ratio = detail::maximum_extrapolation_ratio;
   const double maximum_velocity = std::abs(trend_velocity) * maximum_extrapolation_ratio;
   return static_cast<float>(std::clamp(velocity, -maximum_velocity, maximum_velocity));
 }
@@ -647,7 +648,7 @@ void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& f
       NotifyScrollActivity(*node, ScrollActivitySource::External);
       RequestFrame();
     }
-    if (std::abs(consumed - delta) < 0.001F) {
+    if (std::abs(consumed - delta) < scroll_delta_epsilon) {
       break;
     }
   }
@@ -1183,7 +1184,7 @@ std::vector<detail::MountedNode*> Runtime::ApplyDragScroll(const PointerSession&
       changed.push_back(candidate);
       remaining -= consumed;
     }
-    if (std::abs(remaining) < 0.001F) {
+    if (std::abs(remaining) < scroll_delta_epsilon) {
       break;
     }
   }

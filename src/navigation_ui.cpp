@@ -13,6 +13,7 @@
 #include <huxerui/theme.h>
 
 #include "internal.h"
+#include "numeric_constants.h"
 #include "resource_internal.h"
 
 namespace huxerui::detail {
@@ -861,7 +862,7 @@ public:
     static_cast<detail::MountedNode&>(node.ChildAt(1)).local_enabled = configuration->presentation->target_visible;
     static_cast<detail::MountedNode&>(node).trap_focus =
         !inline_placement &&
-        (configuration->presentation->target_visible || configuration->presentation->progress > 0.001F);
+        (configuration->presentation->target_visible || configuration->presentation->progress > detail::progress_epsilon);
     return result.SetSize(size);
   }
 };
@@ -921,7 +922,7 @@ public:
       configuration_.presentation->progress = progress_.Value();
     }
     auto& mounted = static_cast<detail::MountedNode&>(node);
-    const bool trap_focus = target_visible || progress_.Value() > 0.001F;
+    const bool trap_focus = target_visible || progress_.Value() > detail::progress_epsilon;
     const bool focus_changed = mounted.trap_focus != trap_focus;
     mounted.trap_focus = trap_focus;
     return {result.needs_frame || focus_changed, result.wake_after};
@@ -931,7 +932,7 @@ public:
     if (!IsModal() || !node.IsEnabled() || !node.Bounds().Contains(position)) {
       return false;
     }
-    if (progress_.Value() > 0.001F || TargetVisible()) {
+    if (progress_.Value() > detail::progress_epsilon || TargetVisible()) {
       return true;
     }
     if (!configuration_.presentation || !configuration_.presentation->allow_open_gesture) {
@@ -951,12 +952,12 @@ public:
       drag_origin_ = event.position.x;
       drag_origin_progress_ = progress_.Value();
       const Rect panel = PresentedPanelBounds(node);
-      outside_press_ = progress_.Value() > 0.001F && !panel.Contains(event.position);
+      outside_press_ = progress_.Value() > detail::progress_epsilon && !panel.Contains(event.position);
       const float handle = std::max(0.0F, configuration_.edge_drag_width);
       const bool close_handle = configuration_.side == DrawerSide::Start
                                     ? std::abs(event.position.x - (panel.x + panel.width)) <= handle
                                     : std::abs(event.position.x - panel.x) <= handle;
-      dragging_ = !outside_press_ && (progress_.Value() <= 0.001F || close_handle);
+      dragging_ = !outside_press_ && (progress_.Value() <= detail::progress_epsilon || close_handle);
       return outside_press_ || dragging_ ? PointerResult::Capture : PointerResult::Ignored;
     }
     if (!pointer_id_.has_value() || *pointer_id_ != event.pointer_id) {
@@ -997,7 +998,7 @@ public:
       return false;
     }
     if (!TargetVisible() && !interactive_) {
-      return progress_.Value() > 0.001F;
+      return progress_.Value() > detail::progress_epsilon;
     }
     switch (event.phase) {
     case BackPhase::Begin:

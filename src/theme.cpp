@@ -14,6 +14,18 @@ namespace {
 
 constexpr float material_shadow_blur_per_elevation = 4.0F;
 
+// Alpha coefficients that shape Material design surfaces and their disabled states.
+constexpr float state_layer_alpha = 0.12F;              // Hover/ripple/disabled container/separator
+constexpr float disabled_content_alpha = 0.38F;         // Disabled foreground content
+constexpr float disabled_filled_background_alpha = 0.04F;
+constexpr float hover_state_alpha = 0.08F;              // Indication hover layer
+constexpr float scrim_shadow_alpha = 0.24F;             // Dialog/card shadow
+constexpr float elevated_shadow_alpha = 0.22F;
+constexpr float menu_shadow_alpha = 0.2F;
+constexpr float inverse_surface_alpha = 0.94F;          // Toast/tooltip background
+constexpr float selection_alpha = 0.22F;                // Text selection highlight
+constexpr float slider_track_alpha = 0.2F;
+
 AnimationSpec InteractionTween(double duration) {
   return TweenSpec{.duration = duration, .easing = Easing::EaseOut};
 }
@@ -39,8 +51,8 @@ Indication FlatIndication(Color color, const ThemeSpec& theme, float hover_opaci
 
 Indication MaterialIndication(Color color, const ThemeSpec& theme) {
   Color hover = color;
-  color.alpha *= 0.12F;
-  hover.alpha *= 0.08F;
+  color.alpha *= state_layer_alpha;
+  hover.alpha *= hover_state_alpha;
   return {
       .hover = IndicationLayer{
           .fill = hover,
@@ -67,12 +79,12 @@ Shadow MaterialShadow(Color color, float elevation) {
 
 ToastStyle FlatToastStyle(const ThemeSpec& theme) {
   Color background = theme.colors.inverse_surface;
-  background.alpha *= 0.94F;
+  background.alpha *= inverse_surface_alpha;
   return {
       .background = background,
       .text_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.inverse_on_surface},
       .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small + theme.spacing.extra_small),
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.24F), {}, theme.elevation.medium, 0.0F},
+      .shadow = Shadow{Color::Rgb(0, 0, 0, scrim_shadow_alpha), {}, theme.elevation.medium, 0.0F},
       .corner_radius = theme.shapes.small,
       .maximum_width = 480.0F,
       .viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F},
@@ -83,7 +95,7 @@ ToastStyle FlatToastStyle(const ThemeSpec& theme) {
 
 TooltipStyle FlatTooltipStyle(const ThemeSpec& theme) {
   Color background = theme.colors.inverse_surface;
-  background.alpha *= 0.94F;
+  background.alpha *= inverse_surface_alpha;
   return {
       .background = background,
       .text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.inverse_on_surface},
@@ -104,11 +116,11 @@ TooltipStyle FlatTooltipStyle(const ThemeSpec& theme) {
 
 DialogStyle FlatDialogStyle(const ThemeSpec& theme) {
   Color separator = theme.colors.on_surface;
-  separator.alpha *= 0.12F;
+  separator.alpha *= state_layer_alpha;
   return {
       .scrim = theme.colors.scrim,
       .background = theme.colors.surface,
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.24F), {}, theme.elevation.high, 0.0F},
+      .shadow = Shadow{Color::Rgb(0, 0, 0, scrim_shadow_alpha), {}, theme.elevation.high, 0.0F},
       .title_style =
           TextStyle{Font::System(theme.typography.title_large).WithWeight(FontWeight::Bold), theme.colors.on_surface},
       .message_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
@@ -145,7 +157,7 @@ BottomSheetStyle FlatBottomSheetStyle(const ThemeSpec& theme) {
   return {
       .scrim = theme.colors.scrim,
       .background = theme.colors.surface,
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.22F), {}, theme.elevation.high, 0.0F},
+      .shadow = Shadow{Color::Rgb(0, 0, 0, elevated_shadow_alpha), {}, theme.elevation.high, 0.0F},
       .corner_radii = CornerRadii::Top(theme.shapes.large),
       .drag_handle = Color::Transparent(),
       .drag_handle_size = {},
@@ -158,7 +170,7 @@ BottomSheetStyle FlatBottomSheetStyle(const ThemeSpec& theme) {
 
 MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
   Color separator = theme.colors.on_surface;
-  separator.alpha *= 0.12F;
+  separator.alpha *= state_layer_alpha;
   return {
       .background = theme.colors.surface,
       .foreground = theme.colors.on_surface,
@@ -172,7 +184,7 @@ MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
       .item_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
       .item_content_spacing = theme.spacing.small,
       .icon_size = 18.0F,
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {}, theme.elevation.medium, 0.0F},
+      .shadow = Shadow{Color::Rgb(0, 0, 0, menu_shadow_alpha), {}, theme.elevation.medium, 0.0F},
       .corner_radius = theme.shapes.small,
       .minimum_width = 180.0F,
       .minimum_item_height = 36.0F,
@@ -253,7 +265,7 @@ DrawerStyle FlatDrawerStyle(const ThemeSpec& theme) {
   return {
       .background = theme.colors.surface,
       .scrim = theme.colors.scrim,
-      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.22F), {}, theme.elevation.medium, 0.0F},
+      .shadow = Shadow{Color::Rgb(0, 0, 0, elevated_shadow_alpha), {}, theme.elevation.medium, 0.0F},
       .preferred_width = 320.0F,
       .minimum_width = 240.0F,
       .minimum_content_width = 360.0F,
@@ -291,9 +303,9 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
 
 ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
   Color disabled_background = theme.colors.on_surface;
-  disabled_background.alpha *= 0.12F;
+  disabled_background.alpha *= state_layer_alpha;
   Color disabled_label = theme.colors.on_surface;
-  disabled_label.alpha *= 0.38F;
+  disabled_label.alpha *= disabled_content_alpha;
   return {
       .background = theme.colors.primary,
       .label_style =
@@ -310,7 +322,7 @@ ButtonStyle MaterialButtonStyle(const ThemeSpec& theme) {
 
 IconButtonStyle MaterialIconButtonStyle(const ThemeSpec& theme) {
   Color disabled_foreground = theme.colors.on_surface;
-  disabled_foreground.alpha *= 0.38F;
+  disabled_foreground.alpha *= disabled_content_alpha;
   return {
       .foreground = theme.colors.on_surface_variant,
       .disabled_foreground = disabled_foreground,
@@ -324,11 +336,11 @@ IconButtonStyle MaterialIconButtonStyle(const ThemeSpec& theme) {
 
 ChipStyle MaterialChipStyle(const ThemeSpec& theme) {
   Color disabled_container = theme.colors.on_surface;
-  disabled_container.alpha *= 0.12F;
+  disabled_container.alpha *= state_layer_alpha;
   Color disabled_content = theme.colors.on_surface;
-  disabled_content.alpha *= 0.38F;
+  disabled_content.alpha *= disabled_content_alpha;
   Color disabled_border = theme.colors.on_surface;
-  disabled_border.alpha *= 0.12F;
+  disabled_border.alpha *= state_layer_alpha;
   return {
       .background = Color::Transparent(),
       .selected_background = theme.colors.secondary_container,
@@ -375,7 +387,7 @@ SegmentedButtonStyle MaterialSegmentedButtonStyle(const ThemeSpec& theme) {
 
 TabsStyle MaterialTabsStyle(const ThemeSpec& theme) {
   Color disabled_label = theme.colors.on_surface;
-  disabled_label.alpha *= 0.38F;
+  disabled_label.alpha *= disabled_content_alpha;
   Color divider_color = theme.colors.outline;
   divider_color.alpha *= 0.4F;
   return {
@@ -415,13 +427,13 @@ DividerStyle MaterialDividerStyle(const ThemeSpec& theme) {
 
 TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   Color disabled_content = theme.colors.on_surface;
-  disabled_content.alpha *= 0.38F;
+  disabled_content.alpha *= disabled_content_alpha;
   Color disabled_indicator = theme.colors.on_surface;
-  disabled_indicator.alpha *= 0.38F;
+  disabled_indicator.alpha *= disabled_content_alpha;
   Color disabled_outline = theme.colors.on_surface;
-  disabled_outline.alpha *= 0.12F;
+  disabled_outline.alpha *= state_layer_alpha;
   Color disabled_container = theme.colors.on_surface;
-  disabled_container.alpha *= 0.04F;
+  disabled_container.alpha *= disabled_filled_background_alpha;
   return {
       .variant = TextFieldVariant::Filled,
       .show_label = true,
@@ -503,7 +515,7 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
 
 CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
-  disabled.alpha *= 0.38F;
+  disabled.alpha *= disabled_content_alpha;
   return {
       .size = 18.0F,
       .minimum_interactive_size = 48.0F,
@@ -521,7 +533,7 @@ CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
 
 RadioButtonStyle MaterialRadioButtonStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
-  disabled.alpha *= 0.38F;
+  disabled.alpha *= disabled_content_alpha;
   return {
       .size = 20.0F,
       .minimum_interactive_size = 48.0F,
@@ -538,9 +550,9 @@ RadioButtonStyle MaterialRadioButtonStyle(const ThemeSpec& theme) {
 
 SwitchStyle MaterialSwitchStyle(const ThemeSpec& theme) {
   Color disabled_track = theme.colors.on_surface;
-  disabled_track.alpha *= 0.12F;
+  disabled_track.alpha *= state_layer_alpha;
   Color disabled_thumb = theme.colors.on_surface;
-  disabled_thumb.alpha *= 0.38F;
+  disabled_thumb.alpha *= disabled_content_alpha;
   return {
       .width = 52.0F,
       .height = 32.0F,
@@ -598,9 +610,9 @@ ProgressBarStyle MaterialProgressBarStyle(const ThemeSpec& theme) {
 
 SliderStyle MaterialSliderStyle(const ThemeSpec& theme) {
   Color disabled_active = theme.colors.on_surface;
-  disabled_active.alpha *= 0.38F;
+  disabled_active.alpha *= disabled_content_alpha;
   Color disabled_inactive = theme.colors.on_surface;
-  disabled_inactive.alpha *= 0.12F;
+  disabled_inactive.alpha *= state_layer_alpha;
   return {
       .width = 160.0F,
       .height = 48.0F,
@@ -634,7 +646,7 @@ SliderStyle MaterialSliderStyle(const ThemeSpec& theme) {
 
 ScrollBarStyle MaterialScrollBarStyle(const ThemeSpec& theme) {
   Color thumb = theme.colors.on_surface;
-  thumb.alpha *= 0.38F;
+  thumb.alpha *= disabled_content_alpha;
   return {
       .thickness = 4.0F,
       .minimum_thumb_extent = 24.0F,
@@ -743,7 +755,7 @@ BottomSheetStyle MaterialBottomSheetStyle(const ThemeSpec& theme) {
 
 MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
   Color separator = theme.colors.on_surface;
-  separator.alpha *= 0.12F;
+  separator.alpha *= state_layer_alpha;
   return {
       .background = theme.colors.surface_container,
       .foreground = theme.colors.on_surface,
@@ -1004,7 +1016,7 @@ IconButtonStyle DefaultIconButtonStyle(const ThemeSpec& theme) {
 
 ChipStyle DefaultChipStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
-  border.alpha *= 0.24F;
+  border.alpha *= scrim_shadow_alpha;
   Color disabled_background = theme.colors.surface;
   disabled_background.alpha *= theme.interactions.disabled_opacity;
   Color disabled_selected_background = theme.colors.primary;
@@ -1041,7 +1053,7 @@ ChipStyle DefaultChipStyle(const ThemeSpec& theme) {
 
 SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
-  border.alpha *= 0.24F;
+  border.alpha *= scrim_shadow_alpha;
   return {
       .background = theme.colors.surface,
       .selected_background = theme.colors.primary,
@@ -1089,7 +1101,7 @@ TabsStyle DefaultTabsStyle(const ThemeSpec& theme) {
 
 DividerStyle DefaultDividerStyle(const ThemeSpec& theme) {
   Color color = theme.colors.on_surface;
-  color.alpha *= 0.12F;
+  color.alpha *= state_layer_alpha;
   return {
       .color = color,
       .thickness = 1.0F,
@@ -1160,7 +1172,7 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
               theme.colors.primary.red,
               theme.colors.primary.green,
               theme.colors.primary.blue,
-              0.22F,
+              selection_alpha,
           },
       .caret = theme.colors.primary,
       .error_caret = theme.colors.error,
@@ -1228,7 +1240,7 @@ SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.28F;
   Color disabled_track = theme.colors.on_surface;
-  disabled_track.alpha *= 0.12F;
+  disabled_track.alpha *= state_layer_alpha;
   Color disabled_thumb = theme.colors.on_surface;
   disabled_thumb.alpha *= theme.interactions.disabled_opacity;
   return {
@@ -1292,11 +1304,11 @@ ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme) {
 
 SliderStyle DefaultSliderStyle(const ThemeSpec& theme) {
   Color inactive_track = theme.colors.on_surface;
-  inactive_track.alpha *= 0.2F;
+  inactive_track.alpha *= slider_track_alpha;
   Color disabled_active = theme.colors.on_surface;
-  disabled_active.alpha *= 0.38F;
+  disabled_active.alpha *= disabled_content_alpha;
   Color disabled_inactive = theme.colors.on_surface;
-  disabled_inactive.alpha *= 0.12F;
+  disabled_inactive.alpha *= state_layer_alpha;
   return {
       .width = 160.0F,
       .height = 32.0F,

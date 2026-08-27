@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "numeric_constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -65,26 +66,23 @@ bool Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
     recognition->long_press_pending = false;
     recognition->tap_pending = false;
     recognition->double_tap_pending = false;
-    constexpr double double_tap_interval = 0.4;
-    constexpr float double_tap_slop = 18.0F;
     const double now = state_->platform_->Now();
     if (gesture.previous_tap_time.has_value() &&
         gesture.previous_tap_node == std::optional{recognition->node_identity} &&
-        now - *gesture.previous_tap_time >= 0.0 && now - *gesture.previous_tap_time <= double_tap_interval &&
+        now - *gesture.previous_tap_time >= 0.0 && now - *gesture.previous_tap_time <= detail::double_tap_interval &&
         std::hypot(event.position.x - gesture.previous_tap_position.x,
-                   event.position.y - gesture.previous_tap_position.y) <= double_tap_slop) {
+                   event.position.y - gesture.previous_tap_position.y) <= detail::multi_tap_movement_slop) {
       gesture.previous_tap_time.reset();
       gesture.previous_tap_node.reset();
       recognition->double_tap_pending = true;
       recognition->tap_position = event.position;
       return false;
     }
-    constexpr double delay = 0.5;
     recognition->long_press_pending = true;
-    recognition->long_press_deadline = now + delay;
+    recognition->long_press_deadline = now + detail::long_press_delay;
     recognition->tap_pending = true;
     recognition->tap_position = event.position;
-    RequestFrameAfter(delay);
+    RequestFrameAfter(detail::long_press_delay);
     return false;
   }
   if (event.type == PointerEventType::Move) {
@@ -93,7 +91,7 @@ bool Runtime::TrackTouchTextSelectionGesture(const PointerEvent& event) {
     if (recognition->long_press_pending && distance >= detail::touch_gesture_slop) {
       recognition->long_press_pending = false;
     }
-    if (recognition->tap_pending && distance >= 18.0F) {
+    if (recognition->tap_pending && distance >= detail::multi_tap_movement_slop) {
       recognition->tap_pending = false;
     }
     if (recognition->double_tap_pending && distance >= detail::touch_gesture_slop) {

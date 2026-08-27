@@ -15,6 +15,11 @@ namespace huxerui {
 
 namespace detail {
 
+// Window control glyphs and their interaction surface alphas.
+constexpr float window_close_hover_alpha = 0.9F;
+constexpr float window_control_hover_alpha = 0.08F;
+constexpr float window_control_press_alpha = 0.16F;
+
 class WindowControlsLayout final : public huxerui::Layout<WindowControlsLayout> {
 public:
   using Layout::Layout;
@@ -118,8 +123,10 @@ View WindowControl(
     context.StrokePath(std::move(path), window->caption_foreground, 1.0F);
   });
   const bool close = command == WindowCommand::Close;
-  const Color hover = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.08F);
-  const Color press = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.16F);
+  const Color hover =
+      close ? Color::Rgb(196, 43, 28, window_close_hover_alpha) : Color::Rgb(0, 0, 0, window_control_hover_alpha);
+  const Color press =
+      close ? Color::Rgb(196, 43, 28, window_close_hover_alpha) : Color::Rgb(0, 0, 0, window_control_press_alpha);
   View interaction_surface = Stack {}.With(
       Indication{
           .hover = IndicationLayer{.fill = hover},

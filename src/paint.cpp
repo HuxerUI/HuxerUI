@@ -9,6 +9,7 @@
 #include <huxerui/vector.h>
 
 #include "geometry_internal.h"
+#include "numeric_constants.h"
 #include "shadow_internal.h"
 #include "vector_internal.h"
 
@@ -410,7 +411,7 @@ void PaintContext::DrawArc(
       }
   );
   const float cap_outset =
-      cap == StrokeCap::Square ? std::max(0.0F, width) * 0.70710678118F : std::max(0.0F, width) * 0.5F;
+      cap == StrokeCap::Square ? std::max(0.0F, width) * detail::square_cap_scale : std::max(0.0F, width) * 0.5F;
   const float extent = std::max(0.0F, radius) + cap_outset;
   Include({
       center.x - extent,
@@ -526,7 +527,7 @@ void PaintContext::StrokePath(Path path, Color color, float width, StrokeCap cap
     outset_multiplier = std::max(outset_multiplier, miter_limit);
   }
   if (cap == StrokeCap::Square) {
-    outset_multiplier = std::max(outset_multiplier, 1.41421356237F);
+    outset_multiplier = std::max(outset_multiplier, detail::square_cap_outset);
   }
   const float outset = width * 0.5F * outset_multiplier;
   Include({

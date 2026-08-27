@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "numeric_constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -987,7 +988,7 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
     Stop();
     return {};
   }
-  const float stop_velocity = physics.minimum_fling_velocity * 0.3F;
+  const float stop_velocity = physics.minimum_fling_velocity * fling_stop_velocity_fraction;
   if (!node.interaction.enabled || !IsScrollContainer(node)) {
     Stop();
     return {};
@@ -1000,7 +1001,7 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
     };
   }
 
-  const double elapsed = std::clamp(frame.timestamp - *previous_timestamp_, 0.0, 0.25);
+  const double elapsed = std::clamp(frame.timestamp - *previous_timestamp_, 0.0, fling_frame_clamp);
   previous_timestamp_ = frame.timestamp;
   if (elapsed <= 0.0) {
     return {
@@ -1020,7 +1021,7 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
       }
     }
   }
-  if (std::abs(consumed - delta) > 0.001F) {
+  if (std::abs(consumed - delta) > scroll_delta_epsilon) {
     const float transfer_velocity = velocity_ - physics.deceleration_rate * consumed;
     Stop();
     if (std::abs(transfer_velocity) >= stop_velocity) {
@@ -1105,7 +1106,7 @@ ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event) 
       continue;
     }
     result.scroll_chain.push_back(*candidate);
-    if (std::abs(remaining) < 0.001F) {
+    if (std::abs(remaining) < scroll_delta_epsilon) {
       continue;
     }
     const float consumed = ScrollNodeBy(**candidate, remaining);

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "internal.h"
+#include "numeric_constants.h"
 
 namespace huxerui {
 namespace {
@@ -81,8 +82,8 @@ public:
 
 private:
   std::uint32_t count_ = 2;
-  double maximum_interval_ = 0.3;
-  float maximum_movement_ = 18.0F;
+  double maximum_interval_ = detail::long_press_minimum_interval;
+  float maximum_movement_ = detail::multi_tap_movement_slop;
 };
 
 class MultiTapExtension final : public NodeExtension {
@@ -224,7 +225,7 @@ public:
 
 private:
   Point origin_;
-  float maximum_movement_ = 6.0F;
+  float maximum_movement_ = detail::touch_gesture_slop;
   std::optional<double> deadline_;
   bool accepted_ = false;
 };
@@ -417,7 +418,7 @@ private:
   }
 
   Point Velocity(double timestamp) const {
-    constexpr double maximum_age = 0.1;
+    constexpr double maximum_age = detail::velocity_sample_max_age;
     if (sample_count_ < 2 || !std::isfinite(timestamp)) {
       return {};
     }
@@ -452,8 +453,8 @@ private:
   }
 
   std::optional<Axis> axis_;
-  float minimum_distance_ = 6.0F;
-  float delayed_tolerance_ = 6.0F;
+  float minimum_distance_ = detail::touch_gesture_slop;
+  float delayed_tolerance_ = detail::touch_gesture_slop;
   Point down_origin_;
   Point origin_;
   Point previous_;
@@ -661,10 +662,10 @@ private:
       dot += from.x * to.x + from.y * to.y;
       cross += from.x * to.y - from.y * to.x;
     }
-    const float scale = previous.mean_square_radius > 0.000001F
+    const float scale = previous.mean_square_radius > detail::transform_epsilon
                             ? std::sqrt(current.mean_square_radius / previous.mean_square_radius)
                             : 1.0F;
-    const float rotation = std::abs(dot) > 0.000001F || std::abs(cross) > 0.000001F
+    const float rotation = std::abs(dot) > detail::transform_epsilon || std::abs(cross) > detail::transform_epsilon
                                ? std::atan2(cross, dot)
                                : 0.0F;
     const Point previous_local = Local(previous.centroid);

@@ -1,5 +1,6 @@
 #include "internal.h"
 #include "geometry_internal.h"
+#include "numeric_constants.h"
 #include "resource_internal.h"
 #include "text_field_internal.h"
 #include "text_input_internal.h"
@@ -18,6 +19,9 @@
 
 namespace huxerui {
 namespace {
+
+// Minimum caret blink wake-up interval in seconds.
+constexpr double caret_wake_minimum = 0.001;
 
 bool IsSingleUtf8CodePoint(std::string_view text) noexcept {
   if (text.empty()) {
@@ -239,7 +243,7 @@ Path OutlinedBorderPath(Rect frame, float width, CornerRadii corner_radii, float
     return Path::RoundedRect(centerline, corner_radii);
   }
 
-  constexpr float cubic_circle = 0.5522847498F;
+  constexpr float cubic_circle = detail::cubic_circle_kappa;
   Path path;
   path.MoveTo({end, centerline.y})
       .LineTo({right - corner_radii.top_right, centerline.y})
@@ -826,7 +830,7 @@ public:
     const double phase = std::fmod(elapsed, interval);
     caret_visible_ = static_cast<std::uint64_t>(elapsed / interval) % 2 == 0;
     return finish({
-        .wake_after = std::max(0.001, interval - phase),
+        .wake_after = std::max(caret_wake_minimum, interval - phase),
     });
   }
 

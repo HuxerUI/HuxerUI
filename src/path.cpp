@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "geometry_internal.h"
+#include "numeric_constants.h"
 #include "path_internal.h"
 
 namespace huxerui {
@@ -38,7 +39,7 @@ float CubicValue(float start, float first_control, float second_control, float e
 
 template <class Include> void IncludeQuadraticExtrema(float start, float control, float end, Include&& include) {
   const float denominator = start - 2.0F * control + end;
-  if (std::abs(denominator) <= 0.000001F) {
+  if (std::abs(denominator) <= detail::extrema_epsilon) {
     return;
   }
   const float time = (start - control) / denominator;
@@ -52,8 +53,8 @@ void IncludeCubicExtrema(float start, float first_control, float second_control,
   const float a = -start + 3.0F * first_control - 3.0F * second_control + end;
   const float b = 2.0F * (start - 2.0F * first_control + second_control);
   const float c = first_control - start;
-  if (std::abs(a) <= 0.000001F) {
-    if (std::abs(b) > 0.000001F) {
+  if (std::abs(a) <= detail::extrema_epsilon) {
+    if (std::abs(b) > detail::extrema_epsilon) {
       const float time = -c / b;
       if (time > 0.0F && time < 1.0F) {
         include(time);
@@ -220,7 +221,7 @@ Path Path::RoundedRect(Rect rect, CornerRadii corner_radii) {
 
   const float right = rect.x + rect.width;
   const float bottom = rect.y + rect.height;
-  constexpr float cubic_circle = 0.5522847498F;
+  constexpr float cubic_circle = detail::cubic_circle_kappa;
   Path path;
   path.MoveTo({rect.x + corner_radii.top_left, rect.y})
       .LineTo({right - corner_radii.top_right, rect.y})

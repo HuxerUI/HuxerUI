@@ -11,6 +11,11 @@ namespace huxerui {
 
 namespace {
 
+// Scroll bar surface alphas are a scroll bar implementation detail.
+constexpr float scrollbar_track_alpha = 0.08F;
+constexpr float scrollbar_thumb_alpha = 0.55F;
+constexpr float scrollbar_hit_opacity = 0.01F;
+
 ScrollBarStyle ResolveScrollBarStyle(
     const std::shared_ptr<const Environment>& environment, const std::optional<ScrollBarStyle>& explicit_style
 ) {
@@ -28,9 +33,9 @@ ScrollBarStyle ResolveScrollBarStyle(
   style.fade_in_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.fast);
   style.fade_out_duration = theme.motion.reduced_motion ? 0.0F : static_cast<float>(theme.motion.normal);
   style.track_color = theme.colors.on_surface;
-  style.track_color.alpha *= 0.08F;
+  style.track_color.alpha *= scrollbar_track_alpha;
   style.thumb_color = theme.colors.on_surface;
-  style.thumb_color.alpha *= 0.55F;
+  style.thumb_color.alpha *= scrollbar_thumb_alpha;
   return style;
 }
 
@@ -126,7 +131,8 @@ public:
 
   bool HitTest(MountedNode& node, Point position) const override {
     const auto geometry = ResolveLocalScrollBarGeometry(node);
-    return node.IsEnabled() && geometry.has_value() && opacity_.Value() > 0.01F && geometry->track.Contains(position);
+    return node.IsEnabled() && geometry.has_value() && opacity_.Value() > scrollbar_hit_opacity &&
+           geometry->track.Contains(position);
   }
 
   bool HoverHitTest(MountedNode& node, Point position) const override {
@@ -156,7 +162,8 @@ public:
     }
     if (event.type == PointerEventType::Down) {
       const auto geometry = ResolveLocalScrollBarGeometry(node);
-      if (!geometry.has_value() || opacity_.Value() <= 0.01F || !geometry->track.Contains(event.position)) {
+      if (!geometry.has_value() || opacity_.Value() <= scrollbar_hit_opacity ||
+          !geometry->track.Contains(event.position)) {
         return NodeExtension::PointerResult::Ignored;
       }
 
