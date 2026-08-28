@@ -251,19 +251,37 @@ public:
     }
   }
 
-  void Cancel() noexcept {
-    {
-      std::scoped_lock lock(mutex_);
-      if (finished_) {
-        return;
-      }
-      finished_ = true;
-      completion_ = {};
+  void Cancel() {
+    if (!SuppressCompletion()) {
+      return;
     }
-    g_cancellable_cancel(cancellable_);
+    if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
+      const std::shared_ptr<LinuxHttpRequest> request = shared_from_this();
+      // Keep libsoup request cancellation on the network context that owns its completion and cleanup.
+      transport->Post([request] { request->CancelSoupRequest(); });
+    }
+  }
+
+  void CancelOnNetworkThread() noexcept {
+    static_cast<void>(SuppressCompletion());
+    CancelSoupRequest();
   }
 
 private:
+  [[nodiscard]] bool SuppressCompletion() noexcept {
+    std::scoped_lock lock(mutex_);
+    if (finished_) {
+      return false;
+    }
+    finished_ = true;
+    completion_ = {};
+    return true;
+  }
+
+  void CancelSoupRequest() noexcept {
+    g_cancellable_cancel(cancellable_);
+  }
+
   void SetRequestBody(SoupMessage* message) noexcept {
     if (g_strcmp0(soup_message_get_method(message), HttpMethodName(request_.method)) != 0) {
       return;
@@ -403,7 +421,7 @@ private:
 void LinuxHttpTransportState::Queue(std::shared_ptr<LinuxHttpRequest> request) {
   requests_.push_back(request);
   if (stopping_ || request->Finished()) {
-    request->Cancel();
+    request->CancelOnNetworkThread();
     Remove(request.get());
     return;
   }
@@ -421,9 +439,8 @@ void LinuxHttpTransportState::StopOnNetworkThread() noexcept {
   }
   stopping_ = true;
   for (const std::shared_ptr<LinuxHttpRequest>& request : requests_) {
-    request->Cancel();
+    request->CancelOnNetworkThread();
   }
-  soup_session_abort(session_);
   MaybeQuit();
 }
 

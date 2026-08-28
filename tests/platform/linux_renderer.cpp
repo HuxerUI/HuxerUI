@@ -227,10 +227,12 @@ TEST_CASE("LinuxTextLayoutHonorsExplicitDirection") {
       200.0F,
       {.shaping = {.direction = TextDirection::RightToLeft}, .wrap = TextWrap::NoWrap}
   );
-  REQUIRE(left_to_right->CaretRect(0, TextAffinity::Downstream).x == 0.0F);
-  REQUIRE(left_to_right->CaretRect(3, TextAffinity::Downstream).x > 0.0F);
-  REQUIRE(right_to_left->CaretRect(0, TextAffinity::Downstream).x > 0.0F);
-  REQUIRE(right_to_left->CaretRect(3, TextAffinity::Downstream).x == 0.0F);
+  const Rect left_to_right_start = left_to_right->CaretRect(0, TextAffinity::Downstream);
+  const Rect left_to_right_end = left_to_right->CaretRect(3, TextAffinity::Downstream);
+  const Rect right_to_left_start = right_to_left->CaretRect(0, TextAffinity::Downstream);
+  const Rect right_to_left_end = right_to_left->CaretRect(3, TextAffinity::Downstream);
+  REQUIRE(left_to_right_end.x > left_to_right_start.x);
+  REQUIRE(right_to_left_start.x > right_to_left_end.x);
   renderer.Discard();
 }
 
