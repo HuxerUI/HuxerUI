@@ -331,8 +331,10 @@ jobs:
         include:
           - runner: macos-15
             architecture: arm64
+            parallel_jobs: 3
           - runner: macos-15-intel
             architecture: x86_64
+            parallel_jobs: 4
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -368,7 +370,7 @@ jobs:
           -DHUXERUI_BUILD_TESTS=ON
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel "${{ matrix.parallel_jobs }}"
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Package
