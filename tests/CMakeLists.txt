@@ -430,6 +430,11 @@ elseif (UNIX AND NOT EMSCRIPTEN)
     add_test(NAME HuxerUIToolBuildScriptTests
             COMMAND sh "${HUXERUI_PROJECT_DIR}/scripts/build_tools.sh" -h
     )
+    add_test(NAME HuxerUIToolBuildGeneratorTests
+            COMMAND sh
+                    "${HUXERUI_PROJECT_DIR}/tests/scripts/build_tools_generator.sh"
+                    "${HUXERUI_PROJECT_DIR}"
+    )
     add_test(NAME HuxerUISdkPackageScriptTests
             COMMAND sh "${HUXERUI_PROJECT_DIR}/scripts/package_sdk.sh" --help
     )

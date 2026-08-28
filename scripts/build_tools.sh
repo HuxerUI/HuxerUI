@@ -162,7 +162,15 @@ if [ -n "$toolchain_file" ]; then
   [ -f "$toolchain_file" ] || fail "toolchain file is missing: $toolchain_file"
 fi
 command -v cmake >/dev/null 2>&1 || fail "cmake is required on PATH"
-command -v ninja >/dev/null 2>&1 || fail "ninja is required on PATH"
+if [ -n "${CMAKE_GENERATOR:-}" ]; then
+  cmake_generator=$CMAKE_GENERATOR
+elif command -v ninja >/dev/null 2>&1; then
+  cmake_generator=Ninja
+elif command -v make >/dev/null 2>&1; then
+  cmake_generator="Unix Makefiles"
+else
+  fail "no supported CMake generator is available; set CMAKE_GENERATOR or install ninja or make"
+fi
 
 if [ -z "$build_directory" ]; then
   build_directory="$source_directory/build/tools/$platform/$architecture"
@@ -188,7 +196,7 @@ build_tool() {
   source_path=$1
   tool_build_directory=$2
   target_name=$3
-  set -- cmake -S "$source_path" -B "$tool_build_directory" -G Ninja -DCMAKE_BUILD_TYPE=Release
+  set -- cmake -S "$source_path" -B "$tool_build_directory" -G "$cmake_generator" -DCMAKE_BUILD_TYPE=Release
   if [ -n "$toolchain_file" ]; then
     set -- "$@" "-DCMAKE_TOOLCHAIN_FILE=$toolchain_file"
   fi
