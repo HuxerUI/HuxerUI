@@ -411,6 +411,13 @@ endif ()
 if (WIN32)
     find_program(HUXERUI_POWERSHELL_COMMAND NAMES pwsh powershell)
     if (HUXERUI_POWERSHELL_COMMAND)
+        add_test(NAME HuxerUIToolBuildScriptTests
+                COMMAND "${HUXERUI_POWERSHELL_COMMAND}"
+                        -NoProfile
+                        -ExecutionPolicy Bypass
+                        -File "${HUXERUI_PROJECT_DIR}/scripts/build_tools.ps1"
+                        -h
+        )
         add_test(NAME HuxerUISdkPackageScriptTests
                 COMMAND "${HUXERUI_POWERSHELL_COMMAND}"
                         -NoProfile
@@ -420,6 +427,9 @@ if (WIN32)
         )
     endif ()
 elseif (UNIX AND NOT EMSCRIPTEN)
+    add_test(NAME HuxerUIToolBuildScriptTests
+            COMMAND sh "${HUXERUI_PROJECT_DIR}/scripts/build_tools.sh" -h
+    )
     add_test(NAME HuxerUISdkPackageScriptTests
             COMMAND sh "${HUXERUI_PROJECT_DIR}/scripts/package_sdk.sh" --help
     )
@@ -445,7 +455,7 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
                     "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
                     "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
                     "-DCLI_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
-                    "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
+                    "-DHOST_PLATFORM=${HUXERUI_SDK_HOST_PLATFORM}"
                     "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
                     "-DPLATFORM_ARTIFACTS_INCLUDED=$<BOOL:${HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT}>"
                     "-DWINDOWS_DEBUG_INCLUDED=$<BOOL:${HUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG}>"
@@ -473,7 +483,7 @@ if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME)
                         "-DPACKAGE_GENERATOR=${HUXERUI_SDK_PACKAGE_GENERATOR}"
                         "-DPACKAGE_EXTENSION=${HUXERUI_SDK_PACKAGE_EXTENSION}"
                         "-DINSTALLER_PATH=${HUXERUI_PROJECT_DIR}/install.sh"
-                        "-DHOST_SYSTEM=${HUXERUI_SDK_HOST_SYSTEM}"
+                        "-DHOST_PLATFORM=${HUXERUI_SDK_HOST_PLATFORM}"
                         "-DHOST_ARCHITECTURE=${HUXERUI_SDK_HOST_ARCHITECTURE}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdk_installer.cmake"
         )

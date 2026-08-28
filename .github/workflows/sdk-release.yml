@@ -71,12 +71,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
-      - name: Prepare Android tools
-        run: >-
-          chmod +x
-          platform/android/gradlew
-          tools/prebuilt/linux/x86_64/hcg
-          tools/prebuilt/linux/x86_64/hrc
+      - name: Build Linux host tools
+        run: |
+          chmod +x platform/android/gradlew scripts/build_tools.sh
+          sh scripts/build_tools.sh --platform linux --architecture x86_64
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -124,11 +122,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
-      - name: Prepare Web tools
-        run: >-
-          chmod +x
-          tools/prebuilt/linux/x86_64/hcg
-          tools/prebuilt/linux/x86_64/hrc
+      - name: Build Linux host tools
+        run: |
+          chmod +x scripts/build_tools.sh
+          sh scripts/build_tools.sh --platform linux --architecture x86_64
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: 4.0.19
@@ -161,11 +158,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
-      - name: Prepare iOS tools
-        run: >-
-          chmod +x
-          tools/prebuilt/macos/arm64/hcg
-          tools/prebuilt/macos/arm64/hrc
+      - name: Build macOS host tools
+        run: |
+          chmod +x scripts/build_tools.sh
+          sh scripts/build_tools.sh --platform macos --architecture arm64
       - name: Build iOS artifacts
         run: >-
           sh scripts/build_ios_xcframework.sh
@@ -181,53 +177,73 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build:
-    name: Build ${{ matrix.display_name }} ${{ matrix.architecture }}
-    needs:
-      - validate
-      - android-artifacts
-      - web-artifacts
-      - ios-artifacts
+  linux-host-tools:
+    name: Build Linux ${{ matrix.architecture }} host tools
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-2022
-            system: windows
-            display_name: Windows
+          - runner: ubuntu-24.04
             architecture: x86_64
-            generator: ZIP
-            extension: zip
-          - runner: macos-15
-            system: macos
-            display_name: macOS
-            architecture: arm64
-            generator: TGZ
-            extension: tar.gz
-          - runner: macos-15-intel
-            system: macos
-            display_name: macOS
-            architecture: x86_64
-            generator: TGZ
-            extension: tar.gz
+            image: quay.io/pypa/manylinux2014_x86_64
+          - runner: ubuntu-24.04-arm
+            architecture: aarch64
+            image: quay.io/pypa/manylinux2014_aarch64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
-      - name: Download platform artifacts
+      - name: Build host tools with GLIBC 2.17
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            "${{ matrix.image }}" \
+            bash -lc 'sh scripts/build_tools.sh --platform linux --architecture ${{ matrix.architecture }}'
+          chmod +x \
+            "tools/prebuilt/linux/${{ matrix.architecture }}/hcg" \
+            "tools/prebuilt/linux/${{ matrix.architecture }}/hrc"
+          HUXERUI_MAX_GLIBC=2.17 HUXERUI_REQUIRE_STATIC_CXX=true \
+            sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
+            "tools/prebuilt/linux/${{ matrix.architecture }}/hcg" \
+            "tools/prebuilt/linux/${{ matrix.architecture }}/hrc"
+      - name: Upload Linux host tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-tools-linux-${{ matrix.architecture }}
+          path: tools/prebuilt/linux/${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows x86_64
+    needs:
+      - validate
+      - android-artifacts
+      - web-artifacts
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: platform-artifacts-*
+          name: platform-artifacts-android
           path: platform-artifacts
-          merge-multiple: true
-      - name: Prepare Unix executables
-        if: runner.os != 'Windows'
-        run: >-
-          chmod +x
-          install.sh
-          tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hcg
-          tools/prebuilt/${{ matrix.system }}/${{ matrix.architecture }}/hrc
+      - name: Download Web artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-web
+          path: platform-artifacts
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build Windows host tools
+        shell: pwsh
+        run: .\scripts\build_tools.ps1 -Platform windows -Architecture x86_64
       - name: Configure
         run: >-
           cmake
@@ -240,7 +256,6 @@ jobs:
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
           -DHUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG=ON
       - name: Build Windows Debug libraries
-        if: runner.os == 'Windows'
         run: >-
           cmake
           --build build
@@ -256,10 +271,9 @@ jobs:
           cpack
           --config build/CPackConfig.cmake
           -C Release
-          -G ${{ matrix.generator }}
+          -G ZIP
           -B release-assets
       - name: Test packaged Windows installer
-        if: runner.os == 'Windows'
         shell: pwsh
         env:
           SDK_ARCHIVE: ${{ github.workspace }}\release-assets\huxerui-sdk-${{ needs.validate.outputs.version }}-windows-x86_64.zip
@@ -296,10 +310,81 @@ jobs:
       - name: Upload SDK archive
         uses: actions/upload-artifact@v4
         with:
-          name: sdk-${{ matrix.system }}-${{ matrix.architecture }}
+          name: sdk-windows-x86_64
           path: |
-            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-${{ matrix.system }}-${{ matrix.architecture }}.${{ matrix.extension }}
-            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-${{ matrix.system }}-${{ matrix.architecture }}.${{ matrix.extension }}.sha256
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-windows-x86_64.zip
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-windows-x86_64.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS ${{ matrix.architecture }}
+    needs:
+      - validate
+      - android-artifacts
+      - web-artifacts
+      - ios-artifacts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-android
+          path: platform-artifacts
+      - name: Download Web artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-web
+          path: platform-artifacts
+      - name: Download iOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-ios
+          path: platform-artifacts
+      - name: Build macOS host tools
+        run: |
+          chmod +x install.sh scripts/build_tools.sh
+          sh scripts/build_tools.sh --platform macos --architecture "${{ matrix.architecture }}"
+      - name: Configure
+        run: >-
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_BUILD_CLI=ON
+          -DHUXERUI_BUILD_EXAMPLES=OFF
+          -DHUXERUI_BUILD_TESTS=ON
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: >-
+          cpack
+          --config build/CPackConfig.cmake
+          -C Release
+          -G TGZ
+          -B release-assets
+      - name: Upload SDK archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-macos-${{ matrix.architecture }}
+          path: |
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-macos-${{ matrix.architecture }}.tar.gz
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-macos-${{ matrix.architecture }}.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -310,6 +395,7 @@ jobs:
       - validate
       - android-artifacts
       - web-artifacts
+      - linux-host-tools
     strategy:
       fail-fast: false
       matrix:
@@ -327,12 +413,21 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
-      - name: Download platform artifacts
+      - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: platform-artifacts-*
+          name: platform-artifacts-android
           path: platform-artifacts
-          merge-multiple: true
+      - name: Download Web artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-web
+          path: platform-artifacts
+      - name: Download Linux host tools
+        uses: actions/download-artifact@v4
+        with:
+          name: host-tools-linux-${{ matrix.architecture }}
+          path: tools/prebuilt/linux/${{ matrix.architecture }}
       - name: Install Linux build dependencies
         run: |
           apt-get update
@@ -378,15 +473,11 @@ jobs:
           path: ${{ runner.temp }}/huxerui-linux-test-diagnostics
           if-no-files-found: error
           retention-days: 7
-      - name: Validate Linux binary compatibility
-        run: |
-          sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
-            build/lib/libhuxerui.so \
-            build/bin/huxerui
-          HUXERUI_MAX_GLIBC=2.17 HUXERUI_REQUIRE_STATIC_CXX=true \
-            sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
-            tools/prebuilt/linux/${{ matrix.architecture }}/hcg \
-            tools/prebuilt/linux/${{ matrix.architecture }}/hrc
+      - name: Validate Linux SDK binary compatibility
+        run: >-
+          sh .github/workflows/scripts/check_linux_binary_compatibility.sh
+          build/lib/libhuxerui.so
+          build/bin/huxerui
       - name: Package
         run: >-
           cpack
@@ -405,13 +496,105 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  build-android-host:
+    name: Build Android arm64-v8a host SDK
+    needs:
+      - validate
+      - android-artifacts
+      - web-artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-android
+          path: platform-artifacts
+      - name: Download Web artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-web
+          path: platform-artifacts
+      - name: Install Android NDK
+        run: |
+          set +o pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          set -o pipefail
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
+      - name: Build host tools
+        run: |
+          chmod +x scripts/build_tools.sh
+          sh scripts/build_tools.sh --platform linux --architecture x86_64
+          sh scripts/build_tools.sh \
+            --platform android \
+            --architecture arm64-v8a \
+            --android-ndk "${ANDROID_HOME}/ndk/29.0.14206865"
+      - name: Configure Android host SDK
+        run: >-
+          cmake
+          -S .
+          -B build-android-host
+          -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=${ANDROID_HOME}/ndk/29.0.14206865/build/cmake/android.toolchain.cmake
+          -DANDROID_ABI=arm64-v8a
+          -DANDROID_PLATFORM=android-24
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_BUILD_SHARED=ON
+          -DHUXERUI_BUILD_STATIC=OFF
+          -DHUXERUI_BUILD_CLI=ON
+          -DHUXERUI_BUILD_EXAMPLES=OFF
+          -DHUXERUI_BUILD_TESTS=OFF
+          -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
+      - name: Build Android host SDK
+        run: cmake --build build-android-host --parallel
+      - name: Package Android host SDK
+        run: >-
+          cpack
+          --config build-android-host/CPackConfig.cmake
+          -C Release
+          -G TGZ
+          -B release-assets
+      - name: Validate Android host SDK
+        env:
+          SDK_ROOT: ${{ runner.temp }}/android-host-sdk
+          SDK_ARCHIVE: ${{ github.workspace }}/release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-android-arm64-v8a.tar.gz
+        run: |
+          mkdir -p "${SDK_ROOT}"
+          tar -xzf "${SDK_ARCHIVE}" -C "${SDK_ROOT}" --strip-components=1
+          for executable in \
+            "${SDK_ROOT}/bin/huxerui" \
+            "${SDK_ROOT}/share/huxerui/tools/android/arm64-v8a/hcg" \
+            "${SDK_ROOT}/share/huxerui/tools/android/arm64-v8a/hrc"; do
+            test -x "${executable}"
+            "${ANDROID_HOME}/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+              --program-headers "${executable}" | grep -F '/system/bin/linker64'
+          done
+          test -f "${SDK_ROOT}/include/huxerui/huxerui.h"
+          test -f "${SDK_ROOT}/lib/cmake/HuxerUI/HuxerUIConfig.cmake"
+          test -f "${SDK_ROOT}/share/huxerui/resources/huxerui/resources.bin"
+          test -f "${SDK_ROOT}/share/huxerui/platform/android/HuxerUI.aar"
+      - name: Upload Android host SDK archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-android-arm64-v8a
+          path: |
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-android-arm64-v8a.tar.gz
+            release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-android-arm64-v8a.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   publish:
     name: Publish release
     if: github.event_name != 'workflow_dispatch' || inputs.validation_only == false
     needs:
       - validate
-      - build
+      - build-windows
+      - build-macos
       - build-linux
+      - build-android-host
     runs-on: ubuntu-24.04
     permissions:
       contents: write

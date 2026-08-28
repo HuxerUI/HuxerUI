@@ -2,7 +2,7 @@
 
 set -eu
 
-maximum_glibc=${HUXERUI_MAX_GLIBC:-2.31}
+maximum_glibc=${HUXERUI_MAX_GLIBC:-2.35}
 maximum_glibcxx=${HUXERUI_MAX_GLIBCXX:-3.4.32}
 maximum_cxxabi=${HUXERUI_MAX_CXXABI:-1.3.15}
 require_static_cxx=${HUXERUI_REQUIRE_STATIC_CXX:-false}

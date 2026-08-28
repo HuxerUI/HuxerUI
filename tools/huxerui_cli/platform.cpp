@@ -234,6 +234,8 @@ std::string_view CurrentHostId() noexcept {
   return "windows";
 #elif defined(__APPLE__)
   return "macos";
+#elif defined(__ANDROID__)
+  return "android";
 #elif defined(__linux__)
   return "linux";
 #else

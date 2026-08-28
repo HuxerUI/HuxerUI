@@ -1,11 +1,17 @@
 include_guard(GLOBAL)
 
-function(_huxerui_resolve_host output_system output_architecture)
-    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" host_system)
-    if (host_system STREQUAL "darwin")
-        set(host_system "macos")
-    elseif (NOT host_system STREQUAL "windows"
-            AND NOT host_system STREQUAL "linux")
+function(_huxerui_resolve_host output_platform output_architecture)
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" host_platform)
+    if (host_platform STREQUAL "android"
+            OR (host_platform STREQUAL "linux"
+            AND (NOT "$ENV{TERMUX_VERSION}" STREQUAL ""
+            OR (NOT "$ENV{ANDROID_ROOT}" STREQUAL ""
+            AND EXISTS "/system/bin/getprop"))))
+        set(host_platform "android")
+    elseif (host_platform STREQUAL "darwin")
+        set(host_platform "macos")
+    elseif (NOT host_platform STREQUAL "windows"
+            AND NOT host_platform STREQUAL "linux")
         message(FATAL_ERROR
                 "HuxerUI host tools do not support ${CMAKE_HOST_SYSTEM_NAME}"
         )
@@ -15,8 +21,10 @@ function(_huxerui_resolve_host output_system output_architecture)
     if (host_architecture MATCHES "^(amd64|x64|x86_64)$")
         set(host_architecture "x86_64")
     elseif (host_architecture MATCHES "^(aarch64|arm64)$")
-        if (host_system STREQUAL "linux")
+        if (host_platform STREQUAL "linux")
             set(host_architecture "aarch64")
+        elseif (host_platform STREQUAL "android")
+            set(host_architecture "arm64-v8a")
         else ()
             set(host_architecture "arm64")
         endif ()
@@ -26,15 +34,15 @@ function(_huxerui_resolve_host output_system output_architecture)
         )
     endif ()
 
-    set(${output_system} "${host_system}" PARENT_SCOPE)
+    set(${output_platform} "${host_platform}" PARENT_SCOPE)
     set(${output_architecture} "${host_architecture}" PARENT_SCOPE)
 endfunction()
 
 function(huxerui_resolve_host_tool tool_name output_variable)
-    _huxerui_resolve_host(HUXERUI_HOST_SYSTEM HUXERUI_HOST_ARCHITECTURE)
+    _huxerui_resolve_host(HUXERUI_HOST_PLATFORM HUXERUI_HOST_ARCHITECTURE)
 
     set(HUXERUI_HOST_TOOL_SUFFIX)
-    if (HUXERUI_HOST_SYSTEM STREQUAL "windows")
+    if (HUXERUI_HOST_PLATFORM STREQUAL "windows")
         set(HUXERUI_HOST_TOOL_SUFFIX ".exe")
     endif ()
     if (HUXERUI_HOST_TOOL_ROOT)
@@ -47,7 +55,7 @@ function(huxerui_resolve_host_tool tool_name output_variable)
         )
     endif ()
     set(HUXERUI_HOST_TOOL_DIRECTORY
-            "${HUXERUI_RESOLVED_HOST_TOOL_ROOT}/${HUXERUI_HOST_SYSTEM}/${HUXERUI_HOST_ARCHITECTURE}"
+            "${HUXERUI_RESOLVED_HOST_TOOL_ROOT}/${HUXERUI_HOST_PLATFORM}/${HUXERUI_HOST_ARCHITECTURE}"
     )
     set(HUXERUI_HOST_TOOL
             "${HUXERUI_HOST_TOOL_DIRECTORY}/${tool_name}${HUXERUI_HOST_TOOL_SUFFIX}"

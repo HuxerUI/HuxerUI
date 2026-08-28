@@ -25,3 +25,5 @@ set_target_properties(huxerui_resource_compiler PROPERTIES
         CXX_EXTENSIONS OFF
         OUTPUT_NAME "hrc"
 )
+
+install(TARGETS huxerui_resource_compiler RUNTIME DESTINATION ".")

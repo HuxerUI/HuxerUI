@@ -1,6 +1,6 @@
 foreach (required_variable IN ITEMS
         BUILD_DIRECTORY BUILD_CONFIG WORK_DIRECTORY CPACK_COMMAND PACKAGE_FILE_NAME PACKAGE_GENERATOR
-        PACKAGE_EXTENSION INSTALL_BINDIR INSTALL_LIBDIR CLI_SUFFIX HOST_SYSTEM HOST_ARCHITECTURE
+        PACKAGE_EXTENSION INSTALL_BINDIR INSTALL_LIBDIR CLI_SUFFIX HOST_PLATFORM HOST_ARCHITECTURE
 )
     if (NOT DEFINED ${required_variable})
         message(FATAL_ERROR "${required_variable} is required")
@@ -71,15 +71,15 @@ foreach (required_path IN ITEMS
         "share/huxerui/skills/huxerui-app-development/SKILL.md"
         "share/huxerui/skills/huxerui-app-development/references/project-workflow.md"
         "share/huxerui/skills/huxerui-app-development/references/resources-files-network.md"
-        "share/huxerui/tools/${HOST_SYSTEM}/${HOST_ARCHITECTURE}/hcg${CLI_SUFFIX}"
-        "share/huxerui/tools/${HOST_SYSTEM}/${HOST_ARCHITECTURE}/hrc${CLI_SUFFIX}"
+        "share/huxerui/tools/${HOST_PLATFORM}/${HOST_ARCHITECTURE}/hcg${CLI_SUFFIX}"
+        "share/huxerui/tools/${HOST_PLATFORM}/${HOST_ARCHITECTURE}/hrc${CLI_SUFFIX}"
 )
     if (NOT EXISTS "${SDK_ROOT}/${required_path}")
         message(FATAL_ERROR "SDK archive is missing ${required_path}")
     endif ()
 endforeach ()
 
-if (HOST_SYSTEM STREQUAL "windows" AND WINDOWS_DEBUG_INCLUDED)
+if (HOST_PLATFORM STREQUAL "windows" AND WINDOWS_DEBUG_INCLUDED)
     foreach (required_path IN ITEMS
             "bin/huxerui.dll"
             "bin/huxerui_debug.dll"
@@ -129,7 +129,7 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
     endforeach ()
 
     set(TARGET_PLATFORM_CONSUMERS android web)
-    if (HOST_SYSTEM STREQUAL "macos")
+    if (HOST_PLATFORM STREQUAL "macos")
         foreach (required_path IN ITEMS
                 "share/huxerui/platform/ios/HuxerUI.xcframework/Info.plist"
                 "share/huxerui/platform/ios/HuxerUI.xcframework/ios-arm64/Headers/huxerui/data.h"
@@ -215,13 +215,13 @@ file(GLOB HOST_DIRECTORIES
         RELATIVE "${SDK_ROOT}/share/huxerui/tools"
         "${SDK_ROOT}/share/huxerui/tools/*"
 )
-if (NOT HOST_DIRECTORIES STREQUAL HOST_SYSTEM)
+if (NOT HOST_DIRECTORIES STREQUAL HOST_PLATFORM)
     message(FATAL_ERROR "SDK archive contains unexpected host tool directories: ${HOST_DIRECTORIES}")
 endif ()
 file(GLOB HOST_ARCHITECTURE_DIRECTORIES
         LIST_DIRECTORIES TRUE
-        RELATIVE "${SDK_ROOT}/share/huxerui/tools/${HOST_SYSTEM}"
-        "${SDK_ROOT}/share/huxerui/tools/${HOST_SYSTEM}/*"
+        RELATIVE "${SDK_ROOT}/share/huxerui/tools/${HOST_PLATFORM}"
+        "${SDK_ROOT}/share/huxerui/tools/${HOST_PLATFORM}/*"
 )
 if (NOT HOST_ARCHITECTURE_DIRECTORIES STREQUAL HOST_ARCHITECTURE)
     message(FATAL_ERROR

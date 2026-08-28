@@ -1,6 +1,6 @@
 # Installation
 
-HuxerUI releases provide portable SDK archives and installers for desktop development hosts.
+HuxerUI releases provide portable SDK archives and installers for desktop development hosts and Android arm64-v8a devices running Termux.
 The SDK contains public headers, CMake package files, host tools, the `huxerui` CLI, framework resources, the HuxerUI application-development Skill, and target artifacts required by supported project platforms.
 
 ## Windows
@@ -16,7 +16,7 @@ The installer sets the user `HUXERUI_HOME` variable and adds `%HUXERUI_HOME%\bin
 
 Windows release archives currently target x86_64 hosts.
 
-## macOS and Linux
+## macOS, Linux, and Android
 
 Run in an interactive shell:
 
@@ -24,10 +24,11 @@ Run in an interactive shell:
 curl -fsSL https://github.com/HuxerUI/HuxerUI/releases/latest/download/install.sh | sh
 ```
 
-The default installation directory is `~/Library/Developer/HuxerUI` on macOS and `~/.local/share/HuxerUI` on Linux.
+The default installation directory is `~/Library/Developer/HuxerUI` on macOS and `~/.local/share/HuxerUI` on Linux and Android.
 The installer writes `HUXERUI_HOME` and the SDK `bin` directory to the current shell profile.
 
-Release archives are selected for macOS arm64 or x86_64 and Linux aarch64 or x86_64 hosts.
+Release archives are selected for macOS arm64 or x86_64, Linux aarch64 or x86_64, and Android arm64-v8a hosts.
+Android host installation currently supports Termux and uses the same `install.sh` entry point.
 
 Open a new terminal after installation, then verify the SDK:
 
@@ -46,7 +47,7 @@ Invoke-WebRequest https://github.com/HuxerUI/HuxerUI/releases/latest/download/in
 .\install.ps1 -Version 0.1.0 -Prefix D:\Environment\HuxerUI -Yes
 ```
 
-macOS or Linux:
+macOS, Linux, or Android:
 
 ```bash
 curl -fsSLO https://github.com/HuxerUI/HuxerUI/releases/latest/download/install.sh
@@ -66,6 +67,12 @@ Install an already downloaded archive without querying a release:
 
 ```bash
 sh install.sh --archive ./huxerui-sdk-0.1.0-linux-x86_64.tar.gz --yes
+```
+
+For Android arm64-v8a:
+
+```bash
+sh install.sh --archive ./huxerui-sdk-0.1.0-android-arm64-v8a.tar.gz --yes
 ```
 
 Place the matching `.sha256` file beside the archive.

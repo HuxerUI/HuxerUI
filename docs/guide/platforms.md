@@ -43,6 +43,7 @@ The Linux backend uses GTK 4 for the window and event loop, Pango for text, Cair
 
 Install the corresponding development packages before configuring CMake.
 The SDK archive does not bundle distribution-owned GTK, Pango, Cairo, GIO, or libsoup libraries.
+Official Linux SDK binaries require glibc 2.35 or later.
 
 Linux builds are provided for x86_64 and aarch64 hosts.
 PlatformView and a platform accessibility bridge are not implemented.
@@ -64,6 +65,9 @@ The generated Gradle project links the SDK-provided Android shared library and a
 
 Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, and a compatible emulator or device.
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, and ExternalTexture are translated at the Android host boundary.
+
+An Android arm64-v8a host SDK provides the `huxerui` CLI, `hcg`, and `hrc` as native Bionic executables for Termux.
+The SDK installer does not install Java, Gradle dependencies, the Android SDK, or the Android NDK; use `huxerui doctor android` to inspect those application-build prerequisites.
 
 ## iOS
 

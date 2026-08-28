@@ -109,7 +109,11 @@ Darwin)
   host_system="macos"
   ;;
 Linux)
-  host_system="linux"
+  if [ -n "${TERMUX_VERSION:-}" ] || { [ -n "${ANDROID_ROOT:-}" ] && [ -x /system/bin/getprop ]; }; then
+    host_system="android"
+  else
+    host_system="linux"
+  fi
   ;;
 *)
   fail "unsupported operating system: $(uname -s)"
@@ -120,11 +124,14 @@ case "$(uname -m)" in
 arm64 | aarch64)
   if [ "$host_system" = "linux" ]; then
     host_architecture="aarch64"
+  elif [ "$host_system" = "android" ]; then
+    host_architecture="arm64-v8a"
   else
     host_architecture="arm64"
   fi
   ;;
 x86_64 | amd64)
+  [ "$host_system" != "android" ] || fail "unsupported Android architecture: $(uname -m)"
   host_architecture="x86_64"
   ;;
 *)
@@ -143,10 +150,18 @@ fi
 if [ -z "$profile" ]; then
   case "${SHELL:-}" in
   */zsh)
-    profile="$HOME/.zprofile"
+    if [ "$host_system" = "android" ]; then
+      profile="$HOME/.zshrc"
+    else
+      profile="$HOME/.zprofile"
+    fi
     ;;
   */bash)
-    profile="$HOME/.bash_profile"
+    if [ "$host_system" = "android" ]; then
+      profile="$HOME/.bashrc"
+    else
+      profile="$HOME/.bash_profile"
+    fi
     ;;
   *)
     profile="$HOME/.profile"

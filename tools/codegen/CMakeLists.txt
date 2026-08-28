@@ -25,3 +25,5 @@ set_target_properties(huxerui_codegen PROPERTIES
         CXX_EXTENSIONS OFF
         OUTPUT_NAME "hcg"
 )
+
+install(TARGETS huxerui_codegen RUNTIME DESTINATION ".")

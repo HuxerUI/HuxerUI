@@ -119,7 +119,8 @@ public:
   }
 
   bool SupportsCurrentHost() const noexcept override {
-    return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux";
+    return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux" ||
+           CurrentHostId() == "android";
   }
 
   std::span<const std::string_view> RequiredTools() const noexcept override {

@@ -192,6 +192,7 @@ An application that needs to replace selected framework defaults adds a later ro
 The current install already contains public headers, platform libraries, the precompiled framework resource package, CMake helpers, the CLI, host code generators, and the canonical HuxerUI application-development Skill.
 Formal releases preserve that single-SDK contract while platform package managers carry the artifacts they own.
 Host tools are selected from `share/huxerui/tools/<host>/<architecture>` and always run on the development host, independently of the target architecture.
+Android host packages use the Android ABI spelling `arm64-v8a` and contain native Bionic executables; they never reuse Linux aarch64 tools.
 
 ## Generated integration
 
@@ -396,6 +397,7 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 Platform build systems consume platform artifacts through their normal mechanisms:
 
 - Android uses a Java-only AAR plus ABI-specific shared libraries imported by the installed CMake package.
+- Android arm64-v8a also has a host SDK for Termux containing Bionic CLI and host-tool executables.
 - macOS uses its host libraries, while the macOS SDK carries a static iOS XCFramework for device and Simulator application-core builds.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
 - Web uses the Emscripten 4.0.19 static library from the selected SDK while configuring the application root through `emcmake`.
@@ -408,7 +410,7 @@ An installed iOS build selects the matching device or Simulator slice from the X
 ### Installers
 
 The canonical install rules produce one relocatable SDK tree, and thin platform installers place that tree, expose its `bin` directory, and remove only state they own during uninstall.
-The repository provides `install.sh` for published macOS and Linux archives and `install.ps1` for Windows archives.
+The repository provides `install.sh` for published macOS, Linux, and Android archives and `install.ps1` for Windows archives.
 These scripts install a selected HuxerUI SDK release, persist `HUXERUI_HOME`, expose `HUXERUI_HOME/bin` on `PATH`, and support repeatable upgrade or uninstall without modifying unrelated profile content.
 They may download and verify an official HuxerUI SDK archive, but they never download a compiler, CMake, Java, Android SDK or NDK, Emscripten, Xcode, Visual Studio, signing identity, or another platform prerequisite.
 Platform packages may later provide the same SDK-only behavior through operating-system installation mechanisms.
@@ -423,16 +425,13 @@ install.ps1 -Uninstall [-Prefix <path>] [-Yes]
 
 Without an explicit version, an installer resolves the latest release from `https://github.com/HuxerUI/HuxerUI`.
 An explicit archive enables offline installation and tests but still requires its adjacent CPack-generated `.sha256` file.
-macOS defaults to `~/Library/Developer/HuxerUI`, Linux defaults to `~/.local/share/HuxerUI`, Windows defaults to `%LOCALAPPDATA%\HuxerUI`, and an explicit prefix replaces that default without changing the SDK layout.
+macOS defaults to `~/Library/Developer/HuxerUI`, Linux and Android default to `~/.local/share/HuxerUI`, Windows defaults to `%LOCALAPPDATA%\HuxerUI`, and an explicit prefix replaces that default without changing the SDK layout.
 Publication uses a sibling staging directory and preserves the prior valid SDK until the new SDK and environment selection succeed.
 Upgrade and uninstall refuse a non-SDK directory, a filesystem root, or the user's home directory.
 A pushed `v<major>.<minor>.<patch>` tag must match the CMake project version before release builds begin.
-The release workflow first builds the reusable Android and Web target artifacts and the static iOS device and Simulator XCFramework, then builds Windows x86_64, macOS arm64, macOS x86_64, Linux x86_64, and Linux aarch64 SDK archives independently, runs each host's configured tests, applies Linux binary compatibility gates, and transfers only the expected archives and checksums to the publication job.
+Release assembly publishes one archive per supported host package and includes only the platform artifacts owned by that package.
 The iOS XCFramework is an intermediate SDK assembly artifact rather than an independent release asset, and only the macOS archives contain it.
-Repository-local `scripts/package_sdk.ps1` and `scripts/package_sdk.sh` provide the corresponding one-command developer workflow.
-They always build Android and Web artifacts internally before packaging the current host SDK, and macOS packaging additionally builds the iOS XCFramework; intermediate artifact paths are implementation details rather than public parameters.
-That job adds both installer entry points, verifies the exact asset set and every checksum, creates or reuses the tag's GitHub Release as a draft, and makes it public only after all assets upload successfully.
-An invalid tag, failed host build, missing archive, unexpected asset, or checksum mismatch therefore cannot publish a partial release.
+Publication validates the complete archive and checksum set before making a release public, so a failed build or incomplete asset set cannot publish a partial release.
 CMake install rules are the single file-layout source of truth.
 Installers do not edit application projects, run `huxerui setup`, download platform toolchains, or silently select an Android SDK, NDK, Xcode installation, compiler, or signing identity.
 
