@@ -994,20 +994,20 @@ TSF can replace or augment the adapter later without changing Runtime, TextInput
 
 ## Linux adapter
 
-The GTK host owns one `GtkIMMulticontext` for its drawing area and lets GTK select the active desktop input-method module.
-Key events enter the input context before the shared direct-key path; accepted events produce preedit or commit callbacks, while declined events continue through Runtime key handling in order.
+The SDL host owns the window text-input session and lets SDL select the active desktop input-method integration.
+SDL text-editing events enter the shared composition path, text-input events commit UTF-8 text, and key events continue through Runtime's direct-key path except for editing keys consumed while an inline composition is active.
 
 The bridge:
 
-- Maps `preedit-start`, `preedit-changed`, and `preedit-end` to the shared composition command sequence.
-- Converts GTK UTF-8 byte positions to the common UTF-16 offset space without splitting a code point or surrogate pair.
+- Maps `SDL_EVENT_TEXT_EDITING` updates and their empty terminator to the shared begin, update, and finish composition sequence.
+- Converts SDL UTF-8 character and byte positions to the common UTF-16 offset space without splitting a code point or surrogate pair.
 - Maps committed UTF-8 text to `CommitText` and clears local composition bookkeeping after Runtime processes the command.
-- Publishes bounded non-secure surrounding text with both cursor and anchor positions and maps `delete-surrounding` to Unicode-code-point deletion.
 - Updates the native candidate location from the latest transformed caret geometry.
-- Maps input purpose, autocorrection, capitalization, and secure-entry policy to GTK input purpose and hint values.
-- Disables inline preedit and surrounding-text publication for secure sessions while retaining native password input purpose and private-input hints.
+- Maps input type, autocorrection, capitalization, multiline, and secure-entry policy to SDL text-input properties.
+- Ignores inline preedit for secure sessions while retaining SDL password input types.
 
-The implementation does not contain separate XIM, IBus, or Fcitx state machines. GTK's input-method module boundary owns those desktop-specific protocols.
+The implementation does not contain separate XIM, IBus, or Fcitx state machines. SDL's video backend owns those desktop-specific protocols.
+SDL3 does not expose host callbacks for retrieving or deleting surrounding text, so the adapter cannot publish those optional IME operations; an editing event with an unspecified native selection leaves `selection_after` unset so the shared reducer selects the composition end.
 
 ## PlatformView focus
 

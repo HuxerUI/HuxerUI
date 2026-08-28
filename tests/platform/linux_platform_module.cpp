@@ -4,8 +4,6 @@
 #include "runtime_test_support.h"
 #include "timer.h"
 
-#include <glib.h>
-
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -42,12 +40,10 @@ bool RunDispatcherUntil(
   static_cast<void>(dispatcher);
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!std::invoke(predicate) && std::chrono::steady_clock::now() < deadline) {
-    while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
-    }
+    dispatcher.DrainPending();
     std::this_thread::sleep_for(1ms);
   }
-  while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
-  }
+  dispatcher.DrainPending();
   return std::invoke(predicate);
 }
 
@@ -184,8 +180,7 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
     REQUIRE(RunDispatcherUntil(dispatcher, [&] { return first_replaced && second_completed && ticked; }, 1s));
 
     static_cast<void>(timer->Stop([](PlatformResult<std::monostate>) {}));
-    while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
-    }
+    dispatcher.DrainPending();
     const PlatformRequestId cancelled = timer->Start(
         100ms,
         [&](std::uint64_t) { cancelled_ticked = true; },

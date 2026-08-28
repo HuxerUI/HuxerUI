@@ -669,7 +669,7 @@ New backends implement PlatformResources and platform image replay without addin
 
 Linux resolves `<executable-name>.resources` beside the running executable instead of relying on the current working directory.
 AppImage, Flatpak, Snap, or another distribution may relocate the executable and its sidecar together without changing resource identity.
-The Linux GTK renderer decodes images through GdkPixbuf and retains its platform cache without changing ImageAsset.
+The Linux renderer decodes images through SDL_image, converts them to premultiplied ARGB32 CPU buffers, and retains its platform cache without changing ImageAsset.
 
 ### Web
 

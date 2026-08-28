@@ -120,6 +120,14 @@ ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::st
 [[nodiscard]] std::string ProfileConfiguration(std::string_view profile);
 [[nodiscard]] std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& context);
 [[nodiscard]] std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context);
+[[nodiscard]] EnvironmentDiagnostic
+LinuxCmakePackageDiagnostic(std::string_view name, std::string_view minimum_version, const ProcessResult& result);
+[[nodiscard]] EnvironmentDiagnostic LinuxPkgConfigDiagnostic(
+    std::string_view name,
+    std::string_view minimum_version,
+    const ProcessResult& version_result,
+    int requirement_exit_code
+);
 
 [[nodiscard]] const PlatformDriver& AndroidPlatformDriver() noexcept;
 [[nodiscard]] const PlatformDriver& WindowsPlatformDriver() noexcept;

@@ -684,8 +684,8 @@ AppKit calls and Runtime actions remain on the main thread.
 
 ### Linux
 
-The GTK host does not yet project the shared SemanticFrame into an AT-SPI subtree.
-GTK exposes the native top-level surface, while complete role, state, hierarchy, geometry, action, value, selection, text, collection, and event mapping remains deferred.
+The SDL host does not yet project the shared SemanticFrame into an AT-SPI subtree.
+SDL exposes the native top-level surface, while complete role, state, hierarchy, geometry, action, value, selection, text, collection, and event mapping remains deferred.
 
 ### Web
 

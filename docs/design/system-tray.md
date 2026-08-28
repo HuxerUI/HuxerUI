@@ -251,11 +251,11 @@ Removing the status item balances the object returned by the system status bar a
 
 ## Linux mapping
 
-Linux implements the [StatusNotifierItem](https://specifications.freedesktop.org/status-notifier-item/latest-single/) contract over the session D-Bus through `org.kde.StatusNotifierItem` and registers it with `org.kde.StatusNotifierWatcher`. Its platform menu is exported through the `com.canonical.dbusmenu` contract. The implementation uses existing GIO ownership and main-context dispatch without adding a second desktop integration library.
+Linux implements the [StatusNotifierItem](https://specifications.freedesktop.org/status-notifier-item/latest-single/) contract over the session D-Bus through `org.kde.StatusNotifierItem` and registers it with `org.kde.StatusNotifierWatcher`. Its platform menu is exported through the `com.canonical.dbusmenu` contract. The SDL event loop performs a bounded number of non-blocking default GIO main-context iterations at safe loop boundaries and caps idle waits so D-Bus activity remains responsive without moving tray state off the UI thread.
 
 `IsAvailable()` is true only while a watcher with an active status notifier host is present and registration succeeds. The adapter monitors session-bus ownership, unregisters stale objects, and re-registers the desired presentation when the watcher or host returns. Icon pixmaps follow the protocol's ARGB32 network-byte-order representation.
 
-`Activate` reports primary activation and the host presents the exported menu. GTK close requests enter the shared request path. GDK exposes window-manager minimization only as a state transition, so a handled platform minimize transition is immediately undone after the shared request handler hides the window. Framework-originated minimize commands are guarded against duplicate delivery.
+`Activate` reports primary activation and the host presents the exported menu. SDL close requests enter the shared request path. SDL reports window-manager minimization as a state transition, so a handled platform minimize transition is immediately undone after the shared request handler hides the window. Framework-originated minimize commands are guarded against duplicate delivery.
 
 An absent host produces an unavailable service. HuxerUI does not fall back to XEmbed or deprecated GTK status icons, which would create different behavior across X11 and Wayland.
 

@@ -304,25 +304,25 @@ System mode retains the ordinary AppKit title bar and submits no title-bar metri
 
 ## Linux mapping
 
-The Linux backend uses GTK 4 and delegates native surface behavior to the active GDK backend.
-Custom mode disables GTK's system decorations while retaining an ordinary managed top-level window, so taskbar presence, snap, and window-manager keybindings keep working.
+The Linux backend uses SDL3 and delegates native surface behavior to its active video backend.
+Custom mode creates a borderless SDL top-level window while retaining ordinary window-manager ownership, so taskbar presence, snap, and window-manager keybindings keep working.
 
 The framework renders the standard minimize, maximize or restore, and close controls in a `WindowControlsLayout` layer.
-Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three times 46 DIP, matching the Windows modern interaction width because GTK does not expose a portable native caption-button metric for a custom client area.
+Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three times 46 DIP, matching the Windows modern interaction width because SDL does not expose a portable native caption-button metric for a custom client area.
 
 Linux metric resolution prefers `AppOptions::window.title_bar_height`, enforces a 32-DIP minimum height, clamps to the viewport, reports zero left inset, caps the right inset at the viewport width, and tracks the maximized state.
 
-Native drag and edge or corner resize use `gdk_toplevel_begin_move()` and `gdk_toplevel_begin_resize()` with the device, button, local coordinates, and timestamp from the initiating GTK gesture.
+Native drag and edge or corner resize use SDL's window hit-test callback.
 Hit testing resolves resize edges before `Runtime::IsWindowDragRegion()`, while shared caption controls consume their own pointer input before a drag can begin.
 
 The custom client area uses a fixed 6-DIP resize border and skips resize edges while maximized.
 
-Minimize, maximize, restore, toggle, and close use the corresponding `GtkWindow` operations.
-The GTK maximized property drives the caption glyph swap through the shared `maximize_state_changed` path.
+Minimize, maximize, restore, toggle, and close use the corresponding SDL window operations.
+SDL window state events drive the caption glyph swap through the shared `maximize_state_changed` path.
 
 System mode is unchanged and submits no title-bar metrics.
 
-These operations remain backend-neutral inside HuxerUI; GTK maps them to the active X11 or Wayland surface protocol.
+These operations remain backend-neutral inside HuxerUI; SDL maps them to the active X11 or Wayland video backend.
 
 ## Other platforms
 
@@ -354,7 +354,7 @@ The removed Windows Extended experiment has no compatibility alias or retained D
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
 macOS Custom mode uses full-size AppKit content, AppKit traffic lights, converted left-side control geometry, AppKit dragging, and system window commands.
-Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, GTK decoration policy and window commands, GDK move and resize operations, and GTK-tracked maximized state.
+Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, SDL borderless-window policy and commands, SDL hit-tested move and resize operations, and SDL-tracked maximized state.
 
 ## Testing
 
@@ -379,4 +379,4 @@ High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still re
 macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
 Manual macOS validation remains required for system window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
 Linux tests isolate metric resolution, preferred-height flooring, viewport clamping, caption-control reservation, and maximized-state propagation.
-Manual Linux validation covers GTK decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on each supported GDK backend.
+Manual Linux validation covers SDL decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on the X11 and Wayland SDL video backends.

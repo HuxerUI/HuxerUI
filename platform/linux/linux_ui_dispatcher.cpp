@@ -1,69 +1,65 @@
+#include "linux_internal.h"
 #include "linux_ui_dispatcher.h"
 
-#include <glib.h>
+#include <SDL3/SDL.h>
 
+#include <deque>
 #include <functional>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 namespace huxerui::detail {
 
 struct LinuxUIThreadDispatcher::State {
-  State() : context(g_main_context_ref(g_main_context_default())) {}
+  State() : wake_event(SDL_RegisterEvents(1)) {}
 
-  ~State() {
-    g_main_context_unref(context);
-  }
-
-  struct PendingTask {
-    std::weak_ptr<State> state;
-    std::function<void()> task;
-  };
-
-  void Post(const std::shared_ptr<State>& self, std::function<void()> task) {
+  void Post(std::function<void()> task) {
     {
       std::lock_guard lock(mutex);
       if (!active) {
         return;
       }
+      pending.push_back(std::move(task));
     }
-    GSource* source = g_idle_source_new();
-    auto* pending = new PendingTask{self, std::move(task)};
-    g_source_set_callback(
-        source,
-        [](gpointer data) -> gboolean {
-          auto& pending_task = *static_cast<PendingTask*>(data);
-          const std::shared_ptr<State> state = pending_task.state.lock();
-          if (!state) {
-            return G_SOURCE_REMOVE;
-          }
-          {
-            std::lock_guard lock(state->mutex);
-            if (!state->active) {
-              return G_SOURCE_REMOVE;
-            }
-          }
-          try {
-            pending_task.task();
-          } catch (...) {
-          }
-          return G_SOURCE_REMOVE;
-        },
-        pending,
-        [](gpointer data) { delete static_cast<PendingTask*>(data); }
-    );
-    g_source_attach(source, context);
-    g_source_unref(source);
-    g_main_context_wakeup(context);
+    if (wake_event != 0) {
+      SDL_Event event{};
+      event.type = wake_event;
+      static_cast<void>(SDL_PushEvent(&event));
+    }
+  }
+
+  void Drain() {
+    if (std::this_thread::get_id() != ui_thread) {
+      return;
+    }
+    for (;;) {
+      std::function<void()> task;
+      {
+        std::lock_guard lock(mutex);
+        if (!active || pending.empty()) {
+          return;
+        }
+        task = std::move(pending.front());
+        pending.pop_front();
+      }
+      try {
+        task();
+      } catch (...) {
+      }
+    }
   }
 
   void Shutdown() noexcept {
     std::lock_guard lock(mutex);
     active = false;
+    pending.clear();
   }
 
-  GMainContext* context = nullptr;
   std::mutex mutex;
+  std::deque<std::function<void()>> pending;
+  std::thread::id ui_thread = std::this_thread::get_id();
+  Uint32 wake_event = 0;
   bool active = true;
 };
 
@@ -75,7 +71,11 @@ LinuxUIThreadDispatcher::~LinuxUIThreadDispatcher() {
 
 UIThreadDispatcher LinuxUIThreadDispatcher::Bind() const {
   const std::shared_ptr<State> state = state_;
-  return [state](std::function<void()> task) { state->Post(state, std::move(task)); };
+  return [state](std::function<void()> task) { state->Post(std::move(task)); };
+}
+
+void LinuxUIThreadDispatcher::DrainPending() {
+  state_->Drain();
 }
 
 void LinuxUIThreadDispatcher::Shutdown() noexcept {

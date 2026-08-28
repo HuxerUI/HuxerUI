@@ -189,7 +189,7 @@ Closing the request handle is the single cancellation path, and callback context
 A private thread-pool deadline covers the complete operation rather than restarting for each WinHTTP phase.
 Windows 10 and later use the operating system automatic proxy configuration, while Windows 7 compatibility builds retain WinHTTP's default proxy mode.
 The backend disables persistent cookies, requests transport-managed gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
-The Linux backend uses one libsoup 3 Session on a dedicated GLib network thread, preserving system proxy and trust-store behavior without entering the GTK UI context.
+The Linux backend uses one libsoup 3 Session on a dedicated GLib network thread, preserving system proxy and trust-store behavior without entering the SDL UI thread.
 It buffers responses through the asynchronous send-and-read API, enforces the complete request deadline with a GLib timeout source, and cancels requests through GCancellable.
 The distribution-provided libsoup 3 development package and its GLib/GIO dependencies are manually installed system dependencies rather than FetchContent inputs.
 Adding another platform implements HttpTransport without changing HttpClient or Task.

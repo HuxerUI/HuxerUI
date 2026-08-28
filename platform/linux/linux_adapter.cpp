@@ -1,9 +1,6 @@
 #include "linux_internal.h"
 
-#include <gtk/gtk.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/x11/gdkx.h>
-#endif
+#include <SDL3/SDL.h>
 
 #include <sys/resource.h>
 #include <unistd.h>
@@ -13,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -36,6 +34,7 @@
 #include "linux_file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
+#include "linux_event_internal.h"
 #include "linux_renderer.h"
 #include "linux_system_tray.h"
 #include "linux_text_input.h"
@@ -50,149 +49,94 @@ namespace {
 constexpr float kDipsPerScrollStep = 40.0F;
 constexpr float kResizeBorderDips = 6.0F;
 
-Key TranslateKey(guint key_value) noexcept {
-  switch (key_value) {
-  case GDK_KEY_Shift_L:
-  case GDK_KEY_Shift_R:
+[[noreturn]] void ThrowSdlError(std::string_view operation) {
+  throw std::runtime_error("HuxerUI Linux " + std::string(operation) + " failed: " + SDL_GetError());
+}
+
+Key TranslateKey(SDL_Keycode key) noexcept {
+  switch (key) {
+  case SDLK_LSHIFT:
+  case SDLK_RSHIFT:
     return Key::Shift;
-  case GDK_KEY_Control_L:
-  case GDK_KEY_Control_R:
+  case SDLK_LCTRL:
+  case SDLK_RCTRL:
     return Key::Control;
-  case GDK_KEY_Alt_L:
-  case GDK_KEY_Alt_R:
+  case SDLK_LALT:
+  case SDLK_RALT:
     return Key::Alt;
-  case GDK_KEY_Meta_L:
-  case GDK_KEY_Meta_R:
-  case GDK_KEY_Super_L:
-  case GDK_KEY_Super_R:
+  case SDLK_LGUI:
+  case SDLK_RGUI:
     return Key::Meta;
-  case GDK_KEY_Tab:
-  case GDK_KEY_ISO_Left_Tab:
+  case SDLK_TAB:
     return Key::Tab;
-  case GDK_KEY_Return:
-  case GDK_KEY_KP_Enter:
+  case SDLK_RETURN:
+  case SDLK_KP_ENTER:
     return Key::Enter;
-  case GDK_KEY_space:
+  case SDLK_SPACE:
     return Key::Space;
-  case GDK_KEY_Escape:
+  case SDLK_ESCAPE:
     return Key::Escape;
-  case GDK_KEY_BackSpace:
+  case SDLK_BACKSPACE:
+  case SDLK_KP_BACKSPACE:
     return Key::Backspace;
-  case GDK_KEY_Delete:
-  case GDK_KEY_KP_Delete:
+  case SDLK_DELETE:
     return Key::Delete;
-  case GDK_KEY_Left:
-  case GDK_KEY_KP_Left:
+  case SDLK_LEFT:
     return Key::ArrowLeft;
-  case GDK_KEY_Right:
-  case GDK_KEY_KP_Right:
+  case SDLK_RIGHT:
     return Key::ArrowRight;
-  case GDK_KEY_Up:
-  case GDK_KEY_KP_Up:
+  case SDLK_UP:
     return Key::ArrowUp;
-  case GDK_KEY_Down:
-  case GDK_KEY_KP_Down:
+  case SDLK_DOWN:
     return Key::ArrowDown;
-  case GDK_KEY_Home:
-  case GDK_KEY_KP_Home:
+  case SDLK_HOME:
     return Key::Home;
-  case GDK_KEY_End:
-  case GDK_KEY_KP_End:
+  case SDLK_END:
     return Key::End;
-  case GDK_KEY_Page_Up:
-  case GDK_KEY_KP_Page_Up:
+  case SDLK_PAGEUP:
     return Key::PageUp;
-  case GDK_KEY_Page_Down:
-  case GDK_KEY_KP_Page_Down:
+  case SDLK_PAGEDOWN:
     return Key::PageDown;
-  case GDK_KEY_a:
-  case GDK_KEY_A:
+  case SDLK_A:
     return Key::A;
-  case GDK_KEY_c:
-  case GDK_KEY_C:
+  case SDLK_C:
     return Key::C;
-  case GDK_KEY_v:
-  case GDK_KEY_V:
+  case SDLK_V:
     return Key::V;
-  case GDK_KEY_x:
-  case GDK_KEY_X:
+  case SDLK_X:
     return Key::X;
-  case GDK_KEY_y:
-  case GDK_KEY_Y:
+  case SDLK_Y:
     return Key::Y;
-  case GDK_KEY_z:
-  case GDK_KEY_Z:
+  case SDLK_Z:
     return Key::Z;
   default:
     return Key::Unknown;
   }
 }
 
-KeyModifiers TranslateModifiers(GdkModifierType state) noexcept {
+KeyModifiers TranslateModifiers(SDL_Keymod modifiers) noexcept {
   return {
-      (state & GDK_SHIFT_MASK) != 0,
-      (state & GDK_CONTROL_MASK) != 0,
-      (state & GDK_ALT_MASK) != 0,
-      (state & GDK_SUPER_MASK) != 0 || (state & GDK_META_MASK) != 0,
+      (modifiers & SDL_KMOD_SHIFT) != 0,
+      (modifiers & SDL_KMOD_CTRL) != 0,
+      (modifiers & SDL_KMOD_ALT) != 0,
+      (modifiers & SDL_KMOD_GUI) != 0,
   };
 }
 
-std::string KeyText(guint key_value, GdkModifierType state) {
-  if ((state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK)) != 0) {
+std::string KeyText(SDL_Keycode key, SDL_Keymod modifiers) {
+  if ((modifiers & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) != 0 || key < 0x20U || key > 0x7EU) {
     return {};
   }
-  const gunichar character = gdk_keyval_to_unicode(key_value);
-  if (character == 0 || !g_unichar_isprint(character)) {
-    return {};
+  char character = static_cast<char>(key);
+  if ((modifiers & SDL_KMOD_SHIFT) != 0 && character >= 'a' && character <= 'z') {
+    character = static_cast<char>(character - 'a' + 'A');
   }
-  char buffer[7]{};
-  const int length = g_unichar_to_utf8(character, buffer);
-  return std::string(buffer, static_cast<std::size_t>(length));
+  return std::string(1, character);
 }
 
-std::optional<GdkSurfaceEdge> ResizeEdge(Point point, Size viewport, bool maximized) noexcept {
-  if (maximized || viewport.width <= 0.0F || viewport.height <= 0.0F) {
-    return std::nullopt;
-  }
-  const bool left = point.x <= kResizeBorderDips;
-  const bool right = point.x >= viewport.width - kResizeBorderDips;
-  const bool top = point.y <= kResizeBorderDips;
-  const bool bottom = point.y >= viewport.height - kResizeBorderDips;
-  if (top && left) {
-    return GDK_SURFACE_EDGE_NORTH_WEST;
-  }
-  if (top && right) {
-    return GDK_SURFACE_EDGE_NORTH_EAST;
-  }
-  if (bottom && left) {
-    return GDK_SURFACE_EDGE_SOUTH_WEST;
-  }
-  if (bottom && right) {
-    return GDK_SURFACE_EDGE_SOUTH_EAST;
-  }
-  if (left) {
-    return GDK_SURFACE_EDGE_WEST;
-  }
-  if (right) {
-    return GDK_SURFACE_EDGE_EAST;
-  }
-  if (top) {
-    return GDK_SURFACE_EDGE_NORTH;
-  }
-  if (bottom) {
-    return GDK_SURFACE_EDGE_SOUTH;
-  }
-  return std::nullopt;
-}
-
-std::shared_ptr<LinuxUIThreadDispatcher> InitializeGtk() {
-  if (g_getenv("GTK_A11Y") == nullptr) {
-    // The Linux adapter does not yet publish Runtime semantics through GTK. Avoid exposing a misleading host-only
-    // accessibility tree, while preserving an explicit backend selected by the application or its environment.
-    static_cast<void>(g_setenv("GTK_A11Y", "none", FALSE));
-  }
-  if (gtk_init_check() == FALSE) {
-    throw std::runtime_error("HuxerUI Linux could not initialize GTK");
+std::shared_ptr<LinuxUIThreadDispatcher> InitializeSdl() {
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
+    ThrowSdlError("could not initialize SDL");
   }
   return std::make_shared<LinuxUIThreadDispatcher>();
 }
@@ -201,7 +145,13 @@ std::shared_ptr<LinuxUIThreadDispatcher> InitializeGtk() {
 
 class LinuxPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
 public:
-  LinuxPlatformAdapter() : LinuxPlatformAdapter(InitializeGtk()) {}
+  LinuxPlatformAdapter() : LinuxPlatformAdapter(InitializeSdl()) {
+    wake_event_ = SDL_RegisterEvents(1);
+    if (wake_event_ == 0) {
+      SDL_Quit();
+      ThrowSdlError("could not allocate a wake event");
+    }
+  }
 
   int Run(Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
@@ -210,14 +160,14 @@ public:
       renderer_.Initialize();
       CreateWindow(options);
       runtime_->UpdateResourceConfiguration(Configuration());
-      UpdateRuntimeViewport(options.initial_size);
+      UpdateRuntimeViewport();
       running_ = true;
-      gtk_window_present(window_);
-      gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
+      shown_ = true;
+      focused_ = (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) != 0;
+      text_input_.SetFocus(focused_);
+      UpdateLifecycleState();
       RequestFrameAt(Now());
-      while (running_) {
-        g_main_context_iteration(nullptr, TRUE);
-      }
+      EventLoop();
       Cleanup();
       runtime_ = nullptr;
       if (failure_) {
@@ -232,9 +182,11 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled =
-            frame_state_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
-      ScheduleFrame(*scheduled);
+    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), window_ != nullptr && running_)) {
+      if (!frame_deadline_.has_value() || *scheduled < *frame_deadline_) {
+        frame_deadline_ = *scheduled;
+      }
+      WakeEventLoop();
     }
   }
 
@@ -247,9 +199,7 @@ public:
     return renderer_.Metrics(font);
   }
 
-  TextRunMetrics MeasureRun(
-      std::string_view text, const TextStyle& style, const TextShapingOptions& options
-  ) override {
+  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) override {
     return renderer_.MeasureRun(text, style, options);
   }
 
@@ -326,41 +276,44 @@ public:
     }
     switch (command) {
     case WindowCommand::Minimize:
-      performing_minimize_ = true;
-      gtk_window_minimize(window_);
+      performing_minimize_ = SDL_MinimizeWindow(window_);
       break;
     case WindowCommand::Maximize:
-      gtk_window_maximize(window_);
+      static_cast<void>(SDL_MaximizeWindow(window_));
       break;
     case WindowCommand::Restore:
-      gtk_window_unminimize(window_);
-      gtk_window_unmaximize(window_);
+      static_cast<void>(SDL_RestoreWindow(window_));
       break;
     case WindowCommand::ToggleMaximize:
-      gtk_window_is_maximized(window_) ? gtk_window_unmaximize(window_) : gtk_window_maximize(window_);
+      if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) != 0) {
+        static_cast<void>(SDL_RestoreWindow(window_));
+      } else {
+        static_cast<void>(SDL_MaximizeWindow(window_));
+      }
       break;
     case WindowCommand::Close:
-      performing_close_ = true;
-      gtk_window_close(window_);
+      running_ = false;
+      WakeEventLoop();
       break;
     case WindowCommand::Show:
-      gtk_widget_set_visible(GTK_WIDGET(window_), TRUE);
+      static_cast<void>(SDL_ShowWindow(window_));
       break;
     case WindowCommand::Hide:
-      gtk_widget_set_visible(GTK_WIDGET(window_), FALSE);
+      static_cast<void>(SDL_HideWindow(window_));
       break;
     case WindowCommand::Activate:
-      gtk_window_present(window_);
+      static_cast<void>(SDL_ShowWindow(window_));
+      if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0) {
+        static_cast<void>(SDL_RestoreWindow(window_));
+      }
+      static_cast<void>(SDL_RaiseWindow(window_));
       break;
     }
   }
 
   void RequestApplicationQuit() override {
     running_ = false;
-    if (window_ != nullptr) {
-      performing_close_ = true;
-      gtk_window_close(window_);
-    }
+    WakeEventLoop();
   }
 
   bool DispatchWindowRequest(WindowCommand command) noexcept {
@@ -376,16 +329,19 @@ public:
   }
 
   ResourceConfiguration Configuration() const override {
-    const char* const* languages = g_get_language_names();
-    std::string language = languages != nullptr && languages[0] != nullptr ? languages[0] : "en";
-    if (const std::size_t dot = language.find('.'); dot != std::string::npos) {
-      language.resize(dot);
+    std::string language = "en";
+    int locale_count = 0;
+    SDL_Locale** locales = SDL_GetPreferredLocales(&locale_count);
+    if (locales != nullptr && locale_count > 0 && locales[0] != nullptr && locales[0]->language != nullptr) {
+      language = locales[0]->language;
+      if (locales[0]->country != nullptr && locales[0]->country[0] != '\0') {
+        language += "-";
+        language += locales[0]->country;
+      }
     }
-    std::replace(language.begin(), language.end(), '_', '-');
-    const float scale = drawing_area_ != nullptr
-                            ? static_cast<float>(gtk_widget_get_scale_factor(GTK_WIDGET(drawing_area_)))
-                            : 1.0F;
-    return {Locale::FromLanguageTag(std::move(language)), std::max(1.0F, scale)};
+    SDL_free(locales);
+    const float scale = window_ != nullptr ? SDL_GetWindowDisplayScale(window_) : 1.0F;
+    return {Locale::FromLanguageTag(std::move(language)), std::isfinite(scale) ? std::max(1.0F, scale) : 1.0F};
   }
 
   RawAsset Read(std::string_view package_path) override {
@@ -411,79 +367,17 @@ public:
   }
 
   std::optional<std::string> ReadText() override {
-    if (drawing_area_ == nullptr || clipboard_read_active_) {
+    char* text = SDL_GetClipboardText();
+    if (text == nullptr) {
       return std::nullopt;
     }
-    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
-    GdkClipboard* clipboard = gdk_display_get_clipboard(display);
-    struct ReadState {
-      ~ReadState() {
-        g_object_unref(cancellable);
-        g_main_loop_unref(loop);
-      }
-
-      GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
-      GCancellable* cancellable = g_cancellable_new();
-      std::optional<std::string> value;
-      bool finished = false;
-      bool timed_out = false;
-    };
-    auto state = std::make_shared<ReadState>();
-    clipboard_read_active_ = true;
-    gdk_clipboard_read_text_async(
-        clipboard,
-        state->cancellable,
-        [](GObject* source, GAsyncResult* result, gpointer data) {
-          std::unique_ptr<std::shared_ptr<ReadState>> owner(
-              static_cast<std::shared_ptr<ReadState>*>(data)
-          );
-          const std::shared_ptr<ReadState>& read = *owner;
-          GError* error = nullptr;
-          char* text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), result, &error);
-          if (text != nullptr) {
-            if (!read->timed_out) {
-              read->value = text;
-            }
-            g_free(text);
-          }
-          if (error != nullptr) {
-            g_error_free(error);
-          }
-          read->finished = true;
-          g_main_loop_quit(read->loop);
-        },
-        new std::shared_ptr<ReadState>(state)
-    );
-    const guint timeout = g_timeout_add_full(
-        G_PRIORITY_DEFAULT,
-        1000,
-        [](gpointer data) -> gboolean {
-          auto& read = *static_cast<ReadState*>(data);
-          if (!read.finished) {
-            read.timed_out = true;
-            g_cancellable_cancel(read.cancellable);
-            g_main_loop_quit(read.loop);
-          }
-          return G_SOURCE_REMOVE;
-        },
-        state.get(),
-        nullptr
-    );
-    g_main_loop_run(state->loop);
-    if (!state->timed_out) {
-      g_source_remove(timeout);
-    }
-    clipboard_read_active_ = false;
-    return std::move(state->value);
+    std::string result(text);
+    SDL_free(text);
+    return result;
   }
 
   bool WriteText(std::string_view text) override {
-    if (drawing_area_ == nullptr) {
-      return false;
-    }
-    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
-    gdk_clipboard_set_text(gdk_display_get_clipboard(display), std::string(text).c_str());
-    return true;
+    return SDL_SetClipboardText(std::string(text).c_str());
   }
 
 private:
@@ -493,206 +387,353 @@ private:
   void CreateWindow(const WindowOptions& options) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
     custom_title_bar_height_ = options.title_bar_height;
-    window_ = GTK_WINDOW(gtk_window_new());
-    gtk_window_set_title(window_, options.title.c_str());
-    gtk_window_set_default_size(
-        window_,
-        std::max(1, static_cast<int>(std::lround(options.initial_size.width))),
-        std::max(1, static_cast<int>(std::lround(options.initial_size.height)))
-    );
-    gtk_window_set_decorated(window_, !custom_chrome_);
-
-    drawing_area_ = GTK_DRAWING_AREA(gtk_drawing_area_new());
-    gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
-    gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
-    gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));
-    g_signal_connect(drawing_area_, "destroy", G_CALLBACK(ClientWidgetDestroyed), this);
-    text_input_.SetClientWidget(GTK_WIDGET(drawing_area_));
-
-    g_signal_connect(window_, "close-request", G_CALLBACK(CloseRequested), this);
-    g_signal_connect(window_, "destroy", G_CALLBACK(Destroyed), this);
-    g_signal_connect(window_, "map", G_CALLBACK(WindowMapped), this);
-    g_signal_connect(window_, "unmap", G_CALLBACK(WindowUnmapped), this);
-    g_signal_connect(window_, "notify::is-active", G_CALLBACK(WindowActiveChanged), this);
-    g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowMaximizedChanged), this);
-    g_signal_connect(drawing_area_, "notify::scale-factor", G_CALLBACK(ScaleChanged), this);
-
-    GtkGesture* click = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
-    g_signal_connect(click, "pressed", G_CALLBACK(PointerPressed), this);
-    g_signal_connect(click, "released", G_CALLBACK(PointerReleased), this);
-    g_signal_connect(click, "cancel", G_CALLBACK(PointerCanceled), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), GTK_EVENT_CONTROLLER(click));
-
-    GtkEventController* motion = gtk_event_controller_motion_new();
-    g_signal_connect(motion, "enter", G_CALLBACK(PointerEntered), this);
-    g_signal_connect(motion, "motion", G_CALLBACK(PointerMoved), this);
-    g_signal_connect(motion, "leave", G_CALLBACK(PointerLeft), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), motion);
-
-    GtkEventController* scroll = gtk_event_controller_scroll_new(
-        static_cast<GtkEventControllerScrollFlags>(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES |
-                                                   GTK_EVENT_CONTROLLER_SCROLL_DISCRETE)
-    );
-    g_signal_connect(scroll, "scroll", G_CALLBACK(Scrolled), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), scroll);
-
-    GtkEventController* key = gtk_event_controller_key_new();
-    g_signal_connect(key, "key-pressed", G_CALLBACK(KeyPressed), this);
-    g_signal_connect(key, "key-released", G_CALLBACK(KeyReleased), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), key);
-
-    GtkEventController* focus = gtk_event_controller_focus_new();
-    g_signal_connect(focus, "enter", G_CALLBACK(FocusEntered), this);
-    g_signal_connect(focus, "leave", G_CALLBACK(FocusLeft), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), focus);
-  }
-
-  void ScheduleFrame(double deadline) {
-    if (frame_source_ != 0) {
-      g_source_remove(frame_source_);
-      frame_source_ = 0;
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    if (custom_chrome_) {
+      flags |= SDL_WINDOW_BORDERLESS;
     }
-    const double milliseconds = std::ceil(std::max(0.0, deadline - Now()) * 1000.0);
-    const guint delay = static_cast<guint>(
-        std::clamp(milliseconds, 0.0, static_cast<double>(std::numeric_limits<guint>::max()))
+    window_ = SDL_CreateWindow(
+        options.title.c_str(),
+        std::max(1, static_cast<int>(std::lround(options.initial_size.width))),
+        std::max(1, static_cast<int>(std::lround(options.initial_size.height))),
+        flags
     );
-    frame_source_ = delay == 0
-                        ? g_idle_add_full(G_PRIORITY_HIGH_IDLE, FrameReady, this, nullptr)
-                        : g_timeout_add_full(G_PRIORITY_HIGH, std::max(1U, delay), FrameReady, this, nullptr);
+    if (window_ == nullptr) {
+      ThrowSdlError("could not create a window");
+    }
+    window_id_ = SDL_GetWindowID(window_);
+    renderer_context_ = SDL_CreateRenderer(window_, nullptr);
+    if (renderer_context_ == nullptr) {
+      ThrowSdlError("could not create a renderer");
+    }
+    if (custom_chrome_ && !SDL_SetWindowHitTest(window_, WindowHitTest, this)) {
+      ThrowSdlError("could not install custom window hit testing");
+    }
+    text_input_.SetWindow(window_);
+    if (!SDL_ShowWindow(window_)) {
+      ThrowSdlError("could not show a window");
+    }
+    static_cast<void>(SDL_RaiseWindow(window_));
   }
 
-  void CommitFrame() {
-    frame_source_ = 0;
+  void EventLoop() {
+    while (running_) {
+      static_cast<void>(LinuxDispatchPendingGlibIterations());
+      ui_dispatcher_->DrainPending();
+      CommitFrameIfDue();
+      const int timeout = WaitTimeoutMilliseconds();
+      SDL_Event event{};
+      if (SDL_WaitEventTimeout(&event, timeout)) {
+        HandleEvent(event);
+        while (running_ && SDL_PollEvent(&event)) {
+          HandleEvent(event);
+        }
+        ui_dispatcher_->DrainPending();
+      }
+    }
+  }
+
+  int WaitTimeoutMilliseconds() const noexcept {
+    if (!frame_deadline_.has_value()) {
+      return LinuxBoundWaitTimeoutForGlib(-1);
+    }
+    const double milliseconds = std::ceil(std::max(0.0, *frame_deadline_ - Now()) * 1000.0);
+    return LinuxBoundWaitTimeoutForGlib(
+        static_cast<int>(std::clamp(milliseconds, 0.0, static_cast<double>(std::numeric_limits<int>::max())))
+    );
+  }
+
+  void WakeEventLoop() const noexcept {
+    if (wake_event_ == 0) {
+      return;
+    }
+    SDL_Event event{};
+    event.type = wake_event_;
+    event.user.data1 = const_cast<LinuxPlatformAdapter*>(this);
+    static_cast<void>(SDL_PushEvent(&event));
+  }
+
+  void CommitFrameIfDue() {
+    if (!frame_deadline_.has_value() || *frame_deadline_ > Now()) {
+      return;
+    }
+    frame_deadline_.reset();
     if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
       return;
     }
     const FrameCommit& commit = runtime_->BuildFrame();
     committed_frame_ = &commit.render_frame;
     frame_state_.MarkPaintPending();
-    gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
-    FlushDeferredFrame();
-  }
-
-  void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(drawing_area_ != nullptr && running_)) {
-      ScheduleFrame(*deadline);
-    }
-  }
-
-  void DrawFrame(cairo_t* context) {
-    if (committed_frame_ == nullptr) {
-      return;
-    }
     frame_state_.BeginPaint();
     try {
-      renderer_.Draw(context, *committed_frame_);
+      PresentFrame();
     } catch (...) {
       if (!failure_) {
         failure_ = std::current_exception();
       }
       running_ = false;
     }
-    if (const std::optional<double> deadline = frame_state_.EndPaint(drawing_area_ != nullptr && running_)) {
-      ScheduleFrame(*deadline);
+    if (const std::optional<double> deferred = frame_state_.EndPaint(window_ != nullptr && running_)) {
+      if (!frame_deadline_.has_value() || *deferred < *frame_deadline_) {
+        frame_deadline_ = *deferred;
+      }
     }
   }
 
-  void UpdateRuntimeViewport(Size viewport) {
-    if (runtime_ == nullptr || viewport.width <= 0.0F || viewport.height <= 0.0F) {
+  void PresentFrame() {
+    if (committed_frame_ == nullptr || renderer_context_ == nullptr) {
       return;
     }
+    EnsureBackbuffer();
+    renderer_.Draw(
+        backbuffer_surface_,
+        *committed_frame_,
+        static_cast<float>(render_scale_x_),
+        static_cast<float>(render_scale_y_)
+    );
+    if (!SDL_UpdateTexture(texture_, nullptr, pixels_.data(), pixel_width_ * static_cast<int>(sizeof(std::uint32_t)))) {
+      ThrowSdlError("could not upload a rendered frame");
+    }
+    if (!SDL_SetRenderDrawColor(renderer_context_, 0, 0, 0, 255) || !SDL_RenderClear(renderer_context_) ||
+        !SDL_RenderTexture(renderer_context_, texture_, nullptr, nullptr) || !SDL_RenderPresent(renderer_context_)) {
+      ThrowSdlError("could not present a rendered frame");
+    }
+  }
+
+  void EnsureBackbuffer() {
+    int pixel_width = 0;
+    int pixel_height = 0;
+    int logical_width = 0;
+    int logical_height = 0;
+    if (!SDL_GetRenderOutputSize(renderer_context_, &pixel_width, &pixel_height) ||
+        !SDL_GetWindowSize(window_, &logical_width, &logical_height)) {
+      ThrowSdlError("could not query the window size");
+    }
+    pixel_width = std::max(1, pixel_width);
+    pixel_height = std::max(1, pixel_height);
+    logical_width = std::max(1, logical_width);
+    logical_height = std::max(1, logical_height);
+    render_scale_x_ = static_cast<double>(pixel_width) / static_cast<double>(logical_width);
+    render_scale_y_ = static_cast<double>(pixel_height) / static_cast<double>(logical_height);
+    if (texture_ != nullptr && pixel_width_ == pixel_width && pixel_height_ == pixel_height) {
+      return;
+    }
+    DestroyBackbuffer();
+    pixel_width_ = pixel_width;
+    pixel_height_ = pixel_height;
+    pixels_.assign(static_cast<std::size_t>(pixel_width_) * static_cast<std::size_t>(pixel_height_), 0U);
+    backbuffer_surface_ = SDL_CreateSurfaceFrom(
+        pixel_width_,
+        pixel_height_,
+        SDL_PIXELFORMAT_ARGB8888,
+        pixels_.data(),
+        pixel_width_ * static_cast<int>(sizeof(std::uint32_t))
+    );
+    if (backbuffer_surface_ == nullptr) {
+      ThrowSdlError("could not create the CPU backbuffer surface");
+    }
+    texture_ = SDL_CreateTexture(
+        renderer_context_,
+        SDL_PIXELFORMAT_ARGB8888,
+        SDL_TEXTUREACCESS_STREAMING,
+        pixel_width_,
+        pixel_height_
+    );
+    if (texture_ == nullptr) {
+      ThrowSdlError("could not create the frame texture");
+    }
+    if (!SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_NONE)) {
+      ThrowSdlError("could not disable frame texture blending");
+    }
+  }
+
+  void DestroyBackbuffer() noexcept {
+    if (texture_ != nullptr) {
+      SDL_DestroyTexture(texture_);
+      texture_ = nullptr;
+    }
+    if (backbuffer_surface_ != nullptr) {
+      SDL_DestroySurface(backbuffer_surface_);
+      backbuffer_surface_ = nullptr;
+    }
+    pixels_.clear();
+    pixel_width_ = 0;
+    pixel_height_ = 0;
+  }
+
+  void HandleEvent(const SDL_Event& event) {
+    if (event.type == wake_event_ || event.type == SDL_EVENT_POLL_SENTINEL) {
+      return;
+    }
+    if (!LinuxSdlEventTargetsWindow(event, window_id_)) {
+      return;
+    }
+    if (LinuxSdlEventInvalidatesBackbuffer(event.type)) {
+      DestroyBackbuffer();
+      RequestFrameAt(Now());
+      return;
+    }
+    switch (event.type) {
+    case SDL_EVENT_QUIT:
+      running_ = false;
+      break;
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+      if (!DispatchWindowRequest(WindowCommand::Close)) {
+        running_ = false;
+      }
+      break;
+    case SDL_EVENT_WINDOW_SHOWN:
+      shown_ = true;
+      UpdateLifecycleState();
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_HIDDEN:
+      shown_ = false;
+      CancelPointer(true);
+      key_tracker_.Reset();
+      UpdateLifecycleState();
+      break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+      focused_ = true;
+      text_input_.SetFocus(true);
+      UpdateLifecycleState();
+      break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+      focused_ = false;
+      text_input_.SetFocus(false);
+      key_tracker_.Reset();
+      CancelPointer(true);
+      UpdateLifecycleState();
+      break;
+    case SDL_EVENT_WINDOW_MINIMIZED:
+      if (performing_minimize_) {
+        performing_minimize_ = false;
+      } else if (DispatchWindowRequest(WindowCommand::Minimize)) {
+        static_cast<void>(SDL_RestoreWindow(window_));
+      }
+      minimized_ = true;
+      UpdateLifecycleState();
+      UpdateRuntimeViewport();
+      break;
+    case SDL_EVENT_WINDOW_MAXIMIZED:
+      minimized_ = false;
+      UpdateLifecycleState();
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_RESTORED:
+      minimized_ = false;
+      UpdateLifecycleState();
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+      DestroyBackbuffer();
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+      DestroyBackbuffer();
+      if (runtime_ != nullptr) {
+        runtime_->UpdateResourceConfiguration(Configuration());
+      }
+      UpdateRuntimeViewport();
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_EXPOSED:
+      RequestFrameAt(Now());
+      break;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+      if (!pointer_down_) {
+        CancelPointer(true);
+      }
+      break;
+    case SDL_EVENT_MOUSE_MOTION:
+      SendPointer(PointerEventType::Move, {event.motion.x, event.motion.y});
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+      if (event.button.button == SDL_BUTTON_LEFT) {
+        pointer_down_ = true;
+        static_cast<void>(SDL_CaptureMouse(true));
+        SendPointer(
+            PointerEventType::Down,
+            {event.button.x, event.button.y},
+            static_cast<std::uint32_t>(std::max<int>(1, event.button.clicks))
+        );
+      }
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      if (event.button.button == SDL_BUTTON_LEFT && pointer_down_) {
+        pointer_down_ = false;
+        static_cast<void>(SDL_CaptureMouse(false));
+        SendPointer(PointerEventType::Up, {event.button.x, event.button.y});
+      }
+      break;
+    case SDL_EVENT_MOUSE_WHEEL:
+      if (runtime_ != nullptr) {
+        const float direction = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0F : 1.0F;
+        last_pointer_position_ = {event.wheel.mouse_x, event.wheel.mouse_y};
+        runtime_->HandleScrollEvent({
+            last_pointer_position_,
+            event.wheel.x * direction * kDipsPerScrollStep,
+            -event.wheel.y * direction * kDipsPerScrollStep,
+        });
+      }
+      break;
+    case SDL_EVENT_KEY_DOWN: {
+      const bool filtered_by_input_method = LinuxShouldFilterImeKey(text_input_.Composing(), event.key.key);
+      const LinuxKeyPressResult press = key_tracker_.Press(event.key.scancode, filtered_by_input_method);
+      if (press.dispatch) {
+        SendKey(KeyEventType::Down, event.key, event.key.repeat || press.repeat);
+      }
+      break;
+    }
+    case SDL_EVENT_KEY_UP:
+      if (key_tracker_.Release(event.key.scancode, LinuxShouldFilterImeKey(text_input_.Composing(), event.key.key))) {
+        SendKey(KeyEventType::Up, event.key, false);
+      }
+      break;
+    case SDL_EVENT_TEXT_EDITING:
+      text_input_
+          .HandleTextEditing(event.edit.text != nullptr ? event.edit.text : "", event.edit.start, event.edit.length);
+      break;
+    case SDL_EVENT_TEXT_INPUT:
+      text_input_.HandleTextInput(event.text.text != nullptr ? event.text.text : "");
+      break;
+    default:
+      break;
+    }
+  }
+
+  void UpdateRuntimeViewport() {
+    if (runtime_ == nullptr || window_ == nullptr) {
+      return;
+    }
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetWindowSize(window_, &width, &height) || width <= 0 || height <= 0) {
+      return;
+    }
+    const Size viewport{static_cast<float>(width), static_cast<float>(height)};
     WindowMetrics metrics{.viewport = viewport, .safe_area = {}, .title_bar = std::nullopt};
     if (custom_chrome_) {
       metrics.title_bar = ResolveLinuxTitleBarMetrics(
-          custom_title_bar_height_, viewport, window_ != nullptr && gtk_window_is_maximized(window_)
+          custom_title_bar_height_,
+          viewport,
+          (SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) != 0
       );
     }
     runtime_->SetWindowMetrics(metrics);
   }
 
-  void UpdateRuntimeViewport() {
-    if (drawing_area_ == nullptr) {
-      return;
-    }
-    UpdateRuntimeViewport({
-        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
-        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
-    });
-  }
-
-  void AttachToplevelState() {
-    if (window_ == nullptr) {
-      return;
-    }
-    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
-    GdkToplevel* toplevel = surface != nullptr && GDK_IS_TOPLEVEL(surface) ? GDK_TOPLEVEL(surface) : nullptr;
-    if (toplevel == toplevel_) {
-      return;
-    }
-    DetachToplevelState();
-    toplevel_ = toplevel;
-    if (toplevel_ != nullptr) {
-      minimized_ = (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
-      toplevel_state_handler_ =
-          g_signal_connect(toplevel_, "notify::state", G_CALLBACK(ToplevelStateChanged), this);
-    }
-  }
-
-  void DetachToplevelState() noexcept {
-    if (toplevel_ != nullptr && toplevel_state_handler_ != 0) {
-      g_signal_handler_disconnect(toplevel_, toplevel_state_handler_);
-    }
-    toplevel_ = nullptr;
-    toplevel_state_handler_ = 0;
-    minimized_ = false;
-  }
-
   void UpdateLifecycleState() {
-    if (runtime_ == nullptr || window_ == nullptr) {
-      return;
+    if (runtime_ != nullptr) {
+      runtime_->UpdateApplicationLifecycleState(ResolveLinuxApplicationLifecycleState(shown_, focused_, minimized_));
     }
-    const bool mapped = gtk_widget_get_mapped(GTK_WIDGET(window_)) != FALSE;
-    const bool active = gtk_window_is_active(window_) != FALSE;
-    const bool minimized = toplevel_ != nullptr &&
-                           (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
-    runtime_->UpdateApplicationLifecycleState(
-        ResolveLinuxApplicationLifecycleState(mapped, active, minimized)
-    );
-  }
-
-  bool BeginWindowOperation(GtkGestureClick* gesture, Point point) {
-    if (!custom_chrome_ || window_ == nullptr || runtime_ == nullptr) {
-      return false;
-    }
-    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
-    if (surface == nullptr || !GDK_IS_TOPLEVEL(surface)) {
-      return false;
-    }
-    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
-    GdkDevice* device = gtk_event_controller_get_current_event_device(GTK_EVENT_CONTROLLER(gesture));
-    if (event == nullptr || device == nullptr) {
-      return false;
-    }
-    const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
-    const guint32 time = gdk_event_get_time(event);
-    const Size viewport{
-        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
-        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
-    };
-    if (const std::optional<GdkSurfaceEdge> edge =
-            ResizeEdge(point, viewport, gtk_window_is_maximized(window_) != FALSE)) {
-      gdk_toplevel_begin_resize(GDK_TOPLEVEL(surface), *edge, device, static_cast<int>(button), point.x, point.y, time);
-      return true;
-    }
-    if (runtime_->IsWindowDragRegion(point)) {
-      gdk_toplevel_begin_move(GDK_TOPLEVEL(surface), device, static_cast<int>(button), point.x, point.y, time);
-      return true;
-    }
-    return false;
   }
 
   void SendPointer(PointerEventType type, Point position, std::uint32_t clicks = 1) {
@@ -703,24 +744,24 @@ private:
     runtime_->HandlePointerEvent({type, 0, position, PointerDeviceKind::Mouse, clicks});
   }
 
-  void CancelPointer() {
-    suppress_pointer_release_ = false;
-    if (!pointer_down_) {
+  void CancelPointer(bool force = false) {
+    if (!pointer_down_ && !force) {
       return;
     }
     pointer_down_ = false;
+    static_cast<void>(SDL_CaptureMouse(false));
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
   }
 
-  void SendKey(KeyEventType type, guint key_value, GdkModifierType state, bool repeat = false) {
+  void SendKey(KeyEventType type, const SDL_KeyboardEvent& event, bool repeat) {
     if (runtime_ == nullptr) {
       return;
     }
     runtime_->HandleKeyEvent({
         type,
-        TranslateKey(key_value),
-        type == KeyEventType::Down ? KeyText(key_value, state) : std::string{},
-        TranslateModifiers(state),
+        TranslateKey(event.key),
+        type == KeyEventType::Down && !text_input_.Active() ? KeyText(event.key, event.mod) : std::string{},
+        TranslateModifiers(event.mod),
         repeat,
     });
   }
@@ -735,238 +776,106 @@ private:
   }
 
   unsigned long X11WindowId() const noexcept {
-#ifdef GDK_WINDOWING_X11
-    if (window_ != nullptr) {
-      GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
-      if (surface != nullptr && GDK_IS_X11_SURFACE(surface)) {
-        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        return gdk_x11_surface_get_xid(surface);
-        G_GNUC_END_IGNORE_DEPRECATIONS
-      }
+    if (window_ == nullptr) {
+      return 0;
     }
-#endif
-    return 0;
+    const SDL_PropertiesID properties = SDL_GetWindowProperties(window_);
+    if (properties == 0) {
+      return 0;
+    }
+    return static_cast<unsigned long>(SDL_GetNumberProperty(properties, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
   }
 
   void Cleanup() noexcept {
-    if (frame_source_ != 0) {
-      g_source_remove(frame_source_);
-      frame_source_ = 0;
-    }
     ui_dispatcher_->Shutdown();
     text_input_.Reset();
-    DetachToplevelState();
+    CancelPointer();
     key_tracker_.Reset();
     committed_frame_ = nullptr;
+    DestroyBackbuffer();
     renderer_.Discard();
+    if (renderer_context_ != nullptr) {
+      SDL_DestroyRenderer(renderer_context_);
+      renderer_context_ = nullptr;
+    }
     if (window_ != nullptr) {
-      gtk_window_destroy(window_);
+      SDL_DestroyWindow(window_);
       window_ = nullptr;
-      drawing_area_ = nullptr;
+      window_id_ = 0;
     }
+    SDL_Quit();
   }
 
-  static gboolean FrameReady(gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->CommitFrame();
-    return G_SOURCE_REMOVE;
-  }
-
-  static void Draw(GtkDrawingArea*, cairo_t* context, int width, int height, gpointer data) {
+  static SDL_HitTestResult WindowHitTest(SDL_Window*, const SDL_Point* area, void* data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.UpdateRuntimeViewport({static_cast<float>(width), static_cast<float>(height)});
-    self.DrawFrame(context);
-  }
-
-  static gboolean CloseRequested(GtkWindow*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (!self.performing_close_ && self.DispatchWindowRequest(WindowCommand::Close)) {
-      return TRUE;
+    if (!self.custom_chrome_ || self.runtime_ == nullptr || area == nullptr) {
+      return SDL_HITTEST_NORMAL;
     }
-    self.performing_close_ = false;
-    self.text_input_.Reset();
-    self.running_ = false;
-    return FALSE;
-  }
-
-  static void ClientWidgetDestroyed(GtkWidget* widget, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.text_input_.Reset();
-    if (self.drawing_area_ != nullptr && GTK_WIDGET(self.drawing_area_) == widget) {
-      self.drawing_area_ = nullptr;
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetWindowSize(self.window_, &width, &height) || width <= 0 || height <= 0) {
+      return SDL_HITTEST_NORMAL;
     }
-  }
-
-  static void Destroyed(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.CancelPointer();
-    self.key_tracker_.Reset();
-    self.running_ = false;
-    self.toplevel_ = nullptr;
-    self.toplevel_state_handler_ = 0;
-    self.window_ = nullptr;
-    self.drawing_area_ = nullptr;
-  }
-
-  static void WindowMapped(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.AttachToplevelState();
-    self.UpdateLifecycleState();
-  }
-
-  static void WindowUnmapped(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.CancelPointer();
-    self.key_tracker_.Reset();
-    self.UpdateLifecycleState();
-  }
-
-  static void WindowActiveChanged(GObject*, GParamSpec*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->UpdateLifecycleState();
-  }
-
-  static void ToplevelStateChanged(GObject*, GParamSpec*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    const bool minimized = self.toplevel_ != nullptr &&
-                           (gdk_toplevel_get_state(self.toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
-    if (minimized && !self.minimized_) {
-      if (self.performing_minimize_) {
-        self.performing_minimize_ = false;
-      } else if (self.DispatchWindowRequest(WindowCommand::Minimize)) {
-        gtk_window_unminimize(self.window_);
+    const Point point{static_cast<float>(area->x), static_cast<float>(area->y)};
+    if ((SDL_GetWindowFlags(self.window_) & SDL_WINDOW_MAXIMIZED) == 0) {
+      const bool left = point.x <= kResizeBorderDips;
+      const bool right = point.x >= static_cast<float>(width) - kResizeBorderDips;
+      const bool top = point.y <= kResizeBorderDips;
+      const bool bottom = point.y >= static_cast<float>(height) - kResizeBorderDips;
+      if (top && left) {
+        return SDL_HITTEST_RESIZE_TOPLEFT;
+      }
+      if (top && right) {
+        return SDL_HITTEST_RESIZE_TOPRIGHT;
+      }
+      if (bottom && left) {
+        return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+      }
+      if (bottom && right) {
+        return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+      }
+      if (left) {
+        return SDL_HITTEST_RESIZE_LEFT;
+      }
+      if (right) {
+        return SDL_HITTEST_RESIZE_RIGHT;
+      }
+      if (top) {
+        return SDL_HITTEST_RESIZE_TOP;
+      }
+      if (bottom) {
+        return SDL_HITTEST_RESIZE_BOTTOM;
       }
     }
-    self.minimized_ = minimized;
-    self.UpdateLifecycleState();
-    self.UpdateRuntimeViewport();
-  }
-
-  static void WindowMaximizedChanged(GObject*, GParamSpec*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->UpdateRuntimeViewport();
-  }
-
-  static void ScaleChanged(GObject*, GParamSpec*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.runtime_ != nullptr) {
-      self.runtime_->UpdateResourceConfiguration(self.Configuration());
-      self.UpdateRuntimeViewport();
-      self.RequestFrameAt(self.Now());
-    }
-  }
-
-  static void PointerPressed(GtkGestureClick* gesture, int presses, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.suppress_pointer_release_ = false;
-    const Point point{static_cast<float>(x), static_cast<float>(y)};
-    if (self.BeginWindowOperation(gesture, point)) {
-      self.suppress_pointer_release_ = true;
-      return;
-    }
-    self.pointer_down_ = true;
-    self.SendPointer(PointerEventType::Down, point, static_cast<std::uint32_t>(std::max(1, presses)));
-  }
-
-  static void PointerReleased(GtkGestureClick*, int, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.suppress_pointer_release_) {
-      self.suppress_pointer_release_ = false;
-      return;
-    }
-    if (!self.pointer_down_) {
-      return;
-    }
-    self.pointer_down_ = false;
-    self.SendPointer(PointerEventType::Up, {static_cast<float>(x), static_cast<float>(y)});
-  }
-
-  static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->CancelPointer();
-  }
-
-  static void PointerEntered(GtkEventControllerMotion*, double x, double y, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
-        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
-    );
-  }
-
-  static void PointerMoved(GtkEventControllerMotion*, double x, double y, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
-        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
-    );
-  }
-
-  static void PointerLeft(GtkEventControllerMotion*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (!self.pointer_down_) {
-      self.SendPointer(PointerEventType::Cancel, self.last_pointer_position_);
-    }
-  }
-
-  static gboolean Scrolled(GtkEventControllerScroll*, double dx, double dy, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.runtime_ != nullptr) {
-      self.runtime_->HandleScrollEvent({
-          self.last_pointer_position_,
-          static_cast<float>(dx * kDipsPerScrollStep),
-          static_cast<float>(dy * kDipsPerScrollStep),
-      });
-    }
-    return TRUE;
-  }
-
-  static gboolean KeyPressed(
-      GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
-  ) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
-    const LinuxKeyPressResult press =
-        self.key_tracker_.Press(key_code, self.text_input_.FilterKeyEvent(event));
-    if (!press.dispatch) {
-      return TRUE;
-    }
-    self.SendKey(KeyEventType::Down, key_value, state, press.repeat);
-    return FALSE;
-  }
-
-  static void KeyReleased(
-      GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
-  ) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
-    if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
-      self.SendKey(KeyEventType::Up, key_value, state);
-    }
-  }
-
-  static void FocusEntered(GtkEventControllerFocus*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->text_input_.SetFocus(true);
-  }
-
-  static void FocusLeft(GtkEventControllerFocus*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.text_input_.SetFocus(false);
-    self.key_tracker_.Reset();
+    return self.runtime_->IsWindowDragRegion(point) ? SDL_HITTEST_DRAGGABLE : SDL_HITTEST_NORMAL;
   }
 
   std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
   Runtime* runtime_ = nullptr;
-  GtkWindow* window_ = nullptr;
-  GtkDrawingArea* drawing_area_ = nullptr;
-  GdkToplevel* toplevel_ = nullptr;
-  gulong toplevel_state_handler_ = 0;
+  SDL_Window* window_ = nullptr;
+  SDL_WindowID window_id_ = 0;
+  SDL_Renderer* renderer_context_ = nullptr;
+  SDL_Texture* texture_ = nullptr;
+  SDL_Surface* backbuffer_surface_ = nullptr;
+  std::vector<std::uint32_t> pixels_;
+  int pixel_width_ = 0;
+  int pixel_height_ = 0;
+  double render_scale_x_ = 1.0;
+  double render_scale_y_ = 1.0;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   PlatformFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
-  guint frame_source_ = 0;
+  std::optional<double> frame_deadline_;
+  Uint32 wake_event_ = 0;
   bool running_ = false;
-  bool minimized_ = false;
   bool performing_minimize_ = false;
-  bool performing_close_ = false;
+  bool shown_ = false;
+  bool focused_ = false;
+  bool minimized_ = false;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
   bool pointer_down_ = false;
-  bool suppress_pointer_release_ = false;
-  bool clipboard_read_active_ = false;
   Point last_pointer_position_;
   LinuxKeyTracker key_tracker_;
   std::exception_ptr failure_;

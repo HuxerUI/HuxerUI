@@ -10,18 +10,19 @@ Application developers using a released SDK should follow [Getting Started](../g
 - A C++20 compiler
 - The required platform SDK and dependencies
 
-Linux additionally requires GTK 4, Pango, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
+Linux additionally requires SDL3 3.4, SDL3_image 3.4, SDL3_ttf 3.2, GIO, and libsoup 3 development packages.
+The SDL libraries must provide CMake package configurations; GIO and libsoup are discovered through pkg-config.
 
 Debian or Ubuntu:
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config libgtk-4-dev libsoup-3.0-dev
+sudo apt install build-essential cmake ninja-build pkg-config libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev libglib2.0-dev libsoup-3.0-dev
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install gcc-c++ cmake ninja-build pkgconf-pkg-config gtk4-devel libsoup3-devel
+sudo dnf install gcc-c++ cmake ninja-build pkgconf-pkg-config SDL3-devel SDL3_image-devel SDL3_ttf-devel glib2-devel libsoup3-devel
 ```
 
 ## Configure and build

@@ -436,12 +436,21 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libgtk-4-dev \
-            libsoup-3.0-dev ninja-build pkg-config python3-pip software-properties-common
+            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libasound2-dev \
+            libdbus-1-dev libdecor-0-dev libdrm-dev libegl1-mesa-dev libfreetype6-dev \
+            libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libharfbuzz-dev libibus-1.0-dev \
+            libpipewire-0.3-dev libpng-dev libsoup-3.0-dev libudev-dev liburing-dev \
+            libwayland-dev libx11-dev libxcursor-dev libxext-dev libxfixes-dev libxi-dev \
+            libxkbcommon-dev libxrandr-dev libxss-dev libxtst-dev ninja-build pkg-config \
+            python3-pip software-properties-common wayland-protocols
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
           python3 -m pip install cmake==3.31.10
+      - name: Build SDL dependencies
+        run: |
+          bash .github/workflows/scripts/build_sdl_dependencies.sh /usr/local "${{ matrix.parallel_jobs }}"
+          ldconfig
       - name: Prepare executables
         run: >-
           chmod +x

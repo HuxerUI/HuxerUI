@@ -1,7 +1,6 @@
 #include "linux_internal.h"
 
 #include <catch2/catch_amalgamated.hpp>
-#include <cairo/cairo.h>
 
 #include <array>
 #include <cstddef>
@@ -25,6 +24,8 @@
 
 namespace huxerui::test {
 namespace {
+
+constexpr std::uint32_t kDefaultBackgroundPixel = 0xFFF7F8FAU;
 
 static_assert(!std::is_copy_constructible_v<linux::ExternalTextureSource>);
 static_assert(!std::is_copy_assignable_v<linux::ExternalTextureSource>);
@@ -73,20 +74,10 @@ View LinuxExternalTextureRenderApp() {
 
 std::array<std::uint32_t, 20> RenderPixels(detail::LinuxRenderer& renderer, const RenderFrame& frame) {
   std::array<std::uint32_t, 20> pixels{};
-  cairo_surface_t* surface = cairo_image_surface_create_for_data(
-      reinterpret_cast<unsigned char*>(pixels.data()),
-      CAIRO_FORMAT_ARGB32,
-      5,
-      4,
-      5 * 4
-  );
-  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  REQUIRE(cairo_status(context) == CAIRO_STATUS_SUCCESS);
-  renderer.Draw(context, frame);
-  cairo_surface_flush(surface);
-  cairo_destroy(context);
-  cairo_surface_destroy(surface);
+  SDL_Surface* surface = SDL_CreateSurfaceFrom(5, 4, SDL_PIXELFORMAT_ARGB8888, pixels.data(), 5 * 4);
+  REQUIRE(surface != nullptr);
+  renderer.Draw(surface, frame);
+  SDL_DestroySurface(surface);
   return pixels;
 }
 
@@ -145,7 +136,7 @@ TEST_CASE("LinuxExternalTextureUsesALatestWinsMailboxAndAcceptsBgra") {
   REQUIRE_FALSE(state->AcquireLatestFrame().has_value());
 }
 
-TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThroughCairo") {
+TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesIntoCpuBackbuffer") {
   linux::ExternalTextureSource source({2.0F, 1.0F});
   rendered_texture = source.Texture();
   const std::array<std::byte, 8> red_green{
@@ -167,12 +158,12 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
   detail::LinuxRenderer renderer;
 
   const std::array<std::uint32_t, 20> first = RenderPixels(renderer, frame);
-  REQUIRE(first[0] == 0U);
-  REQUIRE(first[1U * 5U + 1U] == 0U);
+  REQUIRE(first[0] == kDefaultBackgroundPixel);
+  REQUIRE(first[1U * 5U + 1U] == kDefaultBackgroundPixel);
   REQUIRE(first[1U * 5U + 2U] == 0xFF00FF00U);
   REQUIRE(first[2U * 5U + 3U] == 0xFF00FF00U);
-  REQUIRE(first[3U * 5U] == 0x80800000U);
-  REQUIRE(first[3U * 5U + 1U] == 0U);
+  REQUIRE(first[3U * 5U] == 0xFFFB7C7DU);
+  REQUIRE(first[3U * 5U + 1U] == kDefaultBackgroundPixel);
 
   const std::array<std::byte, 8> blue_yellow{
       std::byte{0},
@@ -187,7 +178,7 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
   source.Publish({2, 1, 8, linux::ExternalTexturePixelFormat::Rgba8888, blue_yellow});
   const std::array<std::uint32_t, 20> updated = RenderPixels(renderer, frame);
   REQUIRE(updated[1U * 5U + 2U] == 0xFFFFFF00U);
-  REQUIRE(updated[3U * 5U] == 0x80000080U);
+  REQUIRE(updated[3U * 5U] == 0xFF7B7CFDU);
 
   const std::array<std::uint32_t, 20> retained = RenderPixels(renderer, frame);
   REQUIRE(retained == updated);

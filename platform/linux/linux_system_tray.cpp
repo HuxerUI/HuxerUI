@@ -1,13 +1,16 @@
 #include "linux_system_tray.h"
 
+#include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
 #include <gio/gio.h>
-#include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -93,40 +96,41 @@ struct IconPixmap {
 
 IconPixmap DecodeIconPixmap(const ImageAsset& image) {
   const std::span<const std::byte> encoded = image.EncodedBytes();
-  GInputStream* stream = g_memory_input_stream_new_from_data(encoded.data(), encoded.size(), nullptr);
-  GError* error = nullptr;
-  GdkPixbuf* pixbuf = gdk_pixbuf_new_from_stream(stream, nullptr, &error);
-  g_object_unref(stream);
-  if (pixbuf == nullptr) {
-    const std::string message = error != nullptr ? error->message : "unknown image decoding failure";
-    g_clear_error(&error);
-    throw std::runtime_error("HuxerUI could not decode the Linux system tray icon: " + message);
+  SDL_IOStream* stream = SDL_IOFromConstMem(encoded.data(), encoded.size());
+  SDL_Surface* decoded = stream != nullptr ? IMG_Load_IO(stream, true) : nullptr;
+  if (decoded == nullptr) {
+    throw std::runtime_error("HuxerUI could not decode the Linux system tray icon: " + std::string(SDL_GetError()));
   }
+  const std::unique_ptr<SDL_Surface, void (*)(SDL_Surface*)> surface(decoded, SDL_DestroySurface);
 
-  const int width = gdk_pixbuf_get_width(pixbuf);
-  const int height = gdk_pixbuf_get_height(pixbuf);
-  const int channels = gdk_pixbuf_get_n_channels(pixbuf);
-  const int row_stride = gdk_pixbuf_get_rowstride(pixbuf);
-  const guchar* pixels = gdk_pixbuf_read_pixels(pixbuf);
-  if (width <= 0 || height <= 0 || pixels == nullptr || (channels != 3 && channels != 4)) {
-    g_object_unref(pixbuf);
+  const int width = surface->w;
+  const int height = surface->h;
+  if (width <= 0 || height <= 0 ||
+      static_cast<std::size_t>(width) >
+          std::numeric_limits<std::size_t>::max() / 4U / static_cast<std::size_t>(height)) {
     throw std::runtime_error("HuxerUI decoded an invalid Linux system tray icon");
   }
 
   IconPixmap result{.width = width, .height = height, .argb = {}};
   result.argb.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U);
   for (int y = 0; y < height; ++y) {
-    const guchar* row = pixels + static_cast<std::size_t>(y) * row_stride;
     for (int x = 0; x < width; ++x) {
-      const guchar* source = row + static_cast<std::size_t>(x) * channels;
+      std::uint8_t red = 0;
+      std::uint8_t green = 0;
+      std::uint8_t blue = 0;
+      std::uint8_t alpha = 0;
+      if (!SDL_ReadSurfacePixel(surface.get(), x, y, &red, &green, &blue, &alpha)) {
+        throw std::runtime_error(
+            "HuxerUI could not read the decoded Linux system tray icon: " + std::string(SDL_GetError())
+        );
+      }
       std::uint8_t* destination = result.argb.data() + (static_cast<std::size_t>(y) * width + x) * 4U;
-      destination[0] = channels == 4 ? source[3] : 255U;
-      destination[1] = source[0];
-      destination[2] = source[1];
-      destination[3] = source[2];
+      destination[0] = alpha;
+      destination[1] = red;
+      destination[2] = green;
+      destination[3] = blue;
     }
   }
-  g_object_unref(pixbuf);
   return result;
 }
 

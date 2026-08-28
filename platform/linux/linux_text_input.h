@@ -1,8 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <string_view>
 
-#include <gtk/gtk.h>
+#include <SDL3/SDL.h>
 
 #include <huxerui/text_input.h>
 
@@ -21,13 +22,14 @@ public:
   LinuxTextInput& operator=(const LinuxTextInput&) = delete;
 
   void SetRuntime(Runtime* runtime) noexcept;
-  void SetClientWidget(GtkWidget* widget);
+  void SetWindow(SDL_Window* window) noexcept;
   void SetFocus(bool focused);
   void Reset() noexcept;
 
   [[nodiscard]] bool Active() const noexcept;
   [[nodiscard]] bool Composing() const noexcept;
-  [[nodiscard]] bool FilterKeyEvent(GdkEvent* event);
+  void HandleTextEditing(std::string_view text, int start, int length);
+  void HandleTextInput(std::string_view text);
 
   void Start(
       TextInputSessionId session_id,

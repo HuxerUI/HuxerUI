@@ -65,10 +65,10 @@ LinuxExternalTextureFrame CopyFrame(const linux::ExternalTextureFrame& frame) {
       const auto premultiply = [alpha](std::uint8_t channel) {
         return static_cast<std::uint8_t>((static_cast<std::uint32_t>(channel) * alpha + 127U) / 255U);
       };
-      const std::uint32_t cairo_pixel =
+      const std::uint32_t premultiplied_pixel =
           static_cast<std::uint32_t>(alpha) << 24U | static_cast<std::uint32_t>(premultiply(red)) << 16U |
           static_cast<std::uint32_t>(premultiply(green)) << 8U | static_cast<std::uint32_t>(premultiply(blue));
-      std::memcpy(destination_row + x * 4U, &cairo_pixel, sizeof(cairo_pixel));
+      std::memcpy(destination_row + x * 4U, &premultiplied_pixel, sizeof(premultiplied_pixel));
     }
   }
   return LinuxExternalTextureFrame(frame.pixel_width, frame.pixel_height, std::move(pixels));

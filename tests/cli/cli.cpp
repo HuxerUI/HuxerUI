@@ -1279,8 +1279,11 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
           [id](const huxerui::cli::EnvironmentDiagnostic& diagnostic) { return diagnostic.id == id; }
       );
     };
+    REQUIRE(has_linux_diagnostic("cmake"));
     REQUIRE(has_linux_diagnostic("pkg-config"));
-    REQUIRE(has_linux_diagnostic("pkg:gtk4"));
+    REQUIRE(has_linux_diagnostic("cmake:SDL3"));
+    REQUIRE(has_linux_diagnostic("cmake:SDL3_image"));
+    REQUIRE(has_linux_diagnostic("cmake:SDL3_ttf"));
     REQUIRE(has_linux_diagnostic("pkg:gio-2.0"));
     REQUIRE(has_linux_diagnostic("pkg:libsoup-3.0"));
     REQUIRE_FALSE(has_linux_diagnostic("pkg:x11"));
@@ -1299,6 +1302,43 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
   REQUIRE(unavailable_diagnostics.size() == 1);
   REQUIRE(unavailable_diagnostics.front().status == huxerui::cli::EnvironmentDiagnosticStatus::Unavailable);
   REQUIRE(unavailable_diagnostics.front().id == "host");
+}
+
+TEST_CASE("HuxerUICliLinuxDependencyDiagnosisRejectsMissingAndOutdatedPackages") {
+  using huxerui::cli::EnvironmentDiagnosticStatus;
+
+  const huxerui::cli::EnvironmentDiagnostic cmake_ready =
+      huxerui::cli::detail::LinuxCmakePackageDiagnostic("SDL3_ttf", "3.2", {.exit_code = 0, .output = {}});
+  REQUIRE(cmake_ready.status == EnvironmentDiagnosticStatus::Ready);
+  REQUIRE(cmake_ready.id == "cmake:SDL3_ttf");
+  REQUIRE(cmake_ready.label == "SDL3_ttf 3.2 or newer CMake package");
+  REQUIRE(cmake_ready.detail == "available");
+
+  const huxerui::cli::EnvironmentDiagnostic cmake_missing =
+      huxerui::cli::detail::LinuxCmakePackageDiagnostic(
+          "SDL3_image",
+          "3.4",
+          {.exit_code = 1, .output = "SDL3_image was not found"}
+      );
+  REQUIRE(cmake_missing.status == EnvironmentDiagnosticStatus::Missing);
+  REQUIRE(cmake_missing.id == "cmake:SDL3_image");
+  REQUIRE(cmake_missing.detail.empty());
+
+  const huxerui::cli::EnvironmentDiagnostic package_ready =
+      huxerui::cli::detail::LinuxPkgConfigDiagnostic("libsoup-3.0", "3.0", {.exit_code = 0, .output = "3.6.5\n"}, 0);
+  REQUIRE(package_ready.status == EnvironmentDiagnosticStatus::Ready);
+  REQUIRE(package_ready.label == "libsoup-3.0 3.0 or newer development package");
+  REQUIRE(package_ready.detail == "3.6.5");
+
+  const huxerui::cli::EnvironmentDiagnostic package_outdated =
+      huxerui::cli::detail::LinuxPkgConfigDiagnostic("libsoup-3.0", "3.0", {.exit_code = 0, .output = "2.74.0\n"}, 1);
+  REQUIRE(package_outdated.status == EnvironmentDiagnosticStatus::Missing);
+  REQUIRE(package_outdated.detail.empty());
+
+  const huxerui::cli::EnvironmentDiagnostic package_missing =
+      huxerui::cli::detail::LinuxPkgConfigDiagnostic("libsoup-3.0", "3.0", {.exit_code = 1, .output = "not found"}, 1);
+  REQUIRE(package_missing.status == EnvironmentDiagnosticStatus::Missing);
+  REQUIRE(package_missing.detail.empty());
 }
 
 TEST_CASE("HuxerUICliDoctorChecksRequestedPlatformsOutsideAProject") {

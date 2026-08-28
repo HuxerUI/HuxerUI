@@ -5,27 +5,27 @@
 
 #include <SDL3/SDL.h>
 
-#include <huxerui/render_scene.h>
 #include <huxerui/text.h>
 
 namespace huxerui::detail {
 
 class TextLayout;
 
-// Replays the platform-neutral scene into an SDL CPU surface. Window
-// presentation, input, and frame scheduling remain owned by the SDL host.
-class LinuxRenderer final {
+struct LinuxRenderedText final {
+  std::unique_ptr<SDL_Surface, void (*)(SDL_Surface*)> surface{nullptr, SDL_DestroySurface};
+  TextLayoutMetrics metrics;
+  float raster_scale = 1.0F;
+};
+
+class LinuxTextRenderer final {
 public:
   struct State;
 
-  LinuxRenderer();
-  ~LinuxRenderer();
+  LinuxTextRenderer();
+  ~LinuxTextRenderer();
 
-  LinuxRenderer(const LinuxRenderer&) = delete;
-  LinuxRenderer& operator=(const LinuxRenderer&) = delete;
-
-  void Initialize();
-  void Discard() noexcept;
+  LinuxTextRenderer(const LinuxTextRenderer&) = delete;
+  LinuxTextRenderer& operator=(const LinuxTextRenderer&) = delete;
 
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
@@ -34,11 +34,16 @@ public:
   MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   [[nodiscard]] std::unique_ptr<TextLayout>
   CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
-
-  void Draw(SDL_Surface* surface, const RenderFrame& frame, float scale_x = 1.0F, float scale_y = 1.0F);
+  [[nodiscard]] LinuxRenderedText Render(
+      std::string_view text,
+      const TextStyle& style,
+      float max_width,
+      const TextLayoutOptions& options,
+      float raster_scale = 1.0F
+  );
 
 private:
-  std::unique_ptr<State> state_;
+  std::shared_ptr<State> state_;
 };
 
 } // namespace huxerui::detail

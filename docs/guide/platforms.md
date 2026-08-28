@@ -9,7 +9,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 |---|---|---:|---:|---:|---:|---:|
 | Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | Yes |
 | macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Yes |
-| Linux | Cairo and Pango | Yes | Not implemented | No | Yes | StatusNotifierItem host |
+| Linux | CPU rasterizer and SDL_ttf | Yes | Not implemented | No | Yes | StatusNotifierItem host |
 | Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes | No |
 | Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | No |
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | No |
@@ -41,10 +41,10 @@ System tray presentation uses an AppKit status item and platform menu.
 
 ## Linux
 
-The Linux backend uses GTK 4 for the window and event loop, Pango for text, Cairo for rendering, `GtkIMContext` for composition, GIO for platform services, and libsoup 3 for HTTP.
+The Linux backend uses SDL3 for the window, event loop, input, clipboard, text-input session, and presentation; SDL_ttf for text shaping, bidirectional layout, font fallback, and glyph rasterization; SDL_image for image decoding; a repository-owned CPU rasterizer for platform-neutral PaintCommands; GIO for platform services; and libsoup 3 for HTTP.
 
 Install the corresponding development packages before configuring CMake.
-The SDK archive does not bundle distribution-owned GTK, Pango, Cairo, GIO, or libsoup libraries.
+The SDK archive does not bundle distribution-owned SDL3, SDL3_image, SDL3_ttf, GIO, or libsoup libraries.
 Official Linux SDK binaries require glibc 2.35 or later.
 
 Linux builds are provided for x86_64 and aarch64 hosts.

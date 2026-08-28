@@ -116,6 +116,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             platform/linux_file.cpp
             platform/linux_file_picker.cpp
             platform/linux_http.cpp
+            platform/linux_adapter.cpp
             platform/linux_platform_module.cpp
             platform/linux_renderer.cpp
             platform/linux_text_input.cpp

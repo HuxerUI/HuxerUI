@@ -553,13 +553,13 @@ Otherwise it uses `<system-temporary-directory>/huxerui-<effective-uid>/<executa
 An unsafe existing fallback directory fails initialization rather than being reused.
 Renaming the executable selects different storage, and executable files with the same name share one per-user application directory.
 Its picker transport uses `org.freedesktop.portal.FileChooser` through GDBus on a dedicated GLib main-context thread and reports both capabilities as unavailable when the session bus or portal service cannot be reached.
-When GTK uses its X11 backend, the current native window is encoded as `x11:<hex-xid>` for the portal parent; other GDK backends and requests made before realization use an empty parent.
+When SDL uses its X11 video backend, the current native window is encoded as `x11:<hex-xid>` for the portal parent; other SDL video backends and requests made before window creation use an empty parent.
 One unpredictable handle token is used per request, the predicted Request path is subscribed before the method call, and a backend-returned legacy path replaces that subscription when necessary.
 Task cancellation completes the transport operation immediately and closes the portal Request so Runtime-level picker serialization can advance without waiting for a Response that will not arrive after Close.
 Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
 Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared bounded platform file executor.
 Saving reports success only after the source file has been copied over the portal-confirmed destination.
-This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
+This implementation does not add native-toolkit or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
 
 Web maps application-private storage through the browser filesystem design below and has no executable directory.
 Its picker transport uses browser file handles when available and an input-element fallback for opening; unsupported save capabilities remain visible through the capability contract.

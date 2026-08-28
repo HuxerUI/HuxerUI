@@ -39,16 +39,33 @@ inline void AppendPngChunk(std::vector<std::byte>& bytes, std::string_view type,
   AppendBigEndian32(bytes, PngCrc32(std::span<const std::byte>(bytes).subspan(crc_begin)));
 }
 
-inline std::vector<std::byte> MakeTestPng(std::uint32_t width, std::uint32_t height) {
+inline std::vector<std::byte>
+MakeTestPng(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba = {}) {
   if (width == 0 || height == 0 || width > 1024 || height > 1024) {
     throw std::invalid_argument("test PNG dimensions are invalid");
+  }
+  if (!rgba.empty() && rgba.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U) {
+    throw std::invalid_argument("test PNG pixels do not match its dimensions");
   }
   std::vector<std::byte> scanlines;
   scanlines.reserve(static_cast<std::size_t>(height) * (static_cast<std::size_t>(width) * 4U + 1U));
   for (std::uint32_t y = 0; y < height; ++y) {
     scanlines.push_back(std::byte{0});
     for (std::uint32_t x = 0; x < width; ++x) {
-      scanlines.insert(scanlines.end(), {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0xFF}});
+      const std::size_t offset = (static_cast<std::size_t>(y) * width + x) * 4U;
+      if (rgba.empty()) {
+        scanlines.insert(scanlines.end(), {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0xFF}});
+      } else {
+        scanlines.insert(
+            scanlines.end(),
+            {
+                static_cast<std::byte>(rgba[offset]),
+                static_cast<std::byte>(rgba[offset + 1U]),
+                static_cast<std::byte>(rgba[offset + 2U]),
+                static_cast<std::byte>(rgba[offset + 3U]),
+            }
+        );
+      }
     }
   }
 
@@ -102,6 +119,46 @@ inline std::vector<std::byte> MakeTestPng(std::uint32_t width, std::uint32_t hei
   AppendPngChunk(result, "IDAT", compressed);
   AppendPngChunk(result, "IEND", std::span<const std::byte>{});
   return result;
+}
+
+inline std::vector<std::byte> DecodeTestBase64(std::string_view encoded) {
+  const auto value = [](char character) {
+    if (character >= 'A' && character <= 'Z') {
+      return character - 'A';
+    }
+    if (character >= 'a' && character <= 'z') {
+      return character - 'a' + 26;
+    }
+    if (character >= '0' && character <= '9') {
+      return character - '0' + 52;
+    }
+    return character == '+' ? 62 : character == '/' ? 63 : -1;
+  };
+  std::vector<std::byte> result;
+  std::uint32_t bits = 0;
+  int bit_count = -8;
+  for (char character : encoded) {
+    const int digit = value(character);
+    if (digit < 0) {
+      break;
+    }
+    bits = (bits << 6U) | static_cast<std::uint32_t>(digit);
+    bit_count += 6;
+    if (bit_count >= 0) {
+      result.push_back(static_cast<std::byte>((bits >> bit_count) & 0xFF));
+      bit_count -= 8;
+    }
+  }
+  return result;
+}
+
+inline std::vector<std::byte> MakeTestJpeg() {
+  return DecodeTestBase64(
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+      "AQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+      "AQEBAQEBAQH/wAARCAACAAIDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAV"
+      "AQEBAAAAAAAAAAAAAAAAAAAJCv/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/ABfFOv4f/9k="
+  );
 }
 
 } // namespace huxerui::test

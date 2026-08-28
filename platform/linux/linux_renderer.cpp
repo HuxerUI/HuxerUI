@@ -1,13 +1,15 @@
+#include "linux_internal.h"
 #include "linux_renderer.h"
 
-#include <gtk/gtk.h>
-#include <pango/pangocairo.h>
+#include <SDL3_image/SDL_image.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -20,6 +22,7 @@
 
 #include "external_texture_internal.h"
 #include "linux_external_texture_internal.h"
+#include "linux_text_renderer_internal.h"
 #include "path_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
@@ -28,1239 +31,1180 @@
 namespace huxerui::detail {
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kTau = 2.0 * kPi;
+constexpr float kPi = 3.14159265358979323846F;
+constexpr float kTau = 2.0F * kPi;
+constexpr std::uint32_t kDefaultBackgroundPixel = 0xFFF7F8FAU;
+constexpr std::array<Point, 4> kCoverageSamples{{
+    {0.25F, 0.25F},
+    {0.75F, 0.25F},
+    {0.25F, 0.75F},
+    {0.75F, 0.75F},
+}};
 
-float PangoUnits(int value) noexcept {
-  return static_cast<float>(value) / static_cast<float>(PANGO_SCALE);
+std::uint8_t Byte(float value) noexcept {
+  return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
 }
 
-PangoDirection PangoTextDirection(TextDirection direction) noexcept {
-  switch (direction) {
-  case TextDirection::LeftToRight:
-    return PANGO_DIRECTION_LTR;
-  case TextDirection::RightToLeft:
-    return PANGO_DIRECTION_RTL;
-  case TextDirection::Auto:
-    return PANGO_DIRECTION_NEUTRAL;
-  }
-  return PANGO_DIRECTION_NEUTRAL;
+std::uint32_t PremultipliedPixel(Color color, float coverage = 1.0F) noexcept {
+  const float alpha = std::clamp(color.alpha * coverage, 0.0F, 1.0F);
+  return static_cast<std::uint32_t>(Byte(alpha)) << 24U | static_cast<std::uint32_t>(Byte(color.red * alpha)) << 16U |
+         static_cast<std::uint32_t>(Byte(color.green * alpha)) << 8U |
+         static_cast<std::uint32_t>(Byte(color.blue * alpha));
 }
 
-PangoFontDescription* CreateFontDescription(const Font& font) {
-  PangoFontDescription* description = pango_font_description_new();
-  switch (font.FamilyKind()) {
-  case FontFamilyKind::System:
-    pango_font_description_set_family(description, "sans-serif");
-    break;
-  case FontFamilyKind::Monospace:
-    pango_font_description_set_family(description, "monospace");
-    break;
-  case FontFamilyKind::Named:
-    pango_font_description_set_family(description, std::string(font.FamilyName()).c_str());
-    break;
-  }
-  pango_font_description_set_absolute_size(
-      description,
-      std::max(0.0F, font.Size()) * static_cast<float>(PANGO_SCALE)
-  );
-  pango_font_description_set_weight(description, static_cast<PangoWeight>(font.Weight()));
-  pango_font_description_set_style(
-      description,
-      font.Slant() == FontSlant::Italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL
-  );
-  return description;
+std::uint32_t ModulatePremultiplied(std::uint32_t pixel, float opacity) noexcept {
+  const std::uint32_t factor = static_cast<std::uint32_t>(Byte(opacity));
+  const auto multiply = [factor](std::uint32_t value) { return (value * factor + 127U) / 255U; };
+  return multiply((pixel >> 24U) & 0xFFU) << 24U | multiply((pixel >> 16U) & 0xFFU) << 16U |
+         multiply((pixel >> 8U) & 0xFFU) << 8U | multiply(pixel & 0xFFU);
 }
 
-PangoAttrList* CreateTextAttributes(const TextStyle& style, const TextShapingOptions& shaping) {
-  PangoAttrList* attributes = pango_attr_list_new();
-  if (HasTextDecoration(style.decoration, TextDecoration::Underline)) {
-    pango_attr_list_insert(attributes, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE));
-  }
-  if (HasTextDecoration(style.decoration, TextDecoration::StrikeThrough)) {
-    pango_attr_list_insert(attributes, pango_attr_strikethrough_new(TRUE));
-  }
-  if (!shaping.locale.empty()) {
-    pango_attr_list_insert(attributes, pango_attr_language_new(pango_language_from_string(shaping.locale.c_str())));
-  }
-  return attributes;
-}
-
-void ConfigureLayout(
-    PangoLayout* layout,
-    std::string_view text,
-    const TextStyle& style,
-    float max_width,
-    const TextLayoutOptions& options
-) {
-  if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-    throw std::invalid_argument("HuxerUI Linux text is too large");
-  }
-  pango_layout_set_text(layout, text.data(), static_cast<int>(text.size()));
-  PangoFontDescription* description = CreateFontDescription(style.font);
-  pango_layout_set_font_description(layout, description);
-  pango_font_description_free(description);
-  PangoAttrList* attributes = CreateTextAttributes(style, options.shaping);
-  pango_layout_set_attributes(layout, attributes);
-  pango_attr_list_unref(attributes);
-
-  const PangoDirection direction = PangoTextDirection(options.shaping.direction);
-  pango_layout_set_auto_dir(layout, direction == PANGO_DIRECTION_NEUTRAL);
-  PangoContext* context = pango_layout_get_context(layout);
-  pango_context_set_base_dir(context, direction == PANGO_DIRECTION_NEUTRAL ? PANGO_DIRECTION_LTR : direction);
-
-  const bool constrained = std::isfinite(max_width) && max_width > 0.0F;
-  if (constrained && options.wrap == TextWrap::Word) {
-    pango_layout_set_width(layout, static_cast<int>(std::ceil(max_width * PANGO_SCALE)));
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-  } else {
-    pango_layout_set_width(layout, -1);
-    pango_layout_set_single_paragraph_mode(layout, FALSE);
-  }
-
-  const bool rtl = direction == PANGO_DIRECTION_RTL;
-  switch (options.align) {
-  case TextAlign::Leading:
-    pango_layout_set_alignment(layout, rtl ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
-    break;
-  case TextAlign::Center:
-    pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
-    break;
-  case TextAlign::Trailing:
-    pango_layout_set_alignment(layout, rtl ? PANGO_ALIGN_LEFT : PANGO_ALIGN_RIGHT);
-    break;
-  }
-}
-
-std::optional<TextOffset> Utf8ByteToUtf16(std::string_view text, int byte_offset) noexcept {
-  if (byte_offset < 0 || static_cast<std::size_t>(byte_offset) > text.size() ||
-      !g_utf8_validate(text.data(), static_cast<gssize>(text.size()), nullptr)) {
-    return std::nullopt;
-  }
-  TextOffset result = 0;
-  const char* current = text.data();
-  const char* end = text.data() + byte_offset;
-  while (current < end) {
-    const gunichar code_point = g_utf8_get_char(current);
-    current = g_utf8_next_char(current);
-    if (current > end) {
-      return std::nullopt;
-    }
-    result += code_point > 0xFFFFU ? 2 : 1;
-  }
-  return result;
-}
-
-std::optional<int> Utf16ToUtf8Byte(std::string_view text, TextOffset offset) noexcept {
-  if (offset < 0 || !g_utf8_validate(text.data(), static_cast<gssize>(text.size()), nullptr)) {
-    return std::nullopt;
-  }
-  TextOffset utf16 = 0;
-  const char* current = text.data();
-  const char* end = text.data() + text.size();
-  while (current < end && utf16 < offset) {
-    const gunichar code_point = g_utf8_get_char(current);
-    const TextOffset units = code_point > 0xFFFFU ? 2 : 1;
-    if (utf16 + units > offset) {
-      return std::nullopt;
-    }
-    utf16 += units;
-    current = g_utf8_next_char(current);
-  }
-  if (utf16 != offset) {
-    return std::nullopt;
-  }
-  return static_cast<int>(current - text.data());
-}
-
-TextLayoutMetrics LayoutMetrics(PangoLayout* layout) {
-  PangoRectangle logical{};
-  pango_layout_get_extents(layout, nullptr, &logical);
-  TextLayoutMetrics result{
-      .size = {std::ceil(PangoUnits(logical.width)), std::ceil(PangoUnits(logical.height))},
-      .line_count = static_cast<std::size_t>(std::max(1, pango_layout_get_line_count(layout))),
+std::uint32_t BlendPremultiplied(std::uint32_t destination, std::uint32_t source) noexcept {
+  const std::uint32_t inverse = 255U - (source >> 24U);
+  const auto blend = [inverse](std::uint32_t source_channel, std::uint32_t destination_channel) {
+    return std::min(255U, source_channel + (destination_channel * inverse + 127U) / 255U);
   };
-  PangoLayoutIter* iterator = pango_layout_get_iter(layout);
-  if (iterator != nullptr) {
-    result.first_baseline = PangoUnits(pango_layout_iter_get_baseline(iterator));
-    result.last_baseline = result.first_baseline;
-    while (pango_layout_iter_next_line(iterator)) {
-      result.last_baseline = PangoUnits(pango_layout_iter_get_baseline(iterator));
-    }
-    pango_layout_iter_free(iterator);
-  }
-  return result;
+  return blend((source >> 24U) & 0xFFU, (destination >> 24U) & 0xFFU) << 24U |
+         blend((source >> 16U) & 0xFFU, (destination >> 16U) & 0xFFU) << 16U |
+         blend((source >> 8U) & 0xFFU, (destination >> 8U) & 0xFFU) << 8U | blend(source & 0xFFU, destination & 0xFFU);
 }
 
-class PangoTextLayout final : public TextLayout {
-public:
-  PangoTextLayout(
-      PangoContext* context,
-      std::string_view text,
-      const TextStyle& style,
-      float max_width,
-      const TextLayoutOptions& options
-  ) : text_(text) {
-    PangoFontMap* font_map = pango_context_get_font_map(context);
-    PangoContext* layout_context = pango_font_map_create_context(font_map);
-    pango_context_set_language(layout_context, pango_context_get_language(context));
-    pango_cairo_context_set_resolution(layout_context, pango_cairo_context_get_resolution(context));
-    layout_ = pango_layout_new(layout_context);
-    g_object_unref(layout_context);
-    ConfigureLayout(layout_, text_, style, max_width, options);
-    metrics_ = LayoutMetrics(layout_);
-    if (options.wrap == TextWrap::NoWrap && std::isfinite(max_width) && metrics_.size.width < max_width) {
-      pango_layout_set_width(layout_, static_cast<int>(std::ceil(max_width * PANGO_SCALE)));
-    }
-    BuildCaretOffsets();
-  }
+Transform2D Multiply(const Transform2D& left, const Transform2D& right) noexcept {
+  return {
+      .m11 = left.m11 * right.m11 + left.m21 * right.m12,
+      .m12 = left.m12 * right.m11 + left.m22 * right.m12,
+      .m21 = left.m11 * right.m21 + left.m21 * right.m22,
+      .m22 = left.m12 * right.m21 + left.m22 * right.m22,
+      .translate_x = left.m11 * right.translate_x + left.m21 * right.translate_y + left.translate_x,
+      .translate_y = left.m12 * right.translate_x + left.m22 * right.translate_y + left.translate_y,
+  };
+}
 
-  ~PangoTextLayout() override {
-    g_object_unref(layout_);
-  }
+Transform2D Translation(Point offset) noexcept {
+  return {.translate_x = offset.x, .translate_y = offset.y};
+}
 
-  Size Measure() const override {
-    return metrics_.size;
-  }
+float Distance(Point left, Point right) noexcept {
+  return std::hypot(left.x - right.x, left.y - right.y);
+}
 
-  const TextLayoutMetrics& MetricsValue() const noexcept {
-    return metrics_;
+float SegmentProjection(Point point, Point start, Point end) noexcept {
+  const Point delta = end - start;
+  const float squared = delta.x * delta.x + delta.y * delta.y;
+  if (squared <= 0.000001F) {
+    return 0.0F;
   }
+  return ((point.x - start.x) * delta.x + (point.y - start.y) * delta.y) / squared;
+}
 
-  TextPosition HitTest(Point point) const override {
-    int byte_index = 0;
-    int trailing = 0;
-    const gboolean inside = pango_layout_xy_to_index(
-        layout_,
-        static_cast<int>(std::lround(point.x * PANGO_SCALE)),
-        static_cast<int>(std::lround(point.y * PANGO_SCALE)),
-        &byte_index,
-        &trailing
-    );
-    const char* current = text_.data() + std::clamp(byte_index, 0, static_cast<int>(text_.size()));
-    const char* end = text_.data() + text_.size();
-    while (trailing-- > 0 && current < end) {
-      current = g_utf8_next_char(current);
-    }
-    const int resolved_byte = static_cast<int>(current - text_.data());
-    const TextOffset offset = Utf8ByteToUtf16(text_, resolved_byte).value_or(0);
-    return {offset, inside ? TextAffinity::Downstream : TextAffinity::Upstream};
-  }
-
-  Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
-    const int byte_index = Utf16ToUtf8Byte(text_, offset).value_or(static_cast<int>(text_.size()));
-    PangoRectangle strong{};
-    PangoRectangle weak{};
-    pango_layout_get_cursor_pos(layout_, byte_index, &strong, &weak);
-    const PangoRectangle& selected = affinity == TextAffinity::Upstream ? weak : strong;
-    return {
-        PangoUnits(selected.x),
-        PangoUnits(selected.y),
-        1.0F,
-        std::ceil(PangoUnits(selected.height)),
-    };
-  }
-
-  std::vector<Rect> RangeRects(TextRange range) const override {
-    const int start = Utf16ToUtf8Byte(text_, std::max<TextOffset>(0, range.start)).value_or(0);
-    const int end = Utf16ToUtf8Byte(text_, std::max(range.start, range.end)).value_or(static_cast<int>(text_.size()));
-    if (start >= end) {
-      return {};
-    }
-    std::vector<Rect> result;
-    PangoLayoutIter* iterator = pango_layout_get_iter(layout_);
-    if (iterator == nullptr) {
-      return result;
-    }
-    do {
-      PangoLayoutLine* line = pango_layout_iter_get_line_readonly(iterator);
-      if (line == nullptr) {
-        continue;
-      }
-      const int line_start = line->start_index;
-      const int line_end = line_start + line->length;
-      const int selected_start = std::max(start, line_start);
-      const int selected_end = std::min(end, line_end);
-      if (selected_start >= selected_end) {
-        continue;
-      }
-      int* ranges = nullptr;
-      int range_count = 0;
-      pango_layout_line_get_x_ranges(line, selected_start, selected_end, &ranges, &range_count);
-      PangoRectangle logical{};
-      pango_layout_iter_get_line_extents(iterator, nullptr, &logical);
-      std::vector<Rect> line_rects;
-      line_rects.reserve(static_cast<std::size_t>(range_count));
-      for (int range_index = 0; range_index < range_count; ++range_index) {
-        const int first_x = ranges[range_index * 2];
-        const int last_x = ranges[range_index * 2 + 1];
-        line_rects.push_back({
-            PangoUnits(logical.x + std::min(first_x, last_x)),
-            PangoUnits(logical.y),
-            PangoUnits(std::abs(last_x - first_x)),
-            std::ceil(PangoUnits(logical.height)),
-        });
-      }
-      g_free(ranges);
-      std::ranges::sort(line_rects, {}, &Rect::x);
-      for (const Rect& rect : line_rects) {
-        if (!result.empty() && result.back().y == rect.y &&
-            rect.x <= result.back().x + result.back().width + 1.0F / PANGO_SCALE) {
-          result.back().width = std::max(result.back().x + result.back().width, rect.x + rect.width) - result.back().x;
-        } else {
-          result.push_back(rect);
-        }
-      }
-    } while (pango_layout_iter_next_line(iterator));
-    pango_layout_iter_free(iterator);
-    return result;
-  }
-
-  TextOffset PreviousCaretOffset(TextOffset offset) const override {
-    const auto iterator = std::lower_bound(caret_offsets_.begin(), caret_offsets_.end(), offset);
-    return iterator == caret_offsets_.begin() ? 0 : *std::prev(iterator);
-  }
-
-  TextOffset NextCaretOffset(TextOffset offset) const override {
-    const auto iterator = std::upper_bound(caret_offsets_.begin(), caret_offsets_.end(), offset);
-    return iterator == caret_offsets_.end() ? caret_offsets_.back() : *iterator;
-  }
-
-private:
-  void BuildCaretOffsets() {
-    caret_offsets_.push_back(0);
-    int attribute_count = 0;
-    const PangoLogAttr* attributes = pango_layout_get_log_attrs_readonly(layout_, &attribute_count);
-    const char* current = text_.data();
-    const char* end = text_.data() + text_.size();
-    for (int index = 1; index < attribute_count && current < end; ++index) {
-      current = g_utf8_next_char(current);
-      if (attributes[index].is_cursor_position != 0) {
-        caret_offsets_.push_back(
-            Utf8ByteToUtf16(text_, static_cast<int>(current - text_.data())).value_or(caret_offsets_.back())
-        );
-      }
-    }
-    const TextOffset length = Utf8ByteToUtf16(text_, static_cast<int>(text_.size())).value_or(0);
-    if (caret_offsets_.back() != length) {
-      caret_offsets_.push_back(length);
-    }
-  }
-
-  std::string text_;
-  PangoLayout* layout_ = nullptr;
-  TextLayoutMetrics metrics_;
-  std::vector<TextOffset> caret_offsets_;
+struct FlatPath final {
+  std::vector<std::vector<Point>> contours;
+  Rect bounds;
 };
 
-void SetSourceColor(cairo_t* context, const Color& color) {
-  cairo_set_source_rgba(context, color.red, color.green, color.blue, color.alpha);
-}
-
-cairo_line_cap_t CairoLineCap(StrokeCap cap) noexcept {
-  switch (cap) {
-  case StrokeCap::Butt:
-    return CAIRO_LINE_CAP_BUTT;
-  case StrokeCap::Round:
-    return CAIRO_LINE_CAP_ROUND;
-  case StrokeCap::Square:
-    return CAIRO_LINE_CAP_SQUARE;
+Rect BoundsFor(const std::vector<std::vector<Point>>& contours) noexcept {
+  float left = std::numeric_limits<float>::infinity();
+  float top = std::numeric_limits<float>::infinity();
+  float right = -std::numeric_limits<float>::infinity();
+  float bottom = -std::numeric_limits<float>::infinity();
+  for (const std::vector<Point>& contour : contours) {
+    for (Point point : contour) {
+      left = std::min(left, point.x);
+      top = std::min(top, point.y);
+      right = std::max(right, point.x);
+      bottom = std::max(bottom, point.y);
+    }
   }
-  return CAIRO_LINE_CAP_BUTT;
-}
-
-cairo_line_join_t CairoLineJoin(StrokeJoin join) noexcept {
-  switch (join) {
-  case StrokeJoin::Miter:
-    return CAIRO_LINE_JOIN_MITER;
-  case StrokeJoin::Round:
-    return CAIRO_LINE_JOIN_ROUND;
-  case StrokeJoin::Bevel:
-    return CAIRO_LINE_JOIN_BEVEL;
+  if (!std::isfinite(left)) {
+    return {};
   }
-  return CAIRO_LINE_JOIN_MITER;
+  return {left, top, std::max(0.0F, right - left), std::max(0.0F, bottom - top)};
 }
 
-void AddRoundedRect(cairo_t* context, Rect rect, float corner_radius) {
-  const float radius = std::clamp(corner_radius, 0.0F, std::min(rect.width, rect.height) * 0.5F);
-  if (radius <= 0.0F) {
-    cairo_rectangle(context, rect.x, rect.y, rect.width, rect.height);
-    return;
+float DistanceToLine(Point point, Point start, Point end) noexcept {
+  const Point delta = end - start;
+  const float length = std::hypot(delta.x, delta.y);
+  if (length <= 0.000001F) {
+    return Distance(point, start);
   }
-  const double right = rect.x + rect.width;
-  const double bottom = rect.y + rect.height;
-  cairo_new_sub_path(context);
-  cairo_arc(context, right - radius, rect.y + radius, radius, -kPi / 2.0, 0.0);
-  cairo_arc(context, right - radius, bottom - radius, radius, 0.0, kPi / 2.0);
-  cairo_arc(context, rect.x + radius, bottom - radius, radius, kPi / 2.0, kPi);
-  cairo_arc(context, rect.x + radius, rect.y + radius, radius, kPi, 3.0 * kPi / 2.0);
-  cairo_close_path(context);
+  return std::abs(delta.x * (start.y - point.y) - (start.x - point.x) * delta.y) / length;
 }
 
-void AppendPathContour(cairo_t* context, const Path& path) {
-  Point previous;
+FlatPath TransformFlatPath(const FlatPath& path, const Transform2D& transform) {
+  FlatPath result;
+  result.contours.reserve(path.contours.size());
+  for (const std::vector<Point>& contour : path.contours) {
+    std::vector<Point>& transformed = result.contours.emplace_back();
+    transformed.reserve(contour.size());
+    for (Point point : contour) {
+      transformed.push_back(transform.Apply(point));
+    }
+  }
+  result.bounds = BoundsFor(result.contours);
+  return result;
+}
+
+FlatPath FlattenPath(const Path& path, const Transform2D& transform, bool apply_transform = true) {
+  FlatPath result;
+  std::vector<Point>* contour = nullptr;
+  Point current{};
+  Point contour_start{};
+  auto append = [&](Point point) {
+    if (contour == nullptr) {
+      result.contours.emplace_back();
+      contour = &result.contours.back();
+    }
+    contour->push_back(apply_transform ? transform.Apply(point) : point);
+    current = point;
+  };
+  const auto append_quadratic = [&](auto&& self, Point start, Point control, Point end, int depth) -> void {
+    const Point device_start = transform.Apply(start);
+    const Point device_control = transform.Apply(control);
+    const Point device_end = transform.Apply(end);
+    if (depth >= 12 || DistanceToLine(device_control, device_start, device_end) <= 0.25F) {
+      append(end);
+      return;
+    }
+    const Point start_control = (start + control) * 0.5F;
+    const Point control_end = (control + end) * 0.5F;
+    const Point middle = (start_control + control_end) * 0.5F;
+    self(self, start, start_control, middle, depth + 1);
+    self(self, middle, control_end, end, depth + 1);
+  };
+  const auto append_cubic = [&](auto&& self, Point start, Point first, Point second, Point end, int depth) -> void {
+    const Point device_start = transform.Apply(start);
+    const Point device_first = transform.Apply(first);
+    const Point device_second = transform.Apply(second);
+    const Point device_end = transform.Apply(end);
+    if (depth >= 12 || std::max(
+                           DistanceToLine(device_first, device_start, device_end),
+                           DistanceToLine(device_second, device_start, device_end)
+                       ) <= 0.25F) {
+      append(end);
+      return;
+    }
+    const Point start_first = (start + first) * 0.5F;
+    const Point first_second = (first + second) * 0.5F;
+    const Point second_end = (second + end) * 0.5F;
+    const Point left_control = (start_first + first_second) * 0.5F;
+    const Point right_control = (first_second + second_end) * 0.5F;
+    const Point middle = (left_control + right_control) * 0.5F;
+    self(self, start, start_first, left_control, middle, depth + 1);
+    self(self, middle, right_control, second_end, end, depth + 1);
+  };
   for (const PathElement& element : PathAccess::Elements(path)) {
     switch (element.verb) {
     case PathVerb::MoveTo:
-      cairo_move_to(context, element.points[0].x, element.points[0].y);
-      previous = element.points[0];
+      result.contours.emplace_back();
+      contour = &result.contours.back();
+      current = element.points[0];
+      contour_start = current;
+      contour->push_back(apply_transform ? transform.Apply(current) : current);
       break;
     case PathVerb::LineTo:
-      cairo_line_to(context, element.points[0].x, element.points[0].y);
-      previous = element.points[0];
+      append(element.points[0]);
       break;
     case PathVerb::QuadraticTo: {
-      const Point control = element.points[0];
-      const Point end = element.points[1];
-      cairo_curve_to(
-          context,
-          previous.x + 2.0 / 3.0 * (control.x - previous.x),
-          previous.y + 2.0 / 3.0 * (control.y - previous.y),
-          end.x + 2.0 / 3.0 * (control.x - end.x),
-          end.y + 2.0 / 3.0 * (control.y - end.y),
-          end.x,
-          end.y
-      );
-      previous = end;
+      const Point start = current;
+      append_quadratic(append_quadratic, start, element.points[0], element.points[1], 0);
       break;
     }
-    case PathVerb::CubicTo:
-      cairo_curve_to(
-          context,
-          element.points[0].x,
-          element.points[0].y,
-          element.points[1].x,
-          element.points[1].y,
-          element.points[2].x,
-          element.points[2].y
-      );
-      previous = element.points[2];
+    case PathVerb::CubicTo: {
+      const Point start = current;
+      append_cubic(append_cubic, start, element.points[0], element.points[1], element.points[2], 0);
       break;
+    }
     case PathVerb::Close:
-      cairo_close_path(context);
+      if (contour != nullptr && !contour->empty()) {
+        const Point start = apply_transform ? transform.Apply(contour_start) : contour_start;
+        if (contour->back() != start) {
+          contour->push_back(start);
+        }
+      }
+      current = contour_start;
       break;
     }
   }
+  result.contours.erase(
+      std::remove_if(
+          result.contours.begin(),
+          result.contours.end(),
+          [](const auto& value) { return value.size() < 2; }
+      ),
+      result.contours.end()
+  );
+  result.bounds = BoundsFor(result.contours);
+  return result;
 }
 
-void AppendPath(cairo_t* context, const Path& path) {
-  cairo_new_path(context);
-  AppendPathContour(context, path);
+FlatPath RoundedRect(Rect rect, float radius, const Transform2D& transform) {
+  return FlattenPath(Path::RoundedRect(rect, CornerRadii(std::max(0.0F, radius))), transform);
 }
 
-struct CairoSurfaceHandle {
-  explicit CairoSurfaceHandle(cairo_surface_t* value) : surface(value) {}
+FlatPath Ellipse(Point center, float radius, const Transform2D& transform) {
+  FlatPath result;
+  const float scale = std::max(std::hypot(transform.m11, transform.m12), std::hypot(transform.m21, transform.m22));
+  const int segments = std::clamp(static_cast<int>(std::ceil(kPi * radius * scale)), 24, 4096);
+  result.contours.emplace_back();
+  for (int index = 0; index <= segments; ++index) {
+    const float angle = kTau * static_cast<float>(index) / static_cast<float>(segments);
+    result.contours.back().push_back(transform.Apply({
+        center.x + std::cos(angle) * radius,
+        center.y + std::sin(angle) * radius,
+    }));
+  }
+  result.bounds = BoundsFor(result.contours);
+  return result;
+}
 
-  ~CairoSurfaceHandle() {
-    if (surface != nullptr) {
-      cairo_surface_destroy(surface);
+FlatPath
+Arc(Point center, float radius, float start, float sweep, const Transform2D& transform, bool apply_transform = true) {
+  FlatPath result;
+  const float scale = std::max(std::hypot(transform.m11, transform.m12), std::hypot(transform.m21, transform.m22));
+  const int segments =
+      std::clamp(static_cast<int>(std::ceil(std::abs(sweep) * std::max(8.0F, radius * scale) * 0.5F)), 2, 4096);
+  result.contours.emplace_back();
+  for (int index = 0; index <= segments; ++index) {
+    const float angle = start + sweep * static_cast<float>(index) / static_cast<float>(segments);
+    const Point point{
+        center.x + std::cos(angle) * radius,
+        center.y + std::sin(angle) * radius,
+    };
+    result.contours.back().push_back(apply_transform ? transform.Apply(point) : point);
+  }
+  result.bounds = BoundsFor(result.contours);
+  return result;
+}
+
+int WindingForContour(Point point, const std::vector<Point>& contour) noexcept {
+  int winding = 0;
+  for (std::size_t index = 0; index < contour.size(); ++index) {
+    const Point first = contour[index];
+    const Point second = contour[(index + 1U) % contour.size()];
+    if ((first.y <= point.y && second.y > point.y) || (first.y > point.y && second.y <= point.y)) {
+      const float x = first.x + (point.y - first.y) * (second.x - first.x) / (second.y - first.y);
+      if (x > point.x) {
+        winding += second.y > first.y ? 1 : -1;
+      }
     }
   }
+  return winding;
+}
 
-  CairoSurfaceHandle(const CairoSurfaceHandle&) = delete;
-  CairoSurfaceHandle& operator=(const CairoSurfaceHandle&) = delete;
+bool Contains(const FlatPath& path, Point point, PathFillRule rule) noexcept {
+  int winding = 0;
+  for (const std::vector<Point>& contour : path.contours) {
+    winding += WindingForContour(point, contour);
+  }
+  return rule == PathFillRule::EvenOdd ? std::abs(winding) % 2 == 1 : winding != 0;
+}
 
-  cairo_surface_t* surface = nullptr;
+bool TriangleContains(Point point, Point first, Point second, Point third) noexcept {
+  const auto cross = [](Point left, Point right) { return left.x * right.y - left.y * right.x; };
+  const float one = cross(second - first, point - first);
+  const float two = cross(third - second, point - second);
+  const float three = cross(first - third, point - third);
+  return (one >= 0.0F && two >= 0.0F && three >= 0.0F) || (one <= 0.0F && two <= 0.0F && three <= 0.0F);
+}
+
+std::optional<Point> LineIntersection(Point origin_a, Point direction_a, Point origin_b, Point direction_b) noexcept {
+  const float determinant = direction_a.x * direction_b.y - direction_a.y * direction_b.x;
+  if (std::abs(determinant) <= 0.000001F) {
+    return std::nullopt;
+  }
+  const Point delta = origin_b - origin_a;
+  const float amount = (delta.x * direction_b.y - delta.y * direction_b.x) / determinant;
+  return origin_a + direction_a * amount;
+}
+
+bool JoinContains(
+    Point point, Point previous, Point vertex, Point next, float half, StrokeJoin join, float miter_limit
+) noexcept {
+  const Point incoming = vertex - previous;
+  const Point outgoing = next - vertex;
+  const float incoming_length = std::hypot(incoming.x, incoming.y);
+  const float outgoing_length = std::hypot(outgoing.x, outgoing.y);
+  if (incoming_length <= 0.000001F || outgoing_length <= 0.000001F) {
+    return false;
+  }
+  if (join == StrokeJoin::Round) {
+    return Distance(point, vertex) <= half;
+  }
+  const Point first_direction = incoming * (1.0F / incoming_length);
+  const Point second_direction = outgoing * (1.0F / outgoing_length);
+  const float turn = first_direction.x * second_direction.y - first_direction.y * second_direction.x;
+  if (std::abs(turn) <= 0.000001F) {
+    return false;
+  }
+  const float side = turn > 0.0F ? -1.0F : 1.0F;
+  const Point first_normal{-first_direction.y * side, first_direction.x * side};
+  const Point second_normal{-second_direction.y * side, second_direction.x * side};
+  const Point first_outer = vertex + first_normal * half;
+  const Point second_outer = vertex + second_normal * half;
+  if (join == StrokeJoin::Miter) {
+    const std::optional<Point> miter = LineIntersection(first_outer, first_direction, second_outer, second_direction);
+    if (miter.has_value() && Distance(*miter, vertex) <= std::max(1.0F, miter_limit) * half) {
+      return TriangleContains(point, first_outer, *miter, second_outer);
+    }
+  }
+  return TriangleContains(point, vertex, first_outer, second_outer);
+}
+
+bool StrokeContains(
+    const FlatPath& path, Point point, float width, StrokeCap cap, StrokeJoin join, float miter_limit
+) noexcept {
+  const float half = std::max(0.0F, width * 0.5F);
+  for (const std::vector<Point>& contour : path.contours) {
+    const bool closed = contour.size() > 2 && contour.front() == contour.back();
+    for (std::size_t index = 0; index + 1 < contour.size(); ++index) {
+      const Point start = contour[index];
+      const Point end = contour[index + 1];
+      const float projection = SegmentProjection(point, start, end);
+      const float length = Distance(start, end);
+      float minimum = 0.0F;
+      float maximum = 1.0F;
+      if (!closed && cap == StrokeCap::Square && length > 0.000001F) {
+        if (index == 0) {
+          minimum -= half / length;
+        }
+        if (index + 2 == contour.size()) {
+          maximum += half / length;
+        }
+      }
+      if (projection >= minimum && projection <= maximum &&
+          Distance(point, start + (end - start) * projection) <= half) {
+        return true;
+      }
+    }
+    if (!closed && cap == StrokeCap::Round &&
+        (Distance(point, contour.front()) <= half || Distance(point, contour.back()) <= half)) {
+      return true;
+    }
+    const std::size_t unique_points = closed ? contour.size() - 1U : contour.size();
+    const std::size_t first_join = closed ? 0U : 1U;
+    const std::size_t end_join = closed ? unique_points : unique_points - 1U;
+    for (std::size_t index = first_join; index < end_join; ++index) {
+      const Point previous = contour[(index + unique_points - 1U) % unique_points];
+      const Point vertex = contour[index];
+      const Point next = contour[(index + 1U) % unique_points];
+      if (JoinContains(point, previous, vertex, next, half, join, miter_limit)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+Color Interpolate(Color start, Color end, float amount) noexcept {
+  return {
+      start.red + (end.red - start.red) * amount,
+      start.green + (end.green - start.green) * amount,
+      start.blue + (end.blue - start.blue) * amount,
+      start.alpha + (end.alpha - start.alpha) * amount,
+  };
+}
+
+Color GradientColor(const std::vector<GradientStop>& stops, float offset) noexcept {
+  if (stops.empty()) {
+    return Color::Transparent();
+  }
+  if (offset <= stops.front().offset) {
+    return stops.front().color;
+  }
+  if (offset >= stops.back().offset) {
+    return stops.back().color;
+  }
+  for (std::size_t index = 1; index < stops.size(); ++index) {
+    if (offset <= stops[index].offset) {
+      const GradientStop& first = stops[index - 1];
+      const GradientStop& second = stops[index];
+      const float span = std::max(0.000001F, second.offset - first.offset);
+      return Interpolate(first.color, second.color, (offset - first.offset) / span);
+    }
+  }
+  return stops.back().color;
+}
+
+struct ImageBuffer final {
+  int width = 0;
+  int height = 0;
+  std::vector<std::uint32_t> pixels;
+
+  [[nodiscard]] bool Empty() const noexcept {
+    return width <= 0 || height <= 0 || pixels.empty();
+  }
 };
 
-void ApplyTransform(cairo_t* context, const Transform2D& transform) {
-  cairo_matrix_t matrix{};
-  cairo_matrix_init(
-      &matrix,
-      transform.m11,
-      transform.m12,
-      transform.m21,
-      transform.m22,
-      transform.translate_x,
-      transform.translate_y
-  );
-  cairo_transform(context, &matrix);
+ImageBuffer PremultiplySurface(SDL_Surface& surface) {
+  ImageBuffer result{.width = surface.w, .height = surface.h, .pixels = {}};
+  if (result.width <= 0 || result.height <= 0) {
+    return result;
+  }
+  const bool locked = SDL_MUSTLOCK(&surface);
+  if (locked && !SDL_LockSurface(&surface)) {
+    return {};
+  }
+  result.pixels.resize(static_cast<std::size_t>(result.width) * static_cast<std::size_t>(result.height));
+  const SDL_PixelFormatDetails* details = SDL_GetPixelFormatDetails(surface.format);
+  if (details == nullptr) {
+    if (locked) {
+      SDL_UnlockSurface(&surface);
+    }
+    return {};
+  }
+  for (int y = 0; y < result.height; ++y) {
+    const auto* source = static_cast<const std::uint8_t*>(surface.pixels) + y * surface.pitch;
+    for (int x = 0; x < result.width; ++x) {
+      std::uint32_t pixel = 0;
+      std::memcpy(&pixel, source + x * details->bytes_per_pixel, details->bytes_per_pixel);
+      std::uint8_t red = 0;
+      std::uint8_t green = 0;
+      std::uint8_t blue = 0;
+      std::uint8_t alpha = 0;
+      SDL_GetRGBA(pixel, details, SDL_GetSurfacePalette(&surface), &red, &green, &blue, &alpha);
+      const auto premultiply = [alpha](std::uint8_t channel) {
+        return static_cast<std::uint32_t>((static_cast<std::uint32_t>(channel) * alpha + 127U) / 255U);
+      };
+      result
+          .pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(result.width) + static_cast<std::size_t>(x)] =
+          static_cast<std::uint32_t>(alpha) << 24U | premultiply(red) << 16U | premultiply(green) << 8U |
+          premultiply(blue);
+    }
+  }
+  if (locked) {
+    SDL_UnlockSurface(&surface);
+  }
+  return result;
+}
+
+std::uint32_t SampleImage(const ImageBuffer& image, float x, float y, ImageSampling sampling) noexcept {
+  if (image.Empty()) {
+    return 0U;
+  }
+  const auto at = [&image](int px, int py) {
+    px = std::clamp(px, 0, image.width - 1);
+    py = std::clamp(py, 0, image.height - 1);
+    return image
+        .pixels[static_cast<std::size_t>(py) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(px)];
+  };
+  if (sampling == ImageSampling::Nearest) {
+    return at(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)));
+  }
+  const int x0 = static_cast<int>(std::floor(x));
+  const int y0 = static_cast<int>(std::floor(y));
+  const float tx = x - static_cast<float>(x0);
+  const float ty = y - static_cast<float>(y0);
+  const std::array<std::uint32_t, 4> samples{at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1)};
+  std::uint32_t result = 0;
+  for (int shift : {0, 8, 16, 24}) {
+    const float top = static_cast<float>((samples[0] >> shift) & 0xFFU) * (1.0F - tx) +
+                      static_cast<float>((samples[1] >> shift) & 0xFFU) * tx;
+    const float bottom = static_cast<float>((samples[2] >> shift) & 0xFFU) * (1.0F - tx) +
+                         static_cast<float>((samples[3] >> shift) & 0xFFU) * tx;
+    result |= static_cast<std::uint32_t>(std::lround(top * (1.0F - ty) + bottom * ty)) << shift;
+  }
+  return result;
+}
+
+struct ClipShape final {
+  FlatPath path;
+  PathFillRule rule = PathFillRule::NonZero;
+};
+
+struct CanvasState final {
+  Transform2D transform;
+  std::vector<ClipShape> clips;
+};
+
+class CpuCanvas final {
+public:
+  CpuCanvas(SDL_Surface& surface, float scale_x, float scale_y)
+      : width_(surface.w), height_(surface.h), pitch_(surface.pitch / 4),
+        pixels_(static_cast<std::uint32_t*>(surface.pixels)) {
+    state_.transform = {.m11 = scale_x, .m22 = scale_y};
+  }
+
+  CpuCanvas(SDL_Surface& surface, CanvasState state)
+      : width_(surface.w), height_(surface.h), pitch_(surface.pitch / 4),
+        pixels_(static_cast<std::uint32_t*>(surface.pixels)), state_(std::move(state)) {}
+
+  void Clear(std::uint32_t pixel = 0U) noexcept {
+    for (int y = 0; y < height_; ++y) {
+      std::fill_n(pixels_ + y * pitch_, width_, pixel);
+    }
+  }
+
+  void Save() {
+    stack_.push_back(state_);
+  }
+
+  void Restore() {
+    if (stack_.empty()) {
+      throw std::logic_error("HuxerUI Linux renderer state stack is unbalanced");
+    }
+    state_ = std::move(stack_.back());
+    stack_.pop_back();
+  }
+
+  void Transform(const Transform2D& transform) noexcept {
+    state_.transform = Multiply(state_.transform, transform);
+  }
+
+  const Transform2D& CurrentTransform() const noexcept {
+    return state_.transform;
+  }
+
+  const CanvasState& CurrentState() const noexcept {
+    return state_;
+  }
+
+  void PushClip(const Path& path, PathFillRule rule) {
+    Save();
+    state_.clips.push_back({FlattenPath(path, state_.transform), rule});
+  }
+
+  bool Allows(Point point) const noexcept {
+    return std::ranges::all_of(state_.clips, [point](const ClipShape& clip) {
+      return Contains(clip.path, point, clip.rule);
+    });
+  }
+
+  void Blend(int x, int y, std::uint32_t source) noexcept {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_ || source == 0U) {
+      return;
+    }
+    pixels_[y * pitch_ + x] = BlendPremultiplied(pixels_[y * pitch_ + x], source);
+  }
+
+  template <class Predicate, class Paint> void Rasterize(Rect bounds, Predicate&& predicate, Paint&& paint) {
+    const int left = std::max(0, static_cast<int>(std::floor(bounds.x)) - 1);
+    const int top = std::max(0, static_cast<int>(std::floor(bounds.y)) - 1);
+    const int right = std::min(width_, static_cast<int>(std::ceil(bounds.x + bounds.width)) + 1);
+    const int bottom = std::min(height_, static_cast<int>(std::ceil(bounds.y + bounds.height)) + 1);
+    for (int y = top; y < bottom; ++y) {
+      for (int x = left; x < right; ++x) {
+        float coverage = 0.0F;
+        for (Point sample : kCoverageSamples) {
+          const Point device{static_cast<float>(x) + sample.x, static_cast<float>(y) + sample.y};
+          if (Allows(device) && std::invoke(predicate, device)) {
+            coverage += 0.25F;
+          }
+        }
+        if (coverage <= 0.0F) {
+          continue;
+        }
+        const Point center{static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F};
+        Blend(x, y, PremultipliedPixel(std::invoke(paint, center), coverage));
+      }
+    }
+  }
+
+  void Fill(const FlatPath& path, PathFillRule rule, Color color) {
+    Rasterize(
+        path.bounds,
+        [&path, rule](Point point) { return Contains(path, point, rule); },
+        [color](Point) { return color; }
+    );
+  }
+
+  void Stroke(
+      const FlatPath& path,
+      float width,
+      Color color,
+      StrokeCap cap = StrokeCap::Butt,
+      StrokeJoin join = StrokeJoin::Miter,
+      float miter_limit = 4.0F
+  ) {
+    const float scale = std::max(
+        std::hypot(state_.transform.m11, state_.transform.m12),
+        std::hypot(state_.transform.m21, state_.transform.m22)
+    );
+    const FlatPath device_path = TransformFlatPath(path, state_.transform);
+    const float device_width = std::max(0.0F, width * scale);
+    const float overflow =
+        join == StrokeJoin::Miter ? device_width * 0.5F * std::max(1.0F, miter_limit) : device_width * 0.5F;
+    Rect bounds = device_path.bounds;
+    bounds.x -= overflow;
+    bounds.y -= overflow;
+    bounds.width += overflow * 2.0F;
+    bounds.height += overflow * 2.0F;
+    Rasterize(
+        bounds,
+        [this, &path, width, cap, join, miter_limit](Point point) {
+          const std::optional<Point> local = state_.transform.Inverse(point);
+          return local.has_value() && StrokeContains(path, *local, width, cap, join, miter_limit);
+        },
+        [color](Point) { return color; }
+    );
+  }
+
+  void DrawImage(const ImageBuffer& image, Rect source, Rect destination, ImageSampling sampling, float opacity) {
+    if (image.Empty() || source.IsEmpty() || destination.IsEmpty() || opacity <= 0.0F) {
+      return;
+    }
+    const FlatPath destination_path = RoundedRect(destination, 0.0F, state_.transform);
+    const Transform2D transform = state_.transform;
+    Rasterize(
+        destination_path.bounds,
+        [&destination_path](Point point) { return Contains(destination_path, point, PathFillRule::NonZero); },
+        [=, &image](Point device) {
+          const std::optional<Point> local = transform.Inverse(device);
+          if (!local.has_value()) {
+            return Color::Transparent();
+          }
+          const float u = std::clamp((local->x - destination.x) / destination.width, 0.0F, 1.0F);
+          const float v = std::clamp((local->y - destination.y) / destination.height, 0.0F, 1.0F);
+          const float sampling_offset = sampling == ImageSampling::Linear ? 0.5F : 0.0F;
+          const std::uint32_t pixel = SampleImage(
+              image,
+              source.x + u * source.width - sampling_offset,
+              source.y + v * source.height - sampling_offset,
+              sampling
+          );
+          const float alpha = static_cast<float>((pixel >> 24U) & 0xFFU) / 255.0F;
+          if (alpha <= 0.0F) {
+            return Color::Transparent();
+          }
+          return Color{
+              static_cast<float>((pixel >> 16U) & 0xFFU) / (255.0F * alpha),
+              static_cast<float>((pixel >> 8U) & 0xFFU) / (255.0F * alpha),
+              static_cast<float>(pixel & 0xFFU) / (255.0F * alpha),
+              alpha * std::clamp(opacity, 0.0F, 1.0F),
+          };
+        }
+    );
+  }
+
+  void Composite(const SDL_Surface& layer, float opacity) noexcept {
+    const int rows = std::min(height_, layer.h);
+    const int columns = std::min(width_, layer.w);
+    const int source_pitch = layer.pitch / 4;
+    const auto* source = static_cast<const std::uint32_t*>(layer.pixels);
+    for (int y = 0; y < rows; ++y) {
+      for (int x = 0; x < columns; ++x) {
+        Blend(x, y, ModulatePremultiplied(source[y * source_pitch + x], opacity));
+      }
+    }
+  }
+
+  int Width() const noexcept {
+    return width_;
+  }
+
+  int Height() const noexcept {
+    return height_;
+  }
+
+private:
+  int width_ = 0;
+  int height_ = 0;
+  int pitch_ = 0;
+  std::uint32_t* pixels_ = nullptr;
+  CanvasState state_;
+  std::vector<CanvasState> stack_;
+};
+
+std::vector<std::uint8_t> BoxBlur(std::vector<std::uint8_t> source, int width, int height, int radius) {
+  if (radius <= 0 || width <= 0 || height <= 0) {
+    return source;
+  }
+  std::vector<std::uint8_t> scratch(source.size());
+  const int diameter = radius * 2 + 1;
+  for (int y = 0; y < height; ++y) {
+    int sum = 0;
+    for (int x = -radius; x <= radius; ++x) {
+      sum += source[static_cast<std::size_t>(y * width + std::clamp(x, 0, width - 1))];
+    }
+    for (int x = 0; x < width; ++x) {
+      scratch[static_cast<std::size_t>(y * width + x)] = static_cast<std::uint8_t>(sum / diameter);
+      sum -= source[static_cast<std::size_t>(y * width + std::clamp(x - radius, 0, width - 1))];
+      sum += source[static_cast<std::size_t>(y * width + std::clamp(x + radius + 1, 0, width - 1))];
+    }
+  }
+  for (int x = 0; x < width; ++x) {
+    int sum = 0;
+    for (int y = -radius; y <= radius; ++y) {
+      sum += scratch[static_cast<std::size_t>(std::clamp(y, 0, height - 1) * width + x)];
+    }
+    for (int y = 0; y < height; ++y) {
+      source[static_cast<std::size_t>(y * width + x)] = static_cast<std::uint8_t>(sum / diameter);
+      sum -= scratch[static_cast<std::size_t>(std::clamp(y - radius, 0, height - 1) * width + x)];
+      sum += scratch[static_cast<std::size_t>(std::clamp(y + radius + 1, 0, height - 1) * width + x)];
+    }
+  }
+  return source;
 }
 
 } // namespace
 
-struct LinuxRenderer::State {
-  struct CachedImage {
+struct LinuxRenderer::State final {
+  struct CachedImage final {
     std::uint64_t identity = 0;
-    GdkPixbuf* pixbuf = nullptr;
+    ImageBuffer image;
     std::uint64_t bytes = 0;
   };
 
-  struct CachedExternalTexture {
+  struct CachedExternalTexture final {
     std::weak_ptr<LinuxExternalTextureState> source;
-    std::vector<std::byte> pixels;
-    cairo_surface_t* surface = nullptr;
+    ImageBuffer image;
   };
 
-  struct ShadowMaskKey {
-    float width = 0.0F;
-    float height = 0.0F;
-    float corner_radius = 0.0F;
-    float blur_radius = 0.0F;
-    float scale = 1.0F;
-
-    bool operator==(const ShadowMaskKey&) const = default;
-  };
-
-  struct ShadowMaskEntry {
-    ShadowMaskKey key;
-    cairo_surface_t* surface = nullptr;
-    std::uint64_t bytes = 0;
-  };
-
-  struct PathShadowMaskKey {
-    Path path;
-    PathFillRule fill_rule = PathFillRule::NonZero;
-    float blur_radius = 0.0F;
-    float scale = 1.0F;
-
-    bool operator==(const PathShadowMaskKey&) const = default;
-  };
-
-  struct PathShadowMaskEntry {
-    PathShadowMaskKey key;
-    cairo_surface_t* surface = nullptr;
-    std::uint64_t bytes = 0;
-  };
-
-  State() {
-    PangoFontMap* font_map = pango_cairo_font_map_get_default();
-    context = pango_font_map_create_context(font_map);
-    pango_cairo_context_set_resolution(context, 96.0);
-  }
-
-  ~State() {
-    for (CachedImage& image : images) {
-      g_object_unref(image.pixbuf);
-    }
-    for (CachedExternalTexture& texture : external_textures) {
-      if (texture.surface != nullptr) {
-        cairo_surface_destroy(texture.surface);
-      }
-    }
-    for (ShadowMaskEntry& shadow : shadow_masks) {
-      cairo_surface_destroy(shadow.surface);
-    }
-    for (PathShadowMaskEntry& shadow : path_shadow_masks) {
-      cairo_surface_destroy(shadow.surface);
-    }
-    g_object_unref(context);
-  }
-
-  GdkPixbuf* ImageFor(const ImageAsset& image) {
-    if (!image.HasValue()) {
-      return nullptr;
-    }
+  ImageBuffer* ImageFor(const ImageAsset& image) {
     const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
-    const auto existing = std::find_if(images.begin(), images.end(), [identity](const CachedImage& candidate) {
-      return candidate.identity == identity;
-    });
+    const auto existing = std::ranges::find(images, identity, &CachedImage::identity);
     if (existing != images.end()) {
       std::rotate(existing, existing + 1, images.end());
-      return images.back().pixbuf;
+      return &images.back().image;
     }
-    GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
-    GError* error = nullptr;
     const std::span<const std::byte> bytes = image.EncodedBytes();
-    const gboolean wrote = gdk_pixbuf_loader_write(
-        loader,
-        reinterpret_cast<const guchar*>(bytes.data()),
-        bytes.size(),
-        &error
-    );
-    const gboolean closed = wrote != FALSE && gdk_pixbuf_loader_close(loader, &error);
-    GdkPixbuf* pixbuf = closed != FALSE ? gdk_pixbuf_loader_get_pixbuf(loader) : nullptr;
-    if (pixbuf != nullptr) {
-      g_object_ref(pixbuf);
-      const std::uint64_t decoded_bytes = gdk_pixbuf_get_byte_length(pixbuf);
-      while (!images.empty() &&
-             (images.size() >= kMaxImages || image_cache_bytes + decoded_bytes > kImageCacheBudget)) {
-        image_cache_bytes -= images.front().bytes;
-        g_object_unref(images.front().pixbuf);
-        images.erase(images.begin());
-      }
-      images.push_back({identity, pixbuf, decoded_bytes});
-      image_cache_bytes += decoded_bytes;
+    SDL_IOStream* stream = SDL_IOFromConstMem(bytes.data(), bytes.size());
+    SDL_Surface* decoded = stream != nullptr ? IMG_Load_IO(stream, true) : nullptr;
+    if (decoded == nullptr) {
+      return nullptr;
     }
-    if (error != nullptr) {
-      g_error_free(error);
+    ImageBuffer buffer = PremultiplySurface(*decoded);
+    SDL_DestroySurface(decoded);
+    if (buffer.Empty()) {
+      return nullptr;
     }
-    g_object_unref(loader);
-    return pixbuf;
+    const std::uint64_t decoded_bytes = static_cast<std::uint64_t>(buffer.pixels.size()) * sizeof(std::uint32_t);
+    while (!images.empty() && (images.size() >= kMaxImages || image_cache_bytes + decoded_bytes > kImageCacheBudget)) {
+      image_cache_bytes -= images.front().bytes;
+      images.erase(images.begin());
+    }
+    images.push_back({identity, std::move(buffer), decoded_bytes});
+    image_cache_bytes += decoded_bytes;
+    return &images.back().image;
   }
 
-  cairo_surface_t* ExternalTextureFor(const ExternalTexture& texture) {
+  ImageBuffer* ExternalTextureFor(const ExternalTexture& texture) {
     const std::shared_ptr<LinuxExternalTextureState> source =
         std::dynamic_pointer_cast<LinuxExternalTextureState>(ExternalTextureState::From(texture));
     if (!source) {
       throw std::logic_error("HuxerUI external texture does not contain a Linux frame source");
     }
-    for (auto iterator = external_textures.begin(); iterator != external_textures.end();) {
-      const std::shared_ptr<LinuxExternalTextureState> retained = iterator->source.lock();
-      if (retained && retained->IsActive()) {
-        ++iterator;
-        continue;
-      }
-      if (iterator->surface != nullptr) {
-        cairo_surface_destroy(iterator->surface);
-      }
-      iterator = external_textures.erase(iterator);
-    }
-    auto entry = std::find_if(external_textures.begin(), external_textures.end(), [&source](const auto& candidate) {
+    std::erase_if(external_textures, [](const CachedExternalTexture& entry) {
+      const std::shared_ptr<LinuxExternalTextureState> retained = entry.source.lock();
+      return !retained || !retained->IsActive();
+    });
+    auto entry = std::ranges::find_if(external_textures, [&source](const CachedExternalTexture& candidate) {
       return candidate.source.lock() == source;
     });
     if (entry == external_textures.end()) {
-      entry = external_textures.insert(
-          external_textures.end(),
-          CachedExternalTexture{.source = source, .pixels = {}, .surface = nullptr}
-      );
+      entry = external_textures.insert(external_textures.end(), {.source = source, .image = {}});
     }
-    std::optional<LinuxExternalTextureFrame> frame = source->AcquireLatestFrame();
-    if (frame.has_value()) {
-      if (entry->surface != nullptr) {
-        cairo_surface_destroy(entry->surface);
-      }
-      entry->pixels.assign(frame->Pixels().begin(), frame->Pixels().end());
-      entry->surface = cairo_image_surface_create_for_data(
-          reinterpret_cast<unsigned char*>(entry->pixels.data()),
-          CAIRO_FORMAT_ARGB32,
-          frame->PixelWidth(),
-          frame->PixelHeight(),
-          static_cast<int>(frame->BytesPerRow())
+    if (std::optional<LinuxExternalTextureFrame> frame = source->AcquireLatestFrame()) {
+      entry->image.width = frame->PixelWidth();
+      entry->image.height = frame->PixelHeight();
+      entry->image.pixels.resize(
+          static_cast<std::size_t>(frame->PixelWidth()) * static_cast<std::size_t>(frame->PixelHeight())
       );
+      std::memcpy(entry->image.pixels.data(), frame->Pixels().data(), frame->Pixels().size());
     }
-    return entry->surface;
+    return entry->image.Empty() ? nullptr : &entry->image;
   }
 
-  PangoContext* context = nullptr;
+  LinuxTextRenderer text;
   std::vector<CachedImage> images;
   std::vector<CachedExternalTexture> external_textures;
-  std::vector<ShadowMaskEntry> shadow_masks;
-  std::vector<PathShadowMaskEntry> path_shadow_masks;
-  std::vector<unsigned char> blur_scratch;
-  std::uint64_t shadow_mask_bytes = 0;
-  std::uint64_t path_shadow_mask_bytes = 0;
   std::uint64_t image_cache_bytes = 0;
-  static constexpr std::uint64_t kImageCacheBudget = 32 * 1024 * 1024;
+  static constexpr std::uint64_t kImageCacheBudget = 64U * 1024U * 1024U;
   static constexpr std::size_t kMaxImages = 64;
-  static constexpr std::uint64_t kShadowMaskBudget = 32 * 1024 * 1024;
-  static constexpr std::uint64_t kPathShadowMaskBudget = 32 * 1024 * 1024;
-  static constexpr std::size_t kMaxShadowMasks = 64;
-  static constexpr std::size_t kMaxPathShadowMasks = 32;
 };
 
 namespace {
 
 class ScenePainter final {
 public:
-  ScenePainter(LinuxRenderer::State& state, cairo_t* context) : state_(state), context_(context) {
-    double horizontal_x = 1.0;
-    double horizontal_y = 0.0;
-    double vertical_x = 0.0;
-    double vertical_y = 1.0;
-    cairo_user_to_device_distance(context_, &horizontal_x, &horizontal_y);
-    cairo_user_to_device_distance(context_, &vertical_x, &vertical_y);
-    device_scale_ = static_cast<float>(std::max(
-        std::hypot(horizontal_x, horizontal_y),
-        std::hypot(vertical_x, vertical_y)
-    ));
-    device_scale_ = std::max(device_scale_, 0.001F);
-  }
+  ScenePainter(LinuxRenderer::State& state, CpuCanvas& canvas) : state_(state), canvas_(canvas) {}
 
   void Draw(const RenderScene& scene) {
     if (scene.root != nullptr) {
-      DrawNode(*scene.root);
+      DrawNode(*scene.root, canvas_);
     }
   }
 
 private:
-  int MaskDimension(float length) const noexcept {
-    const double pixels = std::ceil(static_cast<double>(length) * device_scale_);
-    if (!std::isfinite(pixels) || pixels <= 0.0 || pixels > std::numeric_limits<int>::max()) {
-      return 0;
-    }
-    return std::max(1, static_cast<int>(pixels));
-  }
-
-  void DrawNode(const RenderNode& node) {
+  void DrawNode(const RenderNode& node, CpuCanvas& canvas) {
     const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
     if (!node.visible || opacity <= 0.0F) {
       return;
     }
-    cairo_save(context_);
-    cairo_translate(context_, node.offset.x, node.offset.y);
-    ApplyTransform(context_, node.transform);
+    canvas.Save();
+    canvas.Transform(Translation(node.offset));
+    canvas.Transform(node.transform);
     if (opacity < 1.0F) {
-      cairo_push_group(context_);
+      std::unique_ptr<SDL_Surface, void (*)(SDL_Surface*)> layer(
+          SDL_CreateSurface(canvas.Width(), canvas.Height(), SDL_PIXELFORMAT_ARGB8888),
+          SDL_DestroySurface
+      );
+      if (!layer) {
+        throw std::runtime_error("HuxerUI Linux could not allocate an opacity layer: " + std::string(SDL_GetError()));
+      }
+      CpuCanvas layer_canvas(*layer, canvas.CurrentState());
+      layer_canvas.Clear();
+      DrawNodeContents(node, layer_canvas);
+      canvas.Composite(*layer, opacity);
+    } else {
+      DrawNodeContents(node, canvas);
     }
-    DrawSequence(node.content);
+    canvas.Restore();
+  }
+
+  void DrawNodeContents(const RenderNode& node, CpuCanvas& canvas) {
+    DrawSequence(node.content, canvas);
     for (const RenderClip& clip : node.child_clips) {
-      std::visit([this](const auto& value) { DrawCommand(value); }, clip);
+      std::visit([this, &canvas](const auto& value) { DrawCommand(value, canvas); }, clip);
     }
-    cairo_save(context_);
-    ApplyTransform(context_, node.children_transform);
+    canvas.Save();
+    canvas.Transform(node.children_transform);
     for (const RenderNode* child : node.children) {
       if (child != nullptr) {
-        DrawNode(*child);
+        DrawNode(*child, canvas);
       }
     }
-    cairo_restore(context_);
+    canvas.Restore();
     for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
-      cairo_restore(context_);
+      canvas.Restore();
     }
-    DrawSequence(node.foreground);
-    if (opacity < 1.0F) {
-      cairo_pop_group_to_source(context_);
-      cairo_paint_with_alpha(context_, opacity);
-    }
-    cairo_restore(context_);
+    DrawSequence(node.foreground, canvas);
   }
 
-  void DrawSequence(const PaintSequence& sequence) {
+  void DrawSequence(const PaintSequence& sequence, CpuCanvas& canvas) {
     for (const PaintCommand& command : sequence.Commands()) {
-      std::visit([this](const auto& value) { DrawCommand(value); }, command);
+      std::visit([this, &canvas](const auto& value) { DrawCommand(value, canvas); }, command);
     }
   }
 
-  static void AddStops(cairo_pattern_t* pattern, const std::vector<GradientStop>& stops) {
-    for (const GradientStop& stop : stops) {
-      cairo_pattern_add_color_stop_rgba(
-          pattern, stop.offset, stop.color.red, stop.color.green, stop.color.blue, stop.color.alpha
+  void DrawCommand(const DrawRectCommand& command, CpuCanvas& canvas) {
+    if (!command.rect.IsEmpty() && command.color.alpha > 0.0F) {
+      canvas.Fill(
+          RoundedRect(command.rect, command.corner_radius, canvas.CurrentTransform()),
+          PathFillRule::NonZero,
+          command.color
       );
     }
   }
 
-  void DrawCommand(const DrawRectCommand& command) {
-    if (command.rect.IsEmpty() || command.color.alpha <= 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_fill(context_);
-  }
-
-  void DrawCommand(const DrawLinearGradientCommand& command) {
+  void DrawCommand(const DrawLinearGradientCommand& command, CpuCanvas& canvas) {
     if (command.rect.IsEmpty()) {
       return;
     }
-    cairo_pattern_t* pattern = cairo_pattern_create_linear(
+    const FlatPath path = RoundedRect(command.rect, command.corner_radius, canvas.CurrentTransform());
+    const Transform2D transform = canvas.CurrentTransform();
+    const Point start{
         command.rect.x + command.gradient.start.x * command.rect.width,
         command.rect.y + command.gradient.start.y * command.rect.height,
+    };
+    const Point end{
         command.rect.x + command.gradient.end.x * command.rect.width,
-        command.rect.y + command.gradient.end.y * command.rect.height
+        command.rect.y + command.gradient.end.y * command.rect.height,
+    };
+    const Point delta = end - start;
+    const float length_squared = std::max(0.000001F, delta.x * delta.x + delta.y * delta.y);
+    canvas.Rasterize(
+        path.bounds,
+        [&path](Point point) { return Contains(path, point, PathFillRule::NonZero); },
+        [=, &command](Point device) {
+          const Point local = transform.Inverse(device).value_or(start);
+          const float offset = ((local.x - start.x) * delta.x + (local.y - start.y) * delta.y) / length_squared;
+          return GradientColor(command.gradient.stops, offset);
+        }
     );
-    AddStops(pattern, command.gradient.stops);
-    cairo_set_source(context_, pattern);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_fill(context_);
-    cairo_pattern_destroy(pattern);
   }
 
-  void DrawCommand(const DrawRadialGradientCommand& command) {
+  void DrawCommand(const DrawRadialGradientCommand& command, CpuCanvas& canvas) {
     if (command.rect.IsEmpty()) {
       return;
     }
-    const double center_x = command.rect.x + command.gradient.center.x * command.rect.width;
-    const double center_y = command.rect.y + command.gradient.center.y * command.rect.height;
-    const double radius_x = std::max(0.001F, command.gradient.radius.width * command.rect.width);
-    const double radius_y = std::max(0.001F, command.gradient.radius.height * command.rect.height);
-    cairo_save(context_);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_clip(context_);
-    cairo_translate(context_, center_x, center_y);
-    cairo_scale(context_, 1.0, radius_y / radius_x);
-    cairo_translate(context_, -center_x, -center_y);
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(center_x, center_y, 0.0, center_x, center_y, radius_x);
-    AddStops(pattern, command.gradient.stops);
-    cairo_set_source(context_, pattern);
-    cairo_paint(context_);
-    cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
+    const FlatPath path = RoundedRect(command.rect, command.corner_radius, canvas.CurrentTransform());
+    const Transform2D transform = canvas.CurrentTransform();
+    const Point center{
+        command.rect.x + command.gradient.center.x * command.rect.width,
+        command.rect.y + command.gradient.center.y * command.rect.height,
+    };
+    const Size radius{
+        std::max(0.001F, command.gradient.radius.width * command.rect.width),
+        std::max(0.001F, command.gradient.radius.height * command.rect.height),
+    };
+    canvas.Rasterize(
+        path.bounds,
+        [&path](Point point) { return Contains(path, point, PathFillRule::NonZero); },
+        [=, &command](Point device) {
+          const Point local = transform.Inverse(device).value_or(center);
+          return GradientColor(
+              command.gradient.stops,
+              std::hypot((local.x - center.x) / radius.width, (local.y - center.y) / radius.height)
+          );
+        }
+    );
   }
 
-  void DrawCommand(const DrawTextCommand& command) {
+  void DrawCommand(const DrawTextCommand& command, CpuCanvas& canvas) {
     if (command.text.empty() || command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
       return;
     }
-    PangoLayout* layout = pango_layout_new(state_.context);
-    ConfigureLayout(layout, command.text, command.style, command.rect.width, command.options);
-    PangoRectangle logical{};
-    pango_layout_get_extents(layout, nullptr, &logical);
-    if (command.options.wrap == TextWrap::NoWrap && PangoUnits(logical.width) < command.rect.width) {
-      pango_layout_set_width(layout, static_cast<int>(std::ceil(command.rect.width * PANGO_SCALE)));
+    const Transform2D transform = canvas.CurrentTransform();
+    const float raster_scale =
+        std::max(std::hypot(transform.m11, transform.m12), std::hypot(transform.m21, transform.m22));
+    LinuxRenderedText rendered =
+        state_.text.Render(command.text, command.style, command.rect.width, command.options, raster_scale);
+    if (!rendered.surface) {
+      return;
     }
-    const float remaining_height = std::max(0.0F, command.rect.height - PangoUnits(logical.height));
-    float vertical_offset = 0.0F;
-    if (command.options.vertical_align == TextVerticalAlign::Center) {
-      vertical_offset = remaining_height * 0.5F;
-    } else if (command.options.vertical_align == TextVerticalAlign::Bottom) {
-      vertical_offset = remaining_height;
-    }
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(context_, command.rect.x, command.rect.y, command.rect.width, command.rect.height);
-    cairo_clip(context_);
-    SetSourceColor(context_, command.style.foreground);
-    cairo_move_to(
-        context_,
-        command.rect.x + command.paragraph_offset.x,
-        command.rect.y + vertical_offset + command.paragraph_offset.y
+    const float remaining = std::max(0.0F, command.rect.height - rendered.metrics.size.height);
+    const float vertical_offset = command.options.vertical_align == TextVerticalAlign::Center   ? remaining * 0.5F
+                                  : command.options.vertical_align == TextVerticalAlign::Bottom ? remaining
+                                                                                                : 0.0F;
+    const ImageBuffer image = PremultiplySurface(*rendered.surface);
+    canvas.PushClip(Path::RoundedRect(command.rect, {}), PathFillRule::NonZero);
+    canvas.DrawImage(
+        image,
+        {0.0F, 0.0F, static_cast<float>(image.width), static_cast<float>(image.height)},
+        {
+            command.rect.x + command.paragraph_offset.x,
+            command.rect.y + vertical_offset + command.paragraph_offset.y,
+            static_cast<float>(image.width) / rendered.raster_scale,
+            static_cast<float>(image.height) / rendered.raster_scale,
+        },
+        ImageSampling::Linear,
+        1.0F
     );
-    pango_cairo_show_layout(context_, layout);
-    cairo_restore(context_);
-    g_object_unref(layout);
+    canvas.Restore();
   }
 
-  void DrawCommand(const DrawTextRunsCommand& command) {
+  void DrawCommand(const DrawTextRunsCommand& command, CpuCanvas& canvas) {
     for (const TextRun& run : command.runs) {
       if (run.text.empty() || run.bounds.IsEmpty() || run.style.foreground.alpha <= 0.0F) {
         continue;
       }
-      PangoLayout* layout = pango_layout_new(state_.context);
-      ConfigureLayout(
-          layout,
+      const Transform2D transform = canvas.CurrentTransform();
+      const float raster_scale =
+          std::max(std::hypot(transform.m11, transform.m12), std::hypot(transform.m21, transform.m22));
+      LinuxRenderedText rendered = state_.text.Render(
           run.text,
           run.style,
           std::numeric_limits<float>::infinity(),
-          {.shaping = run.shaping, .wrap = TextWrap::NoWrap}
+          {.shaping = run.shaping, .wrap = TextWrap::NoWrap},
+          raster_scale
       );
-      SetSourceColor(context_, run.style.foreground);
-      const float baseline = PangoUnits(pango_layout_get_baseline(layout));
-      cairo_move_to(context_, run.baseline_origin.x, run.baseline_origin.y - baseline);
-      pango_cairo_show_layout(context_, layout);
-      g_object_unref(layout);
+      const ImageBuffer image = rendered.surface ? PremultiplySurface(*rendered.surface) : ImageBuffer{};
+      if (!image.Empty()) {
+        canvas.DrawImage(
+            image,
+            {0.0F, 0.0F, static_cast<float>(image.width), static_cast<float>(image.height)},
+            {
+                run.baseline_origin.x,
+                run.baseline_origin.y - rendered.metrics.first_baseline,
+                static_cast<float>(image.width) / rendered.raster_scale,
+                static_cast<float>(image.height) / rendered.raster_scale,
+            },
+            ImageSampling::Linear,
+            1.0F
+        );
+      }
     }
   }
 
-  void DrawCommand(const DrawImageCommand& command) {
-    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
-      return;
+  void DrawCommand(const DrawImageCommand& command, CpuCanvas& canvas) {
+    if (ImageBuffer* image = state_.ImageFor(command.image); image != nullptr) {
+      const float scale = command.image.Scale();
+      canvas.DrawImage(
+          *image,
+          {
+              command.source.x * scale,
+              command.source.y * scale,
+              command.source.width * scale,
+              command.source.height * scale,
+          },
+          command.destination,
+          command.sampling,
+          command.opacity
+      );
     }
-    GdkPixbuf* pixbuf = state_.ImageFor(command.image);
-    if (pixbuf == nullptr) {
-      return;
-    }
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(
-        context_, command.destination.x, command.destination.y, command.destination.width, command.destination.height
-    );
-    cairo_clip(context_);
-    const float image_scale = command.image.Scale();
-    const double scale_x = command.destination.width / (command.source.width * image_scale);
-    const double scale_y = command.destination.height / (command.source.height * image_scale);
-    cairo_translate(context_, command.destination.x, command.destination.y);
-    cairo_scale(context_, scale_x, scale_y);
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gdk_cairo_set_source_pixbuf(
-        context_, pixbuf, -command.source.x * image_scale, -command.source.y * image_scale
-    );
-    G_GNUC_END_IGNORE_DEPRECATIONS
-    cairo_pattern_set_filter(
-        cairo_get_source(context_),
-        command.sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
-    );
-    cairo_paint_with_alpha(context_, std::clamp(command.opacity, 0.0F, 1.0F));
-    cairo_restore(context_);
   }
 
-  void DrawCommand(const DrawExternalTextureCommand& command) {
-    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
-      return;
-    }
-    cairo_surface_t* surface = state_.ExternalTextureFor(command.texture);
-    if (surface == nullptr) {
+  void DrawCommand(const DrawExternalTextureCommand& command, CpuCanvas& canvas) {
+    ImageBuffer* image = state_.ExternalTextureFor(command.texture);
+    if (image == nullptr) {
       return;
     }
     const Size intrinsic = command.texture.IntrinsicSize();
-    const double source_scale_x = cairo_image_surface_get_width(surface) / std::max(0.001F, intrinsic.width);
-    const double source_scale_y = cairo_image_surface_get_height(surface) / std::max(0.001F, intrinsic.height);
-    const double source_x = command.source.x * source_scale_x;
-    const double source_y = command.source.y * source_scale_y;
-    const double source_width = command.source.width * source_scale_x;
-    const double source_height = command.source.height * source_scale_y;
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(
-        context_, command.destination.x, command.destination.y, command.destination.width, command.destination.height
+    canvas.DrawImage(
+        *image,
+        {
+            command.source.x * static_cast<float>(image->width) / std::max(0.001F, intrinsic.width),
+            command.source.y * static_cast<float>(image->height) / std::max(0.001F, intrinsic.height),
+            command.source.width * static_cast<float>(image->width) / std::max(0.001F, intrinsic.width),
+            command.source.height * static_cast<float>(image->height) / std::max(0.001F, intrinsic.height),
+        },
+        command.destination,
+        command.sampling,
+        command.opacity
     );
-    cairo_clip(context_);
-    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(surface);
-    cairo_matrix_t matrix{};
-    cairo_matrix_init(
-        &matrix,
-        source_width / command.destination.width,
-        0.0,
-        0.0,
-        source_height / command.destination.height,
-        source_x - command.destination.x * source_width / command.destination.width,
-        source_y - command.destination.y * source_height / command.destination.height
-    );
-    cairo_pattern_set_matrix(pattern, &matrix);
-    cairo_pattern_set_filter(
-        pattern, command.sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
-    );
-    cairo_set_source(context_, pattern);
-    cairo_paint_with_alpha(context_, std::clamp(command.opacity, 0.0F, 1.0F));
-    cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
   }
 
-  void DrawCommand(const DrawCircleCommand& command) {
-    if (command.radius <= 0.0F || command.color.alpha <= 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    cairo_new_path(context_);
-    cairo_arc(context_, command.center.x, command.center.y, command.radius, 0.0, kTau);
-    cairo_fill(context_);
-  }
-
-  void DrawCommand(const DrawArcCommand& command) {
-    if (command.radius <= 0.0F || command.width <= 0.0F || command.color.alpha <= 0.0F ||
-        !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    cairo_set_line_width(context_, command.width);
-    cairo_set_line_cap(context_, CairoLineCap(command.cap));
-    cairo_new_path(context_);
-    if (std::abs(command.sweep_angle) >= kTau - 0.0001) {
-      cairo_arc(context_, command.center.x, command.center.y, command.radius, 0.0, kTau);
-    } else if (command.sweep_angle > 0.0F) {
-      cairo_arc(
-          context_, command.center.x, command.center.y, command.radius, command.start_angle,
-          command.start_angle + command.sweep_angle
-      );
-    } else {
-      cairo_arc_negative(
-          context_, command.center.x, command.center.y, command.radius, command.start_angle,
-          command.start_angle + command.sweep_angle
+  void DrawCommand(const DrawCircleCommand& command, CpuCanvas& canvas) {
+    if (command.radius > 0.0F && command.color.alpha > 0.0F) {
+      canvas.Fill(
+          Ellipse(command.center, command.radius, canvas.CurrentTransform()),
+          PathFillRule::NonZero,
+          command.color
       );
     }
-    cairo_stroke(context_);
   }
 
-  void DrawCommand(const DrawBorderCommand& command) {
+  void DrawCommand(const DrawArcCommand& command, CpuCanvas& canvas) {
+    if (command.radius > 0.0F && command.width > 0.0F && command.color.alpha > 0.0F && command.sweep_angle != 0.0F) {
+      canvas.Stroke(
+          Arc(command.center,
+              command.radius,
+              command.start_angle,
+              command.sweep_angle,
+              canvas.CurrentTransform(),
+              false),
+          command.width,
+          command.color,
+          command.cap
+      );
+    }
+  }
+
+  void DrawCommand(const DrawBorderCommand& command, CpuCanvas& canvas) {
     if (command.rect.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
-    const float inset = command.width * 0.5F;
+    const Rect outer = command.rect;
     const Rect inner{
-        command.rect.x + inset,
-        command.rect.y + inset,
-        std::max(0.0F, command.rect.width - command.width),
-        std::max(0.0F, command.rect.height - command.width),
+        command.rect.x + command.width,
+        command.rect.y + command.width,
+        std::max(0.0F, command.rect.width - command.width * 2.0F),
+        std::max(0.0F, command.rect.height - command.width * 2.0F),
     };
-    SetSourceColor(context_, command.color);
-    cairo_set_line_width(context_, command.width);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, inner, std::max(0.0F, command.corner_radius - inset));
-    cairo_stroke(context_);
-  }
-
-  void DrawCommand(const DrawShadowCommand& command) {
-    const ResolvedShadow resolved = ResolveShadow(command);
-    if (resolved.IsEmpty() || command.color.alpha <= 0.0F) {
-      return;
-    }
-    if (command.blur_radius <= 0.0F) {
-      DrawCommand(DrawRectCommand{resolved.caster, command.color, resolved.corner_radius});
-      return;
-    }
-    const int mask_width = MaskDimension(resolved.bounds.width);
-    const int mask_height = MaskDimension(resolved.bounds.height);
-    if (mask_width == 0 || mask_height == 0) {
-      return;
-    }
-    cairo_surface_t* blurred = BlurredRectMaskFor(resolved, command.blur_radius, mask_width, mask_height);
-    if (blurred == nullptr) {
-      return;
-    }
-
-    SetSourceColor(context_, command.color);
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(
-        context_, resolved.bounds.x, resolved.bounds.y, mask_width / device_scale_, mask_height / device_scale_
+    const FlatPath outer_path = RoundedRect(outer, command.corner_radius, canvas.CurrentTransform());
+    const FlatPath inner_path =
+        RoundedRect(inner, std::max(0.0F, command.corner_radius - command.width), canvas.CurrentTransform());
+    canvas.Rasterize(
+        outer_path.bounds,
+        [&outer_path, &inner_path](Point point) {
+          return Contains(outer_path, point, PathFillRule::NonZero) &&
+                 !Contains(inner_path, point, PathFillRule::NonZero);
+        },
+        [&command](Point) { return command.color; }
     );
-    AddRoundedRect(context_, resolved.caster, resolved.corner_radius);
-    cairo_set_fill_rule(context_, CAIRO_FILL_RULE_EVEN_ODD);
-    cairo_clip(context_);
-    cairo_translate(context_, resolved.bounds.x, resolved.bounds.y);
-    cairo_scale(context_, 1.0 / device_scale_, 1.0 / device_scale_);
-    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(blurred);
-    cairo_pattern_set_extend(pattern, CAIRO_EXTEND_NONE);
-    cairo_mask(context_, pattern);
-    cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
   }
 
-  cairo_surface_t*
-  BlurredRectMaskFor(const ResolvedShadow& shadow, float blur_radius, int width, int height) {
-    const LinuxRenderer::State::ShadowMaskKey key{
-        shadow.caster.width,
-        shadow.caster.height,
-        shadow.corner_radius,
-        blur_radius,
-        device_scale_,
-    };
-    const auto cached = std::find_if(
-        state_.shadow_masks.begin(),
-        state_.shadow_masks.end(),
-        [&key](const LinuxRenderer::State::ShadowMaskEntry& entry) { return entry.key == key; }
+  void DrawShadow(
+      const FlatPath& shifted,
+      const FlatPath& caster,
+      PathFillRule rule,
+      Color color,
+      float blur_radius,
+      CpuCanvas& canvas
+  ) {
+    if (color.alpha <= 0.0F) {
+      return;
+    }
+    const float scale = std::max(
+        std::hypot(canvas.CurrentTransform().m11, canvas.CurrentTransform().m12),
+        std::hypot(canvas.CurrentTransform().m21, canvas.CurrentTransform().m22)
     );
-    if (cached != state_.shadow_masks.end()) {
-      std::rotate(cached, cached + 1, state_.shadow_masks.end());
-      return state_.shadow_masks.back().surface;
+    const int blur = std::max(0, static_cast<int>(std::ceil(blur_radius * scale * 0.57735F)));
+    const int left = std::max(0, static_cast<int>(std::floor(shifted.bounds.x)) - blur - 1);
+    const int top = std::max(0, static_cast<int>(std::floor(shifted.bounds.y)) - blur - 1);
+    const int right =
+        std::min(canvas.Width(), static_cast<int>(std::ceil(shifted.bounds.x + shifted.bounds.width)) + blur + 1);
+    const int bottom =
+        std::min(canvas.Height(), static_cast<int>(std::ceil(shifted.bounds.y + shifted.bounds.height)) + blur + 1);
+    const int width = right - left;
+    const int height = bottom - top;
+    if (width <= 0 || height <= 0) {
+      return;
     }
-
-    CairoSurfaceHandle mask{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
-    if (cairo_surface_status(mask.surface) != CAIRO_STATUS_SUCCESS) {
-      return nullptr;
-    }
-    cairo_t* mask_context = cairo_create(mask.surface);
-    cairo_scale(mask_context, device_scale_, device_scale_);
-    cairo_translate(mask_context, blur_radius - shadow.caster.x, blur_radius - shadow.caster.y);
-    cairo_set_source_rgb(mask_context, 1.0, 1.0, 1.0);
-    AddRoundedRect(mask_context, shadow.caster, shadow.corner_radius);
-    cairo_fill(mask_context);
-    cairo_destroy(mask_context);
-
-    const int radius = std::max(1, static_cast<int>(std::ceil(blur_radius * device_scale_ * 0.57735F)));
-    cairo_surface_t* blurred = BoxBlurMask(mask.surface, radius);
-    if (blurred == nullptr) {
-      return nullptr;
-    }
-    const std::uint64_t bytes =
-        static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
-    while (!state_.shadow_masks.empty() &&
-           (state_.shadow_masks.size() >= LinuxRenderer::State::kMaxShadowMasks ||
-            state_.shadow_mask_bytes + bytes > LinuxRenderer::State::kShadowMaskBudget)) {
-      state_.shadow_mask_bytes -= state_.shadow_masks.front().bytes;
-      cairo_surface_destroy(state_.shadow_masks.front().surface);
-      state_.shadow_masks.erase(state_.shadow_masks.begin());
-    }
-    state_.shadow_masks.push_back({key, blurred, bytes});
-    state_.shadow_mask_bytes += bytes;
-    return blurred;
-  }
-
-  cairo_surface_t* BoxBlurMask(cairo_surface_t* mask, int radius) {
-    cairo_surface_flush(mask);
-    const int width = cairo_image_surface_get_width(mask);
-    const int height = cairo_image_surface_get_height(mask);
-    const unsigned char* source = cairo_image_surface_get_data(mask);
-    const int source_stride = cairo_image_surface_get_stride(mask);
-    state_.blur_scratch.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-    const int window = radius * 2 + 1;
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     for (int y = 0; y < height; ++y) {
-      int sum = 0;
-      for (int x = -radius; x <= radius; ++x) {
-        sum += source[y * source_stride + std::clamp(x, 0, width - 1)];
-      }
       for (int x = 0; x < width; ++x) {
-        state_.blur_scratch[static_cast<std::size_t>(y) * width + x] = static_cast<unsigned char>(sum / window);
-        sum += source[y * source_stride + std::clamp(x + radius + 1, 0, width - 1)] -
-               source[y * source_stride + std::clamp(x - radius, 0, width - 1)];
+        const Point point{static_cast<float>(left + x) + 0.5F, static_cast<float>(top + y) + 0.5F};
+        if (canvas.Allows(point) && Contains(shifted, point, rule)) {
+          mask[static_cast<std::size_t>(y * width + x)] = 255U;
+        }
       }
     }
-    cairo_surface_t* result = cairo_image_surface_create(CAIRO_FORMAT_A8, width, height);
-    if (cairo_surface_status(result) != CAIRO_STATUS_SUCCESS) {
-      cairo_surface_destroy(result);
-      return nullptr;
-    }
-    unsigned char* destination = cairo_image_surface_get_data(result);
-    const int destination_stride = cairo_image_surface_get_stride(result);
-    for (int x = 0; x < width; ++x) {
-      int sum = 0;
-      for (int y = -radius; y <= radius; ++y) {
-        sum += state_.blur_scratch[static_cast<std::size_t>(std::clamp(y, 0, height - 1)) * width + x];
-      }
-      for (int y = 0; y < height; ++y) {
-        destination[y * destination_stride + x] = static_cast<unsigned char>(sum / window);
-        sum += state_.blur_scratch[static_cast<std::size_t>(std::clamp(y + radius + 1, 0, height - 1)) * width + x] -
-               state_.blur_scratch[static_cast<std::size_t>(std::clamp(y - radius, 0, height - 1)) * width + x];
+    mask = BoxBlur(std::move(mask), width, height, blur);
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        const Point point{static_cast<float>(left + x) + 0.5F, static_cast<float>(top + y) + 0.5F};
+        if (!canvas.Allows(point) || Contains(caster, point, rule)) {
+          continue;
+        }
+        const float coverage = static_cast<float>(mask[static_cast<std::size_t>(y * width + x)]) / 255.0F;
+        canvas.Blend(left + x, top + y, PremultipliedPixel(color, coverage));
       }
     }
-    cairo_surface_mark_dirty(result);
-    return result;
   }
 
-  void DrawCommand(const FillPathCommand& command) {
-    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    AppendPath(context_, command.path);
-    cairo_set_fill_rule(
-        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_fill(context_);
-  }
-
-  void DrawCommand(const StrokePathCommand& command) {
-    if (command.path.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    AppendPath(context_, command.path);
-    cairo_set_line_width(context_, command.width);
-    cairo_set_line_cap(context_, CairoLineCap(command.cap));
-    cairo_set_line_join(context_, CairoLineJoin(command.join));
-    cairo_set_miter_limit(context_, command.miter_limit);
-    cairo_stroke(context_);
-  }
-
-  void DrawCommand(const DrawPathShadowCommand& command) {
-    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
-      return;
-    }
+  void DrawCommand(const DrawShadowCommand& command, CpuCanvas& canvas) {
+    const ResolvedShadow resolved = ResolveShadow(command);
+    const FlatPath caster = RoundedRect(resolved.caster, resolved.corner_radius, canvas.CurrentTransform());
     if (command.blur_radius <= 0.0F) {
-      SetSourceColor(context_, command.color);
-      cairo_save(context_);
-      cairo_translate(context_, command.offset.x, command.offset.y);
-      AppendPath(context_, command.path);
-      cairo_set_fill_rule(
-          context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-      );
-      cairo_fill(context_);
-      cairo_restore(context_);
+      canvas.Fill(caster, PathFillRule::NonZero, command.color);
       return;
     }
+    DrawShadow(caster, caster, PathFillRule::NonZero, command.color, command.blur_radius, canvas);
+  }
 
-    const Rect bounds = command.path.Bounds();
-    const Rect shadow_bounds{
-        bounds.x + command.offset.x - command.blur_radius,
-        bounds.y + command.offset.y - command.blur_radius,
-        bounds.width + command.blur_radius * 2.0F,
-        bounds.height + command.blur_radius * 2.0F,
-    };
-    const int mask_width = MaskDimension(shadow_bounds.width);
-    const int mask_height = MaskDimension(shadow_bounds.height);
-    if (mask_width == 0 || mask_height == 0) {
+  void DrawCommand(const FillPathCommand& command, CpuCanvas& canvas) {
+    canvas.Fill(FlattenPath(command.path, canvas.CurrentTransform()), command.fill_rule, command.color);
+  }
+
+  void DrawCommand(const StrokePathCommand& command, CpuCanvas& canvas) {
+    canvas.Stroke(
+        FlattenPath(command.path, canvas.CurrentTransform(), false),
+        command.width,
+        command.color,
+        command.cap,
+        command.join,
+        command.miter_limit
+    );
+  }
+
+  void DrawCommand(const DrawPathShadowCommand& command, CpuCanvas& canvas) {
+    const FlatPath shifted =
+        FlattenPath(command.path, Multiply(canvas.CurrentTransform(), Translation(command.offset)));
+    if (command.blur_radius <= 0.0F) {
+      canvas.Fill(shifted, command.fill_rule, command.color);
       return;
     }
-    cairo_surface_t* blurred = BlurredPathMaskFor(command, bounds, mask_width, mask_height);
-    if (blurred == nullptr) {
-      return;
-    }
-
-    SetSourceColor(context_, command.color);
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(
-        context_, shadow_bounds.x, shadow_bounds.y, mask_width / device_scale_, mask_height / device_scale_
-    );
-    cairo_matrix_t previous{};
-    cairo_get_matrix(context_, &previous);
-    cairo_translate(context_, command.offset.x, command.offset.y);
-    AppendPathContour(context_, command.path);
-    cairo_set_matrix(context_, &previous);
-    cairo_set_fill_rule(context_, CAIRO_FILL_RULE_EVEN_ODD);
-    cairo_clip(context_);
-    cairo_translate(context_, shadow_bounds.x, shadow_bounds.y);
-    cairo_scale(context_, 1.0 / device_scale_, 1.0 / device_scale_);
-    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(blurred);
-    cairo_pattern_set_extend(pattern, CAIRO_EXTEND_NONE);
-    cairo_mask(context_, pattern);
-    cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
+    DrawShadow(shifted, shifted, command.fill_rule, command.color, command.blur_radius, canvas);
   }
 
-  cairo_surface_t*
-  BlurredPathMaskFor(const DrawPathShadowCommand& command, const Rect& bounds, int width, int height) {
-    const LinuxRenderer::State::PathShadowMaskKey key{
-        command.path,
-        command.fill_rule,
-        command.blur_radius,
-        device_scale_,
-    };
-    const auto cached = std::find_if(
-        state_.path_shadow_masks.begin(),
-        state_.path_shadow_masks.end(),
-        [&key](const LinuxRenderer::State::PathShadowMaskEntry& entry) { return entry.key == key; }
-    );
-    if (cached != state_.path_shadow_masks.end()) {
-      std::rotate(cached, cached + 1, state_.path_shadow_masks.end());
-      return state_.path_shadow_masks.back().surface;
-    }
-
-    CairoSurfaceHandle mask{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
-    if (cairo_surface_status(mask.surface) != CAIRO_STATUS_SUCCESS) {
-      return nullptr;
-    }
-    cairo_t* mask_context = cairo_create(mask.surface);
-    cairo_scale(mask_context, device_scale_, device_scale_);
-    cairo_translate(mask_context, command.blur_radius - bounds.x, command.blur_radius - bounds.y);
-    cairo_set_source_rgb(mask_context, 1.0, 1.0, 1.0);
-    AppendPath(mask_context, command.path);
-    cairo_set_fill_rule(
-        mask_context,
-        command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_fill(mask_context);
-    cairo_destroy(mask_context);
-
-    const int radius =
-        std::max(1, static_cast<int>(std::ceil(command.blur_radius * device_scale_ * 0.57735F)));
-    cairo_surface_t* blurred = BoxBlurMask(mask.surface, radius);
-    if (blurred == nullptr) {
-      return nullptr;
-    }
-    const std::uint64_t bytes =
-        static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
-    while (!state_.path_shadow_masks.empty() &&
-           (state_.path_shadow_masks.size() >= LinuxRenderer::State::kMaxPathShadowMasks ||
-            state_.path_shadow_mask_bytes + bytes > LinuxRenderer::State::kPathShadowMaskBudget)) {
-      state_.path_shadow_mask_bytes -= state_.path_shadow_masks.front().bytes;
-      cairo_surface_destroy(state_.path_shadow_masks.front().surface);
-      state_.path_shadow_masks.erase(state_.path_shadow_masks.begin());
-    }
-    state_.path_shadow_masks.push_back({key, blurred, bytes});
-    state_.path_shadow_mask_bytes += bytes;
-    return blurred;
+  void DrawCommand(const PushClipCommand& command, CpuCanvas& canvas) {
+    canvas.PushClip(Path::RoundedRect(command.rect, CornerRadii(command.corner_radius)), PathFillRule::NonZero);
   }
 
-  void DrawCommand(const PushClipCommand& command) {
-    cairo_save(context_);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_clip(context_);
+  void DrawCommand(const PushPathClipCommand& command, CpuCanvas& canvas) {
+    canvas.PushClip(command.path, command.fill_rule);
   }
 
-  void DrawCommand(const PushPathClipCommand& command) {
-    cairo_save(context_);
-    AppendPath(context_, command.path);
-    cairo_set_fill_rule(
-        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_clip(context_);
+  void DrawCommand(const PopClipCommand&, CpuCanvas& canvas) {
+    canvas.Restore();
   }
 
-  void DrawCommand(const PopClipCommand&) {
-    cairo_restore(context_);
+  void DrawCommand(const PushTransformCommand& command, CpuCanvas& canvas) {
+    canvas.Save();
+    canvas.Transform(command.transform);
   }
 
-  void DrawCommand(const PushTransformCommand& command) {
-    cairo_save(context_);
-    ApplyTransform(context_, command.transform);
+  void DrawCommand(const PopTransformCommand&, CpuCanvas& canvas) {
+    canvas.Restore();
   }
 
-  void DrawCommand(const PopTransformCommand&) {
-    cairo_restore(context_);
-  }
-
-  void DrawCommand(const PlacePlatformViewCommand&) {
+  void DrawCommand(const PlacePlatformViewCommand&, CpuCanvas&) {
     throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
   }
 
   LinuxRenderer::State& state_;
-  cairo_t* context_;
-  float device_scale_ = 1.0F;
+  CpuCanvas& canvas_;
 };
 
 } // namespace
@@ -1280,79 +1224,33 @@ void LinuxRenderer::Discard() noexcept {
 }
 
 FontMetrics LinuxRenderer::Metrics(const Font& font) {
-  PangoFontDescription* description = CreateFontDescription(font);
-  PangoFontMetrics* metrics = pango_context_get_metrics(state_->context, description, nullptr);
-  pango_font_description_free(description);
-  const float ascent = PangoUnits(pango_font_metrics_get_ascent(metrics));
-  const float descent = PangoUnits(pango_font_metrics_get_descent(metrics));
-  const float height = PangoUnits(pango_font_metrics_get_height(metrics));
-  FontMetrics result{
-      .ascent = ascent,
-      .descent = descent,
-      .leading = std::max(0.0F, height - ascent - descent),
-      .underline_position = std::abs(PangoUnits(pango_font_metrics_get_underline_position(metrics))),
-      .underline_thickness = std::max(1.0F, PangoUnits(pango_font_metrics_get_underline_thickness(metrics))),
-      .strike_through_position = PangoUnits(pango_font_metrics_get_strikethrough_position(metrics)),
-      .strike_through_thickness =
-          std::max(1.0F, PangoUnits(pango_font_metrics_get_strikethrough_thickness(metrics))),
-  };
-  pango_font_metrics_unref(metrics);
-  return result;
+  return state_->text.Metrics(font);
 }
 
-TextRunMetrics LinuxRenderer::MeasureRun(
-    std::string_view text, const TextStyle& style, const TextShapingOptions& options
-) {
-  if (text.find_first_of("\r\n") != std::string_view::npos) {
-    throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
-  }
-  PangoLayout* layout = pango_layout_new(state_->context);
-  ConfigureLayout(
-      layout,
-      text,
-      style,
-      std::numeric_limits<float>::infinity(),
-      {.shaping = options, .wrap = TextWrap::NoWrap}
-  );
-  PangoRectangle ink{};
-  PangoRectangle logical{};
-  pango_layout_get_extents(layout, &ink, &logical);
-  const float baseline = PangoUnits(pango_layout_get_baseline(layout));
-  const FontMetrics font_metrics = Metrics(style.font);
-  const TextRunMetrics result{
-      .advance = PangoUnits(logical.width),
-      .visual_bounds = {PangoUnits(ink.x), PangoUnits(ink.y) - baseline, PangoUnits(ink.width), PangoUnits(ink.height)},
-      .font_metrics = font_metrics,
-  };
-  g_object_unref(layout);
-  return result;
+TextRunMetrics
+LinuxRenderer::MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
+  return state_->text.MeasureRun(text, style, options);
 }
 
 TextLayoutMetrics LinuxRenderer::MeasureText(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
-  if (std::isfinite(max_width) && max_width <= 0.0F) {
-    return {};
-  }
-  PangoTextLayout layout(state_->context, text, style, max_width, options);
-  TextLayoutMetrics metrics = layout.MetricsValue();
-  if (std::isfinite(max_width)) {
-    metrics.size.width = std::min(metrics.size.width, max_width);
-  }
-  return metrics;
+  return state_->text.MeasureText(text, style, max_width, options);
 }
 
 std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
-  return std::make_unique<PangoTextLayout>(state_->context, text, style, max_width, options);
+  return state_->text.CreateTextLayout(text, style, max_width, options);
 }
 
-void LinuxRenderer::Draw(cairo_t* context, const RenderFrame& frame) {
-  if (context == nullptr) {
-    throw std::invalid_argument("HuxerUI Linux renderer requires a Cairo context");
+void LinuxRenderer::Draw(SDL_Surface* surface, const RenderFrame& frame, float scale_x, float scale_y) {
+  if (surface == nullptr || surface->format != SDL_PIXELFORMAT_ARGB8888) {
+    throw std::invalid_argument("HuxerUI Linux renderer requires an ARGB8888 SDL surface");
   }
-  ScenePainter(*state_, context).Draw(frame.scene);
+  CpuCanvas canvas(*surface, std::max(0.001F, scale_x), std::max(0.001F, scale_y));
+  canvas.Clear(kDefaultBackgroundPixel);
+  ScenePainter(*state_, canvas).Draw(frame.scene);
 }
 
 } // namespace huxerui::detail

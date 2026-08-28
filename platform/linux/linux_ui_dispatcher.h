@@ -15,6 +15,7 @@ public:
   LinuxUIThreadDispatcher& operator=(const LinuxUIThreadDispatcher&) = delete;
 
   [[nodiscard]] UIThreadDispatcher Bind() const;
+  void DrainPending();
   void Shutdown() noexcept;
 
 private:

@@ -182,7 +182,7 @@ The implemented platform mappings are:
 - Android maps Activity resume to `Active`, pause or foreground transition to `Inactive`, and stop to `Background`; embedded owners explicitly update their `HuxerUIView`.
 - iOS maps UIKit active, inactive, and background application callbacks directly.
 - macOS maps application activation to `Active` or `Inactive` and application hiding to `Background`.
-- Linux maps top-level GTK focus to `Active` or `Inactive` and minimization or unmapping to `Background`.
+- Linux maps SDL window focus to `Active` or `Inactive` and minimization or hiding to `Background`.
 - Web maps a focused visible document to `Active`, a visible unfocused document to `Inactive`, and a hidden document to `Background`.
 
 `Launching`, `Suspended`, and `Terminated` are not planned states. Startup input is represented by `StartupActivation()`, while suspension and termination callbacks cannot be delivered reliably across supported platforms.
