@@ -261,9 +261,9 @@ jobs:
           --build build
           --config Debug
           --target huxerui huxerui_static
-          --parallel
+          --parallel 4
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Package
@@ -404,8 +404,10 @@ jobs:
         include:
           - runner: ubuntu-24.04
             architecture: x86_64
+            parallel_jobs: 4
           - runner: ubuntu-24.04-arm
             architecture: aarch64
+            parallel_jobs: 4
     runs-on: ${{ matrix.runner }}
     container: ubuntu:22.04
     env:
@@ -457,7 +459,7 @@ jobs:
           -DHUXERUI_BUILD_TESTS=ON
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${GITHUB_WORKSPACE}/platform-artifacts
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "${{ matrix.parallel_jobs }}"
       - name: Test
         run: bash .github/workflows/scripts/run_linux_tests.sh build
       - name: Collect Linux failure diagnostics
