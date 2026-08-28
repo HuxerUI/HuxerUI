@@ -27,10 +27,20 @@ On Web, include `<huxerui/web/navigation.h>` and use `BrowserNavigationStack` wi
 
 `WindowTitleBar` lays out application-defined title-bar content, consumes the platform-resolved caption insets, and marks its non-interactive area as draggable. Interactive descendants such as buttons, tabs, and text fields remain interactive inside it and need no exclusion rectangles. Do not duplicate framework- or platform-managed caption controls. Use `WindowDragRegion` only when another mounted region should drag the window.
 
-`UseWindow()` exposes `Minimize`, `Maximize`, `Restore`, `ToggleMaximize`, and `Close`. It does not expose window dragging, state observation, host window handles, or application-readable caption metrics.
+`UseWindow()` exposes `Show`, `Hide`, `Activate`, `Minimize`, `Maximize`, `Restore`, `ToggleMaximize`, and `Close`. `Activate` restores a minimized window and requests foreground activation, subject to platform focus policy. It does not expose window dragging, state observation, platform window handles, or application-readable caption metrics.
+
+`OnMinimizeRequest` and `OnCloseRequest` register lifecycle-bound handlers for platform and application window requests. Return `true` only after application code has handled the request; returning `false` preserves the normal platform action. Keep handlers synchronous and use the dependency arguments when captured values should replace a committed handler.
 
 System bar background and foreground brightness come from the resolved `SystemBarsAppearance`, which is both a Theme value and a View modifier. `Light` and `Dark` describe system foreground icons and text, not the background color. Desktop custom chrome and mobile safe areas share a public window boundary but have different platform behavior.
 
 ## Activation
 
 Use `UseApplication().StartupActivation()` for the cold-start `ApplicationActivation`. Inspect its `LaunchActivation`, `UrlActivation`, or `FileActivation` alternative with `std::visit` or `std::get_if`. Register `UseApplication().OnActivation(...)` for later activations while the declaring composition lifetime is mounted. Route external URLs or files by updating the authoritative navigation path rather than creating a parallel page stack.
+
+## System tray
+
+`UseApplication().SystemTray()` returns the application-level tray handle, and `UseApplication().Quit()` requests orderly application termination. Check `IsAvailable()` before hiding the last visible window because unsupported hosts and temporarily unavailable Linux tray hosts report `false`.
+
+Declare tray presentation in `Lifecycle(...)`: call `Show(icon, options)` during setup and `Hide()` from cleanup. `SystemTrayOptions` reuses `MenuEntry`, `MenuItem`, and `MenuSection`; tray and menu icons are `ImageVariant` values that must resolve to raster `ImageAsset` values. Register primary activation through `OnActivate(...)`, commonly restoring the window with `WindowHandle::Activate()`.
+
+Compose minimize-to-tray behavior from the tray handle and window request handlers. When the tray is unavailable, return `false` so minimize and close retain their normal platform behavior. Do not create a second menu model, a `PlatformModule`, or platform-specific tray code for ordinary application use.

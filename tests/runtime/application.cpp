@@ -23,6 +23,7 @@ State<int> handler_version;
 ApplicationLifecycleState lifecycle_state = ApplicationLifecycleState::Active;
 std::size_t lifecycle_compositions = 0;
 Runtime* active_runtime = nullptr;
+std::optional<ApplicationHandle> application_handle;
 
 View ActivationApp() {
   auto application = UseApplication();
@@ -69,6 +70,11 @@ View LifecycleStateApp() {
   return {};
 }
 
+View ApplicationCommandsApp() {
+  application_handle = UseApplication();
+  return {};
+}
+
 void ResetActivationState() {
   received_activations.clear();
   received_lifecycle_states.clear();
@@ -78,6 +84,19 @@ void ResetActivationState() {
   lifecycle_state = ApplicationLifecycleState::Active;
   lifecycle_compositions = 0;
   active_runtime = nullptr;
+  application_handle.reset();
+}
+
+TEST_CASE("Application quit requests orderly platform termination") {
+  ResetActivationState();
+  TestPlatform platform;
+  Runtime runtime(ApplicationCommandsApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(application_handle.has_value());
+  application_handle->Quit();
+  REQUIRE(platform.application_quit_requests == 1);
 }
 
 } // namespace

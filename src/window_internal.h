@@ -29,15 +29,29 @@ struct WindowState {
   std::optional<std::pair<SystemBarContentBrightness, SystemBarContentBrightness>> committed_system_bar_brightness;
 };
 
-class WindowService {
+class WindowService : public std::enable_shared_from_this<WindowService> {
 public:
   explicit WindowService(PlatformAdapter& platform);
 
-  void Request(WindowCommand command) const;
+  void Request(WindowCommand command);
+  [[nodiscard]] bool HandleRequest(WindowCommand command);
+  [[nodiscard]] std::function<void()>
+  ConnectRequest(WindowCommand command, std::function<bool()> handler);
   void Disconnect() noexcept;
 
 private:
+  struct RequestHandler {
+    std::function<bool()> handler;
+    std::uint64_t connection = 0;
+  };
+
+  RequestHandler& Handler(WindowCommand command);
+  void DisconnectRequest(WindowCommand command, std::uint64_t connection) noexcept;
+
   PlatformAdapter* platform_;
+  RequestHandler minimize_handler_;
+  RequestHandler close_handler_;
+  std::uint64_t next_connection_ = 1;
 };
 
 View MakeWindowControls(

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "external_texture_internal.h"
+#include "system_tray_internal.h"
 #include "text_layout_internal.h"
 
 namespace huxerui {
@@ -43,6 +44,10 @@ std::shared_ptr<detail::FilePickerTransport> PlatformAdapter::CreateFilePickerTr
 }
 
 std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
+  return {};
+}
+
+std::shared_ptr<detail::SystemTrayTransport> PlatformAdapter::CreateSystemTrayTransport() {
   return {};
 }
 

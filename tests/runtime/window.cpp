@@ -13,6 +13,10 @@ int title_bar_compositions = 0;
 bool use_light_status_bar = false;
 Color title_bar_background = Color::Rgb(48, 32, 96);
 std::optional<WindowHandle> window_handle;
+bool handle_minimize_request = false;
+bool handle_close_request = false;
+int minimize_requests = 0;
+int close_requests = 0;
 
 View WindowContentApp() {
   ++window_compositions;
@@ -64,6 +68,19 @@ View WindowTitleBarApp() {
 
 View WindowCommandsApp() {
   window_handle = UseWindow();
+  return Spacer();
+}
+
+View WindowRequestsApp() {
+  window_handle = UseWindow();
+  window_handle->OnMinimizeRequest([] {
+    ++minimize_requests;
+    return handle_minimize_request;
+  });
+  window_handle->OnCloseRequest([] {
+    ++close_requests;
+    return handle_close_request;
+  });
   return Spacer();
 }
 
@@ -281,6 +298,9 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   runtime.BuildFrame();
 
   REQUIRE(window_handle.has_value());
+  window_handle->Show();
+  window_handle->Hide();
+  window_handle->Activate();
   window_handle->Minimize();
   window_handle->Maximize();
   window_handle->Restore();
@@ -288,6 +308,9 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   window_handle->Close();
 
   const std::vector expected{
+      WindowCommand::Show,
+      WindowCommand::Hide,
+      WindowCommand::Activate,
       WindowCommand::Minimize,
       WindowCommand::Maximize,
       WindowCommand::Restore,
@@ -295,6 +318,29 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
       WindowCommand::Close,
   };
   REQUIRE(platform.window_commands == expected);
+}
+
+TEST_CASE("Window request handlers independently suppress platform and public defaults") {
+  window_handle.reset();
+  handle_minimize_request = true;
+  handle_close_request = false;
+  minimize_requests = 0;
+  close_requests = 0;
+  TestPlatform platform;
+  Runtime runtime(WindowRequestsApp, platform);
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HandleWindowRequest(WindowCommand::Minimize));
+  REQUIRE_FALSE(runtime.HandleWindowRequest(WindowCommand::Close));
+  REQUIRE(minimize_requests == 1);
+  REQUIRE(close_requests == 1);
+
+  window_handle->Minimize();
+  window_handle->Close();
+  REQUIRE(minimize_requests == 2);
+  REQUIRE(close_requests == 2);
+  REQUIRE(platform.window_commands == std::vector<WindowCommand>{WindowCommand::Close});
 }
 
 TEST_CASE("CustomWindowChromeProvidesStandardCaptionControls") {

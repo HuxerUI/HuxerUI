@@ -4,7 +4,8 @@ This is a navigation index, not a replacement for the active SDK's public header
 
 | Area | Primary public names | Main reference | Authority |
 | --- | --- | --- | --- |
-| App and lifecycle | `Application`, `AppOptions`, `RunApplication`, `UseApplication`, `ApplicationActivation`, `ApplicationLifecycleState`, `Lifecycle` | [fundamentals.md](fundamentals.md) | `app.h`, `lifecycle.h` |
+| App and lifecycle | `Application`, `AppOptions`, `RunApplication`, `UseApplication`, `ApplicationHandle`, `ApplicationActivation`, `ApplicationLifecycleState`, `Lifecycle` | [fundamentals.md](fundamentals.md) | `app.h`, `lifecycle.h` |
+| System tray | `SystemTrayHandle`, `SystemTrayOptions`, `MenuEntry`, `ApplicationHandle::SystemTray`, `ApplicationHandle::Quit` | [navigation-and-window.md](navigation-and-window.md) | `app.h`, `presentation.h` |
 | Tasks | `Task`, `TaskScope`, `UseTaskScope`, `Delay` | [fundamentals.md](fundamentals.md) | `task.h` |
 | View and composition | `View`, `Scope`, `[[huxerui::composable]]`, `ForEach` | [fundamentals.md](fundamentals.md) | `view.h` |
 | State | `State`, `StateList`, `UseState`, `UseStateList` | [fundamentals.md](fundamentals.md) | `state.h` |
@@ -27,7 +28,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | Resources | string/image/raw resources, `UseString`, `UseImage`, `UseVectorImage`, `UseRawResource` | [resources-files-network.md](resources-files-network.md) | `resource.h` |
 | Files and network | `Bytes`, `File`, `FileReference`, `FilePicker`, `FileSystem`, `HttpClient` | [resources-files-network.md](resources-files-network.md) | `data.h`, `file.h`, `http.h` |
 | Navigation | `NavigationPath`, routed `NavigationStack`, controllers, browser codec | [navigation-and-window.md](navigation-and-window.md) | `navigation.h`, `web/navigation.h` |
-| Window | `WindowContentMode`, `WindowChromeMode`, safe area, system bars, title bar, `UseWindow` | [navigation-and-window.md](navigation-and-window.md) | `window.h` |
+| Window | `WindowContentMode`, `WindowChromeMode`, safe area, system bars, title bar, `UseWindow`, `WindowHandle` | [navigation-and-window.md](navigation-and-window.md) | `window.h` |
 | Paint | `Color`, `VisualFill`, `Canvas`, `PaintContext`, `UseTextMeasurer`, `Path`, gradients, images, vectors | [canvas-paint-and-images.md](canvas-paint-and-images.md) | `color.h`, `paint.h`, `text.h`, `vector.h` |
 | Platform services | payload, typed methods/events, instances, root registration | [platform-modules.md](platform-modules.md) | `platform_module.h`, `root.h` |
 | Platform controls | `PlatformView`, platform factories | [platform-views.md](platform-views.md) | `platform_view.h`, platform headers |

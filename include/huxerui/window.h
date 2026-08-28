@@ -1,13 +1,16 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <huxerui/color.h>
 #include <huxerui/geometry.h>
+#include <huxerui/lifecycle.h>
 #include <huxerui/resource.h>
 #include <huxerui/view.h>
 
@@ -34,6 +37,9 @@ enum class WindowCommand {
   Restore,
   ToggleMaximize,
   Close,
+  Show,
+  Hide,
+  Activate,
 };
 
 enum class SystemBarContentBrightness {
@@ -134,13 +140,44 @@ public:
 
 class WindowHandle {
 public:
+  void Show() const;
+  void Hide() const;
+  void Activate() const;
   void Minimize() const;
   void Maximize() const;
   void Restore() const;
   void ToggleMaximize() const;
   void Close() const;
 
+  template <class... Dependencies>
+  void OnMinimizeRequest(std::function<bool()> handler, Dependencies&&... dependencies) const {
+    RegisterRequest(WindowCommand::Minimize, std::move(handler), std::forward<Dependencies>(dependencies)...);
+  }
+
+  template <class... Dependencies>
+  void OnCloseRequest(std::function<bool()> handler, Dependencies&&... dependencies) const {
+    RegisterRequest(WindowCommand::Close, std::move(handler), std::forward<Dependencies>(dependencies)...);
+  }
+
 private:
+  template <class... Dependencies>
+  void RegisterRequest(
+      WindowCommand command, std::function<bool()> handler, Dependencies&&... dependencies
+  ) const {
+    if (!handler) {
+      throw std::invalid_argument("HuxerUI window request handler must not be empty");
+    }
+    Lifecycle(
+        [window = *this, command, handler = std::move(handler)]() mutable {
+          return window.ConnectRequest(command, std::move(handler));
+        },
+        std::forward<Dependencies>(dependencies)...
+    );
+  }
+
+  [[nodiscard]] std::function<void()>
+  ConnectRequest(WindowCommand command, std::function<bool()> handler) const;
+
   explicit WindowHandle(std::shared_ptr<detail::WindowService> service) : service_(std::move(service)) {}
 
   std::shared_ptr<detail::WindowService> service_;

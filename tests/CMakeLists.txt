@@ -50,6 +50,7 @@ add_executable(huxerui_tests
         runtime/render_scene.cpp
         runtime/resources.cpp
         runtime/scrolling.cpp
+        runtime/system_tray.cpp
         runtime/selection_area.cpp
         runtime/task.cpp
         runtime/text_field.cpp

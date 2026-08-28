@@ -37,6 +37,7 @@
 #include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
 #include "linux_renderer.h"
+#include "linux_system_tray.h"
 #include "linux_text_input.h"
 #include "linux_ui_dispatcher.h"
 #include "platform_frame_internal.h"
@@ -288,6 +289,10 @@ public:
     return CreateLinuxHttpTransport();
   }
 
+  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
+    return std::make_shared<LinuxSystemTrayTransport>();
+  }
+
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
     rusage usage{};
     if (getrusage(RUSAGE_SELF, &usage) != 0) {
@@ -321,20 +326,52 @@ public:
     }
     switch (command) {
     case WindowCommand::Minimize:
+      performing_minimize_ = true;
       gtk_window_minimize(window_);
       break;
     case WindowCommand::Maximize:
       gtk_window_maximize(window_);
       break;
     case WindowCommand::Restore:
+      gtk_window_unminimize(window_);
       gtk_window_unmaximize(window_);
       break;
     case WindowCommand::ToggleMaximize:
       gtk_window_is_maximized(window_) ? gtk_window_unmaximize(window_) : gtk_window_maximize(window_);
       break;
     case WindowCommand::Close:
+      performing_close_ = true;
       gtk_window_close(window_);
       break;
+    case WindowCommand::Show:
+      gtk_widget_set_visible(GTK_WIDGET(window_), TRUE);
+      break;
+    case WindowCommand::Hide:
+      gtk_widget_set_visible(GTK_WIDGET(window_), FALSE);
+      break;
+    case WindowCommand::Activate:
+      gtk_window_present(window_);
+      break;
+    }
+  }
+
+  void RequestApplicationQuit() override {
+    running_ = false;
+    if (window_ != nullptr) {
+      performing_close_ = true;
+      gtk_window_close(window_);
+    }
+  }
+
+  bool DispatchWindowRequest(WindowCommand command) noexcept {
+    try {
+      return runtime_ != nullptr && runtime_->HandleWindowRequest(command);
+    } catch (...) {
+      if (!failure_) {
+        failure_ = std::current_exception();
+      }
+      running_ = false;
+      return true;
     }
   }
 
@@ -599,6 +636,7 @@ private:
     DetachToplevelState();
     toplevel_ = toplevel;
     if (toplevel_ != nullptr) {
+      minimized_ = (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
       toplevel_state_handler_ =
           g_signal_connect(toplevel_, "notify::state", G_CALLBACK(ToplevelStateChanged), this);
     }
@@ -610,6 +648,7 @@ private:
     }
     toplevel_ = nullptr;
     toplevel_state_handler_ = 0;
+    minimized_ = false;
   }
 
   void UpdateLifecycleState() {
@@ -740,6 +779,10 @@ private:
 
   static gboolean CloseRequested(GtkWindow*, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    if (!self.performing_close_ && self.DispatchWindowRequest(WindowCommand::Close)) {
+      return TRUE;
+    }
+    self.performing_close_ = false;
     self.text_input_.Reset();
     self.running_ = false;
     return FALSE;
@@ -783,6 +826,16 @@ private:
 
   static void ToplevelStateChanged(GObject*, GParamSpec*, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    const bool minimized = self.toplevel_ != nullptr &&
+                           (gdk_toplevel_get_state(self.toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
+    if (minimized && !self.minimized_) {
+      if (self.performing_minimize_) {
+        self.performing_minimize_ = false;
+      } else if (self.DispatchWindowRequest(WindowCommand::Minimize)) {
+        gtk_window_unminimize(self.window_);
+      }
+    }
+    self.minimized_ = minimized;
     self.UpdateLifecycleState();
     self.UpdateRuntimeViewport();
   }
@@ -906,6 +959,9 @@ private:
   const RenderFrame* committed_frame_ = nullptr;
   guint frame_source_ = 0;
   bool running_ = false;
+  bool minimized_ = false;
+  bool performing_minimize_ = false;
+  bool performing_close_ = false;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
   bool pointer_down_ = false;

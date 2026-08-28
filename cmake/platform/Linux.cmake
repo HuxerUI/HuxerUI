@@ -18,6 +18,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_file_picker.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_http.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_renderer.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/linux/linux_system_tray.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_text_input.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/linux/linux_ui_dispatcher.cpp"
 )

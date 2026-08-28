@@ -57,7 +57,7 @@ Read only the references needed for the request:
 - Built-in themes, token or component-style customization, any proposed `ThemeDefinition`, indication, animation, layers, dialogs, menus, and scene transitions: [theme-animation-presentation.md](references/theme-animation-presentation.md)
 - Text input, validation, selection, and accessibility: [text-input-and-semantics.md](references/text-input-and-semantics.md)
 - Resources, localization, files, file pickers, HTTP, and async work: [resources-files-network.md](references/resources-files-network.md)
-- Navigation, browser routes, safe areas, and window chrome: [navigation-and-window.md](references/navigation-and-window.md)
+- Navigation, browser routes, safe areas, window chrome, and system tray behavior: [navigation-and-window.md](references/navigation-and-window.md)
 - Canvas, paint, images, vectors, and external textures: [canvas-paint-and-images.md](references/canvas-paint-and-images.md)
 - Non-visual platform services: [platform-modules.md](references/platform-modules.md)
 - Embedded platform controls: [platform-views.md](references/platform-views.md)

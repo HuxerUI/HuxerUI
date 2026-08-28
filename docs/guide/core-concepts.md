@@ -165,6 +165,11 @@ Its tasks are canceled when that scope is replaced or unmounted, and continuatio
 The root can observe application lifecycle state and receive cold-start or later activation containing URLs or external files.
 Navigation and file handling remain application policy; the platform shell only normalizes and delivers activation data.
 
+`UseApplication()` returns the application-level handle.
+On desktop, its `SystemTray()` sub-handle presents one tray item and `Quit()` requests orderly application termination.
+Tray declarations reuse `MenuItem`, `MenuEntry`, and `MenuSection`; their `ImageVariant` icons must resolve to raster `ImageAsset` values.
+`UseWindow()` supplies independent visibility commands and lifecycle-bound minimize and close request handlers, allowing an application to compose minimize-to-tray behavior while preserving the normal window action when no tray host is available.
+
 ## Runtime model
 
 The shared Runtime owns composition, reconciliation, layout, interaction, scrolling, animation, semantics, and retained scene generation.

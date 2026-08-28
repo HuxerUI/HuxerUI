@@ -21,6 +21,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_http.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_platform_view.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_renderer.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/windows/win32_system_tray.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_text_input.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_ui_dispatcher.cpp"
 )

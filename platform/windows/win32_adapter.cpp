@@ -34,6 +34,7 @@
 #include "win32_internal.h"
 #include "win32_platform_view.h"
 #include "win32_renderer.h"
+#include "win32_system_tray.h"
 #include "win32_text_input.h"
 #include "win32_ui_dispatcher.h"
 
@@ -431,6 +432,14 @@ public:
     return CreateWin32HttpTransport();
   }
 
+  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
+    if (!system_tray_) {
+      system_tray_ = std::make_shared<Win32SystemTrayTransport>();
+      system_tray_->SetWindow(window_);
+    }
+    return system_tray_;
+  }
+
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
     FILETIME created{};
     FILETIME exited{};
@@ -458,6 +467,13 @@ public:
       return;
     }
     PostMessageW(window_, kWindowCommandMessage, static_cast<WPARAM>(command), 0);
+  }
+
+  void RequestApplicationQuit() override {
+    if (window_ != nullptr) {
+      performing_close_ = true;
+      SendMessageW(window_, WM_CLOSE, 0, 0);
+    }
   }
 
   ResourceConfiguration Configuration() const override {
@@ -999,7 +1015,18 @@ private:
       ShowWindow(window_, IsZoomed(window_) ? SW_RESTORE : SW_MAXIMIZE);
       break;
     case WindowCommand::Close:
-      PostMessageW(window_, WM_CLOSE, 0, 0);
+      performing_close_ = true;
+      SendMessageW(window_, WM_CLOSE, 0, 0);
+      break;
+    case WindowCommand::Show:
+      ShowWindow(window_, SW_SHOWNA);
+      break;
+    case WindowCommand::Hide:
+      ShowWindow(window_, SW_HIDE);
+      break;
+    case WindowCommand::Activate:
+      ShowWindow(window_, IsIconic(window_) ? SW_RESTORE : SW_SHOW);
+      SetForegroundWindow(window_);
       break;
     }
   }
@@ -1015,6 +1042,11 @@ private:
   }
 
   LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
+    if (system_tray_) {
+      if (const std::optional<LRESULT> handled = system_tray_->HandleMessage(message, w_param, l_param)) {
+        return *handled;
+      }
+    }
     if (custom_chrome_ && message == WM_NCCALCSIZE) {
       // User32 must observe the first captioned-window calculation before the client takes ownership of the frame.
       if (first_nc_calc_) {
@@ -1052,6 +1084,9 @@ private:
       text_input_.SetDpiScale(DpiScale());
       return 0;
     case WM_DESTROY:
+      if (system_tray_) {
+        system_tray_->SetWindow(nullptr);
+      }
       ui_dispatcher_.Shutdown();
       text_input_.SetWindow(nullptr);
       accessibility_.Reset();
@@ -1062,6 +1097,21 @@ private:
       committed_frame_ = nullptr;
       PostQuitMessage(0);
       return 0;
+    case WM_CLOSE:
+      if (performing_close_) {
+        performing_close_ = false;
+        break;
+      }
+      if (runtime_ != nullptr && runtime_->HandleWindowRequest(WindowCommand::Close)) {
+        return 0;
+      }
+      break;
+    case WM_SYSCOMMAND:
+      if ((w_param & 0xFFF0U) == SC_MINIMIZE && runtime_ != nullptr &&
+          runtime_->HandleWindowRequest(WindowCommand::Minimize)) {
+        return 0;
+      }
+      break;
     case WM_ERASEBKGND:
       return 1;
     case WM_ACTIVATE:
@@ -1267,6 +1317,9 @@ private:
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
       adapter = static_cast<Win32PlatformAdapter*>(create->lpCreateParams);
       adapter->window_ = window;
+      if (adapter->system_tray_) {
+        adapter->system_tray_->SetWindow(window);
+      }
       adapter->accessibility_.SetWindow(window);
       adapter->text_input_.SetWindow(window);
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(adapter));
@@ -1300,6 +1353,7 @@ private:
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   HWND mouse_tracking_window_ = nullptr;
   bool pointer_down_ = false;
+  bool performing_close_ = false;
   Point last_pointer_position_;
   Win32Accessibility accessibility_;
   Win32TextInput text_input_;
@@ -1311,6 +1365,7 @@ private:
   Win32Api win32_api_;
   Win32Renderer renderer_;
   std::unique_ptr<Win32PlatformViews> platform_views_;
+  std::shared_ptr<Win32SystemTrayTransport> system_tray_;
 };
 
 int RunPlatformApplication(const Application& application) {

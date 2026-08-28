@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -24,6 +25,7 @@
 #include "appkit_accessibility.h"
 #include "appkit_platform_view.h"
 #include "appkit_renderer.h"
+#include "appkit_system_tray.h"
 #include "appkit_text_input.h"
 #include "appkit_window_chrome.h"
 #include "macos_application_internal.h"
@@ -266,6 +268,9 @@ public:
       platform_views_->Shutdown();
       platform_views_.reset();
       runtime_ = nullptr;
+      if (failure_) {
+        std::rethrow_exception(failure_);
+      }
     }
     return 0;
   }
@@ -292,6 +297,7 @@ public:
     }
     switch (command) {
     case WindowCommand::Minimize:
+      performing_minimize_ = true;
       [window_ miniaturize:nil];
       break;
     case WindowCommand::Maximize:
@@ -308,8 +314,44 @@ public:
       [window_ zoom:nil];
       break;
     case WindowCommand::Close:
+      performing_close_ = true;
       [window_ performClose:nil];
       break;
+    case WindowCommand::Show:
+      [window_ orderFront:nil];
+      break;
+    case WindowCommand::Hide:
+      [window_ orderOut:nil];
+      break;
+    case WindowCommand::Activate:
+      [window_ deminiaturize:nil];
+      [window_ makeKeyAndOrderFront:nil];
+      [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+      break;
+    }
+  }
+
+  void RequestApplicationQuit() override {
+    [[NSApplication sharedApplication] terminate:nil];
+  }
+
+  bool AllowWindowRequest(WindowCommand command) {
+    if (command == WindowCommand::Minimize && performing_minimize_) {
+      performing_minimize_ = false;
+      return true;
+    }
+    if (command == WindowCommand::Close && performing_close_) {
+      performing_close_ = false;
+      return true;
+    }
+    try {
+      return runtime_ == nullptr || !runtime_->HandleWindowRequest(command);
+    } catch (...) {
+      if (!failure_) {
+        failure_ = std::current_exception();
+      }
+      [[NSApplication sharedApplication] terminate:nil];
+      return false;
     }
   }
 
@@ -519,6 +561,10 @@ public:
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateMacHttpTransport();
+  }
+
+  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
+    return std::make_shared<AppKitSystemTrayTransport>();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
@@ -758,6 +804,9 @@ private:
   std::optional<double> scheduled_frame_deadline_;
   std::vector<ApplicationActivation> pending_activations_;
   const RenderFrame* committed_frame_ = nullptr;
+  bool performing_minimize_ = false;
+  bool performing_close_ = false;
+  std::exception_ptr failure_;
 };
 
 int RunPlatformApplication(const Application& application) {
@@ -1058,6 +1107,16 @@ int RunPlatformApplication(const Application& application) {
 @end
 
 @implementation HuxerUIApplicationDelegate
+
+- (BOOL)windowShouldClose:(NSWindow*)sender {
+  static_cast<void>(sender);
+  return huxeruiAdapter == nullptr || huxeruiAdapter->AllowWindowRequest(huxerui::WindowCommand::Close);
+}
+
+- (BOOL)windowShouldMiniaturize:(NSWindow*)sender {
+  static_cast<void>(sender);
+  return huxeruiAdapter == nullptr || huxeruiAdapter->AllowWindowRequest(huxerui::WindowCommand::Minimize);
+}
 
 - (void)application:(NSApplication*)application openURLs:(NSArray<NSURL*>*)urls {
   static_cast<void>(application);

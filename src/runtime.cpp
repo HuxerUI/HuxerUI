@@ -2,6 +2,7 @@
 #include "application_internal.h"
 #include "external_texture_internal.h"
 #include "resource_internal.h"
+#include "system_tray_internal.h"
 #include "task_internal.h"
 #include "text_input_internal.h"
 #include "window_internal.h"
@@ -1065,7 +1066,6 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       application.options.viewport_breakpoints,
       std::move(window)
   );
-  state_->application_service_ = std::make_shared<ApplicationService>(*this, std::move(startup_activation));
   state_->gesture_settings_ = gesture_settings;
   state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
   state_->root_environment_ = std::make_shared<Environment>();
@@ -1081,6 +1081,11 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
   state_->root_environment_->Set(resource_configuration.locale);
   root.Provide(state_->app_resources_);
+  state_->application_service_ = std::make_shared<ApplicationService>(
+      *this,
+      std::move(startup_activation),
+      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_)
+  );
   root.Provide(state_->application_service_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
@@ -1132,6 +1137,10 @@ Runtime::~Runtime() {
     service->reset();
   }
   state_->root_services_.clear();
+}
+
+void Runtime::RequestApplicationQuit() {
+  state_->platform_->RequestApplicationQuit();
 }
 
 void Runtime::QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope) {
@@ -1595,6 +1604,10 @@ void Runtime::HandleApplicationActivation(ApplicationActivation activation) {
 
 void Runtime::UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
   state_->application_service_->UpdateLifecycleState(lifecycle_state);
+}
+
+bool Runtime::HandleWindowRequest(WindowCommand command) {
+  return state_->window_service_->HandleRequest(command);
 }
 
 const detail::MountedNode* Runtime::RootNode() const noexcept {

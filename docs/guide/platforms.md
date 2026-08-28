@@ -5,14 +5,14 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 
 ## Capability overview
 
-| Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture |
-|---|---|---:|---:|---:|---:|
-| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes |
-| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes |
-| Linux | Cairo and Pango | Yes | Not implemented | No | Yes |
-| Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes |
-| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes |
-| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes |
+| Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture | System tray |
+|---|---|---:|---:|---:|---:|---:|
+| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | Yes |
+| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Yes |
+| Linux | Cairo and Pango | Yes | Not implemented | No | Yes | StatusNotifierItem host |
+| Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes | No |
+| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | No |
+| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
 OHOS does not currently have a repository-owned backend.
@@ -28,6 +28,7 @@ Windows 7 without Platform Update is unsupported.
 
 Custom chrome keeps Win32 window behavior while HuxerUI draws the title-bar content and caption controls.
 Windows 11 Snap Layout is available through the shared maximize-button geometry on the default backend.
+System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
 
 ## macOS
 
@@ -36,6 +37,7 @@ Build with Xcode and the macOS SDK.
 
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
+System tray presentation uses an AppKit status item and platform menu.
 
 ## Linux
 
@@ -47,6 +49,7 @@ Official Linux SDK binaries require glibc 2.35 or later.
 
 Linux builds are provided for x86_64 and aarch64 hosts.
 PlatformView and a platform accessibility bridge are not implemented.
+System tray presentation requires an active StatusNotifierItem watcher and host; `IsAvailable()` tracks hosts appearing or disappearing at runtime.
 
 ## Web
 

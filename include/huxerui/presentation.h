@@ -31,6 +31,7 @@ class DialogExtension;
 class DialogService;
 class LayerAnchorExtension;
 class MenuService;
+class SystemTrayService;
 class PopupService;
 class ToastService;
 struct LayerAnchorState;
@@ -540,6 +541,7 @@ private:
 
   friend class MenuEntry;
   friend class detail::MenuService;
+  friend class detail::SystemTrayService;
 };
 
 class MenuEntry {
@@ -551,6 +553,7 @@ private:
   std::variant<MenuItem, MenuSection> value_;
 
   friend class detail::MenuService;
+  friend class detail::SystemTrayService;
 };
 
 class MenuHandle {

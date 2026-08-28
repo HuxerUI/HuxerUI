@@ -65,6 +65,10 @@ StringVariant WindowCommandLabel(const WindowCaptionLabels& labels, WindowComman
     return maximized ? StringVariant(strings::window_restore) : StringVariant(strings::window_maximize);
   case WindowCommand::Close:
     return detail::IsEmptyStringVariantLiteral(labels.close) ? StringVariant(strings::window_close) : labels.close;
+  case WindowCommand::Show:
+  case WindowCommand::Hide:
+  case WindowCommand::Activate:
+    break;
   }
   return {};
 }
@@ -113,6 +117,10 @@ View WindowControl(
           .LineTo({center.x + 5.0F, center.y + 5.0F})
           .MoveTo({center.x + 5.0F, center.y - 5.0F})
           .LineTo({center.x - 5.0F, center.y + 5.0F});
+      break;
+    case WindowCommand::Show:
+    case WindowCommand::Hide:
+    case WindowCommand::Activate:
       break;
     }
     context.StrokePath(std::move(path), window->caption_foreground, 1.0F);
@@ -170,14 +178,74 @@ bool IsValidSystemBarsAppearance(const SystemBarsAppearance& appearance) noexcep
 
 WindowService::WindowService(PlatformAdapter& platform) : platform_(&platform) {}
 
-void WindowService::Request(WindowCommand command) const {
-  if (platform_ != nullptr) {
-    platform_->RequestWindowCommand(command);
+void WindowService::Request(WindowCommand command) {
+  if (platform_ == nullptr) {
+    return;
   }
+  if ((command == WindowCommand::Minimize || command == WindowCommand::Close) &&
+      HandleRequest(command)) {
+    return;
+  }
+  platform_->RequestWindowCommand(command);
+}
+
+bool WindowService::HandleRequest(WindowCommand command) {
+  RequestHandler& request = Handler(command);
+  if (!request.handler) {
+    return false;
+  }
+  return request.handler();
+}
+
+std::function<void()>
+WindowService::ConnectRequest(WindowCommand command, std::function<bool()> handler) {
+  if (!handler) {
+    throw std::invalid_argument("HuxerUI window request handler must not be empty");
+  }
+  RequestHandler& request = Handler(command);
+  if (request.handler) {
+    throw std::logic_error("HuxerUI window request handler is already connected");
+  }
+  request.connection = next_connection_++;
+  request.handler = std::move(handler);
+  const std::uint64_t connection = request.connection;
+  std::weak_ptr<WindowService> service = weak_from_this();
+  return [service, command, connection] {
+    if (const auto active = service.lock()) {
+      active->DisconnectRequest(command, connection);
+    }
+  };
+}
+
+WindowService::RequestHandler& WindowService::Handler(WindowCommand command) {
+  switch (command) {
+  case WindowCommand::Minimize:
+    return minimize_handler_;
+  case WindowCommand::Close:
+    return close_handler_;
+  default:
+    throw std::invalid_argument("HuxerUI window request command is not interceptable");
+  }
+}
+
+void WindowService::DisconnectRequest(WindowCommand command, std::uint64_t connection) noexcept {
+  RequestHandler* request = nullptr;
+  if (command == WindowCommand::Minimize) {
+    request = &minimize_handler_;
+  } else if (command == WindowCommand::Close) {
+    request = &close_handler_;
+  }
+  if (request == nullptr || request->connection != connection) {
+    return;
+  }
+  request->handler = {};
+  request->connection = 0;
 }
 
 void WindowService::Disconnect() noexcept {
   platform_ = nullptr;
+  minimize_handler_ = {};
+  close_handler_ = {};
 }
 
 } // namespace detail
@@ -235,6 +303,18 @@ const detail::ModifierDescriptor& WindowDragRegion::Descriptor() {
   return ApplyOnlyModifierDescriptor<WindowDragRegion, ApplyWindowDragRegion>();
 }
 
+void WindowHandle::Show() const {
+  service_->Request(WindowCommand::Show);
+}
+
+void WindowHandle::Hide() const {
+  service_->Request(WindowCommand::Hide);
+}
+
+void WindowHandle::Activate() const {
+  service_->Request(WindowCommand::Activate);
+}
+
 void WindowHandle::Minimize() const {
   service_->Request(WindowCommand::Minimize);
 }
@@ -253,6 +333,11 @@ void WindowHandle::ToggleMaximize() const {
 
 void WindowHandle::Close() const {
   service_->Request(WindowCommand::Close);
+}
+
+std::function<void()>
+WindowHandle::ConnectRequest(WindowCommand command, std::function<bool()> handler) const {
+  return service_->ConnectRequest(command, std::move(handler));
 }
 
 WindowHandle UseWindow() {

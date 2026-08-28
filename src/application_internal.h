@@ -12,12 +12,18 @@ namespace huxerui::detail {
 
 class ApplicationService final : public std::enable_shared_from_this<ApplicationService> {
 public:
-  ApplicationService(Runtime& runtime, ApplicationActivation startup_activation);
+  ApplicationService(
+      Runtime& runtime,
+      ApplicationActivation startup_activation,
+      std::shared_ptr<SystemTrayService> system_tray
+  );
 
   [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
   [[nodiscard]] std::function<void()> ConnectActivation(std::function<void(ApplicationActivation)> handler);
   [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler);
+  [[nodiscard]] const std::shared_ptr<SystemTrayService>& SystemTray() const noexcept;
+  void Quit() const;
   void Enqueue(ApplicationActivation activation);
   void UpdateLifecycleState(ApplicationLifecycleState lifecycle_state);
   void DispatchPending();
@@ -30,6 +36,7 @@ private:
   Runtime* runtime_;
   ApplicationActivation startup_activation_;
   std::shared_ptr<StateCell<ApplicationLifecycleState>> lifecycle_state_;
+  std::shared_ptr<SystemTrayService> system_tray_;
   std::deque<ApplicationActivation> pending_activations_;
   std::deque<ApplicationLifecycleState> pending_lifecycle_states_;
   std::function<void(ApplicationActivation)> activation_handler_;

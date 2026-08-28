@@ -5,6 +5,8 @@
 #include <utility>
 
 #include "application_internal.h"
+#include "internal.h"
+#include "system_tray_internal.h"
 
 namespace huxerui::detail {
 
@@ -43,10 +45,16 @@ void ValidateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state
 
 } // namespace
 
-ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation startup_activation)
+ApplicationService::ApplicationService(
+    Runtime& runtime, ApplicationActivation startup_activation, std::shared_ptr<SystemTrayService> system_tray
+)
     : runtime_(&runtime), startup_activation_(std::move(startup_activation)),
-      lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(ApplicationLifecycleState::Active)) {
+      lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(ApplicationLifecycleState::Active)),
+      system_tray_(std::move(system_tray)) {
   ValidateApplicationActivation(startup_activation_);
+  if (!system_tray_) {
+    throw std::invalid_argument("HuxerUI application system tray service must not be empty");
+  }
 }
 
 const ApplicationActivation& ApplicationService::StartupActivation() const noexcept {
@@ -108,6 +116,16 @@ ApplicationService::ConnectLifecycle(std::function<void(ApplicationLifecycleStat
   };
 }
 
+const std::shared_ptr<SystemTrayService>& ApplicationService::SystemTray() const noexcept {
+  return system_tray_;
+}
+
+void ApplicationService::Quit() const {
+  if (runtime_ != nullptr) {
+    runtime_->RequestApplicationQuit();
+  }
+}
+
 void ApplicationService::Enqueue(ApplicationActivation activation) {
   ValidateApplicationActivation(activation);
   if (runtime_ == nullptr) {
@@ -152,6 +170,7 @@ void ApplicationService::DispatchPending() {
 }
 
 void ApplicationService::Disconnect() noexcept {
+  system_tray_->Disconnect();
   runtime_ = nullptr;
   pending_activations_.clear();
   pending_lifecycle_states_.clear();
@@ -189,6 +208,18 @@ const ApplicationActivation& ApplicationHandle::StartupActivation() const noexce
 
 ApplicationLifecycleState ApplicationHandle::LifecycleState() const {
   return service_->LifecycleState();
+}
+
+SystemTrayHandle ApplicationHandle::SystemTray() const {
+  return SystemTrayHandle{
+      service_->SystemTray(),
+      detail::CurrentEnvironment(),
+      detail::Composer::RequireCurrent().ScopeId(),
+  };
+}
+
+void ApplicationHandle::Quit() const {
+  service_->Quit();
 }
 
 std::function<void()>

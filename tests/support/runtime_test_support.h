@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "internal.h"
+#include "system_tray_internal.h"
 #include "text_layout_internal.h"
 
 namespace huxerui::test {
@@ -319,6 +320,10 @@ public:
     runtime_.UpdateApplicationLifecycleState(lifecycle_state);
   }
 
+  bool HandleWindowRequest(huxerui::WindowCommand command) {
+    return runtime_.HandleWindowRequest(command);
+  }
+
   bool HandleBack() {
     return runtime_.HandleBack();
   }
@@ -372,6 +377,61 @@ private:
   huxerui::Runtime runtime_;
   FlattenedScene flattened_scene_;
   const FrameCommit* last_commit_ = nullptr;
+};
+
+class TestSystemTrayTransport : public huxerui::detail::SystemTrayTransport {
+public:
+  [[nodiscard]] bool IsAvailable() const noexcept override {
+    return available;
+  }
+
+  void SetEventHandler(std::function<void(huxerui::detail::SystemTrayEvent)> handler) override {
+    event_handler = std::move(handler);
+    ++event_handler_updates;
+  }
+
+  void Show(const huxerui::detail::ResolvedSystemTrayPresentation& value) override {
+    presentation = value;
+    ++show_count;
+  }
+
+  void Hide() noexcept override {
+    presentation.reset();
+    ++hide_count;
+  }
+
+  void SetAvailable(bool value) {
+    available = value;
+    if (event_handler) {
+      event_handler({
+          .type = huxerui::detail::SystemTrayEventType::AvailabilityChanged,
+          .available = value,
+      });
+    }
+  }
+
+  void Activate() {
+    if (event_handler) {
+      event_handler({.type = huxerui::detail::SystemTrayEventType::Activate});
+    }
+  }
+
+  void Invoke(std::uint64_t generation, std::uint64_t command) {
+    if (event_handler) {
+      event_handler({
+          .type = huxerui::detail::SystemTrayEventType::Command,
+          .generation = generation,
+          .command = command,
+      });
+    }
+  }
+
+  bool available = false;
+  int show_count = 0;
+  int hide_count = 0;
+  int event_handler_updates = 0;
+  std::optional<huxerui::detail::ResolvedSystemTrayPresentation> presentation;
+  std::function<void(huxerui::detail::SystemTrayEvent)> event_handler;
 };
 
 class TestPlatform : public huxerui::PlatformAdapter {
@@ -660,6 +720,14 @@ public:
     window_commands.push_back(command);
   }
 
+  void RequestApplicationQuit() override {
+    ++application_quit_requests;
+  }
+
+  std::shared_ptr<huxerui::detail::SystemTrayTransport> CreateSystemTrayTransport() override {
+    return system_tray_transport;
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
@@ -668,6 +736,8 @@ public:
       system_bar_brightness;
   std::optional<huxerui::ProcessMetrics> process_metrics;
   std::vector<huxerui::WindowCommand> window_commands;
+  int application_quit_requests = 0;
+  std::shared_ptr<TestSystemTrayTransport> system_tray_transport;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;

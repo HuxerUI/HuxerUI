@@ -22,6 +22,7 @@
 #include <huxerui/layer.h>
 #include <huxerui/lifecycle.h>
 #include <huxerui/platform_module.h>
+#include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/semantics.h>
@@ -37,6 +38,7 @@ struct DragEvent;
 class FileSystem;
 class FilePicker;
 class PlatformResources;
+class ApplicationHandle;
 struct GestureSettings;
 struct ResourceConfiguration;
 
@@ -67,9 +69,52 @@ class ExternalTextureSurface;
 class ApplicationService;
 class FilePickerTransport;
 class HttpTransport;
+class SystemTrayService;
+class SystemTrayTransport;
 class TaskScopeState;
 class TextLayout;
 } // namespace detail
+
+struct SystemTrayOptions {
+  StringVariant tooltip;
+  std::vector<MenuEntry> menu;
+};
+
+class SystemTrayHandle final {
+public:
+  [[nodiscard]] bool IsAvailable() const;
+  void Show(ImageVariant icon, SystemTrayOptions options = {}) const;
+  void Hide() const;
+
+  template <class... Dependencies>
+  void OnActivate(std::function<void()> handler, Dependencies&&... dependencies) const {
+    if (!handler) {
+      throw std::invalid_argument("HuxerUI system tray activation handler must not be empty");
+    }
+    Lifecycle(
+        [tray = *this, handler = std::move(handler)]() mutable {
+          return tray.ConnectActivate(std::move(handler));
+        },
+        std::forward<Dependencies>(dependencies)...
+    );
+  }
+
+private:
+  SystemTrayHandle(
+      std::shared_ptr<detail::SystemTrayService> service,
+      std::shared_ptr<const Environment> environment,
+      std::uint64_t owner
+  )
+      : service_(std::move(service)), environment_(std::move(environment)), owner_(owner) {}
+
+  [[nodiscard]] std::function<void()> ConnectActivate(std::function<void()> handler) const;
+
+  std::shared_ptr<detail::SystemTrayService> service_;
+  std::shared_ptr<const Environment> environment_;
+  std::uint64_t owner_ = 0;
+
+  friend class ApplicationHandle;
+};
 
 struct AppOptions {
   WindowOptions window;
@@ -103,6 +148,8 @@ public:
   [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
   // Reading the current platform-owned state during composition subscribes that scope to later changes.
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
+  [[nodiscard]] SystemTrayHandle SystemTray() const;
+  void Quit() const;
 
   // Delivers each distinct platform transition while the declaring component Lifecycle is mounted.
   template <class... Dependencies>
@@ -190,6 +237,7 @@ public:
   virtual void RequestWindowCommand(WindowCommand command) {
     static_cast<void>(command);
   }
+  virtual void RequestApplicationQuit() {}
   // Embedded adapters without native-window authority may leave this optional capability as a no-op.
   virtual void SetSystemBarsContentBrightness(
       SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
@@ -202,6 +250,7 @@ protected:
   virtual std::shared_ptr<FileSystem> CreateFileSystem();
   virtual std::shared_ptr<detail::FilePickerTransport> CreateFilePickerTransport();
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
+  virtual std::shared_ptr<detail::SystemTrayTransport> CreateSystemTrayTransport();
 
   template <class Registration>
   [[nodiscard]] const Registration* FindPlatformModuleRegistration(std::string_view type) const {
@@ -277,6 +326,8 @@ public:
   void HandleApplicationActivation(ApplicationActivation activation);
   // Platform updates feed both the coalescing current value and any mounted ordered transition handler.
   void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state);
+  // Returns true when application code handled the platform minimize or close request.
+  [[nodiscard]] bool HandleWindowRequest(WindowCommand command);
   bool HandleBack();
   bool HandleBack(const BackEvent& event);
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
@@ -300,6 +351,7 @@ private:
   };
 
   void RequestFrame();
+  void RequestApplicationQuit();
   void RequestFrameAfter(double delay_seconds);
   void NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source);
   [[nodiscard]] std::optional<std::uint64_t> HitTestPlatformView(Point position) const;
