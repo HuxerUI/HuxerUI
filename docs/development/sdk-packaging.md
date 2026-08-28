@@ -64,7 +64,7 @@ CMake packaging changes require both an incremental build and a separate clean c
 Release CI produces Windows x86_64, macOS arm64 and x86_64, Linux aarch64 and x86_64, and Android arm64-v8a archives.
 Linux release CI rejects binaries that require symbols newer than GLIBC 2.35, GLIBCXX 3.4.32, or CXXABI 1.3.15.
 Release jobs rebuild their host tools from source before configuration instead of publishing the executables checked into the selected release ref.
-Distributed Linux host tools are built in a GLIBC 2.17 environment and statically link the GNU C++ runtime independently of the newer Linux SDK-library baseline.
+Distributed Linux host tools are built in a GLIBC 2.28 environment and statically link the GNU C++ runtime independently of the newer Linux SDK-library baseline.
 
 Rebuild repository host-tool packages with `scripts/build_tools.sh` or `scripts/build_tools.ps1`.
 The scripts default to the current host and accept explicit platform, architecture, CMake toolchain, Android NDK, build-directory, and output-directory arguments.
