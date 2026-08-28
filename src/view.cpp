@@ -938,6 +938,7 @@ private:
     spec->properties.text_layout_options = {
         .shaping = {},
         .align = TextAlign::Center,
+        .vertical_align = TextVerticalAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
     spec->default_indication = style.indication;
@@ -1877,7 +1878,11 @@ void ApplyToggleLayoutDefaults(
   spec.properties.frame.min_height = metrics.interactive_size.height;
   spec.properties.text_style =
       ResolveStyleOverride<TextStyle>(environment).value_or(detail::DefaultTextStyle(theme, TextRole::Body));
-  spec.properties.text_layout_options = {.wrap = TextWrap::NoWrap};
+  spec.properties.text_layout_options = {
+      .shaping = {},
+      .vertical_align = TextVerticalAlign::Center,
+      .wrap = TextWrap::NoWrap,
+  };
   Color disabled_label = spec.properties.text_style.foreground;
   disabled_label.alpha *= spec.properties.disabled_opacity;
   spec.properties.disabled_foreground = disabled_label;
@@ -1941,7 +1946,9 @@ private:
     spec->properties.frame.min_width = std::max(0.0F, style.minimum_segment_width);
     spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec->properties.text_layout_options = {
+        .shaping = {},
         .align = TextAlign::Center,
+        .vertical_align = TextVerticalAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
     spec->default_indication =
@@ -2868,6 +2875,16 @@ void View::SetTextStyle(TextStyle style) {
   AddModifier(detail::MakeModifierSpec(TextStyleProperty{std::move(style)}));
 }
 
+void View::SetTextAlign(TextAlign align) {
+  EnsureUniqueSpec();
+  spec_->properties.text_layout_options.align = align;
+}
+
+void View::SetTextVerticalAlign(TextVerticalAlign align) {
+  EnsureUniqueSpec();
+  spec_->properties.text_layout_options.vertical_align = align;
+}
+
 void View::SetImageFit(ImageFit fit) {
   EnsureUniqueSpec();
   spec_->image_properties.fit = fit;
@@ -2953,6 +2970,16 @@ Text::Text(StringVariant value, TextRole role) : View(MakeTextSpec(std::move(val
 
 Text Text::Style(TextStyle style) && {
   SetTextStyle(std::move(style));
+  return std::move(*this);
+}
+
+Text Text::Align(TextAlign align) && {
+  SetTextAlign(align);
+  return std::move(*this);
+}
+
+Text Text::VerticalAlign(TextVerticalAlign align) && {
+  SetTextVerticalAlign(align);
   return std::move(*this);
 }
 

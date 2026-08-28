@@ -167,6 +167,7 @@ void PaintLabelContent(
   }
   TextLayoutOptions options = node.properties.text_layout_options;
   options.align = TextAlign::Leading;
+  options.vertical_align = TextVerticalAlign::Center;
   options.wrap = TextWrap::NoWrap;
   context.DrawText(
       {leading + icon_width + spacing, content.y, text_width, content.height},
@@ -668,7 +669,12 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
           bounds,
           node.text,
           text_style,
-          TextLayoutOptions{.align = TextAlign::Center, .wrap = TextWrap::NoWrap}
+          TextLayoutOptions{
+              .shaping = {},
+              .align = TextAlign::Center,
+              .vertical_align = TextVerticalAlign::Center,
+              .wrap = TextWrap::NoWrap,
+          }
       );
     } else if ((node.kind == NodeKind::Checkbox || node.kind == NodeKind::RadioButton ||
                 node.kind == NodeKind::Switch) &&

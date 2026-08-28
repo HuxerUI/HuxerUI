@@ -46,8 +46,14 @@ Underline and strike-through are style properties rather than separate drawing c
 Selection, composition, diagnostics, and other decorations that require custom geometry can still use ordinary PaintCommands.
 
 Paragraph alignment and wrapping are not visual style.
-They belong to `TextLayoutOptions`, while direction and locale shaping hints belong to `TextShapingOptions`.
+Horizontal and vertical text alignment and wrapping belong to `TextLayoutOptions`, while direction and locale shaping hints belong to `TextShapingOptions`.
 This keeps one TextStyle reusable across a paragraph, a TextField, and exact editor runs.
+
+`TextAlign` places each line horizontally using semantic leading and trailing directions.
+`TextVerticalAlign` places the complete paragraph vertically inside its final rectangle using `Top`, `Center`, or `Bottom`.
+The default layout uses leading horizontal alignment, top vertical alignment, and word wrapping.
+Vertical alignment does not change intrinsic paragraph measurement and applies only when the final rectangle has unused height.
+When the paragraph is taller than the rectangle, the remaining height is clamped to zero so alignment never introduces a negative vertical origin.
 
 `TextDirection::Auto` resolves from the first strong directional character and falls back to left-to-right when the text contains no strong character.
 Measurement and drawing use the same resolution rule on every platform.
@@ -94,13 +100,19 @@ paint.DrawText(
     {0.0F, 0.0F, size.width, size.height},
     text,
     style,
-    {.align = TextAlign::Leading, .wrap = TextWrap::Word}
+    {
+        .align = TextAlign::Leading,
+        .vertical_align = TextVerticalAlign::Top,
+        .wrap = TextWrap::Word,
+    }
 );
 ```
 
 Its rectangle is a layout constraint, so the renderer creates a platform paragraph layout using the same TextStyle and TextLayoutOptions that were used for measurement.
-Wrapped paragraphs start at the top of the rectangle; an unwrapped paragraph is vertically centered while TextAlign controls each hard line's horizontal placement.
+`TextAlign` controls each hard line's horizontal placement, and `TextVerticalAlign` controls the paragraph's vertical placement independently of wrapping.
 When an unwrapped line is wider than the rectangle, Center and semantic trailing alignment may place its origin before the rectangle's leading edge; the rectangle clips the overflow without changing alignment.
+`DrawTextCommand::paragraph_offset` applies a post-layout translation inside that fixed rectangle.
+It does not affect paragraph measurement, alignment, cache identity, or clipping, and lets a scrolling editor keep retained text geometry and rendered text in the same coordinate system.
 This path serves Text, buttons, labels, validation text, and other ordinary UI paragraphs.
 
 `DrawTextRun()` is the exact baseline-positioned operation:
@@ -148,6 +160,9 @@ Secure TextField source text must not be retained in a global text or paragraph 
 
 TextField uses complete TextStyle values for editable text, placeholder text, and validation text.
 The platform TextLayout created for editing supplies hit testing, caret rectangles, selection rectangles, and grapheme movement from the same style and layout options used to paint the field.
+TextField applies horizontal alignment through that retained TextLayout and derives value, placeholder, caret, selection, hit-test, and IME geometry from one aligned origin.
+Single-line fields vertically center editable content by default, while multiline fields default to top alignment; an explicit TextField vertical alignment overrides that adaptive default.
+Floating labels, icons, and supporting messages retain their own component geometry and are not moved by editable-text alignment.
 IME geometry therefore derives from the committed TextLayout and the node's local-to-host transform rather than from a renderer-side measurement.
 
 Selection overlays remain Runtime-owned RenderNodes.

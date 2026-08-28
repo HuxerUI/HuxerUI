@@ -271,6 +271,13 @@ View WrappedTextApp() {
   };
 }
 
+View AlignedTextApp() {
+  return Text("aligned")
+      .Align(TextAlign::Trailing)
+      .VerticalAlign(TextVerticalAlign::Bottom)
+      .With(Frame{80.0F, 40.0F});
+}
+
 View AdaptiveFrameApp() {
   return Column {
     Text("Wide").With(Frame{.width = 80.0F}),
@@ -796,6 +803,18 @@ TEST_CASE("TestWrappedTextMeasurement") {
   REQUIRE(root != nullptr);
   REQUIRE(root->children[0]->bounds.width == 40.0F);
   REQUIRE(root->children[0]->bounds.height == 60.0F);
+}
+
+TEST_CASE("TextCarriesHorizontalAndVerticalAlignmentIntoParagraphPainting") {
+  TestPlatform platform;
+  Runtime runtime{AlignedTextApp, platform};
+  runtime.SetWindowMetrics({.viewport = {80.0F, 40.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const DrawTextCommand* text = FindText(scene, "aligned");
+  REQUIRE(text != nullptr);
+  REQUIRE(text->options.align == TextAlign::Trailing);
+  REQUIRE(text->options.vertical_align == TextVerticalAlign::Bottom);
 }
 
 TEST_CASE("TestAdaptiveFrameConstraints") {

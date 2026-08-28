@@ -150,6 +150,8 @@ protected:
   void AddModifier(detail::ModifierSpec modifier);
   void SetModifier(detail::ModifierSpec modifier);
   void SetTextStyle(TextStyle style);
+  void SetTextAlign(TextAlign align);
+  void SetTextVerticalAlign(TextVerticalAlign align);
   void SetImageFit(ImageFit fit);
   void SetImageAlignment(HorizontalAlignment horizontal, VerticalAlignment vertical);
   void SetImageSampling(ImageSampling sampling);
@@ -523,6 +525,8 @@ public:
   explicit Text(StringVariant value, TextRole role = TextRole::Body);
 
   Text Style(TextStyle style) &&;
+  Text Align(TextAlign align) &&;
+  Text VerticalAlign(TextVerticalAlign align) &&;
 
   template <class... Arguments> static Text Format(std::string_view format, const Arguments&... arguments) {
     return Text(detail::InterpolateText(format, arguments...));
@@ -707,6 +711,8 @@ public:
   TextField TrailingIcon(ImageVariant icon) &&;
   TextField Variant(TextFieldVariant value) &&;
   TextField LineLimits(TextFieldLineLimits value) &&;
+  TextField Align(TextAlign value) &&;
+  TextField VerticalAlign(TextVerticalAlign value) &&;
   TextField MaxLength(std::size_t value) &&;
   TextField Validation(ValidationResult value) &&;
   TextField Secure() &&;
@@ -731,6 +737,8 @@ private:
   std::optional<TextFieldVariant> variant_;
   TextInputConfiguration configuration_;
   TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();
+  TextAlign text_align_ = TextAlign::Leading;
+  std::optional<TextVerticalAlign> text_vertical_align_;
   std::optional<std::size_t> max_length_;
   ValidationResult validation_;
 };

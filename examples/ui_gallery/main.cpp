@@ -443,6 +443,7 @@ View TextInputDemo() {
         "Filled, outlined, and standard fields share editing, selection, composition, icons, and floating labels.",
         Column {
           TextField(display_name)
+              .Align(TextAlign::Center)
               .Label("Display name")
               .Placeholder("Your name")
               .OnChanged([display_name](const TextEditingValue& value) { display_name = value; }),
@@ -756,24 +757,25 @@ View LayoutDemo() {
         "consistently across platforms.",
         Column {
           Row {
-            Stack {
-              Text("Full").With(Foreground(theme.colors.on_primary)),
-            }.With(
-                Frame{.width = 48.0F, .height = 48.0F},
-                Background(theme.colors.primary),
-                CornerRadius(theme.shapes.full),
-                Align(HorizontalAlignment::Center, VerticalAlignment::Center)
-            ),
-            Stack {
-              Text("Adaptive capsule").With(Foreground(theme.colors.on_secondary_container)),
-            }.With(
-                Frame{.height = 48.0F},
-                Padding(EdgeInsets::Symmetric(theme.spacing.medium, 0.0F)),
-                Background(theme.colors.secondary_container),
-                CornerRadius(theme.shapes.full),
-                Align(HorizontalAlignment::Start, VerticalAlignment::Center),
-                Grow()
-            ),
+            Text("Full")
+                .Align(TextAlign::Center)
+                .VerticalAlign(TextVerticalAlign::Center)
+                .With(
+                    Frame{.width = 48.0F, .height = 48.0F},
+                    Foreground(theme.colors.on_primary),
+                    Background(theme.colors.primary),
+                    CornerRadius(theme.shapes.full)
+                ),
+            Text("Adaptive capsule")
+                .VerticalAlign(TextVerticalAlign::Center)
+                .With(
+                    Frame{.height = 48.0F},
+                    Padding(EdgeInsets::Symmetric(theme.spacing.medium, 0.0F)),
+                    Foreground(theme.colors.on_secondary_container),
+                    Background(theme.colors.secondary_container),
+                    CornerRadius(theme.shapes.full),
+                    Grow()
+                ),
           }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center)),
           Row {
             Text("SECURE SESSION").With(Foreground(theme.colors.primary)),

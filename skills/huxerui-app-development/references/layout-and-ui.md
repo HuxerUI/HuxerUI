@@ -73,7 +73,9 @@ return Stack {
 - Parent constraints remain authoritative; an impossible `Frame` does not override them.
 - Prefer min/max bounds and growth over fixed viewport dimensions.
 
-`TextAlign::Center` centers glyph layout only inside the paragraph rectangle already assigned to `Text`. It may be invisible when the text has only natural width. Place the entire text View with `MainAlign`/`CrossAlign` on a linear parent, `Align` on a `Stack`, or an explicit `Frame`. Vertical centering is normally parent placement, not `TextAlign`.
+`Text(...).Align(TextAlign::...)` and `TextField(...).Align(TextAlign::...)` place glyphs horizontally inside the component's text rectangle. `.VerticalAlign(TextVerticalAlign::...)` controls paragraph placement on the vertical axis. These component-specific methods do not place the View itself and may be visually unchanged when the paragraph rectangle has only natural size.
+
+Place the entire View with `MainAlign`/`CrossAlign` on a linear parent or `.With(Align(HorizontalAlignment::..., VerticalAlignment::...))` on a `Stack`. The `Align` modifier is Stack child-placement policy and is unrelated to the `Text` and `TextField` methods with the same short name.
 
 ## Constraint discipline
 

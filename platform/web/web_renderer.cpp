@@ -952,8 +952,13 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command) {
     return;
   }
   const WebTextLayout& layout = ParagraphFor(command.text, command.style, command.rect.width, command.options);
-  const float vertical_offset =
-      command.options.wrap == TextWrap::NoWrap ? (command.rect.height - layout.Metrics().size.height) * 0.5F : 0.0F;
+  const float remaining_height = std::max(0.0F, command.rect.height - layout.Metrics().size.height);
+  float vertical_offset = 0.0F;
+  if (command.options.vertical_align == TextVerticalAlign::Center) {
+    vertical_offset = remaining_height * 0.5F;
+  } else if (command.options.vertical_align == TextVerticalAlign::Bottom) {
+    vertical_offset = remaining_height;
+  }
   context_.call<void>("save");
   context_.call<void>("beginPath");
   context_.call<void>("rect", command.rect.x, command.rect.y, command.rect.width, command.rect.height);
@@ -968,8 +973,8 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command) {
   );
   context_.set("fillStyle", CssColor(command.style.foreground));
   for (const WebTextLayout::Line& line : layout.Lines()) {
-    const float x = command.rect.x + layout.LineOffset(line);
-    const float baseline = command.rect.y + vertical_offset + line.baseline;
+    const float x = command.rect.x + command.paragraph_offset.x + layout.LineOffset(line);
+    const float baseline = command.rect.y + command.paragraph_offset.y + vertical_offset + line.baseline;
     context_.call<void>("fillText", layout.TextFor(line), x, baseline);
     DrawTextDecorations(context_, x, baseline, layout.LineWidth(line), command.style, layout.ResolvedFontMetrics());
   }

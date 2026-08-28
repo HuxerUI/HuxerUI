@@ -250,6 +250,21 @@ CTTextAlignment ToTextAlignment(TextAlign align, TextDirection direction) {
   return kCTTextAlignmentNatural;
 }
 
+float TextAlignmentOffset(TextAlign align, TextDirection direction, float available_width, float content_width) {
+  if (!std::isfinite(available_width)) {
+    return 0.0F;
+  }
+  const float remaining = available_width - content_width;
+  if (align == TextAlign::Center) {
+    return remaining * 0.5F;
+  }
+  if ((align == TextAlign::Leading && direction == TextDirection::RightToLeft) ||
+      (align == TextAlign::Trailing && direction != TextDirection::RightToLeft)) {
+    return remaining;
+  }
+  return 0.0F;
+}
+
 CFAttributedStringRef CreateAttributedString(
     std::string_view text,
     const TextStyle& style,
@@ -564,6 +579,7 @@ struct AppKitRenderer::State {
       CombineHash(result, std::hash<TextDecoration>{}(decoration));
       CombineHash(result, HashShaping(options.shaping));
       CombineHash(result, std::hash<TextAlign>{}(options.align));
+      CombineHash(result, std::hash<TextVerticalAlign>{}(options.vertical_align));
       CombineHash(result, std::hash<TextWrap>{}(options.wrap));
       CombineHash(result, std::hash<float>{}(size.width));
       CombineHash(result, std::hash<float>{}(size.height));
@@ -833,6 +849,7 @@ public:
     string_ = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
     CTFontRef font = CreateFont(style.font);
     line_height_ = static_cast<float>(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font));
+    const TextDirection direction = ResolveTextDirection(text, options.shaping.direction, font);
     CFRelease(font);
 
     const bool constrained = std::isfinite(max_width);
@@ -851,6 +868,7 @@ public:
           std::ceil(static_cast<float>(width)),
           std::ceil(std::max(line_height_, static_cast<float>(ascent + descent + leading))),
       };
+      horizontal_offset_ = TextAlignmentOffset(options.align, direction, max_width, static_cast<float>(width));
       metrics_ = {
           size_,
           static_cast<float>(ascent),
@@ -939,7 +957,7 @@ public:
 
   TextPosition HitTest(Point point) const override {
     CTLineRef line = line_;
-    CGPoint origin{};
+    CGPoint origin{horizontal_offset_, 0.0};
     CFRange range = CFRangeMake(0, static_cast<CFIndex>(string_.length));
     std::size_t selected_line = 0;
     if (!line_records_.empty()) {
@@ -980,7 +998,7 @@ public:
   Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
     const CFIndex index = std::clamp<CFIndex>(static_cast<CFIndex>(offset), 0, static_cast<CFIndex>(string_.length));
     CTLineRef line = line_;
-    CGPoint origin{};
+    CGPoint origin{horizontal_offset_, 0.0};
     float top = 0.0F;
     float height = line_height_;
     if (!line_records_.empty()) {
@@ -1048,7 +1066,13 @@ public:
       }
     };
     if (line_records_.empty()) {
-      append_line(line_, CFRangeMake(0, static_cast<CFIndex>(string_.length)), {}, 0.0F, line_height_);
+      append_line(
+          line_,
+          CFRangeMake(0, static_cast<CFIndex>(string_.length)),
+          CGPointMake(horizontal_offset_, 0.0),
+          0.0F,
+          line_height_
+      );
     } else {
       for (const LineRecord& line : line_records_) {
         append_line(line.line, line.range, line.origin, line.top, line.height);
@@ -1091,6 +1115,7 @@ private:
   Size size_;
   TextLayoutMetrics metrics_;
   float line_height_ = 0.0F;
+  float horizontal_offset_ = 0.0F;
 };
 
 AppKitRenderer::AppKitRenderer() : state_(std::make_unique<State>()) {}
@@ -1270,12 +1295,21 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& 
     return;
   }
   State::CachedParagraph& paragraph = state_->ParagraphFor(command);
-  const float vertical_offset =
-      command.options.wrap == TextWrap::NoWrap ? (command.rect.height - paragraph.content_height) * 0.5F : 0.0F;
+  const float remaining_height = std::max(0.0F, command.rect.height - paragraph.content_height);
+  float vertical_offset = 0.0F;
+  if (command.options.vertical_align == TextVerticalAlign::Center) {
+    vertical_offset = remaining_height * 0.5F;
+  } else if (command.options.vertical_align == TextVerticalAlign::Bottom) {
+    vertical_offset = remaining_height;
+  }
 
   CGContextSaveGState(context);
   CGContextClipToRect(context, CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height));
-  CGContextTranslateCTM(context, command.rect.x, command.rect.y + paragraph.frame_height + vertical_offset);
+  CGContextTranslateCTM(
+      context,
+      command.rect.x + command.paragraph_offset.x,
+      command.rect.y + paragraph.frame_height + vertical_offset + command.paragraph_offset.y
+  );
   CGContextScaleCTM(context, 1.0, -1.0);
   CGContextSetTextMatrix(context, CGAffineTransformIdentity);
   SetFillColor(context, command.style.foreground);

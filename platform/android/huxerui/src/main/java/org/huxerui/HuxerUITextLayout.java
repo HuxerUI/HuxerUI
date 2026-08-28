@@ -14,13 +14,14 @@ final class HuxerUITextLayout {
     private final String text;
     private final TextPaint paint;
     private final StaticLayout layout;
+    private final float horizontalOffset;
 
     HuxerUITextLayout(
             String text, TextPaint paint, float maxWidth, Layout.Alignment alignment, boolean wrap, int direction) {
         this.text = text;
         this.paint = paint;
         float desiredWidth = StaticLayout.getDesiredWidth(text, paint);
-        float requestedWidth = wrap && Float.isFinite(maxWidth) ? Math.min(maxWidth, desiredWidth) : desiredWidth;
+        float requestedWidth = wrap && Float.isFinite(maxWidth) ? maxWidth : desiredWidth;
         int width = Math.max(1, (int) Math.ceil(requestedWidth));
         StaticLayout.Builder builder = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
                                                .setAlignment(alignment)
@@ -33,6 +34,7 @@ final class HuxerUITextLayout {
             builder.setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_LTR);
         }
         layout = builder.build();
+        horizontalOffset = wrap ? 0.0F : resolveHorizontalOffset(text, maxWidth, width, alignment, direction);
     }
 
     private float[] measure() {
@@ -48,7 +50,7 @@ final class HuxerUITextLayout {
 
     private long hitTest(float x, float y) {
         int line = layout.getLineForVertical((int) Math.max(0.0F, y));
-        int offset = layout.getOffsetForHorizontal(line, x);
+        int offset = layout.getOffsetForHorizontal(line, x - horizontalOffset);
         boolean upstream = line + 1 < layout.getLineCount() && offset == layout.getLineEnd(line)
                 && layout.getLineStart(line + 1) == offset;
         return upstream ? -(long) offset - 1L : offset;
@@ -60,7 +62,8 @@ final class HuxerUITextLayout {
         if (upstream && line > 0 && layout.getLineStart(line) == offset && layout.getLineEnd(line - 1) == offset) {
             --line;
         }
-        float x = upstream ? layout.getSecondaryHorizontal(offset) : layout.getPrimaryHorizontal(offset);
+        float x = (upstream ? layout.getSecondaryHorizontal(offset) : layout.getPrimaryHorizontal(offset))
+                + horizontalOffset;
         return new float[] {
                 x,
                 layout.getLineTop(line),
@@ -89,12 +92,33 @@ final class HuxerUITextLayout {
             layout.getSelectionPath(lineStart, lineEnd, selection);
             RectF bounds = new RectF();
             selection.computeBounds(bounds, true);
-            result[output++] = bounds.left;
+            result[output++] = bounds.left + horizontalOffset;
             result[output++] = bounds.top;
             result[output++] = bounds.width();
             result[output++] = bounds.height();
         }
         return output == result.length ? result : Arrays.copyOf(result, output);
+    }
+
+    static float resolveHorizontalOffset(String text, float availableWidth, float layoutWidth,
+            Layout.Alignment alignment, int direction) {
+        if (!Float.isFinite(availableWidth)) {
+            return 0.0F;
+        }
+        if (alignment == Layout.Alignment.ALIGN_CENTER) {
+            return (availableWidth - layoutWidth) * 0.5F;
+        }
+        boolean rightToLeft = isRightToLeft(text, direction);
+        if ((alignment == Layout.Alignment.ALIGN_NORMAL && rightToLeft)
+                || (alignment == Layout.Alignment.ALIGN_OPPOSITE && !rightToLeft)) {
+            return availableWidth - layoutWidth;
+        }
+        return 0.0F;
+    }
+
+    static boolean isRightToLeft(String text, int direction) {
+        return direction == 2
+                || (direction != 1 && TextDirectionHeuristics.FIRSTSTRONG_LTR.isRtl(text, 0, text.length()));
     }
 
     private long previous(long requestedOffset) {

@@ -72,6 +72,8 @@ public final class HuxerUIView extends ViewGroup {
 
     private static final int TEXT_ALIGN_CENTER = 1;
     private static final int TEXT_ALIGN_TRAILING = 2;
+    private static final int TEXT_VERTICAL_ALIGN_CENTER = 1;
+    private static final int TEXT_VERTICAL_ALIGN_BOTTOM = 2;
     private static final int TEXT_WRAP_WORD = 1;
     private static final int TEXT_DIRECTION_LEFT_TO_RIGHT = 1;
     private static final int TEXT_DIRECTION_RIGHT_TO_LEFT = 2;
@@ -1276,7 +1278,7 @@ public final class HuxerUIView extends ViewGroup {
             int slant, int decoration, int direction, byte[] utf8Locale) {
         prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, decoration, utf8Locale);
         String text = new String(utf8, StandardCharsets.UTF_8);
-        boolean rightToLeft = isTextRightToLeft(text, direction);
+        boolean rightToLeft = HuxerUITextLayout.isRightToLeft(text, direction);
         float advance = textPaint.getRunAdvance(text, 0, text.length(), 0, text.length(), rightToLeft, text.length());
         Paint.FontMetrics metrics = textPaint.getFontMetrics();
         textBounds.setEmpty();
@@ -1365,9 +1367,10 @@ public final class HuxerUIView extends ViewGroup {
         paint.setShader(null);
     }
 
-    private void drawText(Canvas canvas, byte[] utf8, float x, float y, float width, float height, int color,
-            float fontSize, int familyKind, byte[] familyName, int weight, int slant, int decoration, int alignment,
-            int wrap, int direction, byte[] utf8Locale) {
+    private void drawText(Canvas canvas, byte[] utf8, float x, float y, float width, float height,
+            float paragraphOffsetX, float paragraphOffsetY, int color, float fontSize, int familyKind,
+            byte[] familyName, int weight, int slant, int decoration, int alignment, int verticalAlignment, int wrap,
+            int direction, byte[] utf8Locale) {
         if (width <= 0.0F || height <= 0.0F) {
             return;
         }
@@ -1389,18 +1392,17 @@ public final class HuxerUIView extends ViewGroup {
             paragraphCache.put(key, layout);
         }
         layout.getPaint().setColor(color);
-        float horizontalOffset = 0.0F;
-        if (!wraps) {
-            boolean rightToLeft = isTextRightToLeft(text, direction);
-            if (alignment == TEXT_ALIGN_CENTER) {
-                horizontalOffset = (width - layoutWidth) * 0.5F;
-            } else if ((alignment != TEXT_ALIGN_TRAILING && rightToLeft)
-                    || (alignment == TEXT_ALIGN_TRAILING && !rightToLeft)) {
-                horizontalOffset = width - layoutWidth;
-            }
+        float horizontalOffset = wraps ? 0.0F
+                : HuxerUITextLayout.resolveHorizontalOffset(text, width, layoutWidth, layoutAlignment, direction);
+        float remainingHeight = Math.max(0.0F, height - layout.getHeight());
+        float verticalOffset = 0.0F;
+        if (verticalAlignment == TEXT_VERTICAL_ALIGN_CENTER) {
+            verticalOffset = remainingHeight * 0.5F;
+        } else if (verticalAlignment == TEXT_VERTICAL_ALIGN_BOTTOM) {
+            verticalOffset = remainingHeight;
         }
-        float verticalOffset = wraps ? 0.0F : (height - layout.getHeight()) * 0.5F;
-        canvas.translate(x + horizontalOffset, y + verticalOffset);
+        canvas.translate(
+                x + horizontalOffset + paragraphOffsetX, y + verticalOffset + paragraphOffsetY);
         layout.draw(canvas);
         canvas.restoreToCount(saveCount);
     }
@@ -1424,7 +1426,7 @@ public final class HuxerUIView extends ViewGroup {
                     StandardCharsets.UTF_8);
             prepareTextPaint(fontSizes[index], colors[index], styles[styleIndex], familyName, styles[styleIndex + 1],
                     styles[styleIndex + 2], styles[styleIndex + 3], locale);
-            boolean rightToLeft = isTextRightToLeft(text, styles[styleIndex + 4]);
+            boolean rightToLeft = HuxerUITextLayout.isRightToLeft(text, styles[styleIndex + 4]);
             canvas.drawTextRun(text, 0, text.length(), 0, text.length(), baselines[textIndex], baselines[textIndex + 1],
                     rightToLeft, textPaint);
         }
@@ -1814,12 +1816,6 @@ public final class HuxerUIView extends ViewGroup {
         paint.setAlpha(Math.round(Math.max(0.0F, Math.min(1.0F, opacity)) * 255.0F));
         paint.setFilterBitmap(sampling != 0);
         canvas.drawBitmap(bitmap, source, rect, paint);
-    }
-
-    private static boolean isTextRightToLeft(String text, int direction) {
-        return direction == TEXT_DIRECTION_RIGHT_TO_LEFT
-                || (direction != TEXT_DIRECTION_LEFT_TO_RIGHT
-                        && TextDirectionHeuristics.FIRSTSTRONG_LTR.isRtl(text, 0, text.length()));
     }
 
     private StaticLayout createTextLayout(String text, int width, Layout.Alignment alignment, int direction) {

@@ -125,6 +125,12 @@ enum class TextAlign {
   Trailing,
 };
 
+enum class TextVerticalAlign {
+  Top,
+  Center,
+  Bottom,
+};
+
 enum class TextWrap {
   NoWrap,
   Word,
@@ -133,6 +139,7 @@ enum class TextWrap {
 struct TextLayoutOptions {
   TextShapingOptions shaping;
   TextAlign align = TextAlign::Leading;
+  TextVerticalAlign vertical_align = TextVerticalAlign::Top;
   TextWrap wrap = TextWrap::Word;
 
   bool operator==(const TextLayoutOptions&) const = default;

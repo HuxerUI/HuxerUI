@@ -209,6 +209,9 @@ public:
     g_object_unref(layout_context);
     ConfigureLayout(layout_, text_, style, max_width, options);
     metrics_ = LayoutMetrics(layout_);
+    if (options.wrap == TextWrap::NoWrap && std::isfinite(max_width) && metrics_.size.width < max_width) {
+      pango_layout_set_width(layout_, static_cast<int>(std::ceil(max_width * PANGO_SCALE)));
+    }
     BuildCaretOffsets();
   }
 
@@ -789,15 +792,23 @@ private:
     if (command.options.wrap == TextWrap::NoWrap && PangoUnits(logical.width) < command.rect.width) {
       pango_layout_set_width(layout, static_cast<int>(std::ceil(command.rect.width * PANGO_SCALE)));
     }
-    const float vertical_offset = command.options.wrap == TextWrap::NoWrap
-                                      ? std::max(0.0F, (command.rect.height - PangoUnits(logical.height)) * 0.5F)
-                                      : 0.0F;
+    const float remaining_height = std::max(0.0F, command.rect.height - PangoUnits(logical.height));
+    float vertical_offset = 0.0F;
+    if (command.options.vertical_align == TextVerticalAlign::Center) {
+      vertical_offset = remaining_height * 0.5F;
+    } else if (command.options.vertical_align == TextVerticalAlign::Bottom) {
+      vertical_offset = remaining_height;
+    }
     cairo_save(context_);
     cairo_new_path(context_);
     cairo_rectangle(context_, command.rect.x, command.rect.y, command.rect.width, command.rect.height);
     cairo_clip(context_);
     SetSourceColor(context_, command.style.foreground);
-    cairo_move_to(context_, command.rect.x, command.rect.y + vertical_offset);
+    cairo_move_to(
+        context_,
+        command.rect.x + command.paragraph_offset.x,
+        command.rect.y + vertical_offset + command.paragraph_offset.y
+    );
     pango_cairo_show_layout(context_, layout);
     cairo_restore(context_);
     g_object_unref(layout);

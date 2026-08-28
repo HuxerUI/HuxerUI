@@ -7,6 +7,8 @@ Use application state for authoritative values and let mounted behavior retain t
 
 `Text` accepts literals, `StringResource`, formatted values, and `State<T>`.
 Use `TextRole` for theme typography or provide an explicit `TextStyle`.
+Use `Align(TextAlign::...)` for horizontal paragraph alignment and `VerticalAlign(TextVerticalAlign::...)` when a framed Text should place its paragraph within extra height.
+Vertical alignment does not change intrinsic text measurement.
 
 `ImageVariant` covers `ImageResource`, `ImageAsset`, and `VectorAsset`.
 `Image` also accepts `ExternalTexture` through a separate overload because a live platform texture is not an application image value.
@@ -162,6 +164,8 @@ The active theme decides whether the visual label is shown; its semantic label r
 
 Use `LeadingIcon`, `TrailingIcon`, `LineLimits`, `MaxLength`, `Secure`, `InputConfiguration`, and `Validation` for typed configuration.
 `TextFieldLineLimits::SingleLine()` is the default; multiline fields can define a minimum and optional maximum line count.
+`Align(TextAlign::...)` applies horizontal alignment to editable text, placeholder, selection, caret, hit testing, and input-method geometry.
+`VerticalAlign(TextVerticalAlign::...)` places the editable region within the field; single-line fields default to `Center` and multiline fields default to `Top`.
 
 `OnChanged` reports the complete requested editing value.
 `OnSubmitted` reports the submitted text when the configured platform action is performed.

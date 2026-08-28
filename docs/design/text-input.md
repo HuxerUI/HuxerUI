@@ -587,6 +587,12 @@ They are decorative content within the editor geometry rather than independent c
 Their occupied width participates in text layout, selection, caret geometry, scrolling, and native text-input geometry.
 Vector assets resolve the TextField state color, while raster assets retain their encoded colors.
 
+`Align(TextAlign::...)` and `VerticalAlign(TextVerticalAlign::...)` configure the editable text region rather than the field container.
+The retained TextLayout applies horizontal alignment to the value, placeholder, selection, caret, hit testing, scrolling, and native input geometry.
+Vertical alignment places the same editing geometry within the available content height without changing intrinsic measurement.
+Single-line fields default to `Center`; multiline fields default to `Top`; an explicit value remains stable when line limits change.
+Floating labels, icons, and supporting messages keep their component-owned placement.
+
 Text semantics such as placeholder, multiline behavior, keyboard type, and submission action are component configuration. Intrinsic line limits and input length limits follow the same rule:
 
 ```cpp
@@ -791,7 +797,7 @@ The current `PaintContext` already provides the necessary primitives:
 
 TextField does not require a component-specific drawing command.
 
-A single-line field registers its editor rectangle as a horizontal scroll viewport, maintains a retained offset through the shared scroll state, and keeps the active caret visible. Fixed decorations such as leading and trailing icons remain outside that viewport. The field does not create an internal ScrollView node.
+A single-line field registers its editor rectangle as a horizontal scroll viewport, maintains a retained offset through the shared scroll state, and keeps the active caret visible. The retained layout and DrawText command use the same bounded paragraph width, while `paragraph_offset` translates its rendering inside the fixed editor clip. Fixed decorations such as leading and trailing icons remain outside that viewport. The field does not create an internal ScrollView node.
 
 A multiline field uses the same retained scroll state on the vertical axis when its content is taller than its viewport. Pointer hit testing, selection, composition, candidate geometry, and caret painting all resolve through the same translated text origin. Up and Down preserve a preferred horizontal caret position, while Home and End move to visual line boundaries.
 

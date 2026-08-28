@@ -11,6 +11,13 @@ static_assert(std::equality_comparable<Font>);
 static_assert(std::equality_comparable<TextStyle>);
 static_assert(std::equality_comparable<TextLayoutOptions>);
 
+TEST_CASE("TextLayoutOptionsHaveExplicitAlignmentDefaults") {
+  const TextLayoutOptions options;
+  REQUIRE(options.align == TextAlign::Leading);
+  REQUIRE(options.vertical_align == TextVerticalAlign::Top);
+  REQUIRE(options.wrap == TextWrap::Word);
+}
+
 TEST_CASE("FontFactoriesPreservePlatformNeutralIdentity") {
   const Font system = Font::System(16.0F).WithWeight(FontWeight::SemiBold).WithSlant(FontSlant::Italic);
   REQUIRE(system.FamilyKind() == FontFamilyKind::System);

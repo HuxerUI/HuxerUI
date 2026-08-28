@@ -6,7 +6,7 @@ This is a decision-oriented catalog, not a replacement for the active SDK's publ
 
 | Component | Important contract |
 | --- | --- |
-| `Text` | Takes `StringVariant` and optional `TextRole`; `.Style(TextStyle)` overrides text styling. `Text::Format` supports literal and resource formats. |
+| `Text` | Takes `StringVariant` and optional `TextRole`; `.Style(TextStyle)` overrides text styling. `.Align(TextAlign)` and `.VerticalAlign(TextVerticalAlign)` place the paragraph inside its text rectangle. `Text::Format` supports literal and resource formats. |
 | `Image` | Takes `ImageVariant` or `ExternalTexture`; `.Fit`, `.Align`, `.Sampling`, and `.Tint` are component-specific. |
 | `Canvas` | Takes a `CanvasPainter` and paints in the size assigned by layout. |
 | `Divider` | Horizontal by default; pass `Axis::Vertical` only when height is bounded. |
@@ -32,7 +32,7 @@ Do not rely on constructor overloads that accept `State<T>` to mutate state auto
 
 ## Input and progress
 
-- `TextField(TextEditingValue)` is controlled by the complete editing value. Configure `.Label`, `.Placeholder`, icons, `.Variant`, `.LineLimits`, `.MaxLength`, `.Validation`, `.Secure`, and `.InputConfiguration`, then handle `.OnChanged` and optionally `.OnSubmitted`.
+- `TextField(TextEditingValue)` is controlled by the complete editing value. Configure `.Label`, `.Placeholder`, icons, `.Variant`, `.LineLimits`, `.MaxLength`, `.Validation`, `.Secure`, `.Align(TextAlign)`, `.VerticalAlign(TextVerticalAlign)`, and `.InputConfiguration`, then handle `.OnChanged` and optionally `.OnSubmitted`. Alignment applies to the editable paragraph, not the TextField View's placement.
 - `TextFieldVariant` currently contains `Filled`, `Outlined`, and `Standard`.
 - `ProgressCircle()` and `ProgressBar()` are indeterminate. Their `float` constructors are determinate.
 

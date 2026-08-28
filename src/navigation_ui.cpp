@@ -151,7 +151,11 @@ private:
     auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
     spec->text = std::move(title);
     spec->text_role = TextRole::Title;
-    spec->properties.text_layout_options = {.wrap = TextWrap::NoWrap};
+    spec->properties.text_layout_options = {
+        .shaping = {},
+        .vertical_align = TextVerticalAlign::Center,
+        .wrap = TextWrap::NoWrap,
+    };
     spec->component_semantics.role = SemanticRole::Heading;
     spec->component_semantics.heading_level = 1;
     spec->defaults = ApplyTopAppBarTitleDefaults;

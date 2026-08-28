@@ -149,11 +149,18 @@ void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, Corner
   }
 }
 
-void PaintContext::DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options) {
+void PaintContext::DrawText(
+    Rect rect, std::string text, TextStyle style, TextLayoutOptions options, Point paragraph_offset
+) {
   RequireOpen();
   RequireRect(rect);
   RequireTextStyle(style);
-  sequence_.commands_.emplace_back(DrawTextCommand{rect, std::move(text), std::move(style), std::move(options)});
+  if (!IsFinite(paragraph_offset)) {
+    throw std::invalid_argument("HuxerUI text paragraph offset must be finite");
+  }
+  sequence_.commands_.emplace_back(
+      DrawTextCommand{rect, std::move(text), std::move(style), std::move(options), paragraph_offset}
+  );
   Include(rect);
 }
 

@@ -49,6 +49,8 @@ Blurred Path shadows exclude the shifted caster interior, matching rectangular s
 
 Canvas uses the same text vocabulary as built-in controls.
 `DrawText()` lays out a paragraph inside a rectangle, while `DrawTextRun()` and `DrawTextRuns()` replay baseline-positioned runs whose bounds were produced by `TextMeasurer`.
+`TextLayoutOptions` controls horizontal alignment, vertical placement, and wrapping independently for paragraph drawing.
+`DrawTextCommand::paragraph_offset` translates the laid-out paragraph inside its fixed layout and clip rectangle without changing measurement or alignment.
 The run path is intended for syntax highlighting, diagnostics, and other callers that already own line layout.
 See [Text and Font Design](text.md) for the measurement and replay contract.
 

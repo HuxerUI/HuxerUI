@@ -92,6 +92,20 @@ public:
   std::optional<std::string> text;
 };
 
+class RecordingTextLayoutPlatform final : public TestPlatform {
+public:
+  std::unique_ptr<detail::TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    if (text == "Centered value that overflows the editor" && options.align == TextAlign::Center) {
+      centered_layout_width = max_width;
+    }
+    return TestPlatform::CreateTextLayout(text, style, max_width, options);
+  }
+
+  float centered_layout_width = std::numeric_limits<float>::infinity();
+};
+
 View TextFieldApp() {
   auto value = UseState(
       TextEditingValue::FromText(
@@ -679,6 +693,30 @@ const StrokePathCommand* FindTextFieldOutline(const FlattenedScene& scene, Color
   return nullptr;
 }
 
+template <TextVerticalAlign vertical_align>
+View AlignedPlaceholderApp() {
+  return TextField(TextEditingValue::FromText(""))
+      .Placeholder("Aligned placeholder")
+      .Align(TextAlign::Trailing)
+      .VerticalAlign(vertical_align)
+      .With(huxerui::Frame{160.0F, 80.0F});
+}
+
+View DefaultAlignedTextFieldsApp() {
+  return Column {
+    TextField(TextEditingValue::FromText("")).Placeholder("Single line"),
+    TextField(TextEditingValue::FromText(""))
+        .Placeholder("Multiple lines")
+        .LineLimits(TextFieldLineLimits::MultiLine(2)),
+  };
+}
+
+View CenterAlignedTextFieldApp() {
+  return TextField(TextEditingValue::FromText("Centered value that overflows the editor"))
+      .Align(TextAlign::Center)
+      .With(huxerui::Frame{160.0F, 56.0F});
+}
+
 } // namespace
 
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
@@ -724,6 +762,58 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   REQUIRE(style.validation_border_width == 1.0F);
   REQUIRE(style.focused_validation_border_width == 2.0F);
   REQUIRE(style.filled.focused_border == material_theme.colors.primary);
+}
+
+TEST_CASE("TextFieldAlignmentUsesOneLayoutContractForPlaceholderGeometry") {
+  const auto render = [](RootFactory factory) {
+    TestPlatform platform;
+    Runtime runtime{factory, platform};
+    runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+    const DrawTextCommand* placeholder = FindText(runtime.BuildFrame(), "Aligned placeholder");
+    REQUIRE(placeholder != nullptr);
+    return *placeholder;
+  };
+
+  const DrawTextCommand top = render(AlignedPlaceholderApp<TextVerticalAlign::Top>);
+  const DrawTextCommand center = render(AlignedPlaceholderApp<TextVerticalAlign::Center>);
+  const DrawTextCommand bottom = render(AlignedPlaceholderApp<TextVerticalAlign::Bottom>);
+  REQUIRE(top.options.align == TextAlign::Trailing);
+  REQUIRE(top.options.vertical_align == TextVerticalAlign::Top);
+  REQUIRE(center.options.vertical_align == TextVerticalAlign::Center);
+  REQUIRE(bottom.options.vertical_align == TextVerticalAlign::Bottom);
+  REQUIRE(top.rect.y < center.rect.y);
+  REQUIRE(center.rect.y < bottom.rect.y);
+}
+
+TEST_CASE("TextFieldDefaultsSingleLineToCenterAndMultilineToTop") {
+  TestPlatform platform;
+  Runtime runtime{DefaultAlignedTextFieldsApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 200.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const DrawTextCommand* single_line = FindText(scene, "Single line");
+  const DrawTextCommand* multiline = FindText(scene, "Multiple lines");
+  REQUIRE(single_line != nullptr);
+  REQUIRE(multiline != nullptr);
+  REQUIRE(single_line->options.vertical_align == TextVerticalAlign::Center);
+  REQUIRE(single_line->options.wrap == TextWrap::NoWrap);
+  REQUIRE(multiline->options.vertical_align == TextVerticalAlign::Top);
+  REQUIRE(multiline->options.wrap == TextWrap::Word);
+}
+
+TEST_CASE("TextFieldUsesTheBoundedEditorWidthForAlignedSingleLineGeometry") {
+  RecordingTextLayoutPlatform platform;
+  Runtime runtime{CenterAlignedTextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  const DrawTextCommand* text = FindText(scene, "Centered value that overflows the editor");
+
+  REQUIRE(std::isfinite(platform.centered_layout_width));
+  REQUIRE(platform.centered_layout_width > 0.0F);
+  REQUIRE(platform.centered_layout_width < 200.0F);
+  REQUIRE(text != nullptr);
+  REQUIRE(text->rect.width == Catch::Approx(platform.centered_layout_width));
+  REQUIRE(text->paragraph_offset.x < 0.0F);
 }
 
 TEST_CASE("TestTextFieldUsesThemeCaretWidth") {

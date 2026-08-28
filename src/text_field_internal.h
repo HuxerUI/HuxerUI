@@ -64,6 +64,7 @@ struct TextFieldModifier {
   std::optional<ImageVariant> trailing_icon;
   std::optional<TextFieldVariant> variant;
   TextInputConfiguration configuration;
+  TextLayoutOptions text_layout_options;
   std::size_t min_lines = 1;
   std::optional<std::size_t> max_lines;
   std::optional<std::size_t> max_length;

@@ -122,6 +122,7 @@ struct DrawTextCommand {
   std::string text;
   TextStyle style;
   TextLayoutOptions options;
+  Point paragraph_offset;
 
   bool operator==(const DrawTextCommand&) const = default;
 };
@@ -372,7 +373,8 @@ public:
   void DrawRect(Rect rect, Color color, CornerRadii corner_radii = {});
   void DrawLinearGradient(Rect rect, LinearGradient gradient, CornerRadii corner_radii = {});
   void DrawRadialGradient(Rect rect, RadialGradient gradient, CornerRadii corner_radii = {});
-  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {});
+  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {},
+                Point paragraph_offset = {});
   void
   DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});
   void DrawTextRuns(std::vector<TextRun> runs);

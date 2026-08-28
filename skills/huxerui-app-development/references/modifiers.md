@@ -16,7 +16,7 @@ Modifiers apply from left to right. Property modifiers alter declaration data wi
 | `Enabled`, `Focusable` | Input/focus eligibility and semantics |
 | `Padding`, `Frame` | Measurement and layout constraints |
 | `Spacing`, `MainAlign`, `CrossAlign` | Linear and Flow container layout policy |
-| `Align` | `Stack` container alignment policy |
+| `Align` | `Stack` child-placement policy; unrelated to the component-specific `Text::Align` and `TextField::Align` methods |
 | `Grow` | Immediate parent-child layout metadata |
 | `Background`, `Border`, `CornerRadius`, `Shadow`, `Foreground`, `Opacity` | Paint/presentation; some affect clipping or presentation bounds as defined by the active SDK |
 | `FontSize` | Inherited text styling |

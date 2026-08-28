@@ -101,6 +101,10 @@ struct PreparedTextLayout {
   std::string display_text;
 };
 
+bool ParagraphLayoutOptionsEqual(const TextLayoutOptions& left, const TextLayoutOptions& right) noexcept {
+  return left.shaping == right.shaping && left.align == right.align && left.wrap == right.wrap;
+}
+
 std::vector<TextOffset> CollectGraphemeBoundaries(detail::TextLayout& layout, std::string_view text) {
   const TextOffset length = detail::Utf16Length(text).value_or(0);
   std::vector<TextOffset> boundaries{0};
@@ -444,11 +448,15 @@ public:
     const bool text_layout_mode_changed =
         initialized_ && (configuration_.multiline != modifier.configuration.multiline ||
                          configuration_.secure != modifier.configuration.secure);
+    const bool text_layout_options_changed = initialized_ && text_layout_options_ != modifier.text_layout_options;
+    const bool paragraph_layout_options_changed =
+        initialized_ && !ParagraphLayoutOptionsEqual(text_layout_options_, modifier.text_layout_options);
     const bool authoritative_value_changed = initialized_ && modifier.value != authoritative_value_;
     const bool length_limit_changed = initialized_ && max_length_ != modifier.max_length;
     const bool validation_changed = validation_ != validation;
     const bool label_changed = label_ != label;
     configuration_ = modifier.configuration;
+    text_layout_options_ = modifier.text_layout_options;
     min_lines_ = modifier.min_lines;
     max_lines_ = modifier.max_lines;
     max_length_ = modifier.max_length;
@@ -480,6 +488,12 @@ public:
       floating_label_layout_.reset();
       placeholder_layout_.reset();
       validation_layout_.reset();
+    } else if (paragraph_layout_options_changed) {
+      text_layout_.reset();
+      placeholder_layout_.reset();
+    }
+    if (text_layout_options_changed) {
+      RequestCaretReveal();
     }
     if (text_layout_mode_changed) {
       if (node.scroll_state) {
@@ -652,28 +666,33 @@ public:
     const float placeholder_opacity = HasVisualLabel() ? label_progress : 1.0F;
     if (editing_.value.text.empty() && !placeholder_.empty() && placeholder_layout_ && placeholder_opacity > 0.0F) {
       const Size size = placeholder_layout_->Measure();
+      const Point placeholder_origin = TextOrigin(node, size);
       placeholder_style.foreground.alpha *= placeholder_opacity;
       context.DrawText(
           {
-              origin.x,
-              origin.y,
-              std::max(content.width, size.width),
+              content.x,
+              placeholder_origin.y,
+              content.width,
               size.height,
           },
           placeholder_,
-          std::move(placeholder_style)
+          std::move(placeholder_style),
+          text_layout_options_,
+          {placeholder_origin.x - content.x, 0.0F}
       );
     } else if (!editing_.value.text.empty()) {
       const Size size = text_layout_->Measure();
       context.DrawText(
           {
-              origin.x,
+              content.x,
               origin.y,
-              std::max(content.width, size.width),
+              content.width,
               size.height,
           },
           laid_out_text_,
-          std::move(text_style)
+          std::move(text_style),
+          text_layout_options_,
+          {origin.x - content.x, 0.0F}
       );
     }
 
@@ -1310,9 +1329,6 @@ private:
   }
 
   void EnsureLayouts(PlatformAdapter& platform) {
-    const TextLayoutOptions text_layout_options{
-        .wrap = configuration_.multiline ? TextWrap::Word : TextWrap::NoWrap,
-    };
     if (!text_layout_) {
       PreparedTextLayout prepared = PrepareTextFieldLayout(
           platform,
@@ -1320,7 +1336,7 @@ private:
           style_.text_style,
           text_layout_width_,
           configuration_.secure,
-          text_layout_options
+          text_layout_options_
       );
       text_layout_ = std::move(prepared.text_layout);
       laid_out_text_ = std::move(prepared.display_text);
@@ -1350,7 +1366,7 @@ private:
       laid_out_placeholder_.clear();
     } else if (!placeholder_layout_ || laid_out_placeholder_ != placeholder_) {
       placeholder_layout_ =
-          platform.CreateTextLayout(placeholder_, style_.placeholder_style, text_layout_width_, text_layout_options);
+          platform.CreateTextLayout(placeholder_, style_.placeholder_style, text_layout_width_, text_layout_options_);
       laid_out_placeholder_ = placeholder_;
       if (!placeholder_layout_) {
         throw std::logic_error("HuxerUI platform does not provide editable text layout");
@@ -1937,7 +1953,8 @@ private:
   TextPosition LineBoundary(bool end) const {
     const TextSelection selection = editing_.value.selection;
     const Rect caret = text_layout_->CaretRect(selection.active, selection.affinity);
-    const float x = end ? text_layout_->Measure().width + 1.0F : -1.0F;
+    const float layout_width = std::isfinite(text_layout_width_) ? text_layout_width_ : text_layout_->Measure().width;
+    const float x = end ? layout_width + 1.0F : -1.0F;
     return text_layout_->HitTest({x, caret.y + caret.height * 0.5F});
   }
 
@@ -2026,11 +2043,16 @@ private:
     return detail::IsValidTextEditingValue(probe);
   }
 
-  Point TextOrigin(const detail::MountedNode& node) const {
+  Point TextOrigin(const detail::MountedNode& node, Size size) const {
     const Rect content = EditorContentRect(node);
     const Rect frame = EditorFrame(node);
-    const Size size = text_layout_ ? text_layout_->Measure() : Size{};
-    float y = configuration_.multiline ? content.y : frame.y + std::max(0.0F, (frame.height - size.height) * 0.5F);
+    const float remaining_height = std::max(0.0F, content.height - size.height);
+    float y = content.y;
+    if (text_layout_options_.vertical_align == TextVerticalAlign::Center) {
+      y += remaining_height * 0.5F;
+    } else if (text_layout_options_.vertical_align == TextVerticalAlign::Bottom) {
+      y += remaining_height;
+    }
     if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
       const Rect floating_label = FloatingLabelBounds(node);
       float floating_y = floating_label.y + floating_label.height + std::max(0.0F, style_.label_spacing);
@@ -2050,6 +2072,10 @@ private:
         content.x - ResolveHorizontalScrollOffset(node, content),
         y,
     };
+  }
+
+  Point TextOrigin(const detail::MountedNode& node) const {
+    return TextOrigin(node, text_layout_ ? text_layout_->Measure() : Size{});
   }
 
   float ResolveHorizontalScrollOffset(const detail::MountedNode& node, Rect content) const {
@@ -2146,11 +2172,11 @@ private:
   }
 
   float ResolveLayoutWidth(PlatformAdapter& platform, Constraints constraints) const {
-    if (!configuration_.multiline) {
-      return std::numeric_limits<float>::infinity();
-    }
     if (constraints.HasBoundedWidth()) {
       return std::max(1.0F, constraints.max_width - IconContentWidth());
+    }
+    if (!configuration_.multiline) {
+      return std::numeric_limits<float>::infinity();
     }
 
     float width = std::max(1.0F, constraints.min_width - IconContentWidth());
@@ -2259,6 +2285,7 @@ private:
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
+  TextLayoutOptions text_layout_options_;
   float text_layout_width_ = std::numeric_limits<float>::infinity();
   float validation_text_layout_width_ = std::numeric_limits<float>::infinity();
   bool initialized_ = false;
@@ -2455,7 +2482,8 @@ bool TextFieldModifier::LayoutEquals(const TextFieldModifier& left, const TextFi
          left.leading_icon.has_value() == right.leading_icon.has_value() &&
          left.trailing_icon.has_value() == right.trailing_icon.has_value() && left.variant == right.variant &&
          left.configuration.multiline == right.configuration.multiline &&
-         left.configuration.secure == right.configuration.secure && left.min_lines == right.min_lines &&
+         left.configuration.secure == right.configuration.secure &&
+         left.text_layout_options == right.text_layout_options && left.min_lines == right.min_lines &&
          left.max_lines == right.max_lines && left.validation == right.validation;
 }
 
@@ -2559,6 +2587,18 @@ TextField TextField::LineLimits(TextFieldLineLimits value) && {
   return std::move(*this);
 }
 
+TextField TextField::Align(TextAlign value) && {
+  text_align_ = value;
+  UpdateModifier();
+  return std::move(*this);
+}
+
+TextField TextField::VerticalAlign(TextVerticalAlign value) && {
+  text_vertical_align_ = value;
+  UpdateModifier();
+  return std::move(*this);
+}
+
 TextField TextField::MaxLength(std::size_t value) && {
   max_length_ = value;
   UpdateModifier();
@@ -2589,6 +2629,14 @@ TextField TextField::InputConfiguration(TextInputConfiguration configuration) &&
 }
 
 void TextField::UpdateModifier() {
+  const TextLayoutOptions text_layout_options{
+      .shaping = {},
+      .align = text_align_,
+      .vertical_align = text_vertical_align_.value_or(
+          line_limits_.IsMultiline() ? TextVerticalAlign::Top : TextVerticalAlign::Center
+      ),
+      .wrap = line_limits_.IsMultiline() ? TextWrap::Word : TextWrap::NoWrap,
+  };
   SetModifier(detail::MakeModifierSpec(detail::TextFieldModifier{
       value_,
       label_,
@@ -2597,6 +2645,7 @@ void TextField::UpdateModifier() {
       trailing_icon_,
       variant_,
       configuration_,
+      text_layout_options,
       line_limits_.Minimum(),
       line_limits_.Maximum(),
       max_length_,

@@ -72,6 +72,24 @@ TEST_CASE("PaintContextBuildsAnImmutableLocalSequence") {
   REQUIRE_THROWS_AS(context.DrawRect({}, Color::White()), std::logic_error);
 }
 
+TEST_CASE("PaintContextKeepsTextParagraphOffsetsInsideFixedCommandBounds") {
+  const Rect bounds{10.0F, 20.0F, 80.0F, 24.0F};
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawText(bounds, "Scrollable text", TextStyle{}, {}, {-12.0F, 0.0F});
+  REQUIRE_THROWS_AS(
+      context.DrawText(bounds, "Invalid", TextStyle{}, {}, {std::numeric_limits<float>::infinity(), 0.0F}),
+      std::invalid_argument
+  );
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const DrawTextCommand& command = std::get<DrawTextCommand>(sequence.Commands().front());
+  REQUIRE(command.rect == bounds);
+  REQUIRE(command.paragraph_offset == (Point{-12.0F, 0.0F}));
+  REQUIRE(sequence.Bounds() == bounds);
+}
+
 TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
   const Rect pill{10.0F, 20.0F, 120.0F, 20.0F};
   const LinearGradient linear{

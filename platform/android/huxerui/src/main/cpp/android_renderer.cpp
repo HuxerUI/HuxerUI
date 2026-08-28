@@ -103,7 +103,8 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_radial_gradient_ = environment->GetMethodID(
       view_class, "drawRadialGradient", "(Landroid/graphics/Canvas;FFFFFFFF[F[IF)V"
   );
-  draw_text_ = environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFIFI[BIIIIII[B)V");
+  draw_text_ =
+      environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFFFIFI[BIIIIIII[B)V");
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
   draw_image_ = environment->GetMethodID(view_class, "drawImage", "(Landroid/graphics/Canvas;J[BFFFFFFFFFI)Z");
@@ -355,6 +356,8 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
       command.rect.y,
       command.rect.width,
       command.rect.height,
+      command.paragraph_offset.x,
+      command.paragraph_offset.y,
       PackColor(command.style.foreground),
       command.style.font.Size(),
       static_cast<jint>(command.style.font.FamilyKind()),
@@ -363,6 +366,7 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
       static_cast<jint>(command.style.font.Slant()),
       static_cast<jint>(command.style.decoration),
       static_cast<jint>(command.options.align),
+      static_cast<jint>(command.options.vertical_align),
       static_cast<jint>(command.options.wrap),
       static_cast<jint>(command.options.shaping.direction),
       locale.Get()

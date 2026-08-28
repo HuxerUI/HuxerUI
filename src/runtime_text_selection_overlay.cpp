@@ -417,6 +417,7 @@ void Runtime::PaintTextSelectionOverlay() {
             TextLayoutOptions{
                 .shaping = overlay.toolbar_text_shaping,
                 .align = TextAlign::Center,
+                .vertical_align = TextVerticalAlign::Center,
                 .wrap = TextWrap::NoWrap,
             }
         );

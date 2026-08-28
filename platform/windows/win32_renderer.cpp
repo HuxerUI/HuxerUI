@@ -395,6 +395,7 @@ struct Win32Renderer::State {
       CombineHash(result, std::hash<TextDecoration>{}(decoration));
       CombineHash(result, HashShaping(options.shaping));
       CombineHash(result, std::hash<TextAlign>{}(options.align));
+      CombineHash(result, std::hash<TextVerticalAlign>{}(options.vertical_align));
       CombineHash(result, std::hash<TextWrap>{}(options.wrap));
       CombineHash(result, std::hash<float>{}(size.width));
       CombineHash(result, std::hash<float>{}(size.height));
@@ -706,12 +707,6 @@ struct Win32Renderer::State {
     const std::wstring text = Utf8ToWide(command.text);
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(command.style.font, command.options.shaping.locale);
     ConfigureTextFormat(*format.Get(), command.options, text);
-    if (command.options.wrap == TextWrap::NoWrap) {
-      ThrowIfFailed(
-          format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER),
-          "HuxerUI could not center a DirectWrite text paragraph"
-      );
-    }
     ComPtr<IDWriteTextLayout> layout;
     ThrowIfFailed(
         write_factory_->CreateTextLayout(
@@ -1306,13 +1301,27 @@ struct Win32Renderer::State {
       return;
     }
     ComPtr<IDWriteTextLayout> layout = ParagraphFor(command);
+    DWRITE_TEXT_METRICS metrics{};
+    ThrowIfFailed(layout->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text paragraph");
+    const float remaining_height = std::max(0.0F, command.rect.height - metrics.height);
+    float vertical_offset = 0.0F;
+    if (command.options.vertical_align == TextVerticalAlign::Center) {
+      vertical_offset = remaining_height * 0.5F;
+    } else if (command.options.vertical_align == TextVerticalAlign::Bottom) {
+      vertical_offset = remaining_height;
+    }
     SetBrushColor(command.style.foreground);
+    device_context_->PushAxisAlignedClip(ToD2DRect(command.rect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     device_context_->DrawTextLayout(
-        D2D1::Point2F(command.rect.x, command.rect.y),
+        D2D1::Point2F(
+            command.rect.x + command.paragraph_offset.x,
+            command.rect.y + vertical_offset + command.paragraph_offset.y
+        ),
         layout.Get(),
         brush_.Get(),
-        D2D1_DRAW_TEXT_OPTIONS_CLIP
+        D2D1_DRAW_TEXT_OPTIONS_NONE
     );
+    device_context_->PopAxisAlignedClip();
   }
 
   void RenderCommand(const DrawTextRunsCommand& command) {
