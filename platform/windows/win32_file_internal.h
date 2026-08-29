@@ -8,7 +8,7 @@
 #include <string_view>
 
 #include <huxerui/file.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
 
 namespace huxerui {
 

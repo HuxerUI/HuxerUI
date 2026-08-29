@@ -6,7 +6,7 @@
 #include <memory>
 #include <variant>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/root.h>
 
 namespace huxerui::example {
@@ -14,34 +14,28 @@ namespace huxerui::example {
 namespace timer {
 
 inline constexpr char type[] = "example/Timer";
-inline constexpr char start_method[] = "start";
-inline constexpr char stop_method[] = "stop";
-inline constexpr char tick_event[] = "tick";
 
 } // namespace timer
 
-class TimerService final {
+class TimerService {
 public:
-  using TickHandler = std::function<void(std::uint64_t)>;
-
-  explicit TimerService(PlatformInstance instance);
+  virtual ~TimerService() = default;
 
   TimerService(const TimerService&) = delete;
   TimerService& operator=(const TimerService&) = delete;
   TimerService(TimerService&&) = delete;
   TimerService& operator=(TimerService&&) = delete;
 
-  PlatformRequestId Start(
+  virtual PlatformRequestId Start(
       std::chrono::milliseconds interval,
-      TickHandler tick_handler,
+      std::function<void(std::uint64_t)> tick_handler,
       std::function<void(PlatformResult<std::uint64_t>)> completion
-  );
-  PlatformRequestId Stop(std::function<void(PlatformResult<std::monostate>)> completion);
-  bool Cancel(PlatformRequestId request);
+  ) = 0;
+  virtual PlatformRequestId Stop(std::function<void(PlatformResult<std::monostate>)> completion) = 0;
+  virtual bool Cancel(PlatformRequestId request) = 0;
 
-private:
-  PlatformInstance instance_;
-  TickHandler tick_handler_;
+protected:
+  TimerService() = default;
 };
 
 std::shared_ptr<TimerService> UseTimer();

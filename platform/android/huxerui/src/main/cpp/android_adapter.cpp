@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <huxerui/android/jni.h>
-#include <huxerui/android/platform_module.h>
+#include <huxerui/android/platform_registry.h>
 
 #include "android_accessibility.h"
 #include "android_application_internal.h"
@@ -351,6 +351,8 @@ UIThreadDispatcher MakeUIThreadDispatcher(const std::shared_ptr<AndroidUIThreadD
   };
 }
 
+} // namespace
+
 class AndroidViewPlatformAdapter final : public PlatformAdapter,
                                          public PlatformTextInput,
                                          public PlatformClipboard,
@@ -510,14 +512,7 @@ public:
 
   void AttachRuntime(JNIEnv* environment, Runtime& runtime) {
     platform_views_ = std::make_unique<AndroidPlatformViews>(
-        environment,
-        view_,
-        context_,
-        renderer_,
-        Modules(),
-        runtime,
-        MakeUIThreadDispatcher(dispatch_state_)
-    );
+        environment, view_, context_, renderer_, PlatformRegistry(), runtime, MakeUIThreadDispatcher(dispatch_state_));
   }
 
   ApplicationActivation DecodeApplicationActivation(
@@ -568,6 +563,8 @@ public:
   }
 
 private:
+  friend android::PlatformEnv android::GetPlatformEnv(PlatformAdapter& adapter);
+
   void ScheduleFrame(double deadline) {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
@@ -1015,45 +1012,6 @@ private:
     return CreateAndroidHttpTransport(virtual_machine_, Environment());
   }
 
-  PlatformModuleFactory::Instance
-  CreatePlatformModule(std::string_view type, const PlatformPayload& options, PlatformEventSink events) override {
-    const auto* factory = FindPlatformModuleRegistration<android::PlatformModuleFactory>(type);
-    if (factory == nullptr) {
-      return PlatformAdapter::CreatePlatformModule(type, options, std::move(events));
-    }
-    if (!factory->create) {
-      throw std::logic_error("HuxerUI Android platform module factory must provide create");
-    }
-    JNIEnv* environment = Environment();
-    if (environment == nullptr || context_ == nullptr) {
-      throw std::logic_error("HuxerUI Android platform module host is unavailable");
-    }
-
-    PlatformModuleFactory::Instance instance;
-    try {
-      instance = factory->create(environment, context_, options, std::move(events));
-    } catch (...) {
-      if (environment->ExceptionCheck()) {
-        environment->ExceptionClear();
-      }
-      throw;
-    }
-    if (environment->ExceptionCheck()) {
-      environment->ExceptionClear();
-      if (instance.dispose) {
-        try {
-          instance.dispose();
-        } catch (...) {
-        }
-        if (environment->ExceptionCheck()) {
-          environment->ExceptionClear();
-        }
-      }
-      throw std::logic_error("HuxerUI Android platform module factory raised a Java exception while creating");
-    }
-    return instance;
-  }
-
   void CallTextInput(
       jmethodID method,
       TextInputSessionId session_id,
@@ -1407,9 +1365,23 @@ AndroidSession* Session(jlong handle) {
   return reinterpret_cast<AndroidSession*>(static_cast<std::uintptr_t>(handle));
 }
 
-} // namespace
-
 } // namespace huxerui::detail
+
+namespace huxerui::android {
+
+PlatformEnv GetPlatformEnv(PlatformAdapter& adapter) {
+  auto* platform = dynamic_cast<huxerui::detail::AndroidViewPlatformAdapter*>(&adapter);
+  if (platform == nullptr) {
+    throw std::logic_error("HuxerUI Android platform factory requires an Android host");
+  }
+  JNIEnv* environment = platform->Environment();
+  if (environment == nullptr || platform->context_ == nullptr) {
+    throw std::logic_error("HuxerUI Android platform host is unavailable");
+  }
+  return {environment, platform->context_};
+}
+
+} // namespace huxerui::android
 
 extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIView_nativeCreate(
     JNIEnv* environment, jclass, jobject view, jint kind, jstring value, jstring name, jlong size,

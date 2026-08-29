@@ -4,8 +4,8 @@
 #include <memory>
 #include <stdexcept>
 
-#include <huxerui/app.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 
 #include "external_texture_internal.h"
 
@@ -144,6 +144,17 @@ void detail::BindExternalTextures(
     break;
   default:
     break;
+  }
+}
+
+void detail::BindExternalTextures(const PlatformValue& value, const std::shared_ptr<ExternalTextureSurface>& surface) {
+  if (value.Type() == typeid(PlatformPayload)) {
+    BindExternalTextures(value.Get<PlatformPayload>(), surface);
+  } else if (value.Type() == typeid(ExternalTexture)) {
+    const ExternalTexture& texture = value.Get<ExternalTexture>();
+    if (texture.HasValue()) {
+      ExternalTextureState::From(texture)->Bind(surface);
+    }
   }
 }
 

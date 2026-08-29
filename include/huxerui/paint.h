@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,7 +13,7 @@
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/resource.h>
 #include <huxerui/text.h>
 #include <huxerui/vector.h>
@@ -273,12 +272,20 @@ public:
     return type_;
   }
 
-  [[nodiscard]] const PlatformPayload& Properties() const noexcept {
+  [[nodiscard]] const PlatformValue& Properties() const noexcept {
     return properties_;
+  }
+
+  [[nodiscard]] const PlatformValue& Controller() const noexcept {
+    return controller_;
   }
 
   [[nodiscard]] std::uint64_t PropertiesRevision() const noexcept {
     return properties_revision_;
+  }
+
+  [[nodiscard]] std::uint64_t ControllerRevision() const noexcept {
+    return controller_revision_;
   }
 
   [[nodiscard]] Rect Bounds() const noexcept {
@@ -288,20 +295,15 @@ public:
   bool operator==(const PlacePlatformViewCommand& other) const = default;
 
 private:
-  PlacePlatformViewCommand(
-      std::uint64_t identity,
-      std::string type,
-      PlatformPayload properties,
-      std::uint64_t properties_revision,
-      Rect bounds
-  )
-      : identity_(identity), type_(std::move(type)), properties_(std::move(properties)),
-        properties_revision_(properties_revision), bounds_(bounds) {}
+  PlacePlatformViewCommand(std::uint64_t identity, std::string type, PlatformValue properties, PlatformValue controller,
+                           std::uint64_t properties_revision, std::uint64_t controller_revision, Rect bounds);
 
   std::uint64_t identity_ = 0;
   std::string type_;
-  PlatformPayload properties_;
+  PlatformValue properties_;
+  PlatformValue controller_;
   std::uint64_t properties_revision_ = 0;
+  std::uint64_t controller_revision_ = 0;
   Rect bounds_;
 
   friend struct detail::PlatformViewPaintAccess;

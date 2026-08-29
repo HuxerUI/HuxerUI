@@ -25,13 +25,14 @@
 #include <huxerui/indication.h>
 #include <huxerui/gesture.h>
 #include <huxerui/lifecycle.h>
-#include <huxerui/platform_view.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
 #include <huxerui/task.h>
 #include <huxerui/view.h>
 
 #include "geometry_internal.h"
+#include "platform_registry_internal.h"
 
 namespace huxerui::detail {
 
@@ -493,7 +494,8 @@ struct ImageProperties {
 
 struct PlatformViewDeclaration {
   std::string type;
-  PlatformPayload properties;
+  PlatformValue properties;
+  PlatformValue controller;
   std::vector<PlatformEventDescriptor> events;
 };
 
@@ -502,6 +504,11 @@ inline bool PlatformViewPropertiesEqual(
     const std::shared_ptr<const PlatformViewDeclaration>& right
 ) {
   return left == right || (left && right && left->type == right->type && left->properties == right->properties);
+}
+
+inline bool PlatformViewControllerEqual(const std::shared_ptr<const PlatformViewDeclaration>& left,
+                                        const std::shared_ptr<const PlatformViewDeclaration>& right) {
+  return left == right || (left && right && left->type == right->type && left->controller == right->controller);
 }
 
 // ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
@@ -705,6 +712,7 @@ struct MountedNode final : public huxerui::MountedNode {
   ImageProperties image_properties;
   std::shared_ptr<const PlatformViewDeclaration> platform_view;
   std::uint64_t platform_view_properties_revision = 0;
+  std::uint64_t platform_view_controller_revision = 0;
   const LayoutDescriptor* layout_descriptor = nullptr;
   const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
@@ -1373,6 +1381,11 @@ struct RuntimeAccess {
       Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
   ) {
     return runtime.DispatchPlatformViewEvent(identity, name, payload);
+  }
+
+  static bool DispatchPlatformViewEvent(Runtime& runtime, std::uint64_t identity, std::type_index key,
+                                        const PlatformValue& value) {
+    return runtime.DispatchPlatformViewEvent(identity, key, value);
   }
 };
 

@@ -14,7 +14,7 @@
 #include <variant>
 #include <vector>
 
-#include <huxerui/windows/platform_view.h>
+#include <huxerui/windows/platform_registry.h>
 
 #include "win32_accessibility.h"
 
@@ -25,27 +25,33 @@ constexpr wchar_t kPlatformViewTestClass[] = L"HuxerUI.Tests.PlatformView";
 constexpr wchar_t kPlatformViewRootClass[] = L"HuxerUI.Tests.PlatformViewRoot";
 
 State<int> windows_platform_view_value;
+State<int> windows_platform_view_controller;
+State<bool> windows_platform_view_controller_attached;
 State<bool> windows_platform_view_mounted;
 State<bool> windows_platform_view_visible;
 int windows_platform_view_creates = 0;
 int windows_platform_view_updates = 0;
 int windows_platform_view_disposals = 0;
 int windows_platform_view_event_value = 0;
+std::vector<std::string> windows_platform_view_controller_operations;
 HWND windows_platform_view_root = nullptr;
 HWND windows_platform_view_edit = nullptr;
-PlatformEventSink windows_platform_view_event_sink;
+PlatformEventEmitter windows_platform_view_events;
 
 struct WindowsPlatformViewEvents {
   struct Changed : Event<int> {
     static constexpr std::string_view Name = "changed";
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
   };
 };
 
+struct WindowsPlatformViewProperties {
+  int value = 0;
+
+  bool operator==(const WindowsPlatformViewProperties&) const = default;
+};
+
 struct PlatformViewState {
+  HWND root = nullptr;
   HWND edit = nullptr;
 };
 
@@ -191,32 +197,44 @@ private:
   HRESULT result_ = E_FAIL;
 };
 
-PlatformPayload WindowsPlatformViewProperties(int value) {
-  return PlatformPayload::Object{{"value", value}};
-}
-
 View WindowsPlatformViewApp() {
   auto value = UseState(1);
+  auto controller = UseState(1);
+  auto controller_attached = UseState(true);
   auto mounted = UseState(true);
   auto visible = UseState(true);
   windows_platform_view_value = value;
+  windows_platform_view_controller = controller;
+  windows_platform_view_controller_attached = controller_attached;
   windows_platform_view_mounted = mounted;
   windows_platform_view_visible = visible;
   if (!mounted.Get()) {
     return Text("without platform view");
   }
-  return Stack {
-    PlatformView("test/WindowsView", WindowsPlatformViewProperties(value.Get()))
-        .Events<WindowsPlatformViewEvents::Changed>()
-        .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
-        .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
+  if (controller_attached.Get()) {
+    return Stack{
+        PlatformView("test/WindowsView", WindowsPlatformViewProperties{value.Get()})
+            .Controller(controller.Get())
+            .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
+            .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
+    };
+  }
+  return Stack{
+      PlatformView("test/WindowsView", WindowsPlatformViewProperties{value.Get()})
+          .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
+          .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
   };
 }
 
-HWND CreateWindowsPlatformView(HWND parent, const PlatformPayload& properties, PlatformEventSink event_sink) {
+View FailingWindowsPlatformViewApp() {
+  return PlatformView("test/FailingWindowsView", WindowsPlatformViewProperties{1}).With(Frame{80.0F, 40.0F});
+}
+
+std::shared_ptr<PlatformViewState>
+CreateWindowsPlatformView(HWND parent, const WindowsPlatformViewProperties& properties, PlatformEventEmitter events) {
   ++windows_platform_view_creates;
-  windows_platform_view_event_sink = std::move(event_sink);
-  auto state = std::make_unique<PlatformViewState>();
+  windows_platform_view_events = std::move(events);
+  auto state = std::make_shared<PlatformViewState>();
   HWND view = CreateWindowExW(
       WS_EX_CONTROLPARENT,
       kPlatformViewTestClass,
@@ -232,38 +250,73 @@ HWND CreateWindowsPlatformView(HWND parent, const PlatformPayload& properties, P
       state.get()
   );
   if (view == nullptr) {
-    return nullptr;
+    return {};
   }
-  state.release();
+  state->root = view;
   windows_platform_view_root = view;
-  const std::wstring text = std::to_wstring(properties.AsObject().at("value").AsInteger());
+  const std::wstring text = std::to_wstring(properties.value);
   SetWindowTextW(windows_platform_view_edit, text.c_str());
-  return view;
+  return state;
 }
 
-void UpdateWindowsPlatformView(HWND view, const PlatformPayload& properties) {
-  static_cast<void>(view);
+void UpdateWindowsPlatformView(PlatformViewState& state, const WindowsPlatformViewProperties& properties) {
+  static_cast<void>(state);
   ++windows_platform_view_updates;
-  const std::wstring text = std::to_wstring(properties.AsObject().at("value").AsInteger());
+  const std::wstring text = std::to_wstring(properties.value);
   SetWindowTextW(windows_platform_view_edit, text.c_str());
 }
 
-void DisposeWindowsPlatformView(HWND view) {
+void DisposeWindowsPlatformView(PlatformViewState& state) {
   ++windows_platform_view_disposals;
-  auto* state = reinterpret_cast<PlatformViewState*>(GetWindowLongPtrW(view, GWLP_USERDATA));
-  SetWindowLongPtrW(view, GWLP_USERDATA, 0);
-  delete state;
+  SetWindowLongPtrW(state.root, GWLP_USERDATA, 0);
   windows_platform_view_root = nullptr;
   windows_platform_view_edit = nullptr;
 }
 
-windows::PlatformViewFactory WindowsPlatformViewFactory() {
+windows::PlatformViewFactory<WindowsPlatformViewProperties, PlatformViewState> WindowsPlatformViewFactory() {
   return {
       .create = CreateWindowsPlatformView,
+      .view = [](const std::shared_ptr<PlatformViewState>& state) { return state->root; },
       .update = UpdateWindowsPlatformView,
       .dispose = DisposeWindowsPlatformView,
   };
 }
+
+windows::PlatformViewFactory<WindowsPlatformViewProperties, PlatformViewState, int>
+ControlledWindowsPlatformViewFactory() {
+  return {
+      .create = CreateWindowsPlatformView,
+      .view = [](const std::shared_ptr<PlatformViewState>& state) { return state->root; },
+      .update = UpdateWindowsPlatformView,
+      .dispose = DisposeWindowsPlatformView,
+      .connect =
+          [](PlatformViewState&, const int& controller) {
+            windows_platform_view_controller_operations.push_back("connect:" + std::to_string(controller));
+          },
+      .disconnect =
+          [](PlatformViewState&, const int& controller) {
+            windows_platform_view_controller_operations.push_back("disconnect:" + std::to_string(controller));
+          },
+  };
+}
+
+windows::PlatformViewFactory<void, PlatformViewState> WindowsPropertylessPlatformViewFactory() {
+  return {
+      .create =
+          [](HWND parent, PlatformEventEmitter events) {
+            return CreateWindowsPlatformView(parent, WindowsPlatformViewProperties{}, std::move(events));
+          },
+      .view = [](const std::shared_ptr<PlatformViewState>& state) { return state->root; },
+      .dispose = DisposeWindowsPlatformView,
+  };
+}
+
+class WindowsPlatformViewTestPlatform final : public TestPlatform {
+public:
+  detail::PlatformRegistry& Registry() noexcept {
+    return PlatformRegistry();
+  }
+};
 
 TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   ComApartment com;
@@ -272,33 +325,29 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   windows_platform_view_updates = 0;
   windows_platform_view_disposals = 0;
   windows_platform_view_event_value = 0;
+  windows_platform_view_controller_operations.clear();
   windows_platform_view_root = nullptr;
   windows_platform_view_edit = nullptr;
-  windows_platform_view_event_sink = {};
+  windows_platform_view_events = {};
 
-  TestPlatform platform;
-  PlatformModules* modules = nullptr;
+  WindowsPlatformViewTestPlatform platform;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([&](RootContext& root) {
-    modules = &root.Modules();
-    modules->Register("test/WindowsView", WindowsPlatformViewFactory());
+  options.root_hooks.push_back([](RootContext& root) {
+    root.RegisterPlatformView<WindowsPlatformViewProperties, int>("test/WindowsView",
+                                                                  ControlledWindowsPlatformViewFactory());
+    root.RegisterPlatformView<void>("test/PropertylessWindowsView", WindowsPropertylessPlatformViewFactory());
   });
   Runtime runtime(WindowsPlatformViewApp, platform, std::move(options));
   runtime.SetWindowMetrics({{240.0F, 160.0F}});
-  REQUIRE(modules != nullptr);
 
   PlatformViewTestWindow window;
   std::vector<std::function<void()>> pending_tasks;
   detail::Win32PlatformViews platform_views(
-      GetModuleHandleW(nullptr),
-      window.Handle(),
-      *modules,
-      runtime.CoreRuntime(),
+      GetModuleHandleW(nullptr), window.Handle(), platform.Registry(), runtime.CoreRuntime(),
       [&pending_tasks](std::function<void()> task) { pending_tasks.push_back(std::move(task)); },
       [](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
         return DefWindowProcW(source, message, w_param, l_param);
-      }
-  );
+      });
 
   const FrameCommit& initial = runtime.BuildCommit();
   REQUIRE(platform_views.Commit(initial.render_frame, 1.0F));
@@ -306,6 +355,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(windows_platform_view_creates == 1);
   REQUIRE(windows_platform_view_updates == 0);
   REQUIRE(windows_platform_view_root != nullptr);
+  REQUIRE((windows_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
   REQUIRE(GetParent(GetParent(windows_platform_view_root)) == window.Handle());
   RECT platform_view_bounds{};
   RECT platform_view_edit_bounds{};
@@ -328,7 +378,22 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   REQUIRE(windows_platform_view_creates == 1);
   REQUIRE(windows_platform_view_updates == 1);
-  windows_platform_view_event_sink(WindowsPlatformViewEvents::Changed::Name, PlatformPayload(7));
+  REQUIRE((windows_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
+
+  windows_platform_view_controller = 2;
+  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  REQUIRE((windows_platform_view_controller_operations ==
+           std::vector<std::string>{"connect:1", "disconnect:1", "connect:2"}));
+
+  windows_platform_view_controller_attached = false;
+  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  REQUIRE((windows_platform_view_controller_operations ==
+           std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2"}));
+  windows_platform_view_controller_attached = true;
+  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  REQUIRE((windows_platform_view_controller_operations ==
+           std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2", "connect:2"}));
+  windows_platform_view_events.Emit<WindowsPlatformViewEvents::Changed>(7);
   for (const auto& task : std::exchange(pending_tasks, {})) {
     task();
   }
@@ -392,13 +457,13 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(windows_platform_view_root == retained_root);
   REQUIRE(windows_platform_view_creates == 1);
 
-  const PlatformEventSink retired_event_sink = windows_platform_view_event_sink;
+  const PlatformEventEmitter retired_events = windows_platform_view_events;
   windows_platform_view_mounted = false;
   REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   accessibility.Commit(runtime.BuildCommit().semantic_frame, &platform_views);
   REQUIRE(windows_platform_view_disposals == 0);
   REQUIRE(IsWindow(retained_root));
-  retired_event_sink(WindowsPlatformViewEvents::Changed::Name, PlatformPayload(9));
+  retired_events.Emit<WindowsPlatformViewEvents::Changed>(9);
   for (const auto& task : std::exchange(pending_tasks, {})) {
     task();
   }
@@ -406,6 +471,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
 
   platform_views.DidPresent();
   REQUIRE(windows_platform_view_disposals == 1);
+  REQUIRE(windows_platform_view_controller_operations.back() == "disconnect:2");
   REQUIRE_FALSE(IsWindow(retained_root));
   REQUIRE_FALSE(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
 
@@ -414,17 +480,55 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   platform_views.DidPresent();
   REQUIRE(windows_platform_view_creates == 2);
   REQUIRE(windows_platform_view_root != nullptr);
+  REQUIRE(windows_platform_view_controller_operations.back() == "connect:2");
 
   windows_platform_view_visible = false;
   REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   windows_platform_view_mounted = false;
   REQUIRE_FALSE(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   REQUIRE(windows_platform_view_disposals == 2);
+  REQUIRE(windows_platform_view_controller_operations.back() == "disconnect:2");
 
   accessibility.Reset();
   platform_views.Shutdown();
   REQUIRE(windows_platform_view_disposals == 2);
-  windows_platform_view_event_sink = {};
+  windows_platform_view_events = {};
+}
+
+TEST_CASE("WindowsPlatformViewsDisposeInstancesWhenViewCreationFails") {
+  ComApartment com;
+  REQUIRE(SUCCEEDED(com.Result()));
+  windows_platform_view_creates = 0;
+  windows_platform_view_disposals = 0;
+  windows_platform_view_root = nullptr;
+  windows_platform_view_edit = nullptr;
+
+  WindowsPlatformViewTestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([](RootContext& root) {
+    auto factory = WindowsPlatformViewFactory();
+    factory.view = [](const std::shared_ptr<PlatformViewState>&) -> HWND {
+      throw std::runtime_error("test view failure");
+    };
+    root.RegisterPlatformView<WindowsPlatformViewProperties>("test/FailingWindowsView", std::move(factory));
+  });
+  Runtime runtime(FailingWindowsPlatformViewApp, platform, std::move(options));
+  runtime.SetWindowMetrics({{240.0F, 160.0F}});
+
+  PlatformViewTestWindow window;
+  detail::Win32PlatformViews platform_views(
+      GetModuleHandleW(nullptr), window.Handle(), platform.Registry(), runtime.CoreRuntime(),
+      [](std::function<void()>) {},
+      [](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
+        return DefWindowProcW(source, message, w_param, l_param);
+      });
+
+  REQUIRE_THROWS_AS(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F), std::runtime_error);
+  REQUIRE(windows_platform_view_creates == 1);
+  REQUIRE(windows_platform_view_disposals == 1);
+  REQUIRE(windows_platform_view_root == nullptr);
+  REQUIRE(windows_platform_view_edit == nullptr);
+  platform_views.Shutdown();
 }
 
 } // namespace

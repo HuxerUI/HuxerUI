@@ -27,6 +27,7 @@
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/modifier.h>
 #include <huxerui/paint.h>
 #include <huxerui/resource.h>
@@ -53,6 +54,7 @@ enum class TextRole {
 namespace detail {
 struct ViewSpec;
 struct PlatformEventDescriptor;
+std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string name, PlatformValue properties);
 struct SegmentedButtonItemAccess;
 struct TabItemAccess;
 class VirtualMeasureSession;
@@ -129,6 +131,9 @@ protected:
     if constexpr (std::same_as<Key, ViewEvents::Click>) {
       AddDefaultIndication();
     }
+    if constexpr (detail::PlatformEventKey<Key>) {
+      AddPlatformEvent(detail::MakePlatformEventDescriptor<Key>());
+    }
   }
 
   template <class Key> void ApplyLayoutValue(typename Key::Value value) {
@@ -145,6 +150,7 @@ protected:
 
   void SetEventBinding(std::type_index key, std::shared_ptr<detail::EventHandlerBase> handler);
   void AddPlatformEvent(detail::PlatformEventDescriptor descriptor);
+  void SetPlatformController(PlatformValue controller);
   void SetErasedLayoutValue(std::type_index key, detail::ErasedLayoutValue value);
   void AddDefaultIndication();
   void AddModifier(detail::ModifierSpec modifier);
@@ -168,6 +174,32 @@ private:
   friend View ProvideEnvironment(Environment environment, View content);
   friend class Runtime;
   friend class detail::VirtualMeasureSession;
+};
+
+class PlatformView final : public View {
+public:
+  explicit PlatformView(std::string name);
+
+  template <class Properties>
+    requires std::move_constructible<std::decay_t<Properties>> && std::equality_comparable<std::decay_t<Properties>>
+  PlatformView(std::string name, Properties&& properties)
+      : View(detail::MakePlatformViewSpec(std::move(name),
+                                          PlatformValue::Store(std::forward<Properties>(properties)))) {}
+
+  template <class Key, class Function>
+    requires detail::PlatformEventKey<Key> && std::constructible_from<std::function<typename Key::Signature>, Function>
+  PlatformView On(Function&& function) && {
+    ApplyEvent<Key>(std::forward<Function>(function));
+    return std::move(*this);
+  }
+
+  template <class ControllerValue>
+    requires std::move_constructible<std::decay_t<ControllerValue>> &&
+             std::equality_comparable<std::decay_t<ControllerValue>>
+  PlatformView Controller(ControllerValue&& controller) && {
+    SetPlatformController(PlatformValue::Store(std::forward<ControllerValue>(controller)));
+    return std::move(*this);
+  }
 };
 
 namespace detail {

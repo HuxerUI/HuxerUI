@@ -1,520 +1,347 @@
 #include "runtime_test_support.h"
 
-#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
-
-#include "external_texture_test_support.h"
 
 namespace huxerui::test {
 namespace {
 
-struct TestPlatformMethods {
-  struct Double {
-    using Request = int;
-    using Result = int;
-    static constexpr std::string_view Name = "double";
+struct TestModuleOptions {
+  int value = 0;
 
-    static PlatformPayload Encode(int value) {
-      return value;
-    }
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
-  };
-
-  struct Widen {
-    using Request = int;
-    using Result = std::int64_t;
-    static constexpr std::string_view Name = "widen";
-
-    static PlatformPayload Encode(int value) {
-      return value;
-    }
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
-  };
-
-  struct Texture {
-    using Request = ExternalTexture;
-    using Result = ExternalTexture;
-    static constexpr std::string_view Name = "texture";
-
-    static PlatformPayload Encode(const ExternalTexture& value) {
-      return PlatformPayload(value);
-    }
-
-    static ExternalTexture Decode(const PlatformPayload& payload) {
-      return payload.AsExternalTexture();
-    }
-  };
+  bool operator==(const TestModuleOptions&) const = default;
 };
 
-struct InvalidPlatformMethods {
-  struct VoidRequest {
-    using Request = void;
-    using Result = int;
-    static constexpr std::string_view Name = "voidRequest";
-
-    static PlatformPayload Encode();
-    static int Decode(const PlatformPayload&);
-  };
-
-  struct ImmovableResult {
-    ImmovableResult() = default;
-    ImmovableResult(const ImmovableResult&) = delete;
-    ImmovableResult& operator=(const ImmovableResult&) = delete;
-    ImmovableResult(ImmovableResult&&) = delete;
-    ImmovableResult& operator=(ImmovableResult&&) = delete;
-  };
-
-  struct ReturnsImmovable {
-    using Request = int;
-    using Result = ImmovableResult;
-    static constexpr std::string_view Name = "returnsImmovable";
-
-    static PlatformPayload Encode(int);
-    static ImmovableResult Decode(const PlatformPayload&);
-  };
-
-  struct ReturnsPlatformError {
-    using Request = int;
-    using Result = PlatformError;
-    static constexpr std::string_view Name = "returnsPlatformError";
-
-    static PlatformPayload Encode(int);
-    static PlatformError Decode(const PlatformPayload&);
-  };
-};
-
-struct TestPlatformModuleEvents {
-  struct Changed : Event<int> {
-    static constexpr std::string_view Name = "changed";
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
-  };
-
-  struct TextureChanged : Event<ExternalTexture> {
-    static constexpr std::string_view Name = "textureChanged";
-
-    static ExternalTexture Decode(const PlatformPayload& payload) {
-      return payload.AsExternalTexture();
-    }
-  };
-
-  struct MissingDecoder : Event<int> {
-    static constexpr std::string_view Name = "missingDecoder";
-  };
-
-  struct InvalidDecoder : Event<int> {
-    static constexpr std::string_view Name = "invalidDecoder";
-
-    static void Decode(const PlatformPayload&);
-  };
-};
-
-static_assert(detail::PlatformMethodKey<TestPlatformMethods::Double>);
-static_assert(detail::PlatformMethodKey<TestPlatformMethods::Widen>);
-static_assert(detail::PlatformMethodKey<TestPlatformMethods::Texture>);
-static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::VoidRequest>);
-static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::ReturnsImmovable>);
-static_assert(!detail::PlatformMethodKey<InvalidPlatformMethods::ReturnsPlatformError>);
-static_assert(detail::PlatformEventKey<TestPlatformModuleEvents::Changed>);
-static_assert(detail::PlatformEventKey<TestPlatformModuleEvents::TextureChanged>);
-static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::MissingDecoder>);
-static_assert(!detail::PlatformEventKey<TestPlatformModuleEvents::InvalidDecoder>);
-
-struct PlatformModuleCall {
-  std::string method;
-  PlatformPayload arguments;
-  PlatformResultSink result;
-  bool cancelled = false;
-};
-
-struct PlatformModuleState {
-  PlatformPayload options;
-  PlatformEventSink events;
-  std::vector<std::shared_ptr<PlatformModuleCall>> calls;
-  int creates = 0;
-  int cancellations = 0;
-  int disposals = 0;
-};
-
-PlatformModuleFactory TestModuleFactory(const std::shared_ptr<PlatformModuleState>& module_state) {
-  PlatformModuleFactory factory;
-  factory.create = [module_state](const PlatformPayload& options, PlatformEventSink events) {
-    ++module_state->creates;
-    module_state->options = options;
-    module_state->events = std::move(events);
-    PlatformModuleFactory::Instance instance;
-    instance.call = [module_state](std::string method, PlatformPayload arguments, PlatformResultSink result) {
-      auto call = std::make_shared<PlatformModuleCall>(PlatformModuleCall{
-          std::move(method),
-          std::move(arguments),
-          std::move(result),
-          false,
-      });
-      module_state->calls.push_back(call);
-      return [module_state, call] {
-        if (!call->cancelled) {
-          call->cancelled = true;
-          ++module_state->cancellations;
-        }
-      };
-    };
-    instance.dispose = [module_state] { ++module_state->disposals; };
-    return instance;
-  };
-  return factory;
-}
-
-struct TestPlatformModuleFactory {
-  PlatformModuleFactory factory;
-};
-
-class ProjectingTestPlatform final : public TestPlatform {
-protected:
-  PlatformModuleFactory::Instance CreatePlatformModule(
-      std::string_view type, const PlatformPayload& options, PlatformEventSink events
-  ) override {
-    if (const auto* registration = FindPlatformModuleRegistration<TestPlatformModuleFactory>(type)) {
-      return registration->factory.create(options, std::move(events));
-    }
-    return TestPlatform::CreatePlatformModule(type, options, std::move(events));
-  }
-};
-
-class TestService final {
+class TestModule final {
 public:
-  explicit TestService(PlatformInstance instance) : instance_(std::move(instance)) {}
+  TestModule(int value, std::shared_ptr<int> disposals) : value_(value), disposals_(std::move(disposals)) {}
 
-  PlatformRequestId Double(int value, std::function<void(PlatformResult<int>)> completion) {
-    return instance_.Call<TestPlatformMethods::Double>(value, std::move(completion));
-  }
+  TestModule(const TestModule&) = delete;
+  TestModule& operator=(const TestModule&) = delete;
+  TestModule(TestModule&&) noexcept = default;
+  TestModule& operator=(TestModule&&) noexcept = default;
 
-  PlatformRequestId Texture(
-      const ExternalTexture& texture,
-      std::function<void(PlatformResult<ExternalTexture>)> completion
-  ) {
-    return instance_.Call<TestPlatformMethods::Texture>(texture, std::move(completion));
-  }
-
-  void BindEvents() {
-    instance_.On<TestPlatformModuleEvents::Changed>([this](int value) { events.push_back(value); });
-    instance_.On<TestPlatformModuleEvents::TextureChanged>([this](ExternalTexture texture) {
-      texture_events.push_back(std::move(texture));
-    });
-  }
-
-  bool Cancel(PlatformRequestId request) {
-    return instance_.Cancel(request);
-  }
-
-  bool MoveRoundTrip() {
-    PlatformInstance moved = std::move(instance_);
-    bool moved_from_rejected = false;
-    try {
-      static_cast<void>(instance_.Call<TestPlatformMethods::Double>(0, [](PlatformResult<int>) {}));
-    } catch (const std::logic_error&) {
-      moved_from_rejected = true;
+  ~TestModule() {
+    if (disposals_) {
+      ++*disposals_;
     }
-    instance_ = std::move(moved);
-    return moved_from_rejected;
   }
 
-  std::vector<int> events;
-  std::vector<ExternalTexture> texture_events;
+  [[nodiscard]] int Value() const noexcept {
+    return value_;
+  }
 
 private:
-  PlatformInstance instance_;
+  int value_ = 0;
+  std::shared_ptr<int> disposals_;
+};
+
+struct DummyPlatformViewFactory {
+private:
+  detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
+    static_cast<void>(adapter);
+    return detail::MakePlatformViewFactoryRegistration(std::make_shared<int>(1));
+  }
+
+  friend class detail::PlatformRegistry;
+};
+
+struct AdapterPreparedPlatformViewFactory {
+  PlatformAdapter** prepared = nullptr;
+
+private:
+  detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
+    *prepared = &adapter;
+    return detail::MakePlatformViewFactoryRegistration(std::make_shared<int>(2));
+  }
+
+  friend class detail::PlatformRegistry;
 };
 
 View PlatformModuleApp() {
   return Text("module");
 }
 
-AppOptions InstallTestModule(
-    const std::shared_ptr<PlatformModuleState>& module_state,
-    std::shared_ptr<TestService>& service
-) {
+TEST_CASE("PlatformRegistryOpensExactMoveOnlyModuleFromRoot") {
+  TestPlatform platform;
+  const auto disposals = std::make_shared<int>(0);
+  std::unique_ptr<TestModule> module;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([module_state, &service](RootContext& root) {
-    root.Modules().Register("test/Module", TestModuleFactory(module_state));
-    PlatformInstance instance = root.Modules().Open("test/Module", PlatformPayload::Object{{"enabled", true}});
-    service = std::make_shared<TestService>(std::move(instance));
-    service->BindEvents();
-    root.Provide(service);
+  options.root_hooks.push_back([&](RootContext& root) {
+    root.RegisterPlatformModule<TestModule, TestModuleOptions>(
+        "test/Module", [disposals](PlatformAdapter&, const TestModuleOptions& options) {
+          return TestModule(options.value, disposals);
+        });
+    module =
+        std::make_unique<TestModule>(root.OpenPlatformModule<TestModule>("test/Module", TestModuleOptions{.value = 7}));
   });
-  return options;
-}
 
-AppOptions InstallTextureOption(const std::shared_ptr<PlatformModuleState>& module_state, ExternalTexture texture) {
-  AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([module_state, texture = std::move(texture)](RootContext& root) {
-    root.Modules().Register("test/TextureModule", TestModuleFactory(module_state));
-    static_cast<void>(root.Modules().Open("test/TextureModule", PlatformPayload(texture)));
-  });
-  return options;
-}
-
-void OpenTextureOnAnotherSurface(const ExternalTexture& texture) {
-  TestPlatform platform;
-  const auto module_state = std::make_shared<PlatformModuleState>();
-  Runtime runtime(PlatformModuleApp, platform, InstallTextureOption(module_state, texture));
-  static_cast<void>(runtime);
-}
-
-TEST_CASE("PlatformInstanceDeliversTypedCallsAndEventsAsynchronously") {
-  TestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
-
-  REQUIRE(service != nullptr);
-  REQUIRE(module_state->creates == 1);
-  REQUIRE(module_state->options.AsObject().at("enabled").AsBoolean());
-  REQUIRE_THROWS_AS(service->BindEvents(), std::invalid_argument);
-
-  std::vector<PlatformResult<int>> results;
-  const PlatformRequestId request =
-      service->Double(7, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
-  REQUIRE(request != 0);
-  REQUIRE(module_state->calls.size() == 1);
-  REQUIRE(module_state->calls.front()->method == "double");
-  REQUIRE(module_state->calls.front()->arguments.AsInteger() == 7);
-
-  module_state->calls.front()->result(PlatformPayload(14));
-  REQUIRE(results.empty());
-  platform.RunPlatformModuleTasks();
-  REQUIRE(results == std::vector<PlatformResult<int>>{14});
-
-  std::string event_name = "changed";
-  module_state->events(std::string_view(event_name), PlatformPayload(1));
-  event_name = "replaced";
-  module_state->events("changed", PlatformPayload(2));
-  REQUIRE(service->events.empty());
-  platform.RunPlatformModuleTasks();
-  REQUIRE(service->events == std::vector<int>{1, 2});
-
-  module_state->events("changed", PlatformPayload("invalid"));
-  module_state->events("", PlatformPayload(3));
-  module_state->events(std::string(1, static_cast<char>(0xFF)), PlatformPayload(4));
-  platform.RunPlatformModuleTasks();
-  REQUIRE(service->events == std::vector<int>{1, 2});
-
-  int throwing_completions = 0;
-  static_cast<void>(service->Double(8, [&](PlatformResult<int>) {
-    ++throwing_completions;
-    throw std::runtime_error("test completion failure");
-  }));
-  module_state->calls.back()->result(PlatformPayload(16));
-  platform.RunPlatformModuleTasks();
-  REQUIRE(throwing_completions == 1);
-}
-
-TEST_CASE("PlatformInstanceOrdersResultsAndRejectsCancelledOrDuplicateDelivery") {
-  TestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
-
-  std::vector<int> completion_order;
-  const PlatformRequestId first =
-      service->Double(1, [&](PlatformResult<int> result) { completion_order.push_back(std::get<int>(result)); });
-  const PlatformRequestId second =
-      service->Double(2, [&](PlatformResult<int> result) { completion_order.push_back(std::get<int>(result)); });
-  const PlatformRequestId cancelled =
-      service->Double(3, [&](PlatformResult<int> result) { completion_order.push_back(std::get<int>(result)); });
-  REQUIRE(first != second);
-  REQUIRE(second != cancelled);
-
-  module_state->calls[1]->result(PlatformPayload(20));
-  module_state->calls[0]->result(PlatformPayload(10));
-  module_state->calls[0]->result(PlatformPayload(11));
-  REQUIRE(service->Cancel(cancelled));
-  REQUIRE_FALSE(service->Cancel(cancelled));
-  REQUIRE(module_state->cancellations == 1);
-  module_state->calls[2]->result(PlatformPayload(30));
-
-  platform.RunPlatformModuleTasks();
-  REQUIRE(completion_order == std::vector<int>{20, 10});
-  REQUIRE_FALSE(service->Cancel(first));
-}
-
-TEST_CASE("PlatformInstanceConvertsErrorsAndInvalidTypedResults") {
-  TestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
-
-  std::vector<PlatformResult<int>> results;
-  service->Double(1, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
-  service->Double(2, [&](PlatformResult<int> result) { results.push_back(std::move(result)); });
-  module_state->calls[0]->result(PlatformError{"test/rejected", "Rejected by test module", {}});
-  module_state->calls[1]->result(PlatformPayload("invalid"));
-  platform.RunPlatformModuleTasks();
-
-  REQUIRE(results.size() == 2);
-  REQUIRE(std::get<PlatformError>(results[0]).code == "test/rejected");
-  REQUIRE(std::get<PlatformError>(results[1]).code == "huxerui/invalid-result");
-}
-
-TEST_CASE("PlatformInstanceMoveAndRootTeardownClosePlatformModuleState") {
-  TestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
   {
-    Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
-    REQUIRE(service->MoveRoundTrip());
-    static_cast<void>(service->Double(1, [](PlatformResult<int>) {}));
-    REQUIRE(module_state->disposals == 0);
-    service.reset();
+    Runtime runtime(PlatformModuleApp, platform, std::move(options));
+    REQUIRE(module != nullptr);
+    REQUIRE(module->Value() == 7);
+    REQUIRE(*disposals == 0);
   }
-
-  REQUIRE(module_state->cancellations == 1);
-  REQUIRE(module_state->disposals == 1);
-  module_state->calls.front()->result(PlatformPayload(2));
-  module_state->events("changed", PlatformPayload(3));
-  platform.RunPlatformModuleTasks();
-  REQUIRE(module_state->disposals == 1);
+  module.reset();
+  REQUIRE(*disposals == 1);
 }
 
-TEST_CASE("PlatformAdapterCreatesPlatformModuleRegistration") {
-  ProjectingTestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
+std::shared_ptr<int> lifecycle_module_value;
+std::shared_ptr<int> lifecycle_cleanups;
+
+View LifecyclePlatformModuleApp() {
+  Lifecycle([] {
+    lifecycle_module_value =
+        OpenPlatformModule<std::shared_ptr<int>>("test/LifecycleModule", TestModuleOptions{.value = 11});
+    return [] {
+      lifecycle_module_value.reset();
+      ++*lifecycle_cleanups;
+    };
+  });
+  return Text("lifecycle module");
+}
+
+TEST_CASE("OpenPlatformModuleUsesOnlyCommittedLifecycleContext") {
+  REQUIRE_THROWS_AS(OpenPlatformModule<std::shared_ptr<int>>("test/LifecycleModule", TestModuleOptions{}),
+                    std::logic_error);
+
+  TestPlatform platform;
+  lifecycle_module_value.reset();
+  lifecycle_cleanups = std::make_shared<int>(0);
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([module_state, &service](RootContext& root) {
-    root.Modules().Register("test/PlatformModule", TestPlatformModuleFactory{TestModuleFactory(module_state)});
-    service = std::make_shared<TestService>(
-        root.Modules().Open("test/PlatformModule", PlatformPayload::Object{{"platform", true}})
-    );
-    root.Provide(service);
+  options.root_hooks.push_back([](RootContext& root) {
+    root.RegisterPlatformModule<std::shared_ptr<int>, TestModuleOptions>(
+        "test/LifecycleModule",
+        [](PlatformAdapter&, const TestModuleOptions& options) { return std::make_shared<int>(options.value); });
+  });
+
+  {
+    Runtime runtime(LifecyclePlatformModuleApp, platform, std::move(options));
+    runtime.BuildFrame();
+    REQUIRE(lifecycle_module_value != nullptr);
+    REQUIRE(*lifecycle_module_value == 11);
+    REQUIRE(*lifecycle_cleanups == 0);
+  }
+  REQUIRE(lifecycle_module_value == nullptr);
+  REQUIRE(*lifecycle_cleanups == 1);
+}
+
+TEST_CASE("PlatformRegistryPassesOwningAdapterToModuleFactory") {
+  TestPlatform platform;
+  PlatformAdapter* received = nullptr;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([&](RootContext& root) {
+    root.RegisterPlatformModule<std::shared_ptr<int>>("test/Adapter", [&received](PlatformAdapter& adapter) {
+      received = &adapter;
+      return std::make_shared<int>(3);
+    });
+    REQUIRE(*root.OpenPlatformModule<std::shared_ptr<int>>("test/Adapter") == 3);
   });
   Runtime runtime(PlatformModuleApp, platform, std::move(options));
-
-  REQUIRE(module_state->creates == 1);
-  REQUIRE(module_state->options.AsObject().at("platform").AsBoolean());
-  REQUIRE(service != nullptr);
+  REQUIRE(received == &platform);
 }
 
-TEST_CASE("PlatformModulesBindNestedExternalTexturePayloadsToOneSurface") {
-  const ExternalTexture texture = MakeTestExternalTexture({32.0F, 18.0F});
-  const auto install = [texture](const std::shared_ptr<PlatformModuleState>& module_state) {
-    AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([texture, module_state](RootContext& root) {
-      root.Modules().Register("test/TextureModule", TestModuleFactory(module_state));
-      static_cast<void>(root.Modules().Open(
-          "test/TextureModule",
-          PlatformPayload::Object{{"textures", PlatformPayload::List{texture}}}
-      ));
-    });
-    return options;
-  };
-
-  TestPlatform first_platform;
-  const auto first_module_state = std::make_shared<PlatformModuleState>();
-  Runtime first_runtime(PlatformModuleApp, first_platform, install(first_module_state));
-  REQUIRE(first_module_state->creates == 1);
-  REQUIRE(
-      first_module_state->options.AsObject().at("textures").AsList().front().AsExternalTexture() == texture
-  );
-
-  TestPlatform other_platform;
-  const auto other_module_state = std::make_shared<PlatformModuleState>();
-  REQUIRE_THROWS_AS(
-      Runtime(PlatformModuleApp, other_platform, install(other_module_state)),
-      std::logic_error
-  );
-  REQUIRE(other_module_state->creates == 0);
-}
-
-TEST_CASE("PlatformInstanceBindsExternalTexturesAcrossCallsResultsAndEvents") {
+TEST_CASE("PlatformRegistryPassesOwningAdapterWhileErasingPlatformViewFactories") {
   TestPlatform platform;
-  auto module_state = std::make_shared<PlatformModuleState>();
-  std::shared_ptr<TestService> service;
-  Runtime runtime(PlatformModuleApp, platform, InstallTestModule(module_state, service));
-
-  const ExternalTexture argument = MakeTestExternalTexture({32.0F, 18.0F});
-  std::vector<PlatformResult<ExternalTexture>> results;
-  static_cast<void>(service->Texture(argument, [&](PlatformResult<ExternalTexture> result) {
-    results.push_back(std::move(result));
-  }));
-  REQUIRE(module_state->calls.back()->arguments.AsExternalTexture() == argument);
-
-  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(argument), std::logic_error);
-
-  const ExternalTexture result = MakeTestExternalTexture({32.0F, 18.0F});
-  module_state->calls.back()->result(PlatformPayload(result));
-  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(result), std::logic_error);
-  platform.RunPlatformModuleTasks();
-  REQUIRE(results.size() == 1);
-  REQUIRE(std::get<ExternalTexture>(results.front()) == result);
-
-  const ExternalTexture event = MakeTestExternalTexture({32.0F, 18.0F});
-  module_state->events("textureChanged", PlatformPayload(event));
-  REQUIRE_THROWS_AS(OpenTextureOnAnotherSurface(event), std::logic_error);
-  platform.RunPlatformModuleTasks();
-  REQUIRE(service->texture_events == std::vector<ExternalTexture>{event});
+  PlatformAdapter* view_adapter = nullptr;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([&](RootContext& root) {
+    root.RegisterPlatformView<int>("test/PreparedView", AdapterPreparedPlatformViewFactory{&view_adapter});
+  });
+  Runtime runtime(PlatformModuleApp, platform, std::move(options));
+  REQUIRE(view_adapter == &platform);
 }
 
-TEST_CASE("PlatformModulesValidateNonvisualFactoryRegistration") {
-  TestPlatform undispatched_platform(UIThreadDispatcher{});
-  AppOptions undispatched_options{.show_debug_overlay = false};
-  undispatched_options.root_hooks.push_back(
-      [](RootContext& root) { static_cast<void>(root.Modules().Open("test/Module")); }
-  );
-  REQUIRE_THROWS_WITH(
-      Runtime(PlatformModuleApp, undispatched_platform, std::move(undispatched_options)),
-      "HuxerUI UI thread dispatcher is not configured"
-  );
-
-  TestPlatform missing_platform;
-  AppOptions missing_options{.show_debug_overlay = false};
-  RootHook missing_hook = [](RootContext& root) { static_cast<void>(root.Modules().Open("test/Missing")); };
-  missing_options.root_hooks.push_back(std::move(missing_hook));
-  REQUIRE_THROWS_AS(Runtime(PlatformModuleApp, missing_platform, std::move(missing_options)), std::logic_error);
-
-  TestPlatform incompatible_platform;
-  AppOptions incompatible_options{.show_debug_overlay = false};
-  incompatible_options.root_hooks.push_back([](RootContext& root) {
-    root.Modules().Register("test/Module", 42);
-    static_cast<void>(root.Modules().Open("test/Module"));
+TEST_CASE("PlatformRegistryRejectsDuplicateNamesAcrossRegistrationKinds") {
+  TestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([](RootContext& root) {
+    root.RegisterPlatformModule<std::shared_ptr<int>>("test/Duplicate",
+                                                      [](PlatformAdapter&) { return std::make_shared<int>(1); });
+    root.RegisterPlatformView<int>("test/Duplicate", DummyPlatformViewFactory{});
   });
-  REQUIRE_THROWS_AS(
-      Runtime(PlatformModuleApp, incompatible_platform, std::move(incompatible_options)),
-      std::logic_error
-  );
+  REQUIRE_THROWS_AS(Runtime(PlatformModuleApp, platform, std::move(options)), std::logic_error);
+}
 
-  TestPlatform invalid_platform;
-  AppOptions invalid_options{.show_debug_overlay = false};
-  invalid_options.root_hooks.push_back([](RootContext& root) {
-    root.Modules().Register("test/Module", PlatformModuleFactory{});
-    static_cast<void>(root.Modules().Open("test/Module"));
+TEST_CASE("PlatformRegistryRejectsWrongModuleAndOptionsTypes") {
+  TestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([](RootContext& root) {
+    root.RegisterPlatformModule<std::shared_ptr<int>, TestModuleOptions>(
+        "test/Typed",
+        [](PlatformAdapter&, const TestModuleOptions& options) { return std::make_shared<int>(options.value); });
+    REQUIRE_THROWS_AS(root.OpenPlatformModule<std::shared_ptr<std::string>>("test/Typed"), std::logic_error);
+    REQUIRE_THROWS_AS(root.OpenPlatformModule<std::shared_ptr<int>>("test/Typed", std::string("wrong")),
+                      std::logic_error);
   });
-  REQUIRE_THROWS_AS(Runtime(PlatformModuleApp, invalid_platform, std::move(invalid_options)), std::logic_error);
+  Runtime runtime(PlatformModuleApp, platform, std::move(options));
+}
 
-  TestPlatform missing_call_platform;
-  AppOptions missing_call_options{.show_debug_overlay = false};
-  missing_call_options.root_hooks.push_back([](RootContext& root) {
-    PlatformModuleFactory factory;
-    factory.create = [](const PlatformPayload&, PlatformEventSink) { return PlatformModuleFactory::Instance{}; };
-    root.Modules().Register("test/Module", std::move(factory));
-    static_cast<void>(root.Modules().Open("test/Module"));
+TEST_CASE("PlatformRegistryRejectsEmptyMissingAndInvalidUtf8Names") {
+  TestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([](RootContext& root) {
+    REQUIRE_THROWS_AS(root.RegisterPlatformModule<std::shared_ptr<int>>(
+                          "", [](PlatformAdapter&) { return std::make_shared<int>(1); }),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        root.RegisterPlatformModule<std::shared_ptr<int>>(std::string(1, static_cast<char>(0xFF)),
+                                                          [](PlatformAdapter&) { return std::make_shared<int>(1); }),
+        std::invalid_argument);
+    REQUIRE_THROWS_AS(root.OpenPlatformModule<std::shared_ptr<int>>("test/Missing"), std::logic_error);
   });
-  REQUIRE_THROWS_AS(
-      Runtime(PlatformModuleApp, missing_call_platform, std::move(missing_call_options)),
-      std::logic_error
-  );
+  Runtime runtime(PlatformModuleApp, platform, std::move(options));
+}
+
+TEST_CASE("PlatformChannelOwnsInvocationEventAndDisposalDelivery") {
+  TestPlatform platform;
+  detail::PlatformChannelEndpoint endpoint = detail::MakePlatformChannelEndpoint(platform);
+  int invocations = 0;
+  int cancellations = 0;
+  int disposals = 0;
+  endpoint.Connect({
+      .invoke =
+          [&](std::string method, PlatformPayload arguments,
+              std::function<void(PlatformResult<PlatformPayload>)> completion) {
+            REQUIRE(method == "read");
+            REQUIRE(arguments.AsInteger() == 4);
+            ++invocations;
+            completion(PlatformPayload(8));
+            return [&] { ++cancellations; };
+          },
+      .dispose = [&] { ++disposals; },
+  });
+
+  PlatformChannel channel = endpoint.Channel();
+  std::optional<std::int64_t> result;
+  const PlatformRequestId completed =
+      channel.Invoke("read", PlatformPayload(4), [&](PlatformResult<PlatformPayload> value) {
+        result = std::get<PlatformPayload>(value).AsInteger();
+      });
+  REQUIRE(invocations == 0);
+  REQUIRE_FALSE(result.has_value());
+  platform.RunPlatformModuleTasks();
+  REQUIRE(invocations == 1);
+  REQUIRE(result == 8);
+  REQUIRE_FALSE(channel.Cancel(completed));
+
+  std::optional<std::int64_t> event;
+  channel.On("changed", [&](const PlatformPayload& value) { event = value.AsInteger(); });
+  endpoint.Events().Emit("changed", PlatformPayload(9));
+  REQUIRE_FALSE(event.has_value());
+  platform.RunPlatformModuleTasks();
+  REQUIRE(event == 9);
+
+  channel.Close();
+  REQUIRE(disposals == 0);
+  REQUIRE(cancellations == 0);
+  REQUIRE_FALSE(channel.IsOpen());
+  platform.RunPlatformModuleTasks();
+  REQUIRE(disposals == 1);
+}
+
+TEST_CASE("PlatformChannelMapsTypedNoValueCallsToNullPayloads") {
+  TestPlatform platform;
+  detail::PlatformChannelEndpoint endpoint = detail::MakePlatformChannelEndpoint(platform);
+  endpoint.Connect({
+      .invoke =
+          [](std::string method, PlatformPayload arguments,
+             std::function<void(PlatformResult<PlatformPayload>)> completion) {
+            REQUIRE(arguments.IsNull());
+            if (method == "stop") {
+              completion(PlatformPayload{});
+            } else {
+              completion(PlatformPayload(1));
+            }
+            return std::function<void()>{};
+          },
+  });
+
+  PlatformChannel channel = endpoint.Channel();
+  bool stopped = false;
+  static_cast<void>(channel.Invoke<std::monostate>("stop", [&](PlatformResult<std::monostate> result) {
+    stopped = std::holds_alternative<std::monostate>(result);
+  }));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(stopped);
+
+  std::optional<PlatformError> error;
+  static_cast<void>(channel.Invoke<std::monostate>("invalid", [&](PlatformResult<std::monostate> result) {
+    if (const auto* failure = std::get_if<PlatformError>(&result)) {
+      error = *failure;
+    }
+  }));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(error.has_value());
+  REQUIRE(error->code == "huxerui/invalid-result");
+}
+
+TEST_CASE("PlatformChannelCancellationInvalidatesQueuedInvocation") {
+  TestPlatform platform;
+  detail::PlatformChannelEndpoint endpoint = detail::MakePlatformChannelEndpoint(platform);
+  int invocations = 0;
+  int cancellations = 0;
+  endpoint.Connect({
+      .invoke =
+          [&](std::string, PlatformPayload, std::function<void(PlatformResult<PlatformPayload>)>) {
+            ++invocations;
+            return [&] { ++cancellations; };
+          },
+  });
+
+  PlatformChannel channel = endpoint.Channel();
+  const PlatformRequestId request = channel.Invoke("read", PlatformPayload(), [](PlatformResult<PlatformPayload>) {});
+  REQUIRE(channel.Cancel(request));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(invocations == 0);
+  REQUIRE(cancellations == 0);
+}
+
+TEST_CASE("PlatformChannelCancelsInFlightInvocationBeforeDisposal") {
+  TestPlatform platform;
+  detail::PlatformChannelEndpoint endpoint = detail::MakePlatformChannelEndpoint(platform);
+  PlatformChannel channel = endpoint.Channel();
+  std::vector<std::string> operations;
+  bool completed = false;
+  endpoint.Connect({
+      .invoke =
+          [&](std::string, PlatformPayload, std::function<void(PlatformResult<PlatformPayload>)>) {
+            channel.Close();
+            return [&] { operations.emplace_back("cancel"); };
+          },
+      .dispose = [&] { operations.emplace_back("dispose"); },
+  });
+
+  static_cast<void>(
+      channel.Invoke("read", PlatformPayload(), [&](PlatformResult<PlatformPayload>) { completed = true; }));
+  REQUIRE(channel.IsOpen());
+  platform.RunPlatformModuleTasks();
+  REQUIRE_FALSE(channel.IsOpen());
+  REQUIRE_FALSE(completed);
+  const std::vector<std::string> expected{"cancel", "dispose"};
+  REQUIRE(operations == expected);
+}
+
+TEST_CASE("PlatformChannelRemovesRequestWhenInvocationDispatchFails") {
+  TestPlatform platform([](std::function<void()>) { throw std::runtime_error("test dispatch failure"); });
+  detail::PlatformChannelEndpoint endpoint = detail::MakePlatformChannelEndpoint(platform);
+  int invocations = 0;
+  endpoint.Connect({
+      .invoke =
+          [&](std::string, PlatformPayload, std::function<void(PlatformResult<PlatformPayload>)>) {
+            ++invocations;
+            return std::function<void()>{};
+          },
+  });
+
+  PlatformChannel channel = endpoint.Channel();
+  REQUIRE_THROWS_AS(channel.Invoke("read", PlatformPayload(), [](PlatformResult<PlatformPayload>) {}),
+                    std::runtime_error);
+  REQUIRE(invocations == 0);
+  REQUIRE_FALSE(channel.Cancel(1));
 }
 
 } // namespace

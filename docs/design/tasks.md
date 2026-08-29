@@ -188,7 +188,7 @@ The framework does not silently discard cleanup failures.
 
 ## Platform boundary
 
-PlatformAdapter retains the UIThreadDispatcher already supplied by every supported production adapter and shares copies with PlatformModules, ExternalTexture, and TaskScope.
+PlatformAdapter retains the UIThreadDispatcher already supplied by every supported production adapter and shares copies with PlatformChannel, ExternalTexture, and TaskScope.
 No new platform callback, event protocol, or platform-specific Task implementation is introduced.
 
 Windows continues to use its private window message, Apple platforms use the main dispatch queue, Linux uses its event-loop dispatcher, Web uses the browser event loop, and Android uses its owning HuxerUIView dispatcher.

@@ -289,7 +289,7 @@ public:
       view_.translatesAutoresizingMaskIntoConstraints = NO;
       view_->huxeruiRuntime = runtime_.get();
       view_->huxeruiAdapter = this;
-      platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, Modules(), *runtime_);
+      platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, PlatformRegistry(), *runtime_);
       [view_controller_.view addSubview:view_];
       [NSLayoutConstraint activateConstraints:@[
         [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],

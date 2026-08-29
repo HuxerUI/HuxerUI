@@ -8,8 +8,9 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 
 #include "external_texture_test_support.h"
 
@@ -86,6 +87,60 @@ TEST_CASE("PlatformPayloadAccessorsRequireTheDeclaredKind") {
   REQUIRE_THROWS_AS(payload.AsInteger(), std::bad_variant_access);
   REQUIRE_THROWS_AS(payload.AsExternalTexture(), std::bad_variant_access);
   REQUIRE_THROWS_AS(PlatformPayload{}.AsString(), std::bad_variant_access);
+}
+
+TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
+  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
+  const PlatformPayload payload = PlatformPayload::Object{
+      {"boolean", true},
+      {"integer", std::numeric_limits<std::int64_t>::min()},
+      {"double", -12.5},
+      {"string", "value"},
+      {"bytes", Bytes{std::byte{1}, std::byte{2}}},
+      {"list", PlatformPayload::List{nullptr, texture}},
+      {"texture", texture},
+  };
+
+  std::vector<ExternalTexture> external_textures;
+  const Bytes encoded = payload.Encode(external_textures);
+
+  REQUIRE(external_textures == std::vector<ExternalTexture>{texture});
+  REQUIRE(PlatformPayload::Decode(encoded, external_textures) == payload);
+}
+
+TEST_CASE("PlatformPayloadEnvelopeIsCanonical") {
+  const PlatformPayload payload = PlatformPayload::Object{{"second", 2}, {"first", 1}};
+  std::vector<ExternalTexture> external_textures;
+  const Bytes first = payload.Encode(external_textures);
+  const Bytes second = PlatformPayload(PlatformPayload::Object{{"first", 1}, {"second", 2}}).Encode(external_textures);
+
+  REQUIRE(first == second);
+}
+
+TEST_CASE("PlatformPayloadEnvelopeRejectsMalformedInput") {
+  std::vector<ExternalTexture> external_textures;
+  const Bytes valid = PlatformPayload("value").Encode(external_textures);
+  Bytes truncated = valid;
+  truncated.pop_back();
+  Bytes trailing = valid;
+  trailing.push_back(std::byte{0});
+  Bytes unsupported_version = valid;
+  unsupported_version[4] = std::byte{2};
+
+  REQUIRE_THROWS_AS(PlatformPayload::Decode({}), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(truncated), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(trailing), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(unsupported_version), std::invalid_argument);
+}
+
+TEST_CASE("PlatformPayloadEnvelopeRequiresExternalTextureCapabilities") {
+  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
+  std::vector<ExternalTexture> external_textures;
+  const Bytes encoded = PlatformPayload(texture).Encode(external_textures);
+  const std::vector<ExternalTexture> duplicate_textures{texture, texture};
+
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(encoded), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(encoded, duplicate_textures), std::invalid_argument);
 }
 
 } // namespace

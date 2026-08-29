@@ -1,69 +1,55 @@
 # Platform Modules
 
-Use `PlatformModule` for a non-visual platform capability. Do not use it for ordinary portable C++ services, embedded controls, or rendered media.
+Use a PlatformModule for a non-visual capability whose implementation depends on the current platform.
+Do not use one for portable C++ services, embedded controls, or frame production that fits `ExternalTexture`.
 
-## Application-side boundary
+## Typed C++ contract
 
-`PlatformPayload` supports null, boolean, signed 64-bit integer, double, string, bytes, list, object, and `ExternalTexture`. Construct its owned byte value with `Bytes`; `AsBytes()` returns a borrowed `std::span<const std::byte>` into the payload. Keep raw payload conversion at a typed service boundary instead of spreading type strings and map keys through UI code.
-
-Define typed method keys with:
-
-- `Request` and `Result` C++ object types, including scalar types such as `bool`;
-- static `Name` convertible to `std::string_view`;
-- `Encode(const Request&) -> PlatformPayload`;
-- `Decode(const PlatformPayload&) -> Result`.
-
-Define typed event keys with an Event `Signature`, static `Name`, and `Decode` compatible with that signature.
-
-`PlatformModules::Open(type, options)` returns a move-only `PlatformInstance`. `Call<Method>` returns a request ID and completes with `PlatformResult<Result>`. Register event handlers with `On<Key>`, cancel outstanding calls with `Cancel`, and release the instance with `Close` or destruction.
-
-Wrap the instance in an app-side service installed by a `RootHook`, then expose the service through `RootContext::Provide` and `UseService<Service>()`. UI components should depend on that typed service, not on `PlatformPayload`.
-
-## Registration
-
-`RootContext::Modules()` owns registrations for the window runtime. A generic `huxerui::PlatformModuleFactory` contains:
-
-- `create(options, event_sink) -> Instance`;
-- `Instance::call(method, arguments, result_sink) -> cancellation callback`;
-- `Instance::dispose()`.
-
-Android additionally exposes `huxerui::android::PlatformModuleFactory`, whose create callback receives `JNIEnv*` and the host Java object. Use installed platform-specific public headers when they exist. Do not assume an uninstalled platform has the same factory signature.
-
-Platform completions/events must return safely to the HuxerUI UI thread according to the platform factory contract. Complete each request at most once. Cancellation and dispose must be idempotent and must not invoke callbacks into destroyed UI.
-
-## Timer service pattern
-
-Keep the public component layer typed:
+The library defines the Module and optional Options types.
+Register one exact factory from a RootHook:
 
 ```cpp
-struct StartTimer {
-  struct Request {
-    std::int64_t milliseconds;
-  };
-  using Result = bool;
-  static constexpr std::string_view Name = "start";
-
-  static PlatformPayload Encode(const Request& request) {
-    return PlatformPayload::Object{{"milliseconds", request.milliseconds}};
-  }
-
-  static bool Decode(const PlatformPayload& payload) {
-    return payload.AsBoolean();
-  }
-};
+root.RegisterPlatformModule<AudioPlayer, AudioPlayerOptions>(
+    "audio/Player",
+    [](PlatformAdapter& adapter, const AudioPlayerOptions& options) {
+      return CreateAudioPlayer(adapter, options);
+    }
+);
 ```
 
-The platform implementation owns the actual scheduler and cancellation handle. The app-side service owns `PlatformInstance`, calls `Call<StartTimer>`, translates `PlatformError`, and closes on teardown. Avoid implementing a timer module when `TaskScope` plus `Delay` already satisfies a portable app need.
+Every direct C++ factory receives the owning surface's non-owning `PlatformAdapter&`, followed by the exact Options type when present, and returns the exact Module type.
+The adapter provides the existing host capabilities without introducing a second factory context; it remains owned by the surface and must not be retained beyond that surface's lifetime.
+Direct C++ factories do not encode values into `PlatformPayload`.
+Registration names are nonempty case-sensitive UTF-8 identities and do not require `/`.
 
-## External texture pattern
+Open a root-owned Module with `RootContext::OpenPlatformModule<Module>()`, then optionally expose it through `root.Provide()`.
+For component lifetime, call the typed free `OpenPlatformModule<Module>()` only from committed `Lifecycle` setup and release the returned Module from cleanup.
+There is no generic `UsePlatformModule`, public registry accessor, mandatory service base, or dynamic method list.
 
-A capture, camera, or decoder module can return an `ExternalTexture` inside `PlatformPayload`. Decode it with `AsExternalTexture()` and display it with `Image(texture)`. The platform producer owns its `ExternalTextureSource` and calls `Finish` on shutdown. This separates non-visual control calls from frame rendering.
+## Cross-language implementations
+
+`PlatformPayload` and `PlatformChannel` belong only at a C++/platform-language boundary.
+Keep them behind the library's typed Module facade.
+A structured boundary type owns its static `Encode(const T&)` or `Decode(const PlatformPayload&)` operation; direct C++ implementations do not call those operations.
+
+Android currently provides `android::JavaPlatformModuleFactory<Module, Options>` for Java or Kotlin implementations.
+Its `connect` callback receives one framework-owned `PlatformChannel` and returns the library's exact Module type.
+The Java implementation receives one `HuxerUIPlatformChannel.Events` emitter and uses the SDK `PlatformPayload` value; it does not declare one JNI callback per event.
+
+Apple Objective-C/Swift and Web JavaScript common adapters are future work.
+Current Apple and Web libraries use direct C++/Objective-C++/Emscripten factories or a library-owned bridge while retaining the same RootHook registration and typed public Module contract.
+
+`PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
+Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.
+Results and events return asynchronously through that dispatcher.
+`Cancel` and `Close` invalidate C++ delivery immediately; queued invocations are skipped, in-flight cancellation runs before disposal, and late results or events are ignored.
+The channel is a reusable transport convenience, not a PlatformModule base class or the Module API exposed to application UI.
 
 ## Review points
 
-- stable type/method/event names contained in one service;
-- complete payload validation and error mapping;
-- request cancellation and instance disposal;
-- UI-thread delivery and component-lifetime safety;
-- no `PlatformView` used for a non-visual service;
-- no `PlatformModule` used where portable C++ is sufficient.
+- one explicit RootHook registration and no platform-host registration path;
+- exact Module and Options types on the direct C++ path;
+- payload conversion confined to an actual language boundary;
+- deterministic ownership, cancellation, and disposal;
+- no string methods, payload maps, or channels exposed through application components;
+- no PlatformModule where portable C++ already owns the capability.

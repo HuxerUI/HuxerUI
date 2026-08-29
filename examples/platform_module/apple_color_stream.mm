@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 
+#include <huxerui/app.h>
+
 #if TARGET_OS_IOS
 #include <huxerui/ios/external_texture.h>
 namespace huxerui_apple = huxerui::ios;
@@ -30,8 +32,14 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
   };
 }
 
-struct AppleColorStreamState : std::enable_shared_from_this<AppleColorStreamState> {
-  AppleColorStreamState() : source({320.0F, 180.0F}) {}
+struct AppleColorStreamState : huxerui::example::ColorStreamService,
+                               std::enable_shared_from_this<AppleColorStreamState> {
+  explicit AppleColorStreamState(huxerui::PlatformAdapter& adapter_value)
+      : adapter(&adapter_value), source({320.0F, 180.0F}) {}
+
+  ~AppleColorStreamState() override {
+    Stop();
+  }
 
   void PublishFrame() {
     CVPixelBufferRef pixel_buffer = nullptr;
@@ -83,57 +91,38 @@ struct AppleColorStreamState : std::enable_shared_from_this<AppleColorStreamStat
     source.Finish();
   }
 
+  huxerui::PlatformRequestId
+  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
+    }
+    if (!NSThread.isMainThread) {
+      throw std::logic_error("HuxerUI example Apple color stream must be used on the main thread");
+    }
+    Start();
+    huxerui::ExternalTexture texture = source.Texture();
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+      completion(std::move(texture));
+    });
+    return ++request_id;
+  }
+
+  huxerui::PlatformAdapter* adapter;
   huxerui_apple::ExternalTextureSource source;
   __strong NSTimer* timer = nil;
   std::uint32_t phase = 0;
+  huxerui::PlatformRequestId request_id = 0;
 };
-
-huxerui::PlatformModuleFactory AppleColorStreamFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    if (!options.IsNull()) {
-      throw std::invalid_argument("HuxerUI example color stream options must be null");
-    }
-    static_cast<void>(events);
-    auto state = std::make_shared<AppleColorStreamState>();
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (!NSThread.isMainThread) {
-        result(
-            ColorStreamError(
-                "example/color-stream-thread",
-                "The platform color stream must be used from the main thread"
-            )
-        );
-        return {};
-      }
-      if (method == huxerui::example::color_stream::texture_method && arguments.IsNull()) {
-        state->Start();
-        result(huxerui::PlatformPayload(state->source.Texture()));
-        return {};
-      }
-      result(
-          ColorStreamError(
-              "example/color-stream-method",
-              "The platform color stream method or payload is not supported"
-          )
-      );
-      return {};
-    };
-    instance.dispose = [state] { state->Stop(); };
-    return instance;
-  };
-  return factory;
-}
 
 } // namespace
 
 namespace huxerui::example {
 
 void InstallColorStream(RootContext& root) {
-  root.Modules().Register(color_stream::type, AppleColorStreamFactory());
-  root.Provide(std::make_shared<ColorStreamService>(root.Modules().Open(color_stream::type)));
+  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<AppleColorStreamState>(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type));
 }
 
 } // namespace huxerui::example

@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
 
 namespace huxerui::detail {
 

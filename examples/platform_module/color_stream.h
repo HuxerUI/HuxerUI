@@ -4,7 +4,7 @@
 #include <memory>
 
 #include <huxerui/external_texture.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/root.h>
 
 namespace huxerui::example {
@@ -12,23 +12,22 @@ namespace huxerui::example {
 namespace color_stream {
 
 inline constexpr char type[] = "example/ColorStream";
-inline constexpr char texture_method[] = "texture";
 
 } // namespace color_stream
 
-class ColorStreamService final {
+class ColorStreamService {
 public:
-  explicit ColorStreamService(PlatformInstance instance);
+  virtual ~ColorStreamService() = default;
 
   ColorStreamService(const ColorStreamService&) = delete;
   ColorStreamService& operator=(const ColorStreamService&) = delete;
   ColorStreamService(ColorStreamService&&) = delete;
   ColorStreamService& operator=(ColorStreamService&&) = delete;
 
-  PlatformRequestId Texture(std::function<void(PlatformResult<ExternalTexture>)> completion);
+  virtual PlatformRequestId Texture(std::function<void(PlatformResult<ExternalTexture>)> completion) = 0;
 
-private:
-  PlatformInstance instance_;
+protected:
+  ColorStreamService() = default;
 };
 
 std::shared_ptr<ColorStreamService> UseColorStream();

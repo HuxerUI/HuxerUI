@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -11,14 +12,14 @@
 #include <emscripten.h>
 #include <emscripten/val.h>
 
-#include <huxerui/web/platform_view.h>
+#include <huxerui/web/platform_registry.h>
 
 namespace {
 
 using emscripten::val;
 
-std::unordered_map<std::uint32_t, huxerui::PlatformEventSink>& EventRoutes() {
-  static std::unordered_map<std::uint32_t, huxerui::PlatformEventSink> routes;
+std::unordered_map<std::uint32_t, huxerui::PlatformEventEmitter>& EventRoutes() {
+  static std::unordered_map<std::uint32_t, huxerui::PlatformEventEmitter> routes;
   return routes;
 }
 
@@ -35,9 +36,10 @@ std::uint32_t AllocateRoute() {
   throw std::logic_error("HuxerUI Web PlatformView example event route space is exhausted");
 }
 
-std::string_view TextProperty(const huxerui::PlatformPayload& properties) {
-  return properties.AsObject().at(huxerui::example::platform_text_field::text_property).AsString();
-}
+struct PlatformTextFieldInstance {
+  std::uint32_t route = 0;
+  val element = val::undefined();
+};
 
 // clang-format off
 EM_JS(emscripten::EM_VAL, CreateWebPlatformTextField, (std::uint32_t route, const char* text), {
@@ -81,28 +83,31 @@ EM_JS(std::uint32_t, DisposeWebPlatformTextField, (emscripten::EM_VAL handle), {
 });
 // clang-format on
 
-huxerui::web::PlatformViewFactory PlatformTextFieldFactory() {
+huxerui::web::PlatformViewFactory<huxerui::example::PlatformTextFieldProperties, PlatformTextFieldInstance>
+PlatformTextFieldFactory() {
   return {
       .create =
-          [](const huxerui::PlatformPayload& properties, huxerui::PlatformEventSink events) {
+          [](const huxerui::example::PlatformTextFieldProperties& properties, huxerui::PlatformEventEmitter events) {
             const std::uint32_t route = AllocateRoute();
             EventRoutes().emplace(route, std::move(events));
             try {
-              const std::string text{TextProperty(properties)};
-              return val::take_ownership(CreateWebPlatformTextField(route, text.c_str()));
+              auto instance = std::make_shared<PlatformTextFieldInstance>();
+              instance->route = route;
+              instance->element = val::take_ownership(CreateWebPlatformTextField(route, properties.text.c_str()));
+              return instance;
             } catch (...) {
               EventRoutes().erase(route);
               throw;
             }
           },
+      .view = [](const std::shared_ptr<PlatformTextFieldInstance>& instance) { return instance->element; },
       .update =
-          [](val element, const huxerui::PlatformPayload& properties) {
-            const std::string text{TextProperty(properties)};
-            UpdateWebPlatformTextField(element.as_handle(), text.c_str());
+          [](PlatformTextFieldInstance& instance, const huxerui::example::PlatformTextFieldProperties& properties) {
+            UpdateWebPlatformTextField(instance.element.as_handle(), properties.text.c_str());
           },
       .dispose =
-          [](val element) {
-            const std::uint32_t route = DisposeWebPlatformTextField(element.as_handle());
+          [](PlatformTextFieldInstance& instance) {
+            const std::uint32_t route = DisposeWebPlatformTextField(instance.element.as_handle());
             if (route != 0) {
               EventRoutes().erase(route);
             }
@@ -119,10 +124,7 @@ huxerui_example_web_platform_text_field_changed(std::uint32_t route, const char*
     return;
   }
   try {
-    found->second(
-        huxerui::example::PlatformTextFieldEvents::Changed::Name,
-        huxerui::PlatformPayload(std::string(value))
-    );
+    found->second.Emit<huxerui::example::PlatformTextFieldEvents::Changed>(std::string(value));
   } catch (...) {
   }
 }
@@ -130,7 +132,7 @@ huxerui_example_web_platform_text_field_changed(std::uint32_t route, const char*
 namespace huxerui::example {
 
 void InstallPlatformTextField(RootContext& root) {
-  root.Modules().Register(platform_text_field::type, PlatformTextFieldFactory());
+  root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type, PlatformTextFieldFactory());
 }
 
 } // namespace huxerui::example

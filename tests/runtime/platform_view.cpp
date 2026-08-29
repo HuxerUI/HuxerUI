@@ -11,30 +11,20 @@ namespace {
 struct TestPlatformEvents {
   struct Changed : Event<int> {
     static constexpr std::string_view Name = "changed";
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
   };
 
   struct DuplicateChanged : Event<int> {
     static constexpr std::string_view Name = "changed";
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
   };
 
   struct TextureChanged : Event<ExternalTexture> {
     static constexpr std::string_view Name = "textureChanged";
-
-    static ExternalTexture Decode(const PlatformPayload& payload) {
-      return payload.AsExternalTexture();
-    }
   };
 };
 
 State<int> platform_view_value;
+State<int> platform_view_controller;
+State<bool> platform_view_controller_attached;
 State<bool> alternate_platform_view_type;
 State<bool> reverse_platform_views;
 State<std::size_t> indexed_platform_view_page;
@@ -42,13 +32,11 @@ int received_platform_event = 0;
 ExternalTexture platform_view_external_texture;
 ExternalTexture received_platform_texture;
 
-struct TestPlatformRegistration {
+struct TestProperties {
   int value = 0;
-};
 
-PlatformPayload TestProperties(int value) {
-  return PlatformPayload::Object{{"value", value}};
-}
+  bool operator==(const TestProperties&) const = default;
+};
 
 View PlatformViewApp() {
   auto value = UseState(1);
@@ -103,23 +91,37 @@ View KeyedPlatformViewApp() {
 
 View EventPlatformViewApp() {
   return PlatformView("test/Event")
-      .Events<TestPlatformEvents::Changed>()
       .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; });
+}
+
+View ControlledPlatformViewApp() {
+  auto controller = UseState(1);
+  auto attached = UseState(true);
+  platform_view_controller = controller;
+  platform_view_controller_attached = attached;
+  if (attached.Get()) {
+    return PlatformView("test/View", TestProperties(1)).Controller(controller.Get()).With(Frame{80.0F, 40.0F});
+  }
+  return PlatformView("test/View", TestProperties(1)).With(Frame{80.0F, 40.0F});
+}
+
+View DuplicateControllerPlatformViewApp() {
+  return Column{
+      PlatformView("test/View", TestProperties(1)).Controller(7),
+      PlatformView("test/View", TestProperties(2)).Controller(7),
+  };
 }
 
 View TextureEventPlatformViewApp() {
   return PlatformView("test/TextureEvent")
-      .Events<TestPlatformEvents::TextureChanged>()
       .On<TestPlatformEvents::TextureChanged>([](ExternalTexture texture) {
         received_platform_texture = std::move(texture);
       });
 }
 
 View HiddenTexturePlatformViewApp() {
-  return PlatformView(
-             "test/Texture",
-             PlatformPayload::Object{{"texture", platform_view_external_texture}}
-  )
+  return PlatformView("test/Texture",
+                      PlatformPayload(PlatformPayload::Object{{"texture", platform_view_external_texture}}))
       .With(Frame{80.0F, 40.0F}, Opacity{0.0F});
 }
 
@@ -146,7 +148,6 @@ View IndexedPlatformViewApp() {
   return IndexedPages(
       {
           PlatformView("test/Event")
-              .Events<TestPlatformEvents::Changed>()
               .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; })
               .With(Frame{80.0F, 40.0F}),
           Text("Other page"),
@@ -199,18 +200,43 @@ TEST_CASE("PlatformViewUsesOrdinaryLayoutAndRetainsItsPlacement") {
 
   const PlacePlatformViewCommand first = FindPlatformView(runtime.BuildRenderFrame());
   REQUIRE(first.Type() == "test/View");
-  REQUIRE(first.Properties().AsObject().at("value").AsInteger() == 1);
+  REQUIRE(first.Properties().Get<TestProperties>().value == 1);
   REQUIRE(first.Bounds() == Rect{0.0F, 0.0F, 80.0F, 40.0F});
   REQUIRE(first.PropertiesRevision() == 1);
 
   platform_view_value = 2;
   const PlacePlatformViewCommand updated = FindPlatformView(runtime.BuildRenderFrame());
   REQUIRE(updated.Identity() == first.Identity());
-  REQUIRE(updated.Properties().AsObject().at("value").AsInteger() == 2);
+  REQUIRE(updated.Properties().Get<TestProperties>().value == 2);
   REQUIRE(updated.PropertiesRevision() == 2);
 
   const PlacePlatformViewCommand unchanged = FindPlatformView(runtime.BuildRenderFrame());
   REQUIRE(unchanged.PropertiesRevision() == updated.PropertiesRevision());
+}
+
+TEST_CASE("PlatformViewTracksControllerReplacementAndRemovalIndependently") {
+  TestPlatform platform;
+  Runtime runtime(ControlledPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+
+  const PlacePlatformViewCommand first = FindPlatformView(runtime.BuildRenderFrame());
+  REQUIRE(first.Controller().Get<int>() == 1);
+  REQUIRE(first.ControllerRevision() == 1);
+  REQUIRE(first.PropertiesRevision() == 1);
+
+  platform_view_controller = 2;
+  const PlacePlatformViewCommand replaced = FindPlatformView(runtime.BuildRenderFrame());
+  REQUIRE(replaced.Identity() == first.Identity());
+  REQUIRE(replaced.Controller().Get<int>() == 2);
+  REQUIRE(replaced.ControllerRevision() == 2);
+  REQUIRE(replaced.PropertiesRevision() == first.PropertiesRevision());
+
+  platform_view_controller_attached = false;
+  const PlacePlatformViewCommand removed = FindPlatformView(runtime.BuildRenderFrame());
+  REQUIRE(removed.Identity() == first.Identity());
+  REQUIRE_FALSE(removed.Controller().HasValue());
+  REQUIRE(removed.ControllerRevision() == 3);
+  REQUIRE(removed.PropertiesRevision() == first.PropertiesRevision());
 }
 
 TEST_CASE("PlatformViewHasNoIntrinsicSize") {
@@ -297,8 +323,11 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
   REQUIRE(mounted->platform_view->events.size() == 1);
   const detail::PlatformEventDescriptor& event = mounted->platform_view->events.front();
   REQUIRE(event.name == "changed");
-  event.dispatch(PlatformPayload(std::int64_t{7}), mounted->event_bindings);
+  event.dispatch_direct(PlatformValue::Store(7), mounted->event_bindings);
   REQUIRE(received_platform_event == 7);
+  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::Changed), PlatformValue::Store(8)));
+  REQUIRE(received_platform_event == 8);
   REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
       runtime.CoreRuntime(),
       placement.Identity(),
@@ -313,10 +342,10 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
       PlatformPayload("invalid")
   ));
 
-  REQUIRE_THROWS_AS(
-      (PlatformView("test/Event").Events<TestPlatformEvents::Changed, TestPlatformEvents::DuplicateChanged>()),
-      std::invalid_argument
-  );
+  REQUIRE_THROWS_AS(PlatformView("test/Event")
+                        .On<TestPlatformEvents::Changed>([](int) {})
+                        .On<TestPlatformEvents::DuplicateChanged>([](int) {}),
+                    std::invalid_argument);
 }
 
 TEST_CASE("PlatformViewBindsExternalTexturesBeforePlatformComposition") {
@@ -345,6 +374,12 @@ TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
       "textureChanged",
       PlatformPayload(texture)
   ));
+  REQUIRE(received_platform_texture == texture);
+
+  received_platform_texture = {};
+  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(runtime.CoreRuntime(), placement.Identity(),
+                                                           typeid(TestPlatformEvents::TextureChanged),
+                                                           PlatformValue::Store(texture)));
   REQUIRE(received_platform_texture == texture);
 
   TestPlatform other_platform;
@@ -412,32 +447,6 @@ TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to 
   REQUIRE(restored_placement.visible);
 }
 
-TEST_CASE("PlatformModulesOwnAUniquePerSurfaceTypeRegistry") {
-  TestPlatform platform;
-  PlatformModules* installed_modules = nullptr;
-  AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([&](RootContext& root) {
-    installed_modules = &root.Modules();
-    root.Modules().Register("test/View", TestPlatformRegistration{42});
-  });
-  Runtime runtime(ZeroPlatformViewApp, platform, std::move(options));
-
-  REQUIRE(installed_modules != nullptr);
-  const TestPlatformRegistration* registration = installed_modules->Find<TestPlatformRegistration>("test/View");
-  REQUIRE(registration != nullptr);
-  REQUIRE(registration->value == 42);
-  REQUIRE(installed_modules->Find<TestPlatformRegistration>("test/Missing") == nullptr);
-  REQUIRE_THROWS_AS(installed_modules->Find<int>("test/View"), std::logic_error);
-
-  TestPlatform duplicate_platform;
-  AppOptions duplicate_options{.show_debug_overlay = false};
-  duplicate_options.root_hooks.push_back([](RootContext& root) {
-    root.Modules().Register("test/View", TestPlatformRegistration{});
-    root.Modules().Register("test/View", TestPlatformRegistration{});
-  });
-  REQUIRE_THROWS_AS(Runtime(ZeroPlatformViewApp, duplicate_platform, std::move(duplicate_options)), std::logic_error);
-}
-
 TEST_CASE("RenderCompositionPreservesDrawingAndPlatformViewOrder") {
   TestPlatform platform;
   Runtime runtime(OrderedPlatformViewApp, platform);
@@ -468,6 +477,14 @@ TEST_CASE("RenderCompositionDoesNotCreateSlicesBetweenAdjacentPlatformViews") {
   REQUIRE(composition.layers.size() == 2);
   REQUIRE(std::holds_alternative<detail::PlatformViewPlacement>(composition.layers[0]));
   REQUIRE(std::holds_alternative<detail::PlatformViewPlacement>(composition.layers[1]));
+}
+
+TEST_CASE("RenderCompositionRejectsAControllerBoundToMultiplePlatformViews") {
+  TestPlatform platform;
+  Runtime runtime(DuplicateControllerPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{300.0F, 200.0F}});
+
+  REQUIRE_THROWS_AS(detail::BuildRenderComposition(runtime.BuildRenderFrame().scene), std::logic_error);
 }
 
 TEST_CASE("RenderCompositionRejectsRotatedPlatformViews") {

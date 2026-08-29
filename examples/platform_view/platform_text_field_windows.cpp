@@ -7,7 +7,7 @@
 #include <string_view>
 #include <utility>
 
-#include <huxerui/windows/platform_view.h>
+#include <huxerui/windows/platform_registry.h>
 
 namespace huxerui::example {
 
@@ -16,8 +16,9 @@ namespace {
 constexpr wchar_t kPlatformTextFieldClassName[] = L"HuxerUI.Example.PlatformTextField";
 
 struct PlatformTextFieldState {
+  HWND view = nullptr;
   HWND edit = nullptr;
-  PlatformEventSink events;
+  PlatformEventEmitter events;
   bool applying_properties = false;
 };
 
@@ -61,22 +62,21 @@ std::string Utf8Text(HWND edit) {
   return result;
 }
 
-void ApplyProperties(HWND view, const PlatformPayload& properties) {
-  auto* state = reinterpret_cast<PlatformTextFieldState*>(GetWindowLongPtrW(view, GWLP_USERDATA));
-  if (state == nullptr || state->edit == nullptr) {
+void ApplyProperties(PlatformTextFieldState& state, const PlatformTextFieldProperties& properties) {
+  if (state.edit == nullptr) {
     return;
   }
-  const std::wstring text = WideStringFromUtf8(properties.AsObject().at(platform_text_field::text_property).AsString());
-  const int current_length = GetWindowTextLengthW(state->edit);
+  const std::wstring text = WideStringFromUtf8(properties.text);
+  const int current_length = GetWindowTextLengthW(state.edit);
   std::wstring current(static_cast<std::size_t>(std::max(current_length, 0)) + 1, L'\0');
   if (current_length > 0) {
-    GetWindowTextW(state->edit, current.data(), current_length + 1);
+    GetWindowTextW(state.edit, current.data(), current_length + 1);
   }
   current.resize(static_cast<std::size_t>(std::max(current_length, 0)));
   if (current != text) {
-    state->applying_properties = true;
-    SetWindowTextW(state->edit, text.c_str());
-    state->applying_properties = false;
+    state.applying_properties = true;
+    SetWindowTextW(state.edit, text.c_str());
+    state.applying_properties = false;
   }
 }
 
@@ -115,8 +115,8 @@ LRESULT CALLBACK PlatformTextFieldProcedure(HWND window, UINT message, WPARAM w_
     }
     return 0;
   case WM_COMMAND:
-    if (state != nullptr && !state->applying_properties && HIWORD(w_param) == EN_CHANGE && state->events) {
-      state->events(PlatformTextFieldEvents::Changed::Name, PlatformPayload(Utf8Text(state->edit)));
+    if (state != nullptr && !state->applying_properties && HIWORD(w_param) == EN_CHANGE) {
+      state->events.Emit<PlatformTextFieldEvents::Changed>(Utf8Text(state->edit));
     }
     return 0;
   default:
@@ -144,10 +144,11 @@ void RegisterPlatformTextFieldClass() {
   }
 }
 
-HWND CreatePlatformTextField(HWND parent, const PlatformPayload& properties, PlatformEventSink event_sink) {
+std::shared_ptr<PlatformTextFieldState>
+CreatePlatformTextField(HWND parent, const PlatformTextFieldProperties& properties, PlatformEventEmitter events) {
   RegisterPlatformTextFieldClass();
-  auto state = std::make_unique<PlatformTextFieldState>();
-  state->events = std::move(event_sink);
+  auto state = std::make_shared<PlatformTextFieldState>();
+  state->events = std::move(events);
   HWND view = CreateWindowExW(
       0,
       kPlatformTextFieldClassName,
@@ -163,26 +164,26 @@ HWND CreatePlatformTextField(HWND parent, const PlatformPayload& properties, Pla
       state.get()
   );
   if (view == nullptr) {
-    return nullptr;
+    return {};
   }
-  state.release();
-  ApplyProperties(view, properties);
-  return view;
+  state->view = view;
+  ApplyProperties(*state, properties);
+  return state;
 }
 
-void UpdatePlatformTextField(HWND view, const PlatformPayload& properties) {
-  ApplyProperties(view, properties);
+void UpdatePlatformTextField(PlatformTextFieldState& state, const PlatformTextFieldProperties& properties) {
+  ApplyProperties(state, properties);
 }
 
-void DisposePlatformTextField(HWND view) {
-  auto* state = reinterpret_cast<PlatformTextFieldState*>(GetWindowLongPtrW(view, GWLP_USERDATA));
-  SetWindowLongPtrW(view, GWLP_USERDATA, 0);
-  delete state;
+void DisposePlatformTextField(PlatformTextFieldState& state) {
+  SetWindowLongPtrW(state.view, GWLP_USERDATA, 0);
+  state.events = {};
 }
 
-windows::PlatformViewFactory PlatformTextFieldFactory() {
+windows::PlatformViewFactory<PlatformTextFieldProperties, PlatformTextFieldState> PlatformTextFieldFactory() {
   return {
       .create = CreatePlatformTextField,
+      .view = [](const std::shared_ptr<PlatformTextFieldState>& state) { return state->view; },
       .update = UpdatePlatformTextField,
       .dispose = DisposePlatformTextField,
   };
@@ -191,7 +192,7 @@ windows::PlatformViewFactory PlatformTextFieldFactory() {
 } // namespace
 
 void InstallPlatformTextField(RootContext& root) {
-  root.Modules().Register(platform_text_field::type, PlatformTextFieldFactory());
+  root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type, PlatformTextFieldFactory());
 }
 
 } // namespace huxerui::example

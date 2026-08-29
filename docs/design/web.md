@@ -1,6 +1,6 @@
 # Web Platform Design
 
-This document defines the implemented HuxerUI Web backend and its target contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, application storage, accessibility, and delivery boundaries.
+This document defines the HuxerUI Web backend contract, including application startup, Emscripten integration, Canvas-session ownership, rendering, text layout, input, resources, application storage, accessibility, and delivery boundaries.
 
 ## Goals
 
@@ -205,14 +205,16 @@ The initial locale derives from `navigator.language` and is normalized through t
 
 ## PlatformModule
 
-Web uses the platform-neutral `PlatformModuleFactory`, `PlatformInstance`, typed method, typed event, cancellation, and disposal contracts without adding a JavaScript factory registry or a second message protocol.
+Web uses the surface-owned internal `PlatformRegistry` and strongly typed library Module APIs without adding a JavaScript factory registry or a second registration entry point.
 Library-owned Web sources are ordinary C++ and Emscripten glue selected by the library's CMake target when `EMSCRIPTEN` is active.
-They call browser APIs through Emscripten, register the existing factory from an explicit RootHook, and keep JavaScript values, callbacks, promises, and DOM objects outside `PlatformPayload` and shared application code.
+They may implement the library's Module directly through Emscripten or register a linked JavaScript export through the common call channel or a library-owned bridge from an explicit RootHook.
+The public Module chooses its own synchronous, asynchronous, callback, stream, and error conventions; no proxy inheritance or dynamic call API appears in that public contract.
+JavaScript values, callbacks, promises, and DOM objects remain outside `PlatformPayload` and shared application code.
 Libraries that require JavaScript dependencies express those link inputs through their own Emscripten target configuration; the HuxerUI library graph does not parse or reproduce JavaScript package metadata.
 
 The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
-Platform result and event sinks may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
-Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while cancellation remains owned by the PlatformModule instance.
+Platform Result and Event endpoints may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
+Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while the bridge or direct Module implementation owns any cancellation behavior exposed by its library API.
 
 The Web `example_platform_module` uses Emscripten intervals to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, disposal, and ExternalTexture publication through the same Timer and ColorStream Root Services as the other platform examples.
 
@@ -222,9 +224,11 @@ DOM-backed PlatformView is implemented and follows final RenderScene paint order
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
 WebPlatformAdapter consumes the shared internal `RenderComposition` before drawing and retains compatible Canvas elements and DOM objects across frames.
 
-Web PlatformView factories include `<huxerui/web/platform_view.h>` and register `web::PlatformViewFactory` explicitly under the same stable UTF-8 type strings as other platform backends.
-The create callback receives the complete initial `PlatformPayload` and an asynchronous `PlatformEventSink`, and returns a detached `HTMLElement` as an `emscripten::val`.
-The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing, while optional update and dispose callbacks retain library-owned behavior without putting DOM values in `PlatformPayload` or adding a JavaScript registry.
+Web PlatformView libraries currently register a direct strongly typed Emscripten C++ factory or a library-owned bridge under the same stable UTF-8 registration names as other platform backends.
+A direct C++ factory receives the concrete Properties and typed `PlatformEventEmitter` without payload encoding.
+A future JavaScript common adapter receives the local immutable `PlatformPayload` representing the complete Properties and one framework-owned emitter, then returns a detached object containing its non-null `HTMLElement` plus `update`, optional command `invoke`, and `dispose` operations.
+The registered exact Controller type currently uses a direct C++ connection or a library-owned Emscripten bridge for commands; the future common adapter routes JavaScript events through the supplied framework emitter rather than event-specific WebAssembly callbacks.
+The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing without putting DOM values in `PlatformPayload` or adding another registry.
 
 A PlatformView-capable session owns one isolated CSS stacking context inside the browser-supplied host element.
 The adapter-owned base Canvas serves as the first HuxerUI slice when applicable, while additional transparent Canvas elements and clipped PlatformView containers become absolutely positioned ordered siblings in the same composition root.

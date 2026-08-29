@@ -7,7 +7,8 @@
 #include <memory>
 #include <optional>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
@@ -20,15 +21,8 @@ class AndroidRenderer;
 
 class AndroidPlatformViews final {
 public:
-  AndroidPlatformViews(
-      JNIEnv* environment,
-      jobject root,
-      jobject context,
-      AndroidRenderer& renderer,
-      PlatformModules& modules,
-      Runtime& runtime,
-      UIThreadDispatcher dispatch_to_ui_thread
-  );
+  AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context, AndroidRenderer& renderer,
+                       PlatformRegistry& registry, Runtime& runtime, UIThreadDispatcher dispatch_to_ui_thread);
   ~AndroidPlatformViews();
 
   AndroidPlatformViews(const AndroidPlatformViews&) = delete;

@@ -239,7 +239,7 @@ public:
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
-      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, Modules(), runtime);
+      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, PlatformRegistry(), runtime);
       accessibility_ = std::make_unique<MacAccessibility>(runtime, view_, *platform_views_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;

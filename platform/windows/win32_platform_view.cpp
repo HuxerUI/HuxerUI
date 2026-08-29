@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
-#include <huxerui/windows/platform_view.h>
+#include <huxerui/windows/platform_registry.h>
 
 #include "internal.h"
 
@@ -71,20 +71,30 @@ struct Win32PlatformViews::State {
 
   struct HostedView {
     std::uint64_t properties_revision = 0;
+    std::uint64_t controller_revision = 0;
     std::string type;
     std::shared_ptr<EventRoute> event_route;
-    windows::PlatformViewFactory factory;
+    std::shared_ptr<const windows::detail::Win32ViewFactory> factory;
+    std::shared_ptr<void> instance;
+    PlatformValue controller;
     HWND container = nullptr;
     HWND view = nullptr;
     bool visible = false;
+    bool controller_connected = false;
 
     ~HostedView() {
       if (event_route) {
         event_route->active = false;
       }
-      if (view != nullptr && factory.dispose) {
+      if (instance && controller_connected && factory && factory->disconnect) {
         try {
-          factory.dispose(view);
+          factory->disconnect(instance, controller);
+        } catch (...) {
+        }
+      }
+      if (instance && factory && factory->dispose) {
+        try {
+          factory->dispose(instance);
         } catch (...) {
         }
       }
@@ -97,15 +107,9 @@ struct Win32PlatformViews::State {
     }
   };
 
-  State(
-      HINSTANCE instance_value,
-      HWND root_value,
-      PlatformModules& modules_value,
-      Runtime& runtime_value,
-      UIThreadDispatcher dispatch_value,
-      OverlayMessageHandler overlay_message_handler_value
-  )
-      : instance(instance_value), root(root_value), modules(&modules_value), runtime(&runtime_value),
+  State(HINSTANCE instance_value, HWND root_value, PlatformRegistry& registry_value, Runtime& runtime_value,
+        UIThreadDispatcher dispatch_value, OverlayMessageHandler overlay_message_handler_value)
+      : instance(instance_value), root(root_value), registry(&registry_value), runtime(&runtime_value),
         dispatch(std::move(dispatch_value)), overlay_message_handler(std::move(overlay_message_handler_value)) {
     RegisterClasses();
     overlay = CreateWindowExW(
@@ -181,13 +185,19 @@ struct Win32PlatformViews::State {
 
   std::unique_ptr<HostedView> Create(const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
-    const auto* factory = modules->Find<windows::PlatformViewFactory>(command.Type());
-    if (factory == nullptr) {
-      throw std::logic_error("HuxerUI Windows PlatformView type is not registered: " + std::string(command.Type()));
-    }
+    std::shared_ptr<const windows::detail::Win32ViewFactory> factory =
+        registry->FindView<windows::detail::Win32ViewFactory>(command.Type(), command.Properties().Type(),
+                                                              command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI Windows PlatformView factory must provide create");
     }
+
+    auto hosted = std::make_unique<HostedView>();
+    hosted->properties_revision = command.PropertiesRevision();
+    hosted->controller_revision = command.ControllerRevision();
+    hosted->type = command.Type();
+    hosted->factory = std::move(factory);
+    hosted->controller = command.Controller();
 
     HWND container = CreateWindowExW(
         WS_EX_CONTROLPARENT,
@@ -206,74 +216,97 @@ struct Win32PlatformViews::State {
     if (container == nullptr) {
       throw std::runtime_error("HuxerUI could not create a Windows PlatformView container");
     }
+    hosted->container = container;
 
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, dispatch, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
-    PlatformEventSink event_sink = [weak_route](std::string_view name, PlatformPayload payload) mutable {
-      const std::shared_ptr<EventRoute> route = weak_route.lock();
-      if (!route || !route->dispatch) {
-        return;
-      }
-      route->dispatch([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
-        const std::shared_ptr<EventRoute> active_route = weak_route.lock();
-        if (!active_route || !active_route->active || active_route->runtime == nullptr) {
-          return;
-        }
-        static_cast<void>(
-            RuntimeAccess::DispatchPlatformViewEvent(*active_route->runtime, active_route->identity, name, payload)
-        );
-      });
-    };
+    PlatformEventEmitter events = MakePlatformEventEmitter(
+        [weak_route](std::type_index key, PlatformValue value) mutable {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || !route->dispatch) {
+            return;
+          }
+          route->dispatch([weak_route, key, value = std::move(value)]() mutable {
+            const std::shared_ptr<EventRoute> active_route = weak_route.lock();
+            if (!active_route || !active_route->active || active_route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(
+                RuntimeAccess::DispatchPlatformViewEvent(*active_route->runtime, active_route->identity, key, value));
+          });
+        },
+        [weak_route](std::string name, PlatformPayload payload) mutable {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || !route->dispatch) {
+            return;
+          }
+          route->dispatch([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+            const std::shared_ptr<EventRoute> active_route = weak_route.lock();
+            if (!active_route || !active_route->active || active_route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*active_route->runtime, active_route->identity,
+                                                                       name, payload));
+          });
+        });
 
-    HWND view = nullptr;
-    try {
-      view = factory->create(container, command.Properties(), std::move(event_sink));
-    } catch (...) {
-      DestroyWindow(container);
-      throw;
+    hosted->event_route = std::move(route);
+    hosted->instance = hosted->factory->create(container, command.Properties(), std::move(events));
+    if (!hosted->instance || !hosted->factory->view) {
+      throw std::logic_error("HuxerUI Windows PlatformView factory returned an empty instance");
     }
-    if (view == nullptr || !IsWindow(view)) {
-      DestroyWindow(container);
+    hosted->view = hosted->factory->view(hosted->instance);
+    if (hosted->view == nullptr || !IsWindow(hosted->view)) {
       throw std::logic_error("HuxerUI Windows PlatformView factory returned an invalid HWND");
     }
 
     DWORD process = 0;
-    const DWORD thread = GetWindowThreadProcessId(view, &process);
-    const LONG_PTR style = GetWindowLongPtrW(view, GWL_STYLE);
-    if (GetParent(view) != container || process != GetCurrentProcessId() || thread != GetCurrentThreadId() ||
-        (style & WS_CHILD) == 0) {
-      if (factory->dispose) {
-        try {
-          factory->dispose(view);
-        } catch (...) {
-        }
+    const DWORD thread = GetWindowThreadProcessId(hosted->view, &process);
+    const LONG_PTR style = GetWindowLongPtrW(hosted->view, GWL_STYLE);
+    if (GetParent(hosted->view) != hosted->container || process != GetCurrentProcessId() ||
+        thread != GetCurrentThreadId() || (style & WS_CHILD) == 0) {
+      if (process != GetCurrentProcessId() || thread != GetCurrentThreadId()) {
+        hosted->view = nullptr;
       }
-      if (process == GetCurrentProcessId() && thread == GetCurrentThreadId() && IsWindow(view)) {
-        DestroyWindow(view);
-      }
-      DestroyWindow(container);
       throw std::logic_error("HuxerUI Windows PlatformView factory must return a same-process, same-thread child HWND");
     }
 
-    auto hosted = std::make_unique<HostedView>();
-    hosted->properties_revision = command.PropertiesRevision();
-    hosted->type = command.Type();
-    hosted->event_route = std::move(route);
-    hosted->factory = *factory;
-    hosted->container = container;
-    hosted->view = view;
+    if (hosted->controller.HasValue()) {
+      if (!hosted->factory->connect || !hosted->factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled Windows PlatformView factory must provide connect and disconnect");
+      }
+      hosted->factory->connect(hosted->instance, hosted->controller);
+      hosted->controller_connected = true;
+    }
     return hosted;
   }
 
   void Update(HostedView& hosted, const PlacePlatformViewCommand& command) {
-    if (hosted.properties_revision == command.PropertiesRevision()) {
-      return;
+    if (hosted.properties_revision != command.PropertiesRevision()) {
+      if (!hosted.factory->update) {
+        throw std::logic_error("HuxerUI Windows PlatformView factory does not support property updates");
+      }
+      hosted.factory->update(hosted.instance, command.Properties());
+      hosted.properties_revision = command.PropertiesRevision();
     }
-    if (!hosted.factory.update) {
-      throw std::logic_error("HuxerUI Windows PlatformView factory does not support property updates");
+    if (hosted.controller_revision != command.ControllerRevision()) {
+      if (hosted.controller_connected) {
+        if (!hosted.factory->disconnect) {
+          throw std::logic_error("HuxerUI controlled Windows PlatformView factory must provide disconnect");
+        }
+        hosted.factory->disconnect(hosted.instance, hosted.controller);
+        hosted.controller_connected = false;
+      }
+      hosted.controller = command.Controller();
+      if (hosted.controller.HasValue()) {
+        if (!hosted.factory->connect) {
+          throw std::logic_error("HuxerUI controlled Windows PlatformView factory must provide connect");
+        }
+        hosted.factory->connect(hosted.instance, hosted.controller);
+        hosted.controller_connected = true;
+      }
+      hosted.controller_revision = command.ControllerRevision();
     }
-    hosted.factory.update(hosted.view, command.Properties());
-    hosted.properties_revision = command.PropertiesRevision();
   }
 
   void Retire(std::unique_ptr<HostedView> hosted_view) {
@@ -328,7 +361,7 @@ struct Win32PlatformViews::State {
   }
 
   std::optional<std::uint64_t> IdentityForWindow(HWND window) const noexcept {
-    for (const auto& [identity, hosted] : hosted) {
+    for (const auto& [identity, hosted] : hosted_views) {
       if (IsDescendant(window, hosted->view)) {
         return identity;
       }
@@ -347,15 +380,9 @@ struct Win32PlatformViews::State {
     }
     RECT client{};
     GetClientRect(root, &client);
-    SetWindowPos(
-        overlay,
-        HWND_TOP,
-        0,
-        0,
-        std::max(0L, client.right - client.left),
-        std::max(0L, client.bottom - client.top),
-        SWP_NOACTIVATE | (hosted.empty() && retired.empty() ? SWP_HIDEWINDOW : SWP_SHOWWINDOW)
-    );
+    SetWindowPos(overlay, HWND_TOP, 0, 0, std::max(0L, client.right - client.left),
+                 std::max(0L, client.bottom - client.top),
+                 SWP_NOACTIVATE | (hosted_views.empty() && retired.empty() ? SWP_HIDEWINDOW : SWP_SHOWWINDOW));
   }
 
   static LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
@@ -382,8 +409,8 @@ struct Win32PlatformViews::State {
           {static_cast<float>(point.x) / scale, static_cast<float>(point.y) / scale}
       );
       if (identity.has_value()) {
-        const auto found = state->hosted.find(*identity);
-        if (found != state->hosted.end() && found->second->visible) {
+        const auto found = state->hosted_views.find(*identity);
+        if (found != state->hosted_views.end() && found->second->visible) {
           return HTTRANSPARENT;
         }
       }
@@ -406,31 +433,23 @@ struct Win32PlatformViews::State {
   HWND overlay = nullptr;
   ATOM container_atom = 0;
   ATOM overlay_atom = 0;
-  PlatformModules* modules = nullptr;
+  PlatformRegistry* registry = nullptr;
   Runtime* runtime = nullptr;
   UIThreadDispatcher dispatch;
   OverlayMessageHandler overlay_message_handler;
   float dpi_scale = 1.0F;
   std::optional<std::uint64_t> platform_view_focus_identity;
   bool pending_focus_visible = false;
-  std::unordered_map<std::uint64_t, std::unique_ptr<HostedView>> hosted;
+  std::unordered_map<std::uint64_t, std::unique_ptr<HostedView>> hosted_views;
   // Removed HWNDs stay behind the previous aperture until the replacement HuxerUI frame is presented.
   std::vector<std::unique_ptr<HostedView>> retired;
 };
 
-Win32PlatformViews::Win32PlatformViews(
-    HINSTANCE instance,
-    HWND root,
-    PlatformModules& modules,
-    Runtime& runtime,
-    UIThreadDispatcher dispatch_to_ui_thread,
-    OverlayMessageHandler overlay_message_handler
-)
-    : state_(
-          std::make_unique<State>(
-              instance, root, modules, runtime, std::move(dispatch_to_ui_thread), std::move(overlay_message_handler)
-          )
-      ) {}
+Win32PlatformViews::Win32PlatformViews(HINSTANCE instance, HWND root, PlatformRegistry& registry, Runtime& runtime,
+                                       UIThreadDispatcher dispatch_to_ui_thread,
+                                       OverlayMessageHandler overlay_message_handler)
+    : state_(std::make_unique<State>(instance, root, registry, runtime, std::move(dispatch_to_ui_thread),
+                                     std::move(overlay_message_handler))) {}
 
 Win32PlatformViews::~Win32PlatformViews() {
   Shutdown();
@@ -449,8 +468,8 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
       const PlacePlatformViewCommand& command = *placement->command;
       retained.insert(command.Identity());
       placements.push_back(placement);
-      const auto found = state_->hosted.find(command.Identity());
-      if (found == state_->hosted.end() || found->second->type != command.Type()) {
+      const auto found = state_->hosted_views.find(command.Identity());
+      if (found == state_->hosted_views.end() || found->second->type != command.Type()) {
         pending.emplace_back(command.Identity(), state_->Create(*placement));
       } else {
         state_->Update(*found->second, command);
@@ -471,28 +490,28 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
     state_->platform_view_focus_identity.reset();
   }
   for (auto& [identity, hosted] : pending) {
-    const auto found = state_->hosted.find(identity);
-    if (found != state_->hosted.end()) {
+    const auto found = state_->hosted_views.find(identity);
+    if (found != state_->hosted_views.end()) {
       state_->Retire(std::move(found->second));
-      state_->hosted.erase(found);
+      state_->hosted_views.erase(found);
     }
-    state_->hosted.emplace(identity, std::move(hosted));
+    state_->hosted_views.emplace(identity, std::move(hosted));
   }
-  for (auto iterator = state_->hosted.begin(); iterator != state_->hosted.end();) {
+  for (auto iterator = state_->hosted_views.begin(); iterator != state_->hosted_views.end();) {
     if (retained.contains(iterator->first)) {
       ++iterator;
       continue;
     }
     state_->Retire(std::move(iterator->second));
-    iterator = state_->hosted.erase(iterator);
+    iterator = state_->hosted_views.erase(iterator);
   }
   for (const PlatformViewPlacement* placement : placements) {
     const PlacePlatformViewCommand& command = *placement->command;
-    const auto found = state_->hosted.find(command.Identity());
+    const auto found = state_->hosted_views.find(command.Identity());
     state_->Place(*found->second, *placement, state_->dpi_scale);
   }
 
-  for (auto& [identity, hosted] : state_->hosted) {
+  for (auto& [identity, hosted] : state_->hosted_views) {
     static_cast<void>(identity);
     hosted->event_route->active = true;
   }
@@ -501,8 +520,8 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
   const std::optional<std::uint64_t> focused = RuntimeAccess::FocusedPlatformView(*state_->runtime);
   const std::optional<std::uint64_t> current = state_->IdentityForWindow(GetFocus());
   if (focused.has_value()) {
-    const auto found = state_->hosted.find(*focused);
-    if (found == state_->hosted.end() || !found->second->visible) {
+    const auto found = state_->hosted_views.find(*focused);
+    if (found == state_->hosted_views.end() || !found->second->visible) {
       if (current == focused) {
         SetFocus(state_->root);
       }
@@ -517,7 +536,7 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
     SetFocus(state_->root);
   }
   state_->platform_view_focus_identity = state_->IdentityForWindow(GetFocus());
-  return !state_->hosted.empty() || !state_->retired.empty();
+  return !state_->hosted_views.empty() || !state_->retired.empty();
 }
 
 void Win32PlatformViews::DidPresent() {
@@ -542,8 +561,8 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
   if (!identity.has_value()) {
     return false;
   }
-  const auto found = state_->hosted.find(*identity);
-  if (found == state_->hosted.end()) {
+  const auto found = state_->hosted_views.find(*identity);
+  if (found == state_->hosted_views.end()) {
     return false;
   }
   std::vector<HWND> tab_order;
@@ -581,20 +600,20 @@ void Win32PlatformViews::SynchronizeFocus(HWND focused) {
 }
 
 HWND Win32PlatformViews::AccessibilityView(std::uint64_t identity) const noexcept {
-  const auto found = state_->hosted.find(identity);
-  return found == state_->hosted.end() || !found->second->visible ? nullptr : found->second->view;
+  const auto found = state_->hosted_views.find(identity);
+  return found == state_->hosted_views.end() || !found->second->visible ? nullptr : found->second->view;
 }
 
 void Win32PlatformViews::Shutdown() noexcept {
   if (!state_) {
     return;
   }
-  for (auto& [identity, hosted] : state_->hosted) {
+  for (auto& [identity, hosted] : state_->hosted_views) {
     static_cast<void>(identity);
     hosted->event_route->active = false;
     hosted->event_route->runtime = nullptr;
   }
-  state_->hosted.clear();
+  state_->hosted_views.clear();
   state_->retired.clear();
   if (state_->overlay != nullptr && IsWindow(state_->overlay)) {
     DestroyWindow(state_->overlay);

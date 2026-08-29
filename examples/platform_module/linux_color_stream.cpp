@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/app.h>
 #include <huxerui/linux/external_texture.h>
 
 namespace {
@@ -24,8 +25,9 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
   };
 }
 
-struct LinuxColorStreamState {
-  LinuxColorStreamState() : source({320.0F, 180.0F}) {}
+struct LinuxColorStreamState : huxerui::example::ColorStreamService {
+  explicit LinuxColorStreamState(huxerui::PlatformAdapter& adapter_value)
+      : adapter(&adapter_value), source({320.0F, 180.0F}) {}
 
   ~LinuxColorStreamState() {
     Dispose();
@@ -38,6 +40,19 @@ struct LinuxColorStreamState {
     }
     PublishFrame();
     worker = std::thread([this] { Run(); });
+  }
+
+  huxerui::PlatformRequestId
+  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
+    }
+    Start();
+    huxerui::ExternalTexture texture = source.Texture();
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+      completion(std::move(texture));
+    });
+    return ++request_id;
   }
 
   void Dispose() noexcept {
@@ -90,51 +105,25 @@ struct LinuxColorStreamState {
     ++phase;
   }
 
+  huxerui::PlatformAdapter* adapter;
   huxerui::linux::ExternalTextureSource source;
   std::mutex mutex;
   std::condition_variable wake;
   std::thread worker;
   bool stopped = false;
   std::uint32_t phase = 0;
+  huxerui::PlatformRequestId request_id = 0;
 };
-
-huxerui::PlatformModuleFactory LinuxColorStreamFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    if (!options.IsNull()) {
-      throw std::invalid_argument("HuxerUI example color stream options must be null");
-    }
-    static_cast<void>(events);
-    auto state = std::make_shared<LinuxColorStreamState>();
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (method == huxerui::example::color_stream::texture_method && arguments.IsNull()) {
-        state->Start();
-        result(huxerui::PlatformPayload(state->source.Texture()));
-        return {};
-      }
-      result(
-          ColorStreamError(
-              "example/color-stream-method",
-              "The platform color stream method or payload is not supported"
-          )
-      );
-      return {};
-    };
-    instance.dispose = [state] { state->Dispose(); };
-    return instance;
-  };
-  return factory;
-}
 
 } // namespace
 
 namespace huxerui::example {
 
 void InstallColorStream(RootContext& root) {
-  root.Modules().Register(color_stream::type, LinuxColorStreamFactory());
-  root.Provide(std::make_shared<ColorStreamService>(root.Modules().Open(color_stream::type)));
+  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<LinuxColorStreamState>(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type));
 }
 
 } // namespace huxerui::example

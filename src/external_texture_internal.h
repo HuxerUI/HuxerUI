@@ -7,11 +7,11 @@
 #include <utility>
 
 #include <huxerui/external_texture.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 
 namespace huxerui {
 
-class PlatformAdapter;
 class PlatformPayload;
 
 namespace detail {
@@ -67,6 +67,7 @@ private:
 };
 
 void BindExternalTextures(const PlatformPayload& payload, const std::shared_ptr<ExternalTextureSurface>& surface);
+void BindExternalTextures(const PlatformValue& value, const std::shared_ptr<ExternalTextureSurface>& surface);
 
 } // namespace detail
 

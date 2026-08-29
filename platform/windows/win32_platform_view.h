@@ -6,7 +6,8 @@
 #include <functional>
 #include <memory>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
@@ -19,14 +20,8 @@ class Win32PlatformViews final {
 public:
   using OverlayMessageHandler = std::function<LRESULT(HWND, UINT, WPARAM, LPARAM)>;
 
-  Win32PlatformViews(
-      HINSTANCE instance,
-      HWND root,
-      PlatformModules& modules,
-      Runtime& runtime,
-      UIThreadDispatcher dispatch_to_ui_thread,
-      OverlayMessageHandler overlay_message_handler
-  );
+  Win32PlatformViews(HINSTANCE instance, HWND root, PlatformRegistry& registry, Runtime& runtime,
+                     UIThreadDispatcher dispatch_to_ui_thread, OverlayMessageHandler overlay_message_handler);
   ~Win32PlatformViews();
 
   Win32PlatformViews(const Win32PlatformViews&) = delete;

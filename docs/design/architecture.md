@@ -37,6 +37,9 @@ const Application application{App};
 
 `RuntimeRoot` is synthesized by the Runtime. It is not a public layout component and does not require applications to wrap their root View.
 
+`PlatformAdapter`, `UIThreadDispatcher`, and `ProcessMetrics` form the public host-capability boundary in `platform_adapter.h`.
+`app.h` includes that boundary for application and Runtime declarations, while platform helpers that need only host scheduling or services include `platform_adapter.h` directly.
+
 The main data flow is:
 
 ```text
@@ -427,181 +430,612 @@ Libraries provide three platform integration forms:
 
 | Requirement | Integration |
 | --- | --- |
-| Permission, Audio, Camera control, or another nonvisual capability | Strongly typed Root Service backed by a registered PlatformModule instance |
+| Permission, Audio, Camera control, or another nonvisual capability | Registered PlatformModule instance owned by a component Lifecycle or typed Root Service |
 | WebView, map, document preview, or another platform interactive hierarchy | Registered PlatformView factory and a real leaf View |
 | Camera preview, video decode, or another high-frequency visual stream | ExternalTexture composed by the HuxerUI renderer |
 
 The categories may coexist in one library.
-A Camera library normally installs a Camera service and returns an ExternalTexture for preview, while a WebView library installs a PlatformView factory.
-PlatformView and nonvisual PlatformModules share the same registry namespace, payload model, event naming, and lifecycle rules without forcing their different update and request models through one factory type.
+A Camera library may expose a shared Camera service or a component-owned camera session and return an ExternalTexture for preview, while a WebView library installs a PlatformView factory.
+PlatformView and nonvisual PlatformModule instances share registration ownership, stable names, event naming, surface isolation, and teardown safety without forcing their different update and request models through one factory type.
 This does not introduce a Runtime subclass, a public Library base class, platform API types in shared headers, or an application-visible generic library lookup.
 
-### Platform payload and instance protocol
+### PlatformRegistry contract
 
-Direct registration from Objective-C, Swift, Java, Kotlin, JavaScript, C++, and additional platform languages requires one value model that every boundary can represent.
-`PlatformPayload` is an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and one closed framework capability kind, `ExternalTexture`.
-The capability kind does not admit arbitrary objects.
-Objects require unique keys and compare independently of insertion order; encoders preserve the distinction between integers, doubles, strings, and bytes rather than routing through JSON.
-Strings and object keys must be valid UTF-8, doubles must be finite, and positive and negative zero compare equal.
-Construction rejects excessive nesting, while platform decoders enforce input-size limits before allocating containers from untrusted data.
-`PlatformPayload` is an in-process platform boundary value rather than a persistence, network, or general serialization format.
-It never contains a callback, open-ended C++ type-erased object, native handle, pointer, platform View, or executable closure.
-`ExternalTexture` is the only framework-owned capability kind and remains an opaque value rather than opening a generic platform-object alternative.
+Every surface owns one internal `PlatformRegistry` with a single case-sensitive UTF-8 name space for PlatformModule and PlatformView registrations.
+The registry records the registration kind, exact C++ value types, and an arbitrary compatible direct factory or platform-language bridge.
+It rejects empty names, duplicate names across both registration kinds, incompatible C++ value types, and mutation after root installation completes.
+Registration names have no required separator, hierarchy, prefix, or grammar beyond being nonempty valid UTF-8; `web/WebView`, `WebView`, and a reverse-domain name are equally valid library contracts.
+Using `/` to group names is an optional library convention and never changes lookup or ownership semantics.
+The registry is not a public service locator, a process-global singleton, or an application-selectable composition mode.
 
-Boundary bridges preserve these kinds directly rather than relying on implicit coercion:
-
-| Boundary | Scalars | Bytes and containers |
-| --- | --- | --- |
-| C++, Windows, and Linux | `bool`, `std::int64_t`, `double`, and UTF-8 string alternatives | `huxerui::Bytes`, list, and object alternatives |
-| Objective-C and Swift | Kind-preserving NSNumber values and NSString | NSData, NSArray, and NSDictionary with NSString keys |
-| Java and Kotlin | Boolean, Long, Double, and String | byte array, List, and String-keyed Map |
-| JavaScript and future JS-hosted adapters | Boolean, BigInt, Number, and string | Uint8Array, Array, and a prototype-free string-keyed object |
-
-Decoders require the declared kind and range instead of converting a string to a number, truncating a double to an integer, or treating bytes as text.
-Platform ExternalTexture bridge phases represent the value with an unforgeable framework wrapper retaining the same opaque source state; they never expose or reconstruct it from a numeric identity.
-
-The shared public surface remains focused:
-
-- `<huxerui/data.h>` owns the cross-subsystem `Bytes` alias and depends only on standard byte-container facilities.
-- `<huxerui/platform_module.h>` owns `PlatformPayload`, `PlatformError`, `PlatformModuleFactory`, `UIThreadDispatcher`, the move-only `PlatformInstance`, and the per-surface `PlatformModules` registry.
-- `<huxerui/platform_view.h>` owns the low-level `PlatformView` leaf and its event-key declaration API.
-- `<huxerui/external_texture.h>` owns the platform-neutral `ExternalTexture` consumer value; platform-specific headers own frame producers.
-- `<huxerui/android/jni.h>` owns move-only JNI local references plus strict UTF-8, Java String, and byte-array conversion for Android library sources; platform-specific `platform_view.h` headers own the Windows, Apple, Web, and Android visual factory contracts.
-
-There is no public PlatformView type tag, declaration wrapper, property base class, callback wrapper, platform-object base class, or parallel dynamic value type.
-Platform-neutral implemented headers are re-exported through `<huxerui/huxerui.h>`, while platform-specific factory and producer headers are included directly by library platform sources; ordinary applications normally see only a library's typed component and service headers.
-
-The same payload type carries controlled PlatformView properties, nonvisual PlatformModule creation options, method arguments, method results, event data, structured error details, and opaque ExternalTexture references.
-Concrete library APIs remain strongly typed and own their codecs at the platform boundary:
+`RootContext` exposes only the operations required by explicit library installers and root-owned instances:
 
 ```cpp
-View WebView(const WebViewOptions& options) {
-  return PlatformView(
-      "web/WebView",
-      EncodeWebViewOptions(options)
-  ).Events<
-      WebViewEvents::NavigationChanged,
-      WebViewEvents::LoadFailed
-  >();
-}
+root.RegisterPlatformModule<AudioPlayer, AudioPlayerOptions>("audio/Player", audio_factory);
+root.RegisterPlatformView<WebViewProperties, WebViewController>("web/WebView", web_view_factory);
+
+auto player = root.OpenPlatformModule<AudioPlayer>(
+    "audio/Player",
+    AudioPlayerOptions{.session = session}
+);
 ```
 
-Application code consumes `WebViewOptions`, `NavigationState`, `AudioSource`, and other library types rather than assembling `PlatformPayload` objects or spelling platform type and method names.
-The dynamic representation exists only where shared C++ crosses into a platform implementation.
-Large or continuous media frames do not travel through PlatformPayload; only an `ExternalTexture` capability may cross that boundary, while its platform-owned streaming path retains all platform frame data.
+There is no `root.Platform()` accessor and no public generic `Register`, `Find`, or arbitrary `std::any` entry point.
+Each registration binds its exact Module type and optional Options type or its exact Properties type and optional Controller type.
+Those types are inferred from a compatible direct factory or stated by a typed bridge adapter, so registration and opening validate the C++ contract without enumerating business methods or events.
+The registered Module type is the exact handle returned by its factory and open operations; it may be a value facade, move-only owner, shared interface pointer, or another library-defined RAII type.
+Root Service ownership is optional rather than the PlatformModule object model.
+Applications consume a library's concrete service, component, or `UseXxx()` API rather than opening modules or spelling registered names directly.
 
-Platform adapters own a per-surface registry with one case-sensitive UTF-8 type namespace.
-Platform sources register visual and nonvisual factories explicitly by stable string, for example `web/WebView` or `audio/Player`.
-`PlatformModules::Register(type, registration)` stores the platform-specific registration by its concrete C++ type, and the owning adapter retrieves it through `Find<Registration>(type)`.
-Visual registrations use the platform-specific `PlatformViewFactory` in the `windows`, `macos`, `web`, `android`, or `ios` namespace. Nonvisual C++ and Apple implementations use the platform-neutral `PlatformModuleFactory`, while Java-backed Android implementations use `android::PlatformModuleFactory` so the owning adapter can inject its retained Context and current UI-thread `JNIEnv`; another registry or registration-kind enum is unnecessary.
-Registration callbacks remain in the platform adapter or PlatformModule source and may use platform API types there; they are not stored in `PlatformPayload` or exposed to shared Runtime code.
-`PlatformModules::Open()` owns instance protocol setup and delegates registration-specific creation to its `PlatformAdapter`. The default adapter path creates a platform-neutral factory, while an adapter override may recognize its own registration type before falling back. This keeps platform host dependencies in the adapter instead of adding a Context service, hidden opener, thread-local state, or process-global registry.
-The registry rejects an empty type, duplicate registration across registration kinds, and retrieving a registered type through an incompatible registration type.
-Type strings are library contracts rather than application configuration, and libraries normally expose them only through their concrete C++ components or services.
-Registration is not a process-global static side effect and does not choose a composition mode.
-An explicitly selected RootHook connects its platform registrations before opening a nonvisual instance or composing the first PlatformView, and a root cannot replace a registration while an instance of that type is alive.
+Registration names remain necessary because Java, Kotlin, Objective-C, Swift, JavaScript, C++, and future platform languages need one stable rendezvous identity.
+They are library contracts rather than application configuration and normally remain behind the library's concrete component, installer, and service API.
+A string name does not weaken the associated C++ values: registration and use validate both the name and the concrete value type.
 
-The host gives each created instance narrow sinks for emitting an Event and completing or failing a Call; PlatformView independently retains its existing presentation invalidation path.
-Sink closures route to their owning instance state without exposing Runtime, MountedNode, EventBindings, or HuxerUI application state.
-The owning bridge validates payloads at Create, Update, Call, Result, and Event boundaries and converts platform failures to `PlatformError`.
+The registry constrains factory behavior, not how a library constructs or organizes that factory.
+A library may register a direct callable, a retained factory object, a framework bridge adapter, or its own adapter that satisfies the same creation and lifecycle contract.
+It may define one shared Install function, provide the same public Install function from mutually exclusive platform sources, or split common and platform installation into private helpers.
+HuxerUI does not require a public factory base class, a `CreateXxxFactory()` convention, a Backend or Service type, or the same internal construction pattern on every platform.
+The application still selects one documented RootHook without platform-specific registration code.
 
-The two integration forms use the same message vocabulary while retaining distinct factory contracts:
+### Strongly typed C++ path
 
-```text
-Create(type, initial payload, event sink) -> PlatformModule instance
-Update(PlatformModule instance, payload)
-Call(PlatformModule instance, method, payload, result sink) -> optional cancellation operation
-Result(result sink, payload or PlatformError)
-Event(event sink, event, payload)
-Dispose(PlatformModule instance)
-```
+C++ PlatformModule and PlatformView implementations receive the library's concrete values directly.
+Windows and Linux factories do not encode Options, Properties, requests, results, or events into `PlatformPayload`, and Apple or Android implementations written in C++ or Objective-C++ follow the same direct path.
+`PlatformValue` is the public low-level in-process carrier that preserves exact C++ type identity and optional equality after immutable type erasure.
+It is shared by RenderScene and platform factory adaptation but never crosses a language boundary; ordinary components and direct factories continue to use their concrete Properties, Controller, Options, and event types.
+Registry erasure never exposes `std::any`, unchecked casts, or a dynamic call API to library code.
 
-PlatformView uses Create, Update, Event, and Dispose, while `PlatformInstance` uses Create, Call, Result, Event, Cancel, and Dispose.
-Application callback objects never cross the platform boundary; the host transfers only protocol results and event envelopes.
-Calls are asynchronous even when the platform implementation answers synchronously, complete at most once, and return a structured `PlatformError` with a stable code, English diagnostic message, and optional PlatformPayload details.
-Framework error codes use the reserved `huxerui/` prefix, while libraries namespace their own codes; neither side requires an enum that would prevent third-party extension.
-C++ exceptions, Objective-C exceptions, Java exceptions, and JavaScript exceptions are converted at their owning boundary and never propagate through another language runtime.
+Every direct PlatformModule factory receives the owning surface's non-owning `PlatformAdapter&`, followed by `const Options&` when the Module declares Options.
+This is the single host-capability dependency for direct factories; there is no alternate no-adapter signature or second factory context.
+The adapter remains surface-owned and a Module must not retain it beyond that surface's lifetime.
+PlatformView factory erasure also binds against the owning adapter, while direct create, update, Controller, and disposal callbacks receive only their exact platform handles and typed values.
 
-The platform adapter receives an optional `UIThreadDispatcher` during construction; HuxerUI defines its UI thread as the thread owning that adapter, its Runtime, and its event loop.
-The dispatcher must enqueue without invoking inline and delivers events in emission order per instance outside frame construction, reconciliation, platform drawing, and the initiating platform call stack.
-Library services call `PlatformInstance::Call`, `On`, `Cancel`, and `Close` only from that UI thread; platform Result and Event sinks may be invoked from other threads and cross through the dispatcher.
-Call results use request identity and may complete out of call order, but their delivery obeys the same thread and reentrancy boundary.
-Events produced while creating a visual candidate remain queued until the candidate enters the committed `RenderComposition`; a failed candidate expires without publishing events.
-Compatible Update mutates an existing PlatformModule instance in place and is not a cross-instance rollback boundary.
-A nonvisual instance begins delivering events only after Create succeeds.
-`Cancel(request)` removes the completion before invoking the optional platform cancellation operation, and a result already queued for that request is subsequently ignored.
-Dispose first rejects new calls, cancels pending requests, detaches event delivery, and then releases platform state.
-Results and events carrying an obsolete instance or request identity are ignored safely.
-
-Platform events retain the existing HuxerUI typed-event model.
-A `PlatformEventSink` borrows its `std::string_view` name only for the synchronous call; framework routes copy that name before dispatching an event asynchronously.
-A library event key supplies its wire event name and a PlatformPayload decoder in addition to its ordinary `Signature`:
+PlatformModule is an ordinary library-defined C++ object or interface.
+The library chooses virtual functions, a concrete value, callbacks, pimpl, or its own type erasure and independently chooses synchronous returns, Task or Future values, callbacks, streams, and error types:
 
 ```cpp
-struct NavigationChanged : Event<NavigationState> {
+class AudioPlayer {
+public:
+  virtual ~AudioPlayer() = default;
+
+  virtual void Play(AudioSource source) = 0;
+  virtual void Pause() = 0;
+};
+```
+
+A direct platform implementation may implement that interface itself, while a cross-language implementation may return a library-defined bridge-backed object implementing the same interface.
+The registry never inspects `Play`, `Pause`, or any other business method.
+HuxerUI does not require Module methods to return `Task`, `PlatformResult`, or a cancellation handle.
+
+The low-level PlatformView declaration keeps its stable string name and strongly typed controlled Properties, while a concrete library component exposes its optional Controller and ordinary typed EventBindings:
+
+```cpp
+return WebView(
+    WebViewProperties{
+        .url = url,
+        .allows_navigation = allows_navigation,
+    }
+)
+    .Controller(controller)
+    .On<WebViewEvents::NavigationChanged>(on_navigation_changed)
+    .On<WebViewEvents::LoadFailed>(on_load_failed);
+```
+
+Properties are complete controlled declarative state.
+They must be move-constructible and equality-comparable so View copies may share the immutable value and reconciliation can suppress unchanged updates deterministically.
+A direct C++ factory receives `const Properties&`; only the common payload bridge invokes `Properties::Encode()`.
+Controller objects, callbacks, platform objects, and executable closures never enter Properties.
+`PlatformView(name)` remains the no-properties form and does not synthesize a null dynamic value in the C++ path.
+There is no separate `.Events<Key...>()` declaration.
+
+Each structured value carried by the common payload bridge owns the static `Encode(const T&)` or `Decode(const PlatformPayload&)` operation required by its direction of travel.
+There is no separate `PlatformCodec<T>`, per-platform codec, factory-provided codec, method-key declaration, or mandatory Methods list.
+Direct C++ calls use their concrete parameters and return values without a payload round trip.
+`void` is the type-level no-value contract, while typed `PlatformChannel` calls use `std::monostate` for a strictly validated Null argument or result; HuxerUI does not add a public `Unit`, `EmptyOptions`, or placeholder request type.
+
+### PlatformModule ownership
+
+Registration and instance ownership are separate.
+RootHooks register immutable factories before first composition, while each strongly typed Module instance belongs to the application abstraction that opens it.
+A typed Root Service may own one shared window-lifetime instance, but a component may instead open an independent instance in `Lifecycle` setup and release it during cleanup.
+Options are present only when the library contract requires them:
+
+```cpp
+template <class Module>
+Module OpenPlatformModule(std::string name);
+
+template <class Module, class Options>
+Module OpenPlatformModule(std::string name, Options options);
+
+Lifecycle(
+    [session] {
+      auto player = OpenPlatformModule<AudioPlayer>(
+          "audio/Player",
+          AudioPlayerOptions{.session = session}
+      );
+
+      return [player = std::move(player)] {};
+    },
+    session
+);
+```
+
+The free `OpenPlatformModule(name, options)` operation is valid only while Runtime is executing a committed `Lifecycle` setup.
+The declaring `RecomposeScope` already identifies its Runtime, and Runtime installs a scoped internal lifecycle execution context containing that surface's `PlatformRegistry` while invoking setup.
+The operation resolves the registered name, verifies the PlatformModule kind and concrete Options type, and creates a new instance through the selected direct C++ factory or platform-language bridge.
+The execution context is restored after setup, is never a process-global registry, and does not remain available to composition, event handlers, asynchronous callbacks, or cleanup.
+Calling the free operation without an active Lifecycle setup is a framework usage error.
+
+Registry freeze prevents later factory mutation but never prevents repeated instance creation.
+The returned exact Module handle owns its direct implementation or cross-language bridge through the library's ordinary RAII model.
+Capturing it in the returned cleanup gives dependency replacement and component unmount the ordinary Lifecycle cleanup order; the instance implementation owns any requests, subscriptions, and cancellation behavior required by its own API.
+RootHooks use `RootContext::OpenPlatformModule(name, options)` instead because `RootContext` already identifies the same surface registry directly.
+These are two lifetime-specific access paths to one registry rather than separate Module systems.
+
+A library may wrap component ownership in a typed custom hook such as `UseAudioPlayer(options)`.
+Such a hook uses stable composition state for any returned handle, opens and attaches the low-level instance from Lifecycle setup, and detaches it during cleanup.
+It may instead return no value when declaring the external lifetime is the complete API.
+HuxerUI does not add a generic `UsePlatformModule`, public registry handle, provider, mandatory service base class, or application-visible generic instance.
+Library handles diagnose use before attachment or after cleanup and avoid strong reference cycles between their state, the implementation, and implementation-owned event handlers.
+
+### PlatformView controllers
+
+A PlatformView Controller is a stable library-defined C++ facade for imperative operations on one mounted PlatformView.
+It is neither controlled Properties nor a platform object and never crosses a language boundary itself.
+The library chooses its public synchronous, asynchronous, callback, stream, and error semantics:
+
+```cpp
+class WebViewController {
+public:
+  [[nodiscard]] bool IsConnected() const noexcept;
+
+  void Reload() const;
+  void GoBack() const;
+  void EvaluateJavaScript(std::string script, EvaluationCompletion completion) const;
+};
+```
+
+The Controller is the exact public type bound by registration and carried by the concrete component declaration.
+It must be safely retainable by a View declaration, and equal Controller values must denote the same logical command target across recomposition.
+HuxerUI does not inspect or prescribe its internal storage, inheritance, indirection, or platform bridge.
+Calling `.Controller(controller)` creates a framework-internal typed binding for that value; the Controller does not embed a binding, State, pimpl, Access helper, Backend, or Connection required by HuxerUI.
+The factory adapter receives the exact Controller type and defines how its mounted instance attaches and detaches.
+The framework erases the binding only inside retained storage after validating the registered Controller type and preserves its stable identity across compatible reconciliation.
+Runtime and the platform adapter retain the mounted implementation only while the PlatformView is committed, so the framework binding never keeps an unmounted platform object alive.
+
+A Controller may be declared before its PlatformView mounts and becomes connected only after the candidate platform instance commits.
+One Controller may be connected to at most one committed PlatformView at a time; a second simultaneous attachment is a framework usage error.
+Compatible reconciliation preserves an unchanged binding, replacing a Controller detaches the old binding and attaches the new one without updating Properties or recreating the platform object, and unmount disconnects the Controller before invalidating calls and disposing the platform instance.
+Disconnected calls are not queued or replayed; the library maps them to its own synchronous, callback, Future, Task, or error convention.
+Initial URL, options, and other initial facts remain Properties rather than imperative commands issued before attachment.
+
+A direct C++ factory may attach its platform instance to the Controller without an intermediate proxy.
+A cross-language implementation may compose a reusable framework call channel that owns payload conversion, result delivery, thread transfer, cancellation, disposal invalidation, and late-result rejection.
+Using that channel does not require the Controller to inherit a proxy base, and a library may instead implement its complete JNI, Objective-C++, Emscripten, or other bridge directly.
+Both forms attach through the internal typed Controller binding and therefore share the same mount, replacement, and teardown semantics.
+
+### Typed events
+
+Platform events remain ordinary HuxerUI Event Keys and use either `Event<>` or `Event<T>`.
+An event with several fields carries one owning, non-reference structured `T` rather than a multi-argument signature, giving every platform boundary one value to validate and decode.
+Every `.On<Key>(handler)` call creates the typed EventBinding and, when the Key provides platform-boundary metadata, records its stable event name and concrete argument type in the same binding.
+This behavior belongs to generic event binding construction rather than a PlatformView-specific Runtime branch, so fluent calls before or after ordinary View modifiers cannot lose the descriptor.
+Multiple event types require multiple `.On<Key>()` calls and no parallel event list.
+
+The Event Key inherits the existing `Event<Arguments...>` base, which already provides `Signature`; it never redeclares that alias.
+A cross-language Event Key adds only its stable boundary `Name`:
+
+```cpp
+struct NavigationState {
+  std::string url;
+  bool can_go_back = false;
+
+  static NavigationState Decode(const PlatformPayload& payload);
+};
+
+struct NavigationChanged : Event<const NavigationState&> {
   static constexpr std::string_view Name = "navigationChanged";
+};
+
+struct LoadStarted : Event<> {
+  static constexpr std::string_view Name = "loadStarted";
+};
+```
+
+`Event<>` requires the Null payload and no decoder.
+`Event<T>` and `Event<const T&>` decode an owned `std::remove_cvref_t<T>` through that value type's static `Decode(const PlatformPayload&)`, then invoke the handler with the declared signature for the duration of dispatch.
+Ordinary local HuxerUI events may continue to have several arguments, but a cross-language event has zero arguments or one value; several boundary fields belong in one owning structured argument.
+The inverse `Encode` operation belongs to `T` only when a C++ event crosses toward another language.
+
+A direct C++ factory receives a `PlatformEventEmitter` and emits values without encoding:
+
+```cpp
+events.Emit<WebViewEvents::NavigationChanged>(navigation_state);
+events.Emit<WebViewEvents::LoadFailed>(failure);
+```
+
+A platform-language bridge emitter receives an event name and its local immutable `PlatformPayload`; the SDK serializes it to the binary envelope, and C++ invokes the argument type's static `Decode()` operation before emitting the same typed Event Key.
+An event with no matching binding is ignored without decoding.
+Duplicate subscribed wire names are invalid configuration, while malformed subscribed payloads and late events from obsolete instances are rejected without invoking application code.
+Changing a handler reconciles EventBindings only and does not update or recreate the platform object.
+An emitter becomes active only after successful creation.
+Events emitted during candidate creation are queued until that candidate commits, creation failure discards them, and events emitted synchronously from `update` or `invoke` are deferred until the foreign call stack has unwound.
+Disposal invalidates the emitter before releasing platform state, so later emissions are harmless no-ops.
+
+Method results and events remain distinct.
+A per-invocation `PlatformResult` completes or fails one cross-language call at most once, while an instance-level `PlatformEventEmitter` may publish any number of unsolicited events.
+Neither endpoint dictates the library's public callback or return type.
+A direct C++ Module may expose ordinary callbacks or state without either endpoint, while a cross-language implementation may adapt Result and Event delivery into the library's chosen API.
+
+### PlatformPayload boundary
+
+`PlatformPayload` is the value model used by HuxerUI's common bridge when data crosses between C++ and another platform language.
+It does not appear in ordinary PlatformView construction, direct C++ factory signatures, direct C++ method handlers, typed Root Service APIs, or Windows and Linux parameter flow.
+The presence of static `Encode()` or `Decode()` members does not imply that they run for a direct C++ implementation or a library-owned bridge with explicit typed boundary conversion.
+
+The corresponding structured C++ type is the single owner of its boundary schema:
+
+```cpp
+struct WebViewProperties {
+  std::string url;
+  bool allows_navigation = true;
+
+  static PlatformPayload Encode(const WebViewProperties& value);
+};
+
+struct NavigationState {
+  std::string url;
+  bool can_go_back = false;
+
   static NavigationState Decode(const PlatformPayload& payload);
 };
 ```
 
-The concrete component declares its supported keys through the rvalue-qualified `PlatformView::Events<Key...>()` fluent API, while application code continues to use `.On<WebViewEvents::NavigationChanged>(handler)`.
-Runtime resolves an incoming event name only against descriptors attached to that mounted declaration, decodes it, and emits the existing Event Key through the node's EventBindings.
-Changing an application callback reconciles EventBindings only; it does not update or recreate the PlatformView instance.
-An unbound declared event is ignored without decoding.
-A duplicate declared event name is rejected as invalid component configuration, while an undeclared incoming event, malformed subscribed payload, or decoder failure is dropped without invoking application code.
+An outbound-only type defines only `Encode`, an inbound-only type defines only `Decode`, and a bidirectional type defines both.
+Framework concepts diagnose a missing operation when a cross-language bridge requires it.
+Scalar and framework data types have built-in boundary conversion; a library wraps an external structured type in an explicit boundary value rather than defining a detached codec specialization.
 
-Nonvisual method keys follow the same pattern without becoming Event Keys.
-A method key declares its request type, result type, stable wire name, encoder, and decoder; a typed service calls `PlatformInstance::Call<Method>(request, completion)` internally and exposes an application-facing asynchronous result in its own API.
-The request and result must be object types, the result must be move-constructible and distinct from `PlatformError`, `Encode` returns `PlatformPayload` exactly, and `Decode` may return a type implicitly convertible to the declared result.
-Call completions and event handlers must be constructible as the declared typed callback before the template participates in overload resolution.
-`PlatformInstance` is the move-only library-author handle returned by `PlatformModules::Open()` and owns the PlatformModule instance, monotonically assigned request identities, pending calls, and typed event subscriptions.
-Its `On<Key>(handler)` operation registers the Key's wire-name and decoder descriptor together with one service-owned handler; it does not expose a raw payload callback to application code.
-It is not a generic application service surface.
+`PlatformPayload` remains an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and the closed framework capability `ExternalTexture`.
+It is an in-process boundary value rather than a persistence, network, or general serialization format.
+It never contains callbacks, arbitrary C++ objects, system handles, pointers, platform Views, or executable closures.
+Large or continuous media frames do not travel through it; an `ExternalTexture` value only retains the opaque platform-owned source state.
 
-Nonvisual PlatformModules use the same event descriptors and payload codecs behind their typed Root Services.
-Runtime exposes the platform-neutral `PlatformModules` capability to RootHook through `RootContext::Modules()`.
-A library installer may open a registered PlatformModule instance and provide a typed service directly:
+#### Platform-language value API
 
-```cpp
-void InstallAudio(RootContext& root) {
-  root.Provide(std::make_shared<AudioService>(
-      root.Modules().Open("audio/Player")
-  ));
+The implemented Android Java SDK exposes one immutable `PlatformPayload` value type rather than separate Reader, Writer, Builder, or Codec abstractions.
+Future Apple Objective-C/Swift and Web JavaScript common adapters use the same value contract.
+Platform naming follows the language convention, while each common adapter provides the same explicit construction operations:
+
+```text
+nullValue()
+booleanValue(value)
+int64(value)
+doubleValue(value)
+string(value)
+bytes(value)
+list(values)
+object(fields)
+externalTexture(value)
+```
+
+Constructors copy or safely freeze mutable byte and collection inputs.
+Byte reads return a defensive copy or an immutable platform view and never expose mutable backing storage.
+Java maps Int64 to `long` and Bytes to copied `byte[]`.
+The future Apple adapter maps them to Swift `Int64` and `Data`, while the future Web adapter maps them to JavaScript `bigint` and copied `Uint8Array`.
+The Web contract never constructs Int64 from Number; every adapter rejects non-finite Double values, invalid Unicode, and ExternalTexture values without a valid framework wrapper.
+
+The same value type provides exact inspection and navigation:
+
+```text
+kind()
+isNull()
+
+requireNull()
+requireBoolean()
+requireInt64()
+requireDouble()
+requireString()
+requireBytes()
+requireExternalTexture()
+
+requireField(name)
+field(name)
+fields()
+rejectUnknownFields(names)
+
+elements()
+element(index)
+```
+
+These operations never coerce between Boolean, Int64, Double, String, or Bytes.
+`field(name)` represents absence with the language's native nullable or optional result, while an explicitly present Null remains a non-absent `PlatformPayload` whose `isNull()` is true.
+`fields()` and `elements()` return immutable child Payload values, and `rejectUnknownFields()` is an explicit boundary-type decision rather than a global policy.
+
+A child returned by field or element navigation shares its immutable backing node and carries a lazy diagnostic path such as `properties.headers[2].value`.
+That path exists only for error reporting and does not participate in value equality, hashing, object ordering, or HUXP encoding.
+Missing fields, kind mismatches, invalid values, unknown fields, and range failures report the complete path through the platform's native exception or error mechanism with the same semantic error category on every platform.
+
+The corresponding platform type owns its conversion just as the C++ type does.
+Java uses a type-local static `decode(PlatformPayload)` and instance `encode()`, Swift uses `init(platformPayload:)` and `encodePlatformPayload()`, Objective-C uses the corresponding initializer or factory and `encodePlatformPayload`, and JavaScript or TypeScript uses type-local `decode(payload)` and `encode()` operations.
+HuxerUI does not reflect arbitrary objects, require Java serialization or Swift `Codable`, inspect JavaScript object shapes implicitly, or add a generic `decode(Class<T>)` operation.
+The SDK exposes no public JSON conversion, numeric coercion, or raw ExternalTexture slot.
+
+The common cross-language bridge transports one HuxerUI binary representation rather than recursively translating the payload tree through JNI, Objective-C collections, or JavaScript interop calls.
+The C++ bridge encodes its `PlatformPayload` to binary, the platform SDK automatically decodes that binary to its immutable local `PlatformPayload`, and the reverse path performs the corresponding platform encode and C++ decode.
+Library implementations receive their platform SDK's `PlatformPayload` value and never parse or produce the transport bytes themselves.
+
+```text
+C++ T::Encode
+  -> C++ PlatformPayload
+  -> HuxerUI binary envelope
+  -> platform PlatformPayload
+
+platform PlatformPayload
+  -> HuxerUI binary envelope
+  -> C++ PlatformPayload
+  -> C++ T::Decode
+```
+
+The envelope starts with the four ASCII bytes `HUXP`, a little-endian unsigned 16-bit format version, and a little-endian unsigned 16-bit flags field.
+Version 1 requires zero flags and contains exactly one value followed by no trailing bytes.
+Values use one-byte tags for Null, Boolean, Integer, Double, String, Bytes, List, Object, and ExternalTexture.
+Integer values use signed 64-bit little-endian representation, Double values use their IEEE 754 binary64 bits in little-endian order, and all byte lengths and container counts use unsigned 32-bit little-endian values.
+Strings contain a byte length followed by UTF-8 bytes, lists contain a count followed by values, and objects contain a count followed by length-prefixed UTF-8 keys and values.
+Object keys are serialized in ascending UTF-8 byte order so one payload has one canonical encoding.
+ExternalTexture contains a one-byte capability kind and an unsigned 32-bit envelope-local slot.
+
+The binary format preserves all payload kinds without implicit coercion.
+Decoders require the declared tag and range instead of converting strings to numbers, truncating doubles to integers, or treating bytes as text.
+Strings and object keys must be valid UTF-8, doubles must be finite, and containers enforce unique object keys plus nesting and allocation limits.
+The maximum nesting depth is 64, matching the in-process payload contract.
+All bridge implementations use the same framework constants for maximum envelope bytes, scalar bytes, container entries, and capability slots and validate them before allocation; a platform must not substitute looser local limits.
+Unknown versions, flags, tags, or capability kinds, duplicate object keys, invalid UTF-8, non-finite doubles, integer or length overflow, truncated input, excessive allocation, and trailing bytes are malformed payloads.
+
+An `ExternalTexture` is an opaque capability and therefore travels beside the binary data in a bridge-private capability table.
+The binary stream contains only an envelope-local slot, while JNI global references, Objective-C objects, JavaScript handles, or C++ source state remain in the owning bridge for that crossing.
+Slots are unique only within one envelope and are not public texture identifiers.
+Repeated references to the same slot preserve capability identity within that decode.
+The encoder rejects an ExternalTexture that cannot be exported by the owning bridge, and the decoder rejects a missing slot, duplicate capability-table entry, or kind mismatch.
+On successful decode, the resulting `ExternalTexture` wrapper retains the capability before the temporary table is released; on failure, the bridge releases the complete table.
+Library code cannot forge, retain, or reuse a slot, and the closed table cannot carry arbitrary platform objects.
+
+| Platform boundary | Binary data | Capability table |
+| --- | --- | --- |
+| Android | `byte[]` | Bridge-owned Java references |
+| Apple common adapter (future) | `NSData` | Bridge-owned Objective-C objects |
+| Web common adapter (future) | `Uint8Array` | Bridge-owned JavaScript objects |
+
+Application callback objects never enter the envelope, and Objective-C, Java, JavaScript, or C++ exceptions are contained by the bridge that owns them.
+`PlatformError` has a stable UTF-8 `code`, an English `message`, and optional structured `details` carried by the same payload envelope.
+Framework codes reserve the `huxerui/` prefix and library codes use a library-owned prefix.
+A bridge failure that prevents a library result from being represented becomes a stable framework error rather than escaping through another language runtime.
+
+### RootHook platform registration
+
+RootHooks are the only PlatformModule and PlatformView registration entry point.
+Android, Apple, and Web applications do not repeat library registration in their host view, application delegate, or mount call, and platform packages do not mutate a process-global registry during static initialization.
+The selected library RootHook registers either a direct factory or a bridge descriptor, and Runtime freezes the completed surface registry before first composition.
+
+Android supplies common Java and Kotlin `PlatformViewFactory`, `PlatformView`, `PlatformModuleFactory`, and `PlatformModule` interfaces plus a JNI bridge adapter that resolves a library implementation class through the host application ClassLoader.
+Current Apple libraries register direct Objective-C++ factories, and current Web libraries register direct Emscripten C++ factories or library-owned bridges.
+Common Apple Objective-C/Swift protocols and a common Web JavaScript adapter are future work.
+Factories and instances are separate because one surface registration may create multiple independently owned View or Module instances.
+One registered factory belongs to its surface registry, may create many independent instances, owns no created instance, and is released when that registry tears down.
+Every successfully created instance is disposed exactly once; a failed creation has no instance disposal and publishes no event.
+
+Common platform-language adapters expose only the event, result, and cancellation endpoints required by the boundary.
+A factory's `create` operation receives its complete Properties or Options and a `PlatformEventEmitter`.
+When a supported platform needs an owning host object, its protocol receives that exact platform type:
+
+| Platform | PlatformView factory host | PlatformModule factory host |
+| --- | --- | --- |
+| Windows | Parent `HWND` | Owning `HWND` |
+| macOS | Adapter-owned parent `NSView` | Owning `NSWindow` |
+| Linux | Adapter-owned parent `GtkWidget` | Owning `GtkWindow` |
+| Web | Adapter-owned parent `HTMLElement` | Owning `Window` |
+| Android | Owning `android.content.Context` | Owning `android.content.Context` |
+| iOS | Owning `UIViewController` | Owning `UIViewController` |
+
+These are explicit platform protocol parameters rather than fields of a universal Context object.
+The platform shell establishes every required owner before Runtime executes RootHooks, and host absence is an integration failure rather than a nullable or partially initialized Context.
+A future platform defines only the narrow host values required by its own factory contracts and does not widen the shared API.
+A PlatformView exposes its platform View, `update`, `invoke`, and `dispose`.
+A PlatformModule exposes `invoke` and `dispose`; `invoke` receives its method, arguments, and one `PlatformResult`, then returns an optional `PlatformCancellation`.
+`PlatformResult.complete` and `fail` are accepted at most once, `PlatformEventEmitter.emit` publishes an instance event, and `PlatformCancellation.cancel` is idempotent.
+Request identities, late-result rejection, thread transfer, and bridge invalidation remain framework implementation details rather than platform-language API parameters.
+
+```text
+PlatformViewFactory.create -> PlatformView
+PlatformView.getView / view, update, invoke, dispose
+
+PlatformModuleFactory.create -> PlatformModule
+PlatformModule.invoke, dispose
+
+PlatformEventEmitter.emit
+PlatformResult.complete, fail
+PlatformCancellation.cancel
+```
+
+The Android SDK passes one framework-owned `HuxerUIPlatformChannel.Events` to each successful Java factory creation.
+The Java implementation retains that emitter and calls `emit(name)` or `emit(name, payload)` from its platform callbacks; the emitter performs the common JNI call, binary transport, instance-generation validation, and UI-thread delivery.
+Libraries do not declare one JNI callback per event.
+Future Apple and Web common adapters receive equivalent framework-owned emitters; current direct factories emit through the C++ `PlatformEventEmitter` supplied by their registered factory contract.
+
+The common cross-language adapters are asynchronous-capable transport contracts rather than library API models.
+An implementation may complete a Result inline or later and may return no cancellation endpoint, while a library bridge may expose that operation as a callback, Future, Task, fire-and-forget method, cached synchronous state, or another abstraction.
+The common call channel never blocks the owning UI thread to manufacture a synchronous API.
+Libraries that require a genuinely synchronous boundary operation may supply their own platform bridge.
+
+The optional C++ `PlatformChannel` is the reusable implementation of that transport contract.
+It exposes named invocation, typed payload encoding and decoding helpers, typed event subscription, cancellation, and close semantics without becoming a PlatformModule base class or a public registry lookup result.
+A library-defined Module or Controller may retain a channel internally, wrap it in any API shape, or ignore it and use a custom bridge.
+Invocation, transport cancellation, and transport disposal are always scheduled in submission order through the owning adapter's `UIThreadDispatcher`.
+`Invoke` allocates and returns its request identity before platform work begins, while `Cancel` and `Close` invalidate C++ delivery synchronously.
+A canceled queued invocation is skipped; cancellation discovered while invocation is in progress runs on that same platform thread before a queued dispose, and all late results or events are ignored.
+
+Direct C++ integrations remain strongly typed.
+A Windows WebView factory may directly attach its instance to the registered WebViewController and emit `events.Emit<Key>(value)` from WebView2 callbacks; a Linux PlatformView implementation follows the same model with its GTK object.
+Neither path constructs a payload or uses a method string.
+An Android C++ bridge may connect the same Controller and translate `Reload()` to a Java invocation or a callback-oriented evaluation operation to the corresponding result endpoint.
+The Java instance implements `invoke`, completes the supplied Result, and emits navigation events through the common emitter.
+An Objective-C++ implementation uses the direct typed path, while an Objective-C or Swift instance currently uses a library-owned bridge when direct Objective-C++ is insufficient.
+A Web implementation currently uses a direct Emscripten C++ factory or a library-owned bridge.
+In every case the application sees only the same concrete WebView, Controller, and typed Event API.
+
+The Android protocol shape is:
+
+```java
+public interface HuxerUIPlatformView {
+    interface Factory {
+        HuxerUIPlatformView create(
+                Context context,
+                PlatformPayload properties,
+                HuxerUIPlatformChannel.Events events);
+    }
+
+    View getView();
+    void update(PlatformPayload properties);
+    default HuxerUIPlatformChannel.Cancellation invoke(
+            String method,
+            PlatformPayload arguments,
+            HuxerUIPlatformChannel.Result result) {
+        result.fail(
+                "huxerui/unsupported-method",
+                "HuxerUI PlatformView does not support controller calls",
+                PlatformPayload.nullValue());
+        return null;
+    }
+    void dispose();
+}
+
+public interface HuxerUIPlatformModule {
+    interface Factory {
+        HuxerUIPlatformModule create(
+                Context context,
+                PlatformPayload options,
+                HuxerUIPlatformChannel.Events events);
+    }
+
+    HuxerUIPlatformChannel.Cancellation invoke(
+            String method,
+            PlatformPayload arguments,
+            HuxerUIPlatformChannel.Result result);
+    void dispose();
 }
 ```
 
-`PlatformModules` is a library-author capability rather than an application service locator.
-The resulting service owns the `PlatformInstance`, encodes typed calls, decodes results and events, and closes the instance from its destructor.
-An application-wide platform engine may remain shared behind several per-window instances, but each Runtime retains only its own identities, subscriptions, and typed services.
-The shared protocol and deterministic dispatcher fixture are implemented and tested.
-Windows posts a private message to its owning application HWND, macOS configures asynchronous main-queue delivery, Linux attaches idle sources to its owning GLib main context, Web queues work through the browser event loop, Android dispatches through its owning `HuxerUIView`, and iOS configures asynchronous main-queue delivery.
-The Windows dispatcher accepts work before that HWND exists because Runtime installs RootHooks before the adapter creates its window, then schedules the queued batch when the window attaches; shutdown drops late platform callbacks without retaining the destroyed HWND.
-`example_platform_module` registers a thread-pool timer on Windows, a Foundation timer on Apple platforms, a `timerfd` timer on Linux, an Emscripten interval on Web, and a Java scheduled timer on Android behind one typed Root Service to exercise Call, Result, Event, Cancel, and Dispose end to end.
+`HuxerUIPlatformChannel.Cancellation` is nullable when an invocation cannot be canceled.
+The framework emitter owns the common native entry point, so a Java implementation calls `events.emit(...)` from Android listeners instead of declaring event-specific JNI methods.
+A PlatformView without a Controller uses the default unsupported `invoke` implementation, and its C++ bridge does not create or connect a call channel.
+
+The future Apple common adapter uses equivalent Objective-C protocols so Objective-C and Swift share one bridge contract.
+The iOS PlatformView protocol exposes a non-null `UIView*`, the macOS protocol exposes a non-null `NSView*`, and their factories receive the owning `UIViewController*` or `NSWindow*` plus Properties and the framework emitter.
+Both View protocols expose `update`, `invoke`, and `dispose`; Module protocols expose `invoke` and `dispose` and receive the platform-specific owning host at creation.
+An Objective-C++ library may register a conforming factory object directly and therefore does not require runtime class lookup.
+
+```objc
+@protocol HUXPlatformEventEmitter <NSObject>
+- (void)emit:(NSString*)event;
+- (void)emit:(NSString*)event payload:(HUXPlatformPayload*)payload;
+@end
+
+@protocol HUXUIKitPlatformView <NSObject>
+@property(nonatomic, readonly) UIView* view;
+- (void)update:(HUXPlatformPayload*)properties;
+- (id<HUXPlatformCancellation>)invoke:(NSString*)method
+                            arguments:(HUXPlatformPayload*)arguments
+                               result:(id<HUXPlatformResult>)result;
+- (void)dispose;
+@end
+```
+
+The AppKit protocol has the same operations and substitutes `NSView*` for `UIView*`.
+
+The future Web common adapter uses the equivalent structural contract:
+
+```js
+export const webViewFactory = {
+  create(host, properties, events) {
+    const element = document.createElement("iframe");
+    return {
+      element,
+      update(nextProperties) {},
+      invoke(method, arguments, result) {},
+      dispose() {},
+    };
+  },
+};
+```
+
+The returned `element` is non-null and initially unparented, the adapter alone attaches it, and the implementation retains the supplied emitter for repeated events.
+The export is linked and loaded before RootHooks execute; `mountHuxerUIApp()` does not register it.
+
+The Android adapter owns binary payload transfer, instance creation, updates, invocations, events, results, cancellation, and disposal.
+A class-based adapter uses a public no-argument constructor and resolves through the host ClassLoader rather than `FindClass` from an arbitrary thread.
+PlatformView registration prepares its Java factory when the RootHook registers the View; PlatformModule registration resolves its Java factory lazily when the Module is first opened.
+Each successful creation validates the returned instance contract, and PlatformView `invoke` is required only when the registered C++ View has a Controller.
+The Android SDK publishes consumer keep rules for any implementation class referenced by stable runtime name so shrinking cannot rename or remove it.
+A library may instead register its own JNI-backed factory when the common class adapter does not fit.
+
+The C++ RootHook selects the common class adapter explicitly with `android::JavaPlatformModuleFactory<Module, Options>` or `android::JavaPlatformViewFactory<Properties, Controller>`.
+Their callback fields use `std::function` directly: the Module adapter constructs the exact Module from a `PlatformChannel`, while the View adapter connects that channel to the exact Controller.
+HuxerUI does not add callback aliases or require a proxy base.
+
+An Objective-C++ library currently registers a direct strongly typed callable like a Windows implementation.
+The future Apple bridge may additionally accept a conforming factory object or construct one through a stable Objective-C runtime class name, but class lookup remains optional rather than the platform contract.
+
+Web currently uses a direct Emscripten C++ factory or a library-owned bridge satisfying the same typed registration contract.
+The future common export adapter may resolve a linked JavaScript module or Emscripten JavaScript library function before RootHooks execute, while `mountHuxerUIApp()` remains outside registration.
+Windows and Linux normally register direct strongly typed C++ factories.
+
+Factory and bridge construction remain library decisions on every platform.
+The framework-provided class, protocol, export, payload, and call-channel adapters are conveniences that implement the registry contract; they do not define the only valid factory representation, require proxy inheritance, or force a library to use reflection.
+Only the common payload bridge invokes the boundary type's static `Encode()` and `Decode()` operations.
+A library-owned bridge may use explicit typed JNI, Objective-C++, Emscripten, or equivalent conversion while preserving the same public Properties, Controller, Module, and Event contracts.
+Android common-bridge instances and all direct C++ factories receive the framework-owned event emitter so instance generation checks, creation-time queueing, UI-thread delivery, disposal invalidation, and late-event rejection remain uniform.
+Future Apple and Web common adapters must preserve the same rule.
+
+The common PlatformView adapter uses Create, Update, Invoke, Result, Cancel, Event, and Dispose when its library exposes imperative commands; a declaration without a Controller has no application path to those commands.
+The common PlatformModule adapter uses Create, Invoke, Result, Event, Cancel, and Dispose, while a direct C++ Module or library-owned bridge uses its ordinary library-defined methods.
+An adapter that supports asynchronous invocation owns monotonically assigned internal request identities and ignores late results after cancellation or teardown.
+The platform adapter's `UIThreadDispatcher` preserves UI-thread delivery and event order without invoking callbacks inline from platform drawing, reconciliation, or a foreign-language call stack.
+Events produced while creating a visual candidate remain queued until that candidate enters the committed RenderComposition; failed candidates publish nothing.
+Disposal rejects new calls, cancels pending requests, detaches event delivery, and then releases platform state.
+PlatformView creation, update, attachment, placement, removal, and disposal run on the owning UI thread.
+Its platform root object is non-null, stable for the instance lifetime, initially unparented, and attached only by the adapter; updates receive the complete Properties value and must be idempotent.
+PlatformModule creation, invocation, cancellation, and disposal run on the owning platform thread, while its Result and Event endpoints may be called from any thread and are marshalled by the bridge.
+Even a result completed inline is delivered asynchronously after `invoke` returns.
+Cancellation races resolve to exactly one terminal result, cancellation is idempotent, and absence of a cancellation endpoint means the invocation is not cancelable.
+Disposal rejects new invocations, invalidates endpoints, cancels outstanding work where possible, and safely drops every later result or event.
+
 ### PlatformView
 
 PlatformView is a real built-in leaf View rather than a modifier.
 Runtime owns its mounted identity, compatible reconciliation, measurement, final geometry, visibility, hit-testing boundary, focus participation, semantic anchor, and unmount timing.
 The platform adapter owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or equivalent platform object.
 
-The low-level declaration has only the registered type, complete controlled properties, and supported event keys:
+The low-level declaration has only the registration name and complete controlled properties:
 
 ```cpp
 class PlatformView final : public View {
 public:
-  explicit PlatformView(std::string type, PlatformPayload properties = {});
+  explicit PlatformView(std::string name);
 
-  template <class... Keys>
-  PlatformView&& Events() &&;
+  template <class Properties>
+  PlatformView(std::string name, Properties properties);
 };
 ```
 
-Default-constructed `PlatformPayload` is null, so `PlatformView("library/Type")` is valid for a factory with no creation properties.
-`Events<Key...>()` stores only wire-name and decoder descriptors; application callbacks remain ordinary EventBindings added later through `View::On<Key>()`.
+`PlatformView("WebView")` is the explicit no-properties form.
+Ordinary `.On<Key>()` calls attach both application handlers and any optional platform-boundary event metadata, so the declaration has no second event-list API.
 PlatformView participates in shared focus traversal by default, while the ordinary `Focusable(false)` modifier removes a non-focusable PlatformView from that order.
 
-A library exposes a concrete component such as `WebView()` and internally constructs `PlatformView(type, properties)` with a stable registered type string and immutable PlatformPayload properties.
-Compatible recomposition retains the mounted PlatformView instance when the type string and key remain compatible.
-A changed type string or incompatible key replaces it, while changed properties update the retained instance after the next successful commit.
+A library exposes a concrete component such as `WebView()` and internally constructs `PlatformView(name, properties)` with a stable registration name and immutable strongly typed Properties.
+The concrete component may expose `.Controller(WebViewController)` or accept the Controller as a required constructor value; the generic View API does not require every PlatformView to have a Controller.
+The resulting internal binding retains the exact registered Controller type, value, and stable identity as implementation metadata rather than making the Controller a property modifier or encoded value.
+Compatible recomposition retains the mounted PlatformView instance when the registration name and key remain compatible.
+A changed registration name, incompatible Properties type, or incompatible key replaces it, while changed properties update the retained instance after the next successful commit.
+Changing only the Controller detaches the previous binding and attaches the new binding to the retained platform instance after commit without resending Properties.
 
 PlatformView measurement remains platform-neutral and never creates or synchronously measures a platform object during shared layout.
 PlatformView has zero intrinsic logical size under loose constraints; ordinary parent constraints and size modifiers such as `Frame` produce its final axis-aligned layout bounds.
@@ -613,8 +1047,9 @@ Content, children, foreground painting, sibling order, and LayerStack entries th
 Registration does not select a behind, above, overlay, or texture composition mode, and applications do not move content into LayerStack merely to cover a PlatformView.
 
 The PlatformView leaf records one `PlacePlatformViewCommand` in its retained PaintSequence.
-The immutable command carries the stable mounted identity, registered type string, immutable PlatformPayload properties and revision, and the final local axis-aligned destination rectangle.
+The immutable command carries the stable mounted identity, registration name, `PlatformValue` instances containing immutable strongly typed Properties and any controller binding, their revisions, and the final local axis-aligned destination rectangle.
 It carries no platform handle and performs no raster drawing.
+Those values preserve exact types, equality or identity, and direct-factory access without introducing a declaration wrapper or encoding to `PlatformPayload`.
 Only the built-in PlatformView leaf records it; Canvas and public PaintContext do not expose an operation for placing an arbitrary PlatformView identity.
 One mounted identity contributes exactly one placement to a committed scene, and a duplicate identity is a framework invariant failure rather than an ordering convention.
 The surrounding RenderNode supplies the accumulated transform, clip, visibility, and paint position in the same way it does for every other PaintCommand.
@@ -645,8 +1080,8 @@ An offscreen or temporarily hidden PlatformView remains mounted and preserves pl
 On Windows, a visible removed HWND remains retained behind the previous transparent aperture until the replacement HuxerUI surface is successfully presented, then it is destroyed before the next frame; this prevents the root background from flashing between frame commit and presentation.
 
 The adapter creates a PlatformView instance when its identity first enters a committed RenderComposition and applies controlled properties before making it visible.
-A property revision sends the complete controlled properties to the compatible instance through an idempotent Update, while bounds-only changes update placement without resending an unchanged property payload.
-Factories should validate an Update before mutating observable platform state and apply the complete controlled payload idempotently.
+A property revision sends the complete controlled Properties to the compatible instance through an idempotent Update, while bounds-only changes update placement without resending unchanged Properties.
+Factories should validate an Update before mutating observable platform state and apply the complete controlled value idempotently.
 Replacement prepares the new instance before retiring the old one.
 A factory exception is a library integration error that aborts the platform commit; adapters contain platform exceptions at their boundary but do not attempt to roll back arbitrary library-owned platform state.
 Runtime shutdown detaches input, focus, and accessibility bridges, destroys PlatformViews and adapter-owned composition resources, and only then releases library Root Services in their existing reverse installation order.
@@ -679,7 +1114,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
 
 These strategies are conformance requirements, not application-selectable composition modes.
-A factory whose platform object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView type or unavailable adapter capability at the layer that detects it.
+A factory whose platform object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView registration name or unavailable adapter capability at the layer that detects it.
 It must not silently flatten the declaration into a global foreground or background plane, capture an interactive platform hierarchy as stale pixels, or discard covering HuxerUI content.
 Libraries may choose a different platform implementation internally, while high-frequency visual content without platform interaction remains an ExternalTexture.
 
@@ -709,24 +1144,28 @@ The container performs no drawing, never takes focus, contributes no semantic no
 It provides a stable ownership and rectangular-clipping boundary without modifying the factory-owned control through `SetWindowRgn`.
 Placement and HWND z-order changes are applied on the window UI thread.
 
-The Windows-specific factory contract lives in `<huxerui/windows/platform_view.h>`:
+The Windows convenience factory contract lives in `<huxerui/windows/platform_registry.h>` and retains a library-defined instance rather than reducing it to an HWND plus untyped callbacks:
 
 ```cpp
 namespace huxerui::windows {
 
+template <class Properties, class Instance>
 struct PlatformViewFactory {
-  std::function<HWND(HWND parent, const PlatformPayload&, PlatformEventSink)> create;
-  std::function<void(HWND, const PlatformPayload&)> update;
-  std::function<void(HWND)> dispose;
+  std::function<std::shared_ptr<Instance>(HWND parent, const Properties&, PlatformEventEmitter)> create;
+  std::function<HWND(const std::shared_ptr<Instance>&)> view;
+  std::function<void(Instance&, const Properties&)> update;
+  std::function<void(Instance&)> dispose;
 };
 
 } // namespace huxerui::windows
 ```
 
-The factory must return a same-process, same-UI-thread `WS_CHILD` HWND whose parent is the supplied clipping container.
+`Instance` is an arbitrary library type and does not inherit a HuxerUI base class.
+For a controlled registration, the factory adapter connects `Instance` to the exact registered Controller type; for an uncontrolled registration it needs no controller-related API.
+The factory's `view` operation must return a same-process, same-UI-thread `WS_CHILD` HWND whose parent is the supplied clipping container.
 After successful creation, HuxerUI owns destruction of that root HWND.
-The adapter calls `dispose` once before `DestroyWindow`; `dispose` releases library callbacks, subclass state, and other owned resources but does not destroy the HWND.
-Creation, update, disposal, placement, and focus changes run on the owning UI thread, while `PlatformEventSink` delivery uses the existing Windows UI-thread dispatcher and drops events from an inactive route.
+The adapter calls `dispose` once before `DestroyWindow`; `dispose` releases library callbacks, subclass state, and other owned resources but does not destroy the HWND, then the retained `Instance` is released.
+Creation, update, disposal, placement, and focus changes run on the owning UI thread, while `PlatformEventEmitter` delivery uses the existing Windows UI-thread dispatcher and drops events from an inactive route.
 
 A single framework-private transparent input-shield HWND covers the client area while PlatformViews are present.
 It asks Runtime for the committed frontmost hit target.
@@ -749,7 +1188,7 @@ The Windows 7 compatibility renderer does not silently flatten PlatformViews int
 `ExternalTexture` is a copyable platform-neutral consumer value representing one live visual source.
 It exposes fixed logical intrinsic size, stable identity equality, and validity, while its shared opaque state retains platform-owned frame production and lifetime data.
 The public value exposes no frame revision, platform texture, buffer, View, device pointer, registry identity, or mutation operation.
-Application code cannot construct a valid texture from an integer or native handle; only a platform-specific source creates one.
+Application code cannot construct a valid texture from an integer or system handle; only a platform-specific source creates one.
 
 The platform-neutral public surface remains a value type:
 
@@ -766,7 +1205,7 @@ public:
 ```
 
 Default construction produces an empty value for optional storage.
-PlatformPayload and Image reject that empty value.
+Image and PlatformPayload boundary encoding reject that empty value.
 
 A platform source is move-only and may be created before a Runtime or platform surface exists.
 Its `Texture()` operation returns the copyable consumer value, `Publish()` replaces the pending platform frame, and `Finish()` rejects later frames while preserving the last published frame for drawing.
@@ -776,16 +1215,18 @@ macOS and iOS accept `CVPixelBufferRef` frames, Linux and Windows copy borrowed 
 Each platform retains independent source state and renderer integration without widening the platform-neutral consumer representation.
 
 An unbound texture binds exactly once when it first enters a surface-owned PlatformAdapter boundary.
-A Result or Event binds before delivery to shared C++, a Call argument or PlatformView property binds or validates against the receiving adapter, and a texture created directly by PlatformModule code binds when its first committed render use is collected.
-All paths use the same internal surface-binding invariant.
+A cross-language envelope binds its capability while the bridge imports or exports that envelope.
+A value moving only through the strongly typed C++ path remains unbound until a surface-owned adapter or renderer operation actually consumes its `ExternalTexture`; returning or emitting an arbitrary C++ structure therefore requires neither payload encoding nor reflective capability traversal.
+A texture created directly by PlatformModule code normally binds when its first committed render use is collected.
+All consuming paths use the same internal surface-binding invariant.
 Re-entering the same surface is valid, while using the texture with another surface fails at the owning boundary with a HuxerUI diagnostic rather than rendering an empty result.
 There is no public or library-visible texture registry: the source state is the capability, and each renderer keeps only the private cache needed to consume sources already bound to its surface.
 
-`PlatformPayloadKind::ExternalTexture` transports the consumer value through PlatformModule options, Calls, Results, Events, and PlatformView properties, including nested lists and objects.
+`PlatformPayloadKind::ExternalTexture` transports the consumer value only when PlatformModule options, calls, results, events, or PlatformView properties cross a platform-language boundary, including when nested in lists and objects.
 Constructing a payload from an empty texture is invalid, and `AsExternalTexture()` requires the exact kind.
 Payload equality delegates to texture identity equality; frame publication never changes payload equality.
 Platform bridges carry an opaque framework wrapper retaining the source state instead of encoding a raw numeric identifier.
-This closed capability does not make PlatformPayload a generic object transport, and PlatformPayload remains explicitly in-process and non-serializable.
+This closed capability does not make PlatformPayload a generic object transport, and its binary envelope remains an ephemeral language-bridge format rather than a persistence or network format.
 
 The existing Image component accepts ExternalTexture directly and reuses ImageFit, alignment, sampling, measurement, clipping, transform, and opacity behavior:
 
@@ -1252,7 +1693,7 @@ A RootHook installs per-window services or persistent global components before t
 using RootHook = std::function<void(RootContext&)>;
 ```
 
-`RootContext` exposes root services, layers, and registered platform modules:
+`RootContext` exposes root services, layers, and the narrow platform registration operations:
 
 ```cpp
 class RootContext {
@@ -1261,12 +1702,29 @@ public:
   void Provide(std::shared_ptr<Service> service);
 
   LayerController& Layers();
-  PlatformModules& Modules();
+
+  template <class Module, class Factory>
+  void RegisterPlatformModule(std::string name, Factory factory);
+
+  template <class Module, class Options, class Factory>
+  void RegisterPlatformModule(std::string name, Factory factory);
+
+  template <class Properties, class Factory>
+  void RegisterPlatformView(std::string name, Factory factory);
+
+  template <class Properties, class Controller, class Factory>
+  void RegisterPlatformView(std::string name, Factory factory);
+
+  template <class Module>
+  Module OpenPlatformModule(std::string name);
+
+  template <class Module, class Options>
+  Module OpenPlatformModule(std::string name, Options options);
 };
 ```
 
-`Modules()` opens only factories already registered by the current platform integration.
-It does not discover compile-time libraries, download dependencies, expose native handles, or provide an application-facing string service lookup.
+These operations forward to the surface-owned internal `PlatformRegistry` and expose no generic lookup or registry accessor.
+They do not discover compile-time libraries, download dependencies, expose system handles, or provide an application-facing string service lookup.
 
 Installation uses `AppOptions`:
 
@@ -1577,6 +2035,7 @@ The current extension points are:
 | Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
 | Custom theme | Typed values in `ThemeDefinition` and a direct Theme View boundary |
 | Per-window service | RootHook and `RootContext::Provide()` |
+| Platform nonvisual session | Registered PlatformModule opened by Lifecycle setup or a RootHook owner |
 | Global component | RootHook and `LayerController` |
 | Typed presentation library | A service backed by the Runtime LayerStack |
 | Platform interactive hierarchy | PlatformView factory, PlacePlatformViewCommand, and internal RenderComposition |

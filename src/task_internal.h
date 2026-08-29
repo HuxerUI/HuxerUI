@@ -3,12 +3,10 @@
 #include <coroutine>
 #include <memory>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
 #include <huxerui/task.h>
 
 namespace huxerui {
-
-class PlatformAdapter;
 
 namespace detail {
 

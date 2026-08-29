@@ -3,17 +3,12 @@
 #include <string>
 #include <utility>
 
-#include <huxerui/platform_view.h>
+#include <huxerui/platform_registry.h>
 
 namespace huxerui::example {
 
-std::string PlatformTextFieldEvents::Changed::Decode(const PlatformPayload& payload) {
-  return std::string(payload.AsString());
-}
-
 View PlatformTextField(std::string value) {
-  PlatformPayload properties = PlatformPayload::Object{{platform_text_field::text_property, std::move(value)}};
-  return PlatformView(platform_text_field::type, std::move(properties)).Events<PlatformTextFieldEvents::Changed>();
+  return PlatformView(platform_text_field::type, PlatformTextFieldProperties{std::move(value)});
 }
 
 } // namespace huxerui::example

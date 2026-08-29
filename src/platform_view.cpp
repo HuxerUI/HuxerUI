@@ -1,4 +1,4 @@
-#include <huxerui/platform_view.h>
+#include <huxerui/platform_registry.h>
 
 #include <cmath>
 #include <ranges>
@@ -8,8 +8,16 @@
 
 #include "geometry_internal.h"
 #include "internal.h"
+#include "platform_registry_internal.h"
 
 namespace huxerui {
+
+PlacePlatformViewCommand::PlacePlatformViewCommand(std::uint64_t identity, std::string type, PlatformValue properties,
+                                                   PlatformValue controller, std::uint64_t properties_revision,
+                                                   std::uint64_t controller_revision, Rect bounds)
+    : identity_(identity), type_(std::move(type)), properties_(std::move(properties)),
+      controller_(std::move(controller)), properties_revision_(properties_revision),
+      controller_revision_(controller_revision), bounds_(bounds) {}
 
 void PaintContext::PlacePlatformView(PlacePlatformViewCommand command) {
   RequireOpen();
@@ -24,16 +32,19 @@ void PaintContext::PlacePlatformView(PlacePlatformViewCommand command) {
 
 namespace detail {
 
-std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string type, PlatformPayload properties) {
-  if (type.empty()) {
-    throw std::invalid_argument("HuxerUI PlatformView type must not be empty");
+std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string name, PlatformValue properties) {
+  if (name.empty()) {
+    throw std::invalid_argument("HuxerUI PlatformView name must not be empty");
   }
-  static_cast<void>(PlatformPayload(type));
+  if (!IsValidUtf8(name)) {
+    throw std::invalid_argument("HuxerUI PlatformView name must contain valid UTF-8");
+  }
   auto spec = std::make_shared<ViewSpec>(NodeKind::PlatformView);
   spec->focusable = true;
   spec->platform_view = std::make_shared<PlatformViewDeclaration>(PlatformViewDeclaration{
-      std::move(type),
+      std::move(name),
       std::move(properties),
+      {},
       {},
   });
   return spec;
@@ -47,7 +58,9 @@ void PlatformViewPaintAccess::Paint(const MountedNode& node, PaintContext& conte
       node.identity,
       node.platform_view->type,
       node.platform_view->properties,
+      node.platform_view->controller,
       node.platform_view_properties_revision,
+      node.platform_view_controller_revision,
       node.ContentBounds(),
   });
 }
@@ -61,6 +74,7 @@ bool IsTranslation(const Transform2D& transform) noexcept {
 struct CompositionState {
   RenderComposition result;
   std::unordered_set<std::uint64_t> platform_view_identities;
+  std::vector<const PlatformValue*> platform_view_controllers;
   std::optional<std::uint64_t> preceding_platform_view;
   std::size_t raster_command_count = 0;
   std::size_t slice_first_command = 0;
@@ -102,6 +116,14 @@ void VisitSequence(const PaintSequence& sequence, const TraversalState& traversa
 
     if (!state.platform_view_identities.insert(placement->Identity()).second) {
       throw std::logic_error("HuxerUI RenderScene contains a duplicate PlatformView identity");
+    }
+    if (placement->Controller().HasValue()) {
+      if (std::ranges::any_of(state.platform_view_controllers, [placement](const PlatformValue* controller) {
+            return controller->Equivalent(placement->Controller());
+          })) {
+        throw std::logic_error("HuxerUI PlatformView controller is bound to more than one committed view");
+      }
+      state.platform_view_controllers.push_back(&placement->Controller());
     }
     if (!IsTranslation(traversal.transform)) {
       throw std::logic_error("HuxerUI PlatformView does not support transformed composition");
@@ -173,14 +195,15 @@ RenderComposition BuildRenderComposition(const RenderScene& scene) {
 
 } // namespace detail
 
-PlatformView::PlatformView(std::string type, PlatformPayload properties)
-    : View(detail::MakePlatformViewSpec(std::move(type), std::move(properties))) {}
+PlatformView::PlatformView(std::string name) : View(detail::MakePlatformViewSpec(std::move(name), {})) {}
 
 void View::AddPlatformEvent(detail::PlatformEventDescriptor descriptor) {
-  if (descriptor.name.empty() || descriptor.dispatch == nullptr) {
+  if (descriptor.name.empty() || descriptor.dispatch_direct == nullptr) {
     throw std::invalid_argument("HuxerUI PlatformView event name and decoder must not be empty");
   }
-  static_cast<void>(PlatformPayload(descriptor.name));
+  if (!detail::IsValidUtf8(descriptor.name)) {
+    throw std::invalid_argument("HuxerUI PlatformView event name must contain valid UTF-8");
+  }
   EnsureUniqueSpec();
   if (spec_->kind != detail::NodeKind::PlatformView || !spec_->platform_view) {
     throw std::logic_error("HuxerUI PlatformView event was applied to a different View kind");
@@ -188,11 +211,26 @@ void View::AddPlatformEvent(detail::PlatformEventDescriptor descriptor) {
   const bool duplicate = std::ranges::any_of(spec_->platform_view->events, [&descriptor](const auto& existing) {
     return existing.key == descriptor.key || existing.name == descriptor.name;
   });
-  if (duplicate) {
+  if (duplicate && !std::ranges::any_of(spec_->platform_view->events, [&descriptor](const auto& existing) {
+        return existing.key == descriptor.key && existing.name == descriptor.name;
+      })) {
     throw std::invalid_argument("HuxerUI PlatformView event keys and names must be unique");
+  }
+  if (duplicate) {
+    return;
   }
   auto declaration = std::make_shared<detail::PlatformViewDeclaration>(*spec_->platform_view);
   declaration->events.push_back(std::move(descriptor));
+  spec_->platform_view = std::move(declaration);
+}
+
+void View::SetPlatformController(PlatformValue controller) {
+  EnsureUniqueSpec();
+  if (spec_->kind != detail::NodeKind::PlatformView || !spec_->platform_view) {
+    throw std::logic_error("HuxerUI PlatformView Controller was applied to a different View kind");
+  }
+  auto declaration = std::make_shared<detail::PlatformViewDeclaration>(*spec_->platform_view);
+  declaration->controller = std::move(controller);
   spec_->platform_view = std::move(declaration);
 }
 

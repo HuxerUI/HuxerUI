@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <memory>
 
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
@@ -19,7 +19,7 @@ class UIKitRenderer;
 
 class UIKitPlatformViews final {
 public:
-  UIKitPlatformViews(UIKitRenderer& renderer, PlatformModules& modules, Runtime& runtime);
+  UIKitPlatformViews(UIKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime);
   ~UIKitPlatformViews();
 
   UIKitPlatformViews(const UIKitPlatformViews&) = delete;

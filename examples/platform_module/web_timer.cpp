@@ -10,6 +10,8 @@
 
 #include <emscripten/eventloop.h>
 
+#include <huxerui/app.h>
+
 namespace {
 
 huxerui::PlatformError TimerError(std::string code, std::string message) {
@@ -22,11 +24,16 @@ huxerui::PlatformError TimerError(std::string code, std::string message) {
 
 struct PendingStart {
   std::uint64_t generation = 0;
-  huxerui::PlatformResultSink result;
+  std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct WebTimerState : std::enable_shared_from_this<WebTimerState> {
-  explicit WebTimerState(huxerui::PlatformEventSink event_sink) : events(std::move(event_sink)) {}
+struct WebTimerState : huxerui::example::TimerService, std::enable_shared_from_this<WebTimerState> {
+  explicit WebTimerState(huxerui::PlatformAdapter& adapter_value) : adapter(&adapter_value) {}
+
+  ~WebTimerState() override {
+    pending_start.reset();
+    InvalidateTimer();
+  }
 
   void InvalidateTimer() noexcept {
     ++generation;
@@ -40,45 +47,41 @@ struct WebTimerState : std::enable_shared_from_this<WebTimerState> {
     std::optional<PendingStart> pending = std::move(pending_start);
     pending_start.reset();
     InvalidateTimer();
-    if (pending && pending->result) {
-      huxerui::PlatformResultSink result = std::move(pending->result);
-      result(std::move(error));
+    if (pending && pending->completion) {
+      Complete(std::move(pending->completion), std::move(error));
     }
   }
 
-  std::function<void()> Start(std::int64_t milliseconds, huxerui::PlatformResultSink result) {
-    if (milliseconds <= 0 || milliseconds > std::numeric_limits<std::int32_t>::max()) {
-      result(TimerError("example/invalid-interval", "The timer interval is outside the browser timer range"));
-      return {};
+  huxerui::PlatformRequestId Start(std::chrono::milliseconds interval, std::function<void(std::uint64_t)> handler,
+                                   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion) override {
+    if (interval <= std::chrono::milliseconds::zero() || interval.count() > std::numeric_limits<std::int32_t>::max()) {
+      throw std::invalid_argument("HuxerUI example timer interval is outside the browser timer range");
+    }
+    if (!handler || !completion) {
+      throw std::invalid_argument("HuxerUI example timer callbacks must not be empty");
     }
 
     StopWithError(TimerError("example/timer-replaced", "The timer was replaced by a newer start call"));
     tick = 0;
     const std::uint64_t timer_generation = generation;
-    pending_start = PendingStart{timer_generation, std::move(result)};
-    timer = emscripten_set_interval(TimerCallback, static_cast<double>(milliseconds), this);
+    tick_handler = std::move(handler);
+    pending_start = PendingStart{timer_generation, std::move(completion)};
+    timer = emscripten_set_interval(TimerCallback, static_cast<double>(interval.count()), this);
     if (timer == 0) {
       StopWithError(TimerError("example/timer-failed", "The browser timer could not be created"));
-      return {};
+      return 0;
     }
-
-    const std::weak_ptr<WebTimerState> weak_state = weak_from_this();
-    return [weak_state, timer_generation] {
-      if (const std::shared_ptr<WebTimerState> state = weak_state.lock()) {
-        state->CancelStart(timer_generation);
-      }
-    };
+    return timer_generation;
   }
 
-  void Stop(huxerui::PlatformResultSink result) {
+  huxerui::PlatformRequestId Stop(std::function<void(huxerui::PlatformResult<std::monostate>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example timer completion must not be empty");
+    }
     StopWithError(TimerError("example/timer-stopped", "The timer stopped before its first tick"));
-    result(huxerui::PlatformPayload());
-  }
-
-  void Dispose() noexcept {
-    pending_start.reset();
-    InvalidateTimer();
-    events = {};
+    tick_handler = {};
+    Complete(std::move(completion), std::monostate{});
+    return generation;
   }
 
 private:
@@ -89,12 +92,14 @@ private:
     }
   }
 
-  void CancelStart(std::uint64_t timer_generation) noexcept {
+  bool Cancel(huxerui::PlatformRequestId timer_generation) override {
     if (generation != timer_generation) {
-      return;
+      return false;
     }
     pending_start.reset();
+    tick_handler = {};
     InvalidateTimer();
+    return true;
   }
 
   void Tick() {
@@ -103,60 +108,42 @@ private:
     }
     ++tick;
     if (pending_start && pending_start->generation == generation) {
-      huxerui::PlatformResultSink result = std::move(pending_start->result);
+      auto completion = std::move(pending_start->completion);
       pending_start.reset();
-      result(huxerui::PlatformPayload(tick));
+      Complete(std::move(completion), tick);
     }
-    events(huxerui::example::timer::tick_event, huxerui::PlatformPayload(tick));
+    std::function<void(std::uint64_t)> handler = tick_handler;
+    adapter->DispatchToUIThread([handler = std::move(handler), next_tick = tick] {
+      if (handler) {
+        handler(next_tick);
+      }
+    });
   }
 
-  huxerui::PlatformEventSink events;
+  template <class Result, class Value>
+  void Complete(std::function<void(huxerui::PlatformResult<Result>)> completion, Value&& value) {
+    huxerui::PlatformResult<Result> result(std::forward<Value>(value));
+    adapter->DispatchToUIThread(
+        [completion = std::move(completion), result = std::move(result)]() mutable { completion(std::move(result)); });
+  }
+
+  huxerui::PlatformAdapter* adapter;
+  std::function<void(std::uint64_t)> tick_handler;
   std::optional<PendingStart> pending_start;
   int timer = 0;
   std::uint64_t generation = 0;
   std::uint64_t tick = 0;
 };
 
-huxerui::PlatformModuleFactory WebTimerFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    static_cast<void>(options);
-    auto state = std::make_shared<WebTimerState>(std::move(events));
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (method == huxerui::example::timer::start_method) {
-        std::int64_t milliseconds = 0;
-        try {
-          milliseconds = arguments.AsInteger();
-        } catch (...) {
-          result(TimerError("example/invalid-interval", "The timer interval payload is invalid"));
-          return {};
-        }
-        return state->Start(milliseconds, std::move(result));
-      }
-
-      if (method == huxerui::example::timer::stop_method) {
-        state->Stop(std::move(result));
-        return {};
-      }
-
-      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
-      return {};
-    };
-    instance.dispose = [state] { state->Dispose(); };
-    return instance;
-  };
-  return factory;
-}
-
 } // namespace
 
 namespace huxerui::example {
 
 void InstallTimer(RootContext& root) {
-  root.Modules().Register(timer::type, WebTimerFactory());
-  root.Provide(std::make_shared<TimerService>(root.Modules().Open(timer::type)));
+  root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<TimerService>(std::make_shared<WebTimerState>(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

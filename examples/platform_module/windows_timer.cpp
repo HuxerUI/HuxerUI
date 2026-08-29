@@ -19,6 +19,8 @@
 #include <system_error>
 #include <utility>
 
+#include <huxerui/app.h>
+
 namespace {
 
 huxerui::PlatformError TimerError(std::string code, std::string message) {
@@ -31,12 +33,12 @@ huxerui::PlatformError TimerError(std::string code, std::string message) {
 
 struct PendingStart {
   std::uint64_t generation = 0;
-  huxerui::PlatformResultSink result;
+  std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
-  static std::shared_ptr<WindowsTimerState> Create(huxerui::PlatformEventSink events) {
-    auto state = std::shared_ptr<WindowsTimerState>(new WindowsTimerState(std::move(events)));
+struct WindowsTimerState : huxerui::example::TimerService, std::enable_shared_from_this<WindowsTimerState> {
+  static std::shared_ptr<WindowsTimerState> Create(huxerui::PlatformAdapter& adapter) {
+    auto state = std::shared_ptr<WindowsTimerState>(new WindowsTimerState(adapter));
     state->timer = CreateThreadpoolTimer(TimerCallback, state.get(), nullptr);
     if (state->timer == nullptr) {
       throw std::system_error(
@@ -52,81 +54,93 @@ struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
     Dispose();
   }
 
-  std::function<void()> Start(std::int64_t milliseconds, huxerui::PlatformResultSink result) {
-    if (milliseconds <= 0 || milliseconds > static_cast<std::int64_t>(std::numeric_limits<DWORD>::max())) {
-      result(TimerError("example/invalid-interval", "The timer interval is outside the Windows timer range"));
-      return {};
+  huxerui::PlatformRequestId Start(std::chrono::milliseconds interval, std::function<void(std::uint64_t)> handler,
+                                   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion) override {
+    if (interval <= std::chrono::milliseconds::zero() ||
+        interval.count() > static_cast<std::int64_t>(std::numeric_limits<DWORD>::max())) {
+      throw std::invalid_argument("HuxerUI example timer interval is outside the Windows timer range");
     }
+    if (!handler || !completion) {
+      throw std::invalid_argument("HuxerUI example timer callbacks must not be empty");
+    }
+    const std::int64_t milliseconds = interval.count();
 
     std::lock_guard operation_lock(operation_mutex);
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The platform timer is closed"));
-        return {};
+        Complete(std::move(completion), TimerError("example/timer-closed", "The platform timer is closed"));
+        return 0;
       }
       if (generation == static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-        result(TimerError("example/timer-exhausted", "The platform timer generation space is exhausted"));
-        return {};
+        Complete(std::move(completion), TimerError("example/timer-exhausted", "The timer generation is exhausted"));
+        return 0;
       }
     }
 
     DisarmAndWait();
 
-    huxerui::PlatformResultSink replaced_result;
+    std::function<void(huxerui::PlatformResult<std::uint64_t>)> replaced_completion;
     std::uint64_t timer_generation = 0;
     {
       std::lock_guard lock(mutex);
       if (pending_start) {
-        replaced_result = std::move(pending_start->result);
+        replaced_completion = std::move(pending_start->completion);
         pending_start.reset();
       }
       timer_generation = ++generation;
       tick = 0;
       armed = true;
-      pending_start = PendingStart{timer_generation, std::move(result)};
+      tick_handler = std::move(handler);
+      pending_start = PendingStart{timer_generation, std::move(completion)};
     }
 
     FILETIME due_time = RelativeDueTime(milliseconds);
     SetThreadpoolTimer(timer, &due_time, static_cast<DWORD>(milliseconds), 0);
-    if (replaced_result) {
-      replaced_result(TimerError("example/timer-replaced", "The timer was replaced by a newer start call"));
+    if (replaced_completion) {
+      Complete(std::move(replaced_completion),
+               TimerError("example/timer-replaced", "The timer was replaced by a newer start call"));
     }
-
-    const std::weak_ptr<WindowsTimerState> weak_state = weak_from_this();
-    return [weak_state, timer_generation] {
-      if (const std::shared_ptr<WindowsTimerState> state = weak_state.lock()) {
-        state->CancelStart(timer_generation);
-      }
-    };
+    return timer_generation;
   }
 
-  void Stop(huxerui::PlatformResultSink result) {
+  huxerui::PlatformRequestId Stop(std::function<void(huxerui::PlatformResult<std::monostate>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example timer completion must not be empty");
+    }
     std::lock_guard operation_lock(operation_mutex);
     {
       std::lock_guard lock(mutex);
       if (closed) {
-        result(TimerError("example/timer-closed", "The platform timer is closed"));
-        return;
+        Complete(std::move(completion), TimerError("example/timer-closed", "The platform timer is closed"));
+        return 0;
       }
     }
 
     DisarmAndWait();
 
-    huxerui::PlatformResultSink pending_result;
+    std::function<void(huxerui::PlatformResult<std::uint64_t>)> pending_completion;
+    std::uint64_t request = 0;
     {
       std::lock_guard lock(mutex);
       armed = false;
-      ++generation;
+      request = ++generation;
+      tick_handler = {};
       if (pending_start) {
-        pending_result = std::move(pending_start->result);
+        pending_completion = std::move(pending_start->completion);
         pending_start.reset();
       }
     }
-    if (pending_result) {
-      pending_result(TimerError("example/timer-stopped", "The timer stopped before its first tick"));
+    if (pending_completion) {
+      Complete(std::move(pending_completion),
+               TimerError("example/timer-stopped", "The timer stopped before its first tick"));
     }
-    result(huxerui::PlatformPayload());
+    Complete(std::move(completion), std::monostate{});
+    return request;
+  }
+
+  bool Cancel(huxerui::PlatformRequestId request) override {
+    return CancelStart(request);
   }
 
   void Dispose() noexcept {
@@ -140,7 +154,7 @@ struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
       armed = false;
       ++generation;
       pending_start.reset();
-      events = {};
+      tick_handler = {};
     }
     if (timer != nullptr) {
       DisarmAndWait();
@@ -150,7 +164,14 @@ struct WindowsTimerState : std::enable_shared_from_this<WindowsTimerState> {
   }
 
 private:
-  explicit WindowsTimerState(huxerui::PlatformEventSink event_sink) : events(std::move(event_sink)) {}
+  explicit WindowsTimerState(huxerui::PlatformAdapter& adapter_value) : adapter(&adapter_value) {}
+
+  template <class Result, class Value>
+  void Complete(std::function<void(huxerui::PlatformResult<Result>)> completion, Value&& value) {
+    huxerui::PlatformResult<Result> result(std::forward<Value>(value));
+    adapter->DispatchToUIThread(
+        [completion = std::move(completion), result = std::move(result)]() mutable { completion(std::move(result)); });
+  }
 
   static void CALLBACK TimerCallback(PTP_CALLBACK_INSTANCE, void* context, PTP_TIMER) noexcept {
     static_cast<WindowsTimerState*>(context)->Tick();
@@ -166,12 +187,12 @@ private:
     };
   }
 
-  void CancelStart(std::uint64_t timer_generation) {
+  bool CancelStart(std::uint64_t timer_generation) {
     std::lock_guard operation_lock(operation_mutex);
     {
       std::lock_guard lock(mutex);
       if (closed || generation != timer_generation) {
-        return;
+        return false;
       }
     }
 
@@ -179,11 +200,13 @@ private:
 
     std::lock_guard lock(mutex);
     if (closed || generation != timer_generation) {
-      return;
+      return false;
     }
     armed = false;
     ++generation;
     pending_start.reset();
+    tick_handler = {};
+    return true;
   }
 
   void DisarmAndWait() noexcept {
@@ -195,8 +218,8 @@ private:
   void Tick() noexcept {
     // Periodic thread-pool callbacks may overlap; serialize delivery so ticks, results, and events stay ordered.
     std::lock_guard callback_lock(callback_mutex);
-    huxerui::PlatformResultSink first_result;
-    huxerui::PlatformEventSink event_sink;
+    std::function<void(huxerui::PlatformResult<std::uint64_t>)> first_completion;
+    std::function<void(std::uint64_t)> handler;
     std::uint64_t next_tick = 0;
     {
       std::lock_guard lock(mutex);
@@ -205,27 +228,31 @@ private:
       }
       next_tick = ++tick;
       if (pending_start && pending_start->generation == generation) {
-        first_result = std::move(pending_start->result);
+        first_completion = std::move(pending_start->completion);
         pending_start.reset();
       }
-      event_sink = events;
+      handler = tick_handler;
     }
     try {
-      if (first_result) {
-        first_result(huxerui::PlatformPayload(next_tick));
-      }
-      if (event_sink) {
-        event_sink(huxerui::example::timer::tick_event, huxerui::PlatformPayload(next_tick));
-      }
+      adapter->DispatchToUIThread(
+          [completion = std::move(first_completion), handler = std::move(handler), next_tick]() mutable {
+            if (completion) {
+              completion(next_tick);
+            }
+            if (handler) {
+              handler(next_tick);
+            }
+          });
     } catch (...) {
     }
   }
 
   PTP_TIMER timer = nullptr;
+  huxerui::PlatformAdapter* adapter = nullptr;
   std::mutex operation_mutex;
   std::mutex callback_mutex;
   std::mutex mutex;
-  huxerui::PlatformEventSink events;
+  std::function<void(std::uint64_t)> tick_handler;
   std::optional<PendingStart> pending_start;
   std::uint64_t generation = 0;
   std::uint64_t tick = 0;
@@ -233,44 +260,15 @@ private:
   bool closed = false;
 };
 
-huxerui::PlatformModuleFactory WindowsTimerFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    static_cast<void>(options);
-    const std::shared_ptr<WindowsTimerState> state = WindowsTimerState::Create(std::move(events));
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (method == huxerui::example::timer::start_method) {
-        std::int64_t milliseconds = 0;
-        try {
-          milliseconds = arguments.AsInteger();
-        } catch (...) {
-          result(TimerError("example/invalid-interval", "The timer interval payload is invalid"));
-          return {};
-        }
-        return state->Start(milliseconds, std::move(result));
-      }
-      if (method == huxerui::example::timer::stop_method) {
-        state->Stop(std::move(result));
-        return {};
-      }
-      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
-      return {};
-    };
-    instance.dispose = [state] { state->Dispose(); };
-    return instance;
-  };
-  return factory;
-}
-
 } // namespace
 
 namespace huxerui::example {
 
 void InstallTimer(RootContext& root) {
-  root.Modules().Register(timer::type, WindowsTimerFactory());
-  root.Provide(std::make_shared<TimerService>(root.Modules().Open(timer::type)));
+  root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<TimerService>(WindowsTimerState::Create(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

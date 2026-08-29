@@ -19,8 +19,8 @@
 #include <huxerui/modifier.h>
 #include <huxerui/navigation.h>
 #include <huxerui/paint.h>
-#include <huxerui/platform_module.h>
-#include <huxerui/platform_view.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/resource.h>

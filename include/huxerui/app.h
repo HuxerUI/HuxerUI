@@ -15,18 +15,17 @@
 #include <variant>
 #include <vector>
 
-#include <huxerui/clipboard.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/file.h>
 #include <huxerui/layer.h>
 #include <huxerui/lifecycle.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_adapter.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/semantics.h>
-#include <huxerui/text.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
 #include <huxerui/window.h>
@@ -35,11 +34,8 @@ namespace huxerui {
 
 struct DragEvent;
 
-class FileSystem;
 class FilePicker;
-class PlatformResources;
 class ApplicationHandle;
-struct GestureSettings;
 struct ResourceConfiguration;
 
 struct LaunchActivation {
@@ -65,14 +61,9 @@ enum class ApplicationLifecycleState {
 };
 
 namespace detail {
-class ExternalTextureSurface;
 class ApplicationService;
-class FilePickerTransport;
-class HttpTransport;
 class SystemTrayService;
-class SystemTrayTransport;
 class TaskScopeState;
-class TextLayout;
 } // namespace detail
 
 struct SystemTrayOptions {
@@ -194,86 +185,6 @@ private:
 
 ApplicationHandle UseApplication();
 
-struct ProcessMetrics {
-  // CPU time is cumulative; consumers derive utilization from two samples and the logical processor count.
-  double cpu_time_seconds = 0.0;
-  // Memory usage is the platform's preferred current process-footprint estimate, expressed in bytes.
-  std::uint64_t memory_usage_bytes = 0;
-  std::uint32_t processor_count = 1;
-
-  bool operator==(const ProcessMetrics&) const = default;
-};
-
-class PlatformAdapter : public TextMeasurer {
-public:
-  // The dispatcher must enqueue work onto this adapter's UI thread without invoking it inline.
-  explicit PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread = {});
-  virtual ~PlatformAdapter();
-
-  PlatformAdapter(const PlatformAdapter&) = delete;
-  PlatformAdapter& operator=(const PlatformAdapter&) = delete;
-  PlatformAdapter(PlatformAdapter&&) = delete;
-  PlatformAdapter& operator=(PlatformAdapter&&) = delete;
-
-  virtual void RequestFrameAt(double deadline) = 0;
-  virtual double Now() const noexcept = 0;
-  virtual GestureSettings GestureDefaults() const noexcept;
-  virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  );
-  virtual PlatformTextInput* TextInput() noexcept {
-    return nullptr;
-  }
-  virtual PlatformClipboard* Clipboard() noexcept {
-    return nullptr;
-  }
-  virtual PlatformResources* Resources() noexcept {
-    return nullptr;
-  }
-  virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
-    return std::nullopt;
-  }
-  // Embedded adapters without native-window authority may ignore desktop window commands.
-  virtual void RequestWindowCommand(WindowCommand command) {
-    static_cast<void>(command);
-  }
-  virtual void RequestApplicationQuit() {}
-  // Embedded adapters without native-window authority may leave this optional capability as a no-op.
-  virtual void SetSystemBarsContentBrightness(
-      SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
-  ) {
-    static_cast<void>(status_bar);
-    static_cast<void>(navigation_bar);
-  }
-
-protected:
-  virtual std::shared_ptr<FileSystem> CreateFileSystem();
-  virtual std::shared_ptr<detail::FilePickerTransport> CreateFilePickerTransport();
-  virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
-  virtual std::shared_ptr<detail::SystemTrayTransport> CreateSystemTrayTransport();
-
-  template <class Registration>
-  [[nodiscard]] const Registration* FindPlatformModuleRegistration(std::string_view type) const {
-    return platform_modules_->FindCompatible<Registration>(type);
-  }
-
-  virtual PlatformModuleFactory::Instance CreatePlatformModule(
-      std::string_view type, const PlatformPayload& options, PlatformEventSink events
-  );
-
-  PlatformModules& Modules() noexcept {
-    return *platform_modules_;
-  }
-
-private:
-  UIThreadDispatcher ui_thread_dispatcher_;
-  std::shared_ptr<detail::ExternalTextureSurface> external_texture_surface_;
-  std::unique_ptr<PlatformModules> platform_modules_;
-
-  friend class PlatformModules;
-  friend class Runtime;
-};
-
 namespace detail {
 
 const Application& CurrentApplication();
@@ -359,6 +270,7 @@ private:
   void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible);
   void MoveFocusFromPlatformView(std::uint64_t identity, bool reverse);
   bool DispatchPlatformViewEvent(std::uint64_t identity, std::string_view name, const PlatformPayload& payload);
+  bool DispatchPlatformViewEvent(std::uint64_t identity, std::type_index key, const PlatformValue& value);
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);

@@ -628,6 +628,7 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
   }
   return mounted.text == StringLiteral(incoming.text) && mounted.image_properties == incoming.image_properties &&
          PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
+         PlatformViewControllerEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties.ContentPaintEquals(incoming.properties);
 }
 
@@ -667,6 +668,9 @@ void ApplyViewDeclaration(
   std::string compiled_text = StringLiteral(std::move(compiled.text));
   if (!PlatformViewPropertiesEqual(mounted.platform_view, compiled.platform_view)) {
     ++mounted.platform_view_properties_revision;
+  }
+  if (!PlatformViewControllerEqual(mounted.platform_view, compiled.platform_view)) {
+    ++mounted.platform_view_controller_revision;
   }
   mounted.kind = compiled.kind;
   mounted.key = std::move(compiled.key);
@@ -1071,11 +1075,8 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
   RootContext root{
-      state_->layer_controller_,
-      platform.Modules(),
-      *state_->root_environment_,
-      state_->root_service_types_,
-      state_->root_services_,
+      state_->layer_controller_,   platform.PlatformRegistry(), *state_->root_environment_,
+      state_->root_service_types_, state_->root_services_,
   };
   state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
@@ -1110,6 +1111,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
     state_->debug_metrics_ = std::make_shared<DebugMetricsState>(platform);
     InstallDebugOverlay(root, state_->debug_metrics_);
   }
+  platform.PlatformRegistry().Freeze();
 }
 
 Runtime::~Runtime() {
@@ -1182,11 +1184,19 @@ void Runtime::CommitLifecycles() {
         active->CommitLifecycleCleanups();
       }
     }
-    for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
-      if (auto active = scope.lock()) {
-        active->CommitLifecycleSetups();
+    detail::PlatformRegistry* previous_registry =
+        detail::SetLifecyclePlatformRegistry(&state_->platform_->PlatformRegistry());
+    try {
+      for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
+        if (auto active = scope.lock()) {
+          active->CommitLifecycleSetups();
+        }
       }
+    } catch (...) {
+      detail::SetLifecyclePlatformRegistry(previous_registry);
+      throw;
     }
+    detail::SetLifecyclePlatformRegistry(previous_registry);
   } catch (...) {
     for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
       if (auto active = scope.lock()) {
@@ -1331,7 +1341,33 @@ bool Runtime::DispatchPlatformViewEvent(
   }
   try {
     detail::BindExternalTextures(payload, state_->platform_->external_texture_surface_);
-    event->dispatch(payload, node->event_bindings);
+    if (event->dispatch_payload == nullptr) {
+      return false;
+    }
+    event->dispatch_payload(payload, node->event_bindings);
+  } catch (...) {
+    return false;
+  }
+  return true;
+}
+
+bool Runtime::DispatchPlatformViewEvent(std::uint64_t identity, std::type_index key, const PlatformValue& value) {
+  if (!state_->mounted_root_) {
+    return false;
+  }
+  detail::MountedNode* node = FindNode(*state_->mounted_root_, identity);
+  if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view ||
+      !node->interaction.enabled) {
+    return false;
+  }
+  const auto event = std::ranges::find(node->platform_view->events, key, &detail::PlatformEventDescriptor::key);
+  if (event == node->platform_view->events.end() || !node->event_bindings.contains(event->key) ||
+      event->argument_type != value.Type()) {
+    return false;
+  }
+  try {
+    detail::BindExternalTextures(value, state_->platform_->external_texture_surface_);
+    event->dispatch_direct(value, node->event_bindings);
   } catch (...) {
     return false;
   }

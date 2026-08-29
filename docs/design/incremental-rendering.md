@@ -1,7 +1,6 @@
 # Incremental Layout and Rendering Design
 
 This document defines the implemented architecture for local measurement, layout, paint, and presentation invalidation in HuxerUI.
-It intentionally removes the legacy absolute-frame and flat-DisplayList runtime contracts.
 
 ## Goals
 
@@ -76,7 +75,7 @@ The mounted tree and render scene have different responsibilities:
 ## PlatformView composition foundation
 
 PlatformView extends the retained scene without adding another Runtime output tree.
-Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registered type, `PlatformPayload` properties, property revision, identity, and local bounds are unchanged.
+Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registration name, strongly typed Properties, property revision, controller-binding identity, mounted identity, and local bounds are unchanged.
 The command contributes no pixels and marks the exact RenderScene paint position at which the PlatformView hierarchy participates.
 
 One shared internal builder derives a `RenderComposition` from the committed scene before platform presentation.

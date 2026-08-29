@@ -17,7 +17,7 @@
 
 #include <emscripten.h>
 
-#include <huxerui/web/platform_view.h>
+#include <huxerui/web/platform_registry.h>
 
 #include "internal.h"
 #include "web_renderer.h"
@@ -120,10 +120,14 @@ struct CommittedPlacement {
 
 struct HostedPlatformView {
   std::uint64_t properties_revision = 0;
+  std::uint64_t controller_revision = 0;
   std::uint32_t token = 0;
   std::string type;
   std::shared_ptr<EventRoute> event_route;
-  web::PlatformViewFactory factory;
+  std::shared_ptr<const web::detail::WebElementFactory> factory;
+  std::shared_ptr<void> instance;
+  PlatformValue controller;
+  bool controller_connected = false;
   val element = val::undefined();
   val container = val::undefined();
   std::optional<CommittedPlacement> placement;
@@ -138,38 +142,60 @@ struct HostedPlatformView {
       } catch (...) {
       }
     }
-    if (factory.dispose && !element.isUndefined() && !element.isNull()) {
+    if (instance && controller_connected && factory && factory->disconnect) {
       try {
-        factory.dispose(element);
+        factory->disconnect(instance, controller);
+      } catch (...) {
+      }
+    }
+    if (instance && factory && factory->dispose) {
+      try {
+        factory->dispose(instance);
       } catch (...) {
       }
     }
   }
 
-  void Update(const PlatformPayload& properties) {
-    if (!factory.update) {
-      throw std::logic_error("HuxerUI Web PlatformView factory does not support property updates");
+  void Update(const PlacePlatformViewCommand& command) {
+    if (properties_revision != command.PropertiesRevision()) {
+      if (!factory->update) {
+        throw std::logic_error("HuxerUI Web PlatformView factory does not support property updates");
+      }
+      try {
+        factory->update(instance, command.Properties());
+      } catch (...) {
+        throw std::logic_error("HuxerUI Web PlatformView factory failed while updating");
+      }
+      properties_revision = command.PropertiesRevision();
     }
-    try {
-      factory.update(element, properties);
-    } catch (...) {
-      throw std::logic_error("HuxerUI Web PlatformView factory failed while updating");
+    if (controller_revision == command.ControllerRevision()) {
+      return;
     }
+    if (controller_connected) {
+      if (!factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled Web PlatformView factory must provide disconnect");
+      }
+      factory->disconnect(instance, controller);
+      controller_connected = false;
+    }
+    controller = command.Controller();
+    if (controller.HasValue()) {
+      if (!factory->connect) {
+        throw std::logic_error("HuxerUI controlled Web PlatformView factory must provide connect");
+      }
+      factory->connect(instance, controller);
+      controller_connected = true;
+    }
+    controller_revision = command.ControllerRevision();
   }
 };
 
 } // namespace
 
 struct WebPlatformViews::State {
-  State(
-      WebRenderer& renderer_value,
-      PlatformModules& modules_value,
-      Runtime& runtime_value,
-      UIThreadDispatcher dispatcher,
-      val root_value,
-      val base_canvas_value
-  )
-      : renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value),
+  State(WebRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value,
+        UIThreadDispatcher dispatcher, val root_value, val base_canvas_value)
+      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value),
         dispatch_to_ui_thread(std::move(dispatcher)), root(std::move(root_value)),
         base_canvas(std::move(base_canvas_value)) {}
 
@@ -187,10 +213,8 @@ struct WebPlatformViews::State {
 
   std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
-    const auto* factory = modules->Find<web::PlatformViewFactory>(command.Type());
-    if (factory == nullptr) {
-      throw std::logic_error("HuxerUI Web PlatformView type is not registered: " + std::string(command.Type()));
-    }
+    std::shared_ptr<const web::detail::WebElementFactory> factory = registry->FindView<web::detail::WebElementFactory>(
+        command.Type(), command.Properties().Type(), command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI Web PlatformView factory must provide create");
     }
@@ -198,28 +222,52 @@ struct WebPlatformViews::State {
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
-    PlatformEventSink events = [weak_route, dispatcher](std::string_view name, PlatformPayload payload) mutable {
-      dispatcher([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
-        const std::shared_ptr<EventRoute> route = weak_route.lock();
-        if (!route || !route->active || route->runtime == nullptr) {
-          return;
-        }
-        static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
-      });
-    };
+    PlatformEventEmitter events = MakePlatformEventEmitter(
+        [weak_route, dispatcher](std::type_index key, PlatformValue value) mutable {
+          dispatcher([weak_route, key, value = std::move(value)]() mutable {
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
+          });
+        },
+        [weak_route, dispatcher](std::string name, PlatformPayload payload) mutable {
+          dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(
+                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
+          });
+        });
 
     auto hosted = std::make_unique<HostedPlatformView>();
     hosted->properties_revision = command.PropertiesRevision();
+    hosted->controller_revision = command.ControllerRevision();
     hosted->type = command.Type();
     hosted->event_route = std::move(route);
-    hosted->factory = *factory;
+    hosted->factory = std::move(factory);
+    hosted->controller = command.Controller();
     try {
-      hosted->element = factory->create(command.Properties(), std::move(events));
+      hosted->instance = hosted->factory->create(command.Properties(), std::move(events));
+      if (!hosted->instance || !hosted->factory->view) {
+        throw std::logic_error("HuxerUI Web PlatformView factory returned an empty instance");
+      }
+      hosted->element = hosted->factory->view(hosted->instance);
     } catch (...) {
       throw std::logic_error("HuxerUI Web PlatformView factory failed while creating");
     }
     if (!IsDetachedWebPlatformElement(hosted->element.as_handle())) {
       throw std::logic_error("HuxerUI Web PlatformView factory must return a detached HTMLElement");
+    }
+    if (hosted->controller.HasValue()) {
+      if (!hosted->factory->connect || !hosted->factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled Web PlatformView factory must provide connect and disconnect");
+      }
+      hosted->factory->connect(hosted->instance, hosted->controller);
+      hosted->controller_connected = true;
     }
 
     const std::uint32_t token = AllocateToken();
@@ -287,7 +335,7 @@ struct WebPlatformViews::State {
   }
 
   WebRenderer* renderer;
-  PlatformModules* modules;
+  PlatformRegistry* registry;
   Runtime* runtime;
   UIThreadDispatcher dispatch_to_ui_thread;
   val root;
@@ -302,17 +350,10 @@ struct WebPlatformViews::State {
   std::vector<LayerKey> order;
 };
 
-WebPlatformViews::WebPlatformViews(
-    WebRenderer& renderer,
-    PlatformModules& modules,
-    Runtime& runtime,
-    UIThreadDispatcher dispatch_to_ui_thread,
-    val root,
-    val base_canvas
-)
-    : state_(std::make_unique<State>(
-          renderer, modules, runtime, std::move(dispatch_to_ui_thread), std::move(root), std::move(base_canvas)
-      )) {}
+WebPlatformViews::WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
+                                   UIThreadDispatcher dispatch_to_ui_thread, val root, val base_canvas)
+    : state_(std::make_unique<State>(renderer, registry, runtime, std::move(dispatch_to_ui_thread), std::move(root),
+                                     std::move(base_canvas))) {}
 
 WebPlatformViews::~WebPlatformViews() {
   Shutdown();
@@ -364,10 +405,7 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
         composition_changed = true;
         continue;
       }
-      if (found->second->properties_revision != command.PropertiesRevision()) {
-        found->second->Update(command.Properties());
-        found->second->properties_revision = command.PropertiesRevision();
-      }
+      found->second->Update(command);
     }
   } catch (...) {
     for (const auto& [identity, hosted] : pending) {

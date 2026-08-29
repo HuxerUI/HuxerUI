@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "external_texture_internal.h"
+#include "platform_registry_internal.h"
 #include "system_tray_internal.h"
 #include "text_layout_internal.h"
 
@@ -25,10 +26,29 @@ std::vector<const Application*>& Applications() {
 PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
     : ui_thread_dispatcher_(std::move(dispatch_to_ui_thread)),
       external_texture_surface_(std::make_shared<detail::ExternalTextureSurface>(*this, ui_thread_dispatcher_)),
-      platform_modules_(new PlatformModules(*this, ui_thread_dispatcher_)) {}
+      platform_registry_(std::make_unique<detail::PlatformRegistry>(*this)) {}
 
 PlatformAdapter::~PlatformAdapter() {
   external_texture_surface_->Close();
+}
+
+namespace detail {
+
+PlatformChannelEndpoint MakePlatformChannelEndpoint(PlatformAdapter& adapter) {
+  return MakePlatformChannelEndpoint(adapter.ui_thread_dispatcher_, adapter.external_texture_surface_);
+}
+
+} // namespace detail
+
+detail::PlatformRegistry& PlatformAdapter::PlatformRegistry() noexcept {
+  return *platform_registry_;
+}
+
+void PlatformAdapter::DispatchToUIThread(std::function<void()> task) const {
+  if (!task) {
+    throw std::invalid_argument("HuxerUI UI-thread task must not be empty");
+  }
+  ui_thread_dispatcher_(std::move(task));
 }
 
 GestureSettings PlatformAdapter::GestureDefaults() const noexcept {
@@ -49,19 +69,6 @@ std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
 
 std::shared_ptr<detail::SystemTrayTransport> PlatformAdapter::CreateSystemTrayTransport() {
   return {};
-}
-
-PlatformModuleFactory::Instance PlatformAdapter::CreatePlatformModule(
-    std::string_view type, const PlatformPayload& options, PlatformEventSink events
-) {
-  const PlatformModuleFactory* factory = FindPlatformModuleRegistration<PlatformModuleFactory>(type);
-  if (factory == nullptr) {
-    throw std::logic_error("HuxerUI platform module registration has an incompatible type");
-  }
-  if (!factory->create) {
-    throw std::logic_error("HuxerUI platform module factory must provide create");
-  }
-  return factory->create(options, std::move(events));
 }
 
 std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(

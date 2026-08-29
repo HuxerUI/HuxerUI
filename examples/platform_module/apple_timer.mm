@@ -8,15 +8,24 @@
 #include <string>
 #include <utility>
 
+#include <huxerui/app.h>
+
 namespace {
+
+huxerui::PlatformError TimerError(std::string code, std::string message);
 
 struct PendingStart {
   std::uint64_t generation = 0;
-  huxerui::PlatformResultSink result;
+  std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct AppleTimerState {
-  explicit AppleTimerState(huxerui::PlatformEventSink event_sink) : events(std::move(event_sink)) {}
+struct AppleTimerState : huxerui::example::TimerService, std::enable_shared_from_this<AppleTimerState> {
+  explicit AppleTimerState(huxerui::PlatformAdapter& adapter_value) : adapter(&adapter_value) {}
+
+  ~AppleTimerState() override {
+    pending_start.reset();
+    InvalidateTimer();
+  }
 
   void InvalidateTimer() {
     ++generation;
@@ -28,18 +37,19 @@ struct AppleTimerState {
     std::optional<PendingStart> pending = std::move(pending_start);
     pending_start.reset();
     InvalidateTimer();
-    if (pending && pending->result) {
-      huxerui::PlatformResultSink result = std::move(pending->result);
-      result(std::move(error));
+    if (pending && pending->completion) {
+      Complete(std::move(pending->completion), std::move(error));
     }
   }
 
-  void CancelStart(std::uint64_t cancelled_generation) {
+  bool Cancel(huxerui::PlatformRequestId cancelled_generation) override {
     if (generation != cancelled_generation) {
-      return;
+      return false;
     }
     pending_start.reset();
+    tick_handler = {};
     InvalidateTimer();
+    return true;
   }
 
   void Tick(std::uint64_t timer_generation) {
@@ -48,14 +58,68 @@ struct AppleTimerState {
     }
     ++tick;
     if (pending_start && pending_start->generation == timer_generation) {
-      huxerui::PlatformResultSink result = std::move(pending_start->result);
+      auto completion = std::move(pending_start->completion);
       pending_start.reset();
-      result(huxerui::PlatformPayload(tick));
+      Complete(std::move(completion), tick);
     }
-    events(huxerui::example::timer::tick_event, huxerui::PlatformPayload(tick));
+    std::function<void(std::uint64_t)> handler = tick_handler;
+    adapter->DispatchToUIThread([handler = std::move(handler), next_tick = tick] {
+      if (handler) {
+        handler(next_tick);
+      }
+    });
   }
 
-  huxerui::PlatformEventSink events;
+  huxerui::PlatformRequestId Start(std::chrono::milliseconds interval, std::function<void(std::uint64_t)> handler,
+                                   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion) override {
+    if (!NSThread.isMainThread) {
+      throw std::logic_error("HuxerUI example Apple timer must be used on the main thread");
+    }
+    if (interval <= std::chrono::milliseconds::zero()) {
+      throw std::invalid_argument("HuxerUI example timer interval must be greater than zero");
+    }
+    if (!handler || !completion) {
+      throw std::invalid_argument("HuxerUI example timer callbacks must not be empty");
+    }
+
+    StopWithError(TimerError("example/timer-replaced", "The timer was replaced by a newer start call"));
+    tick = 0;
+    const std::uint64_t timer_generation = generation;
+    tick_handler = std::move(handler);
+    pending_start = PendingStart{timer_generation, std::move(completion)};
+    const NSTimeInterval seconds = static_cast<NSTimeInterval>(interval.count()) / 1000.0;
+    std::weak_ptr<AppleTimerState> weak_state = weak_from_this();
+    timer = [NSTimer timerWithTimeInterval:seconds
+                                   repeats:YES
+                                     block:^(NSTimer*) {
+                                       if (const std::shared_ptr<AppleTimerState> state = weak_state.lock()) {
+                                         state->Tick(timer_generation);
+                                       }
+                                     }];
+    [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+    return timer_generation;
+  }
+
+  huxerui::PlatformRequestId Stop(std::function<void(huxerui::PlatformResult<std::monostate>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example timer completion must not be empty");
+    }
+    StopWithError(TimerError("example/timer-stopped", "The timer stopped before its first tick"));
+    tick_handler = {};
+    const std::uint64_t request = generation;
+    Complete(std::move(completion), std::monostate{});
+    return request;
+  }
+
+  template <class Result, class Value>
+  void Complete(std::function<void(huxerui::PlatformResult<Result>)> completion, Value&& value) {
+    huxerui::PlatformResult<Result> result(std::forward<Value>(value));
+    adapter->DispatchToUIThread(
+        [completion = std::move(completion), result = std::move(result)]() mutable { completion(std::move(result)); });
+  }
+
+  huxerui::PlatformAdapter* adapter;
+  std::function<void(std::uint64_t)> tick_handler;
   __strong NSTimer* timer = nil;
   std::optional<PendingStart> pending_start;
   std::uint64_t generation = 0;
@@ -70,83 +134,15 @@ huxerui::PlatformError TimerError(std::string code, std::string message) {
   };
 }
 
-huxerui::PlatformModuleFactory AppleTimerFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    static_cast<void>(options);
-    auto state = std::make_shared<AppleTimerState>(std::move(events));
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (!NSThread.isMainThread) {
-        result(TimerError("example/timer-thread", "The platform timer must be used from the main thread"));
-        return {};
-      }
-
-      if (method == huxerui::example::timer::start_method) {
-        std::int64_t milliseconds = 0;
-        try {
-          milliseconds = arguments.AsInteger();
-        } catch (...) {
-          result(TimerError("example/invalid-interval", "The timer interval payload is invalid"));
-          return {};
-        }
-        if (milliseconds <= 0) {
-          result(TimerError("example/invalid-interval", "The timer interval must be greater than zero"));
-          return {};
-        }
-
-        state->StopWithError(TimerError("example/timer-replaced", "The timer was replaced by a newer start call"));
-        state->tick = 0;
-        const std::uint64_t timer_generation = state->generation;
-        state->pending_start = PendingStart{timer_generation, std::move(result)};
-        const NSTimeInterval interval = static_cast<NSTimeInterval>(milliseconds) / 1000.0;
-        std::weak_ptr<AppleTimerState> weak_state = state;
-        state->timer =
-            [NSTimer timerWithTimeInterval:interval
-                                   repeats:YES
-                                     block:^(NSTimer*) {
-                                       if (const std::shared_ptr<AppleTimerState> strong_state = weak_state.lock()) {
-                                         try {
-                                           strong_state->Tick(timer_generation);
-                                         } catch (...) {
-                                         }
-                                       }
-                                     }];
-        [NSRunLoop.mainRunLoop addTimer:state->timer forMode:NSRunLoopCommonModes];
-        return [weak_state, timer_generation] {
-          if (const std::shared_ptr<AppleTimerState> strong_state = weak_state.lock()) {
-            strong_state->CancelStart(timer_generation);
-          }
-        };
-      }
-
-      if (method == huxerui::example::timer::stop_method) {
-        state->StopWithError(TimerError("example/timer-stopped", "The timer stopped before its first tick"));
-        result(huxerui::PlatformPayload());
-        return {};
-      }
-
-      result(TimerError("example/unknown-method", "The platform timer method is not supported"));
-      return {};
-    };
-    instance.dispose = [state] {
-      state->pending_start.reset();
-      state->InvalidateTimer();
-      state->events = {};
-    };
-    return instance;
-  };
-  return factory;
-}
-
 } // namespace
 
 namespace huxerui::example {
 
 void InstallTimer(RootContext& root) {
-  root.Modules().Register(timer::type, AppleTimerFactory());
-  root.Provide(std::make_shared<TimerService>(root.Modules().Open(timer::type)));
+  root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<TimerService>(std::make_shared<AppleTimerState>(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

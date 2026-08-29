@@ -9,6 +9,7 @@
 #include <emscripten/eventloop.h>
 #include <emscripten/val.h>
 
+#include <huxerui/app.h>
 #include <huxerui/web/external_texture.h>
 
 namespace {
@@ -34,9 +35,10 @@ void CloseVideoFrame(val& frame) noexcept {
   frame = val::undefined();
 }
 
-struct WebColorStreamState {
-  WebColorStreamState()
-      : source({320.0F, 180.0F}), canvas(val::global("document").call<val>("createElement", std::string("canvas"))) {
+struct WebColorStreamState : huxerui::example::ColorStreamService {
+  explicit WebColorStreamState(huxerui::PlatformAdapter& adapter_value)
+      : adapter(&adapter_value), source({320.0F, 180.0F}),
+        canvas(val::global("document").call<val>("createElement", std::string("canvas"))) {
     canvas.set("width", 320);
     canvas.set("height", 180);
     context = canvas.call<val>("getContext", std::string("2d"));
@@ -68,6 +70,25 @@ struct WebColorStreamState {
 
   [[nodiscard]] huxerui::ExternalTexture Texture() const noexcept {
     return source.Texture();
+  }
+
+  huxerui::PlatformRequestId
+  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+    if (!completion) {
+      throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
+    }
+    if (!Start()) {
+      huxerui::PlatformError error = ColorStreamError("example/color-stream-unavailable",
+                                                      "This browser does not provide WebCodecs VideoFrame support");
+      adapter->DispatchToUIThread(
+          [completion = std::move(completion), error = std::move(error)]() mutable { completion(std::move(error)); });
+      return ++request_id;
+    }
+    huxerui::ExternalTexture texture = source.Texture();
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+      completion(std::move(texture));
+    });
+    return ++request_id;
   }
 
   void PublishFrame() {
@@ -108,54 +129,24 @@ private:
     }
   }
 
+  huxerui::PlatformAdapter* adapter;
   huxerui::web::ExternalTextureSource source;
   val canvas;
   val context = val::undefined();
   int timer = 0;
   std::uint32_t phase = 0;
+  huxerui::PlatformRequestId request_id = 0;
 };
-
-huxerui::PlatformModuleFactory WebColorStreamFactory() {
-  huxerui::PlatformModuleFactory factory;
-  factory.create = [](const huxerui::PlatformPayload& options, huxerui::PlatformEventSink events) {
-    if (!options.IsNull()) {
-      throw std::invalid_argument("HuxerUI example color stream options must be null");
-    }
-    static_cast<void>(events);
-    auto state = std::make_shared<WebColorStreamState>();
-    huxerui::PlatformModuleFactory::Instance instance;
-    instance.call = [state](std::string method, huxerui::PlatformPayload arguments, huxerui::PlatformResultSink result)
-        -> std::function<void()> {
-      if (method == huxerui::example::color_stream::texture_method && arguments.IsNull()) {
-        if (!state->Start()) {
-          result(ColorStreamError(
-              "example/color-stream-unavailable",
-              "This browser does not provide WebCodecs VideoFrame support"
-          ));
-          return {};
-        }
-        result(huxerui::PlatformPayload(state->Texture()));
-        return {};
-      }
-      result(ColorStreamError(
-          "example/color-stream-method",
-          "The platform color stream method or payload is not supported"
-      ));
-      return {};
-    };
-    instance.dispose = [state] { state->Dispose(); };
-    return instance;
-  };
-  return factory;
-}
 
 } // namespace
 
 namespace huxerui::example {
 
 void InstallColorStream(RootContext& root) {
-  root.Modules().Register(color_stream::type, WebColorStreamFactory());
-  root.Provide(std::make_shared<ColorStreamService>(root.Modules().Open(color_stream::type)));
+  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](PlatformAdapter& adapter) {
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WebColorStreamState>(adapter));
+  });
+  root.Provide(root.OpenPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type));
 }
 
 } // namespace huxerui::example

@@ -10,8 +10,9 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
-#include <huxerui/macos/platform_view.h>
+#include <huxerui/macos/platform_registry.h>
 
 namespace {
 
@@ -103,96 +104,128 @@ namespace huxerui::test {
 namespace {
 
 State<int> mac_platform_view_value;
+State<int> mac_platform_view_controller;
+State<bool> mac_platform_view_controller_attached;
 State<bool> mac_platform_view_visible;
 int mac_platform_view_creates = 0;
 int mac_platform_view_updates = 0;
 int mac_platform_view_disposals = 0;
 int mac_platform_view_event_value = 0;
-PlatformEventSink mac_platform_view_event_sink;
+std::vector<std::string> mac_platform_view_controller_operations;
+PlatformEventEmitter mac_platform_view_events;
 NSView* mac_created_platform_view = nil;
 NSTextField* mac_created_focus_text_field = nil;
 
 struct MacPlatformViewEvents {
   struct Changed : Event<int> {
     static constexpr std::string_view Name = "changed";
-
-    static int Decode(const PlatformPayload& payload) {
-      return static_cast<int>(payload.AsInteger());
-    }
   };
 };
 
-PlatformPayload MacPlatformProperties(int value) {
-  return PlatformPayload::Object{{"value", value}};
-}
+struct MacPlatformViewProperties {
+  int value = 0;
+
+  bool operator==(const MacPlatformViewProperties&) const = default;
+};
+
+struct MacPlatformViewState {
+  NSView* view = nil;
+};
 
 View MacPlatformViewApp() {
   auto value = UseState(1);
+  auto controller = UseState(1);
+  auto controller_attached = UseState(true);
   auto visible = UseState(true);
   mac_platform_view_value = value;
+  mac_platform_view_controller = controller;
+  mac_platform_view_controller_attached = controller_attached;
   mac_platform_view_visible = visible;
   if (!visible.Get()) {
     return Text("without platform view");
   }
-  return Column {
-    Button("before").With(Frame{80.0F, 20.0F}),
-    PlatformView("test/MacView", MacPlatformProperties(value.Get()))
-        .Events<MacPlatformViewEvents::Changed>()
-        .On<MacPlatformViewEvents::Changed>([](int next) { mac_platform_view_event_value = next; })
-        .With(Frame{80.0F, 40.0F}),
-    Button("after").With(Frame{80.0F, 20.0F}),
-  }.With(CrossAlign{CrossAxisAlignment::Start});
+  if (controller_attached.Get()) {
+    return Column{
+        Button("before").With(Frame{80.0F, 20.0F}),
+        PlatformView("test/MacView", MacPlatformViewProperties{value.Get()})
+            .Controller(controller.Get())
+            .On<MacPlatformViewEvents::Changed>([](int next) { mac_platform_view_event_value = next; })
+            .With(Frame{80.0F, 40.0F}),
+        Button("after").With(Frame{80.0F, 20.0F}),
+    }
+        .With(CrossAlign{CrossAxisAlignment::Start});
+  }
+  return Column{
+      Button("before").With(Frame{80.0F, 20.0F}),
+      PlatformView("test/MacView", MacPlatformViewProperties{value.Get()})
+          .On<MacPlatformViewEvents::Changed>([](int next) { mac_platform_view_event_value = next; })
+          .With(Frame{80.0F, 40.0F}),
+      Button("after").With(Frame{80.0F, 20.0F}),
+  }
+      .With(CrossAlign{CrossAxisAlignment::Start});
 }
 
-macos::PlatformViewFactory MacTestFactory() {
+macos::PlatformViewFactory<MacPlatformViewProperties, MacPlatformViewState, int> MacTestFactory() {
   return {
-      .create = [](const PlatformPayload& properties, PlatformEventSink event_sink) -> NSView* {
-        ++mac_platform_view_creates;
-        mac_platform_view_event_sink = std::move(event_sink);
-        NSButton* button = [[HuxerUITestPlatformView alloc] initWithFrame:NSZeroRect];
-        button.title = [NSString stringWithFormat:@"%lld", properties.AsObject().at("value").AsInteger()];
-        mac_created_platform_view = button;
-        return button;
-      },
-      .update = [](NSView* view, const PlatformPayload& properties) {
-        ++mac_platform_view_updates;
-        static_cast<NSButton*>(view).title =
-            [NSString stringWithFormat:@"%lld", properties.AsObject().at("value").AsInteger()];
-      },
-      .dispose = [](NSView* view) {
-        static_cast<void>(view);
-        ++mac_platform_view_disposals;
-        mac_created_platform_view = nil;
-      },
+      .create =
+          [](NSWindow*, const MacPlatformViewProperties& properties, PlatformEventEmitter events) {
+            ++mac_platform_view_creates;
+            mac_platform_view_events = std::move(events);
+            NSButton* button = [[HuxerUITestPlatformView alloc] initWithFrame:NSZeroRect];
+            button.title = [NSString stringWithFormat:@"%d", properties.value];
+            mac_created_platform_view = button;
+            return std::make_shared<MacPlatformViewState>(MacPlatformViewState{button});
+          },
+      .view = [](const std::shared_ptr<MacPlatformViewState>& state) { return state->view; },
+      .update =
+          [](MacPlatformViewState& state, const MacPlatformViewProperties& properties) {
+            ++mac_platform_view_updates;
+            static_cast<NSButton*>(state.view).title = [NSString stringWithFormat:@"%d", properties.value];
+          },
+      .dispose =
+          [](MacPlatformViewState&) {
+            ++mac_platform_view_disposals;
+            mac_created_platform_view = nil;
+          },
+      .connect =
+          [](MacPlatformViewState&, const int& controller) {
+            mac_platform_view_controller_operations.push_back("connect:" + std::to_string(controller));
+          },
+      .disconnect =
+          [](MacPlatformViewState&, const int& controller) {
+            mac_platform_view_controller_operations.push_back("disconnect:" + std::to_string(controller));
+          },
   };
 }
 
 View MacPlatformTextFieldFocusApp() {
-  return Column {
-    Button("before").With(Frame{80.0F, 20.0F}),
-    PlatformView("test/MacTextField", MacPlatformProperties(1)).With(Frame{80.0F, 40.0F}),
-    Button("after").With(Frame{80.0F, 20.0F}),
-  }.With(CrossAlign{CrossAxisAlignment::Start});
+  return Column{
+      Button("before").With(Frame{80.0F, 20.0F}),
+      PlatformView("test/MacTextField", MacPlatformViewProperties{1}).With(Frame{80.0F, 40.0F}),
+      Button("after").With(Frame{80.0F, 20.0F}),
+  }
+      .With(CrossAlign{CrossAxisAlignment::Start});
 }
 
-macos::PlatformViewFactory MacTextFieldFactory() {
+macos::PlatformViewFactory<MacPlatformViewProperties, MacPlatformViewState> MacTextFieldFactory() {
   return {
-      .create = [](const PlatformPayload& properties, PlatformEventSink event_sink) -> NSView* {
-        static_cast<void>(properties);
-        static_cast<void>(event_sink);
-        mac_created_focus_text_field = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        return mac_created_focus_text_field;
-      },
-      .update = [](NSView* view, const PlatformPayload& properties) {
-        static_cast<void>(view);
-        static_cast<void>(properties);
-      },
-      .dispose = [](NSView* view) {
-        static_cast<void>(view);
-        mac_created_focus_text_field = nil;
-      },
+      .create =
+          [](NSWindow*, const MacPlatformViewProperties&, PlatformEventEmitter) {
+            mac_created_focus_text_field = [[NSTextField alloc] initWithFrame:NSZeroRect];
+            return std::make_shared<MacPlatformViewState>(MacPlatformViewState{mac_created_focus_text_field});
+          },
+      .view = [](const std::shared_ptr<MacPlatformViewState>& state) { return state->view; },
+      .update = [](MacPlatformViewState&, const MacPlatformViewProperties&) {},
+      .dispose = [](MacPlatformViewState&) { mac_created_focus_text_field = nil; },
   };
 }
+
+class MacPlatformViewTestPlatform final : public TestPlatform {
+public:
+  detail::PlatformRegistry& Registry() noexcept {
+    return PlatformRegistry();
+  }
+};
 
 NSEvent* TabKeyEvent(NSWindow* window, bool reverse) {
   NSString* characters = reverse ? [NSString stringWithFormat:@"%C", static_cast<unichar>(NSBackTabCharacter)] : @"\t";
@@ -227,28 +260,27 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     mac_platform_view_disposals = 0;
     mac_platform_view_event_value = 0;
     mac_platform_view_frame_sets = 0;
-    mac_platform_view_event_sink = {};
+    mac_platform_view_controller_operations.clear();
+    mac_platform_view_events = {};
     mac_created_platform_view = nil;
 
-    TestPlatform platform;
-    PlatformModules* modules = nullptr;
+    MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([&](RootContext& root) {
-      modules = &root.Modules();
-      root.Modules().Register("test/MacView", MacTestFactory());
+    options.root_hooks.push_back([](RootContext& root) {
+      root.RegisterPlatformView<MacPlatformViewProperties, int>("test/MacView", MacTestFactory());
     });
     Runtime runtime(MacPlatformViewApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
-    REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
     NSView* root = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
 
     REQUIRE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(mac_platform_view_creates == 1);
     REQUIRE(mac_platform_view_updates == 0);
     REQUIRE(mac_created_platform_view != nil);
+    REQUIRE((mac_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
     REQUIRE(root.subviews.count == 2);
     REQUIRE(mac_created_platform_view.superview == root.subviews.firstObject);
     REQUIRE(NSEqualRects(mac_created_platform_view.superview.frame, NSMakeRect(0.0, 20.0, 80.0, 40.0)));
@@ -262,9 +294,22 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(mac_platform_view_frame_sets == placed_frame_sets);
     REQUIRE_FALSE(root.needsDisplay);
+
+    mac_platform_view_controller = 2;
+    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    REQUIRE((mac_platform_view_controller_operations ==
+             std::vector<std::string>{"connect:1", "disconnect:1", "connect:2"}));
+
+    mac_platform_view_controller_attached = false;
+    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    REQUIRE((mac_platform_view_controller_operations ==
+             std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2"}));
+    mac_platform_view_controller_attached = true;
+    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    REQUIRE(mac_platform_view_controller_operations.back() == "connect:2");
     REQUIRE_FALSE(foreground_slice.needsDisplay);
 
-    mac_platform_view_event_sink("changed", PlatformPayload(7));
+    mac_platform_view_events.Emit<MacPlatformViewEvents::Changed>(7);
     REQUIRE(DrainMainQueue());
     REQUIRE(mac_platform_view_event_value == 7);
 
@@ -280,36 +325,34 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     mac_platform_view_visible = false;
     REQUIRE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(mac_platform_view_disposals == 1);
+    REQUIRE(mac_platform_view_controller_operations.back() == "disconnect:2");
     REQUIRE(mac_created_platform_view == nil);
     REQUIRE(root.subviews.count == 0);
 
-    mac_platform_view_event_sink("changed", PlatformPayload(9));
+    mac_platform_view_events.Emit<MacPlatformViewEvents::Changed>(9);
     REQUIRE(DrainMainQueue());
     REQUIRE(mac_platform_view_event_value == 7);
 
     platform_views.Shutdown();
-    mac_platform_view_event_sink = {};
+    mac_platform_view_events = {};
   }
 }
 
 TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
   @autoreleasepool {
-    mac_platform_view_event_sink = {};
+    mac_platform_view_events = {};
     mac_created_platform_view = nil;
 
-    TestPlatform platform;
-    PlatformModules* modules = nullptr;
+    MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([&](RootContext& root) {
-      modules = &root.Modules();
-      root.Modules().Register("test/MacView", MacTestFactory());
+    options.root_hooks.push_back([](RootContext& root) {
+      root.RegisterPlatformView<MacPlatformViewProperties, int>("test/MacView", MacTestFactory());
     });
     Runtime runtime(MacPlatformViewApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
-    REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
@@ -339,7 +382,7 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
     REQUIRE(platform_views.AccessibilityView(platform_view_identity) == nil);
 
     platform_views.Shutdown();
-    mac_platform_view_event_sink = {};
+    mac_platform_view_events = {};
   }
 }
 
@@ -347,19 +390,16 @@ TEST_CASE("MacPlatformViewsTraverseBetweenHostedTextFieldAndRuntimeFocus") {
   @autoreleasepool {
     mac_created_focus_text_field = nil;
 
-    TestPlatform platform;
-    PlatformModules* modules = nullptr;
+    MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([&](RootContext& root) {
-      modules = &root.Modules();
-      root.Modules().Register("test/MacTextField", MacTextFieldFactory());
+    options.root_hooks.push_back([](RootContext& root) {
+      root.RegisterPlatformView<MacPlatformViewProperties>("test/MacTextField", MacTextFieldFactory());
     });
     Runtime runtime(MacPlatformTextFieldFocusApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
-    REQUIRE(modules != nullptr);
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, *modules, runtime.CoreRuntime());
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
     HuxerUITestPlatformWindow* window =
         [[HuxerUITestPlatformWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                      styleMask:NSWindowStyleMaskBorderless

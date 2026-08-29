@@ -16,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-#include <huxerui/macos/platform_view.h>
+#include <huxerui/macos/platform_registry.h>
 
 #include "appkit_renderer.h"
 #include "internal.h"
@@ -100,9 +100,13 @@ struct EventRoute {
 
 struct HostedPlatformView {
   std::uint64_t properties_revision = 0;
+  std::uint64_t controller_revision = 0;
   std::string type;
   std::shared_ptr<EventRoute> event_route;
-  macos::PlatformViewFactory factory;
+  std::shared_ptr<const macos::detail::AppKitViewFactory> factory;
+  std::shared_ptr<void> instance;
+  PlatformValue controller;
+  bool controller_connected = false;
   __strong NSView* view = nil;
   __strong HuxerUIPlatformViewContainer* container = nil;
 
@@ -111,10 +115,20 @@ struct HostedPlatformView {
       event_route->active = false;
     }
     [container removeFromSuperview];
-    if (view != nil && factory.dispose) {
+    if (instance && controller_connected && factory && factory->disconnect) {
       @try {
         try {
-          factory.dispose(view);
+          factory->disconnect(instance, controller);
+        } catch (...) {
+        }
+      } @catch (NSException* exception) {
+        static_cast<void>(exception);
+      }
+    }
+    if (instance && factory && factory->dispose) {
+      @try {
+        try {
+          factory->dispose(instance);
         } catch (...) {
         }
       } @catch (NSException* exception) {
@@ -123,16 +137,35 @@ struct HostedPlatformView {
     }
   }
 
-  void Update(const PlatformPayload& properties) {
-    if (!factory.update) {
-      throw std::logic_error("HuxerUI macOS PlatformView factory does not support property updates");
+  void Update(const PlacePlatformViewCommand& command) {
+    if (properties_revision != command.PropertiesRevision()) {
+      if (!factory->update) {
+        throw std::logic_error("HuxerUI macOS PlatformView factory does not support property updates");
+      }
+      @try {
+        factory->update(instance, command.Properties());
+      } @catch (NSException* exception) {
+        static_cast<void>(exception);
+        throw std::logic_error("HuxerUI macOS PlatformView factory raised an Objective-C exception while updating");
+      }
+      properties_revision = command.PropertiesRevision();
     }
-    @try {
-      factory.update(view, properties);
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
-      throw std::logic_error("HuxerUI macOS PlatformView factory raised an Objective-C exception while updating");
+    if (controller_revision == command.ControllerRevision()) {
+      return;
     }
+    if (controller_connected) {
+      factory->disconnect(instance, controller);
+      controller_connected = false;
+    }
+    controller = command.Controller();
+    if (controller.HasValue()) {
+      if (!factory->connect || !factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled macOS PlatformView factory must provide connect and disconnect");
+      }
+      factory->connect(instance, controller);
+      controller_connected = true;
+    }
+    controller_revision = command.ControllerRevision();
   }
 };
 
@@ -195,15 +228,14 @@ bool IsDescendant(NSView* view, NSView* ancestor) {
 } // namespace
 
 struct AppKitPlatformViews::State {
-  State(AppKitRenderer& renderer_value, PlatformModules& modules_value, Runtime& runtime_value)
-      : renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value) {}
+  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value)
+      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value) {}
 
-  std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
+  std::unique_ptr<HostedPlatformView> Create(NSView* root, const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
-    const auto* factory = modules->Find<macos::PlatformViewFactory>(command.Type());
-    if (factory == nullptr) {
-      throw std::logic_error("HuxerUI macOS PlatformView type is not registered: " + std::string(command.Type()));
-    }
+    std::shared_ptr<const macos::detail::AppKitViewFactory> factory =
+        registry->FindView<macos::detail::AppKitViewFactory>(command.Type(), command.Properties().Type(),
+                                                             command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI macOS PlatformView factory must provide create");
     }
@@ -214,40 +246,59 @@ struct AppKitPlatformViews::State {
         false,
     });
     const std::weak_ptr<EventRoute> weak_route = route;
-    PlatformEventSink event_sink = [weak_route](std::string_view name, PlatformPayload payload) mutable {
-      const std::string owned_name(name);
-      dispatch_async(dispatch_get_main_queue(), ^{
-        const std::shared_ptr<EventRoute> route = weak_route.lock();
-        if (!route || !route->active || route->runtime == nullptr) {
-          return;
-        }
-        static_cast<void>(
-            RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, owned_name, payload)
-        );
-      });
-    };
+    PlatformEventEmitter events = MakePlatformEventEmitter(
+        [weak_route](std::type_index key, PlatformValue value) mutable {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
+          });
+        },
+        [weak_route](std::string name, PlatformPayload payload) mutable {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(
+                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
+          });
+        });
 
-    NSView* view = nil;
+    auto hosted = std::make_unique<HostedPlatformView>();
+    hosted->properties_revision = command.PropertiesRevision();
+    hosted->controller_revision = command.ControllerRevision();
+    hosted->type = command.Type();
+    hosted->event_route = std::move(route);
+    hosted->factory = std::move(factory);
+    hosted->controller = command.Controller();
     @try {
-      view = factory->create(command.Properties(), std::move(event_sink));
+      hosted->instance = hosted->factory->create(root.window, command.Properties(), std::move(events));
+      if (!hosted->instance || !hosted->factory->view) {
+        throw std::logic_error("HuxerUI macOS PlatformView factory returned an empty instance");
+      }
+      hosted->view = hosted->factory->view(hosted->instance);
     } @catch (NSException* exception) {
       static_cast<void>(exception);
       throw std::logic_error("HuxerUI macOS PlatformView factory raised an Objective-C exception while creating");
     }
-    if (view == nil) {
+    if (hosted->view == nil) {
       throw std::logic_error("HuxerUI macOS PlatformView factory returned a null NSView");
     }
 
-    auto hosted = std::make_unique<HostedPlatformView>();
-    hosted->properties_revision = command.PropertiesRevision();
-    hosted->type = command.Type();
-    hosted->event_route = std::move(route);
-    hosted->factory = *factory;
-    hosted->view = view;
     hosted->container = [[HuxerUIPlatformViewContainer alloc] initWithFrame:NSZeroRect];
     hosted->container.wantsLayer = YES;
     hosted->container.layer.masksToBounds = YES;
     [hosted->container addSubview:hosted->view];
+    if (hosted->controller.HasValue()) {
+      if (!hosted->factory->connect || !hosted->factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled macOS PlatformView factory must provide connect and disconnect");
+      }
+      hosted->factory->connect(hosted->instance, hosted->controller);
+      hosted->controller_connected = true;
+    }
     return hosted;
   }
 
@@ -286,7 +337,7 @@ struct AppKitPlatformViews::State {
   }
 
   AppKitRenderer* renderer;
-  PlatformModules* modules;
+  PlatformRegistry* registry;
   Runtime* runtime;
   __weak NSView* root = nil;
   const RenderFrame* frame = nullptr;
@@ -297,8 +348,8 @@ struct AppKitPlatformViews::State {
   std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
 };
 
-AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformModules& modules, Runtime& runtime)
-    : state_(std::make_unique<State>(renderer, modules, runtime)) {}
+AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime)
+    : state_(std::make_unique<State>(renderer, registry, runtime)) {}
 
 AppKitPlatformViews::~AppKitPlatformViews() {
   Shutdown();
@@ -320,13 +371,10 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     retained_identities.insert(command.Identity());
     const auto found = state_->hosted.find(command.Identity());
     if (found == state_->hosted.end() || found->second->type != command.Type()) {
-      pending.emplace_back(command.Identity(), state_->Create(*placement));
+      pending.emplace_back(command.Identity(), state_->Create(root, *placement));
       continue;
     }
-    if (found->second->properties_revision != command.PropertiesRevision()) {
-      found->second->Update(command.Properties());
-      found->second->properties_revision = command.PropertiesRevision();
-    }
+    found->second->Update(command);
   }
 
   const bool focused_instance_removed =

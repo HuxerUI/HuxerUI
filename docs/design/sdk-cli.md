@@ -114,9 +114,6 @@ The root `.gitignore` owns only repository-wide generated state:
 
 Each platform shell owns its platform-specific ignore rules.
 Android ignores Gradle and CMake intermediates inside `platform/android`, while Apple and future platforms keep their own IDE and package-manager state local to their shell.
-The current generator still writes transitional platform CMake configuration files for several shells.
-They are migration inputs, not part of the target project shape, and are removed as each platform starts configuring the root CMake project directly.
-
 The application declaration remains shared:
 
 ```cpp
@@ -790,47 +787,88 @@ The CLI does not translate these declarations into CMake or synthesize policy on
 
 Libraries use three runtime integration forms:
 
-- Permission, Audio, Camera control, and similar nonvisual features install typed Root Services backed by registered PlatformModule instances.
+- Permission, Audio, Camera control, and similar nonvisual features register PlatformModule factories whose instances are owned by component Lifecycle or typed Root Services.
 - WebView, map, document preview, and platform SDK controls register PlatformView factories by stable string type.
 - Camera preview, video decode, and high-frequency visual streams create platform-owned ExternalTexture sources and return platform-neutral consumer values to shared code.
 
 One library may combine the forms.
-Camera normally provides a Camera service plus ExternalTexture preview, while Audio provides only a service and WebView provides a PlatformView factory.
-The application retrieves services through their typed `UseXxx()` helpers; there is no generic library-service lookup.
+Camera may provide a shared service or a component-owned session plus ExternalTexture preview, while Audio may expose either lifetime and WebView provides a PlatformView factory.
+The application consumes concrete library components, services, or typed `UseXxx()` helpers; there is no generic library-service lookup.
 
-PlatformView and nonvisual PlatformModule instances share the PlatformPayload protocol defined in [Architecture Design](architecture.md#platform-payload-and-instance-protocol).
-PlatformPayload is the only dynamic in-process cross-language representation and is restricted to null, scalar, `Bytes`, list, string-keyed object data, and the closed framework capability ExternalTexture.
-Concrete library headers keep application properties, calls, results, and events strongly typed and own all PlatformPayload encoding and decoding.
-Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an ExternalTexture value only retains the opaque platform-owned source state.
+PlatformView and nonvisual PlatformModule implementations share the internal surface-owned `PlatformRegistry` defined in [Architecture Design](architecture.md#platformregistry-contract).
+Concrete C++ properties, creation options, calls, results, and events remain strongly typed through direct C++ factories and ordinary library-defined objects or interfaces.
+`PlatformPayload` is the value model used by HuxerUI's common bridge for C++ crossings into Java, Kotlin, Objective-C, Swift, JavaScript, or another platform language and is never the Windows or Linux C++ factory protocol.
+Each structured value carried by the common payload bridge owns the static `Encode(const T&)` or `Decode(const PlatformPayload&)` operation required by its direction of travel.
+There is no separate codec type, per-platform codec, or factory-provided codec, and direct C++ registrations do not invoke these operations.
+Registry entries contain no Methods or Events list and do not inspect business method signatures.
+Libraries choose virtual functions, concrete values, callbacks, pimpl, or their own type erasure and independently choose synchronous, asynchronous, callback, stream, cancellation, and error conventions.
+Stable method strings exist only inside the common call channel or a custom bridge, while Event Keys directly inherit `Event<>` or `Event<T>` and add only their stable boundary name without redeclaring `Signature`; the concrete request, result, or event argument type owns any required boundary conversion.
+`void` is the uniform no-value contract and maps to a strictly validated Null payload only when crossing a language boundary.
+The common cross-language bridge serializes `PlatformPayload` through one HuxerUI binary envelope.
+The implemented Android SDK automatically converts that representation to its immutable Java `PlatformPayload` API; future Apple and Web common adapters use the same value and envelope contract.
+The Android value type provides explicit construction, exact scalar reads, field and element navigation, unknown-field validation, and path-aware diagnostics without adding a public Reader, Builder, Writer, or Codec.
+Library-defined Java boundary types own their local encode and decode operations, and future Swift, Objective-C, and JavaScript adapters follow the same type-owned rule; the SDK does not provide reflection-based object mapping, JSON conversion, numeric coercion, or public HUXP byte access.
+Library implementations never parse transport bytes, while opaque ExternalTexture values use an envelope-local bridge capability table rather than a public numeric handle.
+Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an `ExternalTexture` value only retains the opaque platform-owned source state.
 
-Platform sources explicitly register each visual or nonvisual factory under a nonempty case-sensitive UTF-8 type such as `web/WebView` or `audio/Player`.
+A library's RootHook explicitly registers each visual or nonvisual factory under a nonempty case-sensitive UTF-8 name such as `WebView`, `web/WebView`, or `audio/Player`.
+Names have no required separator, hierarchy, prefix, or grammar beyond valid UTF-8; `/` is only an optional library naming convention.
 The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during library installation.
 Library registration does not use a generated header, hidden application-entry rewriting, editable metadata bundle, or process-global static initializer.
 The library's documented Install function remains an ordinary RootHook selected explicitly by the application.
+The library may implement that public Install function once, provide mutually exclusive platform definitions, or delegate to any common and platform helpers it chooses.
+Registration accepts a compatible direct callable, retained object, framework bridge adapter, or library-owned adapter; HuxerUI does not require a public factory base class, a `CreateXxxFactory()` convention, or one construction pattern across platforms.
 
-`RootContext::Modules()` exposes the per-surface registry to explicit PlatformModule installers.
-A nonvisual installer opens a registered instance and provides its public typed service through `root.Provide()`.
-The service translates typed methods and events to Create, Call, Result, Event, and Dispose messages, owns pending requests and subscriptions, and closes its platform instance during reverse Root Service teardown.
-Applications never call `Modules()` or use string method names directly.
+`RootContext::RegisterPlatformModule()`, `RegisterPlatformView()`, and typed `OpenPlatformModule<Module>()` are the only C++ RootHook registry operations; the internal registry has no public accessor.
+A nonvisual factory returns the exact registered Module handle, which may be a value facade, move-only owner, shared interface pointer, or another library-defined RAII type.
+An installer may wrap or provide that handle as a shared service through `root.Provide()`, but service ownership is optional.
+A component-scoped library API instead uses the typed free `OpenPlatformModule<Module>(name, options)` operation defined by [PlatformModule ownership](architecture.md#platformmodule-ownership) from committed `Lifecycle` setup and releases its instance through the returned cleanup.
+Runtime resolves that operation through the declaring scope's surface registry only for the duration of setup; it does not expose a process-global registry or remain callable from composition, event handlers, asynchronous callbacks, or cleanup.
+Both ownership forms retain the library's own typed API and deterministic teardown without exposing wire payloads to application code.
+Applications do not register factories, call the low-level open operations, or use string method names directly; concrete library services, components, and optional `UseXxx()` hooks hide those details.
+There is no generic `UsePlatformModule`, public provider, application-visible generic instance, or mandatory PlatformModule service base class.
+
+A concrete PlatformView library may expose a stable typed Controller for imperative commands.
+The Controller is an attachable C++ facade rather than Properties or a transported platform object, and the library chooses its public synchronous, asynchronous, callback, and error semantics.
+Every Controller-capable registration binds the exact public Controller type, while a PlatformView without a Controller creates no binding.
+Controller values are safely retainable and equality preserves their logical command-target identity across recomposition.
+`.Controller(controller)` creates the typed binding internally, and the factory adapter connects its mounted instance to the exact Controller type.
+HuxerUI requires no Controller base class, embedded binding, State, pimpl, Access helper, Backend, or Connection.
+Direct C++ implementations attach without a proxy.
+Android Java implementations may compose the common call channel, while current Web, Objective-C, or Swift implementations use direct C++/Objective-C++ factories or a complete library-owned bridge without changing the public Controller API.
+Controller replacement reconnects the retained PlatformView without resending Properties, and unmount disconnects it before invalidating calls and disposing the platform instance.
+
+RootHooks are the only PlatformModule and PlatformView registration entry point.
+Android provides Java and Kotlin `PlatformViewFactory`, `PlatformView`, `PlatformModuleFactory`, and `PlatformModule` interfaces for the common JNI class adapter, while a platform source may register a custom JNI-backed factory instead.
+Current Apple libraries register direct Objective-C++ factories, while current Web libraries register direct Emscripten C++ factories or library-owned bridges.
+Common Apple Objective-C/Swift protocols and a common Web JavaScript adapter are future work.
+The Android common language interfaces use `create`, View access, `update`, `invoke`, and `dispose`, with narrow `PlatformEventEmitter`, `PlatformResult`, and optional `PlatformCancellation` endpoints instead of generic Module or View Context objects.
+The common bridge owns request identity, late-result rejection, thread transfer, invalidation, and binary payload conversion.
+Each Android common-bridge instance and every direct C++ factory receives one framework-owned emitter.
+Future Apple and Web common adapters preserve the same emitter ownership and delivery rules.
+Libraries do not define one native callback for each event, and per-invocation Result completion remains distinct from instance-level event emission.
+Factories are surface-owned registrations that may create multiple independently owned instances; successful instances dispose exactly once, failed creation publishes no event, and platform host values are explicit per-platform factory parameters rather than a universal Context abstraction.
+Web sources currently use direct Emscripten C++ factories or a library-owned bridge; a linked JavaScript export adapter is future work.
+The platform package makes those implementations linkable but does not register them through an application host, application delegate, `mountHuxerUIApp()`, generated registrant, or global initializer.
 
 The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
 Platform-package attachment only makes a library's platform implementation available to the platform application target; the library's explicit RootHook still installs its factories and services without another runtime API or composition mode.
 A PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the platform object to a global foreground or background plane.
-Library-owned typed Root Services keep PlatformPayload codecs and string method names behind those services.
+Library-owned typed services and component-lifetime wrappers keep boundary conversion and stable method names behind their concrete APIs.
 Windows posts a coalesced private message to its application HWND, the macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Linux attaches idle sources to the owning GLib main context, Web queues work through the browser event loop, and Android dispatches through its owning `HuxerUIView`. `example_platform_module` provides source-level Windows thread-pool timer, Foundation, Linux `timerfd`, Emscripten interval, and Java integrations behind one typed service. On Windows, Apple platforms, Linux, Web, and Android it additionally returns an `ExternalTexture` from a typed service and publishes copied RGBA, `CVPixelBuffer`, cloned WebCodecs `VideoFrame`, or `Bitmap` frames without per-frame PlatformModule callbacks.
 
 Camera or video may still use PlatformView when a platform interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a platform input subtree.
 
 ExternalTexture requires neither a factory registry nor a texture registry.
-A library's platform implementation creates a move-only platform source, obtains its copyable ExternalTexture consumer value, and returns that value through its typed service and PlatformPayload codec.
+A library's platform implementation creates a move-only platform source, obtains its copyable ExternalTexture consumer value, and returns that value through its typed service and the framework-owned ExternalTexture boundary conversion when crossing into another platform language.
 The source binds once when the value first crosses a surface-owned adapter boundary, while the matching renderer keeps only a private cache for bound source states.
 Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
 Frame publication replaces a latest-wins platform mailbox and requests presentation without writing application State, exposing a numeric texture identity, or executing a per-frame language bridge callback.
 The complete binding, payload, lifetime, scheduling, and staged platform contract is defined in [Architecture Design](architecture.md#externaltexture).
 
-Libraries and platform shells provide these factories, registrations, payload codecs, and typed services without introducing Runtime subclasses or platform types into shared public headers.
-Platform integration reports a missing current-platform package, ambiguous platform product, duplicate registered type, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, or incompatible HuxerUI version with the owning library and application target in the diagnostic.
+Libraries provide these factories, registrations, boundary value operations, and typed services without introducing Runtime subclasses or platform types into shared public headers.
+Platform integration reports a missing current-platform package, ambiguous platform product, duplicate registration name, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, or incompatible HuxerUI version with the owning library and application target in the diagnostic.
 The implemented CMake integration already rejects invalid URL schemes, absent revisions, ambiguous origins, duplicate library use, and missing requested targets.
 
 ## Future work

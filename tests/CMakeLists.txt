@@ -179,8 +179,8 @@ set(HUXERUI_PUBLIC_HEADERS
         modifier.h
         navigation.h
         paint.h
-        platform_module.h
-        platform_view.h
+        platform_adapter.h
+        platform_registry.h
         presentation.h
         render_scene.h
         resource.h
@@ -199,16 +199,15 @@ set(HUXERUI_PUBLIC_HEADERS
         window.h
         android/external_texture.h
         android/jni.h
-        android/platform_module.h
-        android/platform_view.h
-        ios/platform_view.h
-        macos/platform_view.h
+        android/platform_registry.h
+        ios/platform_registry.h
+        macos/platform_registry.h
 )
 
 if (WIN32)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             windows/external_texture.h
-            windows/platform_view.h
+            windows/platform_registry.h
     )
 endif ()
 
@@ -223,7 +222,7 @@ if (EMSCRIPTEN)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             web/external_texture.h
             web/navigation.h
-            web/platform_view.h
+            web/platform_registry.h
     )
 endif ()
 

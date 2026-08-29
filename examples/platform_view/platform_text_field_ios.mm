@@ -6,7 +6,7 @@
 #include <string_view>
 #include <utility>
 
-#include <huxerui/ios/platform_view.h>
+#include <huxerui/ios/platform_registry.h>
 
 namespace {
 
@@ -18,7 +18,7 @@ NSString* NSStringFromUtf8(std::string_view value) {
 
 @interface HuxerUIExamplePlatformTextField : UITextField {
 @public
-  std::shared_ptr<huxerui::PlatformEventSink> huxeruiEventSink;
+  std::shared_ptr<huxerui::PlatformEventEmitter> huxeruiEvents;
 }
 - (void)huxeruiTextDidChange;
 @end
@@ -26,14 +26,11 @@ NSString* NSStringFromUtf8(std::string_view value) {
 @implementation HuxerUIExamplePlatformTextField
 
 - (void)huxeruiTextDidChange {
-  if (!huxeruiEventSink) {
+  if (!huxeruiEvents) {
     return;
   }
   const char* utf8 = self.text.UTF8String;
-  (*huxeruiEventSink)(
-      huxerui::example::PlatformTextFieldEvents::Changed::Name,
-      huxerui::PlatformPayload(utf8 == nullptr ? "" : utf8)
-  );
+  huxeruiEvents->Emit<huxerui::example::PlatformTextFieldEvents::Changed>(std::string(utf8 == nullptr ? "" : utf8));
 }
 
 @end
@@ -42,43 +39,50 @@ namespace huxerui::example {
 
 namespace {
 
-void ApplyProperties(HuxerUIExamplePlatformTextField* text_field, const PlatformPayload& properties) {
-  const std::string_view text = properties.AsObject().at(platform_text_field::text_property).AsString();
-  NSString* string_value = NSStringFromUtf8(text);
+struct PlatformTextFieldInstance {
+  __strong HuxerUIExamplePlatformTextField* view = nil;
+};
+
+void ApplyProperties(HuxerUIExamplePlatformTextField* text_field, const PlatformTextFieldProperties& properties) {
+  NSString* string_value = NSStringFromUtf8(properties.text);
   if (![text_field.text isEqualToString:string_value]) {
     text_field.text = string_value;
   }
 }
 
-UIView* CreatePlatformTextField(const PlatformPayload& properties, PlatformEventSink event_sink) {
+std::shared_ptr<PlatformTextFieldInstance>
+CreatePlatformTextField(UIViewController*, const PlatformTextFieldProperties& properties, PlatformEventEmitter events) {
   HuxerUIExamplePlatformTextField* text_field = [[HuxerUIExamplePlatformTextField alloc] initWithFrame:CGRectZero];
   text_field.placeholder = @"Edit PlatformView text";
   text_field.borderStyle = UITextBorderStyleRoundedRect;
   text_field.clearButtonMode = UITextFieldViewModeWhileEditing;
-  text_field->huxeruiEventSink = std::make_shared<PlatformEventSink>(std::move(event_sink));
+  text_field->huxeruiEvents = std::make_shared<PlatformEventEmitter>(std::move(events));
   [text_field addTarget:text_field
                  action:@selector(huxeruiTextDidChange)
        forControlEvents:UIControlEventEditingChanged];
   ApplyProperties(text_field, properties);
-  return text_field;
+  auto instance = std::make_shared<PlatformTextFieldInstance>();
+  instance->view = text_field;
+  return instance;
 }
 
-void UpdatePlatformTextField(UIView* view, const PlatformPayload& properties) {
-  ApplyProperties(static_cast<HuxerUIExamplePlatformTextField*>(view), properties);
+void UpdatePlatformTextField(PlatformTextFieldInstance& instance, const PlatformTextFieldProperties& properties) {
+  ApplyProperties(instance.view, properties);
 }
 
-void DisposePlatformTextField(UIView* view) {
-  auto* text_field = static_cast<HuxerUIExamplePlatformTextField*>(view);
+void DisposePlatformTextField(PlatformTextFieldInstance& instance) {
+  HuxerUIExamplePlatformTextField* text_field = instance.view;
   [text_field removeTarget:text_field
                     action:@selector(huxeruiTextDidChange)
           forControlEvents:UIControlEventEditingChanged];
   [text_field resignFirstResponder];
-  text_field->huxeruiEventSink.reset();
+  text_field->huxeruiEvents.reset();
 }
 
-ios::PlatformViewFactory PlatformTextFieldFactory() {
+ios::PlatformViewFactory<PlatformTextFieldProperties, PlatformTextFieldInstance> PlatformTextFieldFactory() {
   return {
       .create = CreatePlatformTextField,
+      .view = [](const std::shared_ptr<PlatformTextFieldInstance>& instance) -> UIView* { return instance->view; },
       .update = UpdatePlatformTextField,
       .dispose = DisposePlatformTextField,
   };
@@ -87,7 +91,7 @@ ios::PlatformViewFactory PlatformTextFieldFactory() {
 } // namespace
 
 void InstallPlatformTextField(RootContext& root) {
-  root.Modules().Register(platform_text_field::type, PlatformTextFieldFactory());
+  root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type, PlatformTextFieldFactory());
 }
 
 } // namespace huxerui::example

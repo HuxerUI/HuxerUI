@@ -1,43 +1,82 @@
 # Platform Views
 
-`PlatformView` embeds a platform-owned leaf control in HuxerUI layout. It is a View, not a modifier, layout, canvas command, or module.
+`PlatformView` embeds a platform-owned interactive leaf control in HuxerUI layout.
+It is a View, not a modifier, layout, Canvas command, or non-visual Module.
 
-## Declarative contract
+## Typed declaration
 
-Construct `PlatformView(type, properties)` with a stable type string and a complete `PlatformPayload` property snapshot. Register typed events with `.Events<Key...>()` and handlers with `.On<Key>(...)`.
+Wrap the generic declaration in a concrete library component:
 
-Wrap raw construction in an app-side component such as `PlatformTextField(value, on_changed)`. The wrapper owns type names, payload keys, event decoding, constraints, semantics, and controlled update rules. Callers should not manipulate raw payloads.
+```cpp
+struct WebViewProperties {
+  std::string url;
 
-The platform factory owns create, update, and dispose:
+  bool operator==(const WebViewProperties&) const = default;
+};
 
-- Android: Java object factory receiving `JNIEnv*` and host object.
-- iOS: `UIView*` factory.
-- macOS: `NSView*` factory.
-- Web: `emscripten::val` element factory.
-- Windows: child `HWND` factory receiving its parent window.
+struct WebViewEvents {
+  struct NavigationChanged : Event<const NavigationState&> {
+    static constexpr std::string_view Name = "navigationChanged";
+  };
+};
 
-Use only the installed platform-specific public factory header. Register through the platform integration point generated or documented by the active SDK; do not reach into an adapter or runtime private API.
+View WebView(WebViewProperties properties) {
+  return PlatformView("web/WebView", std::move(properties));
+}
+```
+
+Properties are one complete immutable strongly typed snapshot.
+The no-properties form is `PlatformView(name)`.
+Register the exact Properties and optional Controller types with `RootContext::RegisterPlatformView()` from one RootHook.
+Registration names are nonempty case-sensitive UTF-8 identities and do not require `/`.
+
+Events need no separate declaration list.
+The component attaches ordinary typed handlers with `.On<Key>(...)`, and the platform factory receives one `PlatformEventEmitter` that calls `Emit<Key>(value)`.
+When an implementation crosses a platform-language boundary, the event value type owns `Decode(const PlatformPayload&)`; direct C++ emission remains strongly typed.
+
+An optional Controller is a library-defined typed command facade.
+Attach it with `.Controller(controller)` and register that exact Controller type.
+The factory connects the retained platform instance on mount or Controller replacement and disconnects before disposal.
+HuxerUI does not require Controller inheritance, State, pimpl, Access, Backend, or Connection types.
+
+## Factory and platform boundary
+
+Use the active platform's public `platform_registry.h` factory contract:
+
+- Windows returns a same-process, same-thread child `HWND` of the supplied parent.
+- Android returns a Java `View` through either a direct JNI factory or `android::JavaPlatformViewFactory`.
+- iOS returns `UIView*` from Objective-C++.
+- macOS returns `NSView*` from Objective-C++.
+- Web returns a detached DOM element through the Emscripten C++ factory.
+
+`PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
+It never crosses a platform-language boundary, and ordinary components and direct factories use their concrete types rather than constructing it themselves.
+
+Registry installation supplies the owning `PlatformAdapter&` only to the factory's internal binding operation.
+Direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values rather than the adapter.
+
+Android currently provides the common Java/Kotlin class adapter.
+Apple Objective-C/Swift and Web JavaScript common adapters are future work; current implementations use direct platform factories or library-owned bridges.
+Every path still registers once through the library RootHook; application hosts, delegates, and Web mount calls do not form a second registry.
+
+Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.
+Failed creation publishes no event and releases any instance or platform object already returned by the factory.
+Events are accepted only after a candidate commits, and disposal invalidates delivery before releasing platform state.
 
 ## Geometry and behavior
 
-Provide a bounded size or parent `Frame`; a platform control has no portable intrinsic size. The public contract supports HuxerUI layout placement, rectangular visibility/clipping, focus/input integration, update, event dispatch, and lifecycle according to each backend.
+Provide bounded geometry because a PlatformView has no portable intrinsic size.
+The shared contract covers layout placement, rectangular visibility and clipping, composition order, focus/input integration, update, typed events, and lifecycle according to the backend.
 
-Do not promise rotation, arbitrary path clipping, group opacity, backdrop filters, or transparent composition unless the active platform header/user contract explicitly does. A platform control cannot be placed inside Canvas drawing commands.
-
-## Controlled properties
-
-Properties are a full authoritative snapshot. On application change, emit a typed event, update owner state, and supply the new snapshot on composition. Keep a stable key/type when the same platform instance should update; change identity only when replacement is intended.
-
-## PlatformView versus ExternalTexture
-
-Choose `PlatformView` for platform-owned input, IME, accessibility, focus, and control lifecycle. Choose `ExternalTexture` when the platform only produces frames and HuxerUI should own layout, effects, interaction, and surrounding semantics.
+Do not promise arbitrary rotation, path clipping, group opacity, backdrop filters, or transparent mixing unless the active platform contract explicitly supports them.
+Choose `ExternalTexture` when the platform only produces frames and HuxerUI should own effects, interaction, and surrounding semantics.
 
 ## Review points
 
-- concrete wrapper instead of raw type strings in page code;
-- validated payloads and typed events;
-- full controlled property snapshot;
-- bounded geometry;
-- factory create/update/dispose symmetry;
-- focus, IME, accessibility, and unmount behavior;
-- documented platform limitations rather than cross-platform assumptions.
+- concrete typed component instead of raw names in page code;
+- complete Properties snapshot and controlled owner updates;
+- inferred typed events with no parallel event registry;
+- optional Controller with deterministic connect/disconnect lifetime;
+- bounded geometry and documented backend limits;
+- create/update/dispose failure symmetry, focus, IME, accessibility, and unmount behavior;
+- payload conversion only where a platform-language boundary exists.

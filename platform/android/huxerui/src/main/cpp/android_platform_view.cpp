@@ -15,7 +15,8 @@
 #include <variant>
 #include <vector>
 
-#include <huxerui/android/platform_view.h>
+#include <huxerui/android/jni.h>
+#include <huxerui/android/platform_registry.h>
 
 #include "android_renderer.h"
 #include "internal.h"
@@ -32,9 +33,13 @@ struct EventRoute {
 
 struct HostedPlatformView {
   std::uint64_t properties_revision = 0;
+  std::uint64_t controller_revision = 0;
   std::string type;
   std::shared_ptr<EventRoute> event_route;
-  android::PlatformViewFactory factory;
+  std::shared_ptr<const android::detail::AndroidViewFactory> factory;
+  std::shared_ptr<void> instance;
+  PlatformValue controller;
+  bool controller_connected = false;
   jobject view = nullptr;
   bool mounted = false;
 };
@@ -52,16 +57,9 @@ void ClearJavaException(JNIEnv* environment) {
 } // namespace
 
 struct AndroidPlatformViews::State {
-  State(
-      JNIEnv* environment,
-      jobject root_value,
-      jobject context_value,
-      AndroidRenderer& renderer_value,
-      PlatformModules& modules_value,
-      Runtime& runtime_value,
-      UIThreadDispatcher dispatcher
-  )
-      : context(context_value), renderer(&renderer_value), modules(&modules_value), runtime(&runtime_value),
+  State(JNIEnv* environment, jobject root_value, jobject context_value, AndroidRenderer& renderer_value,
+        PlatformRegistry& registry_value, Runtime& runtime_value, UIThreadDispatcher dispatcher)
+      : context(context_value), renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value),
         dispatch_to_ui_thread(std::move(dispatcher)) {
     if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for PlatformView hosting");
@@ -106,10 +104,9 @@ struct AndroidPlatformViews::State {
 
   std::unique_ptr<HostedPlatformView> Create(JNIEnv* environment, const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
-    const auto* factory = modules->Find<android::PlatformViewFactory>(command.Type());
-    if (factory == nullptr) {
-      throw std::logic_error("HuxerUI Android PlatformView type is not registered: " + std::string(command.Type()));
-    }
+    std::shared_ptr<const android::detail::AndroidViewFactory> factory =
+        registry->FindView<android::detail::AndroidViewFactory>(command.Type(), command.Properties().Type(),
+                                                                command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI Android PlatformView factory must provide create");
     }
@@ -117,61 +114,62 @@ struct AndroidPlatformViews::State {
     auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
-    PlatformEventSink event_sink = [weak_route, dispatcher](std::string_view name, PlatformPayload payload) mutable {
-      if (!dispatcher) {
-        return;
-      }
-      dispatcher([weak_route, name = std::string(name), payload = std::move(payload)]() mutable {
-        const std::shared_ptr<EventRoute> route = weak_route.lock();
-        if (!route || !route->active || route->runtime == nullptr) {
-          return;
-        }
-        static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
-      });
-    };
+    PlatformEventEmitter events = MakePlatformEventEmitter(
+        [weak_route, dispatcher](std::type_index key, PlatformValue value) mutable {
+          if (!dispatcher) {
+            return;
+          }
+          dispatcher([weak_route, key, value = std::move(value)]() mutable {
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
+          });
+        },
+        [weak_route, dispatcher](std::string name, PlatformPayload payload) mutable {
+          if (!dispatcher) {
+            return;
+          }
+          dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
+            const std::shared_ptr<EventRoute> route = weak_route.lock();
+            if (!route || !route->active || route->runtime == nullptr) {
+              return;
+            }
+            static_cast<void>(
+                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
+          });
+        });
 
-    jobject local_view = nullptr;
-    local_view = factory->create(environment, context, command.Properties(), std::move(event_sink));
-    if (environment->ExceptionCheck()) {
-      ClearJavaException(environment);
-      if (local_view != nullptr && factory->dispose) {
-        try {
-          factory->dispose(environment, local_view);
-        } catch (...) {
-        }
-        ClearJavaException(environment);
+    auto hosted_view = std::make_unique<HostedPlatformView>();
+    hosted_view->properties_revision = command.PropertiesRevision();
+    hosted_view->controller_revision = command.ControllerRevision();
+    hosted_view->type = command.Type();
+    hosted_view->event_route = std::move(route);
+    hosted_view->factory = std::move(factory);
+    hosted_view->controller = command.Controller();
+    try {
+      hosted_view->instance =
+          hosted_view->factory->create(environment, context, command.Properties(), std::move(events));
+      if (!hosted_view->instance || !hosted_view->factory->view) {
+        throw std::logic_error("HuxerUI Android PlatformView factory returned an empty instance");
       }
-      if (local_view != nullptr) {
-        environment->DeleteLocalRef(local_view);
-      }
-      throw std::logic_error("HuxerUI Android PlatformView factory raised a Java exception while creating");
-    }
-    if (local_view == nullptr) {
-      throw std::logic_error("HuxerUI Android PlatformView factory returned a null View");
-    }
 
-    const jint validation_result = environment->CallIntMethod(root, validate_platform_view, local_view);
-    if (environment->ExceptionCheck()) {
-      ClearJavaException(environment);
-      if (factory->dispose) {
-        try {
-          factory->dispose(environment, local_view);
-        } catch (...) {
-        }
+      android::LocalRef<jobject> local_view(environment,
+                                            hosted_view->factory->view(environment, hosted_view->instance));
+      if (environment->ExceptionCheck()) {
         ClearJavaException(environment);
+        throw std::logic_error("HuxerUI Android PlatformView factory raised a Java exception while creating");
       }
-      environment->DeleteLocalRef(local_view);
-      throw std::logic_error("HuxerUI Android PlatformView host failed to validate the factory result");
-    }
-    if (validation_result != 0) {
-      if (factory->dispose) {
-        try {
-          factory->dispose(environment, local_view);
-        } catch (...) {
-        }
+      if (!local_view) {
+        throw std::logic_error("HuxerUI Android PlatformView factory returned a null View");
+      }
+
+      const jint validation_result = environment->CallIntMethod(root, validate_platform_view, local_view.Get());
+      if (environment->ExceptionCheck()) {
         ClearJavaException(environment);
+        throw std::logic_error("HuxerUI Android PlatformView host failed to validate the factory result");
       }
-      environment->DeleteLocalRef(local_view);
       if (validation_result == 1) {
         throw std::logic_error("HuxerUI Android PlatformView factory returned an object that is not a View");
       }
@@ -181,29 +179,26 @@ struct AndroidPlatformViews::State {
             std::string(command.Type())
         );
       }
-      throw std::logic_error("HuxerUI Android PlatformView factory returned a View that already has a parent");
-    }
-
-    jobject retained_view = environment->NewGlobalRef(local_view);
-    if (retained_view == nullptr) {
-      if (factory->dispose) {
-        try {
-          factory->dispose(environment, local_view);
-        } catch (...) {
-        }
-        ClearJavaException(environment);
+      if (validation_result != 0) {
+        throw std::logic_error("HuxerUI Android PlatformView factory returned a View that already has a parent");
       }
-      environment->DeleteLocalRef(local_view);
-      throw std::runtime_error("HuxerUI could not retain the Android PlatformView instance");
-    }
-    environment->DeleteLocalRef(local_view);
 
-    auto hosted_view = std::make_unique<HostedPlatformView>();
-    hosted_view->properties_revision = command.PropertiesRevision();
-    hosted_view->type = command.Type();
-    hosted_view->event_route = std::move(route);
-    hosted_view->factory = *factory;
-    hosted_view->view = retained_view;
+      hosted_view->view = environment->NewGlobalRef(local_view.Get());
+      if (hosted_view->view == nullptr) {
+        throw std::runtime_error("HuxerUI could not retain the Android PlatformView instance");
+      }
+      if (hosted_view->controller.HasValue()) {
+        if (!hosted_view->factory->connect || !hosted_view->factory->disconnect) {
+          throw std::logic_error("HuxerUI controlled Android PlatformView factory must provide connect and disconnect");
+        }
+        hosted_view->factory->connect(environment, hosted_view->instance, hosted_view->controller);
+        hosted_view->controller_connected = true;
+      }
+    } catch (...) {
+      ClearJavaException(environment);
+      Dispose(environment, command.Identity(), *hosted_view);
+      throw;
+    }
     return hosted_view;
   }
 
@@ -220,15 +215,34 @@ struct AndroidPlatformViews::State {
     hosted_view.mounted = true;
   }
 
-  void Update(JNIEnv* environment, HostedPlatformView& hosted_view, const PlatformPayload& properties) {
-    if (!hosted_view.factory.update) {
-      throw std::logic_error("HuxerUI Android PlatformView factory does not support property updates");
+  void Update(JNIEnv* environment, HostedPlatformView& hosted_view, const PlacePlatformViewCommand& command) {
+    if (hosted_view.properties_revision != command.PropertiesRevision()) {
+      if (!hosted_view.factory->update) {
+        throw std::logic_error("HuxerUI Android PlatformView factory does not support property updates");
+      }
+      hosted_view.factory->update(environment, hosted_view.instance, command.Properties());
+      if (environment->ExceptionCheck()) {
+        ClearJavaException(environment);
+        throw std::logic_error("HuxerUI Android PlatformView factory raised a Java exception while updating");
+      }
+      hosted_view.properties_revision = command.PropertiesRevision();
     }
-    hosted_view.factory.update(environment, hosted_view.view, properties);
-    if (environment->ExceptionCheck()) {
-      ClearJavaException(environment);
-      throw std::logic_error("HuxerUI Android PlatformView factory raised a Java exception while updating");
+    if (hosted_view.controller_revision == command.ControllerRevision()) {
+      return;
     }
+    if (hosted_view.controller_connected) {
+      hosted_view.factory->disconnect(environment, hosted_view.instance, hosted_view.controller);
+      hosted_view.controller_connected = false;
+    }
+    hosted_view.controller = command.Controller();
+    if (hosted_view.controller.HasValue()) {
+      if (!hosted_view.factory->connect || !hosted_view.factory->disconnect) {
+        throw std::logic_error("HuxerUI controlled Android PlatformView factory must provide connect and disconnect");
+      }
+      hosted_view.factory->connect(environment, hosted_view.instance, hosted_view.controller);
+      hosted_view.controller_connected = true;
+    }
+    hosted_view.controller_revision = command.ControllerRevision();
   }
 
   void Dispose(JNIEnv* environment, std::uint64_t identity, HostedPlatformView& hosted_view) noexcept {
@@ -238,9 +252,17 @@ struct AndroidPlatformViews::State {
       ClearJavaException(environment);
       hosted_view.mounted = false;
     }
-    if (hosted_view.view != nullptr && hosted_view.factory.dispose) {
+    if (hosted_view.controller_connected && hosted_view.factory->disconnect) {
       try {
-        hosted_view.factory.dispose(environment, hosted_view.view);
+        hosted_view.factory->disconnect(environment, hosted_view.instance, hosted_view.controller);
+      } catch (...) {
+      }
+      ClearJavaException(environment);
+      hosted_view.controller_connected = false;
+    }
+    if (hosted_view.instance && hosted_view.factory->dispose) {
+      try {
+        hosted_view.factory->dispose(environment, hosted_view.instance);
       } catch (...) {
       }
       ClearJavaException(environment);
@@ -249,13 +271,14 @@ struct AndroidPlatformViews::State {
       environment->DeleteGlobalRef(hosted_view.view);
       hosted_view.view = nullptr;
     }
+    hosted_view.instance.reset();
   }
 
   JavaVM* virtual_machine = nullptr;
   jobject root = nullptr;
   jobject context = nullptr;
   AndroidRenderer* renderer = nullptr;
-  PlatformModules* modules = nullptr;
+  PlatformRegistry* registry = nullptr;
   Runtime* runtime = nullptr;
   UIThreadDispatcher dispatch_to_ui_thread;
   const RenderFrame* frame = nullptr;
@@ -269,18 +292,11 @@ struct AndroidPlatformViews::State {
   jmethodID apply_platform_view_focus = nullptr;
 };
 
-AndroidPlatformViews::AndroidPlatformViews(
-    JNIEnv* environment,
-    jobject root,
-    jobject context,
-    AndroidRenderer& renderer,
-    PlatformModules& modules,
-    Runtime& runtime,
-    UIThreadDispatcher dispatch_to_ui_thread
-)
-    : state_(std::make_unique<State>(
-          environment, root, context, renderer, modules, runtime, std::move(dispatch_to_ui_thread)
-      )) {}
+AndroidPlatformViews::AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context,
+                                           AndroidRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
+                                           UIThreadDispatcher dispatch_to_ui_thread)
+    : state_(std::make_unique<State>(environment, root, context, renderer, registry, runtime,
+                                     std::move(dispatch_to_ui_thread))) {}
 
 AndroidPlatformViews::~AndroidPlatformViews() {
   if (state_) {
@@ -305,10 +321,7 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
         pending.emplace_back(command.Identity(), state_->Create(environment, *placement));
         continue;
       }
-      if (found->second->properties_revision != command.PropertiesRevision()) {
-        state_->Update(environment, *found->second, command.Properties());
-        found->second->properties_revision = command.PropertiesRevision();
-      }
+      state_->Update(environment, *found->second, command);
     }
   } catch (...) {
     for (auto& [identity, hosted_view] : pending) {

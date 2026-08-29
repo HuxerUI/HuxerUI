@@ -3,7 +3,7 @@
 #include <string>
 
 #include <huxerui/event.h>
-#include <huxerui/platform_module.h>
+#include <huxerui/platform_registry.h>
 #include <huxerui/root.h>
 #include <huxerui/view.h>
 
@@ -12,15 +12,21 @@ namespace huxerui::example {
 namespace platform_text_field {
 
 inline constexpr char type[] = "example/PlatformTextField";
-inline constexpr char text_property[] = "text";
-
 } // namespace platform_text_field
 
-struct PlatformTextFieldEvents {
-  struct Changed : Event<std::string> {
-    static constexpr char Name[] = "changed";
+struct PlatformTextFieldProperties {
+  std::string text;
 
-    static std::string Decode(const PlatformPayload& payload);
+  [[nodiscard]] static PlatformPayload Encode(const PlatformTextFieldProperties& properties) {
+    return PlatformPayload(properties.text);
+  }
+
+  bool operator==(const PlatformTextFieldProperties&) const = default;
+};
+
+struct PlatformTextFieldEvents {
+  struct Changed : Event<const std::string&> {
+    static constexpr char Name[] = "changed";
   };
 };
 

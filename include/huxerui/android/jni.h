@@ -22,7 +22,11 @@ class _jbyteArray;
 using jbyteArray = _jbyteArray*;
 #endif
 
-namespace huxerui::android {
+namespace huxerui {
+
+class PlatformPayload;
+
+namespace android {
 
 namespace detail {
 
@@ -88,5 +92,8 @@ private:
 [[nodiscard]] std::string JavaStringToUtf8(JNIEnv* environment, jstring value);
 [[nodiscard]] LocalRef<jbyteArray> BytesToJavaByteArray(JNIEnv* environment, std::span<const std::byte> value);
 [[nodiscard]] Bytes JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value);
+[[nodiscard]] LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPayload& payload);
+[[nodiscard]] PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload);
 
-} // namespace huxerui::android
+} // namespace android
+} // namespace huxerui

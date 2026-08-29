@@ -637,16 +637,11 @@ private:
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
     }
-    platform_views_ = std::make_unique<Win32PlatformViews>(
-        instance_,
-        window_,
-        Modules(),
-        *runtime_,
-        ui_dispatcher_.Bind(),
-        [this](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
-          return HandleOverlayMessage(source, message, w_param, l_param);
-        }
-    );
+    platform_views_ =
+        std::make_unique<Win32PlatformViews>(instance_, window_, PlatformRegistry(), *runtime_, ui_dispatcher_.Bind(),
+                                             [this](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
+                                               return HandleOverlayMessage(source, message, w_param, l_param);
+                                             });
     ui_dispatcher_.Attach(window_);
     if (custom_chrome_) {
       first_nc_calc_ = false;
