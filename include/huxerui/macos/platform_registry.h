@@ -320,18 +320,19 @@ template <class Module, class Options> struct PlatformModuleFactory {
 
 #if defined(__OBJC__)
 /// Adapts an actual Objective-C or Swift PlatformModule factory object to a strongly typed C++ Module facade.
+/// The factory object creates the platform instance; create wraps its framework-owned PlatformChannel in Module.
 template <class Module> struct ObjectiveCPlatformModuleFactory<Module, void> {
   __strong id<HUXAppKitPlatformModuleFactory> factory = nil;
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter) {
-    if (factory == nil || !connect) {
+    if (factory == nil || !create) {
       throw std::logic_error("HuxerUI macOS Objective-C PlatformModule factory is incomplete");
     }
     PlatformChannel channel =
         detail::CreateObjectiveCPlatformModule(adapter, detail::GetAppKitWindow(adapter), factory, {});
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;
@@ -343,16 +344,16 @@ template <class Module, class Options> struct ObjectiveCPlatformModuleFactory {
   static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
 
   __strong id<HUXAppKitPlatformModuleFactory> factory = nil;
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter, const Options& options) {
-    if (factory == nil || !connect) {
+    if (factory == nil || !create) {
       throw std::logic_error("HuxerUI macOS Objective-C PlatformModule factory is incomplete");
     }
     PlatformChannel channel = detail::CreateObjectiveCPlatformModule(
         adapter, detail::GetAppKitWindow(adapter), factory, huxerui::detail::EncodePlatformValue(options));
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;

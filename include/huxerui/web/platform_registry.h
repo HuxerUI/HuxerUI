@@ -42,16 +42,16 @@ template <class Properties, class Instance, class Controller = void> struct Plat
 /// Adapts a JavaScript PlatformModule factory object to a strongly typed C++ Module facade.
 ///
 /// The JavaScript factory is supplied directly by the library's RootHook; HuxerUI does not maintain a second
-/// JavaScript registration table. Options cross the language boundary through PlatformPayload, while connect wraps
-/// the created instance's PlatformChannel in the library's exact Module type.
-/// The factory provides `create(options, events)`. Its returned instance provides `invoke(method, arguments, result)`,
-/// may return a cancellation function from invoke, and provides `dispose()`.
+/// JavaScript registration table. Options cross the language boundary through PlatformPayload, while the adapter's
+/// C++ create callback wraps the created instance's PlatformChannel in the library's exact Module type. The JavaScript
+/// factory object provides `create(options, events)`. Its returned instance provides `invoke(method, arguments,
+/// result)`, may return a cancellation function from invoke, and provides `dispose()`.
 ///
 /// Example:
 /// @code
 /// web::JavaScriptPlatformModuleFactory<std::shared_ptr<TimerService>> factory{
 ///     .factory = emscripten::val::module_property("exampleTimerFactory"),
-///     .connect = [](PlatformChannel channel) {
+///     .create = [](PlatformChannel channel) {
 ///       return std::make_shared<WebTimerService>(std::move(channel));
 ///     },
 /// };
@@ -211,15 +211,15 @@ ErasePlatformViewFactory(web::PlatformViewFactory<Properties, Instance, Controll
 /// JavaScript-backed PlatformModule factory without construction Options.
 template <class Module> struct JavaScriptPlatformModuleFactory<Module, void> {
   emscripten::val factory = emscripten::val::undefined();
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter) {
-    if (!connect) {
+    if (!create) {
       throw std::logic_error("HuxerUI Web JavaScript PlatformModule factory is incomplete");
     }
     PlatformChannel channel = detail::CreateJavaScriptPlatformModule(adapter, factory, {});
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;
@@ -232,16 +232,16 @@ template <class Module, class Options> struct JavaScriptPlatformModuleFactory {
   static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
 
   emscripten::val factory = emscripten::val::undefined();
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter, const Options& options) {
-    if (!connect) {
+    if (!create) {
       throw std::logic_error("HuxerUI Web JavaScript PlatformModule factory is incomplete");
     }
     PlatformChannel channel =
         detail::CreateJavaScriptPlatformModule(adapter, factory, huxerui::detail::EncodePlatformValue(options));
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;

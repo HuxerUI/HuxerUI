@@ -6,7 +6,7 @@
 
 namespace {
 
-constexpr char platform_text_field_factory[] = "huxeruiExamplePlatformTextFieldFactory";
+constexpr char platform_text_field_factory_name[] = "huxeruiExamplePlatformTextFieldFactory";
 
 } // namespace
 
@@ -16,7 +16,7 @@ void InstallPlatformTextField(RootContext& root) {
   root.RegisterPlatformView<PlatformTextFieldProperties>(
       platform_text_field::type,
       web::JavaScriptPlatformViewFactory<PlatformTextFieldProperties>{
-          .factory = emscripten::val::module_property(platform_text_field_factory),
+          .factory = emscripten::val::module_property(platform_text_field_factory_name),
       });
 }
 

@@ -33,11 +33,11 @@ Keep them behind the library's typed Module facade.
 A structured boundary type owns its static `Encode(const T&)` or `Decode(const PlatformPayload&)` operation; direct C++ implementations do not call those operations.
 
 Android currently provides `android::JavaPlatformModuleFactory<Module, Options>` for Java or Kotlin implementations.
-Its `connect` callback receives one framework-owned `PlatformChannel` and returns the library's exact Module type.
+Its `create` callback receives one framework-owned `PlatformChannel` and returns the library's exact Module type.
 The Java implementation receives one `HuxerUIPlatformChannel.Events` emitter and uses the SDK `PlatformPayload` value; it does not declare one JNI callback per event.
 
 Web provides `web::JavaScriptPlatformModuleFactory<Module, Options>` for a linked JavaScript structural factory.
-The RootHook supplies its actual `emscripten::val`, and `connect` wraps the framework-owned `PlatformChannel` in the library's exact Module type.
+The RootHook supplies its actual `emscripten::val`, and `create` wraps the framework-owned `PlatformChannel` in the library's exact Module type.
 JavaScript receives immutable `Module.HuxerUI.PlatformPayload` values and one framework-owned events endpoint; it does not require inheritance or a second name registry.
 
 iOS and macOS expose their Objective-C/Swift contracts through the pure Objective-C Clang module `HuxerUIPlatform`.
@@ -47,7 +47,7 @@ The library's Objective-C++ RootHook passes the actual factory object to the mat
 ```cpp
 ios::ObjectiveCPlatformModuleFactory<std::shared_ptr<AudioPlayer>, AudioPlayerOptions> factory{
     .factory = actual_factory,
-    .connect = [](PlatformChannel channel) {
+    .create = [](PlatformChannel channel) {
       return std::make_shared<ChannelAudioPlayer>(std::move(channel));
     },
 };

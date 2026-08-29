@@ -259,7 +259,7 @@ template <class Module, class Options> struct PlatformModuleFactory {
 /// Registers an Android PlatformModule implemented by a Java HuxerUIPlatformModule.Factory class.
 ///
 /// HuxerUI constructs the Java factory from its fully qualified class_name and passes encoded Options to Java. The Java
-/// Factory class must be public and provide a public no-argument constructor. `connect` receives the shared
+/// Factory class must be public and provide a public no-argument constructor. `create` receives the shared
 /// PlatformChannel for the created Java instance and returns the library's exact strongly typed C++ Module facade. The
 /// facade owns or shares that channel and exposes ordinary domain methods instead of method-name strings to application
 /// code. Closing the last owning channel connection disposes the Java instance.
@@ -268,7 +268,7 @@ template <class Module, class Options> struct PlatformModuleFactory {
 /// @code
 /// android::JavaPlatformModuleFactory<std::shared_ptr<TimerService>> factory;
 /// factory.class_name = "org.example.PlatformTimer";
-/// factory.connect = [](PlatformChannel channel) {
+/// factory.create = [](PlatformChannel channel) {
 ///   return std::make_shared<AndroidTimerService>(std::move(channel));
 /// };
 /// root.RegisterPlatformModule<std::shared_ptr<TimerService>>("Timer", std::move(factory));
@@ -281,10 +281,10 @@ template <class Module, class Options = void> struct JavaPlatformModuleFactory;
 /// Java-backed PlatformModule factory without construction Options.
 template <class Module> struct JavaPlatformModuleFactory<Module, void> {
   std::string class_name;
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter) {
-    if (!connect) {
+    if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
     if (!state_) {
@@ -292,7 +292,7 @@ template <class Module> struct JavaPlatformModuleFactory<Module, void> {
     }
     PlatformChannel channel = detail::CreateJavaPlatformModule(state_, {});
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;
@@ -308,10 +308,10 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
   static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
 
   std::string class_name;
-  std::function<Module(PlatformChannel)> connect;
+  std::function<Module(PlatformChannel)> create;
 
   Module operator()(PlatformAdapter& adapter, const Options& options) {
-    if (!connect) {
+    if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
     if (!state_) {
@@ -319,7 +319,7 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
     }
     PlatformChannel channel = detail::CreateJavaPlatformModule(state_, huxerui::detail::EncodePlatformValue(options));
     try {
-      return connect(channel);
+      return create(channel);
     } catch (...) {
       channel.Close();
       throw;

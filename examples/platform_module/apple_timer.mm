@@ -258,7 +258,7 @@ void InstallTimer(RootContext& root) {
   macos::ObjectiveCPlatformModuleFactory<std::shared_ptr<TimerService>> factory{
 #endif
       .factory = CreateAppleTimerFactory(),
-      .connect = CreateAppleTimerService,
+      .create = CreateAppleTimerService,
   };
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, std::move(factory));
   root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));

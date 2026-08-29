@@ -13,7 +13,7 @@
 
 namespace {
 
-constexpr char platform_timer_factory[] = "huxeruiExampleTimerFactory";
+constexpr char platform_timer_factory_name[] = "huxeruiExampleTimerFactory";
 
 struct TimerTick : huxerui::Event<std::uint64_t> {
   static constexpr char Name[] = "tick";
@@ -78,8 +78,8 @@ namespace huxerui::example {
 
 void InstallTimer(RootContext& root) {
   web::JavaScriptPlatformModuleFactory<std::shared_ptr<TimerService>> factory{
-      .factory = emscripten::val::module_property(platform_timer_factory),
-      .connect = [](PlatformChannel channel) {
+      .factory = emscripten::val::module_property(platform_timer_factory_name),
+      .create = [](PlatformChannel channel) {
         return std::static_pointer_cast<TimerService>(std::make_shared<WebTimerService>(std::move(channel)));
       },
   };

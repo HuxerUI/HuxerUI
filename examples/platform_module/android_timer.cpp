@@ -76,7 +76,7 @@ namespace huxerui::example {
 void InstallTimer(RootContext& root) {
   android::JavaPlatformModuleFactory<std::shared_ptr<TimerService>> factory;
   factory.class_name = platform_timer_class;
-  factory.connect = [](PlatformChannel channel) {
+  factory.create = [](PlatformChannel channel) {
     return std::static_pointer_cast<TimerService>(std::make_shared<AndroidTimerService>(std::move(channel)));
   };
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, std::move(factory));

@@ -85,6 +85,7 @@ Keep strings for valid UTF-8 text and bytes for encoding-independent data; `Plat
 
 iOS and macOS libraries may implement the platform side in Objective-C or Swift through the `HuxerUIPlatform` Clang module.
 Their Objective-C++ RootHook passes the actual factory object to `ios::ObjectiveCPlatformModuleFactory` or `macos::ObjectiveCPlatformModuleFactory`, then wraps the resulting `PlatformChannel` in the library's typed service.
+The adapter's `create` callback performs that strongly typed wrapping; PlatformView reserves `connect` and `disconnect` for Controller attachment.
 The same platform headers retain the direct Objective-C++ factory path; factory class-name lookup and application-host registration are not used.
 
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
