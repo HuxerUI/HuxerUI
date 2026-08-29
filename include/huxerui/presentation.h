@@ -460,6 +460,8 @@ public:
   [[nodiscard]] LayerAnchor Anchor() const;
   LayerId Show(ViewFactory content, PopupOptions options = {}) const;
   LayerId Show(PopupFactory content, PopupOptions options = {}) const;
+  bool Update(LayerId id, ViewFactory content) const;
+  bool Update(LayerId id, PopupFactory content) const;
 
   template <class Factory, class... Arguments>
     requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
@@ -470,6 +472,13 @@ public:
             std::forward<Arguments>(arguments)...
         )
     );
+  }
+
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
+  bool Update(LayerId id, Factory&& content, Arguments&&... arguments) const {
+    return Update(id, detail::BindPresentationFactory<PopupContext>(
+                          std::forward<Factory>(content), std::forward<Arguments>(arguments)...));
   }
 
   LayerId ShowAt(Point point, ViewFactory content, PopupOptions options = {}) const;

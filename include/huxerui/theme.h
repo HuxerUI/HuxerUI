@@ -232,6 +232,38 @@ struct TabsStyle {
   bool operator==(const TabsStyle&) const = default;
 };
 
+struct SelectStyle {
+  Color background = Color::White();
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color border = Color::Rgb(87, 96, 106, 0.55F);
+  Color indicator = Color::Rgb(87, 96, 106);
+  Color popup_background = Color::White();
+  Color active_item_background = Color::Rgb(31, 111, 235, 0.10F);
+  Color selected_item_background = Color::Rgb(31, 111, 235, 0.14F);
+  Color validation_error = Color::Rgb(207, 34, 46);
+  TextStyle validation_text_style{Font::System(12.0F), Color::Rgb(207, 34, 46)};
+  EdgeInsets trigger_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
+  EdgeInsets item_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
+  EdgeInsets popup_padding;
+  Shadow popup_shadow{Color::Rgb(0, 0, 0, 0.2F), {}, 8.0F, 0.0F};
+  float content_spacing = 8.0F;
+  float validation_spacing = 4.0F;
+  float minimum_width = 120.0F;
+  float minimum_height = 36.0F;
+  float minimum_item_height = 36.0F;
+  float maximum_popup_height = 320.0F;
+  float indicator_size = 16.0F;
+  float corner_radius = 6.0F;
+  float popup_corner_radius = 6.0F;
+  float border_width = 1.0F;
+  std::optional<Indication> indication;
+  std::optional<Indication> item_indication;
+
+  static SelectStyle Default();
+
+  bool operator==(const SelectStyle&) const = default;
+};
+
 struct TextFieldVariantStyle {
   Color background = Color::Transparent();
   std::optional<Color> disabled_background;
@@ -521,6 +553,7 @@ ChipStyle DefaultChipStyle(const ThemeSpec& theme);
 DividerStyle DefaultDividerStyle(const ThemeSpec& theme);
 SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme);
 TabsStyle DefaultTabsStyle(const ThemeSpec& theme);
+SelectStyle DefaultSelectStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);

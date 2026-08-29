@@ -404,6 +404,40 @@ TabsStyle MaterialTabsStyle(const ThemeSpec& theme) {
   };
 }
 
+SelectStyle MaterialSelectStyle(const ThemeSpec& theme) {
+  Color active_item_background = theme.colors.primary;
+  active_item_background.alpha *= 0.08F;
+  Color selected_item_background = theme.colors.primary;
+  selected_item_background.alpha *= 0.12F;
+  return {
+      .background = theme.colors.surface_container_highest,
+      .foreground = theme.colors.on_surface,
+      .border = theme.colors.outline,
+      .indicator = theme.colors.on_surface_variant,
+      .popup_background = theme.colors.surface_container,
+      .active_item_background = active_item_background,
+      .selected_item_background = selected_item_background,
+      .validation_error = theme.colors.error,
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .trigger_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .popup_padding = {},
+      .popup_shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.24F), theme.elevation.medium),
+      .content_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
+      .minimum_width = 120.0F,
+      .minimum_height = 48.0F,
+      .minimum_item_height = 40.0F,
+      .maximum_popup_height = 320.0F,
+      .indicator_size = 20.0F,
+      .corner_radius = theme.shapes.extra_small,
+      .popup_corner_radius = theme.shapes.small,
+      .border_width = 1.0F,
+      .indication = MaterialIndication(theme.colors.on_surface, theme),
+      .item_indication = MaterialIndication(theme.colors.on_surface, theme),
+  };
+}
+
 DividerStyle MaterialDividerStyle(const ThemeSpec& theme) {
   Color color = theme.colors.outline;
   color.alpha *= 0.4F;
@@ -869,6 +903,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialChipStyle(theme));
   definition.Set(MaterialSegmentedButtonStyle(theme));
   definition.Set(MaterialTabsStyle(theme));
+  definition.Set(MaterialSelectStyle(theme));
   definition.Set(MaterialDividerStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
   definition.Set(MaterialCheckboxStyle(theme));
@@ -1084,6 +1119,42 @@ TabsStyle DefaultTabsStyle(const ThemeSpec& theme) {
       .expand_items = false,
       .indication = std::nullopt,
       .indicator_animation_duration = theme.motion.reduced_motion ? 0.0 : theme.motion.fast,
+  };
+}
+
+SelectStyle DefaultSelectStyle(const ThemeSpec& theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.4F;
+  Color active_item_background = theme.colors.primary;
+  active_item_background.alpha *= 0.10F;
+  Color selected_item_background = theme.colors.primary;
+  selected_item_background.alpha *= 0.14F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .border = border,
+      .indicator = theme.colors.on_surface_variant,
+      .popup_background = theme.colors.surface,
+      .active_item_background = active_item_background,
+      .selected_item_background = selected_item_background,
+      .validation_error = theme.colors.error,
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .trigger_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .popup_padding = {},
+      .popup_shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {}, theme.elevation.medium, 0.0F},
+      .content_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
+      .minimum_width = 120.0F,
+      .minimum_height = 36.0F,
+      .minimum_item_height = 36.0F,
+      .maximum_popup_height = 320.0F,
+      .indicator_size = 16.0F,
+      .corner_radius = theme.shapes.extra_small,
+      .popup_corner_radius = theme.shapes.small,
+      .border_width = 1.0F,
+      .indication = std::nullopt,
+      .item_indication = std::nullopt,
   };
 }
 
@@ -1352,6 +1423,10 @@ SegmentedButtonStyle SegmentedButtonStyle::Default() {
 
 TabsStyle TabsStyle::Default() {
   return detail::DefaultTabsStyle(ThemeSpec::Default());
+}
+
+SelectStyle SelectStyle::Default() {
+  return detail::DefaultSelectStyle(ThemeSpec::Default());
 }
 
 DividerStyle DividerStyle::Default() {

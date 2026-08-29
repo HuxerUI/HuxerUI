@@ -27,6 +27,7 @@ The returned byte views remain standard immutable spans rather than introducing 
 - `Checkbox`, `RadioButton`, and `Switch` receive a controlled Boolean and emit `OnChanged`.
 - `Chip` supports an optional icon and controlled selected state.
 - `SegmentedButton` receives items and a controlled selected index.
+- `Select` receives a finite item range and a controlled selected index.
 - `Slider` receives a controlled value and can define range and step.
 - `ProgressCircle` and `ProgressBar` support determinate and indeterminate presentation.
 
@@ -52,6 +53,42 @@ View Controls() {
 
 Disabled behavior is configured with the shared enabled modifier where supported.
 Disabled components remain visible but do not emit activation or value-change events.
+
+## Select
+
+`Select` is a compact controlled choice component for a finite, non-empty data set.
+It receives an application-owned selected index and emits `OnChanged(std::size_t)` without changing that value internally.
+
+```cpp
+[[huxerui::composable]]
+View DensityPicker() {
+  auto selected = UseState<std::size_t>(1);
+  const std::vector<std::string> options{"Compact", "Comfortable", "Spacious"};
+
+  return Select(options, selected, [](const std::string& option) {
+    return Text(option).Key(option);
+  }).Label("Density")
+    .OnChanged([selected](std::size_t index) {
+      selected = index;
+    });
+}
+```
+
+The content factory supplies both the selected trigger content and each popup choice.
+Its root View must publish a non-empty semantic label; `Text` already does so, while composite content should use `Semantics{.label = ...}` on its root.
+Use `Label(...)` for the Select control's accessible name; the selected root label remains its read-only current value.
+Apply `Enabled{false}` to that root for an individually disabled choice.
+The root is one Select interaction target, so nested buttons or other independent controls are unsupported.
+
+Use `.Key(...)` on the factory result when data can insert, remove, or reorder while the popup is open.
+Without a key, item identity follows the current index, matching ordinary unkeyed sibling reconciliation.
+The item set must not be empty and the selected index must remain in range; invalid declarations throw `std::invalid_argument`.
+
+Up and Down move through enabled choices without wrapping, Home and End move to an enabled edge, and Enter or Space requests the active choice.
+Opening focuses the selected choice when enabled, otherwise the first enabled choice; a list with no enabled choices has no active item.
+Escape, Back, outside press, and selecting the already controlled value close the popup without emitting a duplicate change.
+Disabling the Select while it is open closes the popup without emitting a change.
+`Validation` presents application-owned validation state without changing selection rules.
 
 ## Tabs and indexed pages
 

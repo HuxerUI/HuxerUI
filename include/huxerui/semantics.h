@@ -36,6 +36,7 @@ enum class SemanticRole {
   Switch,
   Slider,
   ProgressIndicator,
+  ComboBox,
   TextField,
   SearchField,
   Tab,

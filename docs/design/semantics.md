@@ -89,6 +89,7 @@ enum class SemanticRole {
   Switch,
   Slider,
   ProgressIndicator,
+  ComboBox,
   TextField,
   SearchField,
   Tab,
@@ -576,6 +577,7 @@ The shared component contract is listed below.
 | RadioButton | RadioButton role, label, checked state, and Activate |
 | Switch | Switch role, label, checked state, and Activate |
 | SegmentedButton | Horizontal collection containing labeled, checked, selected RadioButton items and Activate |
+| Select | Labeled read-only ComboBox owner with selected value and expansion actions; the popup is a single-selection List whose active enabled ListItem owns focus |
 | ProgressCircle and ProgressBar | ProgressIndicator role, normalized range when determinate, or localized busy state when indeterminate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
 | TextField | TextField or author-overridden SearchField role, value, UTF-16 selection, editing actions, and secure redaction |
@@ -665,6 +667,7 @@ The HWND exposes a UI Automation fragment root with cached providers keyed by Se
 Providers supply only the control patterns supported by committed role, state, and actions.
 Each provider freezes its COM interface set when created; a changed pattern shape replaces the cached provider while preserving the semantic RuntimeId.
 The initial mapping includes Invoke, Toggle, Value, RangeValue, Selection, SelectionItem, ExpandCollapse, ScrollItem, and Scroll.
+Read-only ComboBox nodes expose their committed current value through Value without accepting SetValue.
 It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
 
 UI Automation may query off-thread.
@@ -712,7 +715,7 @@ The container is a non-focusable structural accessibility node whose parent poin
 Provider touch exploration yields to a frontmost PlatformView subtree, and mount, removal, or visibility changes publish one host-subtree change after the frame has synchronized platform accessibility parents.
 
 Roles map to the closest Android widget class, while checked, selected, expanded, editable, secure, range, collection, heading, live-region, invalid, and scrolling state use the corresponding AccessibilityNodeInfo contracts available on the current API level.
-Collections containing RadioButton children map to Android single-selection collections without adding a platform role to the shared semantic model.
+Collections containing RadioButton children or children with selected state map to Android single-selection collections without adding a platform role to the shared semantic model.
 Secure fields never publish text or selection.
 Activate, Focus, SetText, SetSelection, SetValue, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and Custom actions return through `Runtime::PerformSemanticAction()` on the Android UI thread.
 Accessibility focus and explore-by-touch hover stay provider-owned; Android input-focus requests call Runtime Focus and remain distinct from TalkBack focus.
@@ -799,7 +802,7 @@ Current shared tests cover:
 - Compatible updates, replacement, unmount through replacement, identity stability, revision changes, focus, and stale action rejection.
 - Virtual child identity, action routing, extension replacement, stale-route rejection, and identity retirement.
 - Slider range actions, invalid payload rejection, shared value validation, and secure TextField redaction.
-- Tabs, NavigationBar, and NavigationPane hierarchy, selection, disabled items, activation, identity stability, and compact or expanded visual modes.
+- Select, Tabs, NavigationBar, and NavigationPane hierarchy, selection, disabled items, activation, identity stability, focus, and compact or expanded visual modes.
 
 Shared tests also cover:
 
@@ -809,7 +812,7 @@ Shared tests also cover:
 - VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
 
 Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.
-Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
+Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, read-only ComboBox values, List selection containers, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
 The iOS bridge compiles against the iOS 13 Simulator boundary.
 Physical-device VoiceOver validation covers primary ui_gallery traversal, shared controls, text input, and PlatformView substitution.
 Broader manual coverage for modal isolation, scrolling, live regions, and less common actions remains ongoing.

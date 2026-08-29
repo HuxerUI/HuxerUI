@@ -1462,6 +1462,10 @@ public:
       PopupOptions options,
       std::shared_ptr<const Environment> environment
   );
+  bool Update(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id, ViewFactory content,
+              std::shared_ptr<const Environment> environment);
+  bool Update(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id, PopupFactory content,
+              std::shared_ptr<const Environment> environment);
 
 private:
   LayerController layers_;
@@ -2490,6 +2494,14 @@ LayerId PopupHandle::Show(PopupFactory content, PopupOptions options) const {
   return service_->Show(anchor_, std::nullopt, std::move(content), std::move(options), environment_);
 }
 
+bool PopupHandle::Update(LayerId id, ViewFactory content) const {
+  return service_->Update(anchor_, id, std::move(content), environment_);
+}
+
+bool PopupHandle::Update(LayerId id, PopupFactory content) const {
+  return service_->Update(anchor_, id, std::move(content), environment_);
+}
+
 LayerId PopupHandle::ShowAt(Point point, ViewFactory content, PopupOptions options) const {
   return service_->Show(anchor_, point, std::move(content), std::move(options), environment_);
 }
@@ -2548,6 +2560,27 @@ LayerId detail::PopupService::Show(
   );
   *id = attached;
   return attached;
+}
+
+bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id,
+                                  ViewFactory content, std::shared_ptr<const Environment> environment) {
+  if (!content) {
+    throw std::invalid_argument("HuxerUI popup content factory must not be empty");
+  }
+  if (!anchor || anchor->active_layer != id) {
+    return false;
+  }
+  return layers_.UpdateEntry(id, std::nullopt, std::move(content), std::move(environment));
+}
+
+bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id,
+                                  PopupFactory content, std::shared_ptr<const Environment> environment) {
+  if (!content) {
+    throw std::invalid_argument("HuxerUI popup content factory must not be empty");
+  }
+  return Update(anchor, id,
+                [anchor, id, content = std::move(content)] { return content(PopupContext{anchor, id}); },
+                std::move(environment));
 }
 
 PopupHandle UsePopup() {

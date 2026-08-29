@@ -368,7 +368,9 @@ View SelectionDemo() {
   auto switch_checked = UseState(false);
   auto segment = UseState<std::size_t>(0);
   auto tab = UseState<std::size_t>(0);
+  auto density = UseState<std::size_t>(1);
   auto value = UseState(0.35F);
+  const std::vector<std::string> density_options{"Compact", "Comfortable", "Spacious"};
 
   return Column {
     GallerySection(
@@ -397,7 +399,7 @@ View SelectionDemo() {
     ),
     GallerySection(
         "Grouped selection",
-        "SegmentedButton and Tabs keep selection controlled while owning different visual and semantic roles.",
+        "SegmentedButton, Tabs, and Select keep selection controlled across visible, navigational, and compact sets.",
         Column {
           SegmentedButton(
               {
@@ -415,7 +417,14 @@ View SelectionDemo() {
               },
               tab
           ).OnChanged([tab](std::size_t index) { tab = index; }),
-          Text::Format("Selected segment: {} · selected tab: {}", segment.Get() + 1, tab.Get() + 1),
+          Select(density_options, density, [](const std::string& label) {
+            return Text(label).Key(label);
+          }).Label("Density")
+            .OnChanged([density](std::size_t index) { density = index; }),
+          Text::Format(
+              "Selected segment: {} · selected tab: {} · density: {}",
+              segment + 1, tab + 1, density_options[density]
+          ),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
     GallerySection(

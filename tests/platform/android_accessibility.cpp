@@ -62,6 +62,14 @@ TEST_CASE("Android semantic frames use direct checked virtual view ids") {
   REQUIRE(std::search(encoded.begin(), encoded.end(), expected_label.begin(), expected_label.end()) != encoded.end());
 }
 
+TEST_CASE("Android semantic frames encode the ComboBox role") {
+  SemanticNode select;
+  select.role = SemanticRole::ComboBox;
+
+  const std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame({1, 0, {select}});
+  REQUIRE(ReadUint32(encoded, 33) == 24U);
+}
+
 TEST_CASE("Android semantic frames encode PlatformView anchors without changing the protocol version") {
   SemanticNode root;
   root.platform_view_identity = 0x0102030405060708ULL;

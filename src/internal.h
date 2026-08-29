@@ -532,7 +532,7 @@ struct ViewSpec {
   std::shared_ptr<const PlatformViewDeclaration> platform_view;
   const LayoutDescriptor* layout_descriptor = nullptr;
   const VirtualLayoutDescriptor* virtual_layout_descriptor = nullptr;
-  VirtualItemSource virtual_items;
+  ViewItemSource virtual_items;
   std::unordered_map<std::type_index, ErasedLayoutValue> layout_values;
   EventBindings event_bindings;
   std::function<void(const EventBindings&)> activation;
@@ -640,7 +640,7 @@ private:
 };
 
 struct VirtualNodeState {
-  VirtualItemSource source;
+  ViewItemSource source;
   std::unique_ptr<VirtualItemDependencyCapture> dependency_capture;
   std::unordered_map<std::size_t, View> item_declarations;
   std::vector<std::size_t> realized_indices;

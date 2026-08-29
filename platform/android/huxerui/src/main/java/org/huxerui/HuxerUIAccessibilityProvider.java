@@ -58,6 +58,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     private static final int ROLE_GRID = 21;
     private static final int ROLE_GRID_CELL = 22;
     private static final int ROLE_SCROLL_VIEW = 23;
+    private static final int ROLE_COMBO_BOX = 24;
 
     private static final int SEMANTIC_ACTIVATE = 0;
     private static final int SEMANTIC_FOCUS = 1;
@@ -438,7 +439,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         }
         for (int childId : node.children) {
             Node child = current.nodes.get(childId);
-            if (child != null && child.role == ROLE_RADIO_BUTTON) {
+            if (child != null && (child.role == ROLE_RADIO_BUTTON || child.selected != null)) {
                 return true;
             }
         }
@@ -874,6 +875,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             return "android.widget.SeekBar";
         case ROLE_PROGRESS:
             return "android.widget.ProgressBar";
+        case ROLE_COMBO_BOX:
+            return "android.widget.Spinner";
         case ROLE_TEXT_FIELD:
         case ROLE_SEARCH_FIELD:
             return "android.widget.EditText";

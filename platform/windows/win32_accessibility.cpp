@@ -77,6 +77,8 @@ CONTROLTYPEID ControlType(SemanticRole role) noexcept {
     return UIA_SliderControlTypeId;
   case SemanticRole::ProgressIndicator:
     return UIA_ProgressBarControlTypeId;
+  case SemanticRole::ComboBox:
+    return UIA_ComboBoxControlTypeId;
   case SemanticRole::TextField:
   case SemanticRole::SearchField:
     return UIA_EditControlTypeId;
@@ -107,7 +109,7 @@ CONTROLTYPEID ControlType(SemanticRole role) noexcept {
 }
 
 bool IsSelectionContainer(SemanticRole role) noexcept {
-  return role == SemanticRole::TabList || role == SemanticRole::Navigation;
+  return role == SemanticRole::TabList || role == SemanticRole::Navigation || role == SemanticRole::List;
 }
 
 bool SupportsInvoke(const SemanticNode& node) noexcept {
@@ -120,7 +122,8 @@ bool SupportsToggle(const SemanticNode& node) noexcept {
 }
 
 bool SupportsValue(const SemanticNode& node) noexcept {
-  return node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField;
+  return node.role == SemanticRole::ComboBox || node.role == SemanticRole::TextField ||
+         node.role == SemanticRole::SearchField;
 }
 
 bool SupportsScroll(const SemanticNode& node) noexcept {

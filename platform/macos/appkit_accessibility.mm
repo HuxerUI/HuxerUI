@@ -40,6 +40,8 @@ NSString* AccessibilityRole(huxerui::SemanticRole role) {
     return NSAccessibilitySliderRole;
   case SemanticRole::ProgressIndicator:
     return NSAccessibilityProgressIndicatorRole;
+  case SemanticRole::ComboBox:
+    return NSAccessibilityPopUpButtonRole;
   case SemanticRole::TextField:
   case SemanticRole::SearchField:
     return NSAccessibilityTextFieldRole;

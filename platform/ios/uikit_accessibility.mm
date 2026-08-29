@@ -140,6 +140,7 @@ UIAccessibilityTraits Traits(const SemanticNode& node, bool container) {
       traits |= UIAccessibilityTraitImage;
       break;
     case SemanticRole::Button:
+    case SemanticRole::ComboBox:
     case SemanticRole::MenuItem:
     case SemanticRole::Tab:
       traits |= UIAccessibilityTraitButton;

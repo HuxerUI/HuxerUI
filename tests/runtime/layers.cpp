@@ -340,7 +340,14 @@ TEST_CASE("PresentationFactoriesBindTypedArguments") {
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "Popup 5"));
+  REQUIRE(layer_popup->Update(popup, ParameterizedPopupContent, std::string{"Updated popup"}, 6));
+  const FlattenedScene& updated_popup = runtime.BuildFrame();
+  REQUIRE(!ContainsText(updated_popup, "Popup 5"));
+  REQUIRE(ContainsText(updated_popup, "Updated popup 6"));
+  REQUIRE(layer_popup_context.has_value());
+  REQUIRE(layer_popup_context->Id() == popup);
   REQUIRE(layer_popup->Dismiss(popup));
+  REQUIRE_FALSE(layer_popup->Update(popup, [] { return Text("missing popup"); }));
 }
 
 TEST_CASE("TestPopupAndMenuHandlesReplaceTheirActiveEntries") {

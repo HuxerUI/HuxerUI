@@ -377,7 +377,7 @@ template <ViewChild... Children> std::vector<View> CollectChildren(Children&&...
   return result;
 }
 
-struct VirtualItemSource {
+struct ViewItemSource {
   std::size_t size = 0;
   std::function<View(std::size_t)> factory;
 };
@@ -386,7 +386,7 @@ template <std::ranges::input_range Range, class Factory>
   requires std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>> &&
            std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
            std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
-VirtualItemSource MakeVirtualItemSource(Range&& range, Factory&& factory) {
+ViewItemSource MakeViewItemSource(Range&& range, Factory&& factory) {
   using Value = std::ranges::range_value_t<Range>;
   auto values = std::make_shared<std::vector<Value>>();
   if constexpr (std::ranges::sized_range<Range>) {
@@ -408,7 +408,7 @@ VirtualItemSource MakeVirtualItemSource(Range&& range, Factory&& factory) {
 template <class Factory>
   requires std::invocable<Factory&, std::size_t> &&
            std::convertible_to<std::invoke_result_t<Factory&, std::size_t>, View>
-VirtualItemSource MakeVirtualItemSource(std::size_t item_count, Factory&& factory) {
+ViewItemSource MakeViewItemSource(std::size_t item_count, Factory&& factory) {
   auto shared_factory = std::make_shared<std::decay_t<Factory>>(std::forward<Factory>(factory));
   return {
       item_count,
@@ -422,7 +422,8 @@ VirtualItemSource MakeVirtualItemSource(std::size_t item_count, Factory&& factor
 
 namespace detail {
 
-std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, VirtualItemSource source);
+std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, ViewItemSource source);
+std::shared_ptr<ViewSpec> MakeSelectSpec(ViewItemSource source, std::size_t selected_index);
 
 template <class Derived> class TypedView : public View {
 public:
@@ -530,7 +531,7 @@ public:
              std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
              std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
   explicit VirtualLayout(Range&& range, Factory&& factory)
-      : VirtualLayout(detail::MakeVirtualItemSource(std::forward<Range>(range), std::forward<Factory>(factory))) {}
+      : VirtualLayout(detail::MakeViewItemSource(std::forward<Range>(range), std::forward<Factory>(factory))) {}
 
   template <class Range, class Factory>
     requires std::ranges::input_range<const Range&> &&
@@ -543,10 +544,10 @@ public:
     requires std::invocable<Factory&, std::size_t> &&
              std::convertible_to<std::invoke_result_t<Factory&, std::size_t>, View>
   VirtualLayout(std::size_t item_count, Factory&& factory)
-      : VirtualLayout(detail::MakeVirtualItemSource(item_count, std::forward<Factory>(factory))) {}
+      : VirtualLayout(detail::MakeViewItemSource(item_count, std::forward<Factory>(factory))) {}
 
 protected:
-  explicit VirtualLayout(detail::VirtualItemSource source)
+  explicit VirtualLayout(detail::ViewItemSource source)
       : detail::TypedView<Derived>(
             detail::MakeVirtualLayoutSpec(detail::VirtualLayoutDescriptorFor<Derived>(), std::move(source))
         ) {}
@@ -677,6 +678,61 @@ public:
   template <class Function> Tabs OnChanged(Function&& function) && {
     return std::move(*this).On<TabsEvents::Changed>(std::forward<Function>(function));
   }
+};
+
+class Select final : public detail::TypedView<Select> {
+public:
+  template <std::ranges::input_range Range, class Factory>
+    requires std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
+  Select(Range&& items, std::size_t selected_index, Factory&& content)
+      : Select(
+            detail::MakeViewItemSource(std::forward<Range>(items), std::forward<Factory>(content)), selected_index
+        ) {}
+
+  template <std::ranges::input_range Range, class Factory>
+    requires std::constructible_from<std::ranges::range_value_t<Range>, std::ranges::range_reference_t<Range>> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<Range>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<Range>>, View>
+  Select(Range&& items, const State<std::size_t>& selected_index, Factory&& content)
+      : Select(std::forward<Range>(items), selected_index.Get(), std::forward<Factory>(content)) {}
+
+  template <class Range, class Factory>
+    requires std::ranges::input_range<const Range&> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<const Range&>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<const Range&>>, View>
+  Select(const State<Range>& items, std::size_t selected_index, Factory&& content)
+      : Select(items.Get(), selected_index, std::forward<Factory>(content)) {}
+
+  template <class Range, class Factory>
+    requires std::ranges::input_range<const Range&> &&
+             std::invocable<Factory&, std::ranges::range_reference_t<const Range&>> &&
+             std::convertible_to<std::invoke_result_t<Factory&, std::ranges::range_reference_t<const Range&>>, View>
+  Select(const State<Range>& items, const State<std::size_t>& selected_index, Factory&& content)
+      : Select(items.Get(), selected_index.Get(), std::forward<Factory>(content)) {}
+
+  template <class Function> Select OnChanged(Function&& function) && {
+    return std::move(*this).On<SelectEvents::Changed>(std::forward<Function>(function));
+  }
+
+  Select Label(StringVariant value) &&;
+  Select Validation(ValidationResult value) &&;
+
+private:
+  Select(detail::ViewItemSource source, std::size_t selected_index)
+      : detail::TypedView<Select>(detail::MakeSelectSpec(source, selected_index)),
+        source_(std::move(source)),
+        selected_index_(selected_index) {
+    UpdateModifier();
+  }
+
+  void UpdateModifier();
+
+  detail::ViewItemSource source_;
+  std::size_t selected_index_ = 0;
+  StringVariant label_;
+  ValidationResult validation_;
 };
 
 class Image final : public View {

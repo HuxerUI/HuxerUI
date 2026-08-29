@@ -132,6 +132,8 @@ std::int32_t AndroidRole(SemanticRole role) noexcept {
     return 22;
   case SemanticRole::ScrollView:
     return 23;
+  case SemanticRole::ComboBox:
+    return 24;
   }
   return 0;
 }

@@ -2,6 +2,7 @@
 
 #include <wrl/client.h>
 
+#include <array>
 #include <memory>
 #include <ranges>
 #include <string>
@@ -24,6 +25,7 @@ View WindowsAccessibilityApp() {
   return Column{
       Button("Run").OnClick([] { ++accessibility_clicks; }),
       Slider(slider.Get()).Range(0.0F, 10.0F).Step(0.5F).OnChanged([slider](float value) mutable { slider = value; }),
+      Select(std::array{"One", "Two"}, 0, [](const char* label) { return Text(label); }).Label("Number"),
       TextField(text).Label("Editor").OnChanged([text](const TextEditingValue& value) mutable { text = value; }),
   };
 }
@@ -67,6 +69,26 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
   REQUIRE(control_type.vt == VT_I4);
   REQUIRE(control_type.lVal == UIA_ButtonControlTypeId);
 
+  const SemanticNode& select_node = FindNode(*frame, SemanticRole::ComboBox);
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> select;
+  REQUIRE(accessibility.ProviderForNode(select_node.id, &select) == S_OK);
+  VariantClear(&control_type);
+  REQUIRE(select->GetPropertyValue(UIA_ControlTypePropertyId, &control_type) == S_OK);
+  REQUIRE(control_type.vt == VT_I4);
+  REQUIRE(control_type.lVal == UIA_ComboBoxControlTypeId);
+  VariantClear(&control_type);
+  REQUIRE(PropertyString(*select.Get(), UIA_NamePropertyId) == L"Number");
+  Microsoft::WRL::ComPtr<IValueProvider> select_value;
+  REQUIRE(select.As(&select_value) == S_OK);
+  BSTR selected_text = nullptr;
+  REQUIRE(select_value->get_Value(&selected_text) == S_OK);
+  REQUIRE(std::wstring(selected_text, SysStringLen(selected_text)) == L"One");
+  SysFreeString(selected_text);
+  BOOL select_read_only = FALSE;
+  REQUIRE(select_value->get_IsReadOnly(&select_read_only) == S_OK);
+  REQUIRE(select_read_only == TRUE);
+  REQUIRE(select_value->SetValue(L"Two") == UIA_E_NOTSUPPORTED);
+
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> same_button;
   REQUIRE(accessibility.ProviderForNode(button_node.id, &same_button) == S_OK);
   REQUIRE(button.Get() == same_button.Get());
@@ -87,6 +109,59 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
   REQUIRE(runtime_id != nullptr);
   REQUIRE(runtime_id->rgsabound[0].cElements == 3);
   SafeArrayDestroy(runtime_id);
+}
+
+TEST_CASE("Windows accessibility exposes semantic Lists with selected children as single-selection containers") {
+  auto frame = std::make_shared<SemanticFrame>();
+  frame->revision = 1;
+  frame->root = 1;
+  frame->nodes = {
+      SemanticNode{.id = 1, .children = {2}},
+      SemanticNode{
+          .id = 2,
+          .parent = 1,
+          .children = {3, 4},
+          .role = SemanticRole::List,
+          .collection = SemanticCollection{.item_count = 2},
+      },
+      SemanticNode{
+          .id = 3,
+          .parent = 2,
+          .role = SemanticRole::ListItem,
+          .label = "One",
+          .selected = true,
+          .actions = SemanticActionMask(SemanticActionKind::Activate),
+      },
+      SemanticNode{
+          .id = 4,
+          .parent = 2,
+          .role = SemanticRole::ListItem,
+          .label = "Two",
+          .selected = false,
+          .actions = SemanticActionMask(SemanticActionKind::Activate),
+      },
+  };
+
+  detail::Win32Accessibility accessibility;
+  accessibility.Commit(frame, nullptr);
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> list;
+  REQUIRE(accessibility.ProviderForNode(2, &list) == S_OK);
+  Microsoft::WRL::ComPtr<ISelectionProvider> selection;
+  REQUIRE(list.As(&selection) == S_OK);
+  BOOL multiple = TRUE;
+  BOOL required = FALSE;
+  REQUIRE(selection->get_CanSelectMultiple(&multiple) == S_OK);
+  REQUIRE(selection->get_IsSelectionRequired(&required) == S_OK);
+  REQUIRE(multiple == FALSE);
+  REQUIRE(required == TRUE);
+
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> item;
+  REQUIRE(accessibility.ProviderForNode(3, &item) == S_OK);
+  Microsoft::WRL::ComPtr<ISelectionItemProvider> selection_item;
+  REQUIRE(item.As(&selection_item) == S_OK);
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> container;
+  REQUIRE(selection_item->get_SelectionContainer(&container) == S_OK);
+  REQUIRE(container.Get() == list.Get());
 }
 
 TEST_CASE("Windows accessibility patterns route actions through Runtime") {

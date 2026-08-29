@@ -2783,7 +2783,7 @@ std::shared_ptr<ViewSpec> MakeLayoutSpec(const LayoutDescriptor& layout, std::ve
   return spec;
 }
 
-std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, VirtualItemSource source) {
+std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, ViewItemSource source) {
   if (source.size > 0 && !source.factory) {
     throw std::invalid_argument("HuxerUI virtual item factory must not be empty");
   }
@@ -2841,8 +2841,14 @@ void View::AddModifier(detail::ModifierSpec modifier) {
 }
 
 void View::SetModifier(detail::ModifierSpec modifier) {
-  if (modifier.descriptor == nullptr || !modifier.value || modifier.descriptor->create_extension == nullptr) {
-    throw std::invalid_argument("HuxerUI retained modifier descriptor and value must not be empty");
+  if (modifier.descriptor == nullptr || !modifier.value) {
+    throw std::invalid_argument("HuxerUI modifier descriptor and value must not be empty");
+  }
+  if (modifier.descriptor->create_extension == nullptr && modifier.descriptor->update_extension != nullptr) {
+    throw std::invalid_argument("HuxerUI modifier extension update requires extension creation");
+  }
+  if (modifier.descriptor->compile == nullptr && modifier.descriptor->create_extension == nullptr) {
+    throw std::invalid_argument("HuxerUI modifier descriptor must compile or create a node extension");
   }
   EnsureUniqueSpec();
   const auto found = std::ranges::find_if(spec_->modifiers, [&modifier](const detail::ModifierSpec& existing) {

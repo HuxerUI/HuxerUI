@@ -179,6 +179,10 @@ struct TabsEvents {
   struct Changed : Event<std::size_t> {};
 };
 
+struct SelectEvents {
+  struct Changed : Event<std::size_t> {};
+};
+
 struct NavigationEvents {
   struct Changed : Event<std::size_t> {};
 };
