@@ -114,6 +114,7 @@ int mac_platform_view_event_value = 0;
 std::vector<std::string> mac_platform_view_controller_operations;
 PlatformEventEmitter mac_platform_view_events;
 NSView* mac_created_platform_view = nil;
+NSWindow* mac_created_platform_view_window = nil;
 NSTextField* mac_created_focus_text_field = nil;
 
 struct MacPlatformViewEvents {
@@ -168,9 +169,10 @@ View MacPlatformViewApp() {
 macos::PlatformViewFactory<MacPlatformViewProperties, MacPlatformViewState, int> MacTestFactory() {
   return {
       .create =
-          [](NSWindow*, const MacPlatformViewProperties& properties, PlatformEventEmitter events) {
+          [](NSWindow* window, const MacPlatformViewProperties& properties, PlatformEventEmitter events) {
             ++mac_platform_view_creates;
             mac_platform_view_events = std::move(events);
+            mac_created_platform_view_window = window;
             NSButton* button = [[HuxerUITestPlatformView alloc] initWithFrame:NSZeroRect];
             button.title = [NSString stringWithFormat:@"%d", properties.value];
             mac_created_platform_view = button;
@@ -263,6 +265,7 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     mac_platform_view_controller_operations.clear();
     mac_platform_view_events = {};
     mac_created_platform_view = nil;
+    mac_created_platform_view_window = nil;
 
     MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
@@ -273,13 +276,18 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
     NSView* root = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
 
     REQUIRE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(mac_platform_view_creates == 1);
     REQUIRE(mac_platform_view_updates == 0);
     REQUIRE(mac_created_platform_view != nil);
+    REQUIRE(mac_created_platform_view_window == window);
     REQUIRE((mac_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
     REQUIRE(root.subviews.count == 2);
     REQUIRE(mac_created_platform_view.superview == root.subviews.firstObject);
@@ -352,11 +360,11 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
                                                        defer:NO];
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
     NSView* root = [[HuxerUITestPlatformRootView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
     window.contentView = root;
     REQUIRE([window makeFirstResponder:root]);
@@ -399,12 +407,12 @@ TEST_CASE("MacPlatformViewsTraverseBetweenHostedTextFieldAndRuntimeFocus") {
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime());
     HuxerUITestPlatformWindow* window =
         [[HuxerUITestPlatformWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 200.0, 120.0)
                                                      styleMask:NSWindowStyleMaskBorderless
                                                        backing:NSBackingStoreBuffered
                                                          defer:NO];
+    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
     HuxerUITestPlatformRootView* root =
         [[HuxerUITestPlatformRootView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
     window->huxeruiPlatformViews = &platform_views;

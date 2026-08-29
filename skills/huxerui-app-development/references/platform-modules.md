@@ -40,14 +40,33 @@ Web provides `web::JavaScriptPlatformModuleFactory<Module, Options>` for a linke
 The RootHook supplies its actual `emscripten::val`, and `connect` wraps the framework-owned `PlatformChannel` in the library's exact Module type.
 JavaScript receives immutable `Module.HuxerUI.PlatformPayload` values and one framework-owned events endpoint; it does not require inheritance or a second name registry.
 
-The Apple Objective-C/Swift common adapter is future work.
-Current Apple libraries use direct Objective-C++ factories or a library-owned bridge while retaining the same RootHook registration and typed public Module contract.
+iOS and macOS expose their Objective-C/Swift contracts through the pure Objective-C Clang module `HuxerUIPlatform`.
+An Objective-C or Swift implementation conforms to `UIKitPlatformModuleFactory` or `AppKitPlatformModuleFactory` and returns a `PlatformModule` instance.
+The library's Objective-C++ RootHook passes the actual factory object to the matching typed adapter:
+
+```cpp
+ios::ObjectiveCPlatformModuleFactory<std::shared_ptr<AudioPlayer>, AudioPlayerOptions> factory{
+    .factory = actual_factory,
+    .connect = [](PlatformChannel channel) {
+      return std::make_shared<ChannelAudioPlayer>(std::move(channel));
+    },
+};
+root.RegisterPlatformModule<std::shared_ptr<AudioPlayer>, AudioPlayerOptions>(
+    "audio/Player",
+    std::move(factory)
+);
+```
+
+Use `macos::ObjectiveCPlatformModuleFactory` for AppKit.
+The framework does not look up a class name, generate a registrant, or require the application delegate to register the factory again.
+Direct Objective-C++ implementations remain strongly typed through `ios::PlatformModuleFactory` or `macos::PlatformModuleFactory` and do not use payloads.
 
 `PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
 Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.
 Results and events return asynchronously through that dispatcher.
 `Cancel` and `Close` invalidate C++ delivery immediately; queued invocations are skipped, in-flight cancellation runs before disposal, and late results or events are ignored.
 The channel is a reusable transport convenience, not a PlatformModule base class or the Module API exposed to application UI.
+Apple factory creation, invocation, cancellation, and disposal run on the UIKit or AppKit main thread; results and events may originate on any queue and resume through the owning surface dispatcher.
 
 ## Review points
 

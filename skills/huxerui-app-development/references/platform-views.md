@@ -45,8 +45,8 @@ Use the active platform's public `platform_registry.h` factory contract:
 
 - Windows returns a same-process, same-thread child `HWND` of the supplied parent.
 - Android returns a Java `View` through either a direct JNI factory or `android::JavaPlatformViewFactory`.
-- iOS returns `UIView*` from Objective-C++.
-- macOS returns `NSView*` from Objective-C++.
+- iOS returns a detached stable `UIView*` from Objective-C++ or an actual Objective-C/Swift factory object.
+- macOS returns a detached stable `NSView*` from Objective-C++ or an actual Objective-C/Swift factory object.
 - Web returns a detached DOM element through a direct Emscripten C++ factory or `web::JavaScriptPlatformViewFactory`.
 
 `PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
@@ -57,7 +57,11 @@ Direct create, update, Controller, and disposal callbacks receive their exact pl
 
 Android currently provides the common Java/Kotlin class adapter.
 Web currently provides the common JavaScript structural adapter: the RootHook supplies the actual factory object, Properties use `Module.HuxerUI.PlatformPayload`, and events use one framework-owned emitter.
-Apple Objective-C/Swift common adapters are future work; current Apple implementations use direct platform factories or library-owned bridges.
+iOS and macOS expose `UIKitPlatformViewFactory` or `AppKitPlatformViewFactory`, their View protocols, payload endpoints, and cancellation endpoints through the `HuxerUIPlatform` Clang module.
+The Objective-C++ RootHook supplies the actual Objective-C or Swift factory object to `ios::ObjectiveCPlatformViewFactory<Properties, Controller>` or `macos::ObjectiveCPlatformViewFactory<Properties, Controller>`.
+Its `connect` callback attaches the returned `PlatformChannel` to the exact library Controller, and `disconnect` detaches that Controller before View disposal.
+Factories receive the owning `UIViewController` or `NSWindow`; they return the stable detached View and never attach it themselves.
+Direct Objective-C++ factories remain available through `ios::PlatformViewFactory` and `macos::PlatformViewFactory` without a payload round trip.
 Every path still registers once through the library RootHook; application hosts, delegates, and Web mount calls do not form a second registry.
 
 Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.

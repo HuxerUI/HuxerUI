@@ -1,7 +1,7 @@
-#import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 #import <dispatch/dispatch.h>
 
-#include "timer.h"
+#include "apple_timer.h"
 #include "runtime_test_support.h"
 
 #include <chrono>
@@ -16,19 +16,6 @@ namespace huxerui::test {
 namespace {
 
 using namespace std::chrono_literals;
-
-std::weak_ptr<example::TimerService> mac_timer_service;
-
-View MacPlatformModuleApp() {
-  mac_timer_service = example::UseTimer();
-  return Text("platform module");
-}
-
-AppOptions MacPlatformModuleOptions() {
-  AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back(example::InstallTimer);
-  return options;
-}
 
 void DispatchToMainQueue(std::function<void()> task) {
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -51,15 +38,22 @@ void RunMainLoopFor(std::chrono::milliseconds duration) {
   static_cast<void>(RunMainLoopUntil([] { return false; }, duration));
 }
 
+std::shared_ptr<example::TimerService> CreateTimer(TestPlatform& platform, NSWindow* window) {
+  PlatformChannel channel = macos::detail::CreateObjectiveCPlatformModule(
+      platform, window, example::CreateAppleTimerFactory(), {}
+  );
+  return example::CreateAppleTimerService(std::move(channel));
+}
+
 TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
   @autoreleasepool {
     REQUIRE(NSThread.isMainThread);
-    mac_timer_service.reset();
     TestPlatform platform(DispatchToMainQueue);
-    Runtime runtime(MacPlatformModuleApp, platform, MacPlatformModuleOptions());
-    runtime.SetWindowMetrics({{320.0F, 200.0F}});
-    static_cast<void>(runtime.BuildRenderFrame());
-    const std::shared_ptr<example::TimerService> timer = mac_timer_service.lock();
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    const std::shared_ptr<example::TimerService> timer = CreateTimer(platform, window);
     REQUIRE(timer != nullptr);
 
     bool inside_call = true;
@@ -123,16 +117,16 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
 
 TEST_CASE("MacPlatformModuleCancelsAndDisposesFoundationTimer") {
   @autoreleasepool {
-    mac_timer_service.reset();
     bool completed = false;
     bool ticked = false;
     std::weak_ptr<example::TimerService> service_lifetime;
     {
       TestPlatform platform(DispatchToMainQueue);
-      Runtime runtime(MacPlatformModuleApp, platform, MacPlatformModuleOptions());
-      runtime.SetWindowMetrics({{320.0F, 200.0F}});
-      static_cast<void>(runtime.BuildRenderFrame());
-      std::shared_ptr<example::TimerService> timer = mac_timer_service.lock();
+      NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
+                                                     styleMask:NSWindowStyleMaskBorderless
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+      std::shared_ptr<example::TimerService> timer = CreateTimer(platform, window);
       REQUIRE(timer != nullptr);
       service_lifetime = timer;
 

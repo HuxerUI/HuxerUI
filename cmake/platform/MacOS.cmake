@@ -10,6 +10,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/macos/macos_file.mm"
         "${HUXERUI_PROJECT_DIR}/platform/macos/macos_file_picker.mm"
         "${HUXERUI_PROJECT_DIR}/platform/macos/macos_http.mm"
+        "${HUXERUI_PROJECT_DIR}/platform/macos/macos_platform_registry.mm"
 )
 set(HUXERUI_PLATFORM_COMPILE_OPTIONS
         -fobjc-arc

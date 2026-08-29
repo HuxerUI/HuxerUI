@@ -47,7 +47,9 @@ Packaging output belongs in a build directory and must not be written into the s
 
 Every SDK must contain the CLI, host code generators, public headers, framework resources, the canonical application-development Skill under `share/huxerui/skills`, CMake package metadata, Android artifacts, and the pinned Web library.
 Desktop SDKs additionally contain their host libraries; the Android host SDK consumes the packaged Android target artifacts instead of carrying a duplicate host library.
-The macOS SDK must also contain `share/huxerui/platform/ios/HuxerUI.xcframework` with `ios-arm64` and `ios-arm64_x86_64-simulator` slices; Windows and Linux SDKs do not carry iOS binaries.
+The macOS SDK must expose the macOS `HuxerUIPlatform` Clang module beside its public headers and contain `share/huxerui/platform/ios/HuxerUI.xcframework` with `ios-arm64` and `ios-arm64_x86_64-simulator` slices.
+Both XCFramework slices must expose the iOS `HuxerUIPlatform` module, and Objective-C plus Swift import-and-link fixtures must pass against the packaged libraries.
+Windows and Linux SDKs do not carry iOS binaries.
 Install the archive into a temporary prefix and validate at least:
 
 ```bash

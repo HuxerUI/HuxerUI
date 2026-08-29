@@ -30,3 +30,4 @@ Use `Path` and its public builder operations for filled or stroked geometry. Res
 - Web: an `emscripten::val` video-frame source.
 
 Create the source with an intrinsic DIP size, expose `Texture()` to UI, publish platform frames, and call `Finish()` when no more frames will arrive. Use `PlatformView` instead when a live platform control must own input, IME, accessibility, or platform lifecycle.
+Objective-C and Swift on iOS or macOS use `ExternalTextureSource` from `HuxerUIPlatform`; it wraps the same platform source, publishes `CVPixelBuffer` frames, and may travel inside `PlatformPayload` without a public texture identifier or second registry.

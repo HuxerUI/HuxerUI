@@ -7,6 +7,8 @@
 
 #include "external_texture_internal.h"
 
+@class HUXExternalTexture;
+
 namespace huxerui::detail {
 
 class IosExternalTextureState final : public ExternalTextureState {
@@ -27,3 +29,10 @@ private:
 };
 
 } // namespace huxerui::detail
+
+namespace huxerui::ios::detail {
+
+HUXExternalTexture* WrapExternalTexture(ExternalTexture texture);
+ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture);
+
+} // namespace huxerui::ios::detail

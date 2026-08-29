@@ -21,6 +21,7 @@
 
 #include <huxerui/app.h>
 #include <huxerui/gesture.h>
+#include <huxerui/macos/platform_registry.h>
 
 #include "appkit_accessibility.h"
 #include "appkit_platform_view.h"
@@ -199,13 +200,6 @@ public:
         startup_activation = std::move(pending_activations_.front());
         pending_activations_.erase(pending_activations_.begin());
       }
-      Runtime runtime{application_definition, *this, std::move(startup_activation)};
-      runtime_ = &runtime;
-      for (ApplicationActivation& activation : pending_activations_) {
-        runtime.HandleApplicationActivation(std::move(activation));
-      }
-      pending_activations_.clear();
-
       const NSRect frame = NSMakeRect(0.0, 0.0, options.initial_size.width, options.initial_size.height);
       custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
       custom_title_bar_height_ = options.title_bar_height;
@@ -231,6 +225,13 @@ public:
         }
       }
 
+      Runtime runtime{application_definition, *this, std::move(startup_activation)};
+      runtime_ = &runtime;
+      for (ApplicationActivation& activation : pending_activations_) {
+        runtime.HandleApplicationActivation(std::move(activation));
+      }
+      pending_activations_.clear();
+
       view_ = [[HuxerUIView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = runtime_;
       view_->huxeruiAdapter = this;
@@ -239,7 +240,7 @@ public:
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
       text_input_ = std::make_unique<MacTextInput>(runtime, view_);
-      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, PlatformRegistry(), runtime);
+      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, PlatformRegistry(), runtime, window_);
       accessibility_ = std::make_unique<MacAccessibility>(runtime, view_, *platform_views_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       window_.contentView = view_;
@@ -273,6 +274,10 @@ public:
       }
     }
     return 0;
+  }
+
+  NSWindow* Window() const noexcept {
+    return window_;
   }
 
   void RequestFrameAt(double deadline) override {
@@ -816,6 +821,18 @@ int RunPlatformApplication(const Application& application) {
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui::macos::detail {
+
+NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
+  auto* mac_adapter = dynamic_cast<huxerui::detail::MacPlatformAdapter*>(&adapter);
+  if (mac_adapter == nullptr || mac_adapter->Window() == nil) {
+    throw std::logic_error("HuxerUI macOS platform module requires an owning NSWindow");
+  }
+  return mac_adapter->Window();
+}
+
+} // namespace huxerui::macos::detail
 
 @implementation HuxerUIWindow
 

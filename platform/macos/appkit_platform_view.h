@@ -19,7 +19,7 @@ class AppKitRenderer;
 
 class AppKitPlatformViews final {
 public:
-  AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime);
+  AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime, NSWindow* host_window);
   ~AppKitPlatformViews();
 
   AppKitPlatformViews(const AppKitPlatformViews&) = delete;

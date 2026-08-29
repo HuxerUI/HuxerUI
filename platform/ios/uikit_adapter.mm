@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
+#include <huxerui/ios/platform_registry.h>
 
 #include "ios_application_internal.h"
 #include "ios_file_internal.h"
@@ -278,18 +279,13 @@ public:
 
   bool StartRuntime(ApplicationActivation startup_activation) noexcept {
     try {
-      runtime_ = std::make_unique<Runtime>(application_, *this, std::move(startup_activation));
-      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
-
       window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
       view_controller_ = [[HuxerUIIOSViewController alloc] init];
       view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
 
       view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
       view_.translatesAutoresizingMaskIntoConstraints = NO;
-      view_->huxeruiRuntime = runtime_.get();
       view_->huxeruiAdapter = this;
-      platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, PlatformRegistry(), *runtime_);
       [view_controller_.view addSubview:view_];
       [NSLayoutConstraint activateConstraints:@[
         [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
@@ -299,6 +295,13 @@ public:
       ]];
 
       window_.rootViewController = view_controller_;
+      [view_controller_.view layoutIfNeeded];
+
+      runtime_ = std::make_unique<Runtime>(application_, *this, std::move(startup_activation));
+      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+      view_->huxeruiRuntime = runtime_.get();
+      platform_views_ = std::make_unique<UIKitPlatformViews>(renderer_, PlatformRegistry(), *runtime_);
+
       [window_ makeKeyAndVisible];
       [view_controller_.view layoutIfNeeded];
 
@@ -357,6 +360,10 @@ public:
 
   static IosPlatformAdapter* Active() noexcept {
     return active_adapter_;
+  }
+
+  UIViewController* ViewController() const noexcept {
+    return view_controller_;
   }
 
   void RequestFrameAt(double deadline) override {
@@ -710,6 +717,18 @@ int RunPlatformApplication(const Application& application) {
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui::ios::detail {
+
+UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
+  auto* ios_adapter = dynamic_cast<huxerui::detail::IosPlatformAdapter*>(&adapter);
+  if (ios_adapter == nullptr || ios_adapter->ViewController() == nil) {
+    throw std::logic_error("HuxerUI iOS platform module requires an owning UIViewController");
+  }
+  return ios_adapter->ViewController();
+}
+
+} // namespace huxerui::ios::detail
 
 @implementation HuxerUIView
 

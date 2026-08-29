@@ -38,6 +38,7 @@ Build with Xcode and the macOS SDK.
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
 System tray presentation uses an AppKit status item and platform menu.
+The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
 
 ## Linux
 
@@ -85,6 +86,7 @@ huxerui run ios --device <id>
 
 Physical-device builds use Xcode signing settings owned by the generated project and local developer configuration.
 External files preserve security-scoped access when required.
+The iOS XCFramework exposes UIKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
 
 ## Shared behavior
 

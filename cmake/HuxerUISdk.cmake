@@ -53,6 +53,12 @@ install(DIRECTORY "${HUXERUI_PUBLIC_HEADER_DIR}"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
+if (APPLE AND NOT IOS)
+    install(FILES "${HUXERUI_PROJECT_DIR}/platform/macos/HuxerUIPlatform.modulemap"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+            RENAME module.modulemap
+    )
+endif ()
 install(DIRECTORY "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/resources"
 )
@@ -157,10 +163,12 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
         )
         foreach (HUXERUI_REQUIRED_IOS_ARTIFACT IN ITEMS
                 "${HUXERUI_IOS_XCFRAMEWORK}/Info.plist"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/module.modulemap"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/huxerui/data.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/Headers/huxerui/huxerui.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64/libhuxerui_static.a"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/huxerui/data.h"
+                "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/module.modulemap"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/Headers/huxerui/huxerui.h"
                 "${HUXERUI_IOS_XCFRAMEWORK}/ios-arm64_x86_64-simulator/libhuxerui_static.a"
         )

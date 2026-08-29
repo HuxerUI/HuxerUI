@@ -1,0 +1,5 @@
+module HuxerUIPlatform {
+  header "huxerui/ios/platform_registry.h"
+  header "huxerui/ios/external_texture.h"
+  export *
+}

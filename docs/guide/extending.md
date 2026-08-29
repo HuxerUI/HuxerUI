@@ -83,6 +83,10 @@ The application-facing service owns typed requests, results, and events; the pla
 `PlatformPayload` uses the top-level `Bytes` type for owned binary payloads, while `AsBytes()` returns a borrowed `std::span<const std::byte>`.
 Keep strings for valid UTF-8 text and bytes for encoding-independent data; `PlatformPayload` does not convert between them.
 
+iOS and macOS libraries may implement the platform side in Objective-C or Swift through the `HuxerUIPlatform` Clang module.
+Their Objective-C++ RootHook passes the actual factory object to `ios::ObjectiveCPlatformModuleFactory` or `macos::ObjectiveCPlatformModuleFactory`, then wraps the resulting `PlatformChannel` in the library's typed service.
+The same platform headers retain the direct Objective-C++ factory path; factory class-name lookup and application-host registration are not used.
+
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
 Use ExternalTexture when a producer supplies image frames rather than an interactive platform view.
 

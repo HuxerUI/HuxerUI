@@ -1,0 +1,5 @@
+module HuxerUIPlatform {
+  header "huxerui/macos/platform_registry.h"
+  header "huxerui/macos/external_texture.h"
+  export *
+}

@@ -228,10 +228,15 @@ bool IsDescendant(NSView* view, NSView* ancestor) {
 } // namespace
 
 struct AppKitPlatformViews::State {
-  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value)
-      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value) {}
+  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value,
+        NSWindow* host_window_value)
+      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value), host_window(host_window_value) {
+    if (host_window == nil) {
+      throw std::logic_error("HuxerUI macOS PlatformView host window must not be nil");
+    }
+  }
 
-  std::unique_ptr<HostedPlatformView> Create(NSView* root, const PlatformViewPlacement& placement) {
+  std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
     std::shared_ptr<const macos::detail::AppKitViewFactory> factory =
         registry->FindView<macos::detail::AppKitViewFactory>(command.Type(), command.Properties().Type(),
@@ -275,7 +280,11 @@ struct AppKitPlatformViews::State {
     hosted->factory = std::move(factory);
     hosted->controller = command.Controller();
     @try {
-      hosted->instance = hosted->factory->create(root.window, command.Properties(), std::move(events));
+      NSWindow* owner_window = host_window;
+      if (owner_window == nil) {
+        throw std::logic_error("HuxerUI macOS PlatformView host window is unavailable");
+      }
+      hosted->instance = hosted->factory->create(owner_window, command.Properties(), std::move(events));
       if (!hosted->instance || !hosted->factory->view) {
         throw std::logic_error("HuxerUI macOS PlatformView factory returned an empty instance");
       }
@@ -339,6 +348,7 @@ struct AppKitPlatformViews::State {
   AppKitRenderer* renderer;
   PlatformRegistry* registry;
   Runtime* runtime;
+  __weak NSWindow* host_window = nil;
   __weak NSView* root = nil;
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
@@ -348,8 +358,9 @@ struct AppKitPlatformViews::State {
   std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
 };
 
-AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime)
-    : state_(std::make_unique<State>(renderer, registry, runtime)) {}
+AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
+                                         NSWindow* host_window)
+    : state_(std::make_unique<State>(renderer, registry, runtime, host_window)) {}
 
 AppKitPlatformViews::~AppKitPlatformViews() {
   Shutdown();
@@ -371,7 +382,7 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     retained_identities.insert(command.Identity());
     const auto found = state_->hosted.find(command.Identity());
     if (found == state_->hosted.end() || found->second->type != command.Type()) {
-      pending.emplace_back(command.Identity(), state_->Create(root, *placement));
+      pending.emplace_back(command.Identity(), state_->Create(*placement));
       continue;
     }
     found->second->Update(command);

@@ -7,6 +7,8 @@
 
 #include "external_texture_internal.h"
 
+@class HUXExternalTexture;
+
 namespace huxerui::detail {
 
 class MacExternalTextureState final : public ExternalTextureState {
@@ -27,3 +29,10 @@ private:
 };
 
 } // namespace huxerui::detail
+
+namespace huxerui::macos::detail {
+
+HUXExternalTexture* WrapExternalTexture(ExternalTexture texture);
+ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture);
+
+} // namespace huxerui::macos::detail

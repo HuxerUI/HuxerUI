@@ -66,6 +66,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
             platform/macos_application.mm
             platform/macos_platform_module.mm
+            platform/macos_platform_bridge.mm
             platform/macos_platform_view.mm
             platform/macos_external_texture.mm
             platform/macos_file_picker.mm
@@ -74,11 +75,30 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     )
     set_source_files_properties(
             "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
+            platform/macos_platform_bridge.mm
             PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     target_include_directories(huxerui_tests PRIVATE
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
     )
+    if (TARGET ${HUXERUI_STATIC_LIB_NAME})
+        add_test(NAME HuxerUIMacStaticPlatformBridgeImport
+                COMMAND sh "${HUXERUI_PROJECT_DIR}/tests/platform/check_macos_platform_bridge.sh"
+                        "${HUXERUI_PROJECT_DIR}"
+                        "${HUXERUI_PUBLIC_INCLUDE_DIR}"
+                        "$<TARGET_FILE:${HUXERUI_STATIC_LIB_NAME}>"
+                        "${CMAKE_CURRENT_BINARY_DIR}/macos_platform_bridge_static"
+        )
+    endif ()
+    if (TARGET ${HUXERUI_SHARED_LIB_NAME})
+        add_test(NAME HuxerUIMacSharedPlatformBridgeImport
+                COMMAND sh "${HUXERUI_PROJECT_DIR}/tests/platform/check_macos_platform_bridge.sh"
+                        "${HUXERUI_PROJECT_DIR}"
+                        "${HUXERUI_PUBLIC_INCLUDE_DIR}"
+                        "$<TARGET_FILE:${HUXERUI_SHARED_LIB_NAME}>"
+                        "${CMAKE_CURRENT_BINARY_DIR}/macos_platform_bridge_shared"
+        )
+    endif ()
 endif ()
 
 if (WIN32)

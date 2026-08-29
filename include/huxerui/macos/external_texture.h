@@ -1,7 +1,39 @@
 #pragma once
 
+#if defined(__OBJC__)
+#import <CoreGraphics/CoreGraphics.h>
 #include <CoreVideo/CVPixelBuffer.h>
+#import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
+NS_SWIFT_NAME(ExternalTexture)
+__attribute__((objc_subclassing_restricted))
+@interface HUXExternalTexture : NSObject
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+@end
+
+NS_SWIFT_NAME(ExternalTextureSource)
+@interface HUXExternalTextureSource : NSObject
+- (instancetype)initWithIntrinsicSize:(CGSize)size NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
+@property(nonatomic, readonly) HUXExternalTexture* texture;
+- (void)publishPixelBuffer:(CVPixelBufferRef)pixelBuffer;
+- (void)finish;
+@end
+
+NS_ASSUME_NONNULL_END
+
+#else
+#include <CoreVideo/CVPixelBuffer.h>
+#endif
+
+#if defined(__cplusplus)
+#if defined(__OBJC__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#endif
 #include <memory>
 
 #include <huxerui/external_texture.h>
@@ -36,3 +68,8 @@ private:
 } // namespace macos
 
 } // namespace huxerui
+
+#if defined(__OBJC__)
+#pragma clang diagnostic pop
+#endif
+#endif
