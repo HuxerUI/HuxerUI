@@ -1168,9 +1168,9 @@ View DebugPanel(
 View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snapshot) {
   Frame ribbon_frame;
   ribbon_frame.width = 104.0F;
-  ribbon_frame.height = 20.0F;
+  ribbon_frame.height = 16.0F;
   return Row {
-    Text("DEBUG").Style(TextStyle{Font::System(11.0F).WithWeight(FontWeight::SemiBold), debug_ribbon_foreground}),
+    Text("DEBUG").Style(TextStyle{Font::System(11.0F).WithWeight(FontWeight::Medium), debug_ribbon_foreground}),
   }.With(
       ribbon_frame,
       MainAlign{MainAxisAlignment::Center},
