@@ -1,7 +1,7 @@
 # File and Application Storage Design
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
-The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, bounded platform asynchronous executor, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
+The shared `File`, `FileInfo`, `FileResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, shared native worker execution, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
 The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
 
 ## Goals
@@ -483,7 +483,7 @@ An archive or virtual filesystem requires a separate deliberate public design ra
 Lexical operations and the three convenience status predicates are synchronous only.
 Operations that may transfer data, enumerate directories, or mutate storage provide an explicitly named `Async` counterpart.
 
-Non-Web platform asynchronous work uses a bounded shared filesystem executor rather than creating one thread per operation.
+Non-Web platform asynchronous work uses the bounded process-wide worker executor shared with RunWorker rather than creating a File-specific pool or one thread per operation.
 Web uses the browser event loop and its persistent-storage completion callback instead of creating workers or inheriting an unused provider contract.
 
 An asynchronous call validates caller-owned values before returning its lazy Task.
@@ -542,7 +542,7 @@ Windows uses the application's Local App Data identity for durable data, applica
 Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection.
 Filters map extension values directly and exact MIME types through the Windows registry; wildcard or unknown MIME mappings deliberately widen the system filter rather than excluding valid documents.
 Selected filesystem paths remain private to `FileReference`, and metadata reports the filename, size, registered MIME type when available, and basic write capability.
-Reads, imports, replacements, and save copies reuse the bounded platform file executor while dialog presentation and cancellation stay on the existing UI dispatcher.
+Reads, imports, replacements, and save copies reuse the shared core worker executor while dialog presentation and cancellation stay on the existing UI dispatcher.
 The adapter does not request persistent grants, expose platform paths publicly, or add a second Windows-specific file abstraction.
 
 Linux uses the UTF-8 filename resolved from `/proc/self/exe` as its application identity and resolves the executable directory from that same path independently of the process working directory.
@@ -557,7 +557,7 @@ When GTK uses its X11 backend, the current native window is encoded as `x11:<hex
 One unpredictable handle token is used per request, the predicted Request path is subscribed before the method call, and a backend-returned legacy path replaces that subscription when necessary.
 Task cancellation completes the transport operation immediately and closes the portal Request so Runtime-level picker serialization can advance without waiting for a Response that will not arrive after Close.
 Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
-Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared bounded platform file executor.
+Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared core worker executor.
 Saving reports success only after the source file has been copied over the portal-confirmed destination.
 This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
 

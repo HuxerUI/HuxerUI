@@ -2,12 +2,15 @@
 
 #include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <coroutine>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -18,6 +21,91 @@
 #include "task_internal.h"
 
 namespace huxerui::detail {
+
+#if !defined(__EMSCRIPTEN__)
+
+namespace {
+
+std::size_t ResolveWorkerCount() noexcept {
+  const unsigned int reported = std::thread::hardware_concurrency();
+  if (reported == 0) {
+    return 2;
+  }
+  const std::size_t available = reported > 1 ? static_cast<std::size_t>(reported - 1) : 1;
+  return available < 4 ? available : 4;
+}
+
+class WorkerExecutor final {
+public:
+  WorkerExecutor() : worker_count_(ResolveWorkerCount()) {
+    workers_.reserve(worker_count_);
+    for (std::size_t index = 0; index < worker_count_; ++index) {
+      workers_.emplace_back([this] { Run(); });
+    }
+  }
+
+  ~WorkerExecutor() {
+    {
+      std::scoped_lock lock(mutex_);
+      stopping_ = true;
+    }
+    condition_.notify_all();
+    for (std::thread& worker : workers_) {
+      worker.join();
+    }
+  }
+
+  WorkerExecutor(const WorkerExecutor&) = delete;
+  WorkerExecutor& operator=(const WorkerExecutor&) = delete;
+
+  void Submit(std::function<void()> operation) {
+    {
+      std::scoped_lock lock(mutex_);
+      if (stopping_) {
+        throw std::logic_error("HuxerUI worker executor is closed");
+      }
+      operations_.push_back(std::move(operation));
+    }
+    condition_.notify_one();
+  }
+
+  [[nodiscard]] std::size_t WorkerCount() const noexcept {
+    return worker_count_;
+  }
+
+  static WorkerExecutor& Instance() {
+    static WorkerExecutor executor;
+    return executor;
+  }
+
+private:
+  void Run() {
+    for (;;) {
+      std::function<void()> operation;
+      {
+        std::unique_lock lock(mutex_);
+        condition_.wait(lock, [this] { return stopping_ || !operations_.empty(); });
+        if (stopping_ && operations_.empty()) {
+          return;
+        }
+        operation = std::move(operations_.front());
+        operations_.pop_front();
+      }
+      operation();
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::deque<std::function<void()>> operations_;
+  std::vector<std::thread> workers_;
+  std::size_t worker_count_;
+  bool stopping_ = false;
+};
+
+} // namespace
+
+#endif
 
 class TaskDelayScheduler final : public std::enable_shared_from_this<TaskDelayScheduler> {
 public:
@@ -158,11 +246,14 @@ public:
       }
       throw std::logic_error("HuxerUI TaskScope::Launch() must be called on its UI thread");
     }
-    if (closed_) {
-      if (coroutine) {
-        coroutine.destroy();
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_) {
+        if (coroutine) {
+          coroutine.destroy();
+        }
+        throw std::logic_error("HuxerUI TaskScope is closed");
       }
-      throw std::logic_error("HuxerUI TaskScope is closed");
     }
     if (!coroutine) {
       throw std::logic_error("HuxerUI TaskScope::Launch() requires a valid Task");
@@ -194,15 +285,41 @@ public:
     return TaskHandle(execution);
   }
 
+  void Post(std::function<void()> callback) {
+    std::unique_lock lock(mutex_);
+    if (closed_) {
+      return;
+    }
+    const std::uint64_t identity = next_post_identity_++;
+    posts_.emplace(identity, std::move(callback));
+    std::weak_ptr<TaskScopeState> weak = weak_from_this();
+    try {
+      dispatcher_([weak, identity] {
+        if (auto scope = weak.lock()) {
+          scope->DeliverPost(identity);
+        }
+      });
+    } catch (...) {
+      posts_.erase(identity);
+      throw;
+    }
+  }
+
   void Detach(std::uint64_t identity) noexcept {
     tasks_.erase(identity);
   }
 
   void Close() noexcept {
-    if (closed_) {
-      return;
+    std::unordered_map<std::uint64_t, std::function<void()>> posts;
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      closed_ = true;
+      posts = std::move(posts_);
     }
-    closed_ = true;
+    posts.clear();
     auto tasks = std::move(tasks_);
     for (auto& [identity, execution] : tasks) {
       static_cast<void>(identity);
@@ -211,12 +328,32 @@ public:
   }
 
 private:
+  void DeliverPost(std::uint64_t identity) noexcept {
+    std::function<void()> callback;
+    {
+      std::scoped_lock lock(mutex_);
+      if (closed_) {
+        return;
+      }
+      const auto found = posts_.find(identity);
+      if (found == posts_.end()) {
+        return;
+      }
+      callback = std::move(found->second);
+      posts_.erase(found);
+    }
+    callback();
+  }
+
   UIThreadDispatcher dispatcher_;
   std::shared_ptr<TaskDelayScheduler> delay_scheduler_;
   std::thread::id ui_thread_;
+  std::mutex mutex_;
   bool closed_ = false;
   std::uint64_t next_identity_ = 1;
+  std::uint64_t next_post_identity_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TaskExecution>> tasks_;
+  std::unordered_map<std::uint64_t, std::function<void()>> posts_;
 };
 
 class DelayAwaiter final {
@@ -384,6 +521,27 @@ void AdvanceTaskDelays(const std::shared_ptr<TaskDelayScheduler>& scheduler, dou
   scheduler->Advance(timestamp);
 }
 
+void EnqueueWorkerOperation(std::function<void()> operation) {
+  if (!operation) {
+    throw std::invalid_argument("HuxerUI worker operation must not be empty");
+  }
+#if defined(__EMSCRIPTEN__)
+  throw std::runtime_error(
+      "HuxerUI RunWorker() is unavailable because this Web build has no worker execution capability"
+  );
+#else
+  WorkerExecutor::Instance().Submit(std::move(operation));
+#endif
+}
+
+std::size_t WorkerConcurrency() noexcept {
+#if defined(__EMSCRIPTEN__)
+  return 0;
+#else
+  return WorkerExecutor::Instance().WorkerCount();
+#endif
+}
+
 std::shared_ptr<TaskScopeState>
 MakeTaskScopeState(UIThreadDispatcher dispatcher, std::shared_ptr<TaskDelayScheduler> delay_scheduler) {
   return std::make_shared<TaskScopeState>(std::move(dispatcher), std::move(delay_scheduler));
@@ -425,6 +583,16 @@ TaskHandle TaskScope::Launch(Task<void>&& task) const {
     throw std::logic_error("HuxerUI TaskScope is empty");
   }
   return state_->Launch(task.Release());
+}
+
+void TaskScope::PostErased(std::function<void()> callback) const {
+  if (detail::Composer::Current() != nullptr) {
+    throw std::logic_error("HuxerUI TaskScope::Post() cannot run during view composition");
+  }
+  if (!state_) {
+    throw std::logic_error("HuxerUI TaskScope is empty");
+  }
+  state_->Post(std::move(callback));
 }
 
 TaskScope UseTaskScope() {

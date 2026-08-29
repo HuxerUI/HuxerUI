@@ -236,7 +236,9 @@ The scope retains launched `Task<void>` executions across compatible recompositi
 Successful scope retirement queues TaskScope closure for the same commit boundary as Lifecycle retirement, while failed composition leaves active tasks unchanged.
 
 Runtime performs retired Lifecycle cleanup before closing the corresponding TaskScopes, then releases Root Services and platform state.
-TaskScope uses the owning PlatformAdapter's existing UIThreadDispatcher for initial execution and HuxerUI awaitable resumption.
+TaskScope uses the owning PlatformAdapter's existing UIThreadDispatcher for initial execution, HuxerUI awaitable resumption, and lifecycle-bound external-thread posting.
+RunWorker and non-Web local File asynchronous operations share one bounded process-wide C++ worker executor, while platform-native asynchronous transports keep their existing owners.
+Worker execution is process-local and does not imply platform background execution.
 The Task model does not add Runtime branches to State, EventBindings, Lifecycle declarations, or concrete asynchronous services.
 
 The complete public and execution contract is defined in [Task and Structured Concurrency Design](tasks.md).
@@ -2035,7 +2037,8 @@ The current extension points are:
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
 | Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
 | Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
-| Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, and `TaskScope::Launch()` |
+| Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, `TaskScope::Launch()`, and `RunWorker()` |
+| External-thread UI handoff | Lifecycle-bound `TaskScope::Post()` |
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |
 | Custom interaction visual | `Indication` and `NodeExtension::OnInteraction` |

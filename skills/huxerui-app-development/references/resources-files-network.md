@@ -56,4 +56,8 @@ Create requests with `HttpRequest`, `HttpMethod`, and headers during the owning 
 
 Launch app-side async flows from `UseTaskScope()` so unmount cancels work. Return to owner state only while the scope is alive. Avoid detached platform callbacks that capture UI objects indefinitely.
 
+Call File asynchronous methods and `HttpClient::Send()` directly from the owning Task. File Async already owns its platform-appropriate worker or event completion path, while HTTP keeps its platform asynchronous transport; do not wrap either API in `RunWorker()`.
+
+Use `RunWorker()` only for application-owned synchronous CPU-bound or blocking work. Use `TaskScope::Post()` to hand an external callback back to the UI scope. These APIs do not keep a mobile application running in the background; platform background tasks are a separate capability.
+
 The active SDK's services are installed by the application runtime. If a service is unavailable on a platform, report that public capability limit rather than reaching into a private adapter.

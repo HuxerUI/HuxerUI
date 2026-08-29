@@ -1,5 +1,8 @@
 #include "runtime_test_support.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <coroutine>
 #include <functional>
 #include <limits>
@@ -21,6 +24,99 @@ static_assert(std::move_constructible<Task<int>>);
 static_assert(!std::copy_constructible<Task<int>>);
 static_assert(std::copy_constructible<TaskScope>);
 static_assert(std::copy_constructible<TaskHandle>);
+static_assert(std::same_as<decltype(RunWorker([] { return 1; })), Task<int>>);
+
+class ThreadSafeTaskQueue {
+public:
+  UIThreadDispatcher Dispatcher() {
+    return [this](std::function<void()> callback) {
+      {
+        std::scoped_lock lock(mutex_);
+        callbacks_.push_back(std::move(callback));
+      }
+      condition_.notify_one();
+    };
+  }
+
+  void Drain() {
+    for (;;) {
+      std::vector<std::function<void()>> callbacks;
+      {
+        std::scoped_lock lock(mutex_);
+        callbacks = std::move(callbacks_);
+      }
+      if (callbacks.empty()) {
+        return;
+      }
+      for (auto& callback : callbacks) {
+        callback();
+      }
+    }
+  }
+
+  [[nodiscard]] bool WaitForWork() {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5), [this] { return !callbacks_.empty(); });
+  }
+
+private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::vector<std::function<void()>> callbacks_;
+};
+
+template <class Predicate> void DrainUntil(ThreadSafeTaskQueue& queue, Predicate predicate) {
+  while (!predicate()) {
+    REQUIRE(queue.WaitForWork());
+    queue.Drain();
+  }
+}
+
+class WorkerGate {
+public:
+  ~WorkerGate() {
+    Release();
+  }
+
+  void EnterAndWait() {
+    std::unique_lock lock(mutex_);
+    ++started_;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return released_; });
+    ++departed_;
+    condition_.notify_all();
+  }
+
+  [[nodiscard]] bool WaitForStarted(std::size_t count) {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5), [this, count] { return started_ >= count; });
+  }
+
+  [[nodiscard]] bool WaitForDeparted(std::size_t count) {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5), [this, count] { return departed_ >= count; });
+  }
+
+  [[nodiscard]] std::size_t Started() const {
+    std::scoped_lock lock(mutex_);
+    return started_;
+  }
+
+  void Release() {
+    {
+      std::scoped_lock lock(mutex_);
+      released_ = true;
+    }
+    condition_.notify_all();
+  }
+
+private:
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  std::size_t started_ = 0;
+  std::size_t departed_ = 0;
+  bool released_ = false;
+};
 
 struct ManualSuspensionState {
   void Suspend(std::weak_ptr<detail::TaskExecution> execution, std::coroutine_handle<> continuation) {
@@ -81,6 +177,8 @@ TaskScope captured_child_task_scope;
 State<int> task_value;
 State<int> task_recompose_trigger;
 State<bool> task_child_visible;
+State<bool> post_child_visible;
+TaskScope captured_post_child_scope;
 std::shared_ptr<ManualSuspensionState> child_suspension;
 int child_task_completions = 0;
 bool child_cleanup_preceded_scope_cancellation = false;
@@ -89,6 +187,11 @@ std::unordered_map<int, std::shared_ptr<ManualSuspensionState>> keyed_suspension
 ScrollController task_virtual_scroll;
 std::shared_ptr<ManualSuspensionState> virtual_suspension;
 int composition_task_starts = 0;
+int composition_post_runs = 0;
+
+int AddWorkerValues(int left, int right) {
+  return left + right;
+}
 
 Task<int> TaskValue(int value) {
   co_return value;
@@ -176,6 +279,25 @@ View TaskVirtualListApp() {
 View IllegalTaskLaunchApp() {
   auto tasks = UseTaskScope();
   tasks.Launch(DirectTask(&composition_task_starts));
+  return Text("invalid");
+}
+
+View PostChild() {
+  captured_post_child_scope = UseTaskScope();
+  return Text("child");
+}
+
+View PostUnmountApp() {
+  post_child_visible = UseState(true);
+  if (post_child_visible) {
+    return Scope(PostChild);
+  }
+  return Text("removed");
+}
+
+View IllegalTaskPostApp() {
+  auto tasks = UseTaskScope();
+  tasks.Post([] { ++composition_post_runs; });
   return Text("invalid");
 }
 
@@ -468,10 +590,199 @@ TEST_CASE("HuxerUIAwaitableRestoresTaskExecutionToTheOwningUIThread") {
   REQUIRE(task_value.Get() == 7);
 }
 
+#if !defined(__EMSCRIPTEN__)
+
+TEST_CASE("RunWorkerOwnsItsInvocationAndRestoresResultsAndExceptionsToTheUIThread") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const std::thread::id ui_thread = std::this_thread::get_id();
+  std::thread::id worker_thread;
+  std::thread::id resumed_thread;
+  int result = 0;
+  bool completed = false;
+  bool caught = false;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    const int sum = co_await RunWorker(AddWorkerValues, 20, 22);
+    auto owned = co_await RunWorker(
+        [&worker_thread](std::unique_ptr<int> value) {
+          worker_thread = std::this_thread::get_id();
+          ++*value;
+          return value;
+        },
+        std::make_unique<int>(sum)
+    );
+    co_await RunWorker([] {});
+    try {
+      static_cast<void>(co_await RunWorker([]() -> int { throw std::runtime_error("worker failed"); }));
+    } catch (const std::runtime_error&) {
+      caught = true;
+    }
+    resumed_thread = std::this_thread::get_id();
+    result = *owned;
+    completed = true;
+  });
+
+  REQUIRE_FALSE(completed);
+  queue.Drain();
+  DrainUntil(queue, [&] { return completed; });
+
+  REQUIRE(result == 43);
+  REQUIRE(caught);
+  REQUIRE(worker_thread != ui_thread);
+  REQUIRE(resumed_thread == ui_thread);
+}
+
+TEST_CASE("RunWorkerUsesBoundedConcurrencyAndDiscardsCanceledWork") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const std::size_t worker_count = detail::WorkerConcurrency();
+  REQUIRE(worker_count > 0);
+  WorkerGate gate;
+  std::vector<TaskHandle> running;
+  running.reserve(worker_count);
+  int completions = 0;
+
+  for (std::size_t index = 0; index < worker_count; ++index) {
+    running.push_back(captured_task_scope.Launch([&]() -> Task<void> {
+      co_await RunWorker([&gate] { gate.EnterAndWait(); });
+      ++completions;
+    }));
+  }
+  queue.Drain();
+  REQUIRE(gate.WaitForStarted(worker_count));
+  REQUIRE(gate.Started() == worker_count);
+
+  std::atomic<bool> queued_executed = false;
+  TaskHandle queued = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await RunWorker([&queued_executed] { queued_executed = true; });
+    ++completions;
+  });
+  queue.Drain();
+  running.front().Cancel();
+  queued.Cancel();
+  gate.Release();
+
+  DrainUntil(queue, [&] { return completions == static_cast<int>(worker_count - 1); });
+  REQUIRE(gate.WaitForDeparted(worker_count));
+  REQUIRE_FALSE(queued_executed);
+}
+
+TEST_CASE("RuntimeDestructionDiscardsARunningWorkerResult") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  WorkerGate gate;
+  bool resumed = false;
+  {
+    Runtime runtime(TaskScopeApp, platform);
+    runtime.BuildFrame();
+    captured_task_scope.Launch([&]() -> Task<void> {
+      co_await RunWorker([&gate] { gate.EnterAndWait(); });
+      resumed = true;
+    });
+    queue.Drain();
+    REQUIRE(gate.WaitForStarted(1));
+  }
+
+  gate.Release();
+  REQUIRE(gate.WaitForDeparted(1));
+  queue.Drain();
+  REQUIRE_FALSE(resumed);
+}
+
+#else
+
+TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
+  captured_task_scope = {};
+  TestPlatform platform;
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  bool unavailable = false;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      static_cast<void>(co_await RunWorker([] { return 1; }));
+    } catch (const std::runtime_error&) {
+      unavailable = true;
+    }
+  });
+  platform.RunPlatformModuleTasks();
+
+  REQUIRE(unavailable);
+}
+
+#endif
+
+TEST_CASE("TaskScopePostDefersOwnedCallbacksAndPreservesExternalThreadOrder") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const std::thread::id ui_thread = std::this_thread::get_id();
+  std::thread::id callback_thread;
+  std::vector<int> values;
+
+  captured_task_scope.Post([value = std::make_unique<int>(1), &values] { values.push_back(*value); });
+  REQUIRE(values.empty());
+  queue.Drain();
+  REQUIRE(values == std::vector<int>{1});
+
+  std::thread external([tasks = captured_task_scope, &values, &callback_thread] {
+    tasks.Post([&values, &callback_thread] {
+      callback_thread = std::this_thread::get_id();
+      values.push_back(2);
+    });
+    tasks.Post([&values] { values.push_back(3); });
+  });
+  external.join();
+  REQUIRE(values == std::vector<int>{1});
+
+  queue.Drain();
+  REQUIRE(values == std::vector<int>{1, 2, 3});
+  REQUIRE(callback_thread == ui_thread);
+}
+
+TEST_CASE("TaskScopePostSuppressesCallbacksAfterScopeAndRuntimeClosure") {
+  captured_post_child_scope = {};
+  post_child_visible = State<bool>{};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  int callbacks = 0;
+  Runtime runtime(PostUnmountApp, platform);
+  runtime.BuildFrame();
+
+  captured_post_child_scope.Post([&callbacks] { ++callbacks; });
+  post_child_visible = false;
+  runtime.BuildFrame();
+  queue.Drain();
+  REQUIRE(callbacks == 0);
+
+  captured_post_child_scope.Post([&callbacks] { ++callbacks; });
+  queue.Drain();
+  REQUIRE(callbacks == 0);
+
+  {
+    Runtime pending_runtime(TaskScopeApp, platform);
+    pending_runtime.BuildFrame();
+    captured_task_scope.Post([&callbacks] { ++callbacks; });
+  }
+  queue.Drain();
+  REQUIRE(callbacks == 0);
+}
+
 TEST_CASE("TaskScopeReportsInvalidUsage") {
   int starts = 0;
   REQUIRE_THROWS_AS(UseTaskScope(), std::logic_error);
   REQUIRE_THROWS_AS(TaskScope{}.Launch(DirectTask(&starts)), std::logic_error);
+  REQUIRE_THROWS_AS(TaskScope{}.Post([] {}), std::logic_error);
 
   TestPlatform valid_platform;
   Runtime valid_runtime(TaskScopeApp, valid_platform);
@@ -489,6 +800,12 @@ TEST_CASE("TaskScopeReportsInvalidUsage") {
   REQUIRE_THROWS_AS(composition_runtime.BuildFrame(), std::logic_error);
   dispatched_platform.RunPlatformModuleTasks();
   REQUIRE(composition_task_starts == 0);
+
+  composition_post_runs = 0;
+  Runtime post_runtime(IllegalTaskPostApp, dispatched_platform);
+  REQUIRE_THROWS_AS(post_runtime.BuildFrame(), std::logic_error);
+  dispatched_platform.RunPlatformModuleTasks();
+  REQUIRE(composition_post_runs == 0);
 }
 
 } // namespace huxerui::test

@@ -74,6 +74,10 @@ Environment and theme reads belong inside a composable boundary. Do not capture 
 
 `UseTaskScope()` returns a lifetime-bound scope for launching `Task<void>` work. Cancellation follows the mounted composition lifetime. Use `Delay` and task APIs rather than detached threads that update UI state after unmount.
 
+Use `RunWorker()` for owned synchronous CPU-bound or blocking work that must not run on the UI thread. Its result or exception returns to the awaiting Task on the owning UI thread, and cancellation discards queued work or the result of work already running. Do not access State, composition, Views, or UI-affine platform objects from its callable.
+
+Use `TaskScope::Post()` when an external thread or callback must enqueue an owned `void` update on the scope's UI thread. A closed scope ignores late posts. Neither `RunWorker()` nor `Post()` requests or guarantees mobile background execution, and Web builds without a worker execution capability report `RunWorker()` as unavailable.
+
 Prefer concise duration literals such as `200ms` and `2s` when calling `Delay`.
 
 ```cpp

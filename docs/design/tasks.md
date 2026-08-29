@@ -11,8 +11,10 @@ The public model consists of:
 - `TaskHandle`, a copyable cancellation handle for one launched task.
 - `UseTaskScope()`, a composition function that returns the TaskScope owned by the current `RecomposeScope`.
 - `Delay()`, a lazy UI-affine minimum-duration suspension.
+- `RunWorker()`, a lazy Task that executes owned synchronous work on the shared worker pool.
+- `TaskScope::Post()`, a lifecycle-bound handoff from an external thread to the scope's UI thread.
 
-The model does not add `UseTask()`, `UseAsync()`, a generic `AsyncResult<T>`, Task-aware Lifecycle overloads, or Task-aware event handlers.
+The model does not add `UseTask()`, `UseAsync()`, a generic `AsyncResult<T>`, Task-aware Lifecycle overloads, Task-aware event handlers, public executors, or general thread-switching primitives.
 State remains synchronous and does not dispatch writes between threads.
 
 ## Public API
@@ -41,11 +43,25 @@ public:
              std::invocable<std::decay_t<Factory>&> &&
              std::same_as<std::invoke_result_t<std::decay_t<Factory>&>, Task<void>>
   TaskHandle Launch(Factory&& factory) const;
+
+  template <class Callback>
+    requires std::constructible_from<std::decay_t<Callback>, Callback&&> &&
+             std::invocable<std::decay_t<Callback>&> &&
+             std::same_as<std::invoke_result_t<std::decay_t<Callback>&>, void>
+  void Post(Callback&& callback) const;
 };
 
 TaskScope UseTaskScope();
 
 [[nodiscard]] Task<void> Delay(std::chrono::duration<double> duration);
+
+template <class Function, class... Arguments>
+  requires std::constructible_from<std::decay_t<Function>, Function&&> &&
+           std::move_constructible<std::decay_t<Function>> &&
+           (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
+           (std::move_constructible<std::decay_t<Arguments>> && ...) &&
+           std::invocable<std::decay_t<Function>, std::decay_t<Arguments>...>
+[[nodiscard]] auto RunWorker(Function&& function, Arguments&&... arguments);
 ```
 
 `Task<T>` accepts non-cv, non-reference object value types and `void`.
@@ -62,6 +78,13 @@ Launch intentionally is not `[[nodiscard]]`.
 Ignoring its returned TaskHandle creates a scope-owned fire-and-forget child that still participates in structured cancellation.
 TaskHandle destruction does not cancel the task, while `Cancel()` is idempotent and does not throw.
 
+RunWorker decays and owns its move-constructible callable and arguments when the lazy Task is created.
+Its synchronous callable may return `void` or a move-constructible non-reference object, but may not return another Task.
+Applications use `std::ref()` when reference semantics are intentional.
+
+Post accepts an owned `void` callback, does not create a Task, and does not return a TaskHandle.
+It belongs to TaskScope because an external thread has no active TaskExecution from which to obtain a UI thread or composition lifetime.
+
 ## Execution and awaiting
 
 Task uses `std::suspend_always` for initial suspension.
@@ -75,6 +98,52 @@ Nested Tasks do not create independent TaskHandles or TaskScope entries.
 HuxerUI awaitables bind their suspended coroutine to the launched execution.
 They may perform work on another thread, but completion queues the resume through the execution's UI dispatcher.
 A third-party awaitable that resumes its coroutine directly does not gain this guarantee and must provide its own UI-thread handoff.
+
+## Worker execution
+
+RunWorker is a global function because the awaiting TaskExecution remains the only owner of cancellation and UI-thread restoration.
+It returns a lazy Task and submits no work until that Task is awaited from a running HuxerUI Task.
+The callable and arguments are invoked once on one process-wide worker executor shared by every Runtime and TaskScope.
+
+The native executor uses a FIFO queue and a bounded number of C++ worker threads.
+Its implementation leaves one reported logical processor available where possible, never creates more than four workers, and falls back to two workers when the processor count is unknown.
+The queue is not bounded because blocking the UI thread or rejecting otherwise valid Tasks would require another public overload and failure policy.
+
+RunWorker resumes through the awaiting TaskExecution and UIThreadDispatcher.
+A value or `void` completion continues on the owning UI thread, while a worker exception is rethrown from the `co_await` expression on that thread.
+The callable must not access State, Views, composition facilities, or UI-affine platform objects.
+Platform thread initialization such as COM apartments, JNI attachment, or platform-object lifetime scopes remains the responsibility of code that explicitly uses those platform APIs.
+
+Cancellation skips a queued callable and releases its owned inputs without searching or removing the small queue entry.
+A callable that already started may finish, but its value or exception is discarded and retired application code is not resumed.
+The queued or running operation state holds TaskExecution weakly and never retains Runtime, TaskScope, or mounted UI state.
+
+Non-Web local File asynchronous operations reuse this worker executor without calling the public RunWorker API or changing File result and persistence semantics.
+Ordinary platform-native asynchronous HTTP, file-picker, and external-file transports keep their existing cancellation and scheduling owners.
+
+## Scoped UI posting
+
+TaskScope::Post is the callback boundary for an external engine or thread that must update HuxerUI state:
+
+```cpp
+operation = engine->Start([tasks, result](Value value) mutable {
+  tasks.Post([result, value = std::move(value)]() mutable {
+    result = std::move(value);
+  });
+});
+```
+
+Post may be called from any thread, always enqueues, and never invokes the callback inline.
+Callbacks are ordered per TaskScope by the order in which the scope accepts concurrent submissions; calls from one thread therefore preserve program order.
+Each pending callback remains owned by the scope until its identified UI-dispatch entry takes it for execution.
+
+Closing the scope clears pending callbacks before they can execute.
+A copied TaskScope may receive a late external completion after unmount, but Post observes the closed state and ignores it without touching Runtime or its dispatcher.
+Post does not cancel or disconnect the external operation; Lifecycle cleanup remains responsible for that operation's own lifetime.
+
+Post on an empty TaskScope throws `std::logic_error`, while Post on a closed scope is ignored.
+Like Launch, Post is a side effect and throws `std::logic_error` during view composition.
+An exception escaping the delivered callback has no asynchronous consumer and terminates the process rather than crossing a platform event-loop boundary.
 
 ## Delays
 
@@ -101,7 +170,7 @@ It is appropriate for UI feedback, retry backoff, polling, and presentation life
 UseTaskScope requires an active composition and does not allocate an ordered state slot.
 Every call in the same RecomposeScope returns a handle to the same lazily created TaskScope.
 An ordinary helper contributes to its caller's scope, while `[[huxerui::composable]]` creates an independent TaskScope lifetime.
-Launch is a side effect and is rejected during view composition; application code starts work from committed Lifecycle setup, event callbacks, or other post-composition owners.
+Launch and Post are side effects and are rejected during view composition; application code starts work from committed Lifecycle setup, event callbacks, or other post-composition owners.
 
 Compatible recomposition, a changed returned root View, and keyed movement retain the TaskScope and its running tasks.
 Successfully unmounting the scope, evicting a virtual item, or destroying Runtime closes the TaskScope and cancels all remaining tasks.
@@ -111,8 +180,9 @@ TaskScope closure is committed with scope retirement rather than performed durin
 Runtime drains Lifecycle cleanup first and then closes the retired TaskScope, so explicit resource cleanup remains deterministic before the structured cancellation fallback.
 Runtime teardown closes all TaskScopes before releasing Root Services and PlatformModule state.
 
-Copies of TaskScope may outlive their RecomposeScope, but a closed TaskScope cannot launch new work.
+Copies of TaskScope may outlive their RecomposeScope, but a closed TaskScope cannot launch new work or deliver new posts.
 Launch on an empty or closed handle throws `std::logic_error`.
+Post on an empty handle throws `std::logic_error`, while Post on a closed handle is ignored so a late external completion remains harmless.
 UseTaskScope also fails explicitly when a custom PlatformAdapter does not provide a UIThreadDispatcher.
 
 ## Cancellation
@@ -127,6 +197,10 @@ Cancellation is not represented by an exception and does not resume application 
 
 A suspended Delay owns one removable queue registration.
 TaskHandle cancellation, TaskScope closure, and Runtime teardown destroy its awaiter and remove that registration before it can resume application code.
+
+A suspended RunWorker operation owns its callable until it starts or is canceled.
+Canceling its Task skips queued work or discards the outcome of work already running.
+Closing TaskScope also discards every UI callback that Post submitted but the UI thread has not taken for execution.
 
 Canceling one TaskHandle does not cancel sibling tasks in the same TaskScope.
 Closing TaskScope cancels every active child.
@@ -182,6 +256,9 @@ A launched root `Task<void>` has no asynchronous result consumer.
 An exception that escapes that root is an uncaught application error and terminates the process after the coroutine frame is released.
 The public API does not add an error callback, failure State, Task result query, or AsyncResult wrapper.
 
+RunWorker transports an exception back to its awaiting Task before applying the same rule.
+A Post callback has no awaiting Task, so an exception escaping it terminates at the non-throwing UI delivery boundary.
+
 Lifecycle setup exceptions continue to propagate from `Runtime::BuildFrame()`.
 Lifecycle accepts an ordinary `void` cleanup callable; cleanup runs inside the framework's non-throwing teardown boundary, so an exception escaping cleanup terminates the process.
 The framework does not silently discard cleanup failures.
@@ -194,10 +271,20 @@ No new platform callback, event protocol, or platform-specific Task implementati
 Windows continues to use its private window message, Apple platforms use the main dispatch queue, Linux uses its event-loop dispatcher, Web uses the browser event loop, and Android uses its owning HuxerUIView dispatcher.
 Delay additionally reuses PlatformAdapter's existing monotonic `Now()` and absolute `RequestFrameAt()` contracts, so every platform receives the same scheduling and cancellation model without another timer boundary.
 
+Native desktop and mobile builds use the shared C++ worker executor.
+Web does not silently run RunWorker on its main event loop; without a genuine Worker or pthread execution boundary, awaiting RunWorker throws an explicit unavailable-capability `std::runtime_error`.
+TaskScope::Post remains available on Web through the existing UI dispatcher.
+
+RunWorker is process-local work and does not request, extend, or guarantee platform background execution.
+HuxerUI does not cancel or pause it merely because ApplicationLifecycleState becomes Background.
+The operating system may continue, throttle, suspend, or terminate the process; a completed UI continuation waits until the UI dispatcher can run again, while a retired Task remains canceled.
+Platform background services, scheduled jobs, foreground services, and background network sessions are separate explicit capabilities.
+
 Future HuxerUI asynchronous APIs may return Task values or provide HuxerUI awaitables that resume through the bound execution.
 They do not change TaskScope ownership, State semantics, Lifecycle, or EventBindings.
 
 ## Validation
 
-Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, and Delay cancellation.
-The independent `example_task` demonstrates scope-owned launch, cancellable Delay, explicit Lifecycle cancellation, direct State updates, and fire-and-forget event launch through public API.
+Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, Delay cancellation, worker callable forms and result types, worker concurrency bounds, worker cancellation races, Post ordering, move-only callbacks, external-thread delivery, and closed-scope suppression.
+Web coverage verifies that RunWorker fails explicitly without worker support and that Post still uses the browser UI dispatcher.
+The independent `example_task` demonstrates scope-owned launch, cancellable Delay, worker execution, scoped UI posting, explicit Lifecycle cancellation, and direct UI-thread State updates through public API.

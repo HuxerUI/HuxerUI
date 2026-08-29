@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <coroutine>
 #include <memory>
 
@@ -14,11 +15,11 @@ class TaskDelayScheduler;
 
 std::shared_ptr<TaskDelayScheduler> MakeTaskDelayScheduler(PlatformAdapter& platform);
 void AdvanceTaskDelays(const std::shared_ptr<TaskDelayScheduler>& scheduler, double timestamp);
+[[nodiscard]] std::size_t WorkerConcurrency() noexcept;
 
 std::shared_ptr<TaskScopeState>
 MakeTaskScopeState(UIThreadDispatcher dispatcher, std::shared_ptr<TaskDelayScheduler> delay_scheduler);
 void CloseTaskScope(const std::shared_ptr<TaskScopeState>& scope) noexcept;
-void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept;
 
 template <class Promise>
   requires std::derived_from<Promise, TaskPromiseBase>

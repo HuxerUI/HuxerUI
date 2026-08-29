@@ -158,6 +158,10 @@ View UserSession(UserId user_id) {
 `Task<T>` represents asynchronous work.
 `UseTaskScope()` owns launched work for the current composition scope.
 Its tasks are canceled when that scope is replaced or unmounted, and continuations resume on the Runtime thread.
+`RunWorker()` owns a synchronous callable and its arguments, executes them on HuxerUI's bounded native worker pool, and resumes the awaiting Task on that Runtime thread.
+Worker code must not access State, composition, Views, or UI-affine platform objects.
+`TaskScope::Post()` is the lifecycle-bound handoff for an external thread or callback to enqueue a `void` update on the same Runtime thread; pending updates are discarded when the scope closes.
+Neither API requests or guarantees platform background execution.
 
 ## Application state
 

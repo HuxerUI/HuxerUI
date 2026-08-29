@@ -2,13 +2,9 @@
 
 #include <cerrno>
 #include <chrono>
-#if !defined(__EMSCRIPTEN__)
-#include <condition_variable>
-#endif
 #include <coroutine>
 #include <cwchar>
 #include <cstdint>
-#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -18,9 +14,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <system_error>
-#if !defined(__EMSCRIPTEN__)
-#include <thread>
-#endif
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -557,73 +550,6 @@ bool Move(std::string_view source, std::string_view destination, bool overwrite)
   return !error;
 }
 
-#if !defined(__EMSCRIPTEN__)
-
-class FileExecutor final {
-public:
-  FileExecutor() {
-    workers_.reserve(2);
-    for (std::size_t index = 0; index < 2; ++index) {
-      workers_.emplace_back([this] { Run(); });
-    }
-  }
-
-  ~FileExecutor() {
-    {
-      std::scoped_lock lock(mutex_);
-      stopping_ = true;
-    }
-    condition_.notify_all();
-    for (std::thread& worker : workers_) {
-      worker.join();
-    }
-  }
-
-  FileExecutor(const FileExecutor&) = delete;
-  FileExecutor& operator=(const FileExecutor&) = delete;
-
-  void Submit(std::function<void()> operation) {
-    {
-      std::scoped_lock lock(mutex_);
-      if (stopping_) {
-        throw std::logic_error("HuxerUI file executor is closed");
-      }
-      operations_.push_back(std::move(operation));
-    }
-    condition_.notify_one();
-  }
-
-  static FileExecutor& Instance() {
-    static FileExecutor executor;
-    return executor;
-  }
-
-private:
-  void Run() {
-    for (;;) {
-      std::function<void()> operation;
-      {
-        std::unique_lock lock(mutex_);
-        condition_.wait(lock, [this] { return stopping_ || !operations_.empty(); });
-        if (stopping_ && operations_.empty()) {
-          return;
-        }
-        operation = std::move(operations_.front());
-        operations_.pop_front();
-      }
-      operation();
-    }
-  }
-
-  std::mutex mutex_;
-  std::condition_variable condition_;
-  std::deque<std::function<void()>> operations_;
-  std::vector<std::thread> workers_;
-  bool stopping_ = false;
-};
-
-#endif
-
 template <class Result>
 class FileOperationState final : public std::enable_shared_from_this<FileOperationState<Result>> {
 public:
@@ -640,7 +566,7 @@ public:
 #if defined(__EMSCRIPTEN__)
     EnqueueWebFileOperation([self](std::function<void()> completion) { self->Run(std::move(completion)); });
 #else
-    FileExecutor::Instance().Submit([self] { self->Run(); });
+    EnqueueFileOperation([self] { self->Run(); });
 #endif
   }
 
@@ -788,7 +714,7 @@ bool IsValidFileUtf8(std::string_view text) noexcept {
 
 #if !defined(__EMSCRIPTEN__)
 void EnqueueFileOperation(std::function<void()> operation) {
-  FileExecutor::Instance().Submit(std::move(operation));
+  EnqueueWorkerOperation(std::move(operation));
 }
 #endif
 
