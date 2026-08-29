@@ -702,8 +702,8 @@ Large or continuous media frames do not travel through it; an `ExternalTexture` 
 
 #### Platform-language value API
 
-The implemented Android Java SDK exposes one immutable `PlatformPayload` value type rather than separate Reader, Writer, Builder, or Codec abstractions.
-Future Apple Objective-C/Swift and Web JavaScript common adapters use the same value contract.
+The Android Java SDK and Web JavaScript bridge expose one immutable `PlatformPayload` value type rather than separate Reader, Writer, Builder, or Codec abstractions.
+The future Apple Objective-C/Swift common adapter uses the same value contract.
 Platform naming follows the language convention, while each common adapter provides the same explicit construction operations:
 
 ```text
@@ -715,14 +715,15 @@ string(value)
 bytes(value)
 list(values)
 object(fields)
-externalTexture(value)
 ```
+
+An adapter with an implemented ExternalTexture capability bridge additionally provides `externalTexture(value)`.
 
 Constructors copy or safely freeze mutable byte and collection inputs.
 Byte reads return a defensive copy or an immutable platform view and never expose mutable backing storage.
 Java maps Int64 to `long` and Bytes to copied `byte[]`.
-The future Apple adapter maps them to Swift `Int64` and `Data`, while the future Web adapter maps them to JavaScript `bigint` and copied `Uint8Array`.
-The Web contract never constructs Int64 from Number; every adapter rejects non-finite Double values, invalid Unicode, and ExternalTexture values without a valid framework wrapper.
+The future Apple adapter maps them to Swift `Int64` and `Data`, while Web maps them to JavaScript `bigint` and copied `Uint8Array`.
+The Web contract never constructs Int64 from Number and currently rejects every ExternalTexture payload; every adapter rejects non-finite Double values, invalid Unicode, and unsupported capability values.
 
 The same value type provides exact inspection and navigation:
 
@@ -736,7 +737,6 @@ requireInt64()
 requireDouble()
 requireString()
 requireBytes()
-requireExternalTexture()
 
 requireField(name)
 field(name)
@@ -746,6 +746,8 @@ rejectUnknownFields(names)
 elements()
 element(index)
 ```
+
+An adapter with ExternalTexture capability transport additionally provides `requireExternalTexture()`.
 
 These operations never coerce between Boolean, Int64, Double, String, or Bytes.
 `field(name)` represents absence with the language's native nullable or optional result, while an explicitly present Null remains a non-absent `PlatformPayload` whose `isNull()` is true.
@@ -788,7 +790,7 @@ The binary format preserves all payload kinds without implicit coercion.
 Decoders require the declared tag and range instead of converting strings to numbers, truncating doubles to integers, or treating bytes as text.
 Strings and object keys must be valid UTF-8, doubles must be finite, and containers enforce unique object keys plus nesting and allocation limits.
 The maximum nesting depth is 64, matching the in-process payload contract.
-All bridge implementations use the same framework constants for maximum envelope bytes, scalar bytes, container entries, and capability slots and validate them before allocation; a platform must not substitute looser local limits.
+All bridge implementations use the same framework constants for maximum envelope bytes, scalar bytes, and container entries, plus capability slots where supported, and validate them before allocation; a platform must not substitute looser local limits.
 Unknown versions, flags, tags, or capability kinds, duplicate object keys, invalid UTF-8, non-finite doubles, integer or length overflow, truncated input, excessive allocation, and trailing bytes are malformed payloads.
 
 An `ExternalTexture` is an opaque capability and therefore travels beside the binary data in a bridge-private capability table.
@@ -803,7 +805,7 @@ Library code cannot forge, retain, or reuse a slot, and the closed table cannot 
 | --- | --- | --- |
 | Android | `byte[]` | Bridge-owned Java references |
 | Apple common adapter (future) | `NSData` | Bridge-owned Objective-C objects |
-| Web common adapter (future) | `Uint8Array` | Bridge-owned JavaScript objects |
+| Web common adapter | `Uint8Array` | ExternalTexture is not supported by this bridge |
 
 Application callback objects never enter the envelope, and Objective-C, Java, JavaScript, or C++ exceptions are contained by the bridge that owns them.
 `PlatformError` has a stable UTF-8 `code`, an English `message`, and optional structured `details` carried by the same payload envelope.
@@ -817,8 +819,8 @@ Android, Apple, and Web applications do not repeat library registration in their
 The selected library RootHook registers either a direct factory or a bridge descriptor, and Runtime freezes the completed surface registry before first composition.
 
 Android supplies common Java and Kotlin `PlatformViewFactory`, `PlatformView`, `PlatformModuleFactory`, and `PlatformModule` interfaces plus a JNI bridge adapter that resolves a library implementation class through the host application ClassLoader.
-Current Apple libraries register direct Objective-C++ factories, and current Web libraries register direct Emscripten C++ factories or library-owned bridges.
-Common Apple Objective-C/Swift protocols and a common Web JavaScript adapter are future work.
+Web supplies JavaScript structural factories through `web::JavaScriptPlatformModuleFactory` and `web::JavaScriptPlatformViewFactory`, while retaining its direct Emscripten C++ factory path.
+Current Apple libraries register direct Objective-C++ factories; common Apple Objective-C/Swift protocols are future work.
 Factories and instances are separate because one surface registration may create multiple independently owned View or Module instances.
 One registered factory belongs to its surface registry, may create many independent instances, owns no created instance, and is released when that registry tears down.
 Every successfully created instance is disposed exactly once; a failed creation has no instance disposal and publishes no event.
@@ -832,12 +834,12 @@ When a supported platform needs an owning host object, its protocol receives tha
 | Windows | Parent `HWND` | Owning `HWND` |
 | macOS | Adapter-owned parent `NSView` | Owning `NSWindow` |
 | Linux | Adapter-owned parent `GtkWidget` | Owning `GtkWindow` |
-| Web | Adapter-owned parent `HTMLElement` | Owning `Window` |
+| Web | None; the factory returns a detached `HTMLElement` | None; browser globals are directly available |
 | Android | Owning `android.content.Context` | Owning `android.content.Context` |
 | iOS | Owning `UIViewController` | Owning `UIViewController` |
 
 These are explicit platform protocol parameters rather than fields of a universal Context object.
-The platform shell establishes every required owner before Runtime executes RootHooks, and host absence is an integration failure rather than a nullable or partially initialized Context.
+The platform shell establishes every required owner before Runtime executes RootHooks, and a required host's absence is an integration failure rather than a nullable or partially initialized Context.
 A future platform defines only the narrow host values required by its own factory contracts and does not widen the shared API.
 A PlatformView exposes its platform View, `update`, `invoke`, and `dispose`.
 A PlatformModule exposes `invoke` and `dispose`; `invoke` receives its method, arguments, and one `PlatformResult`, then returns an optional `PlatformCancellation`.
@@ -859,7 +861,7 @@ PlatformCancellation.cancel
 The Android SDK passes one framework-owned `HuxerUIPlatformChannel.Events` to each successful Java factory creation.
 The Java implementation retains that emitter and calls `emit(name)` or `emit(name, payload)` from its platform callbacks; the emitter performs the common JNI call, binary transport, instance-generation validation, and UI-thread delivery.
 Libraries do not declare one JNI callback per event.
-Future Apple and Web common adapters receive equivalent framework-owned emitters; current direct factories emit through the C++ `PlatformEventEmitter` supplied by their registered factory contract.
+The Web common adapter receives an equivalent framework-owned emitter, the future Apple adapter follows the same rule, and direct factories emit through the C++ `PlatformEventEmitter` supplied by their registered factory contract.
 
 The common cross-language adapters are asynchronous-capable transport contracts rather than library API models.
 An implementation may complete a Result inline or later and may return no cancellation endpoint, while a library bridge may expose that operation as a callback, Future, Task, fire-and-forget method, cached synchronous state, or another abstraction.
@@ -879,7 +881,7 @@ Neither path constructs a payload or uses a method string.
 An Android C++ bridge may connect the same Controller and translate `Reload()` to a Java invocation or a callback-oriented evaluation operation to the corresponding result endpoint.
 The Java instance implements `invoke`, completes the supplied Result, and emits navigation events through the common emitter.
 An Objective-C++ implementation uses the direct typed path, while an Objective-C or Swift instance currently uses a library-owned bridge when direct Objective-C++ is insufficient.
-A Web implementation currently uses a direct Emscripten C++ factory or a library-owned bridge.
+A Web implementation uses a direct Emscripten C++ factory or the common JavaScript adapter.
 In every case the application sees only the same concrete WebView, Controller, and typed Event API.
 
 The Android protocol shape is:
@@ -951,11 +953,11 @@ An Objective-C++ library may register a conforming factory object directly and t
 
 The AppKit protocol has the same operations and substitutes `NSView*` for `UIView*`.
 
-The future Web common adapter uses the equivalent structural contract:
+The Web common adapter uses a structural factory and instance contract without requiring inheritance:
 
 ```js
 export const webViewFactory = {
-  create(host, properties, events) {
+  create(properties, events) {
     const element = document.createElement("iframe");
     return {
       element,
@@ -968,7 +970,7 @@ export const webViewFactory = {
 ```
 
 The returned `element` is non-null and initially unparented, the adapter alone attaches it, and the implementation retains the supplied emitter for repeated events.
-The export is linked and loaded before RootHooks execute; `mountHuxerUIApp()` does not register it.
+The factory object is linked and loaded before RootHooks execute, then the RootHook passes its actual `emscripten::val` to `web::JavaScriptPlatformViewFactory`; `mountHuxerUIApp()` does not register it.
 
 The Android adapter owns binary payload transfer, instance creation, updates, invocations, events, results, cancellation, and disposal.
 A class-based adapter uses a public no-argument constructor and resolves through the host ClassLoader rather than `FindClass` from an arbitrary thread.
@@ -984,16 +986,16 @@ HuxerUI does not add callback aliases or require a proxy base.
 An Objective-C++ library currently registers a direct strongly typed callable like a Windows implementation.
 The future Apple bridge may additionally accept a conforming factory object or construct one through a stable Objective-C runtime class name, but class lookup remains optional rather than the platform contract.
 
-Web currently uses a direct Emscripten C++ factory or a library-owned bridge satisfying the same typed registration contract.
-The future common export adapter may resolve a linked JavaScript module or Emscripten JavaScript library function before RootHooks execute, while `mountHuxerUIApp()` remains outside registration.
+Web selects either its direct Emscripten C++ path or `web::JavaScriptPlatformModuleFactory` and `web::JavaScriptPlatformViewFactory` in the RootHook.
+The JavaScript factories are linked before RootHooks execute and passed as actual `emscripten::val` objects, so the framework does not add a name-based JavaScript registry and `mountHuxerUIApp()` remains outside registration.
 Windows and Linux normally register direct strongly typed C++ factories.
 
 Factory and bridge construction remain library decisions on every platform.
 The framework-provided class, protocol, export, payload, and call-channel adapters are conveniences that implement the registry contract; they do not define the only valid factory representation, require proxy inheritance, or force a library to use reflection.
 Only the common payload bridge invokes the boundary type's static `Encode()` and `Decode()` operations.
 A library-owned bridge may use explicit typed JNI, Objective-C++, Emscripten, or equivalent conversion while preserving the same public Properties, Controller, Module, and Event contracts.
-Android common-bridge instances and all direct C++ factories receive the framework-owned event emitter so instance generation checks, creation-time queueing, UI-thread delivery, disposal invalidation, and late-event rejection remain uniform.
-Future Apple and Web common adapters must preserve the same rule.
+Android and Web common-bridge instances plus all direct C++ factories receive the framework-owned event emitter so instance generation checks, creation-time queueing, UI-thread delivery, disposal invalidation, and late-event rejection remain uniform.
+The future Apple common adapter must preserve the same rule.
 
 The common PlatformView adapter uses Create, Update, Invoke, Result, Cancel, Event, and Dispose when its library exposes imperative commands; a declaration without a Controller has no application path to those commands.
 The common PlatformModule adapter uses Create, Invoke, Result, Event, Cancel, and Dispose, while a direct C++ Module or library-owned bridge uses its ordinary library-defined methods.

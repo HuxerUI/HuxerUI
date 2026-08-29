@@ -115,8 +115,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
             DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
     )
 endif ()
-install(FILES
-        "${HUXERUI_PROJECT_DIR}/platform/web/web_file.js"
+install(FILES "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.js"
+        DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+        RENAME HuxerUIWebPlatformRegistry.js
+)
+install(FILES "${HUXERUI_PROJECT_DIR}/platform/web/web_file.js"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
         RENAME HuxerUIWebFileSystem.js
 )

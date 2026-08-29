@@ -47,7 +47,7 @@ Use the active platform's public `platform_registry.h` factory contract:
 - Android returns a Java `View` through either a direct JNI factory or `android::JavaPlatformViewFactory`.
 - iOS returns `UIView*` from Objective-C++.
 - macOS returns `NSView*` from Objective-C++.
-- Web returns a detached DOM element through the Emscripten C++ factory.
+- Web returns a detached DOM element through a direct Emscripten C++ factory or `web::JavaScriptPlatformViewFactory`.
 
 `PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
 It never crosses a platform-language boundary, and ordinary components and direct factories use their concrete types rather than constructing it themselves.
@@ -56,7 +56,8 @@ Registry installation supplies the owning `PlatformAdapter&` only to the factory
 Direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values rather than the adapter.
 
 Android currently provides the common Java/Kotlin class adapter.
-Apple Objective-C/Swift and Web JavaScript common adapters are future work; current implementations use direct platform factories or library-owned bridges.
+Web currently provides the common JavaScript structural adapter: the RootHook supplies the actual factory object, Properties use `Module.HuxerUI.PlatformPayload`, and events use one framework-owned emitter.
+Apple Objective-C/Swift common adapters are future work; current Apple implementations use direct platform factories or library-owned bridges.
 Every path still registers once through the library RootHook; application hosts, delegates, and Web mount calls do not form a second registry.
 
 Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.

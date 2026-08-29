@@ -67,6 +67,8 @@ foreach (required_path IN ITEMS
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUILibraries.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResourceBuild.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResources.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIWebFileSystem.js"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIWebPlatformRegistry.js"
         "share/huxerui/resources/huxerui/resources.bin"
         "share/huxerui/skills/huxerui-app-development/SKILL.md"
         "share/huxerui/skills/huxerui-app-development/references/project-workflow.md"

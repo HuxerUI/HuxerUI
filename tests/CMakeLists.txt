@@ -132,6 +132,18 @@ if (EMSCRIPTEN)
     target_sources(huxerui_tests PRIVATE
             platform/web_external_texture.cpp
     )
+    if (CMAKE_CROSSCOMPILING_EMULATOR)
+        set(HUXERUI_WEB_TEST_COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR})
+    elseif (NODE_JS_EXECUTABLE)
+        set(HUXERUI_WEB_TEST_COMMAND "${NODE_JS_EXECUTABLE}")
+    else ()
+        message(FATAL_ERROR "HuxerUI Web tests require a JavaScript runtime")
+    endif ()
+    add_test(NAME HuxerUIWebPlatformRegistryTests
+            COMMAND ${HUXERUI_WEB_TEST_COMMAND}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/platform/web_platform_registry.js"
+                    "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.js"
+    )
 endif ()
 
 target_include_directories(huxerui_tests PRIVATE

@@ -1,138 +1,23 @@
 #include "platform_text_field.h"
 
-#include <cstdint>
-#include <limits>
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <utility>
-
-#include <emscripten.h>
 #include <emscripten/val.h>
 
 #include <huxerui/web/platform_registry.h>
 
 namespace {
 
-using emscripten::val;
-
-std::unordered_map<std::uint32_t, huxerui::PlatformEventEmitter>& EventRoutes() {
-  static std::unordered_map<std::uint32_t, huxerui::PlatformEventEmitter> routes;
-  return routes;
-}
-
-std::uint32_t AllocateRoute() {
-  static std::uint32_t next_route = 0;
-  for (std::uint64_t attempt = 0; attempt < std::numeric_limits<std::uint32_t>::max(); ++attempt) {
-    if (++next_route == 0) {
-      ++next_route;
-    }
-    if (!EventRoutes().contains(next_route)) {
-      return next_route;
-    }
-  }
-  throw std::logic_error("HuxerUI Web PlatformView example event route space is exhausted");
-}
-
-struct PlatformTextFieldInstance {
-  std::uint32_t route = 0;
-  val element = val::undefined();
-};
-
-// clang-format off
-EM_JS(emscripten::EM_VAL, CreateWebPlatformTextField, (std::uint32_t route, const char* text), {
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = "Edit PlatformView text";
-  input.value = UTF8ToString(text);
-  input.dataset.huxeruiExampleRoute = String(route);
-  input.style.font = "16px system-ui, sans-serif";
-  input.oninput = () => {
-    const value = Module.stringToNewUTF8(input.value);
-    try {
-      Module._huxerui_example_web_platform_text_field_changed(route, value);
-    } finally {
-      _free(value);
-    }
-  };
-  return Emval.toHandle(input);
-});
-
-EM_JS(void, UpdateWebPlatformTextField, (emscripten::EM_VAL handle, const char* text), {
-  const input = Emval.toValue(handle);
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error("HuxerUI Web PlatformView example lost its input element");
-  }
-  const value = UTF8ToString(text);
-  if (input.value !== value) {
-    input.value = value;
-  }
-});
-
-EM_JS(std::uint32_t, DisposeWebPlatformTextField, (emscripten::EM_VAL handle), {
-  const input = Emval.toValue(handle);
-  if (!(input instanceof HTMLInputElement)) {
-    return 0;
-  }
-  input.oninput = null;
-  const route = Number(input.dataset.huxeruiExampleRoute);
-  delete input.dataset.huxeruiExampleRoute;
-  return Number.isSafeInteger(route) && route > 0 ? route : 0;
-});
-// clang-format on
-
-huxerui::web::PlatformViewFactory<huxerui::example::PlatformTextFieldProperties, PlatformTextFieldInstance>
-PlatformTextFieldFactory() {
-  return {
-      .create =
-          [](const huxerui::example::PlatformTextFieldProperties& properties, huxerui::PlatformEventEmitter events) {
-            const std::uint32_t route = AllocateRoute();
-            EventRoutes().emplace(route, std::move(events));
-            try {
-              auto instance = std::make_shared<PlatformTextFieldInstance>();
-              instance->route = route;
-              instance->element = val::take_ownership(CreateWebPlatformTextField(route, properties.text.c_str()));
-              return instance;
-            } catch (...) {
-              EventRoutes().erase(route);
-              throw;
-            }
-          },
-      .view = [](const std::shared_ptr<PlatformTextFieldInstance>& instance) { return instance->element; },
-      .update =
-          [](PlatformTextFieldInstance& instance, const huxerui::example::PlatformTextFieldProperties& properties) {
-            UpdateWebPlatformTextField(instance.element.as_handle(), properties.text.c_str());
-          },
-      .dispose =
-          [](PlatformTextFieldInstance& instance) {
-            const std::uint32_t route = DisposeWebPlatformTextField(instance.element.as_handle());
-            if (route != 0) {
-              EventRoutes().erase(route);
-            }
-          },
-  };
-}
+constexpr char platform_text_field_factory[] = "huxeruiExamplePlatformTextFieldFactory";
 
 } // namespace
-
-extern "C" EMSCRIPTEN_KEEPALIVE void
-huxerui_example_web_platform_text_field_changed(std::uint32_t route, const char* value) noexcept {
-  const auto found = EventRoutes().find(route);
-  if (found == EventRoutes().end() || value == nullptr) {
-    return;
-  }
-  try {
-    found->second.Emit<huxerui::example::PlatformTextFieldEvents::Changed>(std::string(value));
-  } catch (...) {
-  }
-}
 
 namespace huxerui::example {
 
 void InstallPlatformTextField(RootContext& root) {
-  root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type, PlatformTextFieldFactory());
+  root.RegisterPlatformView<PlatformTextFieldProperties>(
+      platform_text_field::type,
+      web::JavaScriptPlatformViewFactory<PlatformTextFieldProperties>{
+          .factory = emscripten::val::module_property(platform_text_field_factory),
+      });
 }
 
 } // namespace huxerui::example

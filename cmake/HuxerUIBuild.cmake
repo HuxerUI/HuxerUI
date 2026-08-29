@@ -40,6 +40,7 @@ function(huxerui_configure_public_target target_name resource_package)
     if (EMSCRIPTEN)
         set_property(TARGET ${target_name} APPEND PROPERTY
                 INTERFACE_LINK_DEPENDS
+                "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.js>"
                 "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
         )
     endif ()

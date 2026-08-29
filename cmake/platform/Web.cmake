@@ -5,6 +5,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_http.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_navigation.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_view.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_renderer.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_text_input.cpp"
@@ -18,8 +19,8 @@ set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS
 set(HUXERUI_PLATFORM_LINK_OPTIONS
         --bind
         --no-entry
-        "$<BUILD_INTERFACE:--pre-js>"
-        "$<BUILD_INTERFACE:${HUXERUI_PROJECT_DIR}/platform/web/web_file.js>"
+        "$<BUILD_INTERFACE:SHELL:--pre-js \"${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.js\">"
+        "$<BUILD_INTERFACE:SHELL:--pre-js \"${HUXERUI_PROJECT_DIR}/platform/web/web_file.js\">"
         -fexceptions
         -lidbfs.js
         "-sMODULARIZE=1"

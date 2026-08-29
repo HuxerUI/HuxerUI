@@ -206,17 +206,18 @@ The initial locale derives from `navigator.language` and is normalized through t
 ## PlatformModule
 
 Web uses the surface-owned internal `PlatformRegistry` and strongly typed library Module APIs without adding a JavaScript factory registry or a second registration entry point.
-Library-owned Web sources are ordinary C++ and Emscripten glue selected by the library's CMake target when `EMSCRIPTEN` is active.
-They may implement the library's Module directly through Emscripten or register a linked JavaScript export through the common call channel or a library-owned bridge from an explicit RootHook.
+Libraries may register a direct C++ factory or adapt one linked JavaScript factory object with `web::JavaScriptPlatformModuleFactory<Module, Options>` from an explicit RootHook.
+The RootHook passes the actual `emscripten::val` factory object and constructs the exact C++ Module facade from the supplied `PlatformChannel`; `mountHuxerUIApp()` does not perform registration.
 The public Module chooses its own synchronous, asynchronous, callback, stream, and error conventions; no proxy inheritance or dynamic call API appears in that public contract.
-JavaScript values, callbacks, promises, and DOM objects remain outside `PlatformPayload` and shared application code.
+Options, arguments, results, and events cross the JavaScript boundary as immutable `Module.HuxerUI.PlatformPayload` values using the shared HUXP envelope, while callbacks, promises, and DOM objects remain outside the payload and shared application code.
 Libraries that require JavaScript dependencies express those link inputs through their own Emscripten target configuration; the HuxerUI library graph does not parse or reproduce JavaScript package metadata.
 
 The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
 Platform Result and Event endpoints may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
 Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while the bridge or direct Module implementation owns any cancellation behavior exposed by its library API.
 
-The Web `example_platform_module` uses Emscripten intervals to exercise factory creation, typed calls, first-result completion, recurring events, cancellation, disposal, and ExternalTexture publication through the same Timer and ColorStream Root Services as the other platform examples.
+The Web `example_platform_module` uses a JavaScript Timer factory to exercise typed calls, first-result completion, recurring events, cancellation, and disposal through the common adapter.
+Its ColorStream remains a direct C++ implementation because ExternalTexture payload transport is not part of the JavaScript bridge.
 
 ## PlatformView composition
 
@@ -224,10 +225,10 @@ DOM-backed PlatformView is implemented and follows final RenderScene paint order
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
 WebPlatformAdapter consumes the shared internal `RenderComposition` before drawing and retains compatible Canvas elements and DOM objects across frames.
 
-Web PlatformView libraries currently register a direct strongly typed Emscripten C++ factory or a library-owned bridge under the same stable UTF-8 registration names as other platform backends.
+Web PlatformView libraries register either a direct strongly typed Emscripten C++ factory or `web::JavaScriptPlatformViewFactory<Properties, Controller>` under the same stable UTF-8 registration names as other platform backends.
 A direct C++ factory receives the concrete Properties and typed `PlatformEventEmitter` without payload encoding.
-A future JavaScript common adapter receives the local immutable `PlatformPayload` representing the complete Properties and one framework-owned emitter, then returns a detached object containing its non-null `HTMLElement` plus `update`, optional command `invoke`, and `dispose` operations.
-The registered exact Controller type currently uses a direct C++ connection or a library-owned Emscripten bridge for commands; the future common adapter routes JavaScript events through the supplied framework emitter rather than event-specific WebAssembly callbacks.
+A JavaScript factory receives the local immutable `PlatformPayload` representing the complete Properties and one framework-owned emitter, then returns an object containing its non-null detached `HTMLElement`, `dispose`, `update` when Properties are present, and `invoke` when a Controller is registered.
+The registered exact Controller remains a C++ facade connected to the instance's `PlatformChannel`, while JavaScript events use the supplied framework emitter rather than event-specific WebAssembly callbacks.
 The adapter owns attachment, absolute position, logical size, margin reset, and border-box sizing without putting DOM values in `PlatformPayload` or adding another registry.
 
 A PlatformView-capable session owns one isolated CSS stacking context inside the browser-supplied host element.

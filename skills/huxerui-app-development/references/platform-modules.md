@@ -36,8 +36,12 @@ Android currently provides `android::JavaPlatformModuleFactory<Module, Options>`
 Its `connect` callback receives one framework-owned `PlatformChannel` and returns the library's exact Module type.
 The Java implementation receives one `HuxerUIPlatformChannel.Events` emitter and uses the SDK `PlatformPayload` value; it does not declare one JNI callback per event.
 
-Apple Objective-C/Swift and Web JavaScript common adapters are future work.
-Current Apple and Web libraries use direct C++/Objective-C++/Emscripten factories or a library-owned bridge while retaining the same RootHook registration and typed public Module contract.
+Web provides `web::JavaScriptPlatformModuleFactory<Module, Options>` for a linked JavaScript structural factory.
+The RootHook supplies its actual `emscripten::val`, and `connect` wraps the framework-owned `PlatformChannel` in the library's exact Module type.
+JavaScript receives immutable `Module.HuxerUI.PlatformPayload` values and one framework-owned events endpoint; it does not require inheritance or a second name registry.
+
+The Apple Objective-C/Swift common adapter is future work.
+Current Apple libraries use direct Objective-C++ factories or a library-owned bridge while retaining the same RootHook registration and typed public Module contract.
 
 `PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
 Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.

@@ -35,6 +35,12 @@ elseif (EMSCRIPTEN)
             web_color_stream.cpp
             web_timer.cpp
     )
+    target_link_options(example_platform_module PRIVATE
+            "SHELL:--pre-js \"${CMAKE_CURRENT_SOURCE_DIR}/web_timer.js\""
+    )
+    set_property(TARGET example_platform_module APPEND PROPERTY
+            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web_timer.js"
+    )
 elseif (UNIX AND NOT APPLE)
     target_sources(example_platform_module PRIVATE
             color_stream.cpp
