@@ -25,10 +25,22 @@ Use the complete container, scrolling, virtualization, navigation-shell, and res
 | `RadioButton([label,] selected)` | Controlled `bool`; group exclusivity remains application-owned. |
 | `Switch([label,] checked)` | Controlled `bool`; `.OnChanged(bool)` requests a new value. |
 | `SegmentedButton(items, selected_index)` | Controlled index; items may have icon/label or icon-only with semantic label. |
+| `Select(items, selected_index, content)` | Controlled index for a finite non-empty range; `.OnChanged(std::size_t)` requests a different choice. |
 | `Tabs(items, selected_index)` | Controlled index; `TabItem::Enabled` disables individual destinations. Page content is separately owned. |
 | `Slider(value)` | Controlled `float`; configure `.Range` and optional `.Step`, then write `.OnChanged` values back. |
 
 Do not rely on constructor overloads that accept `State<T>` to mutate state automatically; they read the current value. Bind `OnChanged` explicitly.
+
+## Select
+
+`Select` copies its input range into the declaration, so temporary ranges are safe.
+Its content factory supplies both the selected trigger content and each popup choice; keep the factory declarative and do not rely on invocation count or side effects.
+Each factory result must be a non-empty root View with a non-empty semantic label.
+`Text` already supplies that label; composite content should apply `Semantics{.label = ...}` to its root.
+Use `.Label(...)` for the control's accessible name, `.Validation(...)` for application-owned validation presentation, and the shared `Enabled{false}` modifier on a choice root to disable that choice.
+The choice root is one interaction target and cannot contain another independent pointer or focus target.
+When choices can insert, remove, or reorder while the popup is open, apply a stable semantic `.Key(...)` to each factory result; otherwise identity follows the current index.
+An empty range or an out-of-range selected index throws `std::invalid_argument`.
 
 ## Input and progress
 

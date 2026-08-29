@@ -5,7 +5,7 @@ It is a View, not a modifier, layout, Canvas command, or non-visual Module.
 
 ## Typed declaration
 
-Wrap the generic declaration in a concrete library component:
+Wrap the generic declaration in a concrete component owned by the feature:
 
 ```cpp
 struct WebViewProperties {
@@ -20,8 +20,14 @@ struct WebViewEvents {
   };
 };
 
+namespace web_view {
+
+inline constexpr char type[] = "web/WebView";
+
+} // namespace web_view
+
 View WebView(WebViewProperties properties) {
-  return PlatformView("web/WebView", std::move(properties));
+  return PlatformView(web_view::type, std::move(properties));
 }
 ```
 
@@ -29,13 +35,17 @@ Properties are one complete immutable strongly typed snapshot.
 The no-properties form is `PlatformView(name)`.
 Register the exact Properties and optional Controller types with `RootContext::RegisterPlatformView()` from one RootHook.
 Registration names are nonempty case-sensitive UTF-8 identities and do not require `/`.
+Use one feature-owned type constant for both the component declaration and every selected platform registration rather than repeating the string literal.
+Keep the name, raw `PlatformView` declaration, platform factory types, and registration inside that owning feature.
+A reusable library or a feature with platform-selected implementations may expose one `InstallWebView(RootContext&)`; an app-local one-off implementation may register from its existing RootHook without adding an installer abstraction.
+Page code uses `WebView(...)` and typed events or Controllers only.
 
-Events need no separate declaration list.
+Events need no separate registration list.
 The component attaches ordinary typed handlers with `.On<Key>(...)`, and the platform factory receives one `PlatformEventEmitter` that calls `Emit<Key>(value)`.
 When an implementation crosses a platform-language boundary, the event value type owns `Decode(const PlatformPayload&)`; direct C++ emission remains strongly typed.
 
 An optional Controller is a library-defined typed command facade.
-Attach it with `.Controller(controller)` and register that exact Controller type.
+If the component exposes one, accept it through the concrete component API, attach it internally with `.Controller(controller)`, and register that exact Controller type.
 The factory connects the retained platform instance on mount or Controller replacement and disconnects before disposal.
 HuxerUI does not require Controller inheritance, State, pimpl, Access, Backend, or Connection types.
 
@@ -48,6 +58,7 @@ Use the active platform's public `platform_registry.h` factory contract:
 - iOS returns a detached stable `UIView*` from Objective-C++ or an actual Objective-C/Swift factory object.
 - macOS returns a detached stable `NSView*` from Objective-C++ or an actual Objective-C/Swift factory object.
 - Web returns a detached DOM element through a direct Emscripten C++ factory or `web::JavaScriptPlatformViewFactory`.
+- Linux does not currently implement PlatformView; do not present it as available or add a parallel embedding path.
 
 `PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
 It never crosses a platform-language boundary, and ordinary components and direct factories use their concrete types rather than constructing it themselves.
@@ -55,14 +66,17 @@ It never crosses a platform-language boundary, and ordinary components and direc
 Registry installation supplies the owning `PlatformAdapter&` only to the factory's internal binding operation.
 Direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values rather than the adapter.
 
-Android currently provides the common Java/Kotlin class adapter.
-Web currently provides the common JavaScript structural adapter: the RootHook supplies the actual factory object, Properties use `Module.HuxerUI.PlatformPayload`, and events use one framework-owned emitter.
+Android's common Java/Kotlin adapter uses `.class_name` for the Java factory class.
+When a Controller exists, its `.connect` callback attaches the framework-owned `PlatformChannel` to the exact C++ Controller and `.disconnect` detaches it.
+Web's common JavaScript structural adapter uses `.factory` for the actual `emscripten::val` factory object; a `*_factory_name` string may only identify the module property used to obtain that object.
+Properties use `Module.HuxerUI.PlatformPayload`, and events use one framework-owned emitter.
 iOS and macOS expose `UIKitPlatformViewFactory` or `AppKitPlatformViewFactory`, their View protocols, payload endpoints, and cancellation endpoints through the `HuxerUIPlatform` Clang module.
-The Objective-C++ RootHook supplies the actual Objective-C or Swift factory object to `ios::ObjectiveCPlatformViewFactory<Properties, Controller>` or `macos::ObjectiveCPlatformViewFactory<Properties, Controller>`.
+The Objective-C++ RootHook sets `.factory` to the actual Objective-C or Swift factory object in `ios::ObjectiveCPlatformViewFactory<Properties, Controller>` or `macos::ObjectiveCPlatformViewFactory<Properties, Controller>`.
 Its `connect` callback attaches the returned `PlatformChannel` to the exact library Controller, and `disconnect` detaches that Controller before View disposal.
 Factories receive the owning `UIViewController` or `NSWindow`; they return the stable detached View and never attach it themselves.
 Direct Objective-C++ factories remain available through `ios::PlatformViewFactory` and `macos::PlatformViewFactory` without a payload round trip.
 Every path still registers once through the library RootHook; application hosts, delegates, and Web mount calls do not form a second registry.
+The Web JavaScript `PlatformPayload` bridge does not transport `ExternalTexture`; direct Emscripten C++ PlatformView factories still retain exact Properties, and the direct C++ ExternalTexture path remains available without another data channel.
 
 Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.
 Failed creation publishes no event and releases any instance or platform object already returned by the factory.
@@ -79,6 +93,7 @@ Choose `ExternalTexture` when the platform only produces frames and HuxerUI shou
 ## Review points
 
 - concrete typed component instead of raw names in page code;
+- one feature boundary owns the stable name and registration;
 - complete Properties snapshot and controlled owner updates;
 - inferred typed events with no parallel event registry;
 - optional Controller with deterministic connect/disconnect lifetime;
