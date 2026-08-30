@@ -6,6 +6,7 @@
 #include <cwctype>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #if defined(_WIN32)
@@ -23,7 +24,8 @@ namespace huxerui::cli {
 namespace {
 
 bool IsExecutableFile(const std::filesystem::path& path) {
-  if (!std::filesystem::is_regular_file(path)) {
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(path, error)) {
     return false;
   }
 #if defined(_WIN32)
@@ -59,14 +61,8 @@ std::wstring Utf8ToWide(std::string_view value) {
     throw std::runtime_error("cannot convert process argument to UTF-16");
   }
   std::wstring wide(static_cast<std::size_t>(length), L'\0');
-  if (MultiByteToWideChar(
-          CP_UTF8,
-          MB_ERR_INVALID_CHARS,
-          value.data(),
-          static_cast<int>(value.size()),
-          wide.data(),
-          length
-      ) != length) {
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                          wide.data(), length) != length) {
     throw std::runtime_error("cannot convert process argument to UTF-16");
   }
   return wide;
@@ -76,30 +72,14 @@ std::string WideToUtf8(std::wstring_view value) {
   if (value.empty()) {
     return {};
   }
-  const int length = WideCharToMultiByte(
-      CP_UTF8,
-      WC_ERR_INVALID_CHARS,
-      value.data(),
-      static_cast<int>(value.size()),
-      nullptr,
-      0,
-      nullptr,
-      nullptr
-  );
+  const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                                         static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
   if (length <= 0) {
     throw std::runtime_error("cannot convert process environment value to UTF-8");
   }
   std::string utf8(static_cast<std::size_t>(length), '\0');
-  if (WideCharToMultiByte(
-          CP_UTF8,
-          WC_ERR_INVALID_CHARS,
-          value.data(),
-          static_cast<int>(value.size()),
-          utf8.data(),
-          length,
-          nullptr,
-          nullptr
-      ) != length) {
+  if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                          utf8.data(), length, nullptr, nullptr) != length) {
     throw std::runtime_error("cannot convert process environment value to UTF-8");
   }
   return utf8;
@@ -237,18 +217,8 @@ ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_outp
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
   }
   PROCESS_INFORMATION process{};
-  if (!CreateProcessW(
-          nullptr,
-          command_line.data(),
-          nullptr,
-          nullptr,
-          capture_output ? TRUE : FALSE,
-          0,
-          nullptr,
-          working_directory.empty() ? nullptr : working_directory.c_str(),
-          &startup,
-          &process
-      )) {
+  if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, capture_output ? TRUE : FALSE, 0, nullptr,
+                      working_directory.empty() ? nullptr : working_directory.c_str(), &startup, &process)) {
     const DWORD error = GetLastError();
     if (output_read) {
       CloseHandle(output_read);

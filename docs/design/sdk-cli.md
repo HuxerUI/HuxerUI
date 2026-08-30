@@ -288,7 +288,9 @@ That remains the responsibility of the SDK installer and avoids a recursive depe
 ### Devices
 
 Device discovery does not require a project.
-The Android driver parses `adb devices -l` and preserves ready, offline, unauthorized, and unavailable states. The iOS driver combines paired physical devices from `devicectl` with booted Simulators from `simctl` and retains the selected device kind through build and launch.
+On desktop hosts, the Android driver parses `adb devices -l` and preserves ready, offline, unauthorized, and unavailable states.
+On an Android host, the current device is an implicit local execution destination rather than a discovered device, so `devices android` and `--device` are unsupported and ADB is not required.
+The iOS driver combines paired physical devices from `devicectl` with booted Simulators from `simctl` and retains the selected device kind through build and launch.
 Desktop drivers do not expose synthetic devices.
 
 ### Build
@@ -313,6 +315,8 @@ The ABI-specific C++ build remains exclusively owned by Gradle's root-project `e
 Each ABI writes its merged HuxerUI package to an explicit variant-owned resource directory. Gradle selects the first built configured ABI and performs the one required copy into generated assets without inspecting private `.cxx` directories or comparing timestamps.
 The generated shell includes the source-controlled Gradle 8.13 wrapper, pins the official binary distribution by URL and SHA-256 checksum, and invokes only its local `gradlew` or `gradlew.bat`.
 Gradle itself therefore does not need to be installed separately; the Java runtime remains a host prerequisite.
+On an Android host, the same Gradle shell is restricted to `arm64-v8a` and receives the Termux `aapt2` executable through AGP's tool override.
+The Android host path does not introduce another generated project or native build owner; it requires an existing Android SDK platform and an NDK layout that can execute on Termux.
 
 Web builds use `emcmake` to configure the same root CMake project and produce the ES module, WebAssembly module, and project-owned HTML entry point.
 The Web shell owns the HTML document and host-element mount code rather than hiding them in the SDK.
@@ -320,11 +324,14 @@ The Web shell owns the HTML document and host-element mount code rather than hid
 ### Run
 
 `run` accepts exactly one enabled platform and performs a build before launch.
-Windows starts the executable, macOS opens the application bundle, Web delegates the generated HTML entry point to `emrun`, Android installs and launches the generated APK, and iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device.
+Windows starts the executable, macOS opens the application bundle, desktop Web hosts delegate the generated HTML entry point to `emrun`, Android installs and launches the generated APK, and iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device.
 On Windows hosts, the Web driver asks `emrun` to open its URL through `explorer.exe` so the operating system selects the default browser without relying on Python browser discovery.
+On Android hosts, the Web driver binds a Python standard-library server to an available loopback port, opens the generated entry URL through `termux-open`, and keeps the server in the foreground until interruption.
+This path never selects Emscripten's ADB-backed Android mode or exposes the server to another network interface.
 
-For Android, one ready device is selected automatically.
+For Android on desktop hosts, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
+For Android on Termux, `run` opens the generated APK through `termux-open` and delegates user confirmation and application launch to the system package installer.
 
 ### Package
 
@@ -509,8 +516,9 @@ Missing PlatformView, accessibility, or library capabilities are backend limitat
 ### Web
 
 The shell supplies the browser-owned HTML document and empty host element used by the adapter-owned composition root.
-The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development.
+The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development on desktop hosts.
 It does not define a parallel JavaScript component system or expose browsers as synthetic devices.
+Termux instead uses Python's standard-library HTTP server because `emrun` does not recognize Android hosts, then opens the bound loopback URL through `termux-open`.
 Formal distribution uses an Emscripten-compatible SDK archive, and a source checkout remains an explicit override of the same root-project configuration.
 
 ### Android
@@ -523,6 +531,8 @@ Published builds consume the Java-only HuxerUI AAR through Gradle and the ABI-sp
 Source development substitutes the repository Android library explicitly while preserving the same Gradle and CMake target contract.
 The app module's `externalNativeBuild` points directly at the repository root `CMakeLists.txt`.
 There is no project-level `huxerui.cmake`, generated Android SDK configuration projection, or CMake-owned copy of Gradle configuration in the target architecture.
+Desktop hosts use `sdkmanager` and ADB for managed Android SDK components and external devices.
+Termux instead requires a compatible SDK and NDK supplied outside HuxerUI, overrides AGP's `aapt2` executable with the Termux package, restricts the build to the local `arm64-v8a` ABI, and opens the APK with the system package installer.
 
 ### iOS
 

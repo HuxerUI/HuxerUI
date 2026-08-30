@@ -124,8 +124,14 @@ public:
   }
 
   std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array tools{std::string_view{"java"}};
-    return tools;
+    static constexpr std::array desktop_tools{std::string_view{"java"}};
+    static constexpr std::array android_tools{
+        std::string_view{"java"},
+        std::string_view{"aapt2"},
+        std::string_view{"termux-open"},
+    };
+    return CurrentHostId() == "android" ? std::span<const std::string_view>(android_tools)
+                                        : std::span<const std::string_view>(desktop_tools);
   }
 
   std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const override {
@@ -141,21 +147,23 @@ public:
         "Android SDK",
         sdk_root.string(),
     });
-    const std::optional<std::filesystem::path> sdk_manager = AndroidSdkManager(sdk_root);
-    diagnostics.push_back({
-        sdk_manager ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
-        "sdkmanager",
-        "Android SDK command-line tools",
-        sdk_manager ? sdk_manager->string() : std::string{},
-    });
+    if (CurrentHostId() != "android") {
+      const std::optional<std::filesystem::path> sdk_manager = AndroidSdkManager(sdk_root);
+      diagnostics.push_back({
+          sdk_manager ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+          "sdkmanager",
+          "Android SDK command-line tools",
+          sdk_manager ? sdk_manager->string() : std::string{},
+      });
 
-    const std::filesystem::path adb_path = AndroidAdb(sdk_root);
-    diagnostics.push_back({
-        adb_path.empty() ? EnvironmentDiagnosticStatus::Missing : EnvironmentDiagnosticStatus::Ready,
-        "platform_tools",
-        "Android SDK platform-tools",
-        adb_path.string(),
-    });
+      const std::filesystem::path adb_path = AndroidAdb(sdk_root);
+      diagnostics.push_back({
+          adb_path.empty() ? EnvironmentDiagnosticStatus::Missing : EnvironmentDiagnosticStatus::Ready,
+          "platform_tools",
+          "Android SDK platform-tools",
+          adb_path.string(),
+      });
+    }
 
     const std::array packages{
         std::pair{
@@ -164,8 +172,11 @@ public:
         std::pair{std::string_view{"android_ndk"}, sdk_root / "ndk" / android_ndk_version},
     };
     for (const auto& [id, path] : packages) {
-      const std::string label = id == "android_platform" ? "Android platform " + std::string(android_compile_sdk)
-                                                          : "Android NDK " + std::string(android_ndk_version);
+      const std::string label = id == "android_platform"
+                                    ? "Android platform " + std::string(android_compile_sdk)
+                                    : (CurrentHostId() == "android" ? "Termux-compatible Android NDK "
+                                                                    : "Android NDK ") +
+                                          std::string(android_ndk_version);
       diagnostics.push_back({
           !sdk_root.empty() && std::filesystem::is_directory(path) ? EnvironmentDiagnosticStatus::Ready
                                                                    : EnvironmentDiagnosticStatus::Missing,
@@ -179,6 +190,44 @@ public:
 
   std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
     std::vector<SetupAction> actions;
+    if (CurrentHostId() == "android") {
+      bool needs_android_sdk = false;
+      for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
+        if (diagnostic.status != EnvironmentDiagnosticStatus::Missing) {
+          continue;
+        }
+        if (diagnostic.id == "java") {
+          actions.push_back({
+              "Install OpenJDK for Termux",
+              ProcessCommand{"pkg", {"install", "-y", "openjdk-21"}, {}},
+          });
+        } else if (diagnostic.id == "aapt2") {
+          actions.push_back({
+              "Install aapt2 for Termux",
+              ProcessCommand{"pkg", {"install", "-y", "aapt2"}, {}},
+          });
+        } else if (diagnostic.id == "termux-open") {
+          actions.push_back({
+              "Install Termux system integration tools",
+              ProcessCommand{"pkg", {"install", "-y", "termux-tools"}, {}},
+          });
+        } else if (
+            diagnostic.id == "android_sdk" || diagnostic.id == "android_platform" ||
+            diagnostic.id == "android_ndk"
+        ) {
+          needs_android_sdk = true;
+        }
+      }
+      if (needs_android_sdk) {
+        actions.push_back({
+            "Install a Termux-compatible Android SDK with platform " + std::string(android_compile_sdk) +
+                " and NDK " + std::string(android_ndk_version) + ", then set ANDROID_HOME",
+            std::nullopt,
+        });
+      }
+      return actions;
+    }
+
     const std::filesystem::path sdk_root = AndroidSdkRoot();
     const std::optional<std::filesystem::path> sdk_manager = AndroidSdkManager(sdk_root);
     for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
@@ -261,7 +310,7 @@ public:
   }
 
   bool SupportsDeviceDiscovery() const noexcept override {
-    return true;
+    return CurrentHostId() != "android";
   }
 
   std::vector<PlatformDevice> DiscoverDevices() const override {
@@ -279,35 +328,17 @@ public:
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("Android native builds do not use a CMake generator option");
     }
-    return detail::LibraryGraphConfigureCommands(context);
+    return detail::AndroidLibraryGraphCommands(context, CurrentHostId());
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
-    const std::filesystem::path shell = context.project_root / "platform/android";
-    const std::string configuration = detail::ProfileConfiguration(context.profile);
-    const std::filesystem::path wrapper = shell / (CurrentHostId() == "windows" ? "gradlew.bat" : "gradlew");
-    return {{wrapper.string(), {":app:assemble" + configuration}, shell}};
+    const std::optional<std::filesystem::path> aapt2 =
+        CurrentHostId() == "android" ? FindExecutable("aapt2") : std::optional<std::filesystem::path>{};
+    return detail::AndroidBuildCommands(context, CurrentHostId(), aapt2.value_or(std::filesystem::path{}));
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
-    const std::filesystem::path output_directory =
-        context.project_root / "platform/android/app/build/outputs/apk" / context.profile;
-    const std::string metadata = detail::ReadFile(output_directory / "output-metadata.json");
-    const std::string application_id = detail::JsonString(metadata, "applicationId");
-    if (application_id.empty()) {
-      throw std::runtime_error("Android APK metadata contains an empty applicationId");
-    }
-    const std::filesystem::path apk = AndroidApk(context);
-
-    std::vector<std::string> install_arguments = detail::DeviceArguments(context.device);
-    install_arguments.insert(install_arguments.end(), {"install", "-r", apk.string()});
-    std::vector<std::string> launch_arguments = detail::DeviceArguments(context.device);
-    launch_arguments.insert(launch_arguments.end(), {"shell", "am", "start", "-n", application_id + "/.MainActivity"});
-    const std::string adb = AndroidAdbCommand();
-    return {
-        {adb, std::move(install_arguments), context.project_root},
-        {adb, std::move(launch_arguments), context.project_root},
-    };
+    return detail::AndroidRunCommands(context, CurrentHostId());
   }
 
   std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
@@ -319,6 +350,68 @@ public:
 } // namespace
 
 namespace detail {
+
+std::vector<ProcessCommand>
+AndroidLibraryGraphCommands(const PlatformCommandContext& context, std::string_view host_id) {
+  std::vector<ProcessCommand> commands = LibraryGraphConfigureCommands(context);
+  if (host_id == "android") {
+    commands.front().arguments.push_back("-DANDROID_ABI=arm64-v8a");
+  }
+  return commands;
+}
+
+std::vector<ProcessCommand>
+AndroidBuildCommands(const PlatformCommandContext& context, std::string_view host_id,
+                     const std::filesystem::path& aapt2) {
+  const std::filesystem::path shell = context.project_root / "platform/android";
+  const std::string configuration = ProfileConfiguration(context.profile);
+  const std::filesystem::path wrapper = shell / (host_id == "windows" ? "gradlew.bat" : "gradlew");
+  std::vector<std::string> arguments;
+  if (host_id == "android") {
+    if (aapt2.empty()) {
+      throw std::runtime_error("HuxerUI Termux aapt2 is unavailable; run 'huxerui doctor android'");
+    }
+    arguments = {
+        "-PhuxeruiAbis=arm64-v8a",
+        "-Pandroid.aapt2FromMavenOverride=" + aapt2.string(),
+    };
+  }
+  arguments.push_back(":app:assemble" + configuration);
+  return {{wrapper.string(), std::move(arguments), shell}};
+}
+
+std::vector<ProcessCommand> AndroidRunCommands(const PlatformCommandContext& context, std::string_view host_id) {
+  if (host_id == "android") {
+    if (context.device) {
+      throw std::invalid_argument("HuxerUI Termux Android run does not accept a device");
+    }
+    const std::filesystem::path apk = AndroidApk(context);
+    return {{
+        "termux-open",
+        {"--view", "--content-type", "application/vnd.android.package-archive", apk.string()},
+        context.project_root,
+    }};
+  }
+
+  const std::filesystem::path output_directory =
+      context.project_root / "platform/android/app/build/outputs/apk" / context.profile;
+  const std::string metadata = ReadFile(output_directory / "output-metadata.json");
+  const std::string application_id = JsonString(metadata, "applicationId");
+  if (application_id.empty()) {
+    throw std::runtime_error("Android APK metadata contains an empty applicationId");
+  }
+  const std::filesystem::path apk = AndroidApk(context);
+
+  std::vector<std::string> install_arguments = DeviceArguments(context.device);
+  install_arguments.insert(install_arguments.end(), {"install", "-r", apk.string()});
+  std::vector<std::string> launch_arguments = DeviceArguments(context.device);
+  launch_arguments.insert(launch_arguments.end(), {"shell", "am", "start", "-n", application_id + "/.MainActivity"});
+  const std::string adb = AndroidAdbCommand();
+  return {
+      {adb, std::move(install_arguments), context.project_root},
+      {adb, std::move(launch_arguments), context.project_root},
+  };
+}
 
 const PlatformDriver& AndroidPlatformDriver() noexcept {
   static const AndroidDriver driver;

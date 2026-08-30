@@ -92,7 +92,8 @@ The Web platform configuration supplies Web sources, platform-owned application 
 
 Direct consumers continue to create an executable, link the canonical `HuxerUI::huxerui` target, enable composable code generation, and attach resources. Tool resolution continues to use the development host, so a Windows, macOS, or Linux prebuilt code generator runs while the C++ target is WebAssembly.
 
-The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, packaging, and local serving through `emrun`.
+The CLI wraps the same CMake path for project creation, diagnostics, incremental builds, and packaging.
+Desktop hosts serve generated output through `emrun`, while Termux uses Python's standard-library HTTP server on loopback and opens the bound URL through `termux-open`.
 The project-owned Web shell keeps its HTML and host-element mount code under `platform/web`, while the backend avoids a parallel JavaScript component build system.
 
 ## Viewport and display scale

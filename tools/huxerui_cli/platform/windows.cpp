@@ -131,13 +131,9 @@ public:
   }
 
   std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
-    return std::any_of(
-               diagnostics.begin(),
-               diagnostics.end(),
-               [](const EnvironmentDiagnostic& diagnostic) {
-                 return diagnostic.id == "msvc" && diagnostic.status == EnvironmentDiagnosticStatus::Missing;
-               }
-           )
+    return std::any_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+             return diagnostic.id == "msvc" && diagnostic.status == EnvironmentDiagnosticStatus::Missing;
+           })
                ? std::vector<SetupAction>{{
                      "Install Visual Studio Build Tools with the Desktop development with C++ workload",
                      std::nullopt,
@@ -148,11 +144,8 @@ public:
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
     std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
     std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/windows/app", context);
-    files.insert(
-        files.end(),
-        std::make_move_iterator(platform_files.begin()),
-        std::make_move_iterator(platform_files.end())
-    );
+    files.insert(files.end(), std::make_move_iterator(platform_files.begin()),
+                 std::make_move_iterator(platform_files.end()));
     return files;
   }
 

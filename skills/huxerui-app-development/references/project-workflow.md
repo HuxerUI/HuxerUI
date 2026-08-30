@@ -127,6 +127,8 @@ For manually defined consumer targets, call `huxerui_enable_codegen(target)` aft
 - Build only the current host and platforms affected by the task by default.
 - Preserve existing Android ABI, NDK, Gradle, iOS Xcode, Web Emscripten, and desktop settings.
 - Use `huxerui devices` when a platform needs a device selection.
+- On Termux, Android and Web use the current device directly: do not pass `--device` or add ADB. Web uses the CLI-planned Python loopback server and opens its URL through `termux-open`.
+- A Termux Android run opens the APK in the system installer; complete installation and choose Open there.
 
 ## Diagnose by phase
 

@@ -76,12 +76,10 @@ void WriteFile(const std::filesystem::path& root, const GeneratedFile& file) {
 #if !defined(_WIN32)
   if (file.executable) {
     std::error_code error;
-    std::filesystem::permissions(
-        output_path,
-        std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
-        std::filesystem::perm_options::add,
-        error
-    );
+    std::filesystem::permissions(output_path, std::filesystem::perms::owner_exec |
+                                                  std::filesystem::perms::group_exec |
+                                                  std::filesystem::perms::others_exec,
+                                 std::filesystem::perm_options::add, error);
     if (error) {
       throw std::runtime_error("cannot make " + output_path.string() + " executable: " + error.message());
     }
@@ -95,9 +93,8 @@ void WriteFiles(const std::filesystem::path& root, std::span<const GeneratedFile
   }
 }
 
-void PublishGeneratedTree(
-    std::filesystem::path destination, std::span<const GeneratedFile> files, std::vector<std::filesystem::path>& created
-) {
+void PublishGeneratedTree(std::filesystem::path destination, std::span<const GeneratedFile> files,
+                          std::vector<std::filesystem::path>& created) {
   const std::filesystem::path parent = destination.parent_path();
   const std::filesystem::path temporary = TemporaryPath(parent, destination.filename().string());
   TemporaryTree cleanup(temporary);
@@ -199,11 +196,9 @@ std::filesystem::path AgentSkillRoot(AgentSkillDirectory directory) {
   throw std::logic_error("HuxerUI CLI encountered an unknown agent skill directory");
 }
 
-void CopyApplicationDevelopmentSkill(
-    const std::filesystem::path& project_root,
-    const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> directories
-) {
+void
+CopyApplicationDevelopmentSkill(const std::filesystem::path& project_root, const std::filesystem::path& skill_source,
+                                std::span<const AgentSkillDirectory> directories) {
   if (directories.empty()) {
     return;
   }
@@ -468,14 +463,9 @@ Project ResolveApplicationProject(const Project& project) {
   return project;
 }
 
-void CreateProject(
-    const std::filesystem::path& destination,
-    ProjectKind kind,
-    const ProjectTemplateContext& context,
-    std::span<const PlatformDriver* const> platforms,
-    const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> agent_skill_directories
-) {
+void CreateProject(const std::filesystem::path& destination, ProjectKind kind, const ProjectTemplateContext& context,
+                   std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
+                   std::span<const AgentSkillDirectory> agent_skill_directories) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
@@ -519,12 +509,8 @@ void CreateProject(
   cleanup.Commit();
 }
 
-void AddProjectPlatforms(
-    const Project& project,
-    ProjectKind kind,
-    const ProjectTemplateContext& context,
-    std::span<const PlatformDriver* const> platforms
-) {
+void AddProjectPlatforms(const Project& project, ProjectKind kind, const ProjectTemplateContext& context,
+                         std::span<const PlatformDriver* const> platforms) {
   if (platforms.empty()) {
     throw std::invalid_argument("at least one platform is required");
   }
@@ -562,11 +548,8 @@ void AddProjectPlatforms(
     for (PlatformTrees& trees : generated) {
       if (kind == ProjectKind::Library) {
         if (!trees.library_package.empty()) {
-          PublishGeneratedTree(
-              project.root / "platform" / trees.platform->Id(),
-              std::move(trees.library_package),
-              created
-          );
+          PublishGeneratedTree(project.root / "platform" / trees.platform->Id(),
+                               std::move(trees.library_package), created);
         }
       }
       PublishGeneratedTree(shell_root / trees.platform->Id(), std::move(trees.shell), created);

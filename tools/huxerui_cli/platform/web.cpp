@@ -11,6 +11,14 @@ namespace huxerui::cli {
 namespace {
 
 constexpr std::string_view emscripten_version = "4.0.19";
+constexpr std::string_view termux_web_server_script =
+    "import http.server,signal,subprocess,sys,urllib.parse;"
+    "server=http.server.ThreadingHTTPServer(('127.0.0.1',0),http.server.SimpleHTTPRequestHandler);"
+    "url='http://127.0.0.1:{}/{}'.format(server.server_port,urllib.parse.quote(sys.argv[1]));"
+    "print('Serving HuxerUI Web at '+url,flush=True);"
+    "subprocess.run(['termux-open',url],check=True);"
+    "signal.signal(signal.SIGINT,lambda *_:sys.exit(0));"
+    "server.serve_forever()";
 
 std::string ResolveCMakeGenerator(const PlatformCommandContext& context) {
   if (!context.cmake_generator.empty()) {
@@ -45,16 +53,24 @@ public:
   }
 
   bool SupportsCurrentHost() const noexcept override {
-    return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux";
+    return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux" ||
+           CurrentHostId() == "android";
   }
 
   std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array tools{
+    static constexpr std::array desktop_tools{
         std::string_view{"emcmake"},
         std::string_view{"emcc"},
         std::string_view{"emrun"},
     };
-    return tools;
+    static constexpr std::array android_tools{
+        std::string_view{"emcmake"},
+        std::string_view{"emcc"},
+        std::string_view{"python"},
+        std::string_view{"termux-open"},
+    };
+    return CurrentHostId() == "android" ? std::span<const std::string_view>(android_tools)
+                                        : std::span<const std::string_view>(desktop_tools);
   }
 
   std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const override {
@@ -80,6 +96,44 @@ public:
           return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
         })) {
       return {};
+    }
+    if (CurrentHostId() == "android") {
+      std::vector<SetupAction> actions;
+      const bool needs_emscripten = std::any_of(
+          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+            return diagnostic.status == EnvironmentDiagnosticStatus::Missing &&
+                   (diagnostic.id == "emcmake" || diagnostic.id == "emcc");
+          }
+      );
+      if (needs_emscripten) {
+        actions.push_back({
+            "Install a Termux Emscripten " + std::string(emscripten_version) + " toolchain and add it to PATH",
+            std::nullopt,
+        });
+      }
+      const bool needs_python = std::any_of(
+          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+            return diagnostic.status == EnvironmentDiagnosticStatus::Missing && diagnostic.id == "python";
+          }
+      );
+      if (needs_python) {
+        actions.push_back({
+            "Install Python for the Termux Web development server",
+            ProcessCommand{"pkg", {"install", "-y", "python"}, {}},
+        });
+      }
+      const bool needs_termux_tools = std::any_of(
+          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+            return diagnostic.status == EnvironmentDiagnosticStatus::Missing && diagnostic.id == "termux-open";
+          }
+      );
+      if (needs_termux_tools) {
+        actions.push_back({
+            "Install Termux system integration tools",
+            ProcessCommand{"pkg", {"install", "-y", "termux-tools"}, {}},
+        });
+      }
+      return actions;
     }
     const std::optional<std::filesystem::path> emsdk = FindExecutable("emsdk");
     if (!emsdk) {
@@ -132,22 +186,7 @@ public:
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
-    const std::string plan = detail::ReadFile(detail::AppIntegrationPlan(context));
-    const std::string target = detail::JsonString(plan, "target");
-    const std::filesystem::path artifact = detail::JsonString(plan, "artifact");
-    if (!std::filesystem::is_regular_file(artifact)) {
-      throw std::runtime_error("Web build artifact is missing: " + artifact.string());
-    }
-    const std::filesystem::path entry = artifact.parent_path() / (target + ".html");
-    if (!std::filesystem::is_regular_file(entry)) {
-      throw std::runtime_error("Web entry file is missing: " + entry.string());
-    }
-    std::vector<std::string> arguments;
-    if (CurrentHostId() == "windows") {
-      arguments = {"--browser", "explorer.exe"};
-    }
-    arguments.push_back(entry.string());
-    return {{"emrun", std::move(arguments), artifact.parent_path()}};
+    return detail::WebRunCommands(context, CurrentHostId());
   }
 
   std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
@@ -168,6 +207,32 @@ public:
 } // namespace
 
 namespace detail {
+
+std::vector<ProcessCommand> WebRunCommands(const PlatformCommandContext& context, std::string_view host_id) {
+  const std::string plan = ReadFile(AppIntegrationPlan(context));
+  const std::string target = JsonString(plan, "target");
+  const std::filesystem::path artifact = JsonString(plan, "artifact");
+  if (!std::filesystem::is_regular_file(artifact)) {
+    throw std::runtime_error("Web build artifact is missing: " + artifact.string());
+  }
+  const std::filesystem::path entry = artifact.parent_path() / (target + ".html");
+  if (!std::filesystem::is_regular_file(entry)) {
+    throw std::runtime_error("Web entry file is missing: " + entry.string());
+  }
+  if (host_id == "android") {
+    return {{
+        "python",
+        {"-c", std::string(termux_web_server_script), entry.filename().string()},
+        artifact.parent_path(),
+    }};
+  }
+  std::vector<std::string> arguments;
+  if (host_id == "windows") {
+    arguments = {"--browser", "explorer.exe"};
+  }
+  arguments.push_back(entry.string());
+  return {{"emrun", std::move(arguments), artifact.parent_path()}};
+}
 
 const PlatformDriver& WebPlatformDriver() noexcept {
   static const WebDriver driver;

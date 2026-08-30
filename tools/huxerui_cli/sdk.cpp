@@ -44,9 +44,8 @@ enum class SdkLayout {
   Installed,
 };
 
-std::filesystem::path ApplicationDevelopmentSkillDirectory(
-    const std::filesystem::path& huxerui_home, SdkLayout layout
-) {
+std::filesystem::path ApplicationDevelopmentSkillDirectory(const std::filesystem::path& huxerui_home,
+                                                           SdkLayout layout) {
   if (layout == SdkLayout::Installed) {
     return huxerui_home / "share/huxerui/skills/huxerui-app-development";
   }

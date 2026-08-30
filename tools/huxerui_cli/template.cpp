@@ -21,9 +21,8 @@ void ReplaceAll(std::string& value, std::string_view token, std::string_view rep
   }
 }
 
-std::string Render(
-    std::string_view value, const ProjectTemplateContext& context, std::span<const TemplateReplacement> replacements
-) {
+std::string Render(std::string_view value, const ProjectTemplateContext& context,
+                   std::span<const TemplateReplacement> replacements) {
   std::string rendered = context.Render(value);
   std::string project_id_path = context.project_id;
   std::replace(project_id_path.begin(), project_id_path.end(), '.', '/');
@@ -65,14 +64,9 @@ std::string Render(
   return rendered;
 }
 
-void CollectTemplateFiles(
-    const cmrc::embedded_filesystem& filesystem,
-    std::string_view root,
-    std::string_view relative_directory,
-    const ProjectTemplateContext* context,
-    std::span<const TemplateReplacement> replacements,
-    std::vector<GeneratedFile>& files
-) {
+void CollectTemplateFiles(const cmrc::embedded_filesystem& filesystem, std::string_view root,
+                          std::string_view relative_directory, const ProjectTemplateContext* context,
+                          std::span<const TemplateReplacement> replacements, std::vector<GeneratedFile>& files) {
   std::string directory(root);
   if (!relative_directory.empty()) {
     directory += "/";
@@ -98,9 +92,8 @@ void CollectTemplateFiles(
   }
 }
 
-std::vector<GeneratedFile> LoadTemplateTree(
-    std::string_view root, const ProjectTemplateContext* context, std::span<const TemplateReplacement> replacements
-) {
+std::vector<GeneratedFile> LoadTemplateTree(std::string_view root, const ProjectTemplateContext* context,
+                                            std::span<const TemplateReplacement> replacements) {
   const cmrc::embedded_filesystem filesystem = cmrc::huxerui_cli_templates::get_filesystem();
   if (!filesystem.is_directory(std::string(root))) {
     throw std::logic_error("HuxerUI CLI template directory is missing: " + std::string(root));
@@ -128,9 +121,8 @@ std::string ProjectTemplateContext::Render(std::string_view value) const {
   return rendered;
 }
 
-std::vector<GeneratedFile> RenderTemplateTree(
-    std::string_view root, const ProjectTemplateContext& context, std::span<const TemplateReplacement> replacements
-) {
+std::vector<GeneratedFile> RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
+                                              std::span<const TemplateReplacement> replacements) {
   return LoadTemplateTree(root, &context, replacements);
 }
 

@@ -58,6 +58,8 @@ The Web backend uses Emscripten, WebAssembly, Canvas 2D, browser input events, h
 
 Generated projects use the Emscripten version pinned by the installed HuxerUI SDK.
 Run the generated output through `huxerui run web` or another HTTP server; loading the files directly with a `file:` URL is unsupported.
+On Termux, `huxerui run web` starts a Python standard-library server on an available loopback port and passes the generated entry URL to `termux-open`; it does not use ADB or Emscripten's Android-device mode.
+The pinned Emscripten tools, Python, and `termux-open` must be available on `PATH`.
 
 Typed routed navigation can bind the authoritative `NavigationPath` to browser URL and history state.
 Browser restrictions still govern clipboard, file pickers, autoplay, cross-origin requests, and storage persistence.
@@ -71,7 +73,10 @@ Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, an
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, and ExternalTexture are translated at the Android host boundary.
 
 An Android arm64-v8a host SDK provides the `huxerui` CLI, `hcg`, and `hrc` as native Bionic executables for Termux.
-The SDK installer does not install Java, Gradle dependencies, the Android SDK, or the Android NDK; use `huxerui doctor android` to inspect those application-build prerequisites.
+Termux Android builds target the local `arm64-v8a` ABI, use the Termux `aapt2` executable, and still require an Android SDK platform and NDK layout compatible with Gradle `externalNativeBuild` on Termux.
+The SDK installer does not install Java, Gradle dependencies, `aapt2`, the Android SDK, or the Android NDK; use `huxerui doctor android` to inspect those application-build prerequisites.
+Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB because they are not part of the local-device path.
+`huxerui run android` opens the generated APK in the Android system installer through `termux-open`; complete the confirmation and choose Open in the installer to start the application.
 
 ## iOS
 

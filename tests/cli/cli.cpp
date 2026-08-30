@@ -92,6 +92,37 @@ bool IsExecutable(const std::filesystem::path& path) {
 }
 #endif
 
+#if !defined(_WIN32)
+TEST_CASE("HuxerUICliExecutableSearchSkipsInaccessiblePathEntries") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path inaccessible = temporary.Path() / "inaccessible";
+  const std::filesystem::path available = temporary.Path() / "available";
+  const std::filesystem::path executable = available / "huxerui-test-tool";
+  std::filesystem::create_directories(inaccessible);
+  std::filesystem::create_directories(available);
+  std::ofstream(executable) << "#!/bin/sh\n";
+  std::filesystem::permissions(executable, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+  std::filesystem::permissions(inaccessible, std::filesystem::perms::none);
+
+  const std::optional<std::string> old_path = huxerui::cli::ReadEnvironmentVariable("PATH");
+  REQUIRE(old_path);
+  std::optional<std::filesystem::path> resolved;
+  try {
+    huxerui::cli::SetProcessEnvironmentVariable("PATH", inaccessible.string() + ":" + available.string());
+    resolved = huxerui::cli::FindExecutable(executable.filename().string());
+  } catch (...) {
+    std::filesystem::permissions(inaccessible, std::filesystem::perms::owner_all);
+    huxerui::cli::SetProcessEnvironmentVariable("PATH", *old_path);
+    throw;
+  }
+  std::filesystem::permissions(inaccessible, std::filesystem::perms::owner_all);
+  huxerui::cli::SetProcessEnvironmentVariable("PATH", *old_path);
+
+  REQUIRE(resolved);
+  REQUIRE(std::filesystem::equivalent(*resolved, executable));
+}
+#endif
+
 TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"--help"});
@@ -640,19 +671,55 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
       {},
   };
 
-  const std::vector<huxerui::cli::ProcessCommand> library_commands = android->LibraryGraphCommands(context);
-  const std::vector<huxerui::cli::ProcessCommand> commands = android->BuildCommands(context);
+  const std::vector<huxerui::cli::ProcessCommand> library_commands =
+      huxerui::cli::detail::AndroidLibraryGraphCommands(context, "windows");
+  const std::vector<huxerui::cli::ProcessCommand> windows_commands =
+      huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
+  const std::vector<huxerui::cli::ProcessCommand> posix_commands =
+      huxerui::cli::detail::AndroidBuildCommands(context, "linux", {});
 
   REQUIRE(library_commands.size() == 1);
   REQUIRE(library_commands[0].executable == "cmake");
   REQUIRE(library_commands[0].arguments == ExpectedLibraryGraphArguments(context.project_root));
-  REQUIRE(commands.size() == 1);
-  const std::filesystem::path wrapper = context.project_root / "platform/android" /
-                                        (huxerui::cli::CurrentHostId() == "windows" ? "gradlew.bat" : "gradlew");
-  REQUIRE(commands[0].executable == wrapper.string());
-  REQUIRE(commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(windows_commands.size() == 1);
+  REQUIRE(
+      std::filesystem::path(windows_commands[0].executable).generic_string() ==
+      (context.project_root / "platform/android/gradlew.bat").generic_string()
+  );
+  REQUIRE(windows_commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(posix_commands.size() == 1);
+  REQUIRE(
+      std::filesystem::path(posix_commands[0].executable).generic_string() ==
+      (context.project_root / "platform/android/gradlew").generic_string()
+  );
+  REQUIRE(posix_commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
   REQUIRE(library_commands[0].working_directory == context.project_root);
-  REQUIRE(commands[0].working_directory == context.project_root / "platform/android");
+  REQUIRE(windows_commands[0].working_directory == context.project_root / "platform/android");
+  REQUIRE(posix_commands[0].working_directory == context.project_root / "platform/android");
+
+  const std::vector<huxerui::cli::ProcessCommand> termux_library_commands =
+      huxerui::cli::detail::AndroidLibraryGraphCommands(context, "android");
+  std::vector<std::string> termux_library_arguments = ExpectedLibraryGraphArguments(context.project_root);
+  termux_library_arguments.push_back("-DANDROID_ABI=arm64-v8a");
+  REQUIRE(termux_library_commands.size() == 1);
+  REQUIRE(termux_library_commands[0].arguments == termux_library_arguments);
+
+  const std::filesystem::path termux_aapt2 = "/data/data/com.termux/files/usr/bin/aapt2";
+  const std::vector<huxerui::cli::ProcessCommand> termux_commands =
+      huxerui::cli::detail::AndroidBuildCommands(context, "android", termux_aapt2);
+  REQUIRE(termux_commands.size() == 1);
+  REQUIRE(
+      std::filesystem::path(termux_commands[0].executable).generic_string() ==
+      (context.project_root / "platform" / "android" / "gradlew").generic_string()
+  );
+  REQUIRE(
+      termux_commands[0].arguments ==
+      std::vector<std::string>{
+          "-PhuxeruiAbis=arm64-v8a",
+          "-Pandroid.aapt2FromMavenOverride=" + termux_aapt2.string(),
+          ":app:assembleRelease",
+      }
+  );
 
   huxerui::cli::PlatformCommandContext explicit_generator = context;
   explicit_generator.cmake_generator = "Ninja";
@@ -685,7 +752,8 @@ TEST_CASE("HuxerUICliUsesGradleMetadataToLaunchAndroidApplications") {
       {},
   };
 
-  const std::vector<huxerui::cli::ProcessCommand> commands = android->RunCommands(context);
+  const std::vector<huxerui::cli::ProcessCommand> commands =
+      huxerui::cli::detail::AndroidRunCommands(context, "windows");
 
   REQUIRE(commands.size() == 2);
   REQUIRE(commands[0].arguments.size() == 3);
@@ -696,6 +764,16 @@ TEST_CASE("HuxerUICliUsesGradleMetadataToLaunchAndroidApplications") {
       commands[1].arguments ==
       std::vector<std::string>{"shell", "am", "start", "-n", "dev.example.sample.debug/.MainActivity"}
   );
+
+  const std::vector<huxerui::cli::ProcessCommand> termux_commands =
+      huxerui::cli::detail::AndroidRunCommands(context, "android");
+  REQUIRE(termux_commands.size() == 1);
+  REQUIRE(termux_commands[0].executable == "termux-open");
+  REQUIRE(termux_commands[0].arguments.size() == 4);
+  REQUIRE(termux_commands[0].arguments[0] == "--view");
+  REQUIRE(termux_commands[0].arguments[1] == "--content-type");
+  REQUIRE(termux_commands[0].arguments[2] == "application/vnd.android.package-archive");
+  REQUIRE(std::filesystem::equivalent(termux_commands[0].arguments[3], apk));
   const std::vector<huxerui::cli::PackageArtifact> package_artifacts = android->PackageArtifacts(context);
   REQUIRE(package_artifacts.size() == 1);
   const huxerui::cli::PackageArtifact expected_package_artifact{apk, apk.filename()};
@@ -764,20 +842,37 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
                          "  \"artifact\": \""
                       << artifact.generic_string() << "\"\n}\n";
 
-  const std::vector<huxerui::cli::ProcessCommand> run_commands = web->RunCommands(context);
+  const std::vector<huxerui::cli::ProcessCommand> windows_run_commands =
+      huxerui::cli::detail::WebRunCommands(context, "windows");
 
-  REQUIRE(run_commands.size() == 1);
-  REQUIRE(run_commands[0].executable == "emrun");
-  if (huxerui::cli::CurrentHostId() == "windows") {
-    REQUIRE(run_commands[0].arguments.size() == 3);
-    REQUIRE(run_commands[0].arguments[0] == "--browser");
-    REQUIRE(run_commands[0].arguments[1] == "explorer.exe");
-    REQUIRE(std::filesystem::equivalent(run_commands[0].arguments[2], entry));
-  } else {
-    REQUIRE(run_commands[0].arguments.size() == 1);
-    REQUIRE(std::filesystem::equivalent(run_commands[0].arguments[0], entry));
-  }
-  REQUIRE(std::filesystem::equivalent(run_commands[0].working_directory, build));
+  REQUIRE(windows_run_commands.size() == 1);
+  REQUIRE(windows_run_commands[0].executable == "emrun");
+  REQUIRE(windows_run_commands[0].arguments.size() == 3);
+  REQUIRE(windows_run_commands[0].arguments[0] == "--browser");
+  REQUIRE(windows_run_commands[0].arguments[1] == "explorer.exe");
+  REQUIRE(std::filesystem::equivalent(windows_run_commands[0].arguments[2], entry));
+  REQUIRE(std::filesystem::equivalent(windows_run_commands[0].working_directory, build));
+
+  const std::vector<huxerui::cli::ProcessCommand> posix_run_commands =
+      huxerui::cli::detail::WebRunCommands(context, "linux");
+  REQUIRE(posix_run_commands.size() == 1);
+  REQUIRE(posix_run_commands[0].executable == "emrun");
+  REQUIRE(posix_run_commands[0].arguments.size() == 1);
+  REQUIRE(std::filesystem::equivalent(posix_run_commands[0].arguments[0], entry));
+  REQUIRE(std::filesystem::equivalent(posix_run_commands[0].working_directory, build));
+
+  const std::vector<huxerui::cli::ProcessCommand> termux_run_commands =
+      huxerui::cli::detail::WebRunCommands(context, "android");
+  REQUIRE(termux_run_commands.size() == 1);
+  REQUIRE(termux_run_commands[0].executable == "python");
+  REQUIRE(termux_run_commands[0].arguments.size() == 3);
+  REQUIRE(termux_run_commands[0].arguments[0] == "-c");
+  REQUIRE(termux_run_commands[0].arguments[1].find("ThreadingHTTPServer") != std::string::npos);
+  REQUIRE(termux_run_commands[0].arguments[1].find("127.0.0.1") != std::string::npos);
+  REQUIRE(termux_run_commands[0].arguments[1].find("termux-open") != std::string::npos);
+  REQUIRE(termux_run_commands[0].arguments[1].find("serve_forever") != std::string::npos);
+  REQUIRE(termux_run_commands[0].arguments[2] == entry.filename());
+  REQUIRE(std::filesystem::equivalent(termux_run_commands[0].working_directory, build));
 
   const std::vector<huxerui::cli::PackageArtifact> package_artifacts = web->PackageArtifacts(context);
   REQUIRE(package_artifacts.size() == 3);
@@ -1264,7 +1359,11 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
     );
   };
   REQUIRE(has_android_diagnostic("java"));
-  REQUIRE(has_android_diagnostic("platform_tools"));
+  const bool android_host = huxerui::cli::CurrentHostId() == "android";
+  REQUIRE(has_android_diagnostic("sdkmanager") != android_host);
+  REQUIRE(has_android_diagnostic("platform_tools") != android_host);
+  REQUIRE(has_android_diagnostic("aapt2") == android_host);
+  REQUIRE(has_android_diagnostic("termux-open") == android_host);
   REQUIRE_FALSE(has_android_diagnostic("cmake"));
   REQUIRE_FALSE(has_android_diagnostic("gradle"));
 

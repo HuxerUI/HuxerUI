@@ -186,9 +186,8 @@ std::vector<EnvironmentDiagnostic> DiagnoseCommonEnvironment(const SdkLocation& 
   return diagnostics;
 }
 
-bool PrintEnvironmentDiagnostics(
-    std::span<const EnvironmentDiagnostic> diagnostics, std::string_view indentation, std::ostream& output
-) {
+bool PrintEnvironmentDiagnostics(std::span<const EnvironmentDiagnostic> diagnostics, std::string_view indentation,
+                                 std::ostream& output) {
   bool ready = true;
   for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
     std::string_view status;
@@ -248,9 +247,8 @@ bool DiagnosticsReady(std::span<const EnvironmentDiagnostic> diagnostics) {
   });
 }
 
-int RunSetup(
-    std::span<const std::string_view> arguments, const SdkLocation& sdk, std::istream& input, std::ostream& output
-) {
+int RunSetup(std::span<const std::string_view> arguments, const SdkLocation& sdk, std::istream& input,
+             std::ostream& output) {
   if (arguments.size() < 2) {
     throw UsageError("setup requires an explicit platform list");
   }
@@ -343,12 +341,8 @@ int RunSetup(
   return 0;
 }
 
-int RunCreate(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const std::filesystem::path& huxerui_home,
-    std::ostream& output
-) {
+int RunCreate(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+              const std::filesystem::path& huxerui_home, std::ostream& output) {
   if (arguments.size() < 3) {
     throw UsageError("create requires app or library and a project name");
   }
@@ -431,9 +425,8 @@ int RunCreate(
   return 0;
 }
 
-int RunPlatform(
-    std::span<const std::string_view> arguments, const std::filesystem::path& working_directory, std::ostream& output
-) {
+int RunPlatform(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+                std::ostream& output) {
   if (arguments.size() != 3 || arguments[1] != "add") {
     throw UsageError("platform usage: huxerui platform add <platform-list>");
   }
@@ -468,12 +461,8 @@ int RunPlatform(
   return 0;
 }
 
-int RunDoctor(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const SdkLocation& sdk,
-    std::ostream& output
-) {
+int RunDoctor(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+              const SdkLocation& sdk, std::ostream& output) {
   if (arguments.size() > 2) {
     throw UsageError("doctor accepts at most one platform list");
   }
@@ -639,12 +628,9 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
   return options;
 }
 
-std::vector<const PlatformDriver*> ResolveBuildPlatforms(
-    const Project& project,
-    const std::optional<std::string_view>& requested,
-    std::string_view command,
-    std::string_view requested_device
-) {
+std::vector<const PlatformDriver*>
+ResolveBuildPlatforms(const Project& project, const std::optional<std::string_view>& requested,
+                      std::string_view command, std::string_view requested_device) {
   std::vector<const PlatformDriver*> platforms;
   if (!requested) {
     const PlatformDriver* current = FindPlatformDriver(CurrentHostId());
@@ -690,12 +676,8 @@ std::vector<const PlatformDriver*> ResolveBuildPlatforms(
   return platforms;
 }
 
-PlatformCommandContext MakeCommandContext(
-    const Project& project,
-    const PlatformDriver& platform,
-    const std::filesystem::path& huxerui_home,
-    const BuildOptions& options
-) {
+PlatformCommandContext MakeCommandContext(const Project& project, const PlatformDriver& platform,
+                                          const std::filesystem::path& huxerui_home, const BuildOptions& options) {
   std::string build_variant(platform.Id());
   if (platform.Id() == "ios") {
     build_variant +=
@@ -740,13 +722,8 @@ void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& out
   }
 }
 
-void BuildPlatform(
-    const Project& project,
-    const PlatformDriver& platform,
-    const std::filesystem::path& huxerui_home,
-    const BuildOptions& options,
-    std::ostream& output
-) {
+void BuildPlatform(const Project& project, const PlatformDriver& platform,
+                   const std::filesystem::path& huxerui_home, const BuildOptions& options, std::ostream& output) {
   output << "Building " << platform.Id() << " (" << options.profile << ")\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   platform.PrepareBuildEnvironment();
@@ -797,12 +774,8 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
   return ready.front();
 }
 
-int RunBuild(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const std::filesystem::path& huxerui_home,
-    std::ostream& output
-) {
+int RunBuild(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+             const std::filesystem::path& huxerui_home, std::ostream& output) {
   if (huxerui_home.empty()) {
     throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
@@ -822,12 +795,8 @@ int RunBuild(
   return 0;
 }
 
-int RunApplication(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const std::filesystem::path& huxerui_home,
-    std::ostream& output
-) {
+int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+                   const std::filesystem::path& huxerui_home, std::ostream& output) {
   if (huxerui_home.empty()) {
     throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
@@ -857,9 +826,8 @@ int RunApplication(
   return 0;
 }
 
-void CopyPackageArtifacts(
-    std::span<const PackageArtifact> artifacts, const std::filesystem::path& destination_root, std::ostream& output
-) {
+void CopyPackageArtifacts(std::span<const PackageArtifact> artifacts,
+                          const std::filesystem::path& destination_root, std::ostream& output) {
   if (artifacts.empty()) {
     throw std::runtime_error("platform did not produce any package artifacts");
   }
@@ -876,11 +844,9 @@ void CopyPackageArtifacts(
     const std::filesystem::path destination = destination_root / artifact.destination;
     std::filesystem::create_directories(destination.parent_path());
     if (std::filesystem::is_directory(artifact.source)) {
-      std::filesystem::copy(
-          artifact.source,
-          destination,
-          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing
-      );
+      std::filesystem::copy(artifact.source, destination,
+                            std::filesystem::copy_options::recursive |
+                                std::filesystem::copy_options::overwrite_existing);
     } else {
       std::filesystem::copy_file(artifact.source, destination, std::filesystem::copy_options::overwrite_existing);
     }
@@ -888,12 +854,8 @@ void CopyPackageArtifacts(
   }
 }
 
-int RunPackage(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const std::filesystem::path& huxerui_home,
-    std::ostream& output
-) {
+int RunPackage(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+               const std::filesystem::path& huxerui_home, std::ostream& output) {
   if (huxerui_home.empty()) {
     throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
   }
@@ -925,12 +887,8 @@ int RunPackage(
   return 0;
 }
 
-int RunOpen(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const std::filesystem::path& huxerui_home,
-    std::ostream& output
-) {
+int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+            const std::filesystem::path& huxerui_home, std::ostream& output) {
   if (arguments.size() != 2 || arguments[1] != "ios") {
     throw UsageError("open usage: huxerui open ios");
   }
@@ -959,14 +917,8 @@ int RunOpen(
 
 } // namespace
 
-int Run(
-    std::span<const std::string_view> arguments,
-    const std::filesystem::path& working_directory,
-    const SdkLocation& sdk,
-    std::istream& input,
-    std::ostream& output,
-    std::ostream& error
-) {
+int Run(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+        const SdkLocation& sdk, std::istream& input, std::ostream& output, std::ostream& error) {
   try {
     if (arguments.empty() || arguments[0] == "--help" || arguments[0] == "-h") {
       PrintHelp(output);

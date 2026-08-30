@@ -299,7 +299,8 @@ void UpdateIosLibraryIntegration(const std::filesystem::path& project_root) {
       TemplateReplacement{"@PACKAGE_DEPENDENCIES@", package_dependencies},
       TemplateReplacement{"@PRODUCT_DEPENDENCIES@", product_dependencies},
   };
-  const std::vector<GeneratedFile> files = RenderTemplateTree("generated/ios/libraries", template_context, replacements);
+  const std::vector<GeneratedFile> files =
+      RenderTemplateTree("generated/ios/libraries", template_context, replacements);
   const std::filesystem::path output = project_root / ".huxerui/generated/ios/libraries";
   for (const GeneratedFile& file : files) {
     WriteIosIntegrationFile(output / file.path, file.content);
@@ -376,13 +377,9 @@ public:
   }
 
   std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
-    return std::any_of(
-               diagnostics.begin(),
-               diagnostics.end(),
-               [](const EnvironmentDiagnostic& diagnostic) {
-                 return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
-               }
-           )
+    return std::any_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
+             return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
+           })
                ? std::vector<SetupAction>{{"Install Xcode and select it with xcode-select", std::nullopt}}
                : std::vector<SetupAction>{};
   }
@@ -464,11 +461,8 @@ public:
     }
     if (simulator_result.exit_code == 0) {
       std::vector<PlatformDevice> simulators = ParseIosSimulatorDevices(simulator_result.output);
-      devices.insert(
-          devices.end(),
-          std::make_move_iterator(simulators.begin()),
-          std::make_move_iterator(simulators.end())
-      );
+      devices.insert(devices.end(), std::make_move_iterator(simulators.begin()),
+                     std::make_move_iterator(simulators.end()));
     }
     return devices;
   }
