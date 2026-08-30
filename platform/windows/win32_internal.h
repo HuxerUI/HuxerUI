@@ -121,6 +121,25 @@ inline WindowTitleBarMetrics ConstrainWin32TitleBarMetrics(WindowTitleBarMetrics
   return metrics;
 }
 
+inline POINT ResolveWin32MinimumTrackSize(
+    Size minimum_client_size, float scale, SIZE frame_extent, POINT native_minimum
+) noexcept {
+  const auto resolve_dimension = [scale](float logical_size, LONG frame_size, LONG native_size) {
+    if (!std::isfinite(logical_size) || !std::isfinite(scale) || logical_size <= 0.0F || scale <= 0.0F) {
+      return native_size;
+    }
+    const double pixels = std::ceil(static_cast<double>(logical_size) * scale) + std::max(0L, frame_size);
+    const LONG requested = static_cast<LONG>(
+        std::clamp(pixels, 1.0, static_cast<double>(std::numeric_limits<LONG>::max()))
+    );
+    return std::max(native_size, requested);
+  };
+  return {
+      resolve_dimension(minimum_client_size.width, frame_extent.cx, native_minimum.x),
+      resolve_dimension(minimum_client_size.height, frame_extent.cy, native_minimum.y),
+  };
+}
+
 inline Win32DamageRegion ResolveWin32Damage(const DamageRegion& damage, float scale, const RECT& client) noexcept {
   Win32DamageRegion result;
   if (damage.full || !std::isfinite(scale) || scale <= 0.0F) {

@@ -2,6 +2,8 @@
 
 #include <limits>
 
+#include "window_internal.h"
+
 namespace huxerui::test {
 
 namespace {
@@ -277,6 +279,17 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
   invalid_options.window.initial_size = {520.0F, std::numeric_limits<float>::infinity()};
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.initial_size = {520.0F, 360.0F};
+  invalid_options.window.minimum_size = Size{0.0F, 240.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{320.0F, -1.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{std::numeric_limits<float>::quiet_NaN(), 240.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{320.0F, std::numeric_limits<float>::infinity()};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{640.0F, 480.0F};
+  REQUIRE_NOTHROW(Runtime(WindowContentApp, platform, invalid_options));
   TestPlatform invalid_appearance_platform;
   Runtime invalid_appearance{
       +[]() -> View {
@@ -318,6 +331,16 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
       WindowCommand::Close,
   };
   REQUIRE(platform.window_commands == expected);
+}
+
+TEST_CASE("WindowInitialSizeRespectsEachConfiguredMinimumDimension") {
+  WindowOptions options;
+  options.initial_size = {800.0F, 360.0F};
+  options.minimum_size = Size{640.0F, 480.0F};
+  REQUIRE((detail::ResolveInitialWindowSize(options) == Size{800.0F, 480.0F}));
+
+  options.minimum_size.reset();
+  REQUIRE(detail::ResolveInitialWindowSize(options) == options.initial_size);
 }
 
 TEST_CASE("Window request handlers independently suppress platform and public defaults") {

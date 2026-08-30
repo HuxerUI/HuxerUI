@@ -148,6 +148,7 @@ const Application application{
         .window = {
             .title = "HuxerUI Window Chrome",
             .initial_size = {760.0F, 480.0F},
+            .minimum_size = Size{600.0F, 360.0F},
             .chrome_mode = WindowChromeMode::Custom,
             .title_bar_height = 48.0F,
         },

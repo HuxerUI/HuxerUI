@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -14,6 +15,16 @@ class PlatformAdapter;
 namespace detail {
 
 struct MountedNode;
+
+inline Size ResolveInitialWindowSize(const WindowOptions& options) noexcept {
+  if (!options.minimum_size.has_value()) {
+    return options.initial_size;
+  }
+  return {
+      std::max(options.initial_size.width, options.minimum_size->width),
+      std::max(options.initial_size.height, options.minimum_size->height),
+  };
+}
 
 struct WindowState {
   explicit WindowState(const WindowOptions& options)

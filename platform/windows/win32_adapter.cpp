@@ -37,6 +37,7 @@
 #include "win32_system_tray.h"
 #include "win32_text_input.h"
 #include "win32_ui_dispatcher.h"
+#include "window_internal.h"
 
 namespace huxerui::detail {
 
@@ -608,11 +609,13 @@ private:
     const float scale = DpiScale();
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
     custom_title_bar_height_ = options.title_bar_height;
+    minimum_size_ = options.minimum_size;
+    const Size initial_size = ResolveInitialWindowSize(options);
     RECT frame{
         0,
         0,
-        std::max(1L, static_cast<LONG>(std::lround(options.initial_size.width * scale))),
-        std::max(1L, static_cast<LONG>(std::lround(options.initial_size.height * scale))),
+        std::max(1L, static_cast<LONG>(std::lround(initial_size.width * scale))),
+        std::max(1L, static_cast<LONG>(std::lround(initial_size.height * scale))),
     };
     const DWORD style = WS_OVERLAPPEDWINDOW;
     if (!custom_chrome_ && !win32_api_.AdjustWindowRectForDpi(&frame, style, FALSE, 0, static_cast<UINT>(dpi_))) {
@@ -1059,6 +1062,25 @@ private:
       return *handled;
     }
     switch (message) {
+    case WM_GETMINMAXINFO: {
+      const LRESULT result = DefWindowProcW(window, message, w_param, l_param);
+      if (!minimum_size_.has_value()) {
+        return result;
+      }
+      const UINT dpi = std::max(1U, win32_api_.WindowDpi(window));
+      SIZE frame_extent{};
+      if (!custom_chrome_) {
+        RECT frame{};
+        if (win32_api_.AdjustWindowRectForDpi(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi)) {
+          frame_extent = {frame.right - frame.left, frame.bottom - frame.top};
+        }
+      }
+      auto* limits = reinterpret_cast<MINMAXINFO*>(l_param);
+      limits->ptMinTrackSize = ResolveWin32MinimumTrackSize(
+          *minimum_size_, static_cast<float>(dpi) / kDipsPerInch, frame_extent, limits->ptMinTrackSize
+      );
+      return result;
+    }
     case WM_NCHITTEST:
       if (custom_chrome_) {
         if (const std::optional<LRESULT> caption_control = CaptionControlHitTest(l_param)) {
@@ -1341,6 +1363,7 @@ private:
   float dpi_ = kDipsPerInch;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
+  std::optional<Size> minimum_size_;
   bool first_nc_calc_ = true;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;

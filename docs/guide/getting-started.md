@@ -106,6 +106,7 @@ const Application application{
         .window = {
             .title = "Counter",
             .initial_size = {480.0F, 320.0F},
+            .minimum_size = Size{320.0F, 240.0F},
         },
     }
 };

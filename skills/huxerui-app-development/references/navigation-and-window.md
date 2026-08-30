@@ -21,7 +21,7 @@ On Web, include `<huxerui/web/navigation.h>` and use `BrowserNavigationStack` wi
 
 ## Window content
 
-`WindowOptions` configures the title, initial size, content mode, chrome mode, preferred custom title-bar height, and caption labels exposed by the active SDK. `WindowChromeMode::System` leaves chrome to the platform; `WindowChromeMode::Custom` lets application content occupy the title-bar area while retaining HuxerUI's platform-specific window behavior. Use `WindowContentMode::SafeArea` for automatically inset content and `WindowContentMode::EdgeToEdge` only when application content deliberately handles insets.
+`WindowOptions` configures the title, initial size, optional minimum size, content mode, chrome mode, preferred custom title-bar height, and caption labels exposed by the active SDK. `minimum_size` is a minimum logical client size for framework-owned resizable desktop windows; when present, initialize it with `Size{width, height}` and keep both dimensions finite and positive. An initial size below it is raised independently on each axis. Android, iOS, and Web viewports remain host-owned and may be smaller, so do not use this option as a layout constraint or clamp reported viewport metrics. `WindowChromeMode::System` leaves chrome to the platform; `WindowChromeMode::Custom` lets application content occupy the title-bar area while retaining HuxerUI's platform-specific window behavior. Use `WindowContentMode::SafeArea` for automatically inset content and `WindowContentMode::EdgeToEdge` only when application content deliberately handles insets.
 
 `SafeAreaPadding` consumes selected safe-area edges without hardcoded platform values. Ancestor consumption affects what descendants see.
 

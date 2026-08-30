@@ -35,6 +35,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
+#include "window_internal.h"
 
 namespace huxerui::detail {
 class MacPlatformAdapter;
@@ -200,7 +201,8 @@ public:
         startup_activation = std::move(pending_activations_.front());
         pending_activations_.erase(pending_activations_.begin());
       }
-      const NSRect frame = NSMakeRect(0.0, 0.0, options.initial_size.width, options.initial_size.height);
+      const Size initial_size = ResolveInitialWindowSize(options);
+      const NSRect frame = NSMakeRect(0.0, 0.0, initial_size.width, initial_size.height);
       custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
       custom_title_bar_height_ = options.title_bar_height;
       NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
@@ -213,6 +215,9 @@ public:
                                                    backing:NSBackingStoreBuffered
                                                      defer:NO];
       window_->huxeruiAdapter = this;
+      if (options.minimum_size.has_value()) {
+        window_.contentMinSize = NSMakeSize(options.minimum_size->width, options.minimum_size->height);
+      }
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;
       window_.delegate = delegate_;

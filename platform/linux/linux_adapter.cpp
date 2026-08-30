@@ -43,6 +43,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
+#include "window_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -208,9 +209,10 @@ public:
     text_input_.SetRuntime(runtime_);
     try {
       renderer_.Initialize();
-      CreateWindow(options);
+      const Size initial_size = ResolveInitialWindowSize(options);
+      CreateWindow(options, initial_size);
       runtime_->UpdateResourceConfiguration(Configuration());
-      UpdateRuntimeViewport(options.initial_size);
+      UpdateRuntimeViewport(initial_size);
       running_ = true;
       gtk_window_present(window_);
       gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
@@ -490,19 +492,26 @@ private:
   explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> dispatcher)
       : PlatformAdapter(dispatcher->Bind()), ui_dispatcher_(std::move(dispatcher)) {}
 
-  void CreateWindow(const WindowOptions& options) {
+  void CreateWindow(const WindowOptions& options, Size initial_size) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
     custom_title_bar_height_ = options.title_bar_height;
     window_ = GTK_WINDOW(gtk_window_new());
     gtk_window_set_title(window_, options.title.c_str());
     gtk_window_set_default_size(
         window_,
-        std::max(1, static_cast<int>(std::lround(options.initial_size.width))),
-        std::max(1, static_cast<int>(std::lround(options.initial_size.height)))
+        std::max(1, static_cast<int>(std::lround(initial_size.width))),
+        std::max(1, static_cast<int>(std::lround(initial_size.height)))
     );
     gtk_window_set_decorated(window_, !custom_chrome_);
 
     drawing_area_ = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    if (options.minimum_size.has_value()) {
+      gtk_widget_set_size_request(
+          GTK_WIDGET(drawing_area_),
+          std::max(1, static_cast<int>(std::ceil(options.minimum_size->width))),
+          std::max(1, static_cast<int>(std::ceil(options.minimum_size->height)))
+      );
+    }
     gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
     gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
     gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));

@@ -30,4 +30,22 @@ TEST_CASE("Win32TitleBarMetricsStayInsideNarrowClientBounds") {
   REQUIRE(constrained.maximized);
 }
 
+TEST_CASE("Win32MinimumTrackSizePreservesClientSizeAtTheCurrentScale") {
+  const POINT minimum = detail::ResolveWin32MinimumTrackSize(
+      {640.0F, 480.0F}, 1.25F, SIZE{16, 39}, POINT{160, 120}
+  );
+
+  REQUIRE(minimum.x == 816);
+  REQUIRE(minimum.y == 639);
+}
+
+TEST_CASE("Win32MinimumTrackSizePreservesLargerNativeLimits") {
+  const POINT minimum = detail::ResolveWin32MinimumTrackSize(
+      {320.0F, 240.0F}, 1.0F, SIZE{}, POINT{500, 300}
+  );
+
+  REQUIRE(minimum.x == 500);
+  REQUIRE(minimum.y == 300);
+}
+
 } // namespace huxerui::test

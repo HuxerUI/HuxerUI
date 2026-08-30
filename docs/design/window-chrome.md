@@ -100,6 +100,7 @@ struct WindowMetrics {
 struct WindowOptions {
   std::string title = "HuxerUI";
   Size initial_size = {520.0F, 360.0F};
+  std::optional<Size> minimum_size;
   WindowContentMode content_mode = WindowContentMode::SafeArea;
   WindowChromeMode chrome_mode = WindowChromeMode::System;
   float title_bar_height = 40.0F;
@@ -111,6 +112,11 @@ struct AppOptions {
   // Application-wide fields...
 };
 ```
+
+`WindowOptions::minimum_size` is an optional minimum logical client size for framework-owned resizable desktop windows.
+Both dimensions must be finite and positive when present, and an initial size below the minimum is raised independently on each axis.
+Windows, macOS, and Linux map the value to their native top-level window constraint while preserving any larger platform minimum.
+Android, iOS, and Web viewports remain host-owned, so adapters report their actual size without applying this option or clamping `SetWindowMetrics()`.
 
 `WindowOptions::title_bar_height` is the application's preferred logical height for Custom chrome.
 It drives both `WindowTitleBar` layout and framework caption-control geometry, so applications do not configure those heights independently.
@@ -278,6 +284,8 @@ Its non-client hover and press messages are bridged into the same Runtime pointe
 
 The adapter preserves native double-click maximize, `Alt+Space`, the system menu, taskbar commands, DPI transitions, and maximized work-area bounds.
 The application does not emulate window movement by accumulating pointer deltas.
+`WindowOptions::minimum_size` is converted from logical client dimensions at the current window DPI and combined with the native `WM_GETMINMAXINFO` track limit.
+System chrome includes its DPI-aware non-client extent, while Custom chrome already owns the complete client frame.
 
 Windows 10 and later use this Custom path.
 The Windows 7 compatibility build uses the same HuxerUI controls with its existing sequential swap-chain fallback; Windows 11 Snap Layout is naturally unavailable there.
@@ -301,6 +309,7 @@ Removing or replacing traffic lights is outside the Custom contract.
 It can be considered later as an explicit advanced policy rather than changing the platform default.
 
 System mode retains the ordinary AppKit title bar and submits no title-bar metrics.
+Both chrome modes apply `WindowOptions::minimum_size` through `NSWindow::contentMinSize`.
 
 ## Linux mapping
 
@@ -321,6 +330,7 @@ Minimize, maximize, restore, toggle, and close use the corresponding `GtkWindow`
 The GTK maximized property drives the caption glyph swap through the shared `maximize_state_changed` path.
 
 System mode is unchanged and submits no title-bar metrics.
+Both chrome modes apply `WindowOptions::minimum_size` as the GTK client widget's minimum size request, leaving the window manager authoritative over the final top-level constraint.
 
 These operations remain backend-neutral inside HuxerUI; GTK maps them to the active X11 or Wayland surface protocol.
 
