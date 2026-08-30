@@ -533,7 +533,7 @@ View GalleryPopup(PopupContext popup) {
 }
 
 [[huxerui::composable]]
-View FeedbackDemo() {
+View FeedbackDemo(MenuHandle menu) {
   const ThemeSpec& theme = UseTheme();
   auto progress = UseState(0.35F);
   auto declarative_dialog_visible = UseState(false);
@@ -541,9 +541,17 @@ View FeedbackDemo() {
   auto dialog = UseDialog();
   auto bottom_sheet = UseBottomSheet();
   auto popup = UsePopup();
-  auto menu = UseMenu();
 
   return Column {
+    Text(
+        "Context menu is available across this page. Right-click anywhere, or focus an item and press Shift+F10.",
+        TextRole::Label
+    ).With(
+        Padding(theme.spacing.medium),
+        Foreground(theme.colors.on_secondary_container),
+        Background(theme.colors.secondary_container),
+        CornerRadius(theme.shapes.large)
+    ),
     GallerySection(
         "Progress",
         "Determinate and indeterminate indicators share Theme motion, color, and accessibility semantics.",
@@ -583,8 +591,7 @@ View FeedbackDemo() {
     ),
     GallerySection(
         "Anchored presentation",
-        "Popup and Menu support anchor geometry or explicit interaction points. Right-click Context menu or focus it "
-        "and press Shift+F10.",
+        "Popup and Menu support stable anchor geometry or an explicit window-local interaction point.",
         Flow {
           Button("Show popup").With(popup.Anchor()).OnClick([popup] { popup.Show(GalleryPopup); }),
           Button("Show menu").With(menu.Anchor()).OnClick([menu] {
@@ -600,13 +607,6 @@ View FeedbackDemo() {
                 ),
                 MenuSection{},
                 std::move(MenuItem("Delete", [] {})).Enabled(false),
-            });
-          }),
-          Button("Context menu").On<ViewEvents::ContextMenuRequested>([menu](Point position) {
-            menu.ShowAt(position, {
-                MenuItem("Refresh", [] {}),
-                MenuItem("Inspect", [] {}),
-                MenuItem("Share", [] {}),
             });
           }),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center))
@@ -1041,6 +1041,20 @@ View GalleryPage(const char* description, View content, float padding) {
 }
 
 [[huxerui::composable]]
+View FeedbackPage(float padding) {
+  auto menu = UseMenu();
+  return GalleryPage(
+      "Progress and window-level presentation through layers and anchored surfaces.", FeedbackDemo(menu), padding
+  ).On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+    menu.ShowAt(position, {
+        MenuItem("Refresh", [] {}),
+        MenuItem("Inspect", [] {}),
+        MenuItem("Share", [] {}),
+    });
+  });
+}
+
+[[huxerui::composable]]
 View GalleryMain(
     State<std::size_t> selected_page,
     State<bool> start_open,
@@ -1091,11 +1105,7 @@ View GalleryMain(
                 TextInputDemo(),
                 theme.spacing.large
             ),
-            GalleryPage(
-                "Progress and window-level presentation through layers and anchored surfaces.",
-                FeedbackDemo(),
-                theme.spacing.large
-            ),
+            FeedbackPage(theme.spacing.large),
             GalleryPage(
                 "Destination selection, retained history, app bars, and responsive drawers.",
                 NavigationDemo(),
