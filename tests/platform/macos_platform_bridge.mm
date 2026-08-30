@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -51,6 +52,7 @@
 @property(nonatomic, readonly) NSArray<NSString*>* terminationOrder;
 - (instancetype)initWithProperties:(HUXPlatformPayload*)properties
                              events:(id<HUXPlatformEventEmitter>)events;
+- (HUXPlatformPayload*)requestDecision;
 - (void)emitLateEvent;
 @end
 
@@ -107,6 +109,10 @@
 
 - (NSArray<NSString*>*)terminationOrder {
   return [_mutableTerminationOrder copy];
+}
+
+- (HUXPlatformPayload*)requestDecision {
+  return [_events emit:@"decision" payload:[HUXPlatformPayload integerValue:7]];
 }
 
 - (void)emitLateEvent {
@@ -229,7 +235,11 @@ TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
     PlatformEventEmitter emitter = detail::MakePlatformEventEmitter(
         {},
         [&events](std::string name, PlatformPayload payload) {
+          if (name == "decision") {
+            return std::optional{PlatformPayload(payload.AsInteger() == 7)};
+          }
           events.emplace_back(std::move(name), payload.AsString());
+          return std::optional<PlatformPayload>{};
         }
     );
     const std::shared_ptr<macos::detail::ObjectiveCPlatformViewInstance> instance =
@@ -241,6 +251,9 @@ TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
     REQUIRE(macos::detail::GetObjectiveCPlatformView(instance) == factory.instance.view);
     REQUIRE([factory.instance.properties.stringValue isEqualToString:@"initial"]);
     REQUIRE(events == std::vector<std::pair<std::string, std::string>>{{"changed", "created"}});
+    HUXPlatformPayload* decision = [factory.instance requestDecision];
+    REQUIRE(decision.kind == HUXPlatformPayloadKindBoolean);
+    REQUIRE(decision.booleanValue);
 
     macos::detail::UpdateObjectiveCPlatformView(instance, PlatformPayload("updated"));
     REQUIRE(factory.instance.updateCount == 1);

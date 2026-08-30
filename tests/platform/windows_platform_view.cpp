@@ -5,11 +5,12 @@
 #include <wrl/client.h>
 
 #include <algorithm>
-#include <functional>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -33,14 +34,23 @@ int windows_platform_view_creates = 0;
 int windows_platform_view_updates = 0;
 int windows_platform_view_disposals = 0;
 int windows_platform_view_event_value = 0;
+std::optional<int> windows_platform_view_create_result;
 std::vector<std::string> windows_platform_view_controller_operations;
 HWND windows_platform_view_root = nullptr;
 HWND windows_platform_view_edit = nullptr;
 PlatformEventEmitter windows_platform_view_events;
 
 struct WindowsPlatformViewEvents {
-  struct Changed : Event<int> {
+  struct Changed : Event<void(int)> {
     static constexpr std::string_view Name = "changed";
+  };
+
+  struct DecisionRequested : Event<bool(int)> {
+    static constexpr std::string_view Name = "decisionRequested";
+  };
+
+  struct ReadyRequested : Event<int()> {
+    static constexpr std::string_view Name = "readyRequested";
   };
 };
 
@@ -216,12 +226,16 @@ View WindowsPlatformViewApp() {
         PlatformView("test/WindowsView", WindowsPlatformViewProperties{value.Get()})
             .Controller(controller.Get())
             .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
+            .On<WindowsPlatformViewEvents::DecisionRequested>([](int next) { return next == 42; })
+            .On<WindowsPlatformViewEvents::ReadyRequested>([] { return 7; })
             .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
     };
   }
   return Stack{
       PlatformView("test/WindowsView", WindowsPlatformViewProperties{value.Get()})
           .On<WindowsPlatformViewEvents::Changed>([](int next) { windows_platform_view_event_value = next; })
+          .On<WindowsPlatformViewEvents::DecisionRequested>([](int next) { return next == 42; })
+          .On<WindowsPlatformViewEvents::ReadyRequested>([] { return 7; })
           .With(Frame{80.0F, 40.0F}, Opacity{visible.Get() ? 1.0F : 0.0F}),
   };
 }
@@ -233,6 +247,7 @@ View FailingWindowsPlatformViewApp() {
 std::shared_ptr<PlatformViewState>
 CreateWindowsPlatformView(HWND parent, const WindowsPlatformViewProperties& properties, PlatformEventEmitter events) {
   ++windows_platform_view_creates;
+  windows_platform_view_create_result = events.Emit<WindowsPlatformViewEvents::ReadyRequested>();
   windows_platform_view_events = std::move(events);
   auto state = std::make_shared<PlatformViewState>();
   HWND view = CreateWindowExW(
@@ -325,6 +340,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   windows_platform_view_updates = 0;
   windows_platform_view_disposals = 0;
   windows_platform_view_event_value = 0;
+  windows_platform_view_create_result.reset();
   windows_platform_view_controller_operations.clear();
   windows_platform_view_root = nullptr;
   windows_platform_view_edit = nullptr;
@@ -341,10 +357,8 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   runtime.SetWindowMetrics({{240.0F, 160.0F}});
 
   PlatformViewTestWindow window;
-  std::vector<std::function<void()>> pending_tasks;
   detail::Win32PlatformViews platform_views(
       GetModuleHandleW(nullptr), window.Handle(), platform.Registry(), runtime.CoreRuntime(),
-      [&pending_tasks](std::function<void()> task) { pending_tasks.push_back(std::move(task)); },
       [](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
         return DefWindowProcW(source, message, w_param, l_param);
       });
@@ -355,6 +369,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(windows_platform_view_creates == 1);
   REQUIRE(windows_platform_view_updates == 0);
   REQUIRE(windows_platform_view_root != nullptr);
+  REQUIRE_FALSE(windows_platform_view_create_result.has_value());
   REQUIRE((windows_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
   REQUIRE(GetParent(GetParent(windows_platform_view_root)) == window.Handle());
   RECT platform_view_bounds{};
@@ -394,10 +409,18 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE((windows_platform_view_controller_operations ==
            std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2", "connect:2"}));
   windows_platform_view_events.Emit<WindowsPlatformViewEvents::Changed>(7);
-  for (const auto& task : std::exchange(pending_tasks, {})) {
-    task();
-  }
   REQUIRE(windows_platform_view_event_value == 7);
+  REQUIRE(windows_platform_view_events.Emit<WindowsPlatformViewEvents::DecisionRequested>(42) ==
+          std::optional{true});
+  REQUIRE(windows_platform_view_events.Emit<WindowsPlatformViewEvents::DecisionRequested>(7) ==
+          std::optional{false});
+  REQUIRE(windows_platform_view_events.Emit<WindowsPlatformViewEvents::ReadyRequested>() == std::optional{7});
+  std::optional<bool> off_thread_result;
+  std::thread off_thread([&] {
+    off_thread_result = windows_platform_view_events.Emit<WindowsPlatformViewEvents::DecisionRequested>(42);
+  });
+  off_thread.join();
+  REQUIRE_FALSE(off_thread_result.has_value());
 
   const HWND retained_root = windows_platform_view_root;
   REQUIRE(runtime.CoreRuntime().PerformSemanticAction(anchor_id, {SemanticActionKind::Focus, std::monostate{}}));
@@ -464,9 +487,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(windows_platform_view_disposals == 0);
   REQUIRE(IsWindow(retained_root));
   retired_events.Emit<WindowsPlatformViewEvents::Changed>(9);
-  for (const auto& task : std::exchange(pending_tasks, {})) {
-    task();
-  }
+  REQUIRE_FALSE(retired_events.Emit<WindowsPlatformViewEvents::DecisionRequested>(42).has_value());
   REQUIRE(windows_platform_view_event_value == 7);
 
   platform_views.DidPresent();
@@ -518,7 +539,6 @@ TEST_CASE("WindowsPlatformViewsDisposeInstancesWhenViewCreationFails") {
   PlatformViewTestWindow window;
   detail::Win32PlatformViews platform_views(
       GetModuleHandleW(nullptr), window.Handle(), platform.Registry(), runtime.CoreRuntime(),
-      [](std::function<void()>) {},
       [](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
         return DefWindowProcW(source, message, w_param, l_param);
       });

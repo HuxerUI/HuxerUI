@@ -270,8 +270,12 @@ private:
   [[nodiscard]] std::optional<std::uint64_t> FocusedPlatformView() const;
   void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible);
   void MoveFocusFromPlatformView(std::uint64_t identity, bool reverse);
-  bool DispatchPlatformViewEvent(std::uint64_t identity, std::string_view name, const PlatformPayload& payload);
-  bool DispatchPlatformViewEvent(std::uint64_t identity, std::type_index key, const PlatformValue& value);
+  std::optional<PlatformPayload> DispatchPlatformViewEvent(
+      std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+  );
+  std::optional<PlatformValue> DispatchPlatformViewEvent(
+      std::uint64_t identity, std::type_index key, const PlatformValue& value
+  );
   static detail::MountedNode* FindNode(detail::MountedNode& node, std::uint64_t identity);
   static NodeExtension* FindExtension(detail::MountedNode& root, const detail::NodeExtensionHandle& handle);
   static void ActivateNode(detail::MountedNode& node);

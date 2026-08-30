@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -75,6 +76,8 @@ using LayerKey = std::variant<SliceKey, std::uint64_t>;
 
 struct EventRoute {
   Runtime* runtime = nullptr;
+  // Value-returning events are synchronous, so a route may enter Runtime only from its owning UI thread.
+  std::thread::id ui_thread;
   std::uint64_t identity = 0;
   bool active = false;
 };
@@ -194,10 +197,9 @@ struct HostedPlatformView {
 
 struct WebPlatformViews::State {
   State(WebRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value,
-        UIThreadDispatcher dispatcher, val root_value, val base_canvas_value)
+        val root_value, val base_canvas_value)
       : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value),
-        dispatch_to_ui_thread(std::move(dispatcher)), root(std::move(root_value)),
-        base_canvas(std::move(base_canvas_value)) {}
+        root(std::move(root_value)), base_canvas(std::move(base_canvas_value)) {}
 
   std::uint32_t AllocateToken() {
     for (std::uint64_t attempt = 0; attempt < std::numeric_limits<std::uint32_t>::max(); ++attempt) {
@@ -219,28 +221,25 @@ struct WebPlatformViews::State {
       throw std::logic_error("HuxerUI Web PlatformView factory must provide create");
     }
 
-    auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
+    auto route =
+        std::make_shared<EventRoute>(EventRoute{runtime, std::this_thread::get_id(), command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
-    const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
     PlatformEventEmitter events = MakePlatformEventEmitter(
-        [weak_route, dispatcher](std::type_index key, PlatformValue value) mutable {
-          dispatcher([weak_route, key, value = std::move(value)]() mutable {
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
-          });
+        [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
+          }
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
-        [weak_route, dispatcher](std::string name, PlatformPayload payload) mutable {
-          dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(
-                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
-          });
+        [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
+          }
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -337,7 +336,6 @@ struct WebPlatformViews::State {
   WebRenderer* renderer;
   PlatformRegistry* registry;
   Runtime* runtime;
-  UIThreadDispatcher dispatch_to_ui_thread;
   val root;
   val base_canvas;
   Size viewport;
@@ -351,9 +349,8 @@ struct WebPlatformViews::State {
 };
 
 WebPlatformViews::WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
-                                   UIThreadDispatcher dispatch_to_ui_thread, val root, val base_canvas)
-    : state_(std::make_unique<State>(renderer, registry, runtime, std::move(dispatch_to_ui_thread), std::move(root),
-                                     std::move(base_canvas))) {}
+                                   val root, val base_canvas)
+    : state_(std::make_unique<State>(renderer, registry, runtime, std::move(root), std::move(base_canvas))) {}
 
 WebPlatformViews::~WebPlatformViews() {
   Shutdown();

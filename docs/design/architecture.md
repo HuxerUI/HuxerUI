@@ -618,13 +618,13 @@ Both forms attach through the internal typed Controller binding and therefore sh
 
 ### Typed events
 
-Platform events remain ordinary HuxerUI Event Keys and use either `Event<>` or `Event<T>`.
+Platform events remain ordinary HuxerUI Event Keys and use `Event<Result(Arguments...)>`.
 An event with several fields carries one owning, non-reference structured `T` rather than a multi-argument signature, giving every platform boundary one value to validate and decode.
 Every `.On<Key>(handler)` call creates the typed EventBinding and, when the Key provides platform-boundary metadata, records its stable event name and concrete argument type in the same binding.
 This behavior belongs to generic event binding construction rather than a PlatformView-specific Runtime branch, so fluent calls before or after ordinary View modifiers cannot lose the descriptor.
 Multiple event types require multiple `.On<Key>()` calls and no parallel event list.
 
-The Event Key inherits the existing `Event<Arguments...>` base, which already provides `Signature`; it never redeclares that alias.
+The Event Key inherits `Event<Result(Arguments...)>`, which already provides `Signature`; it never redeclares that alias.
 A cross-language Event Key adds only its stable boundary `Name`:
 
 ```cpp
@@ -635,19 +635,19 @@ struct NavigationState {
   static NavigationState Decode(const PlatformPayload& payload);
 };
 
-struct NavigationChanged : Event<const NavigationState&> {
+struct NavigationChanged : Event<void(const NavigationState&)> {
   static constexpr std::string_view Name = "navigationChanged";
 };
 
-struct LoadStarted : Event<> {
+struct LoadStarted : Event<void()> {
   static constexpr std::string_view Name = "loadStarted";
 };
 ```
 
-`Event<>` requires the Null payload and no decoder.
-`Event<T>` and `Event<const T&>` decode an owned `std::remove_cvref_t<T>` through that value type's static `Decode(const PlatformPayload&)`, then invoke the handler with the declared signature for the duration of dispatch.
+`Event<void()>` requires the Null payload and no decoder.
+An event with one argument decodes an owned `std::remove_cvref_t<T>` through that value type's static `Decode(const PlatformPayload&)`, then invokes the handler with the declared signature for the duration of dispatch.
 Ordinary local HuxerUI events may continue to have several arguments, but a cross-language event has zero arguments or one value; several boundary fields belong in one owning structured argument.
-The inverse `Encode` operation belongs to `T` only when a C++ event crosses toward another language.
+The inverse `Encode` operation belongs to the result type only when a value-returning event crosses back toward another language.
 
 A direct C++ factory receives a `PlatformEventEmitter` and emits values without encoding:
 
@@ -656,18 +656,36 @@ events.Emit<WebViewEvents::NavigationChanged>(navigation_state);
 events.Emit<WebViewEvents::LoadFailed>(failure);
 ```
 
+A PlatformView event may return a synchronous decision:
+
+```cpp
+struct NavigationRequested : Event<NavigationDecision(const NavigationRequest&)> {
+  static constexpr std::string_view Name = "navigationRequested";
+};
+
+const NavigationDecision decision =
+    events.Emit<WebViewEvents::NavigationRequested>(request).value_or(NavigationDecision::Allow);
+```
+
+A void `Emit<Key>()` returns `void`.
+A value-returning `Emit<Key>()` returns `std::optional<Result>` so a missing binding remains distinct from a valid false, zero, empty, or Null result.
+The event key owns the meaning of its result; a non-void result does not generically mean consumed input.
+
 A platform-language bridge emitter receives an event name and its local immutable `PlatformPayload`; the SDK serializes it to the binary envelope, and C++ invokes the argument type's static `Decode()` operation before emitting the same typed Event Key.
+The result crosses the same mounted route in reverse as an optional payload; an absent outer result is distinct from a present Null payload.
 An event with no matching binding is ignored without decoding.
 Duplicate subscribed wire names are invalid configuration, while malformed subscribed payloads and late events from obsolete instances are rejected without invoking application code.
 Changing a handler reconciles EventBindings only and does not update or recreate the platform object.
 An emitter becomes active only after successful creation.
-Events emitted during candidate creation are queued until that candidate commits, creation failure discards them, and events emitted synchronously from `update` or `invoke` are deferred until the foreign call stack has unwound.
+PlatformView emission is synchronous on the owning UI thread so a native delegate can receive an immediate decision without posting and blocking.
+Emission during candidate creation, after detachment, from a disabled mounted View, or from another thread produces no result and invokes no handler.
 Disposal invalidates the emitter before releasing platform state, so later emissions are harmless no-ops.
 
 Method results and events remain distinct.
-A per-invocation `PlatformResult` completes or fails one cross-language call at most once, while an instance-level `PlatformEventEmitter` may publish any number of unsolicited events.
+A per-invocation `PlatformResult` completes or fails one cross-language call at most once, while an instance-level `PlatformEventEmitter` may publish any number of unsolicited notifications or synchronous PlatformView decisions.
 Neither endpoint dictates the library's public callback or return type.
-A direct C++ Module may expose ordinary callbacks or state without either endpoint, while a cross-language implementation may adapt Result and Event delivery into the library's chosen API.
+A PlatformChannel accepts only void event subscriptions; request results remain on `Invoke` rather than becoming result-returning Module events.
+A direct C++ Module may expose ordinary callbacks or state without either endpoint, while a cross-language implementation may adapt Result and notification delivery into the library's chosen API.
 
 ### PlatformPayload boundary
 
@@ -844,7 +862,7 @@ The platform shell establishes every required owner before Runtime executes Root
 A future platform defines only the narrow host values required by its own factory contracts and does not widen the shared API.
 A PlatformView exposes its platform View, `update`, `invoke`, and `dispose`.
 A PlatformModule exposes `invoke` and `dispose`; `invoke` receives its method, arguments, and one `PlatformResult`, then returns an optional `PlatformCancellation`.
-`PlatformResult.complete` and `fail` are accepted at most once, `PlatformEventEmitter.emit` publishes an instance event, and `PlatformCancellation.cancel` is idempotent.
+`PlatformResult.complete` and `fail` are accepted at most once, `PlatformEventEmitter.emit` publishes an instance event and may return a PlatformView decision, and `PlatformCancellation.cancel` is idempotent.
 Request identities, late-result rejection, thread transfer, and bridge invalidation remain framework implementation details rather than platform-language API parameters.
 
 ```text
@@ -860,7 +878,8 @@ PlatformCancellation.cancel
 ```
 
 The Android SDK passes one framework-owned `HuxerUIPlatformChannel.Events` to each successful Java factory creation.
-The Java implementation retains that emitter and calls `emit(name)` or `emit(name, payload)` from its platform callbacks; the emitter performs the common JNI call, binary transport, instance-generation validation, and UI-thread delivery.
+The Java implementation retains that emitter and calls `emit(name)` or `emit(name, payload)` from its platform callbacks; the emitter performs the common JNI call, binary transport, and instance-generation validation.
+PlatformView emission runs synchronously on the owning UI thread and may return a nullable decision payload, while PlatformModule notification delivery remains asynchronous and always returns no decision.
 Libraries do not declare one JNI callback per event.
 The Web and Apple adapters receive equivalent framework-owned emitters, while direct factories emit through the C++ `PlatformEventEmitter` supplied by their registered factory contract.
 
@@ -939,7 +958,7 @@ The framework retains that object in the surface registry and never performs cla
 
 ```objc
 @protocol HUXPlatformEventEmitter <NSObject>
-- (void)emit:(NSString*)event payload:(HUXPlatformPayload*)payload;
+- (nullable HUXPlatformPayload*)emit:(NSString*)event payload:(HUXPlatformPayload*)payload;
 @end
 
 @protocol HUXUIKitPlatformView <NSObject>
@@ -1171,7 +1190,8 @@ For a controlled registration, the factory adapter connects `Instance` to the ex
 The factory's `view` operation must return a same-process, same-UI-thread `WS_CHILD` HWND whose parent is the supplied clipping container.
 After successful creation, HuxerUI owns destruction of that root HWND.
 The adapter calls `dispose` once before `DestroyWindow`; `dispose` releases library callbacks, subclass state, and other owned resources but does not destroy the HWND, then the retained `Instance` is released.
-Creation, update, disposal, placement, and focus changes run on the owning UI thread, while `PlatformEventEmitter` delivery uses the existing Windows UI-thread dispatcher and drops events from an inactive route.
+Creation, update, disposal, placement, focus changes, and `PlatformEventEmitter` delivery run on the owning UI thread.
+The emitter dispatches through the active mounted event route synchronously and returns no result from an inactive route.
 
 A single framework-private transparent input-shield HWND covers the client area while PlatformViews are present.
 It asks Runtime for the committed frontmost hit target.
@@ -2035,7 +2055,7 @@ The current extension points are:
 | --- | --- |
 | Custom layout | `Layout<Derived>`, `LayoutContext`, `LayoutResult` |
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
-| Custom event | `Event<Arguments...>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
+| Custom event | `Event<Result(Arguments...)>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
 | Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
 | Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, `TaskScope::Launch()`, and `RunWorker()` |
 | External-thread UI handoff | Lifecycle-bound `TaskScope::Post()` |

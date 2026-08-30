@@ -12,7 +12,7 @@ namespace {
 
 constexpr char platform_timer_class[] = "org.huxerui.examples.platformmodule.PlatformTimer";
 
-struct TimerTick : huxerui::Event<std::uint64_t> {
+struct TimerTick : huxerui::Event<void(std::uint64_t)> {
   static constexpr char Name[] = "tick";
 };
 

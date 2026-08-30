@@ -18,7 +18,9 @@ View FavoriteButton() {
 }
 ```
 
-Custom typed events derive from `Event<T>` and use the event key type as identity.
+Custom typed events derive from `Event<Result(Arguments...)>` and use the event key type as identity.
+Use `void` for notifications and a value result only for synchronous decisions owned by the event key.
+`UseEvents().Emit<Key>(...)` returns `void` for a void event and `std::optional<Result>` for a value-returning event.
 
 ## Custom layouts
 

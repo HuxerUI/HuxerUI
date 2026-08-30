@@ -1,7 +1,5 @@
 #include "uikit_platform_view.h"
 
-#import <dispatch/dispatch.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -270,24 +268,19 @@ struct UIKitPlatformViews::State {
     });
     const std::weak_ptr<EventRoute> weak_route = route;
     PlatformEventEmitter events = MakePlatformEventEmitter(
-        [weak_route](std::type_index key, PlatformValue value) mutable {
-          dispatch_async(dispatch_get_main_queue(), ^{
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
-          });
+        [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
+            return std::nullopt;
+          }
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
-        [weak_route](std::string name, PlatformPayload payload) mutable {
-          dispatch_async(dispatch_get_main_queue(), ^{
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(
-                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
-          });
+        [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
+            return std::nullopt;
+          }
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();

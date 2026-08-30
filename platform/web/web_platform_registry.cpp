@@ -148,14 +148,16 @@ void CloseEndpoint(val& endpoint) noexcept {
   endpoint = val::undefined();
 }
 
-bool WebPlatformEmit(std::uintptr_t handle, std::string event, const val& payload) noexcept {
+val WebPlatformEmit(std::uintptr_t handle, std::string event, const val& payload) noexcept {
   try {
     if (const std::shared_ptr state = GetRetainedState<WebEventState>(handle)) {
-      state->events.Emit(std::move(event), JavaScriptPlatformPayloadToCpp(payload));
+      std::optional<PlatformPayload> result =
+          state->events.Emit(std::move(event), JavaScriptPlatformPayloadToCpp(payload));
+      return result.has_value() ? PlatformPayloadToJavaScript(*result) : val::undefined();
     }
-    return true;
+    return val::undefined();
   } catch (...) {
-    return false;
+    return val::null();
   }
 }
 

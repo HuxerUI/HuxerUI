@@ -753,8 +753,7 @@ public:
   void Attach(Runtime& runtime) {
     runtime_ = &runtime;
     text_input_.SetRuntime(runtime_);
-    platform_views_ = std::make_unique<WebPlatformViews>(renderer_, PlatformRegistry(), runtime, DispatchToWebUIThread,
-                                                         root_, base_canvas_);
+    platform_views_ = std::make_unique<WebPlatformViews>(renderer_, PlatformRegistry(), runtime, root_, base_canvas_);
   }
 
   void Ready() {

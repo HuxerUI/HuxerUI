@@ -12,7 +12,13 @@ const calls = [];
 global.Module = {
   huxeruiWebPlatformEmit(handle, event, payload) {
     calls.push({ operation: "emit", handle, event, payload });
-    return true;
+    if (event === "decision") {
+      return payload;
+    }
+    if (event === "invalid") {
+      return null;
+    }
+    return undefined;
   },
   huxeruiWebPlatformReleaseEvent(handle) {
     calls.push({ operation: "releaseEvent", handle });
@@ -70,29 +76,31 @@ assert.throws(() => Payload.decode(payload.encode().subarray(0, 7)), /truncated 
 assert.throws(() => decoded.requireField("missing"), /\$\.missing/);
 
 const events = Module.huxerUIWebPlatformBridge.createEvents(41);
-events.emit("changed", Payload.string("next"));
+assert.equal(events.emit("changed", Payload.string("next")), undefined);
+assert.equal(events.emit("decision", Payload.booleanValue(true)).requireBoolean(), true);
+assert.throws(() => events.emit("invalid", Payload.nullValue()), /invalid payload/);
 events.close();
 events.close();
 assert.equal(calls[0].operation, "emit");
 assert.equal(calls[0].payload.requireString(), "next");
-assert.deepEqual(calls[1], { operation: "releaseEvent", handle: 41 });
+assert.deepEqual(calls.at(-1), { operation: "releaseEvent", handle: 41 });
 
 const completion = Module.huxerUIWebPlatformBridge.createResult(42);
 completion.complete(Payload.int64(7n));
 completion.complete(Payload.int64(8n));
 completion.close();
-assert.equal(calls[2].operation, "complete");
-assert.equal(calls[2].payload.requireInt64(), 7n);
+const completed = calls.find((call) => call.operation === "complete");
+assert.equal(completed.payload.requireInt64(), 7n);
 
 const failure = Module.huxerUIWebPlatformBridge.createResult(43);
 failure.fail("example/error", "failed", Payload.string("details"));
 failure.close();
-assert.equal(calls[3].operation, "fail");
-assert.equal(calls[3].details.requireString(), "details");
+const failed = calls.find((call) => call.operation === "fail");
+assert.equal(failed.details.requireString(), "details");
 
 const abandoned = Module.huxerUIWebPlatformBridge.createResult(44);
 abandoned.close();
 abandoned.close();
-assert.deepEqual(calls[4], { operation: "releaseResult", handle: 44 });
+assert.deepEqual(calls.find((call) => call.operation === "releaseResult"), { operation: "releaseResult", handle: 44 });
 
 console.log("HuxerUI Web PlatformRegistry tests passed");

@@ -2,7 +2,8 @@
 
 namespace huxerui::test {
 
-struct SearchSubmitted : Event<std::string> {};
+struct SearchSubmitted : Event<void(std::string)> {};
+struct SearchAccepted : Event<bool(std::string_view)> {};
 
 State<int> event_mode;
 
@@ -385,14 +386,24 @@ View EventApp() {
 
   if (mode.Get() == 1) {
     return Column{
-        EventSource().Key("source").On<SearchSubmitted>([](std::string value) { received_event = "second:" + value; }),
+        EventSource()
+            .Key("source")
+            .On<SearchSubmitted>([](std::string value) { received_event = "second:" + value; })
+            .On<SearchAccepted>([](std::string_view) { return false; }),
     };
   }
 
   return Column{
-      EventSource().Key("source").On<SearchSubmitted>(
-                                     [](std::string value) { received_event = "replaced:" + value; }
-      ).On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; }),
+      EventSource()
+          .Key("source")
+          .On<SearchSubmitted>([](std::string value) { received_event = "replaced:" + value; })
+          .On<SearchSubmitted>([](std::string value) { received_event = "first:" + value; })
+          .On<SearchAccepted>([](std::string_view value) {
+            if (value == "throw") {
+              throw std::runtime_error("event decision failed");
+            }
+            return true;
+          }),
   };
 }
 
@@ -1489,6 +1500,8 @@ TEST_CASE("TestTypedScopeEvents") {
   InvokeClick(*source->children[0]);
   REQUIRE(received_event == "first:query");
   REQUIRE(saved_event_emitter.IsConnected());
+  REQUIRE(saved_event_emitter.Emit<SearchAccepted>("query") == std::optional{true});
+  REQUIRE_THROWS_AS(saved_event_emitter.Emit<SearchAccepted>("throw"), std::runtime_error);
 
   event_mode = 1;
   runtime.BuildFrame();
@@ -1498,11 +1511,13 @@ TEST_CASE("TestTypedScopeEvents") {
   REQUIRE(source->recompose_scope->Id() == scope_id);
   InvokeClick(*source->children[0]);
   REQUIRE(received_event == "second:query");
+  REQUIRE(saved_event_emitter.Emit<SearchAccepted>("query") == std::optional{false});
 
   event_mode = 2;
   runtime.BuildFrame();
   REQUIRE(!saved_event_emitter.IsConnected());
   saved_event_emitter.Emit<SearchSubmitted>("ignored");
+  REQUIRE_FALSE(saved_event_emitter.Emit<SearchAccepted>("query").has_value());
   REQUIRE(received_event == "second:query");
 }
 

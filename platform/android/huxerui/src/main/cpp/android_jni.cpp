@@ -887,20 +887,25 @@ PlatformChannel GetJavaPlatformViewChannel(const std::shared_ptr<JavaPlatformVie
 
 } // namespace huxerui::android::detail
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIPlatformChannel_nativeEmit(JNIEnv* environment, jclass,
-                                                                                     jlong handle, jstring event,
-                                                                                     jobject payload) {
+extern "C" JNIEXPORT jobject JNICALL Java_org_huxerui_HuxerUIPlatformChannel_nativeEmit(
+    JNIEnv* environment, jclass, jlong handle, jstring event, jobject payload
+) {
   if (handle == 0 || event == nullptr || payload == nullptr) {
-    return;
+    return nullptr;
   }
   auto* retained = reinterpret_cast<std::shared_ptr<huxerui::android::detail::PlatformEventState>*>(
       static_cast<std::uintptr_t>(handle));
   try {
-    (*retained)->events.Emit(huxerui::android::JavaStringToUtf8(environment, event),
-                             huxerui::android::JavaPlatformPayloadToCpp(environment, payload));
+    std::optional<huxerui::PlatformPayload> result =
+        (*retained)->events.Emit(huxerui::android::JavaStringToUtf8(environment, event),
+                                 huxerui::android::JavaPlatformPayloadToCpp(environment, payload));
+    if (result.has_value()) {
+      return huxerui::android::PlatformPayloadToJava(environment, *result).Release();
+    }
   } catch (...) {
     huxerui::android::detail::ClearException(environment);
   }
+  return nullptr;
 }
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIPlatformChannel_nativeReleaseEvent(JNIEnv*, jclass,

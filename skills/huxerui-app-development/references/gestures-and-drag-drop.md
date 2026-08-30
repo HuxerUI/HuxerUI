@@ -15,6 +15,37 @@ Node-local coordinates remain based on the transform captured when recognition b
 Handle `Canceled` whenever accepted gesture state or visuals need cleanup.
 Do not combine raw pointer handling with a built-in recognizer to observe or own the same physical operation.
 
+## Pointer events
+
+`PointerEvent` reports `type`, `pointer_id`, window-logical `position`, `device_kind`, and consecutive `click_count`.
+Its `PointerEventType` is `Down`, `Move`, `Up`, or `Cancel`, and `PointerDeviceKind` distinguishes Mouse, Touch, and Pen.
+The current event does not expose mouse-button identity or a built-in secondary-click trigger; do not infer either from `click_count`.
+
+`ViewEvents::PointerDown`, `PointerMove`, `PointerUp`, and `PointerCancel` are void notifications for the deepest eligible raw target.
+They do not capture, bubble, return a handled result, or acquire pointer ownership.
+When another recognizer accepts after raw Down, the raw target receives one PointerCancel and no later event from that sequence.
+Use `.OnClick(...)` for semantic activation, a built-in gesture for standard recognition, and `PointerIntercept` only for custom synchronous ownership decisions driven by pointer updates.
+
+## Pointer interception
+
+Bind `ViewEvents::PointerIntercept` when application-level pointer logic must observe a sequence and synchronously decide when to own it.
+Its signature is `Event<bool(const PointerEvent&)>`:
+
+```cpp
+return content.On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
+  return event.type == PointerEventType::Move && ShouldTakePointer(event.position);
+});
+```
+
+Returning false keeps the recognition pending; the first deepest-to-root handler that returns true becomes the sole PointerSession owner, cancels an already-started raw target, and receives subsequent Move, Up, and Cancel outside its original bounds.
+Once accepted, later return values are ignored.
+Compatible recomposition keeps ownership on the same mounted View and subsequent updates use its current PointerIntercept binding.
+This is one recognizer in the existing PointerSession, not event capture, bubbling, or a public pointer handle.
+
+Use `PointerIntercept` for decisions driven by incoming pointer updates.
+Use `LongPressGesture` or a delayed `DragGesture` when recognition must advance at a deadline while the pointer is stationary; a synchronous event return cannot acquire ownership when no event is being dispatched.
+PlatformView ownership is still decided at initial Down and never transfers across the native boundary afterward.
+
 ## Multi-pointer transform
 
 `TransformEvent` reports incremental values rather than an authoritative accumulated transform:

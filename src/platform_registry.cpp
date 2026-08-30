@@ -415,6 +415,7 @@ PlatformEventEmitter PlatformChannelEndpoint::Events() const {
     if (const std::shared_ptr state = weak_state.lock()) {
       state->PostEvent(std::move(event), std::move(payload));
     }
+    return std::optional<PlatformPayload>{};
   });
 }
 
@@ -503,8 +504,10 @@ PlatformRegistry* SetLifecyclePlatformRegistry(PlatformRegistry* registry) noexc
   return previous;
 }
 
-PlatformEventEmitter MakePlatformEventEmitter(std::function<void(std::type_index, PlatformValue)> emit_direct,
-                                              std::function<void(std::string, PlatformPayload)> emit_payload) {
+PlatformEventEmitter MakePlatformEventEmitter(
+    std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)> emit_direct,
+    std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)> emit_payload
+) {
   return PlatformEventEmitter(std::move(emit_direct), std::move(emit_payload));
 }
 
@@ -539,16 +542,18 @@ void PlatformChannel::Close() const noexcept {
   }
 }
 
-void PlatformEventEmitter::EmitValue(std::type_index key, PlatformValue value) const {
+std::optional<PlatformValue> PlatformEventEmitter::EmitValue(std::type_index key, PlatformValue value) const {
   if (emit_direct_) {
-    emit_direct_(key, std::move(value));
+    return emit_direct_(key, std::move(value));
   }
+  return std::nullopt;
 }
 
-void PlatformEventEmitter::Emit(std::string name, PlatformPayload payload) const {
+std::optional<PlatformPayload> PlatformEventEmitter::Emit(std::string name, PlatformPayload payload) const {
   if (emit_payload_) {
-    emit_payload_(std::move(name), std::move(payload));
+    return emit_payload_(std::move(name), std::move(payload));
   }
+  return std::nullopt;
 }
 
 } // namespace huxerui

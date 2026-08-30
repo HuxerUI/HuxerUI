@@ -11,7 +11,7 @@
 
 namespace {
 
-struct TimerTick : huxerui::Event<std::uint64_t> {
+struct TimerTick : huxerui::Event<void(std::uint64_t)> {
   static constexpr char Name[] = "tick";
 };
 

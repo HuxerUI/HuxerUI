@@ -156,7 +156,7 @@ struct AppleEventState {
   return self;
 }
 
-- (void)emit:(NSString*)event payload:(HUXPlatformPayload*)payload {
+- (nullable HUXPlatformPayload*)emit:(NSString*)event payload:(HUXPlatformPayload*)payload {
   try {
     const std::string name = ToCppString(event, "platform event name");
     PlatformPayload value = DecodePayload(payload);
@@ -164,12 +164,14 @@ struct AppleEventState {
     {
       std::lock_guard lock(state->mutex);
       if (!state->active) {
-        return;
+        return nil;
       }
       emitter = state->events;
     }
-    emitter.Emit(name, std::move(value));
+    std::optional<PlatformPayload> result = emitter.Emit(name, std::move(value));
+    return result.has_value() ? EncodePayload(std::move(*result)) : nil;
   } catch (...) {
+    return nil;
   }
 }
 

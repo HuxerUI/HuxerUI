@@ -820,7 +820,7 @@ Each structured value carried by the common payload bridge owns the static `Enco
 There is no separate codec type, per-platform codec, or factory-provided codec, and direct C++ registrations do not invoke these operations.
 Registry entries contain no Methods or Events list and do not inspect business method signatures.
 Libraries choose virtual functions, concrete values, callbacks, pimpl, or their own type erasure and independently choose synchronous, asynchronous, callback, stream, cancellation, and error conventions.
-Stable method strings exist only inside the common call channel or a custom bridge, while Event Keys directly inherit `Event<>` or `Event<T>` and add only their stable boundary name without redeclaring `Signature`; the concrete request, result, or event argument type owns any required boundary conversion.
+Stable method strings exist only inside the common call channel or a custom bridge, while Event Keys directly inherit `Event<Result(Arguments...)>` and add only their stable boundary name without redeclaring `Signature`; the concrete request, result, event argument, or event result type owns any required boundary conversion.
 `void` is the uniform no-value contract and maps to a strictly validated Null payload only when crossing a language boundary.
 The common cross-language bridge serializes `PlatformPayload` through one HuxerUI binary envelope.
 The Android SDK, Web adapter, and separate iOS/macOS Objective-C bridges convert that representation to their immutable platform-language `PlatformPayload` APIs through the same value and envelope contract.

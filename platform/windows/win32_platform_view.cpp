@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -64,7 +65,8 @@ LRESULT CALLBACK ContainerWindowProcedure(HWND window, UINT message, WPARAM w_pa
 struct Win32PlatformViews::State {
   struct EventRoute {
     Runtime* runtime = nullptr;
-    UIThreadDispatcher dispatch;
+    // Value-returning events are synchronous, so a route may enter Runtime only from its owning UI thread.
+    std::thread::id ui_thread;
     std::uint64_t identity = 0;
     bool active = false;
   };
@@ -107,10 +109,10 @@ struct Win32PlatformViews::State {
     }
   };
 
-  State(HINSTANCE instance_value, HWND root_value, PlatformRegistry& registry_value, Runtime& runtime_value,
-        UIThreadDispatcher dispatch_value, OverlayMessageHandler overlay_message_handler_value)
+  State(HINSTANCE instance_value, HWND root_value, PlatformRegistry& registry_value,
+        Runtime& runtime_value, OverlayMessageHandler overlay_message_handler_value)
       : instance(instance_value), root(root_value), registry(&registry_value), runtime(&runtime_value),
-        dispatch(std::move(dispatch_value)), overlay_message_handler(std::move(overlay_message_handler_value)) {
+        overlay_message_handler(std::move(overlay_message_handler_value)) {
     RegisterClasses();
     overlay = CreateWindowExW(
         WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
@@ -218,36 +220,25 @@ struct Win32PlatformViews::State {
     }
     hosted->container = container;
 
-    auto route = std::make_shared<EventRoute>(EventRoute{runtime, dispatch, command.Identity(), false});
+    auto route =
+        std::make_shared<EventRoute>(EventRoute{runtime, std::this_thread::get_id(), command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     PlatformEventEmitter events = MakePlatformEventEmitter(
-        [weak_route](std::type_index key, PlatformValue value) mutable {
+        [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
-          if (!route || !route->dispatch) {
-            return;
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
           }
-          route->dispatch([weak_route, key, value = std::move(value)]() mutable {
-            const std::shared_ptr<EventRoute> active_route = weak_route.lock();
-            if (!active_route || !active_route->active || active_route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(
-                RuntimeAccess::DispatchPlatformViewEvent(*active_route->runtime, active_route->identity, key, value));
-          });
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
-        [weak_route](std::string name, PlatformPayload payload) mutable {
+        [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
-          if (!route || !route->dispatch) {
-            return;
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
           }
-          route->dispatch([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
-            const std::shared_ptr<EventRoute> active_route = weak_route.lock();
-            if (!active_route || !active_route->active || active_route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*active_route->runtime, active_route->identity,
-                                                                       name, payload));
-          });
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     hosted->event_route = std::move(route);
@@ -435,7 +426,6 @@ struct Win32PlatformViews::State {
   ATOM overlay_atom = 0;
   PlatformRegistry* registry = nullptr;
   Runtime* runtime = nullptr;
-  UIThreadDispatcher dispatch;
   OverlayMessageHandler overlay_message_handler;
   float dpi_scale = 1.0F;
   std::optional<std::uint64_t> platform_view_focus_identity;
@@ -445,11 +435,9 @@ struct Win32PlatformViews::State {
   std::vector<std::unique_ptr<HostedView>> retired;
 };
 
-Win32PlatformViews::Win32PlatformViews(HINSTANCE instance, HWND root, PlatformRegistry& registry, Runtime& runtime,
-                                       UIThreadDispatcher dispatch_to_ui_thread,
-                                       OverlayMessageHandler overlay_message_handler)
-    : state_(std::make_unique<State>(instance, root, registry, runtime, std::move(dispatch_to_ui_thread),
-                                     std::move(overlay_message_handler))) {}
+Win32PlatformViews::Win32PlatformViews(HINSTANCE instance, HWND root, PlatformRegistry& registry,
+                                       Runtime& runtime, OverlayMessageHandler overlay_message_handler)
+    : state_(std::make_unique<State>(instance, root, registry, runtime, std::move(overlay_message_handler))) {}
 
 Win32PlatformViews::~Win32PlatformViews() {
   Shutdown();

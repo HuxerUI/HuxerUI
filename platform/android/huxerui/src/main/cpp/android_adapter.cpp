@@ -512,7 +512,8 @@ public:
 
   void AttachRuntime(JNIEnv* environment, Runtime& runtime) {
     platform_views_ = std::make_unique<AndroidPlatformViews>(
-        environment, view_, context_, renderer_, PlatformRegistry(), runtime, MakeUIThreadDispatcher(dispatch_state_));
+        environment, view_, context_, renderer_, PlatformRegistry(), runtime
+    );
   }
 
   std::optional<ApplicationActivation> DecodeApplicationActivation(

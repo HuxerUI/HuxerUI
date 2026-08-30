@@ -22,6 +22,8 @@ State<float> drag_minimum;
 State<Point> moving_drag_offset;
 State<bool> gesture_target_enabled;
 State<bool> gesture_modifier_present;
+State<int> pointer_intercept_mode;
+State<bool> pointer_intercept_present;
 bool throw_on_gesture_cancel = false;
 bool throw_on_transform_started = false;
 bool drag_drop_completed = false;
@@ -472,6 +474,66 @@ View ThrowingDragDropApp() {
   };
 }
 
+std::string PointerEventName(PointerEventType type) {
+  switch (type) {
+  case PointerEventType::Down:
+    return "down";
+  case PointerEventType::Move:
+    return "move";
+  case PointerEventType::Up:
+    return "up";
+  case PointerEventType::Cancel:
+    return "cancel";
+  }
+  throw std::logic_error("HuxerUI test received an unknown pointer event type");
+}
+
+View PointerInterceptApp() {
+  auto mode = UseState(0);
+  auto intercept_present = UseState(true);
+  pointer_intercept_mode = mode;
+  pointer_intercept_present = intercept_present;
+
+  View content = Column {
+    Text("raw target")
+        .With(huxerui::Frame{120.0F, 60.0F})
+        .On<ViewEvents::PointerDown>([](const PointerEvent&) { gesture_events.emplace_back("raw down"); })
+        .On<ViewEvents::PointerMove>([](const PointerEvent&) { gesture_events.emplace_back("raw move"); })
+        .On<ViewEvents::PointerUp>([](const PointerEvent&) { gesture_events.emplace_back("raw up"); })
+        .On<ViewEvents::PointerCancel>([](const PointerEvent&) { gesture_events.emplace_back("raw cancel"); }),
+  }.With(huxerui::Frame{120.0F, 60.0F}, DragGesture{})
+      .On<DragEvents::Started>([](const DragEvent&) { gesture_events.emplace_back("drag started"); });
+  if (intercept_present.Get()) {
+    content = std::move(content).On<ViewEvents::PointerIntercept>(
+        [current_mode = mode.Get()](const PointerEvent& event) {
+          gesture_events.push_back("intercept " + PointerEventName(event.type));
+          if (current_mode == 3 && event.type == PointerEventType::Down) {
+            throw std::runtime_error("pointer intercept failed");
+          }
+          return current_mode == 0 ? event.type == PointerEventType::Down
+                                   : current_mode == 1 && event.type == PointerEventType::Move;
+        }
+    );
+  }
+  return content;
+}
+
+View NestedPointerInterceptApp() {
+  return Column {
+    Text("child")
+        .With(huxerui::Frame{120.0F, 60.0F})
+        .On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
+          gesture_events.push_back("child " + PointerEventName(event.type));
+          return false;
+        })
+        .On<ViewEvents::PointerDown>([](const PointerEvent&) { gesture_events.emplace_back("raw down"); }),
+  }.With(huxerui::Frame{120.0F, 60.0F})
+      .On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
+        gesture_events.push_back("parent " + PointerEventName(event.type));
+        return event.type == PointerEventType::Down;
+      });
+}
+
 class GesturePlatform final : public TestPlatform {
 public:
   GestureSettings GestureDefaults() const noexcept override {
@@ -502,6 +564,117 @@ void ResetGestureEvents() {
 }
 
 } // namespace
+
+TEST_CASE("PointerIntercept can own Down before raw delivery and retained recognizers") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 30, {10.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 30, {30.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 30, {40.0F, 30.0F});
+
+  REQUIRE((gesture_events ==
+           std::vector<std::string>{"intercept down", "intercept move", "intercept up"}));
+}
+
+TEST_CASE("PointerIntercept can take a pending sequence and cancel its raw target once") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+  pointer_intercept_mode = 1;
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 31, {10.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 31, {30.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 31, {40.0F, 30.0F});
+
+  REQUIRE((gesture_events == std::vector<std::string>{
+                                 "intercept down",
+                                 "raw down",
+                                 "intercept move",
+                                 "raw cancel",
+                                 "intercept up",
+                             }));
+}
+
+TEST_CASE("PointerIntercept false keeps ordinary raw delivery active") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+  pointer_intercept_mode = 2;
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 32, {10.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Move, 32, {11.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 32, {11.0F, 30.0F});
+
+  REQUIRE((gesture_events == std::vector<std::string>{
+                                 "intercept down",
+                                 "raw down",
+                                 "intercept move",
+                                 "raw move",
+                                 "intercept up",
+                                 "raw up",
+                             }));
+}
+
+TEST_CASE("PointerIntercept candidates resolve deepest first and cancel pending competitors") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{NestedPointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 33, {10.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 33, {10.0F, 30.0F});
+
+  REQUIRE((gesture_events == std::vector<std::string>{
+                                 "child down",
+                                 "parent down",
+                                 "child cancel",
+                                 "parent up",
+                             }));
+}
+
+TEST_CASE("Removing a pending PointerIntercept cancels the raw sequence without calling the removed handler") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+  pointer_intercept_mode = 2;
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 34, {10.0F, 30.0F});
+  pointer_intercept_present = false;
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Up, 34, {10.0F, 30.0F});
+
+  REQUIRE((gesture_events == std::vector<std::string>{"intercept down", "raw down", "raw cancel"}));
+}
+
+TEST_CASE("A throwing PointerIntercept quarantines its sequence") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+  pointer_intercept_mode = 3;
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(Pointer(runtime, PointerEventType::Down, 35, {10.0F, 30.0F}), std::runtime_error);
+  Pointer(runtime, PointerEventType::Move, 35, {20.0F, 30.0F});
+  Pointer(runtime, PointerEventType::Up, 35, {20.0F, 30.0F});
+
+  REQUIRE((gesture_events == std::vector<std::string>{"intercept down", "intercept cancel"}));
+}
 
 TEST_CASE("MultiTap shares successful taps with Click and preserves output order") {
   ResetGestureEvents();

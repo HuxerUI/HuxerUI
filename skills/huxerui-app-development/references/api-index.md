@@ -10,13 +10,13 @@ This is a navigation index, not a replacement for the active SDK's public header
 | View and composition | `View`, `Scope`, `[[huxerui::composable]]`, `ForEach` | [fundamentals.md](fundamentals.md) | `view.h` |
 | State | `State`, `StateList`, `UseState`, `UseStateList` | [fundamentals.md](fundamentals.md) | `state.h` |
 | Environment | `Environment`, `ProvideEnvironment`, `UseEnvironment`, `UseViewportClass` | [fundamentals.md](fundamentals.md) | `environment.h` |
-| Events | `Event`, `On`, `OnClick`, `UseEvents` | [fundamentals.md](fundamentals.md) | `event.h` |
+| Events | `Event<Result(Arguments...)>`, `On`, `OnClick`, `UseEvents`, `EventEmitter::Emit` | [fundamentals.md](fundamentals.md) | `event.h` |
 | Containers | `Column`, `Row`, `Flow`, `Stack`, `IndexedPages`, `Spacer` | [layout-and-ui.md](layout-and-ui.md) | `view.h` |
 | Controls | `Button`, `IconButton`, toggles, `Select`, `TextField`, tabs, progress, slider | [components.md](components.md) | `view.h` |
 | Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `MountedNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
 | Virtual layout | `VirtualLayout`, `VirtualLayoutContext`, `VirtualList`, `VirtualGrid` | [layout-and-ui.md](layout-and-ui.md) | `virtual_layout.h`, `view.h` |
 | Scrolling | `ScrollView`, `ScrollController`, `UseScrollController`, `ScrollPhysics`, `ScrollBar` | [layout-and-ui.md](layout-and-ui.md) | `scroll.h`, `modifier.h`, `view.h` |
-| Gestures | multi-tap, long press, drag, transform, typed drag-and-drop | [gestures-and-drag-drop.md](gestures-and-drag-drop.md) | `gesture.h`, `geometry.h` |
+| Gestures | `PointerEvent`, raw `ViewEvents` pointer keys, `PointerIntercept`, multi-tap, long press, drag, transform, typed drag-and-drop | [gestures-and-drag-drop.md](gestures-and-drag-drop.md) | `event.h`, `gesture.h`, `geometry.h` |
 | Modifiers | `ViewModifier`, built-in property modifiers, retained modifiers | [modifiers.md](modifiers.md) | `modifier.h` |
 | Retained behavior | `NodeExtension`, `FrameInfo`, invalidation and input hooks | [node-extensions.md](node-extensions.md) | `modifier.h` |
 | Theme | Flat/Material boundaries, `ThemeSpec`, typed style overrides, `ThemeDefinition` | [theme-animation-presentation.md](theme-animation-presentation.md) | `theme.h`, `navigation.h`, `presentation.h` |

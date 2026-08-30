@@ -94,6 +94,8 @@ Direct Objective-C++ implementations remain strongly typed through `ios::Platfor
 `PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
 Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.
 Results and events return asynchronously through that dispatcher.
+PlatformChannel event subscriptions remain void notifications even though the generic `Event` type supports synchronous result signatures for local code and PlatformView delegate decisions.
+Keep Module request results on `Invoke`; do not model RPC as a result-returning event.
 `Cancel` and `Close` invalidate C++ delivery immediately; queued invocations are skipped, in-flight cancellation runs before disposal, and late results or events are ignored.
 The channel is a reusable transport convenience, not a PlatformModule base class or the Module API exposed to application UI.
 Apple factory creation, invocation, cancellation, and disposal run on the UIKit or AppKit main thread; results and events may originate on any queue and resume through the owning surface dispatcher.

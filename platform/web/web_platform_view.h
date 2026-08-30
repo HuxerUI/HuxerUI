@@ -6,7 +6,6 @@
 #include <emscripten/val.h>
 
 #include <huxerui/geometry.h>
-#include <huxerui/platform_adapter.h>
 #include <huxerui/platform_registry.h>
 #include <huxerui/render_scene.h>
 
@@ -21,7 +20,7 @@ class WebRenderer;
 class WebPlatformViews final {
 public:
   WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
-                   UIThreadDispatcher dispatch_to_ui_thread, emscripten::val root, emscripten::val base_canvas);
+                   emscripten::val root, emscripten::val base_canvas);
   ~WebPlatformViews();
 
   WebPlatformViews(const WebPlatformViews&) = delete;

@@ -25,7 +25,7 @@ struct PlatformTextFieldProperties {
 };
 
 struct PlatformTextFieldEvents {
-  struct Changed : Event<const std::string&> {
+  struct Changed : Event<void(const std::string&)> {
     static constexpr char Name[] = "changed";
   };
 };

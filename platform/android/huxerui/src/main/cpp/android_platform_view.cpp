@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -27,6 +28,8 @@ namespace {
 
 struct EventRoute {
   Runtime* runtime = nullptr;
+  // Value-returning events are synchronous, so a route may enter Runtime only from its owning UI thread.
+  std::thread::id ui_thread;
   std::uint64_t identity = 0;
   bool active = false;
 };
@@ -58,9 +61,8 @@ void ClearJavaException(JNIEnv* environment) {
 
 struct AndroidPlatformViews::State {
   State(JNIEnv* environment, jobject root_value, jobject context_value, AndroidRenderer& renderer_value,
-        PlatformRegistry& registry_value, Runtime& runtime_value, UIThreadDispatcher dispatcher)
-      : context(context_value), renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value),
-        dispatch_to_ui_thread(std::move(dispatcher)) {
+        PlatformRegistry& registry_value, Runtime& runtime_value)
+      : context(context_value), renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value) {
     if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for PlatformView hosting");
     }
@@ -111,34 +113,25 @@ struct AndroidPlatformViews::State {
       throw std::logic_error("HuxerUI Android PlatformView factory must provide create");
     }
 
-    auto route = std::make_shared<EventRoute>(EventRoute{runtime, command.Identity(), false});
+    auto route =
+        std::make_shared<EventRoute>(EventRoute{runtime, std::this_thread::get_id(), command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
-    const UIThreadDispatcher dispatcher = dispatch_to_ui_thread;
     PlatformEventEmitter events = MakePlatformEventEmitter(
-        [weak_route, dispatcher](std::type_index key, PlatformValue value) mutable {
-          if (!dispatcher) {
-            return;
+        [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
           }
-          dispatcher([weak_route, key, value = std::move(value)]() mutable {
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value));
-          });
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
-        [weak_route, dispatcher](std::string name, PlatformPayload payload) mutable {
-          if (!dispatcher) {
-            return;
+        [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
+          const std::shared_ptr<EventRoute> route = weak_route.lock();
+          if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
+              route->runtime == nullptr) {
+            return std::nullopt;
           }
-          dispatcher([weak_route, name = std::move(name), payload = std::move(payload)]() mutable {
-            const std::shared_ptr<EventRoute> route = weak_route.lock();
-            if (!route || !route->active || route->runtime == nullptr) {
-              return;
-            }
-            static_cast<void>(
-                RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload));
-          });
+          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted_view = std::make_unique<HostedPlatformView>();
@@ -280,7 +273,6 @@ struct AndroidPlatformViews::State {
   AndroidRenderer* renderer = nullptr;
   PlatformRegistry* registry = nullptr;
   Runtime* runtime = nullptr;
-  UIThreadDispatcher dispatch_to_ui_thread;
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
@@ -293,10 +285,8 @@ struct AndroidPlatformViews::State {
 };
 
 AndroidPlatformViews::AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context,
-                                           AndroidRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
-                                           UIThreadDispatcher dispatch_to_ui_thread)
-    : state_(std::make_unique<State>(environment, root, context, renderer, registry, runtime,
-                                     std::move(dispatch_to_ui_thread))) {}
+                                           AndroidRenderer& renderer, PlatformRegistry& registry, Runtime& runtime)
+    : state_(std::make_unique<State>(environment, root, context, renderer, registry, runtime)) {}
 
 AndroidPlatformViews::~AndroidPlatformViews() {
   if (state_) {

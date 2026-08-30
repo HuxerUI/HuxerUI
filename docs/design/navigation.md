@@ -561,7 +561,7 @@ ViewEvents gains a commit-only `BackRequested` event:
 
 ```cpp
 struct ViewEvents {
-  struct BackRequested : Event<> {};
+  struct BackRequested : Event<void()> {};
 };
 ```
 

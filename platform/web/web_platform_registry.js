@@ -572,9 +572,11 @@
           throw new TypeError("HuxerUI platform event name must be a non-empty string");
         }
         requireValidUnicode(event, "event name");
-        if (!Module.huxeruiWebPlatformEmit(state.bridgeHandle, event, requirePayload(payload))) {
+        const result = Module.huxeruiWebPlatformEmit(state.bridgeHandle, event, requirePayload(payload));
+        if (result === null) {
           throw new TypeError("HuxerUI platform event contains an invalid payload");
         }
+        return result;
       },
       close() {
         if (state.bridgeHandle !== 0) {

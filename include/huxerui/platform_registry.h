@@ -220,12 +220,14 @@ template <class Signature> struct PlatformEventSignature {
   static constexpr std::size_t argument_count = 2;
 };
 
-template <> struct PlatformEventSignature<void()> {
+template <class Result> struct PlatformEventSignature<Result()> {
   static constexpr std::size_t argument_count = 0;
+  using ResultType = Result;
 };
 
-template <class Argument> struct PlatformEventSignature<void(Argument)> {
+template <class Result, class Argument> struct PlatformEventSignature<Result(Argument)> {
   static constexpr std::size_t argument_count = 1;
+  using ResultType = Result;
   using Value = std::remove_cvref_t<Argument>;
 };
 
@@ -233,6 +235,8 @@ template <class Key>
 concept PlatformEventKey = EventKey<Key> && requires {
   { Key::Name } -> std::convertible_to<std::string_view>;
   requires PlatformEventSignature<typename Key::Signature>::argument_count <= 1;
+  requires std::is_void_v<typename PlatformEventSignature<typename Key::Signature>::ResultType> ||
+               std::copy_constructible<typename PlatformEventSignature<typename Key::Signature>::ResultType>;
 };
 
 template <class Value> Value DecodePlatformPayload(const PlatformPayload& payload) {
@@ -293,14 +297,28 @@ concept PlatformPayloadDecodable =
       { Value::Decode(payload) } -> std::convertible_to<Value>;
     };
 
+template <PlatformEventKey Key> consteval bool CanDispatchPlatformPayloadEvent() {
+  using Signature = PlatformEventSignature<typename Key::Signature>;
+  constexpr bool argument_supported = [] {
+    if constexpr (Signature::argument_count == 0) {
+      return true;
+    } else {
+      return PlatformPayloadDecodable<typename Signature::Value>;
+    }
+  }();
+  constexpr bool result_supported = [] {
+    if constexpr (std::is_void_v<typename Signature::ResultType>) {
+      return true;
+    } else {
+      return PlatformPayloadEncodable<typename Signature::ResultType>;
+    }
+  }();
+  return argument_supported && result_supported;
+}
+
 template <PlatformEventKey Key> consteval bool IsPlatformPayloadEventKey() {
   using Signature = PlatformEventSignature<typename Key::Signature>;
-  if constexpr (Signature::argument_count == 0) {
-    return true;
-  } else if constexpr (Signature::argument_count == 1) {
-    return PlatformPayloadDecodable<typename Signature::Value>;
-  }
-  return false;
+  return std::is_void_v<typename Signature::ResultType> && CanDispatchPlatformPayloadEvent<Key>();
 }
 
 template <class Key>
@@ -310,47 +328,78 @@ struct PlatformEventDescriptor {
   std::type_index key{typeid(void)};
   std::string name;
   std::type_index argument_type{typeid(void)};
-  void (*dispatch_direct)(const PlatformValue&, const EventBindings&) = nullptr;
-  void (*dispatch_payload)(const PlatformPayload&, const EventBindings&) = nullptr;
+  std::optional<PlatformValue> (*dispatch_direct)(const PlatformValue&, const EventBindings&) = nullptr;
+  std::optional<PlatformPayload> (*dispatch_payload)(const PlatformPayload&, const EventBindings&) = nullptr;
 
   bool operator==(const PlatformEventDescriptor&) const = default;
 };
 
 template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescriptor() {
   using Signature = PlatformEventSignature<typename Key::Signature>;
+  using Result = typename Signature::ResultType;
   if constexpr (Signature::argument_count == 0) {
+    std::optional<PlatformPayload> (*dispatch_payload)(const PlatformPayload&, const EventBindings&) = nullptr;
+    if constexpr (CanDispatchPlatformPayloadEvent<Key>()) {
+      dispatch_payload =
+          [](const PlatformPayload& payload, const EventBindings& bindings) -> std::optional<PlatformPayload> {
+        if (!payload.IsNull()) {
+          throw std::logic_error("HuxerUI fieldless platform event payload must be null");
+        }
+        if constexpr (std::is_void_v<Result>) {
+          static_cast<void>(EmitEvent<Key>(bindings));
+          return std::nullopt;
+        } else {
+          std::optional<Result> result = EmitEvent<Key>(bindings);
+          return result.has_value() ? std::optional{EncodePlatformValue(*result)} : std::nullopt;
+        }
+      };
+    }
     return {
         typeid(Key),
         std::string(std::string_view(Key::Name)),
         typeid(void),
-        [](const PlatformValue& value, const EventBindings& bindings) {
+        [](const PlatformValue& value, const EventBindings& bindings) -> std::optional<PlatformValue> {
           if (value.HasValue()) {
             throw std::logic_error("HuxerUI fieldless platform event carried a value");
           }
-          static_cast<void>(EmitEvent<Key>(bindings));
-        },
-        [](const PlatformPayload& payload, const EventBindings& bindings) {
-          if (!payload.IsNull()) {
-            throw std::logic_error("HuxerUI fieldless platform event payload must be null");
+          if constexpr (std::is_void_v<Result>) {
+            static_cast<void>(EmitEvent<Key>(bindings));
+            return std::nullopt;
+          } else {
+            std::optional<Result> result = EmitEvent<Key>(bindings);
+            return result.has_value() ? std::optional{PlatformValue::Store(std::move(*result))} : std::nullopt;
           }
-          static_cast<void>(EmitEvent<Key>(bindings));
         },
+        dispatch_payload,
     };
   } else {
     using Value = typename Signature::Value;
-    void (*dispatch_payload)(const PlatformPayload&, const EventBindings&) = nullptr;
-    if constexpr (PlatformPayloadDecodable<Value>) {
-      dispatch_payload = [](const PlatformPayload& payload, const EventBindings& bindings) {
+    std::optional<PlatformPayload> (*dispatch_payload)(const PlatformPayload&, const EventBindings&) = nullptr;
+    if constexpr (CanDispatchPlatformPayloadEvent<Key>()) {
+      dispatch_payload =
+          [](const PlatformPayload& payload, const EventBindings& bindings) -> std::optional<PlatformPayload> {
         Value value = DecodePlatformPayload<Value>(payload);
-        static_cast<void>(EmitEvent<Key>(bindings, value));
+        if constexpr (std::is_void_v<Result>) {
+          static_cast<void>(EmitEvent<Key>(bindings, value));
+          return std::nullopt;
+        } else {
+          std::optional<Result> result = EmitEvent<Key>(bindings, value);
+          return result.has_value() ? std::optional{EncodePlatformValue(*result)} : std::nullopt;
+        }
       };
     }
     return {
         typeid(Key),
         std::string(std::string_view(Key::Name)),
         typeid(Value),
-        [](const PlatformValue& value, const EventBindings& bindings) {
-          static_cast<void>(EmitEvent<Key>(bindings, value.Get<Value>()));
+        [](const PlatformValue& value, const EventBindings& bindings) -> std::optional<PlatformValue> {
+          if constexpr (std::is_void_v<Result>) {
+            static_cast<void>(EmitEvent<Key>(bindings, value.Get<Value>()));
+            return std::nullopt;
+          } else {
+            std::optional<Result> result = EmitEvent<Key>(bindings, value.Get<Value>());
+            return result.has_value() ? std::optional{PlatformValue::Store(std::move(*result))} : std::nullopt;
+          }
         },
         dispatch_payload,
     };
@@ -361,8 +410,10 @@ class PlatformChannelState;
 class PlatformChannelEndpoint;
 PlatformChannelEndpoint MakePlatformChannelEndpoint(PlatformAdapter& adapter);
 
-PlatformEventEmitter MakePlatformEventEmitter(std::function<void(std::type_index, PlatformValue)> emit_direct,
-                                              std::function<void(std::string, PlatformPayload)> emit_payload);
+PlatformEventEmitter MakePlatformEventEmitter(
+    std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)> emit_direct,
+    std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)> emit_payload
+);
 
 /// Owns all PlatformModule and PlatformView registrations for one surface.
 ///
@@ -535,12 +586,13 @@ PlatformRegistry* SetLifecyclePlatformRegistry(PlatformRegistry* registry) noexc
 /// Publishes events from a mounted platform implementation to the declaring HuxerUI PlatformView.
 ///
 /// Direct C++ factories should use the typed Emit<Key> overload so event values remain strongly typed. A
-/// cross-language bridge may use the named PlatformPayload overload after decoding the platform envelope. Delivery is
-/// routed to the owning UI thread and ignored after the mounted instance is detached.
+/// cross-language bridge may use the named PlatformPayload overload after decoding the platform envelope. PlatformView
+/// emission is synchronous on its owning UI thread and ignored before mount, after detach, or from another thread.
+/// PlatformChannel-backed Module notifications remain asynchronous and do not return values.
 ///
-/// The event key must declare a stable Name and a void signature with zero or one argument:
+/// The event key must declare a stable Name and a complete signature with zero or one argument:
 /// @code
-/// struct TextChanged : Event<std::string> {
+/// struct TextChanged : Event<void(std::string)> {
 ///   static constexpr std::string_view Name = "textChanged";
 /// };
 ///
@@ -554,8 +606,14 @@ public:
   /// Emits a typed event with no argument.
   template <detail::PlatformEventKey Key>
     requires(detail::PlatformEventSignature<typename Key::Signature>::argument_count == 0)
-  void Emit() const {
-    EmitValue(typeid(Key), {});
+  auto Emit() const {
+    using Result = typename detail::PlatformEventSignature<typename Key::Signature>::ResultType;
+    if constexpr (std::is_void_v<Result>) {
+      static_cast<void>(EmitValue(typeid(Key), {}));
+    } else {
+      const std::optional<PlatformValue> result = EmitValue(typeid(Key), {});
+      return result.has_value() ? std::optional<Result>{result->Get<Result>()} : std::nullopt;
+    }
   }
 
   /// Emits a typed event whose value exactly matches Key::Signature.
@@ -563,25 +621,34 @@ public:
     requires(detail::PlatformEventSignature<typename Key::Signature>::argument_count == 1 &&
              std::same_as<std::remove_cvref_t<Value>,
                           typename detail::PlatformEventSignature<typename Key::Signature>::Value>)
-  void Emit(Value&& value) const {
-    EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value)));
+  auto Emit(Value&& value) const {
+    using Result = typename detail::PlatformEventSignature<typename Key::Signature>::ResultType;
+    if constexpr (std::is_void_v<Result>) {
+      static_cast<void>(EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value))));
+    } else {
+      const std::optional<PlatformValue> result =
+          EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value)));
+      return result.has_value() ? std::optional<Result>{result->Get<Result>()} : std::nullopt;
+    }
   }
 
-  /// Emits a named cross-language event carrying an already decoded PlatformPayload.
-  void Emit(std::string name, PlatformPayload payload) const;
+  /// Emits a named cross-language event carrying an already decoded PlatformPayload and returns its optional result.
+  std::optional<PlatformPayload> Emit(std::string name, PlatformPayload payload) const;
 
 private:
-  PlatformEventEmitter(std::function<void(std::type_index, PlatformValue)> emit_direct,
-                       std::function<void(std::string, PlatformPayload)> emit_payload)
+  PlatformEventEmitter(std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)> emit_direct,
+                       std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)> emit_payload)
       : emit_direct_(std::move(emit_direct)), emit_payload_(std::move(emit_payload)) {}
 
-  void EmitValue(std::type_index key, PlatformValue value) const;
+  std::optional<PlatformValue> EmitValue(std::type_index key, PlatformValue value) const;
 
-  std::function<void(std::type_index, PlatformValue)> emit_direct_;
-  std::function<void(std::string, PlatformPayload)> emit_payload_;
+  std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)> emit_direct_;
+  std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)> emit_payload_;
 
-  friend PlatformEventEmitter detail::MakePlatformEventEmitter(std::function<void(std::type_index, PlatformValue)>,
-                                                               std::function<void(std::string, PlatformPayload)>);
+  friend PlatformEventEmitter detail::MakePlatformEventEmitter(
+      std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)>,
+      std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)>
+  );
   friend class detail::PlatformChannelEndpoint;
 };
 

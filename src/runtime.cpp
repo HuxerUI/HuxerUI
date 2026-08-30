@@ -1329,54 +1329,54 @@ void Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
   MoveFocus(reverse);
 }
 
-bool Runtime::DispatchPlatformViewEvent(
+std::optional<PlatformPayload> Runtime::DispatchPlatformViewEvent(
     std::uint64_t identity, std::string_view name, const PlatformPayload& payload
 ) {
   if (!state_->mounted_root_) {
-    return false;
+    return std::nullopt;
   }
   detail::MountedNode* node = FindNode(*state_->mounted_root_, identity);
   if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view ||
       !node->interaction.enabled) {
-    return false;
+    return std::nullopt;
   }
   const auto event = std::ranges::find(node->platform_view->events, name, &detail::PlatformEventDescriptor::name);
   if (event == node->platform_view->events.end() || !node->event_bindings.contains(event->key)) {
-    return false;
+    return std::nullopt;
   }
   try {
     detail::BindExternalTextures(payload, state_->platform_->external_texture_surface_);
     if (event->dispatch_payload == nullptr) {
-      return false;
+      return std::nullopt;
     }
-    event->dispatch_payload(payload, node->event_bindings);
+    return event->dispatch_payload(payload, node->event_bindings);
   } catch (...) {
-    return false;
+    return std::nullopt;
   }
-  return true;
 }
 
-bool Runtime::DispatchPlatformViewEvent(std::uint64_t identity, std::type_index key, const PlatformValue& value) {
+std::optional<PlatformValue> Runtime::DispatchPlatformViewEvent(
+    std::uint64_t identity, std::type_index key, const PlatformValue& value
+) {
   if (!state_->mounted_root_) {
-    return false;
+    return std::nullopt;
   }
   detail::MountedNode* node = FindNode(*state_->mounted_root_, identity);
   if (node == nullptr || node->kind != detail::NodeKind::PlatformView || !node->platform_view ||
       !node->interaction.enabled) {
-    return false;
+    return std::nullopt;
   }
   const auto event = std::ranges::find(node->platform_view->events, key, &detail::PlatformEventDescriptor::key);
   if (event == node->platform_view->events.end() || !node->event_bindings.contains(event->key) ||
       event->argument_type != value.Type()) {
-    return false;
+    return std::nullopt;
   }
   try {
     detail::BindExternalTextures(value, state_->platform_->external_texture_surface_);
-    event->dispatch_direct(value, node->event_bindings);
+    return event->dispatch_direct(value, node->event_bindings);
   } catch (...) {
-    return false;
+    return std::nullopt;
   }
-  return true;
 }
 
 // Requests raised while a frame is being built are retained for its FrameCommit instead of re-entering the platform
@@ -1736,6 +1736,10 @@ void Runtime::RefreshInteractionTree() {
         std::ranges::any_of(session.recognitions, [this](const PointerRecognition& recognition) {
           if (!recognition.started) {
             return false;
+          }
+          if (const auto* intercept = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
+            const detail::MountedNode* node = FindNode(*state_->mounted_root_, intercept->node_identity);
+            return node == nullptr || !HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings);
           }
           if (const auto* extension = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
             return FindExtension(*state_->mounted_root_, extension->extension) == nullptr;

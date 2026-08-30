@@ -1,7 +1,7 @@
 # Gesture Recognition and Arbitration Design
 
 This document defines the shared gesture-recognition, ownership-resolution, and cancellation model.
-Pointer recognition, repeated taps, long presses, single-pointer drags, and multi-pointer transforms share one ownership path.
+Pointer interception, repeated taps, long presses, single-pointer drags, and multi-pointer transforms share one ownership path.
 The model extends the interaction foundation without adding general event capture and bubbling or exposing raw pointer capture to applications.
 
 The mounted interaction and indication contract remains defined by [Interaction and Indication Design](interaction-indication.md).
@@ -13,6 +13,7 @@ PlatformView composition and initial input ownership remain defined by [Architec
 - Give Click, scrolling, public gesture modifiers, and retained pointer extensions one deterministic competition model.
 - Keep every physical pointer sequence exclusively owned by HuxerUI or one PlatformView after its Down event.
 - Continue delivery to an accepted recognizer outside its node bounds until completion or cancellation.
+- Let application code synchronously intercept a pointer sequence without adding general event routing.
 - Preserve typed event identity, `OnClick()`, raw pointer events, and the existing NodeExtension pointer contract.
 - Keep recognition state mounted and incremental without recomposing for every pointer update.
 - Let scrolling, Drawer, BottomSheet, ScrollBar, Tooltip, text selection, and third-party retained behavior converge on one pointer path.
@@ -45,10 +46,10 @@ pointer recognition
         ↓
 one recognition owner
         ↓
-Click / Drag / LongPress / Transform / Scroll / retained pointer extension
+PointerIntercept / Click / Drag / LongPress / Transform / Scroll / retained pointer extension
 ```
 
-Raw pointer events are the only side branch:
+Raw pointer target delivery remains a side branch while recognition is pending:
 
 ```text
                     ┌─ raw PointerDown / PointerMove / PointerUp
@@ -57,7 +58,8 @@ PointerSession ─────┤
 ```
 
 The raw branch reports the physical stream to the deepest ordinary pointer target while recognition resolves ownership.
-It cannot stop propagation, accept a gesture, capture a pointer, or create another owner.
+Raw `PointerDown`, `PointerMove`, `PointerUp`, and `PointerCancel` handlers cannot stop propagation, accept a gesture, capture a pointer, or create another owner.
+`ViewEvents::PointerIntercept` is a distinct typed event key whose result participates as one recognition in the existing PointerSession.
 When a competing recognizer accepts, the raw target receives one PointerCancel and no later event from that sequence.
 
 Runtime does not retain separate scroll, extension-capture, extension-observer, and gesture-session ownership paths.
@@ -90,6 +92,7 @@ A multi-pointer recognizer may be referenced by several sessions, while each ses
 Runtime resolves every session that references the same recognizer before publishing output, so shared recognition does not require a pointer-group registry, a second router, or another public ownership type.
 
 Recognitions are collected from the deepest mounted node toward the root.
+`ViewEvents::PointerIntercept` is first on its mounted node when present.
 Retained-modifier recognitions on the same node follow reverse declaration order, matching existing topmost extension dispatch.
 The node's built-in Tap or Scroll recognition follows its retained-modifier recognitions.
 The first recognition to return Accept in that deterministic order owns the sequence.
@@ -116,6 +119,30 @@ The owner continues receiving Move, Up, and Cancel outside its original bounds.
 Focus and pressed interaction are PointerSession side effects rather than recognizers or owners.
 Mouse and pen focus retain their current Down behavior, while touch focus remains pending until Tap succeeds.
 Another owner cancels pending touch focus and ends the current pressed interaction with Cancel before publishing its own output.
+
+## Pointer interception
+
+Application code binds the ordinary typed key when it needs to observe a physical sequence and synchronously decide when to own it:
+
+```cpp
+return content.On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
+  return ShouldTakePointer(event);
+});
+```
+
+The event signature is `Event<bool(const PointerEvent&)>`.
+Returning false on Down or Move keeps that recognition pending and allows deeper or later candidates and the raw target to continue.
+The first candidate that returns true becomes the sole owner before later candidates see that update.
+If the raw target already observed Down, it receives one PointerCancel; immediate Down acceptance prevents raw Down entirely.
+
+Once accepted, the accepted View's current PointerIntercept binding receives subsequent Move, Up, and Cancel outside its original bounds, and later return values are ignored.
+If another recognition accepts first, a pending interceptor that observed the sequence receives Cancel exactly once.
+Removal, disable, incompatible replacement, or unmount never transfers an accepted sequence to another node.
+An escaping handler exception follows the existing quarantine and rethrow contract.
+
+Pointer interception advances only while Runtime dispatches a PointerEvent.
+A recognition that must accept at a deadline while the pointer is stationary uses the existing retained recognizer path, such as `LongPressGesture` or a delayed `DragGesture`; the Runtime schedules that deadline and resolves ownership before publishing its lifecycle event.
+This distinction avoids a public asynchronous capture handle or another pointer-session API.
 
 ## Click and successful taps
 
@@ -187,7 +214,7 @@ struct MultiTapEvent {
 };
 
 struct MultiTapEvents {
-  struct Recognized : Event<const MultiTapEvent&> {};
+  struct Recognized : Event<void(const MultiTapEvent&)> {};
 };
 ```
 
@@ -227,9 +254,9 @@ struct LongPressEvent {
 };
 
 struct LongPressEvents {
-  struct Started : Event<const LongPressEvent&> {};
-  struct Ended : Event<const LongPressEvent&> {};
-  struct Canceled : Event<const LongPressEvent&> {};
+  struct Started : Event<void(const LongPressEvent&)> {};
+  struct Ended : Event<void(const LongPressEvent&)> {};
+  struct Canceled : Event<void(const LongPressEvent&)> {};
 };
 ```
 
@@ -282,10 +309,10 @@ struct DragEvent {
 };
 
 struct DragEvents {
-  struct Started : Event<const DragEvent&> {};
-  struct Changed : Event<const DragEvent&> {};
-  struct Ended : Event<const DragEvent&> {};
-  struct Canceled : Event<const DragEvent&> {};
+  struct Started : Event<void(const DragEvent&)> {};
+  struct Changed : Event<void(const DragEvent&)> {};
+  struct Ended : Event<void(const DragEvent&)> {};
+  struct Canceled : Event<void(const DragEvent&)> {};
 };
 ```
 
@@ -335,10 +362,10 @@ struct TransformEvent {
 };
 
 struct TransformEvents {
-  struct Started : Event<const TransformEvent&> {};
-  struct Changed : Event<const TransformEvent&> {};
-  struct Ended : Event<const TransformEvent&> {};
-  struct Canceled : Event<const TransformEvent&> {};
+  struct Started : Event<void(const TransformEvent&)> {};
+  struct Changed : Event<void(const TransformEvent&)> {};
+  struct Ended : Event<void(const TransformEvent&)> {};
+  struct Canceled : Event<void(const TransformEvent&)> {};
 };
 ```
 
@@ -422,7 +449,7 @@ Selection rendering, editing commands, menu actions, controlled TextEditingValue
 Gesture output uses the existing `.On<Key>(handler)` surface.
 Component events remain node-local and do not become routed events.
 
-The raw pointer keys remain source compatible:
+The raw pointer keys remain notifications:
 
 ```cpp
 ViewEvents::PointerDown
@@ -431,7 +458,8 @@ ViewEvents::PointerUp
 ViewEvents::PointerCancel
 ```
 
-They have no capture phase, bubble phase, handled result, or public pointer handle.
+They have `Event<void(const PointerEvent&)>` signatures and no capture phase, bubble phase, handled result, or public pointer handle.
+Applications use the separate `ViewEvents::PointerIntercept` key when they need to compete for ownership.
 The deepest ordinary target receives Down and Move while no competing owner exists.
 A successful tap sends PointerUp before Click or MultiTap output; another owner sends one PointerCancel.
 

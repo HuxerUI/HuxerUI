@@ -83,10 +83,10 @@ Transient hover, pressed, animation, momentum, caret, and IME state are retained
 
 Components expose typed events and convenience methods such as `OnClick`, `OnChanged`, and `OnSubmitted`.
 
-Custom event identity is its event key type:
+Custom event identity is its event key type, while `Event` carries the complete handler signature:
 
 ```cpp
-struct Submitted : Event<std::string> {};
+struct Submitted : Event<void(std::string)> {};
 
 [[huxerui::composable]]
 View SearchButton() {
@@ -98,6 +98,20 @@ View SearchButton() {
 ```
 
 Parents attach handlers with `.On<Submitted>(...)`.
+An event may return a synchronous decision:
+
+```cpp
+enum class NavigationDecision {
+  Allow,
+  Cancel,
+};
+
+struct NavigationRequested : Event<NavigationDecision(const NavigationRequest&)> {};
+```
+
+`Emit<NavigationRequested>(request)` returns `std::optional<NavigationDecision>`.
+An empty result means that no current handler produced a decision; the emitter chooses its explicit fallback.
+Void events continue to return `void`.
 
 ## Modifiers and component configuration
 

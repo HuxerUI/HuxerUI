@@ -1377,14 +1377,15 @@ struct RuntimeAccess {
     runtime.MoveFocusFromPlatformView(identity, reverse);
   }
 
-  static bool DispatchPlatformViewEvent(
+  static std::optional<PlatformPayload> DispatchPlatformViewEvent(
       Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
   ) {
     return runtime.DispatchPlatformViewEvent(identity, name, payload);
   }
 
-  static bool DispatchPlatformViewEvent(Runtime& runtime, std::uint64_t identity, std::type_index key,
-                                        const PlatformValue& value) {
+  static std::optional<PlatformValue> DispatchPlatformViewEvent(
+      Runtime& runtime, std::uint64_t identity, std::type_index key, const PlatformValue& value
+  ) {
     return runtime.DispatchPlatformViewEvent(identity, key, value);
   }
 };

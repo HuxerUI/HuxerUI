@@ -159,6 +159,10 @@ struct ExtensionRecognitionState {
   NodeExtensionHandle extension;
 };
 
+struct PointerInterceptRecognitionState {
+  std::uint64_t node_identity = 0;
+};
+
 struct TextSelectionRecognitionState {
   std::uint64_t node_identity = 0;
   Point tap_position;
@@ -174,6 +178,7 @@ struct TextSelectionOverlayOwner {};
 using PointerRecognitionState = std::variant<
     TapRecognitionState,
     ScrollRecognitionState,
+    PointerInterceptRecognitionState,
     ExtensionRecognitionState,
     GestureRecognitionState,
     DragSourceRecognitionState,

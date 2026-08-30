@@ -59,6 +59,10 @@ return Column {
 Bind generic typed events with `view.On<Key>(handler)`. Convenience methods such as `OnClick`, `OnChanged`, and `OnSubmitted` map to typed event keys; do not wire a second callback path for the same action.
 
 `UseEvents()` exposes an emitter for app-side component composition where a component needs to emit its own typed event. Prefer existing built-in component events over a parallel owner callback convention.
+Declare the complete handler signature with `Event<Result(Arguments...)>`.
+Use `Event<void(Arguments...)>` for notifications.
+A value-returning event is a synchronous decision owned by its key, and `Emit<Key>(...)` returns `std::optional<Result>` so the caller must choose the fallback for a missing binding.
+Do not add `VoidEvent`, result-event aliases, a second registration method, or a parallel callback convention.
 
 ## Environment and theme
 

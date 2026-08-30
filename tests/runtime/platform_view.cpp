@@ -9,16 +9,24 @@ namespace huxerui::test {
 namespace {
 
 struct TestPlatformEvents {
-  struct Changed : Event<int> {
+  struct Changed : Event<void(int)> {
     static constexpr std::string_view Name = "changed";
   };
 
-  struct DuplicateChanged : Event<int> {
+  struct DuplicateChanged : Event<void(int)> {
     static constexpr std::string_view Name = "changed";
   };
 
-  struct TextureChanged : Event<ExternalTexture> {
+  struct TextureChanged : Event<void(ExternalTexture)> {
     static constexpr std::string_view Name = "textureChanged";
+  };
+
+  struct DecisionRequested : Event<bool(int)> {
+    static constexpr std::string_view Name = "decisionRequested";
+  };
+
+  struct ReadyRequested : Event<int()> {
+    static constexpr std::string_view Name = "readyRequested";
   };
 };
 
@@ -91,7 +99,14 @@ View KeyedPlatformViewApp() {
 
 View EventPlatformViewApp() {
   return PlatformView("test/Event")
-      .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; });
+      .On<TestPlatformEvents::Changed>([](int value) { received_platform_event = value; })
+      .On<TestPlatformEvents::DecisionRequested>([](int value) {
+        if (value < 0) {
+          throw std::runtime_error("platform decision failed");
+        }
+        return value != 0;
+      })
+      .On<TestPlatformEvents::ReadyRequested>([] { return 42; });
 }
 
 View ControlledPlatformViewApp() {
@@ -320,27 +335,51 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
   const detail::MountedNode* mounted = runtime.RootNode();
   REQUIRE(mounted != nullptr);
   REQUIRE(mounted->platform_view != nullptr);
-  REQUIRE(mounted->platform_view->events.size() == 1);
-  const detail::PlatformEventDescriptor& event = mounted->platform_view->events.front();
-  REQUIRE(event.name == "changed");
-  event.dispatch_direct(PlatformValue::Store(7), mounted->event_bindings);
+  REQUIRE(mounted->platform_view->events.size() == 3);
+  const auto event = std::ranges::find(
+      mounted->platform_view->events, std::string_view{"changed"}, &detail::PlatformEventDescriptor::name
+  );
+  REQUIRE(event != mounted->platform_view->events.end());
+  REQUIRE(event->name == "changed");
+  event->dispatch_direct(PlatformValue::Store(7), mounted->event_bindings);
   REQUIRE(received_platform_event == 7);
-  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::Changed), PlatformValue::Store(8)));
+  static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::Changed), PlatformValue::Store(8))
+  );
   REQUIRE(received_platform_event == 8);
-  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(),
-      placement.Identity(),
-      "changed",
-      PlatformPayload(std::int64_t{9})
+  static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), "changed", PlatformPayload(std::int64_t{9})
   ));
   REQUIRE(received_platform_event == 9);
   REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(),
-      placement.Identity(),
-      "changed",
-      PlatformPayload("invalid")
-  ));
+      runtime.CoreRuntime(), placement.Identity(), "changed", PlatformPayload("invalid")
+  ).has_value());
+  REQUIRE(received_platform_event == 9);
+
+  const std::optional<PlatformValue> direct_decision = detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::DecisionRequested),
+      PlatformValue::Store(1)
+  );
+  REQUIRE(direct_decision.has_value());
+  REQUIRE(direct_decision->Get<bool>());
+  const std::optional<PlatformPayload> payload_decision = detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), "decisionRequested", PlatformPayload(std::int64_t{0})
+  );
+  REQUIRE(payload_decision.has_value());
+  REQUIRE_FALSE(payload_decision->AsBoolean());
+  REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), "decisionRequested", PlatformPayload(std::int64_t{-1})
+  ).has_value());
+  const std::optional<PlatformValue> direct_ready = detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::ReadyRequested), PlatformValue{}
+  );
+  REQUIRE(direct_ready.has_value());
+  REQUIRE(direct_ready->Get<int>() == 42);
+  const std::optional<PlatformPayload> payload_ready = detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), "readyRequested", PlatformPayload{}
+  );
+  REQUIRE(payload_ready.has_value());
+  REQUIRE(payload_ready->AsInteger() == 42);
 
   REQUIRE_THROWS_AS(PlatformView("test/Event")
                         .On<TestPlatformEvents::Changed>([](int) {})
@@ -368,30 +407,27 @@ TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
-  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(),
-      placement.Identity(),
-      "textureChanged",
-      PlatformPayload(texture)
+  static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), "textureChanged", PlatformPayload(texture)
   ));
   REQUIRE(received_platform_texture == texture);
 
   received_platform_texture = {};
-  REQUIRE(detail::RuntimeAccess::DispatchPlatformViewEvent(runtime.CoreRuntime(), placement.Identity(),
-                                                           typeid(TestPlatformEvents::TextureChanged),
-                                                           PlatformValue::Store(texture)));
+  static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::TextureChanged),
+      PlatformValue::Store(texture)
+  ));
   REQUIRE(received_platform_texture == texture);
 
+  received_platform_texture = {};
   TestPlatform other_platform;
   Runtime other_runtime(TextureEventPlatformViewApp, other_platform);
   other_runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand other_placement = FindPlatformView(other_runtime.BuildRenderFrame());
-  REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      other_runtime.CoreRuntime(),
-      other_placement.Identity(),
-      "textureChanged",
-      PlatformPayload(texture)
+  static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
+      other_runtime.CoreRuntime(), other_placement.Identity(), "textureChanged", PlatformPayload(texture)
   ));
+  REQUIRE(received_platform_texture == ExternalTexture{});
 }
 
 TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
@@ -433,10 +469,7 @@ TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to 
     return node.platform_view_identity == identity;
   }));
   REQUIRE_FALSE(detail::RuntimeAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(),
-      identity,
-      "changed",
-      PlatformPayload(std::int64_t{7})
+      runtime.CoreRuntime(), identity, "changed", PlatformPayload(std::int64_t{7})
   ));
   REQUIRE(received_platform_event == 0);
 

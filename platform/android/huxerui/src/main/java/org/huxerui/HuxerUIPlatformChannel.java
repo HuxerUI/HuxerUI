@@ -11,8 +11,10 @@ public final class HuxerUIPlatformChannel {
     /**
      * Emits named events to the C++ PlatformChannel or PlatformView event bindings that own this instance.
      *
-     * <p>Events may be emitted from any thread. Delivery is serialized onto the owning HuxerUI UI thread. Calls after
-     * {@link #close()} are ignored, and implementations must stop retaining this sink during disposal.</p>
+     * <p>PlatformModule notifications may be emitted from any thread, are delivered asynchronously, and return null.
+     * PlatformView events must be emitted on the owning UI thread, are delivered synchronously, and may return a
+     * decision payload. Off-thread PlatformView emission and calls after {@link #close()} are ignored. Implementations
+     * must stop retaining this sink during disposal.</p>
      */
     public static final class Events implements AutoCloseable {
         private long nativeHandle;
@@ -24,16 +26,17 @@ public final class HuxerUIPlatformChannel {
             this.nativeHandle = nativeHandle;
         }
 
-        /** Emits a fieldless event whose payload is Null. */
-        public synchronized void emit(String event) {
-            emit(event, PlatformPayload.nullValue());
+        /** Emits a fieldless event whose payload is Null and returns an optional synchronous PlatformView result. */
+        public synchronized PlatformPayload emit(String event) {
+            return emit(event, PlatformPayload.nullValue());
         }
 
-        /** Emits an event with an immutable PlatformPayload value. */
-        public synchronized void emit(String event, PlatformPayload payload) {
+        /** Emits an event with an immutable PlatformPayload value and returns an optional synchronous result. */
+        public synchronized PlatformPayload emit(String event, PlatformPayload payload) {
             if (nativeHandle != 0L) {
-                nativeEmit(nativeHandle, event, payload);
+                return nativeEmit(nativeHandle, event, payload);
             }
+            return null;
         }
 
         /** Detaches this sink from its C++ owner. Later emissions are ignored. */
@@ -112,7 +115,7 @@ public final class HuxerUIPlatformChannel {
 
     private HuxerUIPlatformChannel() {}
 
-    private static native void nativeEmit(long handle, String event, PlatformPayload payload);
+    private static native PlatformPayload nativeEmit(long handle, String event, PlatformPayload payload);
 
     private static native void nativeReleaseEvent(long handle);
 

@@ -16,7 +16,7 @@ final class TestPlatformModule: NSObject, PlatformModule {
 final class TestPlatformModuleFactory: NSObject, UIKitPlatformModuleFactory {
   func create(with viewController: UIViewController, options: PlatformPayload,
               events: PlatformEventEmitter) -> PlatformModule {
-    events.emit("created", payload: options)
+    _ = events.emit("created", payload: options)
     return TestPlatformModule()
   }
 }
@@ -30,7 +30,7 @@ final class TestPlatformView: NSObject, UIKitPlatformView {
 final class TestPlatformViewFactory: NSObject, UIKitPlatformViewFactory {
   func create(with viewController: UIViewController, properties: PlatformPayload,
               events: PlatformEventEmitter) -> UIKitPlatformView {
-    events.emit("created", payload: properties)
+    _ = events.emit("created", payload: properties)
     return TestPlatformView()
   }
 }

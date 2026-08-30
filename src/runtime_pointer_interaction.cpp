@@ -760,6 +760,11 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
     if (extension && node && source_state->recognizer) {
       source_state->recognizer->Canceled(*node, *extension, GestureInput(*source_state, event, timestamp));
     }
+  } else if (auto* intercept_state = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
+    if (detail::MountedNode* node = FindNode(*state_->mounted_root_, intercept_state->node_identity);
+        node && node->interaction.enabled && HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings)) {
+      static_cast<void>(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, event));
+    }
   } else if (std::holds_alternative<TextSelectionRecognitionState>(recognition.state)) {
     TrackTouchTextSelectionGesture(event);
   }
@@ -934,6 +939,27 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
     return GestureDecision::Reject;
   }
   PointerRecognition& recognition = session.recognitions[index];
+  if (auto* intercept_state = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
+    detail::MountedNode* node = FindNode(*state_->mounted_root_, intercept_state->node_identity);
+    if (!node || !node->interaction.enabled ||
+        !HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings)) {
+      return GestureDecision::Reject;
+    }
+    recognition.started = true;
+    const std::optional<bool> intercept = EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, event);
+    if (RecognitionOwnerIndex(session) == std::optional{index}) {
+      return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
+                 ? GestureDecision::Reject
+                 : GestureDecision::Continue;
+    }
+    if (event.type == PointerEventType::Cancel) {
+      return GestureDecision::Reject;
+    }
+    if (intercept.value_or(false)) {
+      return GestureDecision::Accept;
+    }
+    return event.type == PointerEventType::Up ? GestureDecision::Reject : GestureDecision::Continue;
+  }
   if (auto* extension_state = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
     NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_state->extension);
     detail::MountedNode* node =
@@ -1333,6 +1359,12 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
                      (static_cast<bool>((*node)->activation) ||
                       HasEventBinding<ViewEvents::Click>((*node)->event_bindings)),
     };
+    if ((*node)->interaction.enabled &&
+        HasEventBinding<ViewEvents::PointerIntercept>((*node)->event_bindings)) {
+      session.recognitions.push_back(PointerRecognition{
+          PointerInterceptRecognitionState{.node_identity = (*node)->identity},
+      });
+    }
     for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
       if (!(*node)->interaction.enabled) {
         continue;

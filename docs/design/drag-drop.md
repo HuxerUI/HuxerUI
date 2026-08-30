@@ -78,17 +78,17 @@ struct DragDropResult {
 };
 
 struct DragSourceEvents {
-  struct Started : Event<const DragEvent&> {};
-  struct Changed : Event<const DragEvent&> {};
-  struct Ended : Event<const DragDropResult&> {};
-  struct Canceled : Event<const DragEvent&> {};
+  struct Started : Event<void(const DragEvent&)> {};
+  struct Changed : Event<void(const DragEvent&)> {};
+  struct Ended : Event<void(const DragDropResult&)> {};
+  struct Canceled : Event<void(const DragEvent&)> {};
 };
 
 template <class T> struct DropEvents {
-  struct Entered : Event<const T&, const DropEvent&> {};
-  struct Moved : Event<const T&, const DropEvent&> {};
-  struct Exited : Event<const T&, const DropEvent&> {};
-  struct Dropped : Event<const T&, const DropEvent&> {};
+  struct Entered : Event<void(const T&, const DropEvent&)> {};
+  struct Moved : Event<void(const T&, const DropEvent&)> {};
+  struct Exited : Event<void(const T&, const DropEvent&)> {};
+  struct Dropped : Event<void(const T&, const DropEvent&)> {};
 };
 ```
 

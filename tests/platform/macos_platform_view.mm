@@ -1,11 +1,11 @@
 #import <AppKit/AppKit.h>
-#import <dispatch/dispatch.h>
 
 #include "appkit_platform_view.h"
 #include "appkit_renderer.h"
 #include "runtime_test_support.h"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -118,8 +118,12 @@ NSWindow* mac_created_platform_view_window = nil;
 NSTextField* mac_created_focus_text_field = nil;
 
 struct MacPlatformViewEvents {
-  struct Changed : Event<int> {
+  struct Changed : Event<void(int)> {
     static constexpr std::string_view Name = "changed";
+  };
+
+  struct DecisionRequested : Event<bool(int)> {
+    static constexpr std::string_view Name = "decisionRequested";
   };
 };
 
@@ -151,6 +155,7 @@ View MacPlatformViewApp() {
         PlatformView("test/MacView", MacPlatformViewProperties{value.Get()})
             .Controller(controller.Get())
             .On<MacPlatformViewEvents::Changed>([](int next) { mac_platform_view_event_value = next; })
+            .On<MacPlatformViewEvents::DecisionRequested>([](int next) { return next == 42; })
             .With(Frame{80.0F, 40.0F}),
         Button("after").With(Frame{80.0F, 20.0F}),
     }
@@ -160,6 +165,7 @@ View MacPlatformViewApp() {
       Button("before").With(Frame{80.0F, 20.0F}),
       PlatformView("test/MacView", MacPlatformViewProperties{value.Get()})
           .On<MacPlatformViewEvents::Changed>([](int next) { mac_platform_view_event_value = next; })
+          .On<MacPlatformViewEvents::DecisionRequested>([](int next) { return next == 42; })
           .With(Frame{80.0F, 40.0F}),
       Button("after").With(Frame{80.0F, 20.0F}),
   }
@@ -243,18 +249,6 @@ NSEvent* TabKeyEvent(NSWindow* window, bool reverse) {
                            keyCode:48];
 }
 
-bool DrainMainQueue() {
-  __block bool drained = false;
-  dispatch_async(dispatch_get_main_queue(), ^{
-    drained = true;
-  });
-  NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
-  while (!drained && deadline.timeIntervalSinceNow > 0.0) {
-    [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
-  }
-  return drained;
-}
-
 TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
   @autoreleasepool {
     mac_platform_view_creates = 0;
@@ -318,8 +312,11 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     REQUIRE_FALSE(foreground_slice.needsDisplay);
 
     mac_platform_view_events.Emit<MacPlatformViewEvents::Changed>(7);
-    REQUIRE(DrainMainQueue());
     REQUIRE(mac_platform_view_event_value == 7);
+    REQUIRE(mac_platform_view_events.Emit<MacPlatformViewEvents::DecisionRequested>(42) ==
+            std::optional{true});
+    REQUIRE(mac_platform_view_events.Emit<MacPlatformViewEvents::DecisionRequested>(7) ==
+            std::optional{false});
 
     mac_platform_view_value = 2;
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
@@ -338,7 +335,7 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     REQUIRE(root.subviews.count == 0);
 
     mac_platform_view_events.Emit<MacPlatformViewEvents::Changed>(9);
-    REQUIRE(DrainMainQueue());
+    REQUIRE_FALSE(mac_platform_view_events.Emit<MacPlatformViewEvents::DecisionRequested>(42).has_value());
     REQUIRE(mac_platform_view_event_value == 7);
 
     platform_views.Shutdown();

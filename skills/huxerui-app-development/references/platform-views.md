@@ -15,7 +15,7 @@ struct WebViewProperties {
 };
 
 struct WebViewEvents {
-  struct NavigationChanged : Event<const NavigationState&> {
+  struct NavigationChanged : Event<void(const NavigationState&)> {
     static constexpr std::string_view Name = "navigationChanged";
   };
 };
@@ -43,6 +43,10 @@ Page code uses `WebView(...)` and typed events or Controllers only.
 Events need no separate registration list.
 The component attaches ordinary typed handlers with `.On<Key>(...)`, and the platform factory receives one `PlatformEventEmitter` that calls `Emit<Key>(value)`.
 When an implementation crosses a platform-language boundary, the event value type owns `Decode(const PlatformPayload&)`; direct C++ emission remains strongly typed.
+A PlatformView event may return a synchronous decision through `Event<Result(Argument)>`; typed C++ emission returns `std::optional<Result>`, while Java/Kotlin, Objective-C/Swift, and JavaScript receive an optional result payload from the same `emit` operation.
+Emission is synchronous and valid only on the mounted View's owning UI thread.
+The platform implementation chooses its explicit fallback when no handler produces a result.
+Do not use a result event for asynchronous work or Module RPC.
 
 An optional Controller is a library-defined typed command facade.
 If the component exposes one, accept it through the concrete component API, attach it internally with `.Controller(controller)`, and register that exact Controller type.
@@ -81,6 +85,8 @@ The Web JavaScript `PlatformPayload` bridge does not transport `ExternalTexture`
 Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.
 Failed creation publishes no event and releases any instance or platform object already returned by the factory.
 Events are accepted only after a candidate commits, and disposal invalidates delivery before releasing platform state.
+Create-time, off-thread, disabled, and detached emissions invoke no application handler and produce no result.
+Malformed payloads and handler failures also produce no result; PlatformView handler exceptions do not escape through a platform-language boundary.
 
 ## Geometry and behavior
 

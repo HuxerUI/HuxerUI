@@ -65,7 +65,7 @@ struct MultiTapEvent {
 // Typed event keys emitted by MultiTapGesture.
 struct MultiTapEvents {
   // Emitted once after the configured number of consecutive taps succeeds.
-  struct Recognized : Event<const MultiTapEvent&> {};
+  struct Recognized : Event<void(const MultiTapEvent&)> {};
 };
 
 // Recognizes a pointer held within a movement tolerance for a minimum duration.
@@ -97,11 +97,11 @@ struct LongPressEvent {
 // Typed lifecycle event keys emitted after a LongPressGesture wins the pointer sequence.
 struct LongPressEvents {
   // Emitted when the duration elapses and the long press obtains pointer ownership.
-  struct Started : Event<const LongPressEvent&> {};
+  struct Started : Event<void(const LongPressEvent&)> {};
   // Emitted on pointer Up after Started.
-  struct Ended : Event<const LongPressEvent&> {};
+  struct Ended : Event<void(const LongPressEvent&)> {};
   // Emitted when an accepted long press loses ownership without a normal Up.
-  struct Canceled : Event<const LongPressEvent&> {};
+  struct Canceled : Event<void(const LongPressEvent&)> {};
 };
 
 // Recognizes pointer translation, optionally constrained to one axis or delayed until a press duration elapses.
@@ -144,13 +144,13 @@ struct DragEvent {
 // Typed lifecycle event keys emitted after a DragGesture wins the pointer sequence.
 struct DragEvents {
   // Emitted once after the distance threshold or optional press duration accepts the drag.
-  struct Started : Event<const DragEvent&> {};
+  struct Started : Event<void(const DragEvent&)> {};
   // Emitted for accepted movement; threshold acceptance may emit Changed immediately after Started.
-  struct Changed : Event<const DragEvent&> {};
+  struct Changed : Event<void(const DragEvent&)> {};
   // Emitted on pointer Up after Started.
-  struct Ended : Event<const DragEvent&> {};
+  struct Ended : Event<void(const DragEvent&)> {};
   // Emitted when an accepted drag loses ownership without a normal Up.
-  struct Canceled : Event<const DragEvent&> {};
+  struct Canceled : Event<void(const DragEvent&)> {};
 };
 
 // Describes one target-relative update during a typed drag-and-drop session.
@@ -177,20 +177,20 @@ struct DragDropResult {
 
 // Typed lifecycle event keys emitted by DragSource.
 struct DragSourceEvents {
-  struct Started : Event<const DragEvent&> {};
-  struct Changed : Event<const DragEvent&> {};
-  struct Ended : Event<const DragDropResult&> {};
-  struct Canceled : Event<const DragEvent&> {};
+  struct Started : Event<void(const DragEvent&)> {};
+  struct Changed : Event<void(const DragEvent&)> {};
+  struct Ended : Event<void(const DragDropResult&)> {};
+  struct Canceled : Event<void(const DragEvent&)> {};
 };
 
 // Typed lifecycle event keys emitted by a compatible DropTarget.
 template <class T>
   requires std::same_as<T, std::remove_cvref_t<T>>
 struct DropEvents {
-  struct Entered : Event<const T&, const DropEvent&> {};
-  struct Moved : Event<const T&, const DropEvent&> {};
-  struct Exited : Event<const T&, const DropEvent&> {};
-  struct Dropped : Event<const T&, const DropEvent&> {};
+  struct Entered : Event<void(const T&, const DropEvent&)> {};
+  struct Moved : Event<void(const T&, const DropEvent&)> {};
+  struct Exited : Event<void(const T&, const DropEvent&)> {};
+  struct Dropped : Event<void(const T&, const DropEvent&)> {};
 };
 
 namespace detail {
@@ -317,13 +317,13 @@ struct TransformEvent {
 // Typed lifecycle event keys emitted after a TransformGesture owns at least two pointers.
 struct TransformEvents {
   // Emitted once when the second compatible pointer accepts the transform.
-  struct Started : Event<const TransformEvent&> {};
+  struct Started : Event<void(const TransformEvent&)> {};
   // Emitted for geometry changes and identity rebases after the participating pointer set changes.
-  struct Changed : Event<const TransformEvent&> {};
+  struct Changed : Event<void(const TransformEvent&)> {};
   // Emitted when a normal pointer Up leaves fewer than two participating pointers.
-  struct Ended : Event<const TransformEvent&> {};
+  struct Ended : Event<void(const TransformEvent&)> {};
   // Emitted once when an accepted transform is canceled without normal completion.
-  struct Canceled : Event<const TransformEvent&> {};
+  struct Canceled : Event<void(const TransformEvent&)> {};
 };
 
 } // namespace huxerui

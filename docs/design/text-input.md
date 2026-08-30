@@ -559,11 +559,8 @@ The component uses typed events:
 
 ```cpp
 struct TextFieldEvents {
-  struct Changed
-      : Event<TextFieldEvents, void(const TextEditingValue&)> {};
-
-  struct Submitted
-      : Event<TextFieldEvents, void()> {};
+  struct Changed : Event<void(const TextEditingValue&)> {};
+  struct Submitted : Event<void()> {};
 };
 ```
 

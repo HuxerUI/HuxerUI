@@ -52,7 +52,7 @@ NS_SWIFT_NAME(PlatformPayload)
 
 NS_SWIFT_NAME(PlatformEventEmitter)
 @protocol HUXPlatformEventEmitter <NSObject>
-- (void)emit:(NSString*)event payload:(HUXPlatformPayload*)payload;
+- (nullable HUXPlatformPayload*)emit:(NSString*)event payload:(HUXPlatformPayload*)payload;
 @end
 
 NS_SWIFT_NAME(PlatformResult)

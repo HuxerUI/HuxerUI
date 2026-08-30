@@ -5,7 +5,7 @@
 
 using namespace huxerui;
 
-struct CounterChanged : Event<int> {};
+struct CounterChanged : Event<void(int)> {};
 
 [[huxerui::composable]]
 auto Counter(int value) {
