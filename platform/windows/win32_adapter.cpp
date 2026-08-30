@@ -209,6 +209,10 @@ Key TranslateKey(WPARAM virtual_key) {
     return Key::PageUp;
   case VK_NEXT:
     return Key::PageDown;
+  case VK_F10:
+    return Key::F10;
+  case VK_APPS:
+    return Key::ContextMenu;
   case 'A':
     return Key::A;
   case 'C':
@@ -224,6 +228,31 @@ Key TranslateKey(WPARAM virtual_key) {
   default:
     return Key::Unknown;
   }
+}
+
+PointerButton SemanticMouseButton(bool left) noexcept {
+  const bool primary = left != (GetSystemMetrics(SM_SWAPBUTTON) != 0);
+  return primary ? PointerButton::Primary : PointerButton::Secondary;
+}
+
+PointerButton MouseButtons(WPARAM state) noexcept {
+  PointerButton buttons = PointerButton::None;
+  if ((state & MK_LBUTTON) != 0) {
+    buttons |= SemanticMouseButton(true);
+  }
+  if ((state & MK_RBUTTON) != 0) {
+    buttons |= SemanticMouseButton(false);
+  }
+  if ((state & MK_MBUTTON) != 0) {
+    buttons |= PointerButton::Middle;
+  }
+  if ((state & MK_XBUTTON1) != 0) {
+    buttons |= PointerButton::Back;
+  }
+  if ((state & MK_XBUTTON2) != 0) {
+    buttons |= PointerButton::Forward;
+  }
+  return buttons;
 }
 
 KeyModifiers CurrentKeyModifiers() {
@@ -876,7 +905,8 @@ private:
     return point.x >= maximize_left && point.x < maximize_right ? HTMAXBUTTON : HTCLIENT;
   }
 
-  void SendPointer(PointerEventType type, Point position, std::uint32_t click_count = 1) {
+  void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
+                   PointerButton pressed_buttons = PointerButton::None, std::uint32_t click_count = 1) {
     last_pointer_position_ = position;
     runtime_->HandlePointerEvent({
         type,
@@ -884,6 +914,8 @@ private:
         position,
         PointerDeviceKind::Mouse,
         click_count,
+        changed_button,
+        pressed_buttons,
     });
   }
 
@@ -930,25 +962,82 @@ private:
       SetFocus(window_);
       SetCapture(source);
       pointer_down_ = true;
-      SendPointer(PointerEventType::Down, ClientPoint(source, l_param));
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(true),
+                  MouseButtons(w_param));
       return 0;
     case WM_LBUTTONDBLCLK:
       SetFocus(window_);
       SetCapture(source);
       pointer_down_ = true;
-      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), 2);
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(true),
+                  MouseButtons(w_param), 2);
       return 0;
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
+      SetFocus(window_);
+      SetCapture(source);
+      pointer_down_ = true;
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(false),
+                  MouseButtons(w_param), message == WM_RBUTTONDBLCLK ? 2U : 1U);
+      return 0;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONDBLCLK:
+      SetFocus(window_);
+      SetCapture(source);
+      pointer_down_ = true;
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), PointerButton::Middle,
+                  MouseButtons(w_param), message == WM_MBUTTONDBLCLK ? 2U : 1U);
+      return 0;
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONDBLCLK: {
+      SetFocus(window_);
+      SetCapture(source);
+      pointer_down_ = true;
+      const PointerButton button = GET_XBUTTON_WPARAM(w_param) == XBUTTON1 ? PointerButton::Back
+                                                                           : PointerButton::Forward;
+      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), button,
+                  MouseButtons(GET_KEYSTATE_WPARAM(w_param)), message == WM_XBUTTONDBLCLK ? 2U : 1U);
+      return 0;
+    }
     case WM_MOUSEMOVE:
       TrackMouse(MouseTrackingArea::Client, source);
-      SendPointer(PointerEventType::Move, ClientPoint(source, l_param));
+      SendPointer(PointerEventType::Move, ClientPoint(source, l_param), PointerButton::None, MouseButtons(w_param));
       return 0;
     case WM_LBUTTONUP:
-      SendPointer(PointerEventType::Up, ClientPoint(source, l_param));
-      pointer_down_ = false;
-      if (GetCapture() == source) {
+      SendPointer(PointerEventType::Up, ClientPoint(source, l_param), SemanticMouseButton(true),
+                  MouseButtons(w_param));
+      pointer_down_ = MouseButtons(w_param) != PointerButton::None;
+      if (!pointer_down_ && GetCapture() == source) {
         ReleaseCapture();
       }
       return 0;
+    case WM_RBUTTONUP:
+      SendPointer(PointerEventType::Up, ClientPoint(source, l_param), SemanticMouseButton(false),
+                  MouseButtons(w_param));
+      pointer_down_ = MouseButtons(w_param) != PointerButton::None;
+      if (!pointer_down_ && GetCapture() == source) {
+        ReleaseCapture();
+      }
+      return 0;
+    case WM_MBUTTONUP:
+      SendPointer(PointerEventType::Up, ClientPoint(source, l_param), PointerButton::Middle,
+                  MouseButtons(w_param));
+      pointer_down_ = MouseButtons(w_param) != PointerButton::None;
+      if (!pointer_down_ && GetCapture() == source) {
+        ReleaseCapture();
+      }
+      return 0;
+    case WM_XBUTTONUP: {
+      const PointerButton button = GET_XBUTTON_WPARAM(w_param) == XBUTTON1 ? PointerButton::Back
+                                                                           : PointerButton::Forward;
+      const PointerButton buttons = MouseButtons(GET_KEYSTATE_WPARAM(w_param));
+      SendPointer(PointerEventType::Up, ClientPoint(source, l_param), button, buttons);
+      pointer_down_ = buttons != PointerButton::None;
+      if (!pointer_down_ && GetCapture() == source) {
+        ReleaseCapture();
+      }
+      return TRUE;
+    }
     case WM_MOUSELEAVE:
       mouse_tracking_area_ = MouseTrackingArea::None;
       mouse_tracking_window_ = nullptr;

@@ -42,6 +42,16 @@ Retained animation updates mounted presentation state without recomposing applic
 Motion controllers, theme-owned transitions, and scene transitions use the same frame scheduling and reduced-motion policy.
 
 Scene transitions can customize entering and exiting presentation while keeping old and new scenes synchronized.
+Use `RunFromCurrentInteraction` inside a synchronous component event when a circular reveal should originate at the pointer position or keyboard/accessibility activation center:
+
+```cpp
+Button("Next").OnClick([transition, page] {
+  transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [page] { page += 1; });
+});
+```
+
+The implicit origin exists only for the duration of the interaction callback.
+Use `RunAt` with retained geometry for asynchronous work, and use `Anchor` plus `Run` when the reveal belongs to stable View geometry rather than the triggering interaction.
 When reduced motion is enabled, the runtime selects the documented reduced or immediate path rather than leaving each component to interpret the system setting independently.
 
 ## Tooltips

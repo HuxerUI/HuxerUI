@@ -9,6 +9,7 @@ State<bool> scene_transition_changed;
 State<bool> scene_transition_anchor_visible;
 State<bool> platform_scene_transition_changed;
 State<bool> synchronized_transition_selected;
+std::optional<SceneTransitionHandle> interaction_scene_transition;
 
 View SynchronizedTransitionApp() {
   auto selected = UseState(false);
@@ -25,12 +26,13 @@ View SceneTransitionApp() {
   auto changed = UseState(false);
   scene_transition_changed = changed;
   auto transition = UseSceneTransition();
+  interaction_scene_transition = transition;
   return Column {
     Button("Change")
         .OnClick([transition, changed] {
-          transition.Run(CircularRevealSceneTransition{}, [changed] { changed = true; });
+          transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [changed] { changed = true; });
         })
-        .With(transition.Anchor(), Frame{80.0F, 40.0F}),
+        .With(Frame{80.0F, 40.0F}),
     Text(changed ? "new" : "old"),
   };
 }
@@ -112,12 +114,29 @@ TEST_CASE("SceneTransitionPublishesFrozenAndLiveSceneComposition") {
   REQUIRE(transition.scene.root->id == std::numeric_limits<std::uint64_t>::max());
   REQUIRE(transition.scene.root->children.size() == 2);
   REQUIRE(transition.scene.root->children[1]->child_clips.size() == 1);
+  const auto* reveal =
+      std::get_if<PushPathClipCommand>(&transition.scene.root->children[1]->child_clips.front());
+  REQUIRE(reveal != nullptr);
+  REQUIRE(reveal->path.Bounds() == Rect{20.0F, 20.0F, 0.0F, 0.0F});
 
   platform.AdvanceTime(0.5);
   const RenderFrame& completed = runtime.BuildRenderFrame();
   REQUIRE(completed.damage.full);
   REQUIRE(completed.scene.root != nullptr);
   REQUIRE(completed.scene.root->id == live_root_identity);
+}
+
+TEST_CASE("SceneTransitionRequiresASynchronousInteractionForImplicitOrigin") {
+  TestPlatform platform;
+  Runtime runtime{SceneTransitionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildRenderFrame();
+
+  REQUIRE(interaction_scene_transition.has_value());
+  REQUIRE_THROWS_AS(
+      interaction_scene_transition->RunFromCurrentInteraction(CircularRevealSceneTransition{}, [] {}),
+      std::logic_error
+  );
 }
 
 TEST_CASE("SceneTransitionCancelsWhenViewportChanges") {

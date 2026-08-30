@@ -43,7 +43,7 @@ constexpr std::array web_key_order{
     Key::Unknown,   Key::Tab,        Key::Enter,   Key::Space,     Key::Escape, Key::Backspace, Key::Delete,
     Key::ArrowLeft, Key::ArrowRight, Key::ArrowUp, Key::ArrowDown, Key::Home,   Key::End,       Key::PageUp,
     Key::PageDown,  Key::A,          Key::C,       Key::V,         Key::X,      Key::Y,         Key::Z,
-    Key::Shift,     Key::Control,    Key::Alt,     Key::Meta,
+    Key::Shift,     Key::Control,    Key::Alt,     Key::Meta,      Key::F10,    Key::ContextMenu,
 };
 
 static_assert(
@@ -214,6 +214,7 @@ EM_JS(
           imageFailures : new Map(),
           listeners : [],
           activePointers : new Map(),
+          mousePointerId : 1,
           suppressedKeyUps : new Set(),
           resizeObserver : null,
           resolutionQuery : null,
@@ -282,16 +283,22 @@ EM_JS(
         const platformViewWins = (token, point) =>
             Module._huxerui_web_platform_view_hit(session_id, token, point[0], point[1]);
         const pointerKind = (value) => value === "touch" ? 1 : value === "pen" ? 2 : 0;
+        const changedButton = (button) => [1, 4, 2, 8, 16][button] || 0;
         const sendPointer = (event, type) => {
           const point = position(event);
           Module._huxerui_web_pointer(
-              session_id,
-              type,
-              event.pointerId,
-              point[0],
-              point[1],
-              pointerKind(event.pointerType),
-              Math.max(1, event.detail || 1)
+              session_id, type, event.pointerId, point[0], point[1], pointerKind(event.pointerType),
+              Math.max(1, event.detail || 1),
+              type === 0 || type === 1 ? changedButton(event.button) : 0,
+              type === 3 ? 0 : event.buttons & 31
+          );
+        };
+        const sendMouseButton = (event, type) => {
+          const point = position(event);
+          Module._huxerui_web_pointer(
+              session_id, type, session.mousePointerId, point[0], point[1], 0,
+              Math.max(1, event.detail || 1), changedButton(event.button),
+              event.buttons & 31
           );
         };
 
@@ -308,6 +315,9 @@ EM_JS(
                         }
                         if (!session.activeTextInput) {
                           root.focus({preventScroll : true});
+                        }
+                        if (event.pointerType === "mouse") {
+                          session.mousePointerId = event.pointerId;
                         }
                         session.activePointers.set(event.pointerId, true);
                         try {
@@ -393,6 +403,34 @@ EM_JS(
         };
         listen(window, "pointerup", releaseCapturedPointer);
         listen(window, "pointercancel", releaseCapturedPointer);
+        listen(root, "contextmenu", (event) => {
+          const point = position(event);
+          const token = platformToken(event.target);
+          if ((token && platformViewWins(token, point)) ||
+              !Module._huxerui_web_context_menu_handler(session_id, point[0], point[1])) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+        }, true);
+        listen(root, "mousedown", (event) => {
+          const changed = changedButton(event.button);
+          if (session.activePointers.get(session.mousePointerId) !== true ||
+              ((event.buttons & 31) & ~changed) === 0) {
+            return;
+          }
+          sendMouseButton(event, 0);
+          event.preventDefault();
+          event.stopPropagation();
+        }, true);
+        listen(root, "mouseup", (event) => {
+          if (session.activePointers.get(session.mousePointerId) !== true || (event.buttons & 31) === 0) {
+            return;
+          }
+          sendMouseButton(event, 1);
+          event.preventDefault();
+          event.stopPropagation();
+        }, true);
         listen(
             root,
             "lostpointercapture",
@@ -486,6 +524,10 @@ EM_JS(
             return 23;
           case "Meta":
             return 24;
+          case "F10":
+            return 25;
+          case "ContextMenu":
+            return 26;
           default:
             return 0;
           }
@@ -554,7 +596,9 @@ EM_JS(
                               "Home",
                               "End",
                               "PageUp",
-                              "PageDown"
+                              "PageDown",
+                              "F10",
+                              "ContextMenu"
                             ]
                                 .includes(event.key)) {
                           event.preventDefault();
@@ -909,6 +953,10 @@ public:
     return platform_views_ && platform_views_->HitTest(token, point);
   }
 
+  bool HasContextMenuHandler(Point point) const {
+    return runtime_ != nullptr && runtime_->HasContextMenuHandler(point);
+  }
+
   void SynchronizePlatformViewFocus(std::uint32_t token, bool focus_visible) {
     if (platform_views_) {
       platform_views_->SynchronizeFocus(token, focus_visible);
@@ -1099,6 +1147,14 @@ huxerui_web_platform_view_hit(std::uintptr_t session_id, std::uint32_t token, fl
   return hit;
 }
 
+EMSCRIPTEN_KEEPALIVE bool huxerui_web_context_menu_handler(std::uintptr_t session_id, float x, float y) {
+  bool handled = false;
+  huxerui::detail::DispatchWebSession(session_id, "context menu hit test", [&](auto& platform) {
+    handled = platform.HasContextMenuHandler({x, y});
+  });
+  return handled;
+}
+
 EMSCRIPTEN_KEEPALIVE void
 huxerui_web_platform_view_focus(std::uintptr_t session_id, std::uint32_t token, bool focus_visible) {
   huxerui::detail::DispatchWebSession(session_id, "PlatformView focus", [=](auto& platform) {
@@ -1124,13 +1180,8 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_image_ready(std::uintptr_t session_id) {
 }
 
 EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
-    std::uintptr_t session_id,
-    int type,
-    std::int32_t pointer_id,
-    float x,
-    float y,
-    int device_kind,
-    std::uint32_t click_count
+    std::uintptr_t session_id, int type, std::int32_t pointer_id, float x, float y, int device_kind,
+    std::uint32_t click_count, std::uint32_t changed_button, std::uint32_t pressed_buttons
 ) {
   huxerui::detail::DispatchWebSession(session_id, "pointer input", [=](auto& platform) {
     platform.HandlePointer({
@@ -1139,6 +1190,8 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
         {x, y},
         static_cast<huxerui::PointerDeviceKind>(std::clamp(device_kind, 0, 2)),
         click_count,
+        static_cast<huxerui::PointerButton>(changed_button & 31U),
+        static_cast<huxerui::PointerButton>(pressed_buttons & 31U),
     });
   });
 }
@@ -1163,7 +1216,7 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_key(
   huxerui::detail::DispatchWebSession(session_id, "key input", [&](auto& platform) {
     platform.HandleKey({
         static_cast<huxerui::KeyEventType>(std::clamp(type, 0, 1)),
-        static_cast<huxerui::Key>(std::clamp(key, 0, 20)),
+        static_cast<huxerui::Key>(std::clamp(key, 0, static_cast<int>(huxerui::Key::ContextMenu))),
         text == nullptr ? std::string{} : std::string{text},
         {shift, control, alt, meta},
         repeat,

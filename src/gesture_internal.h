@@ -163,6 +163,10 @@ struct PointerInterceptRecognitionState {
   std::uint64_t node_identity = 0;
 };
 
+struct ContextMenuRecognitionState {
+  std::uint64_t node_identity = 0;
+};
+
 struct TextSelectionRecognitionState {
   std::uint64_t node_identity = 0;
   Point tap_position;
@@ -179,6 +183,7 @@ using PointerRecognitionState = std::variant<
     TapRecognitionState,
     ScrollRecognitionState,
     PointerInterceptRecognitionState,
+    ContextMenuRecognitionState,
     ExtensionRecognitionState,
     GestureRecognitionState,
     DragSourceRecognitionState,
@@ -241,9 +246,12 @@ struct PointerSession {
   Point down_position;
   Point last_position;
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  PointerButton initiating_button = PointerButton::None;
+  PointerButton pressed_buttons = PointerButton::None;
   std::array<ScrollVelocitySample, 8> scroll_velocity_samples;
   std::size_t scroll_velocity_sample_count = 0;
   bool focus_pending = false;
+  bool chorded = false;
   // Deactivation preserves the host pointer sequence without retaining any mounted output target.
   bool quarantined = false;
 };

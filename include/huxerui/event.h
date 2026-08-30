@@ -74,9 +74,9 @@ struct InteractionEvent {
 
 /// Identifies the lifecycle phase of a PointerEvent.
 enum class PointerEventType {
-  /// Begins a pointer sequence.
+  /// Presses one pointer button and begins a sequence when no button is active.
   Down,
-  /// Completes a pointer sequence successfully.
+  /// Releases one pointer button and completes a sequence when no button remains active.
   Up,
   /// Reports movement or hover without ending the sequence.
   Move,
@@ -94,6 +94,46 @@ enum class PointerDeviceKind {
   Pen,
 };
 
+/// Identifies portable pointer buttons and pressed-button combinations.
+///
+/// Primary and Secondary follow the operating system's semantic button roles rather than fixed physical positions.
+enum class PointerButton : std::uint32_t {
+  /// No button.
+  None = 0,
+  /// The primary selection and activation button.
+  Primary = 1U << 0U,
+  /// The secondary context-menu button.
+  Secondary = 1U << 1U,
+  /// The middle or wheel button.
+  Middle = 1U << 2U,
+  /// The backward navigation button.
+  Back = 1U << 3U,
+  /// The forward navigation button.
+  Forward = 1U << 4U,
+};
+
+/// Combines pointer-button flags.
+[[nodiscard]] constexpr PointerButton operator|(PointerButton left, PointerButton right) noexcept {
+  return static_cast<PointerButton>(static_cast<std::uint32_t>(left) | static_cast<std::uint32_t>(right));
+}
+
+/// Intersects pointer-button flags.
+[[nodiscard]] constexpr PointerButton operator&(PointerButton left, PointerButton right) noexcept {
+  return static_cast<PointerButton>(static_cast<std::uint32_t>(left) & static_cast<std::uint32_t>(right));
+}
+
+/// Adds pointer-button flags to an existing mask.
+constexpr PointerButton& operator|=(PointerButton& left, PointerButton right) noexcept {
+  left = left | right;
+  return left;
+}
+
+/// Retains pointer-button flags present in both masks.
+constexpr PointerButton& operator&=(PointerButton& left, PointerButton right) noexcept {
+  left = left & right;
+  return left;
+}
+
 /// Carries normalized pointer input in logical coordinates.
 ///
 /// The receiving API defines the coordinate space. Runtime input and ViewEvents use the window coordinate space, while
@@ -109,6 +149,20 @@ struct PointerEvent {
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
   /// Platform-reported consecutive click count, starting at one when unavailable.
   std::uint32_t click_count = 1;
+  /// Button added by Down or removed by Up, or None for Move and Cancel.
+  PointerButton changed_button = PointerButton::None;
+  /// Complete pressed-button state after this event.
+  PointerButton pressed_buttons = PointerButton::None;
+
+  /// Returns whether every button in a nonempty flag mask is currently pressed.
+  /// @code
+  /// if (event.IsButtonPressed(PointerButton::Primary | PointerButton::Secondary)) {
+  ///   BeginChord();
+  /// }
+  /// @endcode
+  [[nodiscard]] constexpr bool IsButtonPressed(PointerButton button) const noexcept {
+    return button != PointerButton::None && (pressed_buttons & button) == button;
+  }
 
   /// Compares every pointer-event field.
   bool operator==(const PointerEvent&) const = default;
@@ -179,6 +233,10 @@ enum class Key {
   Alt,
   /// The platform Meta, Command, or Windows key.
   Meta,
+  /// The F10 function key.
+  F10,
+  /// The dedicated Context Menu key.
+  ContextMenu,
 };
 
 /// Identifies whether a key is being pressed or released.
@@ -271,6 +329,13 @@ struct ViewEvents {
   struct PointerUp : Event<void(const PointerEvent&)> {};
   /// Reports that another recognizer or the platform canceled the raw pointer stream.
   struct PointerCancel : Event<void(const PointerEvent&)> {};
+  /// Requests a context menu at a window-local logical position.
+  /// @code
+  /// content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+  ///   menu.ShowAt(position, {MenuItem("Refresh", Refresh)});
+  /// });
+  /// @endcode
+  struct ContextMenuRequested : Event<void(Point)> {};
   /// Observes a pointer sequence and returns true when this View takes exclusive ownership.
   /// False keeps the recognition pending. After acceptance, later return values are ignored and the handler continues
   /// receiving Move, Up, or Cancel until the sequence ends.

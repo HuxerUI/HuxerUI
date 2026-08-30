@@ -184,6 +184,10 @@ Key TranslateKey(jint key_code) {
     return Key::PageUp;
   case AKEYCODE_PAGE_DOWN:
     return Key::PageDown;
+  case AKEYCODE_F10:
+    return Key::F10;
+  case AKEYCODE_MENU:
+    return Key::ContextMenu;
   case AKEYCODE_A:
     return Key::A;
   case AKEYCODE_C:
@@ -1169,12 +1173,16 @@ public:
     return std::nullopt;
   }
 
-  void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y) {
+  void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y,
+               PointerButton changed_button, PointerButton pressed_buttons) {
     runtime_.HandlePointerEvent({
         type,
         pointer_id,
         {x, y},
         device_kind,
+        1,
+        changed_button,
+        pressed_buttons,
     });
   }
 
@@ -1630,17 +1638,16 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeMoveFoc
 }
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(
-    JNIEnv* environment, jclass, jlong handle, jint type, jint device_kind, jlong pointer_id, jfloat x, jfloat y
+    JNIEnv* environment, jclass, jlong handle, jint type, jint device_kind, jlong pointer_id, jfloat x, jfloat y,
+    jint changed_button, jint pressed_buttons
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->Pointer(
-          static_cast<huxerui::PointerEventType>(type),
-          static_cast<huxerui::PointerDeviceKind>(device_kind),
-          pointer_id,
-          x,
-          y
-      );
+      const auto event_type = static_cast<huxerui::PointerEventType>(type);
+      const auto device = static_cast<huxerui::PointerDeviceKind>(device_kind);
+      const auto changed = static_cast<huxerui::PointerButton>(changed_button & 31);
+      const auto pressed = static_cast<huxerui::PointerButton>(pressed_buttons & 31);
+      session->Pointer(event_type, device, pointer_id, x, y, changed, pressed);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

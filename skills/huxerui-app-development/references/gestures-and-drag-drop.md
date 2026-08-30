@@ -17,14 +17,31 @@ Do not combine raw pointer handling with a built-in recognizer to observe or own
 
 ## Pointer events
 
-`PointerEvent` reports `type`, `pointer_id`, window-logical `position`, `device_kind`, and consecutive `click_count`.
+`PointerEvent` reports `type`, `pointer_id`, window-logical `position`, `device_kind`, consecutive `click_count`, `changed_button`, and `pressed_buttons`.
 Its `PointerEventType` is `Down`, `Move`, `Up`, or `Cancel`, and `PointerDeviceKind` distinguishes Mouse, Touch, and Pen.
-The current event does not expose mouse-button identity or a built-in secondary-click trigger; do not infer either from `click_count`.
+`PointerButton` is a flag enum with `Primary`, `Secondary`, `Middle`, `Back`, and `Forward`; Primary and Secondary follow system roles rather than fixed physical left and right positions.
+`changed_button` is the button added by Down or removed by Up, while `pressed_buttons` is the complete post-event mask.
+Use `event.IsButtonPressed(mask)` for raw chord logic instead of inferring a button from `click_count`.
 
 `ViewEvents::PointerDown`, `PointerMove`, `PointerUp`, and `PointerCancel` are void notifications for the deepest eligible raw target.
 They do not capture, bubble, return a handled result, or acquire pointer ownership.
 When another recognizer accepts after raw Down, the raw target receives one PointerCancel and no later event from that sequence.
 Use `.OnClick(...)` for semantic activation, a built-in gesture for standard recognition, and `PointerIntercept` only for custom synchronous ownership decisions driven by pointer updates.
+Built-in Click, selection, gestures, scrolling, and retained component interaction recognize only an unchorded Primary sequence.
+Middle, Back, and Forward remain available to raw pointer handlers and PointerIntercept without implicit semantic behavior.
+
+Bind `ViewEvents::ContextMenuRequested` for context actions:
+
+```cpp
+return content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+  menu.ShowAt(position, {MenuItem("Refresh", Refresh)});
+});
+```
+
+An unchorded Secondary tap invokes the deepest enabled binding after raw PointerUp and supplies its window-logical release position.
+The Context Menu key and Shift+F10 use the nearest enabled binding on the focused route and supply that View's center.
+Binding presence claims the request, so do not add a handled result, manually search parents, or rebuild secondary-tap recognition from PointerDown.
+PlatformViews retain native context menus, and Web preserves a pointer-initiated browser menu outside HuxerUI content that declares this binding.
 
 ## Pointer interception
 
@@ -45,6 +62,7 @@ This is one recognizer in the existing PointerSession, not event capture, bubbli
 Use `PointerIntercept` for decisions driven by incoming pointer updates.
 Use `LongPressGesture` or a delayed `DragGesture` when recognition must advance at a deadline while the pointer is stationary; a synchronous event return cannot acquire ownership when no event is being dispatched.
 PlatformView ownership is still decided at initial Down and never transfers across the native boundary afterward.
+An accepted PointerIntercept may continue to own multi-button chords; adding a button cancels pending or accepted standard recognition.
 
 ## Multi-pointer transform
 

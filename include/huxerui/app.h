@@ -195,6 +195,7 @@ enum class GestureDecision;
 class GestureRecognizer;
 struct NodeExtensionHandle;
 struct ActiveDropTarget;
+struct ContextMenuRecognitionState;
 struct DragDropSession;
 struct DragSourceRecognitionState;
 struct MountedNode;
@@ -232,6 +233,9 @@ public:
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
   const FrameCommit& BuildFrame();
   void HandlePointerEvent(const PointerEvent& event);
+  /// Returns whether the window-local position has a HuxerUI context-menu handler.
+  /// Platform hosts use this to preserve their native context menu outside claimed HuxerUI content.
+  [[nodiscard]] bool HasContextMenuHandler(Point position) const;
   void HandleScrollEvent(const ScrollEvent& event);
   void HandleKeyEvent(const KeyEvent& event);
   // Platform hosts submit subsequent activation on the Runtime's UI thread; startup input is a constructor argument.
@@ -288,6 +292,8 @@ private:
   void EndPointerInteraction(detail::PointerSession& session, InteractionEvent::Type type,
                              const PointerEvent& event);
   void CancelPointerSession(detail::PointerSession& session, const PointerEvent& event);
+  [[nodiscard]] bool BeginPointerChord(detail::PointerSession& session, const PointerEvent& event);
+  void DispatchChordPointerEvent(detail::PointerSession& session, const PointerEvent& event);
   void QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event);
   void CancelPointerTarget(detail::PointerSession& session, const PointerEvent& event);
   void CancelPointerRecognition(detail::PointerRecognition& recognition, const PointerEvent& event);
@@ -305,6 +311,7 @@ private:
   void ResolvePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event,
                                  std::optional<double> timestamp = std::nullopt);
   void PublishTap(detail::TapRecognitionState& tap, const PointerEvent& event);
+  void PublishContextMenu(detail::ContextMenuRecognitionState& context_menu, const PointerEvent& event);
   void AdvancePointerRecognition(double timestamp);
   [[nodiscard]] detail::GestureDecision
   UpdatePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event);
@@ -318,6 +325,7 @@ private:
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void UpdateHoveredExtensions(Point position);
   void RefreshInteractionTree();
+  bool DispatchKeyboardContextMenu();
   bool HandleFocusedTextInputKey(const KeyEvent& event);
   detail::MountedNode* ActiveFocusTrapRoot();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
@@ -356,6 +364,7 @@ private:
   void BeginSceneTransition(
       detail::SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion
   );
+  [[nodiscard]] std::optional<Point> CurrentInteractionOrigin() const noexcept;
   void InvalidateScope(std::uint64_t scope_id);
   void InvalidateLayout(detail::MountedNode& mounted);
   void QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope);

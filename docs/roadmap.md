@@ -18,7 +18,6 @@ Current behavior is documented in the user guides, while detailed constraints li
 ## Interaction and animation
 
 - Add ordinary View lifecycle transitions and overscroll effects without introducing per-component Runtime branches.
-- Add portable pointer-button identity and secondary-click context-menu interaction through the existing pointer path.
 - Expand paint primitives only when a production component or application requires them.
 
 ## Navigation and restoration

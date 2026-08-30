@@ -16,6 +16,8 @@ std::vector<std::string> gesture_events;
 std::vector<DragEvent> drag_events;
 std::vector<TransformEvent> transform_events;
 std::vector<PointerEvent> canceled_pointer_events;
+std::vector<PointerEvent> pointer_events;
+std::vector<Point> context_menu_positions;
 int gesture_clicks = 0;
 int pointer_cancels = 0;
 State<float> drag_minimum;
@@ -510,8 +512,14 @@ View PointerInterceptApp() {
           if (current_mode == 3 && event.type == PointerEventType::Down) {
             throw std::runtime_error("pointer intercept failed");
           }
-          return current_mode == 0 ? event.type == PointerEventType::Down
-                                   : current_mode == 1 && event.type == PointerEventType::Move;
+          if (current_mode == 0) {
+            return event.type == PointerEventType::Down;
+          }
+          if (current_mode == 1) {
+            return event.type == PointerEventType::Move;
+          }
+          return current_mode == 4 &&
+                 event.IsButtonPressed(PointerButton::Primary | PointerButton::Secondary);
         }
     );
   }
@@ -534,6 +542,31 @@ View NestedPointerInterceptApp() {
       });
 }
 
+View PointerButtonApp() {
+  return Column {
+    Button("target")
+        .With(huxerui::Frame{60.0F, 60.0F})
+        .On<ViewEvents::PointerDown>([](const PointerEvent& event) {
+          gesture_events.emplace_back("raw down");
+          pointer_events.push_back(event);
+        })
+        .On<ViewEvents::PointerUp>([](const PointerEvent& event) {
+          gesture_events.emplace_back("raw up");
+          pointer_events.push_back(event);
+        })
+        .On<ViewEvents::PointerCancel>([](const PointerEvent& event) {
+          gesture_events.emplace_back("raw cancel");
+          pointer_events.push_back(event);
+        })
+        .On<ViewEvents::ContextMenuRequested>([](Point position) {
+          gesture_events.emplace_back("child context");
+          context_menu_positions.push_back(position);
+        })
+        .OnClick([] { ++gesture_clicks; }),
+  }.With(huxerui::Frame{120.0F, 60.0F})
+      .On<ViewEvents::ContextMenuRequested>([](Point) { gesture_events.emplace_back("parent context"); });
+}
+
 class GesturePlatform final : public TestPlatform {
 public:
   GestureSettings GestureDefaults() const noexcept override {
@@ -548,11 +581,19 @@ void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, P
   runtime.HandlePointerEvent({type, pointer_id, position, device});
 }
 
+void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
+             PointerButton changed_button, PointerButton pressed_buttons) {
+  runtime.HandlePointerEvent({type, pointer_id, position, PointerDeviceKind::Mouse, 1, changed_button,
+                              pressed_buttons});
+}
+
 void ResetGestureEvents() {
   gesture_events.clear();
   drag_events.clear();
   transform_events.clear();
   canceled_pointer_events.clear();
+  pointer_events.clear();
+  context_menu_positions.clear();
   gesture_clicks = 0;
   pointer_cancels = 0;
   throw_on_transform_started = false;
@@ -564,6 +605,115 @@ void ResetGestureEvents() {
 }
 
 } // namespace
+
+TEST_CASE("PointerButton masks report changed and pressed buttons") {
+  const PointerButton chord = PointerButton::Primary | PointerButton::Secondary;
+  REQUIRE((chord & PointerButton::Primary) == PointerButton::Primary);
+  REQUIRE((chord & PointerButton::Middle) == PointerButton::None);
+
+  const PointerEvent event{
+      PointerEventType::Move,
+      1,
+      {10.0F, 20.0F},
+      PointerDeviceKind::Mouse,
+      1,
+      PointerButton::None,
+      chord,
+  };
+  REQUIRE(event.IsButtonPressed(PointerButton::Primary));
+  REQUIRE(event.IsButtonPressed(chord));
+  REQUIRE_FALSE(event.IsButtonPressed(PointerButton::Middle));
+  REQUIRE_FALSE(event.IsButtonPressed(PointerButton::None));
+}
+
+TEST_CASE("Secondary pointer requests the deepest context menu after raw Up") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerButtonApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HasContextMenuHandler({20.0F, 30.0F}));
+  Pointer(runtime, PointerEventType::Down, 50, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 50, {24.0F, 32.0F}, PointerButton::Secondary, PointerButton::None);
+
+  REQUIRE(gesture_events == std::vector<std::string>{"raw down", "raw up", "child context"});
+  REQUIRE(gesture_clicks == 0);
+  REQUIRE(context_menu_positions == std::vector<Point>{{24.0F, 32.0F}});
+  REQUIRE(pointer_events.size() == 2);
+  REQUIRE(pointer_events[0].changed_button == PointerButton::Secondary);
+  REQUIRE(pointer_events[0].IsButtonPressed(PointerButton::Secondary));
+  REQUIRE(pointer_events[1].changed_button == PointerButton::Secondary);
+  REQUIRE(pointer_events[1].pressed_buttons == PointerButton::None);
+}
+
+TEST_CASE("Middle button and mouse chords remain raw pointer input") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerButtonApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 51, {20.0F, 30.0F}, PointerButton::Middle,
+          PointerButton::Middle);
+  Pointer(runtime, PointerEventType::Up, 51, {20.0F, 30.0F}, PointerButton::Middle, PointerButton::None);
+  REQUIRE(gesture_events == std::vector<std::string>{"raw down", "raw up"});
+  REQUIRE(gesture_clicks == 0);
+  REQUIRE(context_menu_positions.empty());
+
+  ResetGestureEvents();
+  Pointer(runtime, PointerEventType::Down, 52, {20.0F, 30.0F}, PointerButton::Primary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Down, 52, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary | PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 52, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Up, 52, {20.0F, 30.0F}, PointerButton::Primary, PointerButton::None);
+
+  REQUIRE(gesture_events ==
+          std::vector<std::string>{"raw down", "raw down", "raw up", "raw up"});
+  REQUIRE(gesture_clicks == 0);
+  REQUIRE(context_menu_positions.empty());
+}
+
+TEST_CASE("Context menu candidate does not transfer to an ancestor") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerButtonApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 54, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 54, {90.0F, 30.0F}, PointerButton::Secondary, PointerButton::None);
+
+  REQUIRE(gesture_events == std::vector<std::string>{"raw down", "raw up"});
+  REQUIRE(context_menu_positions.empty());
+}
+
+TEST_CASE("Keyboard context menu uses the focused View center") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerButtonApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 53, {10.0F, 10.0F}, PointerButton::Primary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Up, 53, {10.0F, 10.0F}, PointerButton::Primary, PointerButton::None);
+  ResetGestureEvents();
+  runtime.HandleKeyEvent({KeyEventType::Down, Key::F10, {}, {.shift = true}});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"child context"});
+  REQUIRE(context_menu_positions == std::vector<Point>{{30.0F, 30.0F}});
+
+  ResetGestureEvents();
+  runtime.HandleKeyEvent({KeyEventType::Down, Key::ContextMenu});
+
+  REQUIRE(gesture_events == std::vector<std::string>{"child context"});
+  REQUIRE(context_menu_positions == std::vector<Point>{{30.0F, 30.0F}});
+}
 
 TEST_CASE("PointerIntercept can own Down before raw delivery and retained recognizers") {
   ResetGestureEvents();
@@ -578,6 +728,59 @@ TEST_CASE("PointerIntercept can own Down before raw delivery and retained recogn
 
   REQUIRE((gesture_events ==
            std::vector<std::string>{"intercept down", "intercept move", "intercept up"}));
+}
+
+TEST_CASE("An accepted PointerIntercept continues receiving mouse chords") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 55, {10.0F, 30.0F}, PointerButton::Primary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Down, 55, {10.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary | PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Move, 55, {20.0F, 30.0F}, PointerButton::None,
+          PointerButton::Primary | PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 55, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Up, 55, {20.0F, 30.0F}, PointerButton::Primary, PointerButton::None);
+
+  REQUIRE((gesture_events == std::vector<std::string>{
+                                 "intercept down",
+                                 "intercept down",
+                                 "intercept move",
+                                 "intercept up",
+                                 "intercept up",
+                             }));
+}
+
+TEST_CASE("A pending PointerIntercept can accept a mouse chord") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  Runtime runtime{PointerInterceptApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+  pointer_intercept_mode = 4;
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 56, {10.0F, 30.0F}, PointerButton::Primary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Down, 56, {10.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary | PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 56, {20.0F, 30.0F}, PointerButton::Secondary,
+          PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Up, 56, {20.0F, 30.0F}, PointerButton::Primary, PointerButton::None);
+
+  REQUIRE((gesture_events == std::vector<std::string>{
+                                 "intercept down",
+                                 "raw down",
+                                 "intercept down",
+                                 "raw cancel",
+                                 "intercept up",
+                                 "intercept up",
+                             }));
 }
 
 TEST_CASE("PointerIntercept can take a pending sequence and cancel its raw target once") {
@@ -843,6 +1046,8 @@ TEST_CASE("Transform atomically owns both pointers and reports incremental geome
   REQUIRE(canceled_pointer_events.front().pointer_id == 30);
   REQUIRE(canceled_pointer_events.front().position == Point{20.0F, 30.0F});
   REQUIRE(canceled_pointer_events.front().device_kind == PointerDeviceKind::Touch);
+  REQUIRE(canceled_pointer_events.front().changed_button == PointerButton::None);
+  REQUIRE(canceled_pointer_events.front().pressed_buttons == PointerButton::None);
   REQUIRE(transform_events.front().pointer_count == 2);
   REQUIRE(transform_events.front().centroid == Point{40.0F, 30.0F});
   REQUIRE(transform_events.front().pan == Point{});

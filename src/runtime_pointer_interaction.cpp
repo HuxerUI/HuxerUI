@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <iterator>
 #include <utility>
@@ -23,6 +24,35 @@ float PointerDelta(Point previous, Point current, Axis axis) {
 
 bool SupportsHover(PointerDeviceKind device_kind) {
   return device_kind == PointerDeviceKind::Mouse || device_kind == PointerDeviceKind::Pen;
+}
+
+PointerEvent NormalizePointerEvent(const PointerEvent& event) noexcept {
+  PointerEvent normalized = event;
+  if (normalized.type == PointerEventType::Cancel) {
+    normalized.changed_button = PointerButton::None;
+    normalized.pressed_buttons = PointerButton::None;
+    return normalized;
+  }
+  if ((normalized.type == PointerEventType::Down || normalized.type == PointerEventType::Up) &&
+      normalized.changed_button == PointerButton::None) {
+    normalized.changed_button = PointerButton::Primary;
+  }
+  if (normalized.type == PointerEventType::Down && normalized.pressed_buttons == PointerButton::None) {
+    normalized.pressed_buttons = normalized.changed_button;
+  }
+  return normalized;
+}
+
+PointerEvent CancellationEvent(const PointerEvent& event) noexcept {
+  PointerEvent cancellation = event;
+  cancellation.type = PointerEventType::Cancel;
+  cancellation.changed_button = PointerButton::None;
+  cancellation.pressed_buttons = PointerButton::None;
+  return cancellation;
+}
+
+bool HasMultipleButtons(PointerButton buttons) noexcept {
+  return std::popcount(static_cast<std::uint32_t>(buttons)) > 1;
 }
 
 void RecordScrollVelocitySample(PointerSession& session, Point position, double timestamp) {
@@ -217,6 +247,9 @@ std::optional<std::uint64_t> PointerRecognitionNodeIdentity(const PointerRecogni
   if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
     return tap->node_identity;
   }
+  if (const auto* context_menu = std::get_if<ContextMenuRecognitionState>(&recognition.state)) {
+    return context_menu->node_identity;
+  }
   if (const auto* extension = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
     return extension->extension.node_identity;
   }
@@ -352,8 +385,7 @@ void Runtime::CancelPointerSession(PointerSession& session, const PointerEvent& 
   session.focus_pending = false;
   session.pending_focus_identity.reset();
 
-  PointerEvent cancellation = event;
-  cancellation.type = PointerEventType::Cancel;
+  const PointerEvent cancellation = CancellationEvent(event);
   EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
   for (PointerRecognition& recognition : session.recognitions) {
     CancelPointerRecognition(recognition, cancellation);
@@ -380,6 +412,83 @@ void Runtime::CancelPointerSession(PointerSession& session, const PointerEvent& 
   }
 }
 
+bool Runtime::BeginPointerChord(PointerSession& session, const PointerEvent& event) {
+  session.chorded = true;
+  session.focus_pending = false;
+  session.pending_focus_identity.reset();
+  if (session.quarantined) {
+    return false;
+  }
+
+  const std::optional<std::size_t> owner = RecognitionOwnerIndex(session);
+  if (owner.has_value() && *owner < session.recognitions.size() &&
+      std::holds_alternative<PointerInterceptRecognitionState>(session.recognitions[*owner].state)) {
+    return true;
+  }
+  const PointerEvent cancellation = CancellationEvent(event);
+  if (owner.has_value()) {
+    CancelPointerSession(session, cancellation);
+    session.quarantined = true;
+    return false;
+  }
+
+  EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
+  for (PointerRecognition& recognition : session.recognitions) {
+    if (!std::holds_alternative<PointerInterceptRecognitionState>(recognition.state)) {
+      CancelPointerRecognition(recognition, cancellation);
+    }
+  }
+  return true;
+}
+
+void Runtime::DispatchChordPointerEvent(PointerSession& session, const PointerEvent& event) {
+  const std::optional<std::size_t> owner = RecognitionOwnerIndex(session);
+  if (owner.has_value()) {
+    if (*owner < session.recognitions.size() &&
+        std::holds_alternative<PointerInterceptRecognitionState>(session.recognitions[*owner].state)) {
+      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
+    }
+    return;
+  }
+
+  for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
+    if (!session.recognitions[index].started ||
+        !std::holds_alternative<PointerInterceptRecognitionState>(session.recognitions[index].state)) {
+      continue;
+    }
+    if (UpdatePointerRecognition(session, index, event) == GestureDecision::Accept) {
+      ResolvePointerRecognition(session, index, event);
+      break;
+    }
+  }
+  if (session.owner.has_value() || !session.raw_target_started || !session.raw_target_identity.has_value()) {
+    return;
+  }
+
+  detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.raw_target_identity);
+  if (target == nullptr) {
+    if (event.type != PointerEventType::Up) {
+      CancelPointerTarget(session, event);
+    }
+    return;
+  }
+  switch (event.type) {
+  case PointerEventType::Down:
+    EmitEvent<ViewEvents::PointerDown>(target->event_bindings, event);
+    break;
+  case PointerEventType::Move:
+    EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
+    break;
+  case PointerEventType::Up:
+    if (target->interaction.enabled) {
+      EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
+    }
+    break;
+  case PointerEventType::Cancel:
+    break;
+  }
+}
+
 void Runtime::QuarantinePointerSession(std::int64_t pointer_id, const PointerEvent& event) {
   const auto found = state_->pointer_sessions_.find(pointer_id);
   if (found == state_->pointer_sessions_.end() || found->second.quarantined) {
@@ -397,8 +506,7 @@ void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& e
   session.focus_pending = false;
   session.pending_focus_identity.reset();
 
-  PointerEvent cancellation = event;
-  cancellation.type = PointerEventType::Cancel;
+  const PointerEvent cancellation = CancellationEvent(event);
   EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
   if (raw_target.has_value()) {
     if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target)) {
@@ -725,12 +833,13 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
     return;
   }
   recognition.started = false;
+  const PointerEvent cancellation = CancellationEvent(event);
   const double timestamp = state_->platform_->Now();
   const auto cancel_gesture = [&](GestureRecognitionState& retained) {
     NodeExtension* extension = FindExtension(*state_->mounted_root_, retained.extension);
     detail::MountedNode* node = FindNode(*state_->mounted_root_, retained.extension.node_identity);
     if (extension && node && retained.recognizer) {
-      retained.recognizer->Canceled(*node, *extension, GestureInput(retained, event, timestamp));
+      retained.recognizer->Canceled(*node, *extension, GestureInput(retained, cancellation, timestamp));
     }
   };
   if (auto* extension_state = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
@@ -738,7 +847,7 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
     detail::MountedNode* node =
         FindNode(*state_->mounted_root_, extension_state->extension.node_identity);
     if (extension && node) {
-      extension->OnPointer(*node, LocalPointerEvent(*node, event));
+      extension->OnPointer(*node, LocalPointerEvent(*node, cancellation));
       RequestFrame();
     }
   } else if (auto* scroll_state = std::get_if<ScrollRecognitionState>(&recognition.state)) {
@@ -758,15 +867,15 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
     NodeExtension* extension = FindExtension(*state_->mounted_root_, source_state->extension);
     detail::MountedNode* node = FindNode(*state_->mounted_root_, source_state->extension.node_identity);
     if (extension && node && source_state->recognizer) {
-      source_state->recognizer->Canceled(*node, *extension, GestureInput(*source_state, event, timestamp));
+      source_state->recognizer->Canceled(*node, *extension, GestureInput(*source_state, cancellation, timestamp));
     }
   } else if (auto* intercept_state = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
     if (detail::MountedNode* node = FindNode(*state_->mounted_root_, intercept_state->node_identity);
         node && node->interaction.enabled && HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings)) {
-      static_cast<void>(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, event));
+      static_cast<void>(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, cancellation));
     }
   } else if (std::holds_alternative<TextSelectionRecognitionState>(recognition.state)) {
-    TrackTouchTextSelectionGesture(event);
+    TrackTouchTextSelectionGesture(cancellation);
   }
 }
 
@@ -892,7 +1001,8 @@ void Runtime::ResolvePointerRecognition(PointerSession& session, std::size_t ind
 
   session.owner = index;
   session.recognitions[index].started = true;
-  const bool tap = std::holds_alternative<TapRecognitionState>(session.recognitions[index].state);
+  const bool tap = std::holds_alternative<TapRecognitionState>(session.recognitions[index].state) ||
+                   std::holds_alternative<ContextMenuRecognitionState>(session.recognitions[index].state);
   const bool immediate_extension = event.type == PointerEventType::Down &&
                                    std::holds_alternative<ExtensionRecognitionState>(session.recognitions[index].state);
   if (!tap) {
@@ -904,8 +1014,7 @@ void Runtime::ResolvePointerRecognition(PointerSession& session, std::size_t ind
       CancelPointerTarget(session, event);
     }
   }
-  PointerEvent cancellation = event;
-  cancellation.type = PointerEventType::Cancel;
+  const PointerEvent cancellation = CancellationEvent(event);
   for (std::size_t other_index = 0; other_index < session.recognitions.size(); ++other_index) {
     if (other_index != index) {
       CancelPointerRecognition(session.recognitions[other_index], cancellation);
@@ -959,6 +1068,21 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
       return GestureDecision::Accept;
     }
     return event.type == PointerEventType::Up ? GestureDecision::Reject : GestureDecision::Continue;
+  }
+  if (auto* context_menu = std::get_if<ContextMenuRecognitionState>(&recognition.state)) {
+    recognition.started = true;
+    if (event.type != PointerEventType::Up) {
+      return event.type == PointerEventType::Cancel ? GestureDecision::Reject : GestureDecision::Continue;
+    }
+    std::vector<detail::MountedNode*> route;
+    if (!BuildPointerRoute(*state_->mounted_root_, event.position, route)) {
+      return GestureDecision::Reject;
+    }
+    const auto target = std::ranges::find(route, context_menu->node_identity, &detail::MountedNode::identity);
+    return target != route.end() && (*target)->interaction.enabled &&
+                   HasEventBinding<ViewEvents::ContextMenuRequested>((*target)->event_bindings)
+               ? GestureDecision::Accept
+               : GestureDecision::Reject;
   }
   if (auto* extension_state = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
     NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_state->extension);
@@ -1073,8 +1197,7 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
       const bool valid = remains_on_route && node->interaction.enabled && extension &&
                          local_position.has_value() && extension->HitTest(**owner, *local_position);
       if (!valid && extension && node && consumer.recognizer) {
-        PointerEvent cancellation = event;
-        cancellation.type = PointerEventType::Cancel;
+        const PointerEvent cancellation = CancellationEvent(event);
         consumer.recognizer->Canceled(*node, *extension,
                                       GestureInput(consumer, cancellation, state_->platform_->Now()));
       }
@@ -1101,6 +1224,13 @@ void Runtime::PublishTap(TapRecognitionState& tap, const PointerEvent& event) {
         target && target->interaction.enabled) {
       ActivateNode(*target);
     }
+  }
+}
+
+void Runtime::PublishContextMenu(ContextMenuRecognitionState& context_menu, const PointerEvent& event) {
+  if (detail::MountedNode* target = FindNode(*state_->mounted_root_, context_menu.node_identity);
+      target && target->interaction.enabled) {
+    static_cast<void>(EmitEvent<ViewEvents::ContextMenuRequested>(target->event_bindings, event.position));
   }
 }
 
@@ -1179,8 +1309,7 @@ void Runtime::AdvancePointerRecognition(double timestamp) {
     if (decision == GestureDecision::Accept) {
       ResolvePointerRecognition(session->second, due->recognition_index, event, timestamp);
     } else if (decision == GestureDecision::Reject) {
-      event.type = PointerEventType::Cancel;
-      CancelPointerRecognition(recognition, event);
+      CancelPointerRecognition(recognition, CancellationEvent(event));
     } else if (recognizer->Deadline().has_value() && *recognizer->Deadline() <= timestamp) {
       throw std::logic_error("HuxerUI gesture recognizer did not consume its elapsed deadline");
     }
@@ -1216,14 +1345,40 @@ std::vector<detail::MountedNode*> Runtime::ApplyDragScroll(const PointerSession&
   return changed;
 }
 
-void Runtime::HandlePointerEvent(const PointerEvent& event) {
+bool Runtime::HasContextMenuHandler(Point position) const {
+  if (!state_->mounted_root_) {
+    return false;
+  }
+  std::vector<detail::MountedNode*> route;
+  if (!BuildPointerRoute(*state_->mounted_root_, position, route)) {
+    return false;
+  }
+  return std::ranges::any_of(route.rbegin(), route.rend(), [](const detail::MountedNode* node) {
+    return node->interaction.enabled && HasEventBinding<ViewEvents::ContextMenuRequested>(node->event_bindings);
+  });
+}
+
+void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
   if (!state_->mounted_root_) {
     return;
   }
 
+  const PointerEvent event = NormalizePointerEvent(input_event);
+  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, event.position, true);
   try {
     const auto active = state_->pointer_sessions_.find(event.pointer_id);
     if (active != state_->pointer_sessions_.end() && TextSelectionOverlayOwnsPointer(active->second)) {
+      PointerSession& session = active->second;
+      session.pressed_buttons = event.pressed_buttons;
+      const bool chorded = event.type == PointerEventType::Down &&
+                           (event.changed_button != session.initiating_button ||
+                            HasMultipleButtons(event.pressed_buttons));
+      if (chorded) {
+        CancelPointerSession(session, event);
+        session.quarantined = true;
+        RefreshTextInputSession();
+        return;
+      }
       HandleTextSelectionOverlayPointer(event);
       if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
         state_->pointer_sessions_.erase(active);
@@ -1231,12 +1386,17 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
       RefreshTextInputSession();
       return;
     }
-    if (active == state_->pointer_sessions_.end() && HandleTextSelectionOverlayPointer(event)) {
+    const bool primary_down = event.type != PointerEventType::Down ||
+                              (event.changed_button == PointerButton::Primary &&
+                               !HasMultipleButtons(event.pressed_buttons));
+    if (active == state_->pointer_sessions_.end() && primary_down && HandleTextSelectionOverlayPointer(event)) {
       if (event.type == PointerEventType::Down) {
         PointerSession session;
         session.down_position = event.position;
         session.last_position = event.position;
         session.device_kind = event.device_kind;
+        session.initiating_button = event.changed_button;
+        session.pressed_buttons = event.pressed_buttons;
         session.owner = TextSelectionOverlayOwner{};
         state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
       }
@@ -1260,8 +1420,7 @@ void Runtime::HandlePointerEvent(const PointerEvent& event) {
     }
     RefreshTextInputSession();
   } catch (...) {
-    PointerEvent cancellation = event;
-    cancellation.type = PointerEventType::Cancel;
+    const PointerEvent cancellation = CancellationEvent(event);
     try {
       QuarantinePointerSession(event.pointer_id, cancellation);
     } catch (...) {
@@ -1306,21 +1465,39 @@ bool Runtime::CommitPendingTouchFocus(PointerSession& session, Point position) {
 void Runtime::HandlePointerDown(const PointerEvent& event) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured != state_->pointer_sessions_.end()) {
-    PointerEvent cancel = event;
-    cancel.type = PointerEventType::Cancel;
-    if (!captured->second.quarantined) {
-      CancelPointerSession(captured->second, cancel);
+    PointerSession& active = captured->second;
+    const PointerButton changed_button = event.changed_button;
+    const bool additional_button = changed_button != PointerButton::None &&
+                                   (active.pressed_buttons & changed_button) == PointerButton::None;
+    if (!additional_button) {
+      if (!active.quarantined) {
+        CancelPointerSession(active, event);
+      }
+      state_->pointer_sessions_.erase(captured);
+    } else {
+      active.pressed_buttons = event.pressed_buttons;
+      active.last_position = event.position;
+      if (!BeginPointerChord(active, event)) {
+        return;
+      }
+      DispatchChordPointerEvent(active, event);
+      return;
     }
-    state_->pointer_sessions_.erase(captured);
   }
 
   std::vector<detail::MountedNode*> route;
   if (!BuildPointerRoute(*state_->mounted_root_, event.position, route)) {
     return;
   }
-  for (detail::MountedNode* node : route) {
-    if (IsScrollContainer(*node)) {
-      node->scroll_state->motion.Stop();
+  const PointerButton initiating_button = event.changed_button;
+  const PointerButton pressed_buttons = event.pressed_buttons;
+  const bool primary = initiating_button == PointerButton::Primary && !HasMultipleButtons(pressed_buttons);
+  const bool secondary = initiating_button == PointerButton::Secondary && !HasMultipleButtons(pressed_buttons);
+  if (primary) {
+    for (detail::MountedNode* node : route) {
+      if (IsScrollContainer(*node)) {
+        node->scroll_state->motion.Stop();
+      }
     }
   }
 
@@ -1332,16 +1509,21 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   session.down_position = event.position;
   session.last_position = event.position;
   session.device_kind = event.device_kind;
+  session.initiating_button = initiating_button;
+  session.pressed_buttons = pressed_buttons;
+  session.chorded = HasMultipleButtons(pressed_buttons);
   const double timestamp = state_->platform_->Now();
   if (event.device_kind == PointerDeviceKind::Touch) {
     RecordScrollVelocitySample(session, event.position, timestamp);
   }
-  const std::optional<std::uint64_t> focus_target = ResolvePointerFocusTarget(route);
-  if (event.device_kind == PointerDeviceKind::Touch) {
-    session.focus_pending = true;
-    session.pending_focus_identity = focus_target;
-  } else {
-    SetFocusedNode(focus_target, false);
+  const std::optional<std::uint64_t> focus_target = primary ? ResolvePointerFocusTarget(route) : std::nullopt;
+  if (primary) {
+    if (event.device_kind == PointerDeviceKind::Touch) {
+      session.focus_pending = true;
+      session.pending_focus_identity = focus_target;
+    } else {
+      SetFocusedNode(focus_target, false);
+    }
   }
 
   std::optional<std::uint64_t> raw_target;
@@ -1352,6 +1534,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   }
   session.raw_target_identity = raw_target;
 
+  bool context_menu_candidate = false;
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
     TapRecognitionState tap{
         .node_identity = (*node)->identity,
@@ -1364,6 +1547,16 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       session.recognitions.push_back(PointerRecognition{
           PointerInterceptRecognitionState{.node_identity = (*node)->identity},
       });
+    }
+    if (secondary && !context_menu_candidate && (*node)->interaction.enabled &&
+        HasEventBinding<ViewEvents::ContextMenuRequested>((*node)->event_bindings)) {
+      session.recognitions.push_back(PointerRecognition{
+          ContextMenuRecognitionState{.node_identity = (*node)->identity},
+      });
+      context_menu_candidate = true;
+    }
+    if (!primary) {
+      continue;
     }
     for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
       if (!(*node)->interaction.enabled) {
@@ -1437,7 +1630,9 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
 
   auto [inserted, unused] = state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
   static_cast<void>(unused);
-  HandleTextSelectionClick(event);
+  if (primary) {
+    HandleTextSelectionClick(event);
+  }
   inserted = state_->pointer_sessions_.find(event.pointer_id);
   if (inserted == state_->pointer_sessions_.end() || inserted->second.quarantined ||
       inserted->second.owner.has_value()) {
@@ -1475,7 +1670,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
         interaction_identity = PointerRecognitionNodeIdentity(*recognition);
       }
     }
-    if (interaction_identity.has_value()) {
+    if (primary && interaction_identity.has_value()) {
       BeginPointerInteraction(inserted->second, *interaction_identity, event);
     }
     if (inserted->second.raw_target_identity.has_value()) {
@@ -1510,7 +1705,17 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
   }
 
   PointerSession& session = captured->second;
+  session.pressed_buttons = event.pressed_buttons;
+  if (!session.chorded && HasMultipleButtons(session.pressed_buttons) && !BeginPointerChord(session, event)) {
+    return;
+  }
   if (session.quarantined) {
+    return;
+  }
+
+  if (session.chorded) {
+    DispatchChordPointerEvent(session, event);
+    session.last_position = event.position;
     return;
   }
 
@@ -1627,15 +1832,39 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     }
     return;
   }
+  PointerSession& session = captured->second;
+  session.pressed_buttons = event.pressed_buttons;
+  const bool final_release = session.pressed_buttons == PointerButton::None;
+  if (!session.chorded &&
+      (session.pressed_buttons != PointerButton::None || event.changed_button != session.initiating_button) &&
+      !BeginPointerChord(session, event)) {
+    if (final_release) {
+      state_->pointer_sessions_.erase(captured);
+    }
+    return;
+  }
   if (captured->second.quarantined) {
-    state_->pointer_sessions_.erase(captured);
-    if (SupportsHover(event.device_kind)) {
+    if (final_release) {
+      state_->pointer_sessions_.erase(captured);
+    }
+    if (final_release && SupportsHover(event.device_kind)) {
       UpdateHoveredExtensions(event.position);
     }
     return;
   }
 
-  PointerSession& session = captured->second;
+  if (session.chorded) {
+    DispatchChordPointerEvent(session, event);
+    session.last_position = event.position;
+    if (final_release) {
+      state_->pointer_sessions_.erase(captured);
+      if (SupportsHover(event.device_kind)) {
+        UpdateHoveredExtensions(event.position);
+      }
+    }
+    return;
+  }
+
   std::optional<std::uint64_t> momentum_identity;
   std::optional<float> scroll_velocity;
   if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
@@ -1664,6 +1893,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
       PointerRecognition& recognition = session.recognitions[index];
       if (!recognition.started || std::holds_alternative<TapRecognitionState>(recognition.state) ||
+          std::holds_alternative<ContextMenuRecognitionState>(recognition.state) ||
           std::holds_alternative<TextSelectionRecognitionState>(recognition.state) ||
           std::holds_alternative<ScrollRecognitionState>(recognition.state)) {
         continue;
@@ -1698,24 +1928,30 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       }
       for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
         if (!session.recognitions[index].started ||
-            !std::holds_alternative<TapRecognitionState>(session.recognitions[index].state)) {
+            (!std::holds_alternative<TapRecognitionState>(session.recognitions[index].state) &&
+             !std::holds_alternative<ContextMenuRecognitionState>(session.recognitions[index].state))) {
           continue;
         }
         const GestureDecision decision = UpdatePointerRecognition(session, index, event);
         if (decision == GestureDecision::Accept) {
           ResolvePointerRecognition(session, index, event);
-          PublishTap(std::get<TapRecognitionState>(session.recognitions[index].state), event);
+          if (auto* tap = std::get_if<TapRecognitionState>(&session.recognitions[index].state)) {
+            PublishTap(*tap, event);
+          } else {
+            PublishContextMenu(std::get<ContextMenuRecognitionState>(session.recognitions[index].state), event);
+          }
           break;
         } else {
-          PointerEvent cancellation = event;
-          cancellation.type = PointerEventType::Cancel;
+          const PointerEvent cancellation = CancellationEvent(event);
           CancelPointerRecognition(session.recognitions[index], cancellation);
         }
       }
     }
   }
 
-  state_->pointer_sessions_.erase(captured);
+  if (final_release) {
+    state_->pointer_sessions_.erase(captured);
+  }
   if (scroll_velocity.has_value() && momentum_identity.has_value()) {
     if (detail::MountedNode* node = FindNode(*state_->mounted_root_, *momentum_identity);
         node && node->scroll_state->motion.StartMomentum(*node, *scroll_velocity)) {
@@ -1723,7 +1959,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       RequestFrame();
     }
   }
-  if (SupportsHover(event.device_kind)) {
+  if (final_release && SupportsHover(event.device_kind)) {
     UpdateHoveredExtensions(event.position);
   }
 }

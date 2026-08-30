@@ -106,6 +106,10 @@ Key TranslateKey(guint key_value) noexcept {
   case GDK_KEY_Page_Down:
   case GDK_KEY_KP_Page_Down:
     return Key::PageDown;
+  case GDK_KEY_F10:
+    return Key::F10;
+  case GDK_KEY_Menu:
+    return Key::ContextMenu;
   case GDK_KEY_a:
   case GDK_KEY_A:
     return Key::A;
@@ -127,6 +131,27 @@ Key TranslateKey(guint key_value) noexcept {
   default:
     return Key::Unknown;
   }
+}
+
+PointerButton TranslatePointerButton(guint button) noexcept {
+  switch (button) {
+  case GDK_BUTTON_PRIMARY:
+    return PointerButton::Primary;
+  case GDK_BUTTON_SECONDARY:
+    return PointerButton::Secondary;
+  case GDK_BUTTON_MIDDLE:
+    return PointerButton::Middle;
+  case 8:
+    return PointerButton::Back;
+  case 9:
+    return PointerButton::Forward;
+  default:
+    return PointerButton::None;
+  }
+}
+
+PointerButton RemovePointerButton(PointerButton buttons, PointerButton button) noexcept {
+  return static_cast<PointerButton>(static_cast<std::uint32_t>(buttons) & ~static_cast<std::uint32_t>(button));
 }
 
 KeyModifiers TranslateModifiers(GdkModifierType state) noexcept {
@@ -526,12 +551,16 @@ private:
     g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowMaximizedChanged), this);
     g_signal_connect(drawing_area_, "notify::scale-factor", G_CALLBACK(ScaleChanged), this);
 
-    GtkGesture* click = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
-    g_signal_connect(click, "pressed", G_CALLBACK(PointerPressed), this);
-    g_signal_connect(click, "released", G_CALLBACK(PointerReleased), this);
-    g_signal_connect(click, "cancel", G_CALLBACK(PointerCanceled), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), GTK_EVENT_CONTROLLER(click));
+    GtkEventController* pointer = gtk_event_controller_legacy_new();
+    g_signal_connect(pointer, "event", G_CALLBACK(PointerEventReceived), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), pointer);
+
+    GtkGesture* touch = gtk_gesture_click_new();
+    gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(touch), TRUE);
+    g_signal_connect(touch, "pressed", G_CALLBACK(TouchPressed), this);
+    g_signal_connect(touch, "released", G_CALLBACK(TouchReleased), this);
+    g_signal_connect(touch, "cancel", G_CALLBACK(PointerCanceled), this);
+    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), GTK_EVENT_CONTROLLER(touch));
 
     GtkEventController* motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "enter", G_CALLBACK(PointerEntered), this);
@@ -673,20 +702,18 @@ private:
     );
   }
 
-  bool BeginWindowOperation(GtkGestureClick* gesture, Point point) {
-    if (!custom_chrome_ || window_ == nullptr || runtime_ == nullptr) {
+  bool BeginWindowOperation(GdkEvent* event, guint button, Point point) {
+    if (!custom_chrome_ || window_ == nullptr || runtime_ == nullptr || event == nullptr) {
       return false;
     }
     GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
     if (surface == nullptr || !GDK_IS_TOPLEVEL(surface)) {
       return false;
     }
-    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
-    GdkDevice* device = gtk_event_controller_get_current_event_device(GTK_EVENT_CONTROLLER(gesture));
-    if (event == nullptr || device == nullptr) {
+    GdkDevice* device = gdk_event_get_device(event);
+    if (device == nullptr) {
       return false;
     }
-    const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
     const guint32 time = gdk_event_get_time(event);
     const Size viewport{
         static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
@@ -704,20 +731,49 @@ private:
     return false;
   }
 
-  void SendPointer(PointerEventType type, Point position, std::uint32_t clicks = 1) {
+  std::uint32_t RecordClick(PointerButton button, Point position, guint32 time) {
+    gint maximum_time = 400;
+    gint maximum_distance = 5;
+    if (drawing_area_ != nullptr) {
+      g_object_get(gtk_widget_get_settings(GTK_WIDGET(drawing_area_)), "gtk-double-click-time", &maximum_time,
+                   "gtk-double-click-distance", &maximum_distance, nullptr);
+    }
+    const guint32 elapsed = time - last_click_time_;
+    const auto allowed_time = static_cast<guint32>(std::max(0, maximum_time));
+    const auto allowed_distance = static_cast<float>(std::max(0, maximum_distance));
+    const bool same_position = std::abs(position.x - last_click_position_.x) <= allowed_distance &&
+                               std::abs(position.y - last_click_position_.y) <= allowed_distance;
+    const bool consecutive = button == last_click_button_ && elapsed <= allowed_time && same_position;
+    click_count_ = consecutive && click_count_ < std::numeric_limits<std::uint32_t>::max() ? click_count_ + 1U : 1U;
+    last_click_button_ = button;
+    last_click_position_ = position;
+    last_click_time_ = time;
+    return click_count_;
+  }
+
+  void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
+                   PointerButton pressed_buttons = PointerButton::None, std::uint32_t clicks = 1) {
     if (runtime_ == nullptr) {
       return;
     }
     last_pointer_position_ = position;
-    runtime_->HandlePointerEvent({type, 0, position, PointerDeviceKind::Mouse, clicks});
+    runtime_->HandlePointerEvent({
+        type,
+        0,
+        position,
+        PointerDeviceKind::Mouse,
+        clicks,
+        changed_button,
+        pressed_buttons,
+    });
   }
 
   void CancelPointer() {
     suppress_pointer_release_ = false;
-    if (!pointer_down_) {
+    if (pressed_buttons_ == PointerButton::None) {
       return;
     }
-    pointer_down_ = false;
+    pressed_buttons_ = PointerButton::None;
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
   }
 
@@ -862,29 +918,79 @@ private:
     }
   }
 
-  static void PointerPressed(GtkGestureClick* gesture, int presses, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    self.suppress_pointer_release_ = false;
-    const Point point{static_cast<float>(x), static_cast<float>(y)};
-    if (self.BeginWindowOperation(gesture, point)) {
-      self.suppress_pointer_release_ = true;
+  void PressPointer(GdkEvent* event, guint platform_button, Point position, std::uint32_t click_count) {
+    suppress_pointer_release_ = false;
+    const PointerButton button = TranslatePointerButton(platform_button);
+    if (button == PointerButton::None) {
       return;
     }
-    self.pointer_down_ = true;
-    self.SendPointer(PointerEventType::Down, point, static_cast<std::uint32_t>(std::max(1, presses)));
+    if (button == PointerButton::Primary && BeginWindowOperation(event, platform_button, position)) {
+      suppress_pointer_release_ = true;
+      return;
+    }
+    pressed_buttons_ |= button;
+    SendPointer(PointerEventType::Down, position, button, pressed_buttons_, click_count);
   }
 
-  static void PointerReleased(GtkGestureClick*, int, double x, double y, gpointer data) {
+  void ReleasePointer(guint platform_button, Point position) {
+    if (suppress_pointer_release_) {
+      suppress_pointer_release_ = false;
+      return;
+    }
+    if (pressed_buttons_ == PointerButton::None) {
+      return;
+    }
+    const PointerButton button = TranslatePointerButton(platform_button);
+    pressed_buttons_ = RemovePointerButton(pressed_buttons_, button);
+    SendPointer(PointerEventType::Up, position, button, pressed_buttons_);
+  }
+
+  static gboolean PointerEventReceived(GtkEventControllerLegacy*, GdkEvent* event, gpointer data) {
+    const GdkEventType type = gdk_event_get_event_type(event);
+    if ((type != GDK_BUTTON_PRESS && type != GDK_BUTTON_RELEASE) ||
+        gdk_event_get_pointer_emulated(event)) {
+      return FALSE;
+    }
+    double x = 0.0;
+    double y = 0.0;
+    if (!gdk_event_get_position(event, &x, &y)) {
+      return FALSE;
+    }
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.suppress_pointer_release_) {
-      self.suppress_pointer_release_ = false;
-      return;
+    if (self.window_ != nullptr) {
+      double offset_x = 0.0;
+      double offset_y = 0.0;
+      gtk_native_get_surface_transform(GTK_NATIVE(self.window_), &offset_x, &offset_y);
+      x += offset_x;
+      y += offset_y;
     }
-    if (!self.pointer_down_) {
-      return;
+    const Point position{static_cast<float>(x), static_cast<float>(y)};
+    const guint platform_button = gdk_button_event_get_button(event);
+    const PointerButton button = TranslatePointerButton(platform_button);
+    if (button == PointerButton::None) {
+      return FALSE;
     }
-    self.pointer_down_ = false;
-    self.SendPointer(PointerEventType::Up, {static_cast<float>(x), static_cast<float>(y)});
+    if (type == GDK_BUTTON_PRESS) {
+      const std::uint32_t click_count = self.RecordClick(button, position, gdk_event_get_time(event));
+      self.PressPointer(event, platform_button, position, click_count);
+    } else {
+      self.ReleasePointer(platform_button, position);
+    }
+    return FALSE;
+  }
+
+  static void TouchPressed(GtkGestureClick* gesture, int presses, double x, double y, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
+    const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    const Point position{static_cast<float>(x), static_cast<float>(y)};
+    self.PressPointer(event, button, position, static_cast<std::uint32_t>(std::max(1, presses)));
+  }
+
+  static void TouchReleased(GtkGestureClick* gesture, int, double x, double y, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    self.ReleasePointer(button, {static_cast<float>(x), static_cast<float>(y)});
   }
 
   static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
@@ -892,20 +998,20 @@ private:
   }
 
   static void PointerEntered(GtkEventControllerMotion*, double x, double y, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
-        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
-    );
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
+                     self.pressed_buttons_);
   }
 
   static void PointerMoved(GtkEventControllerMotion*, double x, double y, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->SendPointer(
-        PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}
-    );
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
+                     self.pressed_buttons_);
   }
 
   static void PointerLeft(GtkEventControllerMotion*, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (!self.pointer_down_) {
+    if (self.pressed_buttons_ == PointerButton::None) {
       self.SendPointer(PointerEventType::Cancel, self.last_pointer_position_);
     }
   }
@@ -973,7 +1079,11 @@ private:
   bool performing_close_ = false;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
-  bool pointer_down_ = false;
+  PointerButton pressed_buttons_ = PointerButton::None;
+  PointerButton last_click_button_ = PointerButton::None;
+  Point last_click_position_;
+  guint32 last_click_time_ = 0;
+  std::uint32_t click_count_ = 0;
   bool suppress_pointer_release_ = false;
   bool clipboard_read_active_ = false;
   Point last_pointer_position_;

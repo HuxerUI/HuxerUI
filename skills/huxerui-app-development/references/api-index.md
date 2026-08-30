@@ -16,12 +16,12 @@ This is a navigation index, not a replacement for the active SDK's public header
 | Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `MountedNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
 | Virtual layout | `VirtualLayout`, `VirtualLayoutContext`, `VirtualList`, `VirtualGrid` | [layout-and-ui.md](layout-and-ui.md) | `virtual_layout.h`, `view.h` |
 | Scrolling | `ScrollView`, `ScrollController`, `UseScrollController`, `ScrollPhysics`, `ScrollBar` | [layout-and-ui.md](layout-and-ui.md) | `scroll.h`, `modifier.h`, `view.h` |
-| Gestures | `PointerEvent`, raw `ViewEvents` pointer keys, `PointerIntercept`, multi-tap, long press, drag, transform, typed drag-and-drop | [gestures-and-drag-drop.md](gestures-and-drag-drop.md) | `event.h`, `gesture.h`, `geometry.h` |
+| Gestures | `PointerButton`, `PointerEvent`, raw `ViewEvents` pointer keys, `ContextMenuRequested`, `PointerIntercept`, multi-tap, long press, drag, transform, typed drag-and-drop | [gestures-and-drag-drop.md](gestures-and-drag-drop.md) | `event.h`, `gesture.h`, `geometry.h` |
 | Modifiers | `ViewModifier`, built-in property modifiers, retained modifiers | [modifiers.md](modifiers.md) | `modifier.h` |
 | Retained behavior | `NodeExtension`, `FrameInfo`, invalidation and input hooks | [node-extensions.md](node-extensions.md) | `modifier.h` |
 | Theme | Flat/Material boundaries, `ThemeSpec`, typed style overrides, `ThemeDefinition` | [theme-animation-presentation.md](theme-animation-presentation.md) | `theme.h`, `navigation.h`, `presentation.h` |
 | Interaction visual | `Indication`, `IndicationLayer`, `RippleEffect`, `FocusRing` | [theme-animation-presentation.md](theme-animation-presentation.md) | `indication.h` |
-| Animation | specs, `MotionController`, animated modifiers, `SceneTransitionHandle` | [theme-animation-presentation.md](theme-animation-presentation.md) | `animation.h` |
+| Animation | specs, `MotionController`, animated modifiers, `SceneTransitionHandle`, `RunFromCurrentInteraction` | [theme-animation-presentation.md](theme-animation-presentation.md) | `animation.h` |
 | Presentation | toast, dialog, bottom sheet, popup, menu, tooltip | [theme-animation-presentation.md](theme-animation-presentation.md) | `presentation.h`, `layer.h` |
 | Text input | `TextEditingValue`, configuration, field limits, `ValidationResult`, `Validate` | [text-input-and-semantics.md](text-input-and-semantics.md) | `text_input.h`, `view.h`, `validation.h` |
 | Semantics | `Semantics`, `SemanticBuilder`, semantic roles/actions | [text-input-and-semantics.md](text-input-and-semantics.md) | `semantics.h` |

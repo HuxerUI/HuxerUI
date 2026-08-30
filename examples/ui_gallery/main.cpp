@@ -583,7 +583,8 @@ View FeedbackDemo() {
     ),
     GallerySection(
         "Anchored presentation",
-        "Popup and Menu remain attached to their final anchor geometry and dismiss through shared layer rules.",
+        "Popup and Menu support anchor geometry or explicit interaction points. Right-click Context menu or focus it "
+        "and press Shift+F10.",
         Flow {
           Button("Show popup").With(popup.Anchor()).OnClick([popup] { popup.Show(GalleryPopup); }),
           Button("Show menu").With(menu.Anchor()).OnClick([menu] {
@@ -599,6 +600,13 @@ View FeedbackDemo() {
                 ),
                 MenuSection{},
                 std::move(MenuItem("Delete", [] {})).Enabled(false),
+            });
+          }),
+          Button("Context menu").On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+            menu.ShowAt(position, {
+                MenuItem("Refresh", [] {}),
+                MenuItem("Inspect", [] {}),
+                MenuItem("Share", [] {}),
             });
           }),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center))
@@ -887,7 +895,9 @@ View MotionDemo() {
         "Scene transitions capture the committed frame around an application-owned state mutation.",
         Column {
           Button("Change scene").OnClick([alternate_scene, scene_transition] {
-            scene_transition.Run(FadeSceneTransition{}, [alternate_scene] { alternate_scene = !alternate_scene; });
+            scene_transition.RunFromCurrentInteraction(
+                CircularRevealSceneTransition{}, [alternate_scene] { alternate_scene = !alternate_scene; }
+            );
           }),
           Text(alternate_scene ? "Alternate scene" : "Initial scene", TextRole::Title).With(
               Frame{.height = 120.0F},
@@ -896,8 +906,7 @@ View MotionDemo() {
                   alternate_scene ? theme.colors.surface_container_highest : theme.colors.secondary_container
               ),
               CornerRadius(theme.shapes.extra_large),
-              Align(HorizontalAlignment::Center, VerticalAlignment::Center),
-              scene_transition.Anchor()
+              Align(HorizontalAlignment::Center, VerticalAlignment::Center)
           ),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
@@ -945,17 +954,16 @@ View GalleryToolsContent(
     Text("Appearance", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
     SegmentedButton({"Material", "Flat"}, theme_family)
         .OnChanged([family_transition, theme_family](std::size_t index) {
-          family_transition.Run(CircularRevealSceneTransition{}, [theme_family, index] { theme_family = index; });
-        })
-        .With(family_transition.Anchor()),
+          family_transition.RunFromCurrentInteraction(
+              CircularRevealSceneTransition{}, [theme_family, index] { theme_family = index; }
+          );
+        }),
     Switch(dark_mode ? "Dark mode" : "Light mode", dark_mode)
         .OnChanged([brightness_transition, dark_mode](bool enabled) {
-          brightness_transition.Run(
-              CircularRevealSceneTransition{},
-              [dark_mode, enabled] { dark_mode = enabled; }
+          brightness_transition.RunFromCurrentInteraction(
+              CircularRevealSceneTransition{}, [dark_mode, enabled] { dark_mode = enabled; }
           );
-        })
-        .With(brightness_transition.Anchor()),
+        }),
     Divider(),
     Text("Context", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
     ToolValue("Page", PageName(selected_page.Get())),

@@ -808,6 +808,12 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
   if (owner == nullptr || !owner->interaction.enabled) {
     return false;
   }
+  const Rect owner_bounds = owner->PresentationBounds();
+  const Point owner_origin{
+      owner_bounds.x + owner_bounds.width * 0.5F,
+      owner_bounds.y + owner_bounds.height * 0.5F,
+  };
+  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, owner_origin, false);
   std::optional<detail::SemanticExtensionRoute> extension_route;
   if (action.kind == SemanticActionKind::Custom) {
     const std::uint64_t action_id = std::get<std::uint64_t>(action.value);

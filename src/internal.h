@@ -947,6 +947,27 @@ struct SceneTransitionRequest {
   Point origin;
 };
 
+class InteractionOriginScope final {
+public:
+  InteractionOriginScope(std::optional<Point>& current, Point origin, bool replace_existing)
+      : current_(&current), previous_(current) {
+    if (replace_existing || !current.has_value()) {
+      current = origin;
+    }
+  }
+
+  ~InteractionOriginScope() {
+    *current_ = previous_;
+  }
+
+  InteractionOriginScope(const InteractionOriginScope&) = delete;
+  InteractionOriginScope& operator=(const InteractionOriginScope&) = delete;
+
+private:
+  std::optional<Point>* current_;
+  std::optional<Point> previous_;
+};
+
 struct SceneTransitionAnchorState {
   void Mount();
   void Unmount() noexcept;
@@ -962,6 +983,7 @@ public:
   explicit SceneTransitionService(Runtime& runtime) : runtime_(&runtime) {}
 
   [[nodiscard]] std::shared_ptr<SceneTransitionAnchorState> CreateAnchor() const;
+  [[nodiscard]] std::optional<Point> CurrentInteractionOrigin() const noexcept;
   void Run(SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion) const;
   void Disconnect() noexcept;
 
@@ -1332,6 +1354,7 @@ struct Runtime::State {
   SemanticNodeId semantic_root_identity_ = 0;
   std::uint64_t semantic_revision_ = 0;
   std::uint64_t next_press_id_ = 1;
+  std::optional<Point> current_interaction_origin_;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
   std::vector<detail::NodeExtensionHandle> hovered_extensions_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;

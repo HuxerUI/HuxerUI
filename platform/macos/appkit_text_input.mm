@@ -66,6 +66,10 @@ Key TranslateKey(unsigned short key_code) {
     return Key::PageUp;
   case 121:
     return Key::PageDown;
+  case 109:
+    return Key::F10;
+  case 110:
+    return Key::ContextMenu;
   case 0:
     return Key::A;
   case 8:

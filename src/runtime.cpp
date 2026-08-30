@@ -40,6 +40,20 @@ bool IsModifierKey(Key key) noexcept {
   return key == Key::Shift || key == Key::Control || key == Key::Alt || key == Key::Meta;
 }
 
+bool BuildNodeRoute(MountedNode& node, std::uint64_t identity, std::vector<MountedNode*>& route) {
+  route.push_back(&node);
+  if (node.identity == identity) {
+    return true;
+  }
+  for (const std::unique_ptr<MountedNode>& child : node.children) {
+    if (BuildNodeRoute(*child, identity, route)) {
+      return true;
+    }
+  }
+  route.pop_back();
+  return false;
+}
+
 void ValidateViewportBreakpoints(const ViewportBreakpoints& breakpoints) {
   if (!std::isfinite(breakpoints.medium_width) || breakpoints.medium_width <= 0.0F ||
       !std::isfinite(breakpoints.expanded_width) || breakpoints.expanded_width <= breakpoints.medium_width) {
@@ -2250,6 +2264,13 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
     return;
   }
 
+  const Rect focused_bounds = focused->PresentationBounds();
+  const Point focused_origin{
+      focused_bounds.x + focused_bounds.width * 0.5F,
+      focused_bounds.y + focused_bounds.height * 0.5F,
+  };
+  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, focused_origin, false);
+
   if (event.type == KeyEventType::Down && !IsModifierKey(event.key)) {
     SetFocusedNode(focused->identity, true);
   }
@@ -2278,6 +2299,15 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
       RefreshTextInputSession();
       return;
     }
+  }
+  const bool context_menu_key = event.key == Key::ContextMenu && !event.modifiers.shift &&
+                                !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta;
+  const bool shift_f10 = event.key == Key::F10 && event.modifiers.shift && !event.modifiers.control &&
+                         !event.modifiers.alt && !event.modifiers.meta;
+  if (event.type == KeyEventType::Down && !event.repeat && (context_menu_key || shift_f10) &&
+      DispatchKeyboardContextMenu()) {
+    RequestFrame();
+    return;
   }
   if (HandleFocusedTextInputKey(event)) {
     return;
@@ -2308,6 +2338,29 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
   }
   RequestFrame();
   RefreshTextInputSession();
+}
+
+bool Runtime::DispatchKeyboardContextMenu() {
+  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+    return false;
+  }
+  std::vector<detail::MountedNode*> route;
+  if (!BuildNodeRoute(*state_->mounted_root_, *state_->focused_node_identity_, route)) {
+    return false;
+  }
+  const Rect focused_bounds = route.back()->PresentationBounds();
+  const Point origin{
+      focused_bounds.x + focused_bounds.width * 0.5F,
+      focused_bounds.y + focused_bounds.height * 0.5F,
+  };
+  for (auto node = route.rbegin(); node != route.rend(); ++node) {
+    if (!(*node)->interaction.enabled ||
+        !detail::HasEventBinding<ViewEvents::ContextMenuRequested>((*node)->event_bindings)) {
+      continue;
+    }
+    return detail::EmitEvent<ViewEvents::ContextMenuRequested>((*node)->event_bindings, origin);
+  }
+  return false;
 }
 
 void Runtime::InvalidateRoot() {

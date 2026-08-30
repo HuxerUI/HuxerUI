@@ -132,6 +132,10 @@ std::shared_ptr<SceneTransitionAnchorState> SceneTransitionService::CreateAnchor
   return std::make_shared<SceneTransitionAnchorState>();
 }
 
+std::optional<Point> SceneTransitionService::CurrentInteractionOrigin() const noexcept {
+  return runtime_ == nullptr ? std::nullopt : runtime_->CurrentInteractionOrigin();
+}
+
 void SceneTransitionService::Run(
     SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion
 ) const {
@@ -215,6 +219,10 @@ void Runtime::BeginSceneTransition(
   RequestFrame();
 }
 
+std::optional<Point> Runtime::CurrentInteractionOrigin() const noexcept {
+  return state_->current_interaction_origin_;
+}
+
 SceneTransitionAnchor SceneTransitionHandle::Anchor() const {
   return SceneTransitionAnchor{anchor_};
 }
@@ -256,6 +264,16 @@ void SceneTransitionHandle::RunAt(
       std::move(mutation),
       reduced_motion_
   );
+}
+
+void SceneTransitionHandle::RunFromCurrentInteraction(
+    CircularRevealSceneTransition transition, std::function<void()> mutation
+) const {
+  const std::optional<Point> origin = service_->CurrentInteractionOrigin();
+  if (!origin.has_value()) {
+    throw std::logic_error("HuxerUI scene transition requires a current interaction origin");
+  }
+  RunAt(*origin, std::move(transition), std::move(mutation));
 }
 
 SceneTransitionHandle UseSceneTransition() {

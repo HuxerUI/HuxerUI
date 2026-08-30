@@ -47,6 +47,33 @@ double TimevalSeconds(const timeval& value) noexcept {
   return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1'000'000.0;
 }
 
+huxerui::PointerButton MacPointerButton(NSInteger button_number) noexcept {
+  switch (button_number) {
+  case 0:
+    return huxerui::PointerButton::Primary;
+  case 1:
+    return huxerui::PointerButton::Secondary;
+  case 2:
+    return huxerui::PointerButton::Middle;
+  case 3:
+    return huxerui::PointerButton::Back;
+  case 4:
+    return huxerui::PointerButton::Forward;
+  default:
+    return huxerui::PointerButton::None;
+  }
+}
+
+huxerui::PointerButton MacPressedButtons(NSUInteger mask) noexcept {
+  huxerui::PointerButton buttons = huxerui::PointerButton::None;
+  for (NSInteger index = 0; index < 5; ++index) {
+    if ((mask & (static_cast<NSUInteger>(1) << index)) != 0) {
+      buttons |= MacPointerButton(index);
+    }
+  }
+  return buttons;
+}
+
 } // namespace
 
 @interface HuxerUIWindow : NSWindow {
@@ -1005,6 +1032,12 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
       },
       huxerui::PointerDeviceKind::Mouse,
       type == huxerui::PointerEventType::Down ? static_cast<std::uint32_t>(event.clickCount) : 1U,
+      type == huxerui::PointerEventType::Down || type == huxerui::PointerEventType::Up
+          ? MacPointerButton(event.buttonNumber)
+          : huxerui::PointerButton::None,
+      type == huxerui::PointerEventType::Cancel
+          ? huxerui::PointerButton::None
+          : MacPressedButtons(NSEvent.pressedMouseButtons),
   });
 }
 
@@ -1019,6 +1052,10 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
           static_cast<float>(huxeruiPointerPosition.x),
           static_cast<float>(huxeruiPointerPosition.y),
       },
+      huxerui::PointerDeviceKind::Mouse,
+      1,
+      huxerui::PointerButton::None,
+      huxerui::PointerButton::None,
   });
 }
 
@@ -1051,6 +1088,32 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)mouseUp:(NSEvent*)event {
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Up];
+}
+
+- (void)rightMouseDown:(NSEvent*)event {
+  [self.window makeFirstResponder:self];
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Down];
+}
+
+- (void)rightMouseDragged:(NSEvent*)event {
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Move];
+}
+
+- (void)rightMouseUp:(NSEvent*)event {
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Up];
+}
+
+- (void)otherMouseDown:(NSEvent*)event {
+  [self.window makeFirstResponder:self];
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Down];
+}
+
+- (void)otherMouseDragged:(NSEvent*)event {
+  [self sendPointerEvent:event type:huxerui::PointerEventType::Move];
+}
+
+- (void)otherMouseUp:(NSEvent*)event {
   [self sendPointerEvent:event type:huxerui::PointerEventType::Up];
 }
 

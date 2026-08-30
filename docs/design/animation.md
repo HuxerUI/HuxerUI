@@ -111,7 +111,27 @@ return Button("Dark theme")
     });
 ```
 
-`RunAt()` accepts a window-local logical point for callers that already own pointer geometry. `Run()` with a circular reveal uses the final bounds of the retained anchor. Fade does not require an anchor.
+`RunAt()` accepts a window-local logical point for callers that already own pointer geometry.
+`Run()` with a circular reveal uses the final bounds of the retained anchor, while Fade does not require an anchor.
+
+`RunFromCurrentInteraction()` resolves a circular reveal from the Runtime's current synchronous interaction origin:
+
+```cpp
+return Button("Dark theme").OnClick([scene_transition, dark] {
+  scene_transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [dark] {
+    dark = !dark;
+  });
+});
+```
+
+Pointer delivery establishes its exact window-local position before raw, gesture, Click, Select, and Menu callbacks run.
+Nested semantic activation inherits that precise position rather than replacing it with a component center.
+Keyboard and accessibility activation establish the activated View's presentation-bounds center when no pointer origin exists.
+The origin is dynamic input-dispatch state: nested dispatch restores its outer value, exceptions restore it, and the value is cleared when synchronous delivery ends.
+
+Calling `RunFromCurrentInteraction()` outside that dynamic scope throws `std::logic_error` rather than consulting a global last-pointer value or silently falling back to an anchor.
+An asynchronous continuation or another caller that retains geometry uses `RunAt()` explicitly.
+Click, Select, and Menu callbacks therefore keep their semantic signatures and do not acquire optional Point arguments.
 
 The service follows this sequence:
 
@@ -150,6 +170,9 @@ Presentation components may continue to choose Theme-owned motion policy while e
 Ordinary View insertion and removal animation is deferred. It requires an explicit `AnimatedVisibility` or `AnimatedContent` ownership contract that can retain outgoing visual state without leaving a logically removed `MountedNode` interactive. Scene snapshots are not used as a hidden substitute for that lifecycle.
 
 Navigation keeps its own page-stack and Back semantics. It may share timing primitives and controllers, but a scene transition does not push pages, retain navigation scopes, or alter route history.
+
+SceneTransition does not depend on Button, Select, Menu, or the event system.
+Runtime owns the temporary interaction origin, while the transition service copies the resolved Point into the ordinary one-shot SceneTransitionRequest before executing the mutation.
 
 ## Validation
 

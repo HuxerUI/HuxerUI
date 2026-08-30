@@ -278,6 +278,10 @@ public:
     return runtime_.IsWindowDragRegion(position);
   }
 
+  bool HasContextMenuHandler(Point position) const {
+    return runtime_.HasContextMenuHandler(position);
+  }
+
   void UpdateResourceConfiguration(huxerui::ResourceConfiguration configuration) {
     runtime_.UpdateResourceConfiguration(std::move(configuration));
   }

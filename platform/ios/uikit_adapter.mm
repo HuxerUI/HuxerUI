@@ -130,6 +130,36 @@ huxerui::PointerDeviceKind PointerKind(UITouch* touch) {
   return huxerui::PointerDeviceKind::Touch;
 }
 
+huxerui::PointerButton UIKitPointerButton(NSInteger button_number) noexcept {
+  switch (button_number) {
+  case 1:
+    return huxerui::PointerButton::Primary;
+  case 2:
+    return huxerui::PointerButton::Secondary;
+  case 3:
+    return huxerui::PointerButton::Middle;
+  case 4:
+    return huxerui::PointerButton::Back;
+  case 5:
+    return huxerui::PointerButton::Forward;
+  default:
+    return huxerui::PointerButton::None;
+  }
+}
+
+huxerui::PointerButton UIKitPressedButtons(UIEvent* event) {
+  if (@available(iOS 13.4, *)) {
+    huxerui::PointerButton buttons = huxerui::PointerButton::None;
+    for (NSInteger button_number = 1; button_number <= 5; ++button_number) {
+      if ((event.buttonMask & UIEventButtonMaskForButtonNumber(button_number)) != 0) {
+        buttons |= UIKitPointerButton(button_number);
+      }
+    }
+    return buttons;
+  }
+  return huxerui::PointerButton::None;
+}
+
 std::int64_t PointerId(UITouch* touch) {
   return static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>((__bridge void*)touch));
 }
@@ -165,6 +195,10 @@ huxerui::Key TranslateKey(UIKeyboardHIDUsage code) API_AVAILABLE(ios(13.4)) {
     return huxerui::Key::PageUp;
   case UIKeyboardHIDUsageKeyboardPageDown:
     return huxerui::Key::PageDown;
+  case UIKeyboardHIDUsageKeyboardF10:
+    return huxerui::Key::F10;
+  case UIKeyboardHIDUsageKeyboardApplication:
+    return huxerui::Key::ContextMenu;
   case UIKeyboardHIDUsageKeyboardA:
     return huxerui::Key::A;
   case UIKeyboardHIDUsageKeyboardC:
@@ -744,6 +778,7 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
   self.isAccessibilityElement = NO;
   self.contentMode = UIViewContentModeRedraw;
   huxeruiTouches = [[NSMutableSet alloc] init];
+  huxeruiPointerButtons = [[NSMutableDictionary alloc] init];
   return self;
 }
 
@@ -824,48 +859,95 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
   }
 }
 
-- (void)sendTouches:(NSSet<UITouch*>*)touches type:(huxerui::PointerEventType)type {
+- (void)sendTouches:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event type:(huxerui::PointerEventType)type {
   if (huxeruiRuntime == nullptr) {
     return;
   }
   for (UITouch* touch in touches) {
     const CGPoint point = [touch locationInView:self];
-    huxeruiRuntime->HandlePointerEvent({
-        type,
-        PointerId(touch),
-        {static_cast<float>(point.x), static_cast<float>(point.y)},
-        PointerKind(touch),
-        static_cast<std::uint32_t>(std::max<NSUInteger>(1, touch.tapCount)),
-    });
+    const huxerui::PointerDeviceKind kind = PointerKind(touch);
+    const std::int64_t pointer_id = PointerId(touch);
+    const NSNumber* pointer_key = @(pointer_id);
+    const huxerui::PointerButton previous =
+        static_cast<huxerui::PointerButton>([huxeruiPointerButtons[pointer_key] unsignedIntValue]);
+    huxerui::PointerButton pressed = huxerui::PointerButton::None;
+    if (kind == huxerui::PointerDeviceKind::Mouse && event != nil) {
+      pressed = UIKitPressedButtons(event);
+    } else if (type == huxerui::PointerEventType::Down || type == huxerui::PointerEventType::Move) {
+      pressed = huxerui::PointerButton::Primary;
+    }
+    if (pressed == huxerui::PointerButton::None) {
+      [huxeruiPointerButtons removeObjectForKey:pointer_key];
+    } else {
+      huxeruiPointerButtons[pointer_key] = @(static_cast<std::uint32_t>(pressed));
+    }
+    const auto send = [&](huxerui::PointerEventType event_type, huxerui::PointerButton changed,
+                          huxerui::PointerButton buttons) {
+      huxeruiRuntime->HandlePointerEvent({
+          event_type,
+          pointer_id,
+          {static_cast<float>(point.x), static_cast<float>(point.y)},
+          kind,
+          static_cast<std::uint32_t>(std::max<NSUInteger>(1, touch.tapCount)),
+          changed,
+          buttons,
+      });
+    };
+    if (type == huxerui::PointerEventType::Cancel) {
+      send(type, huxerui::PointerButton::None, huxerui::PointerButton::None);
+      continue;
+    }
+
+    const std::uint32_t previous_mask = static_cast<std::uint32_t>(previous);
+    const std::uint32_t pressed_mask = static_cast<std::uint32_t>(pressed);
+    const auto emit_changes = [&](std::uint32_t changed_mask, huxerui::PointerEventType event_type,
+                                  bool adding, huxerui::PointerButton& current) {
+      for (NSInteger button_number = 1; button_number <= 5; ++button_number) {
+        const huxerui::PointerButton button = UIKitPointerButton(button_number);
+        const std::uint32_t button_mask = static_cast<std::uint32_t>(button);
+        if ((changed_mask & button_mask) == 0) {
+          continue;
+        }
+        current = adding
+                      ? current | button
+                      : static_cast<huxerui::PointerButton>(static_cast<std::uint32_t>(current) & ~button_mask);
+        send(event_type, button, current);
+      }
+    };
+    huxerui::PointerButton current = previous;
+    const std::uint32_t removed = previous_mask & ~pressed_mask;
+    const std::uint32_t added = pressed_mask & ~previous_mask;
+    emit_changes(removed, huxerui::PointerEventType::Up, false, current);
+    emit_changes(added, huxerui::PointerEventType::Down, true, current);
+    if (removed == 0 && added == 0 && type == huxerui::PointerEventType::Move) {
+      send(type, huxerui::PointerButton::None, pressed);
+    }
   }
 }
 
 - (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(event);
   [huxeruiTouches unionSet:touches];
-  [self sendTouches:touches type:huxerui::PointerEventType::Down];
+  [self sendTouches:touches withEvent:event type:huxerui::PointerEventType::Down];
 }
 
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(event);
-  [self sendTouches:touches type:huxerui::PointerEventType::Move];
+  [self sendTouches:touches withEvent:event type:huxerui::PointerEventType::Move];
 }
 
 - (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(event);
-  [self sendTouches:touches type:huxerui::PointerEventType::Up];
+  [self sendTouches:touches withEvent:event type:huxerui::PointerEventType::Up];
   [huxeruiTouches minusSet:touches];
 }
 
 - (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(event);
-  [self sendTouches:touches type:huxerui::PointerEventType::Cancel];
+  [self sendTouches:touches withEvent:event type:huxerui::PointerEventType::Cancel];
   [huxeruiTouches minusSet:touches];
 }
 
 - (void)cancelHuxerUITouches {
-  [self sendTouches:huxeruiTouches type:huxerui::PointerEventType::Cancel];
+  [self sendTouches:huxeruiTouches withEvent:nil type:huxerui::PointerEventType::Cancel];
   [huxeruiTouches removeAllObjects];
+  [huxeruiPointerButtons removeAllObjects];
 }
 
 - (void)pressesBegan:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event {

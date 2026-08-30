@@ -160,6 +160,12 @@ The application retains the authoritative accumulated transform.
 Gesture callbacks receive stable logical coordinates and explicit cancellation.
 Do not combine raw pointer handling with a built-in recognizer to recreate the same state machine.
 
+`PointerEvent::changed_button` identifies the button added by `Down` or removed by `Up`, while `pressed_buttons` is a `PointerButton` flag mask describing the complete post-event state.
+Use `IsButtonPressed()` for chords and raw custom interaction; primary-button input alone participates in built-in click, selection, drag, and scrolling behavior.
+Attach `ViewEvents::ContextMenuRequested` when a View owns context actions instead of reconstructing a right-click sequence from `PointerDown`.
+The event reports a window-local position for secondary-button input and the focused View center for the Context Menu key or Shift+F10.
+`ViewEvents::PointerIntercept` may take exclusive ownership of any button stream by returning `true`; pending built-in recognizers and the raw target receive `Cancel` when another participant wins.
+
 `DragSource` transfers an immutable application value to one exact typed `DropTarget` while preserving the ordinary DragGesture recognition rules.
 The application handles `DropEvents<T>::Dropped` to perform the authoritative data mutation.
 An optional preview is ordinary View content presented in a non-interactive Layer.

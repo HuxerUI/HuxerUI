@@ -69,6 +69,34 @@ Hover and `ScrollEvent` remain outside pointer recognition because neither repre
 Hover performs an ordinary stateless hit test only when no active pointer delivery owns the event.
 `ScrollEvent` is a platform-recognized wheel or trackpad delta and continues through the existing nested scroll-consumption path without competing with Drag.
 
+## Pointer buttons and chords
+
+`PointerButton` is a flag enum containing `Primary`, `Secondary`, `Middle`, `Back`, and `Forward`.
+Primary and Secondary describe system button roles rather than physical left and right positions, so platform adapters preserve the user's handedness setting.
+Touch contacts and a pen tip use Primary, while an available pen barrel button uses Secondary.
+
+Each `PointerEvent` carries two related facts:
+
+```cpp
+PointerButton changed_button = PointerButton::None;
+PointerButton pressed_buttons = PointerButton::None;
+```
+
+`changed_button` identifies the one button added or removed by Down or Up and is None for Move and Cancel.
+`pressed_buttons` is the complete button state after the event, so Down includes its changed button and Up excludes it.
+`IsButtonPressed()` tests whether every button in a nonempty flag mask is present.
+Button state belongs to one pointer identifier rather than forming a device-global registry.
+
+The first mouse-button Down creates a PointerSession and the final Up whose `pressed_buttons` is None completes it.
+Additional Down and Up events follow the committed route of that session.
+Raw pointer handlers and PointerIntercept receive the complete chord and can implement custom multi-button interaction.
+
+Built-in activation, gestures, scrolling, text selection, and retained component behavior accept only an unchorded Primary sequence.
+A second button cancels their pending or accepted interaction and quarantines standard recognition until every button is released.
+An accepted PointerIntercept continues receiving chord updates because it is the application-defined ownership path.
+Secondary context-menu recognition is likewise unchorded, while Middle, Back, and Forward have no built-in semantic action.
+PlatformView ownership remains native and receives the host's complete button behavior after it wins the initial Down.
+
 ## PointerSession and ownership resolution
 
 Runtime retains one `PointerSession` for each HuxerUI-owned pointer.
@@ -180,6 +208,33 @@ This does not introduce simultaneous owners.
 There is one tap owner and multiple outputs from that result.
 Long press, drag, transform, scrolling, cancellation, disable, or subtree deactivation rejects the tap recognizer and clears incomplete MultiTap accumulation.
 The retained MultiTap modifier contributes to that recognizer through the same private recognizer factory used by other gesture modifiers; it does not add a tap-consumer registry or second recognizer interface.
+
+## Context-menu requests
+
+An unchorded Secondary tap can resolve one semantic context-menu request through the existing PointerSession:
+
+```cpp
+return content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+  menu.ShowAt(position, {
+    MenuItem("Copy", Copy),
+    MenuItem("Delete", Delete),
+  });
+});
+```
+
+The event signature is `Event<void(Point)>`, and its position is window-local logical geometry from the successful Up.
+The deepest enabled binding on the committed route is the single candidate.
+Binding presence claims the request; a result-controlled parent search would reintroduce event bubbling through a semantic callback.
+Movement outside successful-tap rules, a chord, PointerIntercept acceptance, cancellation, disable, or removal rejects the request without transferring it to another node.
+Compatible recomposition retains the candidate identity and uses its current binding.
+
+The Context Menu key and Shift+F10 invoke the same event for the nearest enabled binding on the focused route.
+Keyboard invocation uses the focused View's presentation-bounds center.
+Runtime does not convert touch LongPress into this event because LongPressGesture already owns application-defined touch policy.
+
+`MenuHandle::ShowAt()` remains the only application menu-placement path.
+There is no ContextMenu controller, separate menu model, event capture or bubbling phase, or `OnContextMenu()` convenience member.
+PlatformViews retain their native context-menu behavior, and Web suppresses a pointer-initiated browser menu only for a request claimed by HuxerUI content.
 
 ## Repeated taps
 
@@ -504,7 +559,7 @@ Captured Environment affects the layer's mounted declarations and event handlers
 
 ## Cancellation, unmount, and quarantine
 
-Up completes the owner and removes the session.
+The final button Up completes the owner and removes the session.
 Platform Cancel, capture loss, window deactivation, or device loss first terminates pointer ownership and then removes the session.
 Runtime destruction discards sessions before mounted nodes without invoking application callbacks during teardown.
 
@@ -552,6 +607,7 @@ The public surface adds only independently meaningful values:
 - Their event payloads carry different semantic data and remain separate values instead of inheriting from a generic gesture-event base.
 - Their grouped event keys follow the existing ViewEvents, SliderEvents, and TabsEvents convention.
 - GestureSettings contains only shared recognition defaults.
+- PointerButton is one flag enum shared by raw input and built-in recognition; there is no PointerButtons wrapper.
 
 Ownership resolution, shared recognizer identity, tap accumulation, routes, quarantine, and movement samples remain private implementation details.
 There is no public recognizer base class, gesture controller, ownership handle, capture token, result wrapper, event phase, event context, or generic gesture payload.
@@ -563,7 +619,7 @@ Implementation ownership is focused:
 - One focused private header owns the recognizer contract used by gesture modifiers, pointer routing, and scrolling.
 - `src/runtime_pointer_interaction.cpp` owns PointerSession, raw delivery, ownership resolution, and quarantine.
 - Existing scrolling code owns delta consumption and momentum after its recognizer accepts.
-- Platform adapters own timestamps, pointer identifiers, host-level sequence delivery, cancellation, and platform settings mapping.
+- Platform adapters own timestamps, pointer identifiers, semantic button mapping, complete pressed-button masks, host-level sequence delivery, cancellation, and platform settings mapping.
 
 Runtime dispatches the private recognizer capability and never checks for LongPress, Drag, Drawer, BottomSheet, Slider, or another concrete component kind.
 The existing generic checks for semantic activation, scrolling capability, and NodeExtension pointer capability create their respective internal recognizers.

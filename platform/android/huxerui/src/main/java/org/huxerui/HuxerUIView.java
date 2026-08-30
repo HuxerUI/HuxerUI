@@ -27,6 +27,7 @@ import android.text.TextDirectionHeuristics;
 import android.util.AttributeSet;
 import android.util.LongSparseArray;
 import android.util.LruCache;
+import android.util.SparseIntArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
@@ -142,6 +143,7 @@ public final class HuxerUIView extends ViewGroup {
     private final HuxerUIAccessibilityProvider accessibilityProvider;
     private final HuxerUIFilePicker filePicker;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
+    private final SparseIntArray pointerButtons = new SparseIntArray();
     private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
     private final ViewTreeObserver.OnGlobalFocusChangeListener platformViewFocusListener =
@@ -536,7 +538,19 @@ public final class HuxerUIView extends ViewGroup {
 
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
-        if (nativeHandle != 0L && event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+        if (nativeHandle == 0L) {
+            return super.onGenericMotionEvent(event);
+        }
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_BUTTON_PRESS || action == MotionEvent.ACTION_BUTTON_RELEASE) {
+            if (action == MotionEvent.ACTION_BUTTON_PRESS) {
+                requestFocus();
+            }
+            sendPointer(event, event.getActionIndex(),
+                    action == MotionEvent.ACTION_BUTTON_PRESS ? POINTER_DOWN : POINTER_UP);
+            return true;
+        }
+        if (action == MotionEvent.ACTION_SCROLL) {
             float horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
             float vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
             nativeScroll(nativeHandle, event.getX() / density, event.getY() / density, -horizontal * SCROLL_STEP,
@@ -548,7 +562,10 @@ public final class HuxerUIView extends ViewGroup {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
-        if (event.getActionMasked() == MotionEvent.ACTION_SCROLL && platformViewAt(event.getX(), event.getY()) == 0L) {
+        int action = event.getActionMasked();
+        boolean huxeruiPointerEvent = action == MotionEvent.ACTION_SCROLL || action == MotionEvent.ACTION_BUTTON_PRESS
+                || action == MotionEvent.ACTION_BUTTON_RELEASE;
+        if (huxeruiPointerEvent && platformViewAt(event.getX(), event.getY()) == 0L) {
             return onGenericMotionEvent(event);
         }
         return super.dispatchGenericMotionEvent(event);
@@ -800,8 +817,48 @@ public final class HuxerUIView extends ViewGroup {
     }
 
     private void sendPointer(MotionEvent event, int index, int type) {
+        int pointerId = event.getPointerId(index);
+        int previousButtons = pointerButtons.get(pointerId, 0);
+        int pressedButtons = pressedPointerButtons(event, index, type);
+        int changedButton = mapPointerButtons(event.getActionButton());
+        if (changedButton != 0 && ((type == POINTER_DOWN && (previousButtons & changedButton) != 0)
+                || (type == POINTER_UP && (previousButtons & changedButton) == 0))) {
+            return;
+        }
+        if (changedButton == 0 && type == POINTER_UP && previousButtons == 0
+                && pointerDeviceKind(event, index) == POINTER_DEVICE_MOUSE) {
+            return;
+        }
+        if (changedButton == 0 && (type == POINTER_DOWN || type == POINTER_UP)) {
+            changedButton = Integer.lowestOneBit(previousButtons ^ pressedButtons);
+            if (changedButton == 0) {
+                changedButton = MotionEvent.BUTTON_PRIMARY;
+            }
+        }
+        if (pressedButtons == 0 && (type == POINTER_UP || type == POINTER_CANCEL)) {
+            pointerButtons.delete(pointerId);
+        } else {
+            pointerButtons.put(pointerId, pressedButtons);
+        }
         nativePointer(nativeHandle, type, pointerDeviceKind(event, index), event.getPointerId(index),
-                event.getX(index) / density, event.getY(index) / density);
+                event.getX(index) / density, event.getY(index) / density, changedButton, pressedButtons);
+    }
+
+    private int pressedPointerButtons(MotionEvent event, int index, int type) {
+        int buttons = mapPointerButtons(event.getButtonState());
+        if (pointerDeviceKind(event, index) != POINTER_DEVICE_MOUSE && type != POINTER_UP && type != POINTER_CANCEL) {
+            buttons |= MotionEvent.BUTTON_PRIMARY;
+        }
+        return buttons;
+    }
+
+    private int mapPointerButtons(int buttons) {
+        int result = buttons & (MotionEvent.BUTTON_PRIMARY | MotionEvent.BUTTON_SECONDARY |
+                MotionEvent.BUTTON_TERTIARY | MotionEvent.BUTTON_BACK | MotionEvent.BUTTON_FORWARD);
+        if ((buttons & (MotionEvent.BUTTON_STYLUS_PRIMARY | MotionEvent.BUTTON_STYLUS_SECONDARY)) != 0) {
+            result |= MotionEvent.BUTTON_SECONDARY;
+        }
+        return result;
     }
 
     float density() {
@@ -1886,7 +1943,8 @@ public final class HuxerUIView extends ViewGroup {
 
     private static native boolean nativeMoveFocusFromPlatformView(long handle, long identity, boolean reverse);
 
-    private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y);
+    private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y,
+            int changedButton, int pressedButtons);
 
     private static native void nativeScroll(long handle, float x, float y, float deltaX, float deltaY);
 

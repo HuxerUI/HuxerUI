@@ -99,7 +99,18 @@ Use `AnimateTo` with `Opacity`, `Offset`, `Scale`, `Rotation`, or `Transition` f
 
 Honor `FrameInfo::reduced_motion` or the resolved environment motion policy. Do not drive animation through state writes on every frame.
 
-`UseSceneTransition()` provides fade and circular-reveal transitions around an application mutation. Attach its anchor modifier to the relevant surface and use `Run`/`RunAt`. Reduced motion is handled by the resolved handle; still keep the mutation correct without the visual effect.
+`UseSceneTransition()` provides fade and circular-reveal transitions around an application mutation. Attach its anchor modifier and use `Run` when a circular reveal belongs to stable View geometry, or use `RunAt` with an explicit window-logical point.
+Inside a synchronous Click, component event, Menu action, keyboard activation, or accessibility activation, `RunFromCurrentInteraction` uses the exact pointer position or the activated View center without changing semantic event signatures:
+
+```cpp
+Button("Next").OnClick([transition, page] {
+  transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [page] { page += 1; });
+});
+```
+
+The implicit origin ends when the interaction callback returns and the method throws `std::logic_error` outside that scope.
+Do not store a global last-pointer position, manually record PointerDown, or add Point to OnClick/OnChanged solely to start a transition; asynchronous work retains geometry and calls `RunAt` explicitly.
+Reduced motion is handled by the resolved handle; still keep the mutation correct without the visual effect.
 
 ## Presentation services
 
