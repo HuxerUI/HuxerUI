@@ -503,6 +503,13 @@ private:
     gtk_window_set_decorated(window_, !custom_chrome_);
 
     drawing_area_ = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    if (options.minimum_size.has_value()) {
+      gtk_widget_set_size_request(
+          GTK_WIDGET(drawing_area_),
+          std::max(1, static_cast<int>(std::ceil(options.minimum_size->width))),
+          std::max(1, static_cast<int>(std::ceil(options.minimum_size->height)))
+      );
+    }
     gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
     gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
     gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));

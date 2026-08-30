@@ -218,6 +218,9 @@ public:
                                                  styleMask:style
                                                    backing:NSBackingStoreBuffered
                                                      defer:NO];
+      if (options.minimum_size.has_value()) {
+        window_.contentMinSize = NSMakeSize(options.minimum_size->width, options.minimum_size->height);
+      }
       window_->huxeruiAdapter = this;
       window_.title = [NSString stringWithUTF8String:options.title.c_str()];
       window_.acceptsMouseMovedEvents = YES;

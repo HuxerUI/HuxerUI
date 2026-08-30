@@ -100,6 +100,7 @@ struct WindowMetrics {
 struct WindowOptions {
   std::string title = "HuxerUI";
   Size initial_size = {520.0F, 360.0F};
+  std::optional<Size> minimum_size;
   WindowContentMode content_mode = WindowContentMode::SafeArea;
   WindowChromeMode chrome_mode = WindowChromeMode::System;
   float title_bar_height = 40.0F;
@@ -111,6 +112,11 @@ struct AppOptions {
   // Application-wide fields...
 };
 ```
+
+`initial_size` and `minimum_size` describe the logical HuxerUI content surface in device-independent units.
+When `minimum_size` is present, both sizes must be finite and positive and the initial size must not be smaller in either dimension.
+Resizable top-level desktop adapters preserve larger platform minimums and convert the requested content minimum through their native frame and scale boundary.
+Fixed and embedded hosts, including the current mobile and Web integrations, validate the shared configuration but cannot enforce a top-level window constraint.
 
 `WindowOptions::title_bar_height` is the application's preferred logical height for Custom chrome.
 It drives both `WindowTitleBar` layout and framework caption-control geometry, so applications do not configure those heights independently.

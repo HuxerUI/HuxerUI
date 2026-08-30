@@ -109,6 +109,13 @@ inline RECT InsetWin32MaximizedClientRect(RECT proposed_window, LONG horizontal_
   return proposed_window;
 }
 
+inline POINT ResolveWin32MinimumTrackSize(POINT platform_minimum, const RECT& requested_frame) noexcept {
+  return {
+      std::max(platform_minimum.x, std::max(0L, requested_frame.right - requested_frame.left)),
+      std::max(platform_minimum.y, std::max(0L, requested_frame.bottom - requested_frame.top)),
+  };
+}
+
 inline float ResolveWin32CaptionButtonWidth(float system_width) noexcept {
   constexpr float modern_caption_button_width = 46.0F;
   return std::max(modern_caption_button_width, system_width);

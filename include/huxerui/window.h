@@ -69,6 +69,8 @@ struct WindowCaptionLabels {
 struct WindowOptions {
   std::string title = "HuxerUI";
   Size initial_size = {520.0F, 360.0F};
+  // Resizable top-level hosts enforce this logical content size; fixed or embedded hosts may not support it.
+  std::optional<Size> minimum_size;
   // Root geometry remains stable for one Runtime; pages may still override SystemBarsAppearance independently.
   WindowContentMode content_mode = WindowContentMode::SafeArea;
   // System window chrome ownership remains stable for one Runtime.

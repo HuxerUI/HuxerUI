@@ -17,6 +17,13 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 Capabilities not listed as implemented are not implied by the shared API.
 OHOS does not currently have a repository-owned backend.
 
+## Window sizing
+
+`WindowOptions::initial_size` requests the initial logical content size.
+An optional `minimum_size` constrains resizable Windows, macOS, and Linux top-level windows in the same device-independent units while preserving any larger native minimum.
+Both sizes must be finite and positive, and the initial size must not be smaller than the requested minimum in either dimension.
+Mobile and Web hosts still validate these values but do not control an independently resizable top-level window, so their native shell or embedding page remains authoritative for host sizing.
+
 ## Windows
 
 The default backend targets Windows 10 or later and uses Win32, D3D11, Direct2D, DirectWrite, DXGI, and IMM32.

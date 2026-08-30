@@ -608,6 +608,7 @@ private:
     const float scale = DpiScale();
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
     custom_title_bar_height_ = options.title_bar_height;
+    minimum_size_ = options.minimum_size;
     RECT frame{
         0,
         0,
@@ -1064,6 +1065,27 @@ private:
       return *handled;
     }
     switch (message) {
+    case WM_GETMINMAXINFO:
+      if (minimum_size_.has_value() && l_param != 0) {
+        const LRESULT result = DefWindowProcW(window, message, w_param, l_param);
+        const float scale = DpiScale();
+        RECT minimum_frame{
+            0,
+            0,
+            std::max(1L, static_cast<LONG>(std::ceil(minimum_size_->width * scale))),
+            std::max(1L, static_cast<LONG>(std::ceil(minimum_size_->height * scale))),
+        };
+        if (!custom_chrome_ &&
+            !win32_api_.AdjustWindowRectForDpi(
+                &minimum_frame, WS_OVERLAPPEDWINDOW, FALSE, 0, static_cast<UINT>(std::max(dpi_, 1.0F))
+            )) {
+          throw std::runtime_error("HuxerUI could not calculate the Windows minimum window size");
+        }
+        auto* constraints = reinterpret_cast<MINMAXINFO*>(l_param);
+        constraints->ptMinTrackSize = ResolveWin32MinimumTrackSize(constraints->ptMinTrackSize, minimum_frame);
+        return result;
+      }
+      break;
     case WM_NCHITTEST:
       if (custom_chrome_) {
         if (const std::optional<LRESULT> caption_control = CaptionControlHitTest(l_param)) {
@@ -1358,6 +1380,7 @@ private:
   Win32Accessibility accessibility_;
   Win32TextInput text_input_;
   std::exception_ptr failure_;
+  std::optional<Size> minimum_size_;
   std::optional<double> timer_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
   Win32UIThreadDispatcher& ui_dispatcher_;

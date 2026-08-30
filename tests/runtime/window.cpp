@@ -277,6 +277,15 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
   invalid_options.window.initial_size = {520.0F, std::numeric_limits<float>::infinity()};
   REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.initial_size = {520.0F, 360.0F};
+  invalid_options.window.minimum_size = Size{0.0F, 240.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{320.0F, std::numeric_limits<float>::infinity()};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{521.0F, 360.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  invalid_options.window.minimum_size = Size{520.0F, 361.0F};
+  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
   TestPlatform invalid_appearance_platform;
   Runtime invalid_appearance{
       +[]() -> View {
@@ -288,6 +297,14 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   };
   invalid_appearance.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   REQUIRE_THROWS_AS(invalid_appearance.BuildFrame(), std::invalid_argument);
+}
+
+TEST_CASE("WindowOptionsAcceptAValidMinimumSize") {
+  TestPlatform platform;
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.window.minimum_size = Size{320.0F, 240.0F};
+  REQUIRE_NOTHROW(Runtime(WindowContentApp, platform, options));
 }
 
 TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {

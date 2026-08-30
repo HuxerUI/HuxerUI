@@ -13,6 +13,12 @@ TEST_CASE("Win32MaximizedClientRectStaysInsideTheWorkArea") {
   REQUIRE(client.bottom == 1040);
 }
 
+TEST_CASE("Win32MinimumTrackSizePreservesLargerPlatformLimits") {
+  const POINT minimum = detail::ResolveWin32MinimumTrackSize(POINT{400, 300}, RECT{-8, -31, 328, 511});
+  REQUIRE(minimum.x == 400);
+  REQUIRE(minimum.y == 542);
+}
+
 TEST_CASE("Win32CaptionButtonsUseTheModernMinimumWidth") {
   REQUIRE(detail::ResolveWin32CaptionButtonWidth(36.0F) == 46.0F);
   REQUIRE(detail::ResolveWin32CaptionButtonWidth(52.0F) == 52.0F);
