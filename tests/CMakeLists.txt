@@ -311,6 +311,7 @@ target_compile_options(huxerui_codegen_tests PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
 )
 
 target_link_libraries(huxerui_codegen_tests PRIVATE HuxerUI3p::Catch2)
@@ -337,6 +338,7 @@ target_compile_options(huxerui_resource_compiler_tests PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
 )
 
 target_link_libraries(huxerui_resource_compiler_tests PRIVATE
@@ -409,6 +411,7 @@ if (TARGET huxerui_cli_core)
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+            "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
     )
     target_link_libraries(huxerui_cli_tests PRIVATE
             HuxerUI3p::Catch2
