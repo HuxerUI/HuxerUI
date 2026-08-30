@@ -125,6 +125,7 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
       "-B",
       context.build_directory.string(),
       "-DCMAKE_BUILD_TYPE=" + configuration,
+      "-DHUXERUI_HOME=" + context.huxerui_home.string(),
   };
   if (!context.cmake_generator.empty()) {
     configure_arguments.insert(configure_arguments.begin(), {"-G", context.cmake_generator});
@@ -146,6 +147,7 @@ std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandC
       build_directory.string(),
       "-DCMAKE_BUILD_TYPE=Debug",
       "-DHUXERUI_LIBRARY_GRAPH_ONLY=ON",
+      "-DHUXERUI_HOME=" + context.huxerui_home.string(),
   };
   if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
       !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja")) {

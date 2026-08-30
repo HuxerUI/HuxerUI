@@ -172,6 +172,7 @@ public:
         "-B",
         context.build_directory.string(),
         "-DCMAKE_BUILD_TYPE=" + configuration,
+        "-DHUXERUI_HOME=" + context.huxerui_home.string(),
     };
     const std::string generator = ResolveCMakeGenerator(context);
     if (!generator.empty()) {

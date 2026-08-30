@@ -223,10 +223,12 @@ huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-li
 huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
+huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui open ios
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui open ios [--source <path>]
 ```
 
 A platform list is comma-separated or `all`.
@@ -297,6 +299,9 @@ Desktop drivers do not expose synthetic devices.
 
 Builds retain platform output below `.huxerui/build/<platform>/<profile>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
 The CLI validates the complete requested set before executing commands and prints each platform command.
+`build`, `run`, `package`, and `open ios` accept `--source <path>` as a strict per-invocation HuxerUI source-checkout override.
+The override replaces only the effective HuxerUI home passed through the existing platform command context and child-process environment; it does not persist or rewrite the parent shell's installed SDK selection.
+Configure commands always pass the effective home through `-DHUXERUI_HOME`, so an existing CMake cache can switch between the installed SDK and source checkout without a parallel build workflow or another build directory convention.
 
 Desktop builds configure the root CMake project and then build it.
 Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
@@ -388,6 +393,8 @@ The CLI resolves its home in this order:
 - A valid installation or source root derived from the running `huxerui` executable.
 
 The CLI validates the resolved root, exports the resolved `HUXERUI_HOME` to CMake, Gradle, Xcode, and other child processes, and reports the source of the selection through `doctor`.
+For build-owning commands, `--source <path>` may replace that resolved home with a validated source checkout for the current invocation only.
+It is not a second installed-SDK selector: `doctor`, `setup`, project creation, and platform-shell generation continue to use the normally resolved SDK, while build children receive the effective home through the existing environment and platform configuration.
 The CLI must remain usable when the environment variable is absent, because a platform installer can place `huxerui` on `PATH` more reliably than every operating system can persist an arbitrary environment variable for all shells and GUI processes.
 Direct CMake consumers may set `HUXERUI_HOME` or use the standard `CMAKE_PREFIX_PATH` package lookup.
 The former `HUXERUI_SDK_ROOT` input has been removed rather than retained as an alias.

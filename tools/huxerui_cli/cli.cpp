@@ -54,10 +54,13 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui setup <platform-list> [--yes]\n"
          << "  huxerui devices [platform]\n"
-         << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]\n"
-         << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]\n"
-         << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>]\n"
-         << "  huxerui open ios\n"
+         << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] "
+            "[--source <path>]\n"
+         << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] "
+            "[--source <path>]\n"
+         << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] "
+            "[--source <path>]\n"
+         << "  huxerui open ios [--source <path>]\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n"
          << "An agent list is comma-separated and supports ";
@@ -587,6 +590,7 @@ int RunDevices(std::span<const std::string_view> arguments, std::ostream& output
 
 struct BuildOptions {
   std::optional<std::string_view> platforms;
+  std::optional<std::filesystem::path> source;
   std::string profile = "debug";
   std::string device;
   std::string cmake_generator;
@@ -616,6 +620,14 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
         throw UsageError("--generator requires a value");
       }
       options.cmake_generator = arguments[index];
+    } else if (arguments[index] == "--source") {
+      if (options.source) {
+        throw UsageError("--source may be specified only once");
+      }
+      if (++index >= arguments.size()) {
+        throw UsageError("--source requires a value");
+      }
+      options.source = std::filesystem::path(arguments[index]);
     } else if (!options.platforms) {
       options.platforms = arguments[index];
     } else {
@@ -626,6 +638,21 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
     throw UsageError(std::string(command) + " requires one platform");
   }
   return options;
+}
+
+std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk_home,
+                                                const std::optional<std::filesystem::path>& source,
+                                                const std::filesystem::path& working_directory) {
+  std::filesystem::path huxerui_home;
+  if (source) {
+    huxerui_home = ResolveHuxerUISource(source->is_absolute() ? *source : working_directory / *source);
+  } else if (sdk_home.empty()) {
+    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or use --source <path>");
+  } else {
+    huxerui_home = sdk_home;
+  }
+  SetProcessEnvironmentVariable("HUXERUI_HOME", huxerui_home.string());
+  return huxerui_home;
 }
 
 std::vector<const PlatformDriver*>
@@ -775,11 +802,9 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
 }
 
 int RunBuild(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-             const std::filesystem::path& huxerui_home, std::ostream& output) {
-  if (huxerui_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
-  }
+             const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, {});
+  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -796,11 +821,9 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
 }
 
 int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-                   const std::filesystem::path& huxerui_home, std::ostream& output) {
-  if (huxerui_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
-  }
+                   const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "run");
+  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -855,11 +878,9 @@ void CopyPackageArtifacts(std::span<const PackageArtifact> artifacts,
 }
 
 int RunPackage(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-               const std::filesystem::path& huxerui_home, std::ostream& output) {
-  if (huxerui_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
-  }
+               const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "package");
+  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   if (!options.profile_explicit) {
     options.profile = "release";
   }
@@ -888,12 +909,15 @@ int RunPackage(std::span<const std::string_view> arguments, const std::filesyste
 }
 
 int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-            const std::filesystem::path& huxerui_home, std::ostream& output) {
-  if (arguments.size() != 2 || arguments[1] != "ios") {
-    throw UsageError("open usage: huxerui open ios");
+            const std::filesystem::path& sdk_home, std::ostream& output) {
+  BuildOptions options = ParseBuildOptions(arguments, "open");
+  if (!options.platforms || *options.platforms != "ios") {
+    throw UsageError("open usage: huxerui open ios [--source <path>]");
   }
-  BuildOptions options;
-  options.platforms = "ios";
+  if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty()) {
+    throw UsageError("open accepts only --source <path>");
+  }
+  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -903,10 +927,6 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
   if (platform.Id() != "ios") {
     throw UsageError("open currently supports ios only");
   }
-  if (huxerui_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
-  }
-
   output << "Opening ios Xcode project\n";
   const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   ExecuteCommands(platform.LibraryGraphCommands(context), output);

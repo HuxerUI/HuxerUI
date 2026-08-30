@@ -52,21 +52,24 @@ std::filesystem::path ApplicationDevelopmentSkillDirectory(const std::filesystem
   return huxerui_home / "skills/huxerui-app-development";
 }
 
+bool IsSourceHome(const std::filesystem::path& path) {
+  return std::filesystem::is_regular_file(path / "CMakeLists.txt") &&
+         std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h") &&
+         std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
+         std::filesystem::is_directory(path / "tools/prebuilt") &&
+         std::filesystem::is_directory(path / "resources") &&
+         std::filesystem::is_directory(ApplicationDevelopmentSkillDirectory(path, SdkLayout::Source));
+}
+
+bool IsInstalledHome(const std::filesystem::path& path) {
+  return std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h") &&
+         !InstalledCMakeDirectory(path).empty() && std::filesystem::is_directory(path / "share/huxerui/tools") &&
+         std::filesystem::is_regular_file(path / "share/huxerui/resources/huxerui/resources.bin") &&
+         std::filesystem::is_directory(ApplicationDevelopmentSkillDirectory(path, SdkLayout::Installed));
+}
+
 bool IsSdkHome(const std::filesystem::path& path) {
-  const bool has_headers = std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h");
-  const bool source = std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
-                      std::filesystem::is_directory(path / "tools/prebuilt") &&
-                      std::filesystem::is_directory(path / "resources") &&
-                      std::filesystem::is_directory(
-                          ApplicationDevelopmentSkillDirectory(path, SdkLayout::Source)
-                      );
-  const bool installed = !InstalledCMakeDirectory(path).empty() &&
-                         std::filesystem::is_directory(path / "share/huxerui/tools") &&
-                         std::filesystem::is_regular_file(path / "share/huxerui/resources/huxerui/resources.bin") &&
-                         std::filesystem::is_directory(
-                             ApplicationDevelopmentSkillDirectory(path, SdkLayout::Installed)
-                         );
-  return has_headers && (source || installed);
+  return IsSourceHome(path) || IsInstalledHome(path);
 }
 
 std::filesystem::path Normalize(const std::filesystem::path& path) {
@@ -125,6 +128,14 @@ SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
     }
   }
   return {};
+}
+
+std::filesystem::path ResolveHuxerUISource(const std::filesystem::path& path) {
+  const std::filesystem::path source = Normalize(path);
+  if (!IsSourceHome(source)) {
+    throw std::runtime_error("HuxerUI source checkout is invalid: " + source.string());
+  }
+  return source;
 }
 
 std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home) {

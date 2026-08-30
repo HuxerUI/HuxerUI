@@ -22,10 +22,10 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui open ios
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui open ios [--source <path>]
 ```
 
 Re-read current help before copying these commands.
@@ -45,6 +45,9 @@ Set-Location SampleApp
 huxerui build windows --profile debug
 huxerui run windows --profile debug
 ```
+
+Use `--source <path>` only when the user explicitly wants the application to compile HuxerUI from a local source checkout instead of the installed SDK binaries.
+The path must name the HuxerUI repository root, and the override applies only to that `build`, `run`, `package`, or `open ios` invocation; do not rewrite the user's persistent `HUXERUI_HOME` for this workflow.
 
 On another host, replace `windows` with an available requested platform. Do not claim a platform ran unless it did.
 

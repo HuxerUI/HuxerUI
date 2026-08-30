@@ -69,14 +69,15 @@ std::string Read(const std::filesystem::path& path) {
   return content;
 }
 
-std::vector<std::string> ExpectedLibraryGraphArguments(const std::filesystem::path& project) {
+std::vector<std::string> ExpectedLibraryGraphArguments(const huxerui::cli::PlatformCommandContext& context) {
   std::vector<std::string> arguments{
       "-S",
-      project.string(),
+      context.project_root.string(),
       "-B",
-      (project / ".huxerui/build/library-graph").string(),
+      (context.project_root / ".huxerui/build/library-graph").string(),
       "-DCMAKE_BUILD_TYPE=Debug",
       "-DHUXERUI_LIBRARY_GRAPH_ONLY=ON",
+      "-DHUXERUI_HOME=" + context.huxerui_home.string(),
   };
   if (!huxerui::cli::ReadEnvironmentVariable("CMAKE_GENERATOR") && huxerui::cli::FindExecutable("ninja")) {
     arguments.insert(arguments.begin(), {"-G", "Ninja"});
@@ -142,6 +143,31 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   }
   REQUIRE(invocation.output.find("all") != std::string::npos);
   REQUIRE(invocation.output.find("none") != std::string::npos);
+  REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliValidatesExplicitSourceCheckouts") {
+  const std::filesystem::path source = huxerui::cli::ResolveHuxerUISource(HUXERUI_TEST_SOURCE_DIRECTORY);
+  REQUIRE(std::filesystem::equivalent(source, HUXERUI_TEST_SOURCE_DIRECTORY));
+
+  TemporaryDirectory temporary;
+  REQUIRE_THROWS_AS(huxerui::cli::ResolveHuxerUISource(temporary.Path()), std::runtime_error);
+}
+
+TEST_CASE("HuxerUICliRejectsInvalidSourceBuildOptions") {
+  TemporaryDirectory temporary;
+  const Invocation missing = Invoke(temporary.Path(), {"build", "windows", "--source"});
+  REQUIRE(missing.result == 2);
+  REQUIRE(missing.error.find("--source requires a value") != std::string::npos);
+
+  const Invocation duplicate =
+      Invoke(temporary.Path(), {"build", "windows", "--source", ".", "--source", "."});
+  REQUIRE(duplicate.result == 2);
+  REQUIRE(duplicate.error.find("--source may be specified only once") != std::string::npos);
+
+  const Invocation invalid = Invoke(temporary.Path(), {"build", "windows", "--source", "missing"});
+  REQUIRE(invalid.result == 1);
+  REQUIRE(invalid.error.find("HuxerUI source checkout is invalid:") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
@@ -578,6 +604,7 @@ TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {
           "-B",
           context.build_directory.string(),
           "-DCMAKE_BUILD_TYPE=Release",
+          "-DHUXERUI_HOME=" + context.huxerui_home.string(),
           "-DCMAKE_CXX_COMPILER=cl",
       }
   );
@@ -627,6 +654,7 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
           "-B",
           build.string(),
           "-DCMAKE_BUILD_TYPE=Debug",
+          "-DHUXERUI_HOME=" + context.huxerui_home.string(),
       }
   );
   REQUIRE(
@@ -680,7 +708,7 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
 
   REQUIRE(library_commands.size() == 1);
   REQUIRE(library_commands[0].executable == "cmake");
-  REQUIRE(library_commands[0].arguments == ExpectedLibraryGraphArguments(context.project_root));
+  REQUIRE(library_commands[0].arguments == ExpectedLibraryGraphArguments(context));
   REQUIRE(windows_commands.size() == 1);
   REQUIRE(
       std::filesystem::path(windows_commands[0].executable).generic_string() ==
@@ -699,7 +727,7 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
 
   const std::vector<huxerui::cli::ProcessCommand> termux_library_commands =
       huxerui::cli::detail::AndroidLibraryGraphCommands(context, "android");
-  std::vector<std::string> termux_library_arguments = ExpectedLibraryGraphArguments(context.project_root);
+  std::vector<std::string> termux_library_arguments = ExpectedLibraryGraphArguments(context);
   termux_library_arguments.push_back("-DANDROID_ABI=arm64-v8a");
   REQUIRE(termux_library_commands.size() == 1);
   REQUIRE(termux_library_commands[0].arguments == termux_library_arguments);
@@ -818,6 +846,7 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
           "-B",
           build.string(),
           "-DCMAKE_BUILD_TYPE=Debug",
+          "-DHUXERUI_HOME=" + context.huxerui_home.string(),
       }
   );
   REQUIRE(build_commands[1].executable == "cmake");
@@ -951,7 +980,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
 
   REQUIRE(library_commands.size() == 1);
   REQUIRE(library_commands[0].executable == "cmake");
-  REQUIRE(library_commands[0].arguments == ExpectedLibraryGraphArguments(context.project_root));
+  REQUIRE(library_commands[0].arguments == ExpectedLibraryGraphArguments(context));
   REQUIRE(build_commands.size() == 1);
   REQUIRE(build_commands[0].executable == "xcodebuild");
   REQUIRE(

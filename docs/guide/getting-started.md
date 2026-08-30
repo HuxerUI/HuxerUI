@@ -53,6 +53,13 @@ huxerui run web
 
 Use `--profile release` for a release configuration.
 Use `--generator <name>` only when the host has multiple compatible CMake generators and an explicit selection is required.
+Use `--source <path>` to compile HuxerUI from one explicit source checkout for that build instead of consuming the installed SDK binaries:
+
+```bash
+huxerui run windows --source ../HuxerUI
+```
+
+The source override applies only to that CLI process and its build children; it does not replace the configured `HUXERUI_HOME` in the parent shell.
 
 Android and iOS accept a device selected from:
 
@@ -153,10 +160,10 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>]
-huxerui open ios
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui open ios [--source <path>]
 ```
 
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.

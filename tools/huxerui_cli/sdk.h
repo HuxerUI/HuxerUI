@@ -38,6 +38,12 @@ struct SdkLocation {
 /// @throws std::runtime_error if `HUXERUI_HOME` is defined but does not name a valid HuxerUI SDK or source checkout.
 [[nodiscard]] SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
 
+/// Resolves and validates an explicit HuxerUI source checkout.
+/// @param path Repository root, either absolute or relative to the current working directory.
+/// @return The absolute, normalized repository root.
+/// @throws std::runtime_error if `path` is not a HuxerUI source checkout.
+[[nodiscard]] std::filesystem::path ResolveHuxerUISource(const std::filesystem::path& path);
+
 /// Locates the canonical application-development Skill in an SDK or source checkout.
 /// @param huxerui_home SDK prefix or repository root.
 /// @return Path to the `huxerui-app-development` Skill directory.
