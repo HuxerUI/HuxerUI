@@ -23,6 +23,7 @@ Modifiers apply from left to right. Property modifiers alter declaration data wi
 | `ClipChildren` | Descendant clipping without adding a wrapper |
 | `ScrollPhysics`, `ScrollBar` | Scroll behavior and scrollbar appearance |
 | `Indication` | Focus, hover, press, and ripple visual state |
+| `PointerCursor` | Portable mouse or pen cursor declaration; see [gestures-and-drag-drop.md](gestures-and-drag-drop.md) |
 | `Offset`, `Scale`, `Rotation`, `Transition` | Presentation animation without changing parent measurement |
 | `SafeAreaPadding` | Consumes selected safe-area edges |
 | `Semantics` | Accessibility role, label, state, actions, and collection metadata |

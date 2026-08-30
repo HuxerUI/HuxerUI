@@ -63,8 +63,12 @@ public:
     return node.Bounds().Contains(position);
   }
 
-  void OnHoverChanged(huxerui::MountedNode& node, bool hovered) override {
+  void OnHover(huxerui::MountedNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
+    if (event.type == HoverEventType::Move) {
+      return;
+    }
+    const bool hovered = event.type == HoverEventType::Enter;
     if (const auto target = target_.lock()) {
       target->surface_hovered = hovered;
       if (!hovered && !target->anchor_hovered && !target->focus_visible) {
@@ -515,8 +519,17 @@ public:
     return true;
   }
 
-  void OnHoverChanged(huxerui::MountedNode& node, bool hovered) override {
+  void OnHover(huxerui::MountedNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
+    if (event.type == HoverEventType::Move) {
+      target_->anchor_hovered = true;
+      hover_deadline_.reset();
+      if (target_->visible && !target_->focus_visible) {
+        Hide(false);
+      }
+      return;
+    }
+    const bool hovered = event.type == HoverEventType::Enter;
     target_->anchor_hovered = hovered;
     if (!hovered) {
       hover_deadline_.reset();

@@ -18,12 +18,14 @@ State<bool> recompose_activation_button;
 State<bool> alternate_scroll_bar_style;
 State<bool> alternate_default_indication;
 State<PointerCursorKind> dynamic_pointer_cursor;
+State<bool> wide_hover_target;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 int covered_pointer_clicks = 0;
 int exceptional_pointer_cancels = 0;
 int exceptional_pointer_ups = 0;
 std::vector<std::pair<InteractionState, InteractionEvent>> recorded_interactions;
+std::vector<std::pair<std::string, HoverEvent>> received_hover_events;
 int stable_extension_updates = 0;
 
 std::optional<detail::ScrollBarGeometry> FindScrollBarGeometry(const detail::MountedNode& node) {
@@ -157,6 +159,45 @@ View DynamicPointerCursorApp() {
   auto kind = UseState(PointerCursorKind::Hand);
   dynamic_pointer_cursor = kind;
   return Text("Dynamic").With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(kind.Get()));
+}
+
+View HoverEventApp() {
+  return Column {
+    Spacer().With(huxerui::Frame{.height = 20.0F}),
+    Text("Hover target")
+        .With(huxerui::Frame{.width = 100.0F, .height = 40.0F}, Enabled(false))
+        .On<ViewEvents::Hover>([](const HoverEvent& event) {
+          received_hover_events.emplace_back("child", event);
+        }),
+  }.With(huxerui::Frame{.width = 100.0F, .height = 60.0F})
+      .On<ViewEvents::Hover>([](const HoverEvent& event) {
+        received_hover_events.emplace_back("parent", event);
+      });
+}
+
+View DynamicHoverEventApp() {
+  auto wide = UseState(true);
+  wide_hover_target = wide;
+  return Row {
+    Text("Dynamic hover")
+        .With(huxerui::Frame{.width = wide.Get() ? 100.0F : 10.0F, .height = 40.0F})
+        .On<ViewEvents::Hover>([](const HoverEvent& event) {
+          received_hover_events.emplace_back("dynamic", event);
+        }),
+  }.With(huxerui::Frame{100.0F, 40.0F});
+}
+
+View HoverOverlayPointerTargetApp() {
+  return Stack{
+      Button("Behind")
+          .With(huxerui::Frame{100.0F, 40.0F})
+          .OnClick([] { ++covered_pointer_clicks; }),
+      Text("Hover overlay")
+          .With(huxerui::Frame{100.0F, 40.0F})
+          .On<ViewEvents::Hover>([](const HoverEvent& event) {
+            received_hover_events.emplace_back("overlay", event);
+          }),
+  };
 }
 
 View ExceptionalPointerInputApp() {
@@ -489,6 +530,96 @@ View CursorOverlayPointerTargetApp() {
       Text("Cursor overlay")
           .With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(PointerCursorKind::Crosshair)),
   };
+}
+
+TEST_CASE("HoverEventReportsNestedEnterMoveAndLeaveForMouseAndPenOnly") {
+  received_hover_events.clear();
+  TestPlatform platform;
+  Runtime runtime{HoverEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 30, {50.0F, 40.0F}});
+  REQUIRE(received_hover_events.size() == 2);
+  REQUIRE(received_hover_events[0].first == "parent");
+  REQUIRE(received_hover_events[0].second == HoverEvent{
+                                                  HoverEventType::Enter,
+                                                  30,
+                                                  PointerDeviceKind::Mouse,
+                                                  {50.0F, 40.0F},
+                                                  {50.0F, 40.0F},
+                                              });
+  REQUIRE(received_hover_events[1].first == "child");
+  REQUIRE(received_hover_events[1].second == HoverEvent{
+                                                  HoverEventType::Enter,
+                                                  30,
+                                                  PointerDeviceKind::Mouse,
+                                                  {50.0F, 20.0F},
+                                                  {50.0F, 40.0F},
+                                              });
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 30, {60.0F, 45.0F}});
+  REQUIRE(received_hover_events.size() == 4);
+  REQUIRE(received_hover_events[2].first == "parent");
+  REQUIRE(received_hover_events[2].second.type == HoverEventType::Move);
+  REQUIRE(received_hover_events[3].first == "child");
+  REQUIRE(received_hover_events[3].second.type == HoverEventType::Move);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 30, {60.0F, 45.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Move, 31, {60.0F, 45.0F}, PointerDeviceKind::Touch});
+  REQUIRE(received_hover_events.size() == 4);
+
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 30, {60.0F, 45.0F}});
+  REQUIRE(received_hover_events.size() == 6);
+  REQUIRE(received_hover_events[4].first == "child");
+  REQUIRE(received_hover_events[4].second.type == HoverEventType::Leave);
+  REQUIRE(received_hover_events[5].first == "parent");
+  REQUIRE(received_hover_events[5].second.type == HoverEventType::Leave);
+
+  received_hover_events.clear();
+  runtime.HandlePointerEvent({PointerEventType::Move, 34, {50.0F, 40.0F}, PointerDeviceKind::Pen});
+  REQUIRE(received_hover_events.size() == 2);
+  REQUIRE(received_hover_events[0].second.device_kind == PointerDeviceKind::Pen);
+  REQUIRE(received_hover_events[1].second.device_kind == PointerDeviceKind::Pen);
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 34, {50.0F, 40.0F}, PointerDeviceKind::Pen});
+}
+
+TEST_CASE("HoverEventTracksGeometryChangesUnderAStationaryPointer") {
+  received_hover_events.clear();
+  TestPlatform platform;
+  Runtime runtime{DynamicHoverEventApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Move, 32, {50.0F, 20.0F}});
+  REQUIRE(received_hover_events.size() == 1);
+  REQUIRE(received_hover_events.back().second.type == HoverEventType::Enter);
+
+  received_hover_events.clear();
+  wide_hover_target = false;
+  runtime.BuildFrame();
+  REQUIRE(received_hover_events.size() == 1);
+  REQUIRE(received_hover_events.back().second.type == HoverEventType::Leave);
+
+  received_hover_events.clear();
+  wide_hover_target = true;
+  runtime.BuildFrame();
+  REQUIRE(received_hover_events.size() == 1);
+  REQUIRE(received_hover_events.back().second.type == HoverEventType::Enter);
+}
+
+TEST_CASE("HoverEventDoesNotTurnAVisualOverlayIntoAnInputTarget") {
+  covered_pointer_clicks = 0;
+  received_hover_events.clear();
+  TestPlatform platform;
+  Runtime runtime{HoverOverlayPointerTargetApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 33, {50.0F, 20.0F}});
+  REQUIRE(received_hover_events.size() == 1);
+  REQUIRE(received_hover_events.back().second.type == HoverEventType::Enter);
+  ClickAt(runtime, {50.0F, 20.0F}, 33);
+  REQUIRE(covered_pointer_clicks == 1);
 }
 
 TEST_CASE("PointerCursorResolvesTheDeepestExplicitDeclaration") {

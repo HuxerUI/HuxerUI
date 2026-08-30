@@ -39,6 +39,7 @@ State<std::size_t> indexed_platform_view_page;
 int received_platform_event = 0;
 ExternalTexture platform_view_external_texture;
 ExternalTexture received_platform_texture;
+int platform_view_hover_events = 0;
 
 struct TestProperties {
   int value = 0;
@@ -107,6 +108,16 @@ View EventPlatformViewApp() {
         return value != 0;
       })
       .On<TestPlatformEvents::ReadyRequested>([] { return 42; });
+}
+
+View HoverPlatformViewApp() {
+  return Column {
+    PlatformView("test/View")
+        .With(Frame{80.0F, 40.0F})
+        .On<ViewEvents::Hover>([](const HoverEvent&) { ++platform_view_hover_events; }),
+    Text("Shared content").With(Frame{80.0F, 40.0F}),
+  }.With(Frame{80.0F, 80.0F})
+      .On<ViewEvents::Hover>([](const HoverEvent&) { ++platform_view_hover_events; });
 }
 
 View ControlledPlatformViewApp() {
@@ -465,6 +476,20 @@ TEST_CASE("PlatformViewOwnsTheCursorOverItsNativeContent") {
 
   runtime.HandlePointerEvent({PointerEventType::Move, 1, {20.0F, 60.0F}});
   REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Default);
+}
+
+TEST_CASE("PlatformViewOwnsHoverOverItsNativeContent") {
+  platform_view_hover_events = 0;
+  TestPlatform platform;
+  Runtime runtime(HoverPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{80.0F, 80.0F}});
+  runtime.BuildRenderFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 2, {20.0F, 20.0F}});
+  REQUIRE(platform_view_hover_events == 0);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 2, {20.0F, 60.0F}});
+  REQUIRE(platform_view_hover_events == 1);
 }
 
 TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to the current UI") {

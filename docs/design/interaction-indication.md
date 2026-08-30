@@ -168,7 +168,7 @@ An extension invalidates only its retained paint when the update changes visible
 
 Extension-specific hover hit testing remains available for behavior whose geometry differs from the node interaction surface, such as Tooltip and ScrollBar.
 
-Standard indication no longer interprets `OnPointer`, `OnKey`, `OnFocusChanged`, or extension-specific `OnHoverChanged` callbacks.
+Standard indication no longer interprets `OnPointer`, `OnKey`, `OnFocusChanged`, or extension-specific `OnHover` callbacks.
 
 Adding `Indication` to a View without Click, pointer events, or an accepting gesture does not make that View an input target or block a target behind it.
 
@@ -179,8 +179,9 @@ An implementation-only pending-sync flag on the extension entry prevents an earl
 Compatible extension updates can read `MountedNode::Interaction()` immediately and preserve their retained animation state.
 
 Ordinary node hover follows the deepest interactive hit target and is recomputed from the last pointer position after tree or layout changes.
+Public Hover handlers independently receive direct Enter, Move, and Leave notifications along the same resolved branch without becoming interaction targets.
 
-Geometry-specific hover callbacks remain limited to extensions such as Tooltip and ScrollBar whose active region is not the ordinary node interaction region.
+Geometry-specific Hover events remain limited to extensions such as Tooltip and ScrollBar whose active region is not the ordinary node interaction region.
 
 ## Normal appearance and transient indication
 

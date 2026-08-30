@@ -171,10 +171,12 @@ public:
     return false;
   }
 
-  /// Notifies the extension when its hover hit-test state changes.
-  virtual void OnHoverChanged(MountedNode& node, bool hovered) {
+  /// Delivers entry, movement, and departure for this extension's active hover hit-test.
+  ///
+  /// The event position is local to `node`. Runtime sends Move only when the logical pointer position changes.
+  virtual void OnHover(MountedNode& node, const HoverEvent& event) {
     static_cast<void>(node);
-    static_cast<void>(hovered);
+    static_cast<void>(event);
   }
 
   /// Notifies the extension when keyboard focus enters or leaves its node.

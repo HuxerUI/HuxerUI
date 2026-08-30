@@ -44,6 +44,14 @@ struct NodeExtensionHandle {
   bool operator==(const NodeExtensionHandle&) const = default;
 };
 
+struct PointerHoverState {
+  std::int64_t pointer_id = 0;
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  Point window_position;
+  std::vector<std::uint64_t> event_nodes;
+  std::vector<NodeExtensionHandle> extensions;
+};
+
 } // namespace huxerui::detail
 
 #include "gesture_internal.h"
@@ -1357,10 +1365,9 @@ struct Runtime::State {
   std::uint64_t semantic_revision_ = 0;
   std::uint64_t next_press_id_ = 1;
   std::optional<Point> current_interaction_origin_;
-  std::optional<Point> pointer_cursor_position_;
+  std::optional<detail::PointerHoverState> pointer_hover_;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
-  std::vector<detail::NodeExtensionHandle> hovered_extensions_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
@@ -1452,6 +1459,7 @@ void DeactivateExternalTextures(
 void UpdateInteraction(MountedNode& node, InteractionState state, std::optional<InteractionEvent> event = std::nullopt);
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 bool BuildPointerCursorRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
+bool BuildHoverRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
 bool HitTestWindowDragRegion(MountedNode& node, Point position);
 std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);

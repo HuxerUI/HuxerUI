@@ -518,6 +518,29 @@ Applications use the separate `ViewEvents::PointerIntercept` key when they need 
 The deepest ordinary target receives Down and Move while no competing owner exists.
 A successful tap sends PointerUp before Click or MultiTap output; another owner sends one PointerCancel.
 
+## Hover lifecycle
+
+`ViewEvents::Hover` reports `HoverEventType::Enter`, `Move`, and `Leave` for mouse and pen pointers.
+It is a notification with `Event<void(const HoverEvent&)>`, not a gesture recognizer, ownership request, or pointer-session participant.
+Touch input does not produce Hover.
+
+Runtime retains one hover-capable pointer identity, device kind, latest window position, and the currently matched public handlers and retained extensions.
+This is one projection of the existing pointer hit route rather than a `HoverSession`, registry, or second input path.
+An exact duplicate host position does not emit Move.
+After final presentation geometry settles, Runtime resolves the same retained position again so recomposition, layout, clipping, transforms, layer dismissal, and unmount can emit Enter or Leave without synthetic movement.
+
+A View with only a Hover handler is eligible for the Hover route but not the ordinary pointer route, so a visual hover overlay does not block Click or raw input behind it.
+Disabled Views remain eligible because Hover describes pointer presence rather than activation.
+Nested bound Views each receive a direct containment lifecycle with positions converted into their own local coordinate spaces; delivery does not introduce capture, bubbling, handled results, or propagation control.
+Enter and Move are delivered from root to deepest bound View, while Leave is delivered from deepest bound View toward the root.
+
+Hover-capable NodeExtensions share the resolved branch and receive the same complete `HoverEvent` through `OnHover()`.
+Their existing `HoverHitTest()` and `HoverWhenDisabled()` capabilities continue to own specialized geometry and disabled affordances.
+Tooltip uses Move to restart its stationary-hover delay and immediately dismiss a visible hover-owned surface, while focus-owned visibility remains independent.
+
+If the deepest hit node is a `PlatformView`, the native hierarchy owns hover and the HuxerUI route is cleared at that boundary.
+Platform exit or cancellation also produces Leave and resets the retained hover state.
+
 ## Pointer cursor declarations
 
 `PointerCursor` is an ordinary property modifier rather than an event, gesture recognizer, or `NodeExtension` capability.

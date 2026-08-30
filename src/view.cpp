@@ -1550,8 +1550,9 @@ public:
     return HitTest(node, position);
   }
 
-  void OnHoverChanged(MountedNode& node, bool hovered) override {
+  void OnHover(MountedNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
+    const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
       return;
     }

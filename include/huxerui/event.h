@@ -94,6 +94,16 @@ enum class PointerDeviceKind {
   Pen,
 };
 
+/// Identifies one phase of hover-capable pointer presence over a View.
+enum class HoverEventType {
+  /// The pointer entered the View's presented bounds.
+  Enter,
+  /// The pointer moved while remaining within the View's presented bounds.
+  Move,
+  /// The pointer left the View's presented bounds or hover tracking was canceled.
+  Leave,
+};
+
 /// Identifies a portable pointer cursor requested by a View.
 ///
 /// Platforms map each value to the closest native cursor they provide. A PlatformView keeps ownership of the cursor
@@ -199,6 +209,27 @@ struct PointerEvent {
 
   /// Compares every pointer-event field.
   bool operator==(const PointerEvent&) const = default;
+};
+
+/// Carries one mouse or pen hover update for a View.
+///
+/// `position` is local to the receiving View, while `window_position` remains stable when the same physical update is
+/// delivered to nested Views. Touch input does not produce this event. Final presentation geometry can produce Enter
+/// or Leave under a stationary pointer, while an unchanged host position does not produce another Move.
+struct HoverEvent {
+  /// Lifecycle phase represented by this event.
+  HoverEventType type = HoverEventType::Move;
+  /// Platform pointer identifier associated with the hover-capable device.
+  std::int64_t pointer_id = 0;
+  /// Mouse or pen device that produced the update.
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  /// Current position in the receiving View's local logical coordinate space.
+  Point position;
+  /// Current position in host-window logical coordinates.
+  Point window_position;
+
+  /// Compares every hover-event field.
+  bool operator==(const HoverEvent&) const = default;
 };
 
 /// Carries a platform-recognized wheel or trackpad scroll update.
@@ -362,6 +393,16 @@ struct ViewEvents {
   struct PointerUp : Event<void(const PointerEvent&)> {};
   /// Reports that another recognizer or the platform canceled the raw pointer stream.
   struct PointerCancel : Event<void(const PointerEvent&)> {};
+  /// Reports mouse or pen entry, movement, and departure without joining pointer-sequence ownership.
+  ///
+  /// Disabled Views participate. Nested bound Views receive independent direct lifecycles rather than a bubbled event,
+  /// and a PlatformView owns hover over its native content.
+  /// @code
+  /// content.On<ViewEvents::Hover>([](const HoverEvent& event) {
+  ///   SetHighlighted(event.type != HoverEventType::Leave);
+  /// });
+  /// @endcode
+  struct Hover : Event<void(const HoverEvent&)> {};
   /// Requests a context menu at a window-local logical position.
   /// @code
   /// content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {

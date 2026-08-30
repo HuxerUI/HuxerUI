@@ -200,6 +200,7 @@ struct DragDropSession;
 struct DragSourceRecognitionState;
 struct MountedNode;
 struct PointerRecognition;
+struct PointerHoverState;
 struct PointerSession;
 struct ScrollRecognitionState;
 struct TapRecognitionState;
@@ -318,13 +319,16 @@ private:
   std::vector<detail::MountedNode*> ApplyDragScroll(const detail::PointerSession& session,
                                                     detail::ScrollRecognitionState& scroll, float delta);
   void HandlePointerDown(const PointerEvent& event);
-  void HandlePointerMove(const PointerEvent& event);
+  void HandlePointerMove(const PointerEvent& event, bool hover_moved);
   void HandlePointerCancel(const PointerEvent& event);
   void HandlePointerUp(const PointerEvent& event);
   bool CommitPendingTouchFocus(detail::PointerSession& session, Point position);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void UpdatePointerCursor(std::optional<Point> position);
-  void UpdateHoveredExtensions(Point position);
+  [[nodiscard]] bool TrackHoverPointer(const PointerEvent& event);
+  void RefreshHover(bool moved);
+  void UpdateHoverRoute(detail::PointerHoverState next, bool moved);
+  void ClearHover();
   void RefreshInteractionTree();
   bool DispatchKeyboardContextMenu();
   bool HandleFocusedTextInputKey(const KeyEvent& event);

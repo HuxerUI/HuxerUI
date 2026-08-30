@@ -302,7 +302,7 @@ public:
 
   virtual bool HoverWhenDisabled() const noexcept;
 
-  virtual void OnHoverChanged(MountedNode& node, bool hovered);
+  virtual void OnHover(MountedNode& node, const HoverEvent& event);
   virtual void OnFocusChanged(MountedNode& node, bool focused);
   virtual void OnKey(MountedNode& node, const KeyEvent& event);
 
@@ -343,7 +343,8 @@ Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are 
 
 An extension whose `HitTest()` returns true keeps its node on the topmost pointer route and prevents lower visual branches from receiving that pointer. Runtime may query `HitTest()` while constructing the route and again before dispatch, so implementations keep it deterministic and free of side effects.
 
-Every matching hover extension on the deepest hit node receives `OnHoverChanged()` rather than competing for one exclusive hover slot.
+Every matching hover extension on the deepest hit node receives the complete `HoverEvent` through `OnHover()` rather than competing for one exclusive hover slot.
+Public Hover handlers on the resolved ancestor route receive their own node-local Enter, Move, and Leave lifecycle without turning those Views into ordinary pointer targets.
 `HoverWhenDisabled()` opts a hover-only affordance into disabled targets without enabling focus, touch, Click, or other pointer behavior.
 An extension that returned `Observe` on pointer down continues receiving the pointer sequence without owning it; returning `CancelTarget` after recognizing a competing gesture sends PointerCancel to the active target and suppresses its activation.
 

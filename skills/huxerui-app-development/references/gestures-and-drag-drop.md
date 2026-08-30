@@ -43,6 +43,47 @@ The Context Menu key and Shift+F10 use the nearest enabled binding on the focuse
 Binding presence claims the request, so do not add a handled result, manually search parents, or rebuild secondary-tap recognition from PointerDown.
 PlatformViews retain native context menus, and Web preserves a pointer-initiated browser menu outside HuxerUI content that declares this binding.
 
+## Hover
+
+Bind `ViewEvents::Hover` for direct mouse or pen presence without claiming a pointer sequence:
+
+```cpp
+return content.On<ViewEvents::Hover>([hovered](const HoverEvent& event) {
+  hovered = event.type != HoverEventType::Leave;
+});
+```
+
+`HoverEventType` is `Enter`, `Move`, or `Leave`.
+Its `position` is local to the receiving View and `window_position` remains window logical.
+Touch does not produce Hover, while disabled Views remain eligible.
+Nested bound Views each receive an independent containment lifecycle rather than a bubbled event.
+A Hover-only visual overlay does not become an ordinary pointer target, and a `PlatformView` owns hover over its native content.
+
+Exact duplicate positions do not emit Move.
+Final geometry changes may still emit Enter or Leave under a stationary pointer.
+Use Enter and Leave for continuous presence, invert those transitions for departure-driven UI, or restart a lifecycle-bound `TaskHandle` on Enter and Move when content should appear only after the pointer remains still.
+`Delay` resumes on the owning UI thread, so a delayed handler may update `State` without `Post`.
+Do not invent `HoverStopped`, a timer service, or a raw PointerMove state machine for these cases.
+
+## Pointer cursors
+
+Declare a portable mouse or pen cursor with the ordinary `PointerCursor` property modifier:
+
+```cpp
+return Canvas(painter).With(PointerCursor(PointerCursorKind::Crosshair));
+```
+
+The deepest explicit declaration under the pointer wins.
+`PointerCursorKind::Default` is an explicit declaration that stops an ancestor cursor from applying to that region.
+Disabled Views remain eligible because a cursor is presentation rather than interaction ownership.
+
+The cursor kind may come from `State`; ordinary local recomposition updates the declaration even while the pointer is stationary.
+Assigning the same state value does not recompose or resend the cursor.
+A `PlatformView` owns the cursor over its native content, and a platform without a traditional pointer cursor may ignore the declaration.
+
+Do not add a raw pointer handler, resolver callback, or retained `NodeExtension` solely to select a cursor.
+Use `.With(PointerCursor(kind))` on the narrowest region whose interaction calls for that cursor, and inspect the active SDK header for the available portable kinds.
+
 ## Pointer interception
 
 Bind `ViewEvents::PointerIntercept` when application-level pointer logic must observe a sequence and synchronously decide when to own it.

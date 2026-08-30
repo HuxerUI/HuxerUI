@@ -52,7 +52,7 @@ Read only the references needed for the request:
 - Arranging UI, scrolling, virtualization, responsiveness, app shells, or any proposed custom layout: [layout-and-ui.md](references/layout-and-ui.md)
 - Composition, state, events, environment, lifecycle, and tasks: [fundamentals.md](references/fundamentals.md)
 - `.With(...)`, events, keys, and modifier ownership: [modifiers.md](references/modifiers.md)
-- Pointer buttons, context-menu requests, raw pointer input, pointer interception, repeated tap, long press, drag, multi-pointer transform, and typed in-process drag-and-drop: [gestures-and-drag-drop.md](references/gestures-and-drag-drop.md)
+- Pointer buttons, hover, pointer cursors, context-menu requests, raw pointer input, pointer interception, repeated tap, long press, drag, multi-pointer transform, and typed in-process drag-and-drop: [gestures-and-drag-drop.md](references/gestures-and-drag-drop.md)
 - Custom retained behavior, after confirming that events, gestures, animation, lifecycle, or other built-ins do not fit: [node-extensions.md](references/node-extensions.md)
 - Built-in themes, token or component-style customization, any proposed `ThemeDefinition`, indication, animation, layers, dialogs, menus, and scene transitions: [theme-animation-presentation.md](references/theme-animation-presentation.md)
 - Text input, validation, selection, and accessibility: [text-input-and-semantics.md](references/text-input-and-semantics.md)

@@ -1360,7 +1360,6 @@ bool Runtime::HasContextMenuHandler(Point position) const {
 }
 
 void Runtime::UpdatePointerCursor(std::optional<Point> position) {
-  state_->pointer_cursor_position_ = position;
   PointerCursorKind kind = PointerCursorKind::Default;
   if (position.has_value() && state_->mounted_root_ && state_->window_->metrics.viewport.width > 0.0F &&
       state_->window_->metrics.viewport.height > 0.0F) {
@@ -1390,11 +1389,21 @@ void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
   const PointerEvent event = NormalizePointerEvent(input_event);
   detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, event.position, true);
   try {
+    bool hover_moved = false;
     if (SupportsHover(event.device_kind)) {
-      UpdatePointerCursor(event.type == PointerEventType::Cancel ? std::nullopt : std::optional{event.position});
+      if (event.type == PointerEventType::Cancel) {
+        ClearHover();
+        UpdatePointerCursor(std::nullopt);
+      } else {
+        hover_moved = TrackHoverPointer(event);
+      }
     }
     const auto active = state_->pointer_sessions_.find(event.pointer_id);
     if (active != state_->pointer_sessions_.end() && TextSelectionOverlayOwnsPointer(active->second)) {
+      if (SupportsHover(event.device_kind) && event.type != PointerEventType::Cancel) {
+        ClearHover();
+        UpdatePointerCursor(std::nullopt);
+      }
       PointerSession& session = active->second;
       session.pressed_buttons = event.pressed_buttons;
       const bool chorded = event.type == PointerEventType::Down &&
@@ -1416,7 +1425,13 @@ void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
     const bool primary_down = event.type != PointerEventType::Down ||
                               (event.changed_button == PointerButton::Primary &&
                                !HasMultipleButtons(event.pressed_buttons));
-    if (active == state_->pointer_sessions_.end() && primary_down && HandleTextSelectionOverlayPointer(event)) {
+    const bool selection_overlay_handled =
+        active == state_->pointer_sessions_.end() && primary_down && HandleTextSelectionOverlayPointer(event);
+    if (selection_overlay_handled) {
+      if (SupportsHover(event.device_kind) && event.type != PointerEventType::Cancel) {
+        ClearHover();
+        UpdatePointerCursor(std::nullopt);
+      }
       if (event.type == PointerEventType::Down) {
         PointerSession session;
         session.down_position = event.position;
@@ -1436,7 +1451,7 @@ void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
       HandlePointerDown(event);
       break;
     case PointerEventType::Move:
-      HandlePointerMove(event);
+      HandlePointerMove(event, hover_moved);
       break;
     case PointerEventType::Cancel:
       HandlePointerCancel(event);
@@ -1718,11 +1733,11 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   AdvancePointerRecognition(timestamp);
 }
 
-void Runtime::HandlePointerMove(const PointerEvent& event) {
+void Runtime::HandlePointerMove(const PointerEvent& event, bool hover_moved) {
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured == state_->pointer_sessions_.end()) {
     if (SupportsHover(event.device_kind)) {
-      UpdateHoveredExtensions(event.position);
+      RefreshHover(hover_moved);
     }
     if (detail::MountedNode* target = HitTestPointer(*state_->mounted_root_, event.position);
         target && target->interaction.enabled) {
@@ -1818,25 +1833,6 @@ void Runtime::HandlePointerMove(const PointerEvent& event) {
 }
 
 void Runtime::HandlePointerCancel(const PointerEvent& event) {
-  if (SupportsHover(event.device_kind) && !state_->hovered_extensions_.empty()) {
-    std::vector<std::uint64_t> cleared_nodes;
-    for (const NodeExtensionHandle& hovered : state_->hovered_extensions_) {
-      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, hovered)) {
-        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, hovered.node_identity)) {
-          extension->OnHoverChanged(*node, false);
-          if (std::ranges::find(cleared_nodes, node->identity) == cleared_nodes.end()) {
-            InteractionState interaction = node->interaction;
-            interaction.hovered = false;
-            UpdateInteraction(*node, interaction);
-            cleared_nodes.push_back(node->identity);
-          }
-        }
-      }
-    }
-    state_->hovered_extensions_.clear();
-    RequestFrame();
-  }
-
   auto captured = state_->pointer_sessions_.find(event.pointer_id);
   if (captured == state_->pointer_sessions_.end()) {
     return;
@@ -1855,7 +1851,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
     }
     if (SupportsHover(event.device_kind)) {
-      UpdateHoveredExtensions(event.position);
+      RefreshHover(false);
     }
     return;
   }
@@ -1875,7 +1871,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       state_->pointer_sessions_.erase(captured);
     }
     if (final_release && SupportsHover(event.device_kind)) {
-      UpdateHoveredExtensions(event.position);
+      RefreshHover(false);
     }
     return;
   }
@@ -1886,7 +1882,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     if (final_release) {
       state_->pointer_sessions_.erase(captured);
       if (SupportsHover(event.device_kind)) {
-        UpdateHoveredExtensions(event.position);
+        RefreshHover(false);
       }
     }
     return;
@@ -1987,7 +1983,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     }
   }
   if (final_release && SupportsHover(event.device_kind)) {
-    UpdateHoveredExtensions(event.position);
+    RefreshHover(false);
   }
 }
 

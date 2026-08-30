@@ -125,10 +125,10 @@ public:
     return node.Bounds().Contains(position);
   }
 
-  void OnHoverChanged(MountedNode& node, bool hovered) override {
+  void OnHover(MountedNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     if (hovered_) {
-      *hovered_ = hovered;
+      *hovered_ = event.type != HoverEventType::Leave;
     }
   }
 
@@ -175,6 +175,34 @@ TEST_CASE("TestTooltipShowsAfterHoverDelayAndDismissesAfterExitDelay") {
   runtime.BuildFrame();
   runtime.BuildFrame();
   REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") == nullptr);
+}
+
+TEST_CASE("TestTooltipRequiresStationaryHoverAndRestartsAfterMovement") {
+  TestPlatform platform;
+  Runtime runtime{TooltipApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  MovePointer(runtime, {40.0F, 20.0F});
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.3);
+  runtime.BuildFrame();
+  MovePointer(runtime, {50.0F, 20.0F});
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.49);
+  REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") == nullptr);
+  platform.AdvanceTime(0.02);
+  runtime.BuildFrame();
+  REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") != nullptr);
+
+  MovePointer(runtime, {60.0F, 20.0F});
+  runtime.BuildFrame();
+  REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") == nullptr);
+  platform.AdvanceTime(0.49);
+  REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") == nullptr);
+  platform.AdvanceTime(0.02);
+  runtime.BuildFrame();
+  REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") != nullptr);
 }
 
 TEST_CASE("TestTooltipRemainsVisibleWhileItsSurfaceIsHovered") {

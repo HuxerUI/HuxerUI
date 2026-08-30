@@ -337,7 +337,11 @@ EM_JS(
                       {
                         const owner = session.activePointers.get(event.pointerId);
                         const token = platformToken(event.target);
-                        if (owner === false || (owner === undefined && token && platformViewWins(token, position(event)))) {
+                        if (owner === false) {
+                          return;
+                        }
+                        if (owner === undefined && token && platformViewWins(token, position(event))) {
+                          sendPointer(event, 3);
                           return;
                         }
                         sendPointer(event, 2);

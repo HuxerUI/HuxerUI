@@ -58,6 +58,8 @@ When reduced motion is enabled, the runtime selects the documented reduced or im
 
 Attach `Tooltip` to an anchor that needs short contextual help.
 Hover, focus, dismissal, placement, and delay are owned by the presentation service and active theme.
+The hover delay begins again after each pointer movement over the anchor, and a visible hover-owned Tooltip hides immediately when the pointer moves.
+Keyboard focus keeps its independently owned Tooltip visible.
 
 ## Toast
 

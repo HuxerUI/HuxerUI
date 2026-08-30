@@ -166,6 +166,34 @@ Attach `ViewEvents::ContextMenuRequested` when a View owns context actions inste
 The event reports a window-local position for secondary-button input and the focused View center for the Context Menu key or Shift+F10.
 `ViewEvents::PointerIntercept` may take exclusive ownership of any button stream by returning `true`; pending built-in recognizers and the raw target receive `Cancel` when another participant wins.
 
+Use `ViewEvents::Hover` for mouse or pen presence without joining pointer-sequence ownership:
+
+```cpp
+return content.On<ViewEvents::Hover>([hovered](const HoverEvent& event) {
+  switch (event.type) {
+  case HoverEventType::Enter:
+  case HoverEventType::Move:
+    hovered = true;
+    break;
+  case HoverEventType::Leave:
+    hovered = false;
+    break;
+  }
+});
+```
+
+`position` is local to the receiving View and `window_position` uses window logical coordinates.
+Nested Views with Hover handlers each receive their own containment lifecycle; this is direct delivery, not event bubbling.
+Disabled Views still receive Hover, while touch input does not create Hover events.
+An exact duplicate pointer position does not emit another Move, but recomposition, layout, and presentation changes still resolve Enter or Leave under a stationary pointer.
+A `PlatformView` owns hover over its native content.
+
+For content that remains visible while hovered, set `State` on Enter or Move and clear it on Leave.
+For content that appears only after departure, update that `State` on Leave instead.
+For a delayed tooltip-like affordance, restart a lifecycle-bound `TaskHandle` on Enter and Move, await `Delay(500ms)`, and cancel the task and hide the affordance on Move or Leave as appropriate.
+`Delay` resumes on the owning UI thread, so the task may update `State` directly without `Post`.
+Hover deliberately has no separate stopped-moving event or built-in delay policy.
+
 Use `PointerCursor` to declare a portable cursor without adding a pointer handler or retained extension:
 
 ```cpp
