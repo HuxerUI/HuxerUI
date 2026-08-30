@@ -35,15 +35,11 @@ struct PendingStart {
   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct LinuxTimerState : huxerui::example::TimerService, std::enable_shared_from_this<LinuxTimerState> {
+struct LinuxTimerState : huxerui::example::TimerService {
   static std::shared_ptr<LinuxTimerState> Create(huxerui::PlatformAdapter& adapter) {
     auto state = std::shared_ptr<LinuxTimerState>(new LinuxTimerState(adapter));
-    const std::weak_ptr<LinuxTimerState> weak_state = state;
-    state->worker = std::thread([weak_state] {
-      if (const std::shared_ptr<LinuxTimerState> strong_state = weak_state.lock()) {
-        strong_state->Run();
-      }
-    });
+    LinuxTimerState* state_pointer = state.get();
+    state->worker = std::thread([state_pointer] { state_pointer->Run(); });
     return state;
   }
 

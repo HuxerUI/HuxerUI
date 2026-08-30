@@ -62,11 +62,12 @@ Task<void> DownloadFile(std::shared_ptr<HttpClient> http, File output, State<Dow
     .detail = "Waiting for response headers...",
   };
 
+  HttpRequest stream_request{
+      .url = download_url,
+      .headers = {{"Accept", "application/octet-stream"}},
+  };
   HttpStreamResult opened = co_await http->SendStream(
-      {
-          .url = download_url,
-          .headers = {{"Accept", "application/octet-stream"}},
-      },
+      std::move(stream_request),
       [download](HttpProgress progress) {
         if (progress.kind != HttpProgressKind::Download) {
           return;
@@ -161,10 +162,11 @@ View HttpContent() {
         tasks.Launch([=]() -> Task<void> {
           request = {true, "Loading", "Waiting for the response..."};
 
-          HttpResult result = co_await http->Send({
+          HttpRequest buffered_request{
               .url = "https://httpbingo.org/get",
               .headers = {{"Accept", "application/json"}},
-          });
+          };
+          HttpResult result = co_await http->Send(std::move(buffered_request));
           if (result.HasResponse()) {
             HttpResponse& response = result.Response();
             request = {
