@@ -113,17 +113,32 @@ if ($Uninstall) {
     exit 0
 }
 
-$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-if ($Architecture -notin @("x64", "x86_64")) {
+$Architecture = $(if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }).ToLowerInvariant()
+
+if ($Architecture -notin @("amd64", "x64", "x86_64")) {
     Fail "Windows SDK archives currently support x86_64 hosts only"
 }
+
 $HostArchitecture = "x86_64"
 
 $ReleaseTag = $null
 if (-not $Archive) {
     if (-not $Version) {
-        $Release = Invoke-RestMethod -Uri "$RepositoryUrl/releases/latest"
+        $ApiUrl = $RepositoryUrl -replace '^https://github\.com/', 'https://api.github.com/repos/'
+        
+        try {
+            $Release = Invoke-RestMethod -Uri "$ApiUrl/releases/latest" -Headers @{
+                Accept       = "application/vnd.github+json"
+                "User-Agent" = "PowerShell-Installer"
+            }
+        } catch {
+            Fail "Failed to query latest release from API: $_"
+        }
+
         $ReleaseTag = [string]$Release.tag_name
+        if (-not $ReleaseTag) {
+            Fail "GitHub API did not return a valid release. Response: $($Release | ConvertTo-Json -Depth 2)"
+        }
         if (-not $ReleaseTag.StartsWith("v")) {
             Fail "latest HuxerUI release has an invalid tag: $ReleaseTag"
         }
@@ -135,6 +150,7 @@ if (-not $Archive) {
     if ($Version -notmatch "^[0-9A-Za-z._-]+$") {
         Fail "invalid version: $Version"
     }
+    
     $ArchiveName = "huxerui-sdk-$Version-windows-$HostArchitecture.zip"
     $ArchiveSource = "$RepositoryUrl/releases/download/$ReleaseTag/$ArchiveName"
     $ArchiveDisplay = $ArchiveSource
