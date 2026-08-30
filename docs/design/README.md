@@ -34,7 +34,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Resources, Images, and Localization](resources.md): typed resources, packages, variants, and locale.
 - [Semantics and Accessibility](semantics.md): semantic frames, actions, identity, and platform bridges.
 - [Files and Application Storage](files.md): storage, external references, pickers, and platform mapping.
-- [HTTP Client](http.md): requests, cancellation, transport ownership, and errors.
+- [HTTP Client](http.md): streaming, progress, cancellation, and platform transport ownership.
 
 ## SDK and platforms
 

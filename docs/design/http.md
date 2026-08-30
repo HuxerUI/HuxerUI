@@ -1,212 +1,170 @@
 # HTTP Client Design
 
-The platform-neutral API, Runtime service, Task integration, deterministic transport tests, and independent Windows, macOS, iOS, Linux, Android, and Web backends are implemented.
+The platform-neutral API, shared operation state, Task integration, and Windows, macOS, iOS, Linux, Android, and Web transports are implemented.
 
-## Goals
-
-HuxerUI provides one small HTTP API that composes with Task and retains each platform's networking stack.
-The shared layer owns portable request values, response values, validation, error categories, Task resumption, and cancellation races.
-Platform adapters own URL loading, TLS, proxy integration, connection reuse, redirects, timeout enforcement, and conversion to owned C++ response values.
+## Ownership
 
 HTTP is a built-in Runtime capability rather than a PlatformModule.
-It does not introduce a string registry, PlatformPayload encoding, a second asynchronous result model, or an HTTP-specific cancellation handle.
+Runtime installs one `HttpClient` root service backed by the adapter's private `HttpTransport`.
+The shared layer owns request validation, result types, stream state, progress semantics, buffering for `Send()`, Task resumption, and cancellation races.
+Platform transports own URL loading, TLS, proxies, redirects, native decoding, headers, body delivery, and native cancellation.
 
-## Public API
+There is one operation state for both public request forms.
+`SendStream()` exposes that state after final headers, while `Send()` opens the same state and repeatedly reads it into `HttpResponse::body`.
+There is no buffered transport completion path beside the streaming path and no second registry, callback model, or data channel.
 
-The public declarations live in `<huxerui/http.h>` and are re-exported from `<huxerui/huxerui.h>`:
+## Public contract
+
+`HttpClient::Send()` returns `Task<HttpResult>` and retains the complete final response body.
+`HttpClient::SendStream()` returns `Task<HttpStreamResult>` after final headers and before body EOF.
+Both accept `std::function<void(HttpProgress)>`.
+
+`HttpResponseStream` is move-only and exposes immutable final URL, status, and headers plus pull-based `Read()`.
+Only one read may be outstanding.
+A data result contains 1 byte through 64 KiB, completion is an explicit alternative, and a post-header transport failure is an error alternative.
+The shared state splits larger platform deliveries without requesting another native read until the buffered remainder has been consumed.
+
+HTTP status codes, including 4xx and 5xx, remain responses.
+Errors before final headers use `HttpStreamResult::Error()`; errors after headers use `HttpStreamReadResult::Error()`.
+`Send()` maps either transport phase to `HttpResult::Error()` because its buffered result is not published until EOF.
+
+Request validation happens synchronously before the lazy Task is returned.
+URLs must be absolute HTTP or HTTPS URLs, GET and HEAD reject nonempty bodies, header syntax is validated, and a specified timeout must be positive.
+
+## Progress
+
+`HttpProgress::transferred_bytes` is monotonic for each direction.
+Upload progress is the logical request body accepted or handed to the platform, not server acknowledgement.
+The shared state clamps redirect replays and native over-reporting to the request body size.
+An early server response is allowed before the logical upload reaches its total.
+
+Download progress advances immediately before a chunk is returned to `Read()`.
+The buffered `Send()` path uses those same reads, so its progress counts the exact bytes appended to `HttpResponse::body`.
+The bytes are post-platform-delivery bytes: a backend that performs automatic content decoding reports the decoded bytes, while a backend that exposes encoded bytes reports encoded bytes.
+
+`total_bytes` is optional.
+A transport supplies it only when native metadata reliably describes the representation delivered to the shared state.
+Content length is therefore omitted for chunked responses and when automatic content decoding makes the encoded content length unreliable.
+The shared state clears a native total if delivered bytes exceed it.
+
+Transport callbacks may arrive on any thread.
+The shared state coalesces pending upload observations and resumes through the Task execution's `UIThreadDispatcher`.
+Application progress callbacks and code after every HTTP `co_await` run on the owning Runtime UI thread.
+If a progress callback throws, the current Task rethrows that exception and the operation is canceled.
+
+## Shared operation state
+
+`src/http_internal.h` defines the only platform boundary:
 
 ```cpp
-enum class HttpMethod {
-  Get,
-  Head,
-  Post,
-  Put,
-  Patch,
-  Delete,
-  Options,
-};
-
-struct HttpHeader {
-  std::string name;
-  std::string value;
-};
-
-struct HttpRequest {
+struct HttpTransportResponse {
   std::string url;
-  HttpMethod method = HttpMethod::Get;
+  int status_code;
   std::vector<HttpHeader> headers;
-  Bytes body;
-  std::optional<std::chrono::milliseconds> timeout =
-      std::chrono::milliseconds{30000};
+  std::optional<std::uint64_t> body_size;
 };
 
-struct HttpResponse {
-  std::string url;
-  int status_code = 0;
-  std::vector<HttpHeader> headers;
-  Bytes body;
+struct HttpTransportCallbacks {
+  std::function<void(std::uint64_t)> upload_progress;
+  std::function<void(HttpTransportResponse)> response;
+  std::function<void(Bytes)> body;
+  std::function<void()> complete;
+  std::function<void(HttpError)> error;
 };
 
-enum class HttpErrorCode {
-  Transport,
-  Timeout,
-  Unsupported,
-};
-
-struct HttpError {
-  HttpErrorCode code;
-  std::string message;
-};
-
-class [[nodiscard]] HttpResult final {
+class HttpTransportOperation {
 public:
-  explicit HttpResult(HttpResponse response);
-  explicit HttpResult(HttpError error);
-
-  [[nodiscard]] bool HasResponse() const noexcept;
-
-  [[nodiscard]] HttpResponse& Response() &;
-  [[nodiscard]] const HttpResponse& Response() const&;
-  [[nodiscard]] HttpResponse&& Response() &&;
-
-  [[nodiscard]] HttpError& Error() &;
-  [[nodiscard]] const HttpError& Error() const&;
+  virtual void RequestRead() = 0;
+  virtual void Cancel() noexcept = 0;
 };
 
-class HttpClient final {
-public:
-  [[nodiscard]] Task<HttpResult> Send(HttpRequest request) const;
-};
-```
-
-Request and response bodies are owned binary values using `Bytes` from `<huxerui/data.h>`.
-They preserve embedded null bytes and byte sequences that are not valid UTF-8.
-HttpClient does not infer an encoding, parse JSON, construct form bodies, or decode application payloads.
-Header entries remain a sequence because repeated field names are meaningful, although a platform may combine fields when its response API no longer exposes individual lines.
-
-URLs must be absolute HTTP or HTTPS URLs.
-GET and HEAD requests reject non-empty bodies.
-Header names use the HTTP token character set, and header names and values reject null, carriage-return, and line-feed characters.
-A specified timeout must be positive and covers the request until the complete in-memory response is available.
-Omitting it disables the HuxerUI deadline but does not disable failures imposed by the operating system or network stack.
-
-## Usage
-
-Runtime installs one HttpClient Root Service before application RootHooks run.
-Components retrieve it through the existing typed service function and launch requests through their existing TaskScope:
-
-```cpp
-std::string Utf8Text(std::span<const std::byte> bytes) {
-  return bytes.empty()
-      ? std::string{}
-      : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-}
-
-[[huxerui::composable]]
-View RepositoryPage() {
-  auto http = UseService<HttpClient>();
-  auto tasks = UseTaskScope();
-  auto result = UseState(std::string{"Not loaded"});
-
-  return Button("Load").OnClick([=] {
-    tasks.Launch([=]() -> Task<void> {
-      HttpResult request = co_await http->Send({
-          .url = "https://api.example.com/repository",
-          .headers = {{"Accept", "application/json"}},
-      });
-      if (request.HasResponse()) {
-        HttpResponse response = std::move(request).Response();
-        result = Utf8Text(response.body);
-      } else {
-        result = request.Error().message;
-      }
-    });
-  });
-}
-```
-
-This example's API contract declares a UTF-8 JSON response.
-Applications remain responsible for selecting and validating the encoding when converting response bytes to text.
-
-HTTP status codes, including 4xx and 5xx, produce an HttpResult containing HttpResponse.
-Transport failures, timeout, and an unavailable platform transport produce an HttpResult containing HttpError.
-HttpResult deliberately exposes `HasResponse()` instead of a Boolean conversion because an HTTP error status is still a valid response.
-Invalid methods, URLs, headers, bodies, and timeout values remain caller errors and throw `std::invalid_argument` synchronously from `Send()` before a Task is launched.
-The HTTP result model does not add a generic Result, AsyncResult, or second Task error channel.
-
-## Ownership and cancellation
-
-HttpClient is a per-Runtime Root Service and owns a shared private HttpTransport.
-The transport may retain a process or adapter-level session so requests reuse transport connection pools.
-Every Send call copies that shared transport into the lazy Task before returning, so the coroutine does not retain a raw HttpClient pointer.
-
-The HTTP awaiter binds its continuation to the current Task execution.
-A platform completion may arrive on any thread, but it resumes the coroutine through the execution's UIThreadDispatcher.
-Code after co_await therefore runs on the TaskScope's owning UI thread and may update State directly.
-
-Destroying the awaiter marks the request canceled, detaches its continuation, and invokes the platform cancellation operation.
-TaskHandle cancellation, RecomposeScope retirement, virtual-item eviction, and Runtime teardown all reach that same path through TaskScope ownership.
-Cancellation does not throw and does not resume application code.
-The private request state accepts at most one result, and a completion arriving after cancellation or timeout is ignored safely.
-
-## Platform boundary
-
-PlatformAdapter has one optional protected capability:
-
-```cpp
-virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
-```
-
-The base implementation returns no transport so existing custom adapters remain source-compatible.
-Runtime still provides HttpClient; awaiting Send on an adapter without a transport returns HttpError with `HttpErrorCode::Unsupported`.
-
-The focused private contract lives in `src/http_internal.h`:
-
-```cpp
 class HttpTransport {
 public:
-  virtual std::function<void()> Start(
+  virtual std::shared_ptr<HttpTransportOperation> Start(
       HttpRequest request,
-      HttpTransportCompletion completion
+      bool require_incremental_response,
+      HttpTransportCallbacks callbacks
   ) = 0;
 };
 ```
 
-Start takes ownership of the complete request and returns an optional cancellation operation.
-The completion receives one owned platform-neutral HttpResult and may run on any thread.
-Transport callbacks never retain a coroutine handle, Runtime pointer, or awaiter directly.
+The callback order is final-response oriented:
 
-macOS uses an ephemeral NSURLSession with URLSessionDataTask.
-It disables persistent cookies and URL caching, keeps connection reuse inside the session, applies the request deadline, cancels the data task during Task cancellation, and converts the final HTTP response and body into owned C++ values.
-iOS has an independent NSURLSession implementation in its platform directory with the same buffering, timeout, cancellation, and ownership contract.
+- Zero or more upload observations may precede the final response.
+- Exactly one final response or pre-header error is published.
+- Body callbacks are demand-driven after `RequestRead()`.
+- Exactly one completion or post-header error terminates body delivery.
+- Intermediate redirect responses and bodies are not published.
 
-The Android backend uses HttpURLConnection on a bounded worker executor, enforces the complete request deadline, and disconnects a canceled request.
-The Web backend uses Fetch on the browser main thread, buffers the response through `arrayBuffer()`, and aborts canceled or timed-out requests through AbortController.
-It preserves browser redirect, same-origin credential, CORS, forbidden-header, and response-header visibility rules rather than weakening them in generated glue.
-The Windows backend uses one asynchronous WinHTTP session per Runtime and one request handle per Send call.
-WinHTTP callbacks advance send, response, and buffered-read phases without occupying a framework worker thread.
-Closing the request handle is the single cancellation path, and callback context remains alive until WinHTTP reports `HANDLE_CLOSING`.
-A private thread-pool deadline covers the complete operation rather than restarting for each WinHTTP phase.
-Windows 10 and later use the operating system automatic proxy configuration, while Windows 7 compatibility builds retain WinHTTP's default proxy mode.
-The backend disables persistent cookies, requests transport-managed gzip and deflate decompression when the application has not supplied `Accept-Encoding`, and preserves repeated response headers when WinHTTP exposes them.
-The Linux backend uses one libsoup 3 Session on a dedicated GLib network thread, preserving system proxy and trust-store behavior without entering the GTK UI context.
-It buffers responses through the asynchronous send-and-read API, enforces the complete request deadline with a GLib timeout source, and cancels requests through GCancellable.
-The distribution-provided libsoup 3 development package and its GLib/GIO dependencies are manually installed system dependencies rather than FetchContent inputs.
-Adding another platform implements HttpTransport without changing HttpClient or Task.
+The shared state is mutex-protected but never invokes a platform operation, application callback, or coroutine continuation while holding its lock.
+Transport callbacks retain only a weak state reference.
+The state keeps the transport and operation alive through EOF, timeout, error, or cancellation.
+Body data or completion received before final response metadata terminates the operation with a transport error.
+Late and duplicate callbacks are ignored.
 
-Platform application projects retain authority over permissions and security policy.
-HuxerUI does not add Android Internet permission from CMake, weaken Apple transport security or sandbox entitlements, bypass browser CORS, replace system trust stores, or inject application credentials.
+Calling `Read()` reserves the single read slot synchronously before returning its lazy Task.
+Destroying an unstarted or suspended read Task cancels the complete stream.
+Consuming EOF or a read error closes the read contract; subsequent calls throw `std::logic_error`.
+Destroying an unfinished `HttpResponseStream` reaches the same idempotent platform cancellation path.
+
+The optional HuxerUI deadline covers request start through stream EOF, including redirects and idle time between reads.
+A timeout received after headers is retained until the next `Read()`.
+Task cancellation remains distinct from `HttpError`: it detaches the continuation and does not resume application code.
+
+## Platform transports
+
+Windows uses one asynchronous WinHTTP session per Runtime.
+It publishes final metadata from `HEADERS_AVAILABLE`, performs one `WinHttpReadData` per requested native read, and keeps callback context alive until `HANDLE_CLOSING`.
+Its thread-pool deadline covers the whole stream.
+WinHTTP handles redirects and optional gzip or deflate decoding, and download totals are omitted when decoding makes content length unreliable.
+
+Linux uses one libsoup 3 session on its private GLib network thread.
+It opens responses with `soup_session_send_async` and performs one `GInputStream` read per demand.
+The GLib deadline and `GCancellable` remain active while a stream is idle.
+The distribution-provided libsoup and GLib dependencies remain system packages.
+
+Android uses `HttpURLConnection` on a bounded Java executor.
+Connection setup and each requested body read occupy workers only while work is active; an idle stream does not reserve a worker thread.
+The in-memory request body uses Java's buffered upload path so automatic redirects and authentication are not disabled by fixed-length streaming mode.
+JNI publishes headers, body chunks, progress, and one terminal event through the same native operation handle.
+
+Web uses Fetch and `ReadableStreamDefaultReader` when available.
+`SendStream()` returns `Unsupported` before headers when the browser cannot expose a readable body stream.
+The internal buffered `Send()` path may fall back to `Response.arrayBuffer()` on such a browser without creating another public result path.
+`AbortController` and a separate timer remain active through EOF.
+Browser CORS, forbidden-header, credential, redirect, and visible-response-header rules are preserved.
+
+iOS and macOS each own a Foundation transport in their platform directory.
+Each operation uses an ephemeral `NSURLSession` data delegate, suspends its data task after headers and after each delivered body chunk, and resumes it for one requested read.
+A dispatch deadline remains active while the native task is suspended.
+The configuration disables persistent cookies and URL caching without weakening App Transport Security or sandbox policy.
+
+No transport uses `RunWorker` as a general networking scheduler.
+Windows, iOS, macOS, Web, and libsoup use their native asynchronous facilities; Android retains its bounded Java network executor.
+These choices do not extend platform lifecycle or grant background execution.
+Android and iOS applications need explicit background-task or background-transfer capabilities when work must continue through application suspension.
+On macOS, ordinary requests follow the application's process lifetime and system scheduling rather than the mobile suspension contract.
+
+## Redirects and content decoding
+
+The public API intentionally has no redirect policy object.
+Each platform follows redirects permitted by its networking stack and exposes only the final URL, status, headers, and body.
+The request timeout includes redirect handling, and upload progress remains a logical-body count even when a platform replays the body.
+Platform redirect limits, cross-scheme restrictions, and browser security rules remain authoritative.
+
+Content decoding also remains platform-managed.
+The shared layer does not implement gzip, deflate, Brotli, or another parallel decoder.
+This preserves the platform's header and byte-delivery contract and prevents a second body pipeline.
 
 ## Deliberate limits
 
-Send buffers the complete request and response bodies in memory and is intended for ordinary API requests.
-The HTTP API does not include streaming uploads, streaming downloads, progress callbacks, resumable transfers, background transfer, WebSocket, retry policy, interceptors, certificate pinning, a framework Cookie Jar, or persistent HTTP caching.
-Streaming and file-transfer APIs remain separate operations instead of changing the ownership of `HttpResponse::body`.
+Request bodies remain owned in-memory `Bytes`; streaming and resumable uploads are not part of this contract.
+`Send()` remains intended for ordinary API responses that fit in memory, while `SendStream()` allows bounded consumption without implying a file destination.
+Implicit file transfers, background transfer, retry policy, interceptors, WebSocket, certificate pinning, a framework cookie jar, and persistent HTTP caching remain separate capabilities.
 
 ## Validation
 
-Shared tests use a deterministic fake HttpTransport to verify arbitrary binary request and response preservation, HTTP error separation, parameter validation, transport failures, Task cancellation, late completion, unsupported adapters, and UI-thread resumption.
-Each platform phase adds its implementation to the corresponding platform build and validates that platform without claiming unexecuted backends.
-Windows transport tests use a deterministic loopback server to verify WinHTTP request and response conversion plus the complete-operation deadline.
-Linux transport tests use a deterministic loopback server to verify binary bodies, repeated headers, redirects, errors, cancellation, deadlines, races, and shutdown.
-`example_http` provides the Windows, macOS, iOS, Linux, Android, and Web end-to-end request demonstration and becomes available on another platform only after that platform transport is implemented.
+Shared Runtime tests verify synchronous validation, binary preservation, headers-first completion, demand reads, 64 KiB splitting, pre- and post-header errors, logical progress, UI-thread callbacks, cancellation, late events, and unsupported adapters.
+Windows loopback tests verify WinHTTP request conversion, pull-based body reads, reliable length metadata, deadlines, cancellation, and invalid UTF-8 handling.
+Linux loopback tests verify binary bodies, repeated headers, redirects, HTTP statuses, transport failures, deadlines, cancellation races, and transport shutdown.
+Android and Web builds validate their language boundary and generated platform artifact; Apple behavior requires macOS or iOS validation because Objective-C++ and Foundation cannot be built on Windows.

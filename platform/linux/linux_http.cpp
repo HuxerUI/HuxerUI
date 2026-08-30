@@ -7,11 +7,15 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -21,6 +25,8 @@
 namespace huxerui::detail {
 
 namespace {
+
+constexpr gsize read_buffer_size = 64U * 1024U;
 
 const char* HttpMethodName(HttpMethod method) noexcept {
   switch (method) {
@@ -47,6 +53,58 @@ std::string ErrorMessage(const GError* error) {
     return "HuxerUI Linux HTTP request failed";
   }
   return "HuxerUI Linux HTTP request failed: " + std::string(error->message);
+}
+
+bool EqualsAsciiCaseInsensitive(std::string_view first, std::string_view second) noexcept {
+  if (first.size() != second.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < first.size(); ++index) {
+    unsigned char left = first[index];
+    unsigned char right = second[index];
+    if (left >= 'A' && left <= 'Z') {
+      left = static_cast<unsigned char>(left + ('a' - 'A'));
+    }
+    if (right >= 'A' && right <= 'Z') {
+      right = static_cast<unsigned char>(right + ('a' - 'A'));
+    }
+    if (left != right) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::optional<std::uint64_t> ParseContentLength(const std::vector<HttpHeader>& headers) noexcept {
+  std::optional<std::uint64_t> content_length;
+  for (const HttpHeader& header : headers) {
+    if (EqualsAsciiCaseInsensitive(header.name, "Content-Encoding") ||
+        EqualsAsciiCaseInsensitive(header.name, "Transfer-Encoding")) {
+      return std::nullopt;
+    }
+    if (!EqualsAsciiCaseInsensitive(header.name, "Content-Length")) {
+      continue;
+    }
+    std::uint64_t value = 0;
+    if (header.value.empty()) {
+      return std::nullopt;
+    }
+    for (const unsigned char character : header.value) {
+      if (character < '0' || character > '9') {
+        return std::nullopt;
+      }
+      const std::uint64_t digit = character - '0';
+      if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10U) {
+        return std::nullopt;
+      }
+      value = value * 10U + digit;
+    }
+    if (content_length.has_value() && *content_length != value) {
+      return std::nullopt;
+    }
+    content_length = value;
+  }
+  return content_length;
 }
 
 class LinuxHttpRequest;
@@ -157,15 +215,15 @@ private:
   std::vector<std::shared_ptr<LinuxHttpRequest>> requests_;
 };
 
-class LinuxHttpRequest final : public std::enable_shared_from_this<LinuxHttpRequest> {
+class LinuxHttpRequest final : public HttpTransportOperation, public std::enable_shared_from_this<LinuxHttpRequest> {
 public:
   LinuxHttpRequest(
-      std::weak_ptr<LinuxHttpTransportState> transport, HttpRequest request, HttpTransportCompletion completion
+      std::weak_ptr<LinuxHttpTransportState> transport, HttpRequest request, HttpTransportCallbacks callbacks
   )
-      : transport_(std::move(transport)), request_(std::move(request)), completion_(std::move(completion)),
+      : transport_(std::move(transport)), request_(std::move(request)), callbacks_(std::move(callbacks)),
         cancellable_(g_cancellable_new()) {}
 
-  ~LinuxHttpRequest() {
+  ~LinuxHttpRequest() override {
     g_object_unref(cancellable_);
   }
 
@@ -178,12 +236,7 @@ public:
     try {
       message_ = soup_message_new(HttpMethodName(request_.method), request_.url.c_str());
       if (message_ == nullptr) {
-        FinishWithoutNative(HttpResult(
-            HttpError{
-                HttpErrorCode::Transport,
-                "HuxerUI Linux HTTP URL could not be parsed",
-            }
-        ));
+        FinishWithoutNative(HttpError{HttpErrorCode::Transport, "HuxerUI Linux HTTP URL could not be parsed"});
         return;
       }
 
@@ -220,8 +273,19 @@ public:
         g_source_attach(timeout_source_, g_main_context_get_thread_default());
       }
 
+      std::function<void(std::uint64_t)> upload_progress;
+      {
+        std::scoped_lock lock(mutex_);
+        if (!finished_) {
+          upload_progress = callbacks_.upload_progress;
+        }
+      }
+      if (!request_.body.empty() && upload_progress) {
+        upload_progress(static_cast<std::uint64_t>(request_.body.size()));
+      }
+      native_pending_ = true;
       auto* callback_request = new std::shared_ptr<LinuxHttpRequest>(shared_from_this());
-      soup_session_send_and_read_async(
+      soup_session_send_async(
           session,
           message_,
           G_PRIORITY_DEFAULT,
@@ -230,41 +294,48 @@ public:
             std::unique_ptr<std::shared_ptr<LinuxHttpRequest>> request(
                 static_cast<std::shared_ptr<LinuxHttpRequest>*>(data)
             );
-            (*request)->Complete(SOUP_SESSION(source), result);
+            (*request)->ReceiveHeaders(SOUP_SESSION(source), result);
           },
           callback_request
       );
     } catch (const std::exception& error) {
-      FinishWithoutNative(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Linux HTTP request failed: " + std::string(error.what()),
-          }
-      ));
+      FinishWithoutNative(HttpError{
+          HttpErrorCode::Transport,
+          "HuxerUI Linux HTTP request failed: " + std::string(error.what()),
+      });
     } catch (...) {
-      FinishWithoutNative(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Linux HTTP request failed",
-          }
-      ));
+      FinishWithoutNative(HttpError{HttpErrorCode::Transport, "HuxerUI Linux HTTP request failed"});
     }
   }
 
-  void Cancel() {
+  void RequestRead() override {
+    if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
+      const std::shared_ptr<LinuxHttpRequest> request = shared_from_this();
+      transport->Post([request] { request->ReadOnNetworkThread(); });
+    }
+  }
+
+  void Cancel() noexcept override {
     if (!SuppressCompletion()) {
       return;
     }
     if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
       const std::shared_ptr<LinuxHttpRequest> request = shared_from_this();
-      // Keep libsoup request cancellation on the network context that owns its completion and cleanup.
-      transport->Post([request] { request->CancelSoupRequest(); });
+      transport->Post([request] { request->CancelOnNetworkThread(); });
     }
   }
 
   void CancelOnNetworkThread() noexcept {
-    static_cast<void>(SuppressCompletion());
-    CancelSoupRequest();
+    {
+      std::scoped_lock lock(mutex_);
+      finished_ = true;
+      callbacks_ = {};
+    }
+    g_cancellable_cancel(cancellable_);
+    if (!native_pending_) {
+      CleanupNative();
+      RemoveFromTransport();
+    }
   }
 
 private:
@@ -274,12 +345,7 @@ private:
       return false;
     }
     finished_ = true;
-    completion_ = {};
     return true;
-  }
-
-  void CancelSoupRequest() noexcept {
-    g_cancellable_cancel(cancellable_);
   }
 
   void SetRequestBody(SoupMessage* message) noexcept {
@@ -292,64 +358,57 @@ private:
   }
 
   void Timeout() noexcept {
-    HttpTransportCompletion completion;
+    HttpTransportCallbacks callbacks;
     {
       std::scoped_lock lock(mutex_);
       if (finished_) {
         return;
       }
       finished_ = true;
-      completion = std::move(completion_);
+      callbacks = std::move(callbacks_);
     }
-    if (completion) {
-      completion(HttpResult(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"}));
+    if (callbacks.error) {
+      callbacks.error(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"});
     }
     g_cancellable_cancel(cancellable_);
+    if (!native_pending_) {
+      CleanupNative();
+      RemoveFromTransport();
+    }
   }
 
-  void Complete(SoupSession* session, GAsyncResult* result) noexcept {
+  void ReceiveHeaders(SoupSession* session, GAsyncResult* result) noexcept {
     GError* error = nullptr;
-    GBytes* bytes = soup_session_send_and_read_finish(session, result, &error);
-    HttpResult request_result = BuildResult(bytes, error);
-    if (bytes != nullptr) {
-      g_bytes_unref(bytes);
-    }
-    if (error != nullptr) {
-      g_error_free(error);
-    }
-
-    CleanupNative();
-
-    HttpTransportCompletion completion;
-    {
-      std::scoped_lock lock(mutex_);
-      if (!finished_) {
-        finished_ = true;
-        completion = std::move(completion_);
+    GInputStream* stream = soup_session_send_finish(session, result, &error);
+    native_pending_ = false;
+    if (error != nullptr || stream == nullptr) {
+      const HttpErrorCode code = error != nullptr && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT)
+                                     ? HttpErrorCode::Timeout
+                                     : HttpErrorCode::Transport;
+      const HttpError request_error{code, ErrorMessage(error)};
+      if (stream != nullptr) {
+        g_object_unref(stream);
       }
-    }
-    if (completion) {
-      completion(std::move(request_result));
-    }
-    RemoveFromTransport();
-  }
-
-  HttpResult BuildResult(GBytes* bytes, const GError* error) const noexcept {
-    try {
       if (error != nullptr) {
-        const HttpErrorCode code = g_error_matches(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT) ? HttpErrorCode::Timeout
-                                                                                            : HttpErrorCode::Transport;
-        return HttpResult(HttpError{code, ErrorMessage(error)});
+        g_error_free(error);
       }
-      if (bytes == nullptr || message_ == nullptr) {
-        return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Linux HTTP response is invalid"});
-      }
+      FinishTerminal(request_error);
+      return;
+    }
+    input_stream_ = stream;
 
-      HttpResponse response{
+    if (Finished()) {
+      CleanupNative();
+      RemoveFromTransport();
+      return;
+    }
+
+    try {
+      HttpTransportResponse response{
           .url = {},
           .status_code = static_cast<int>(soup_message_get_status(message_)),
           .headers = {},
-          .body = {},
+          .body_size = std::nullopt,
       };
       if (GUri* uri = soup_message_get_uri(message_)) {
         const std::unique_ptr<char, decltype(&g_free)> text(g_uri_to_string(uri), g_free);
@@ -357,7 +416,6 @@ private:
           response.url = text.get();
         }
       }
-
       SoupMessageHeadersIter iterator;
       soup_message_headers_iter_init(&iterator, soup_message_get_response_headers(message_));
       const char* name = nullptr;
@@ -365,35 +423,144 @@ private:
       while (soup_message_headers_iter_next(&iterator, &name, &value)) {
         response.headers.push_back({name != nullptr ? name : "", value != nullptr ? value : ""});
       }
-
-      gsize size = 0;
-      const auto* data = static_cast<const std::byte*>(g_bytes_get_data(bytes, &size));
-      if (data != nullptr && size != 0) {
-        response.body.assign(data, data + size);
+      if (request_.method == HttpMethod::Head || (response.status_code >= 100 && response.status_code < 200) ||
+          response.status_code == 204 || response.status_code == 304) {
+        response.body_size = 0;
+      } else {
+        response.body_size = ParseContentLength(response.headers);
       }
-      return HttpResult(std::move(response));
+      std::function<void(HttpTransportResponse)> response_callback;
+      {
+        std::scoped_lock lock(mutex_);
+        if (!finished_) {
+          response_callback = callbacks_.response;
+        }
+      }
+      if (response_callback) {
+        response_callback(std::move(response));
+      }
     } catch (...) {
-      return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Linux HTTP response could not be converted"});
+      FinishTerminal(HttpError{HttpErrorCode::Transport, "HuxerUI Linux HTTP response could not be converted"});
     }
   }
 
-  void FinishWithoutNative(HttpResult result) noexcept {
-    CleanupNative();
-    HttpTransportCompletion completion;
+  void ReadOnNetworkThread() noexcept {
+    if (Finished() || input_stream_ == nullptr || native_pending_) {
+      return;
+    }
+    native_pending_ = true;
+    auto* callback_request = new std::shared_ptr<LinuxHttpRequest>(shared_from_this());
+    g_input_stream_read_bytes_async(
+        input_stream_,
+        read_buffer_size,
+        G_PRIORITY_DEFAULT,
+        cancellable_,
+        [](GObject* source, GAsyncResult* result, gpointer data) {
+          std::unique_ptr<std::shared_ptr<LinuxHttpRequest>> request(
+              static_cast<std::shared_ptr<LinuxHttpRequest>*>(data)
+          );
+          (*request)->ReceiveBody(G_INPUT_STREAM(source), result);
+        },
+        callback_request
+    );
+  }
+
+  void ReceiveBody(GInputStream* stream, GAsyncResult* result) noexcept {
+    GError* error = nullptr;
+    GBytes* bytes = g_input_stream_read_bytes_finish(stream, result, &error);
+    native_pending_ = false;
+    if (Finished()) {
+      if (bytes != nullptr) {
+        g_bytes_unref(bytes);
+      }
+      if (error != nullptr) {
+        g_error_free(error);
+      }
+      CleanupNative();
+      RemoveFromTransport();
+      return;
+    }
+    if (error != nullptr || bytes == nullptr) {
+      const HttpErrorCode code = error != nullptr && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT)
+                                     ? HttpErrorCode::Timeout
+                                     : HttpErrorCode::Transport;
+      HttpError request_error{code, ErrorMessage(error)};
+      if (bytes != nullptr) {
+        g_bytes_unref(bytes);
+      }
+      if (error != nullptr) {
+        g_error_free(error);
+      }
+      FinishTerminal(std::move(request_error));
+      return;
+    }
+
+    gsize size = 0;
+    const auto* data = static_cast<const std::byte*>(g_bytes_get_data(bytes, &size));
+    if (size == 0) {
+      g_bytes_unref(bytes);
+      FinishComplete();
+      return;
+    }
+    Bytes body(data, data + size);
+    g_bytes_unref(bytes);
+    std::function<void(Bytes)> body_callback;
     {
       std::scoped_lock lock(mutex_);
       if (!finished_) {
-        finished_ = true;
-        completion = std::move(completion_);
+        body_callback = callbacks_.body;
       }
     }
-    if (completion) {
-      completion(std::move(result));
+    if (body_callback) {
+      body_callback(std::move(body));
+    }
+  }
+
+  void FinishComplete() noexcept {
+    HttpTransportCallbacks callbacks;
+    {
+      std::scoped_lock lock(mutex_);
+      if (finished_) {
+        return;
+      }
+      finished_ = true;
+      callbacks = std::move(callbacks_);
+    }
+    CleanupNative();
+    if (callbacks.complete) {
+      callbacks.complete();
     }
     RemoveFromTransport();
   }
 
+  void FinishTerminal(HttpError error) noexcept {
+    HttpTransportCallbacks callbacks;
+    bool notify = false;
+    {
+      std::scoped_lock lock(mutex_);
+      if (!finished_) {
+        finished_ = true;
+        callbacks = std::move(callbacks_);
+        notify = true;
+      }
+    }
+    CleanupNative();
+    if (notify && callbacks.error) {
+      callbacks.error(std::move(error));
+    }
+    RemoveFromTransport();
+  }
+
+  void FinishWithoutNative(HttpError error) noexcept {
+    native_pending_ = false;
+    FinishTerminal(std::move(error));
+  }
+
   void RemoveFromTransport() noexcept {
+    if (removed_) {
+      return;
+    }
+    removed_ = true;
     if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
       transport->Remove(this);
     }
@@ -405,16 +572,20 @@ private:
       g_source_unref(timeout_source_);
       timeout_source_ = nullptr;
     }
+    g_clear_object(&input_stream_);
     g_clear_object(&message_);
   }
 
   std::weak_ptr<LinuxHttpTransportState> transport_;
   HttpRequest request_;
   mutable std::mutex mutex_;
-  HttpTransportCompletion completion_;
+  HttpTransportCallbacks callbacks_;
   GCancellable* cancellable_ = nullptr;
   SoupMessage* message_ = nullptr;
+  GInputStream* input_stream_ = nullptr;
   GSource* timeout_source_ = nullptr;
+  bool native_pending_ = false;
+  bool removed_ = false;
   bool finished_ = false;
 };
 
@@ -422,7 +593,6 @@ void LinuxHttpTransportState::Queue(std::shared_ptr<LinuxHttpRequest> request) {
   requests_.push_back(request);
   if (stopping_ || request->Finished()) {
     request->CancelOnNetworkThread();
-    Remove(request.get());
     return;
   }
   request->Start(session_);
@@ -438,7 +608,8 @@ void LinuxHttpTransportState::StopOnNetworkThread() noexcept {
     return;
   }
   stopping_ = true;
-  for (const std::shared_ptr<LinuxHttpRequest>& request : requests_) {
+  const std::vector requests = requests_;
+  for (const std::shared_ptr<LinuxHttpRequest>& request : requests) {
     request->CancelOnNetworkThread();
   }
   MaybeQuit();
@@ -452,11 +623,12 @@ public:
     state_->Stop();
   }
 
-  std::function<void()> Start(HttpRequest request, HttpTransportCompletion completion) override {
-    auto operation = std::make_shared<LinuxHttpRequest>(state_, std::move(request), std::move(completion));
+  std::shared_ptr<HttpTransportOperation>
+  Start(HttpRequest request, bool, HttpTransportCallbacks callbacks) override {
+    auto operation = std::make_shared<LinuxHttpRequest>(state_, std::move(request), std::move(callbacks));
     LinuxHttpTransportState* state = state_.get();
     state->Post([state, operation] { state->Queue(operation); });
-    return [operation] { operation->Cancel(); };
+    return operation;
   }
 
 private:

@@ -183,10 +183,10 @@ private:
   std::shared_ptr<Win32HttpDeadline>* owner_ = nullptr;
 };
 
-class Win32HttpRequest final : public std::enable_shared_from_this<Win32HttpRequest> {
+class Win32HttpRequest final : public HttpTransportOperation, public std::enable_shared_from_this<Win32HttpRequest> {
 public:
-  Win32HttpRequest(std::shared_ptr<Win32HttpSession> session, HttpRequest request, HttpTransportCompletion completion)
-      : session_(std::move(session)), request_(std::move(request)), completion_(std::move(completion)) {}
+  Win32HttpRequest(std::shared_ptr<Win32HttpSession> session, HttpRequest request, HttpTransportCallbacks callbacks)
+      : session_(std::move(session)), request_(std::move(request)), callbacks_(std::move(callbacks)) {}
 
   ~Win32HttpRequest() {
     if (request_handle_ != nullptr) {
@@ -202,24 +202,27 @@ public:
 
   void Start() noexcept {
     try {
+      if (session_->Handle() == nullptr) {
+        FinishUnattached(HttpError{
+            HttpErrorCode::Transport,
+            "HuxerUI Windows HTTP could not create a WinHTTP session: error " + std::to_string(session_->Error()),
+        });
+        return;
+      }
       if (request_.body.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) {
-        FinishUnattached(HttpResult(
-            HttpError{
-                HttpErrorCode::Transport,
-                "HuxerUI Windows HTTP request body exceeds the WinHTTP size range",
-            }
-        ));
+        FinishUnattached(HttpError{
+            HttpErrorCode::Transport,
+            "HuxerUI Windows HTTP request body exceeds the WinHTTP size range",
+        });
         return;
       }
 
       const std::optional<std::wstring> url = StrictUtf8ToWide(request_.url);
       if (!url.has_value()) {
-        FinishUnattached(HttpResult(
-            HttpError{
-                HttpErrorCode::Transport,
-                "HuxerUI Windows HTTP URL is not valid UTF-8",
-            }
-        ));
+        FinishUnattached(HttpError{
+            HttpErrorCode::Transport,
+            "HuxerUI Windows HTTP URL is not valid UTF-8",
+        });
         return;
       }
       URL_COMPONENTS components{};
@@ -231,12 +234,10 @@ public:
       if (WinHttpCrackUrl(url->data(), static_cast<DWORD>(url->size()), 0, &components) == FALSE ||
           (components.nScheme != INTERNET_SCHEME_HTTP && components.nScheme != INTERNET_SCHEME_HTTPS) ||
           components.lpszHostName == nullptr || components.dwHostNameLength == 0) {
-        FinishUnattached(HttpResult(
-            HttpError{
-                HttpErrorCode::Transport,
-                "HuxerUI Windows HTTP URL could not be parsed",
-            }
-        ));
+        FinishUnattached(HttpError{
+            HttpErrorCode::Transport,
+            "HuxerUI Windows HTTP URL could not be parsed",
+        });
         return;
       }
 
@@ -317,23 +318,25 @@ public:
         Finish(WinHttpError(send_error));
       }
     } catch (const std::exception& exception) {
-      Finish(HttpResult(HttpError{HttpErrorCode::Transport, exception.what()}));
+      Finish(HttpError{HttpErrorCode::Transport, exception.what()});
     } catch (...) {
-      Finish(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Windows HTTP request could not be started",
-          }
-      ));
+      Finish(HttpError{
+          HttpErrorCode::Transport,
+          "HuxerUI Windows HTTP request could not be started",
+      });
     }
   }
 
-  void Cancel() noexcept {
-    Finish(std::nullopt);
+  void RequestRead() override {
+    ReadBody();
+  }
+
+  void Cancel() noexcept override {
+    Finish(std::nullopt, false);
   }
 
   void Timeout() noexcept {
-    Finish(HttpResult(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"}));
+    Finish(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"});
   }
 
 private:
@@ -353,14 +356,12 @@ private:
     try {
       request->HandleStatus(status, status_information, status_information_length);
     } catch (const std::exception& exception) {
-      request->Finish(HttpResult(HttpError{HttpErrorCode::Transport, exception.what()}));
+      request->Finish(HttpError{HttpErrorCode::Transport, exception.what()});
     } catch (...) {
-      request->Finish(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Windows HTTP response could not be processed",
-          }
-      ));
+      request->Finish(HttpError{
+          HttpErrorCode::Transport,
+          "HuxerUI Windows HTTP response could not be processed",
+      });
     }
   }
 
@@ -435,6 +436,8 @@ private:
           if (error != ERROR_WINHTTP_INVALID_OPTION) {
             return error;
           }
+        } else {
+          automatic_decompression_ = true;
         }
       }
       return static_cast<DWORD>(ERROR_SUCCESS);
@@ -481,6 +484,7 @@ private:
   void HandleStatus(DWORD status, void* status_information, DWORD status_information_length) {
     switch (status) {
     case WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE:
+      PublishUploadProgress();
       ReceiveResponse();
       break;
     case WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE:
@@ -491,12 +495,10 @@ private:
       break;
     case WINHTTP_CALLBACK_STATUS_REQUEST_ERROR:
       if (status_information == nullptr || status_information_length != sizeof(WINHTTP_ASYNC_RESULT)) {
-        Finish(HttpResult(
-            HttpError{
-                HttpErrorCode::Transport,
-                "HuxerUI Windows HTTP request returned an invalid asynchronous error",
-            }
-        ));
+        Finish(HttpError{
+            HttpErrorCode::Transport,
+            "HuxerUI Windows HTTP request returned an invalid asynchronous error",
+        });
         return;
       }
       Finish(WinHttpError(static_cast<const WINHTTP_ASYNC_RESULT*>(status_information)->dwError));
@@ -504,6 +506,63 @@ private:
     default:
       break;
     }
+  }
+
+  void PublishUploadProgress() {
+    std::function<void(std::uint64_t)> callback;
+    std::uint64_t body_size = 0;
+    {
+      std::scoped_lock lock(mutex_);
+      if (finished_ || request_.body.empty()) {
+        return;
+      }
+      callback = callbacks_.upload_progress;
+      body_size = static_cast<std::uint64_t>(request_.body.size());
+    }
+    if (callback) {
+      callback(body_size);
+    }
+  }
+
+  [[nodiscard]] std::optional<std::uint64_t> ResponseBodySize(const HttpTransportResponse& response) const noexcept {
+    if (request_.method == HttpMethod::Head || (response.status_code >= 100 && response.status_code < 200) ||
+        response.status_code == 204 || response.status_code == 304) {
+      return 0;
+    }
+
+    std::optional<std::uint64_t> content_length;
+    bool encoded = false;
+    bool transfer_encoded = false;
+    for (const HttpHeader& header : response.headers) {
+      if (EqualsAsciiCaseInsensitive(header.name, "Content-Encoding") && !header.value.empty()) {
+        encoded = true;
+      } else if (EqualsAsciiCaseInsensitive(header.name, "Transfer-Encoding") && !header.value.empty()) {
+        transfer_encoded = true;
+      } else if (EqualsAsciiCaseInsensitive(header.name, "Content-Length")) {
+        std::uint64_t value = 0;
+        if (header.value.empty()) {
+          return std::nullopt;
+        }
+        for (const unsigned char character : header.value) {
+          if (character < '0' || character > '9') {
+            return std::nullopt;
+          }
+          const std::uint64_t digit = character - '0';
+          if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10U) {
+            return std::nullopt;
+          }
+          value = value * 10U + digit;
+        }
+        if (content_length.has_value() && *content_length != value) {
+          return std::nullopt;
+        }
+        content_length = value;
+      }
+    }
+    if (transfer_encoded || (automatic_decompression_ && encoded)) {
+      return std::nullopt;
+    }
+    return content_length;
   }
 
   void ReceiveResponse() {
@@ -516,7 +575,7 @@ private:
   }
 
   void ReceiveHeaders() {
-    HttpResponse response;
+    HttpTransportResponse response;
     const DWORD error = WithRequestHandle([&response](HINTERNET request_handle) {
       DWORD status_code = 0;
       DWORD status_size = sizeof(status_code);
@@ -610,14 +669,19 @@ private:
       Finish(WinHttpError(error));
       return;
     }
+    response.body_size = ResponseBodySize(response);
+    std::function<void(HttpTransportResponse)> callback;
     {
       std::scoped_lock lock(mutex_);
-      if (finished_) {
+      if (finished_ || response_published_) {
         return;
       }
-      response_ = std::move(response);
+      response_published_ = true;
+      callback = callbacks_.response;
     }
-    ReadBody();
+    if (callback) {
+      callback(std::move(response));
+    }
   }
 
   void ReadBody() {
@@ -634,43 +698,36 @@ private:
 
   void ReceiveBody(void* bytes, DWORD byte_count) {
     if (byte_count == 0) {
-      HttpResponse response;
-      {
-        std::scoped_lock lock(mutex_);
-        if (finished_) {
-          return;
-        }
-        response = std::move(response_);
-      }
-      Finish(HttpResult(std::move(response)));
+      Finish(std::nullopt, true);
       return;
     }
     if (bytes == nullptr) {
-      Finish(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Windows HTTP response body is invalid",
-          }
-      ));
+      Finish(HttpError{
+          HttpErrorCode::Transport,
+          "HuxerUI Windows HTTP response body is invalid",
+      });
       return;
     }
+    std::function<void(Bytes)> callback;
     {
       std::scoped_lock lock(mutex_);
       if (finished_) {
         return;
       }
-      const auto* body = static_cast<const std::byte*>(bytes);
-      response_.body.insert(response_.body.end(), body, body + byte_count);
+      callback = callbacks_.body;
     }
-    ReadBody();
+    if (callback) {
+      const auto* body = static_cast<const std::byte*>(bytes);
+      callback(Bytes(body, body + byte_count));
+    }
   }
 
-  HttpResult WinHttpError(DWORD error) const {
-    return HttpResult(HttpError{WinHttpErrorCode(error), WinHttpErrorMessage(error)});
+  HttpError WinHttpError(DWORD error) const {
+    return HttpError{WinHttpErrorCode(error), WinHttpErrorMessage(error)};
   }
 
-  void Finish(std::optional<HttpResult> result) noexcept {
-    HttpTransportCompletion completion;
+  void Finish(std::optional<HttpError> error, bool complete = false) noexcept {
+    HttpTransportCallbacks callbacks;
     std::shared_ptr<Win32HttpDeadline> deadline;
     HINTERNET request_handle = nullptr;
     {
@@ -679,7 +736,7 @@ private:
         return;
       }
       finished_ = true;
-      completion = std::move(completion_);
+      callbacks = std::move(callbacks_);
       deadline = std::move(deadline_);
       close_requested_ = true;
       if (native_calls_ == 0) {
@@ -692,12 +749,14 @@ private:
     if (request_handle != nullptr) {
       WinHttpCloseHandle(request_handle);
     }
-    if (result.has_value() && completion) {
-      completion(std::move(*result));
+    if (error.has_value() && callbacks.error) {
+      callbacks.error(std::move(*error));
+    } else if (complete && callbacks.complete) {
+      callbacks.complete();
     }
   }
 
-  void FinishUnattached(HttpResult result) noexcept {
+  void FinishUnattached(HttpError error) noexcept {
     HINTERNET request_handle = std::exchange(request_handle_, nullptr);
     HINTERNET connection_handle = std::exchange(connection_handle_, nullptr);
     if (request_handle != nullptr) {
@@ -706,10 +765,10 @@ private:
     if (connection_handle != nullptr) {
       WinHttpCloseHandle(connection_handle);
     }
-    HttpTransportCompletion completion = std::move(completion_);
+    HttpTransportCallbacks callbacks = std::move(callbacks_);
     finished_ = true;
-    if (completion) {
-      completion(std::move(result));
+    if (callbacks.error) {
+      callbacks.error(std::move(error));
     }
   }
 
@@ -730,16 +789,17 @@ private:
 
   std::shared_ptr<Win32HttpSession> session_;
   HttpRequest request_;
-  HttpTransportCompletion completion_;
+  HttpTransportCallbacks callbacks_;
   std::mutex mutex_;
   HINTERNET connection_handle_ = nullptr;
   HINTERNET request_handle_ = nullptr;
   std::shared_ptr<Win32HttpRequest>* request_owner_ = nullptr;
   std::shared_ptr<Win32HttpDeadline> deadline_;
-  HttpResponse response_;
   std::array<std::byte, kReadBufferSize> read_buffer_{};
   std::size_t native_calls_ = 0;
+  bool automatic_decompression_ = false;
   bool close_requested_ = false;
+  bool response_published_ = false;
   bool finished_ = false;
 };
 
@@ -763,19 +823,11 @@ class Win32HttpTransport final : public HttpTransport {
 public:
   Win32HttpTransport() : session_(std::make_shared<Win32HttpSession>()) {}
 
-  std::function<void()> Start(HttpRequest request, HttpTransportCompletion completion) override {
-    if (session_->Handle() == nullptr) {
-      completion(HttpResult(
-          HttpError{
-              HttpErrorCode::Transport,
-              "HuxerUI Windows HTTP could not create a WinHTTP session: error " + std::to_string(session_->Error()),
-          }
-      ));
-      return {};
-    }
-    auto operation = std::make_shared<Win32HttpRequest>(session_, std::move(request), std::move(completion));
+  std::shared_ptr<HttpTransportOperation>
+  Start(HttpRequest request, bool, HttpTransportCallbacks callbacks) override {
+    auto operation = std::make_shared<Win32HttpRequest>(session_, std::move(request), std::move(callbacks));
     operation->Start();
-    return [operation] { operation->Cancel(); };
+    return operation;
   }
 
 private:

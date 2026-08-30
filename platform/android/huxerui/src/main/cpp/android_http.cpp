@@ -2,13 +2,13 @@
 
 #include <jni.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -24,8 +24,8 @@ namespace huxerui::detail {
 
 namespace {
 
-enum class AndroidHttpResult : jint {
-  Response,
+enum class AndroidHttpTerminal : jint {
+  Complete,
   TransportError,
   Timeout,
   Canceled,
@@ -98,12 +98,14 @@ std::string JavaStringOrFallback(JNIEnv* environment, jstring value, std::string
   }
 }
 
-class AndroidHttpRequestControl final {
+class AndroidHttpRequestControl final : public HttpTransportOperation {
 public:
-  AndroidHttpRequestControl(JavaVM* virtual_machine, jmethodID cancel, HttpTransportCompletion completion)
-      : virtual_machine_(virtual_machine), cancel_(cancel), completion_(std::move(completion)) {}
+  AndroidHttpRequestControl(
+      JavaVM* virtual_machine, jmethodID read, jmethodID cancel, HttpTransportCallbacks callbacks
+  )
+      : virtual_machine_(virtual_machine), read_(read), cancel_(cancel), callbacks_(std::move(callbacks)) {}
 
-  ~AndroidHttpRequestControl() {
+  ~AndroidHttpRequestControl() override {
     jobject request = nullptr;
     {
       std::scoped_lock lock(mutex_);
@@ -136,51 +138,157 @@ public:
     return !release;
   }
 
-  void Complete(HttpResult result) noexcept {
-    jobject request = nullptr;
-    HttpTransportCompletion completion;
+  void RequestRead() override {
+    InvokeJava(read_);
+  }
+
+  void Cancel() noexcept override {
     {
       std::scoped_lock lock(mutex_);
       if (finished_) {
         return;
       }
       finished_ = true;
-      request = std::exchange(request_, nullptr);
-      completion = std::move(completion_);
+      callbacks_ = {};
     }
-    DeleteRequest(request);
-    if (completion) {
-      completion(std::move(result));
+    InvokeJava(cancel_);
+  }
+
+  void Upload(std::uint64_t transferred_bytes) {
+    std::function<void(std::uint64_t)> callback;
+    {
+      std::scoped_lock lock(mutex_);
+      if (!finished_) {
+        callback = callbacks_.upload_progress;
+      }
+    }
+    if (callback) {
+      callback(transferred_bytes);
     }
   }
 
-  void Cancel() noexcept {
+  void Response(HttpTransportResponse response) {
+    std::function<void(HttpTransportResponse)> callback;
+    {
+      std::scoped_lock lock(mutex_);
+      if (!finished_) {
+        callback = callbacks_.response;
+      }
+    }
+    if (callback) {
+      callback(std::move(response));
+    }
+  }
+
+  void Body(Bytes body) {
+    std::function<void(Bytes)> callback;
+    {
+      std::scoped_lock lock(mutex_);
+      if (!finished_) {
+        callback = callbacks_.body;
+      }
+    }
+    if (callback) {
+      callback(std::move(body));
+    }
+  }
+
+  void Terminal(AndroidHttpTerminal terminal, std::string message) noexcept {
     jobject request = nullptr;
+    HttpTransportCallbacks callbacks;
+    bool notify = false;
+    {
+      std::scoped_lock lock(mutex_);
+      request = std::exchange(request_, nullptr);
+      if (!finished_) {
+        finished_ = true;
+        callbacks = std::move(callbacks_);
+        notify = true;
+      }
+    }
+    DeleteRequest(request);
+    if (!notify) {
+      return;
+    }
+    switch (terminal) {
+    case AndroidHttpTerminal::Complete:
+      if (callbacks.complete) {
+        callbacks.complete();
+      }
+      return;
+    case AndroidHttpTerminal::Timeout:
+      if (callbacks.error) {
+        callbacks.error(HttpError{
+            HttpErrorCode::Timeout,
+            message.empty() ? "HuxerUI HTTP request timed out" : std::move(message),
+        });
+      }
+      return;
+    case AndroidHttpTerminal::TransportError:
+      if (callbacks.error) {
+        callbacks.error(HttpError{
+            HttpErrorCode::Transport,
+            message.empty() ? "HuxerUI HTTP request failed" : std::move(message),
+        });
+      }
+      return;
+    case AndroidHttpTerminal::Canceled:
+      return;
+    }
+    if (callbacks.error) {
+      callbacks.error(HttpError{
+          HttpErrorCode::Transport,
+          "HuxerUI Android HTTP bridge returned an invalid terminal result",
+      });
+    }
+  }
+
+  void Fail(HttpError error, bool cancel_java) noexcept {
+    HttpTransportCallbacks callbacks;
     {
       std::scoped_lock lock(mutex_);
       if (finished_) {
         return;
       }
       finished_ = true;
-      completion_ = {};
-      request = std::exchange(request_, nullptr);
+      callbacks = std::move(callbacks_);
     }
-    if (request == nullptr) {
-      return;
+    if (callbacks.error) {
+      callbacks.error(std::move(error));
     }
-
-    JniEnvironment attached(virtual_machine_);
-    JNIEnv* environment = attached.Get();
-    if (environment != nullptr) {
-      environment->CallVoidMethod(request, cancel_);
-      if (environment->ExceptionCheck()) {
-        environment->ExceptionClear();
-      }
-      environment->DeleteGlobalRef(request);
+    if (cancel_java) {
+      InvokeJava(cancel_);
     }
   }
 
 private:
+  void InvokeJava(jmethodID method) noexcept {
+    JniEnvironment attached(virtual_machine_);
+    JNIEnv* environment = attached.Get();
+    if (environment == nullptr || method == nullptr) {
+      return;
+    }
+
+    jobject request = nullptr;
+    {
+      std::scoped_lock lock(mutex_);
+      if (request_ != nullptr) {
+        request = environment->NewLocalRef(request_);
+      }
+    }
+    if (request == nullptr) {
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionClear();
+      }
+      return;
+    }
+    environment->CallVoidMethod(request, method);
+    if (environment->ExceptionCheck()) {
+      environment->ExceptionClear();
+    }
+    environment->DeleteLocalRef(request);
+  }
+
   void DeleteRequest(jobject request) noexcept {
     if (request == nullptr) {
       return;
@@ -192,10 +300,11 @@ private:
   }
 
   JavaVM* virtual_machine_ = nullptr;
+  jmethodID read_ = nullptr;
   jmethodID cancel_ = nullptr;
   std::mutex mutex_;
   jobject request_ = nullptr;
-  HttpTransportCompletion completion_;
+  HttpTransportCallbacks callbacks_;
   bool finished_ = false;
 };
 
@@ -228,6 +337,51 @@ MakeStringArray(JNIEnv* environment, jclass string_class, const std::vector<Http
   return result;
 }
 
+HttpTransportResponse MakeAndroidHttpResponse(
+    JNIEnv* environment,
+    jstring url,
+    jint status_code,
+    jobjectArray header_names,
+    jobjectArray header_values,
+    jlong body_size
+) {
+  if (url == nullptr || header_names == nullptr || header_values == nullptr) {
+    throw std::runtime_error("HuxerUI Android HTTP response is incomplete");
+  }
+  const jsize header_count = environment->GetArrayLength(header_names);
+  if (header_count != environment->GetArrayLength(header_values)) {
+    throw std::runtime_error("HuxerUI Android HTTP response headers are invalid");
+  }
+  HttpTransportResponse response{
+      .url = android::JavaStringToUtf8(environment, url),
+      .status_code = status_code,
+      .headers = {},
+      .body_size = std::nullopt,
+  };
+  response.headers.reserve(static_cast<std::size_t>(header_count));
+  for (jsize index = 0; index < header_count; ++index) {
+    android::LocalRef<jstring> name(
+        environment,
+        static_cast<jstring>(environment->GetObjectArrayElement(header_names, index))
+    );
+    android::LocalRef<jstring> value(
+        environment,
+        static_cast<jstring>(environment->GetObjectArrayElement(header_values, index))
+    );
+    if (!name || !value) {
+      throw std::runtime_error("HuxerUI Android HTTP response header is invalid");
+    }
+    response.headers.push_back({
+        android::JavaStringToUtf8(environment, name.Get()),
+        android::JavaStringToUtf8(environment, value.Get()),
+    });
+  }
+  if (body_size >= 0) {
+    response.body_size = static_cast<std::uint64_t>(body_size);
+  }
+  return response;
+}
+
 class AndroidHttpTransport final : public HttpTransport {
 public:
   AndroidHttpTransport(JavaVM* virtual_machine, JNIEnv* environment) : virtual_machine_(virtual_machine) {
@@ -253,8 +407,9 @@ public:
         "(JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[BJ)V"
     );
     start_ = environment->GetMethodID(request_class_, "start", "()V");
+    read_ = environment->GetMethodID(request_class_, "read", "()V");
     cancel_ = environment->GetMethodID(request_class_, "cancel", "()V");
-    if (constructor_ == nullptr || start_ == nullptr || cancel_ == nullptr) {
+    if (constructor_ == nullptr || start_ == nullptr || read_ == nullptr || cancel_ == nullptr) {
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
       }
@@ -271,15 +426,17 @@ public:
     }
   }
 
-  std::function<void()> Start(HttpRequest request, HttpTransportCompletion completion) override {
+  std::shared_ptr<HttpTransportOperation>
+  Start(HttpRequest request, bool, HttpTransportCallbacks callbacks) override {
+    auto control = std::make_shared<AndroidHttpRequestControl>(virtual_machine_, read_, cancel_, std::move(callbacks));
     JniEnvironment attached(virtual_machine_);
     JNIEnv* environment = attached.Get();
     if (environment == nullptr) {
-      completion(HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP could not access JNI"}));
-      return {};
+      control->Fail(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP could not access JNI"}, false);
+      return control;
     }
 
-    std::shared_ptr<AndroidHttpRequestControl> control;
+    bool native_owner_released = false;
     try {
       android::LocalRef<jclass> string_class(environment, environment->FindClass("java/lang/String"));
       if (!string_class) {
@@ -298,7 +455,6 @@ public:
       }
 
       const jlong timeout = request.timeout.has_value() ? static_cast<jlong>(request.timeout->count()) : -1;
-      control = std::make_shared<AndroidHttpRequestControl>(virtual_machine_, cancel_, std::move(completion));
       auto native_handle = std::make_unique<AndroidHttpControlHandle>(control);
       android::LocalRef<jobject> java_request(
           environment,
@@ -324,32 +480,19 @@ public:
         throw std::runtime_error("HuxerUI Android HTTP request could not be retained");
       }
       native_handle.release();
+      native_owner_released = true;
       environment->CallVoidMethod(java_request.Get(), start_);
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
-        control->Complete(HttpResult(HttpError{
-            HttpErrorCode::Transport,
-            "HuxerUI Android HTTP request could not be started",
-        }));
-        environment->CallVoidMethod(java_request.Get(), cancel_);
-        if (environment->ExceptionCheck()) {
-          environment->ExceptionClear();
-        }
-        return {};
+        throw std::runtime_error("HuxerUI Android HTTP request could not be started");
       }
-      return [control] { control->Cancel(); };
     } catch (const std::exception& exception) {
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
       }
-      HttpResult error(HttpError{HttpErrorCode::Transport, exception.what()});
-      if (control) {
-        control->Complete(std::move(error));
-      } else {
-        completion(std::move(error));
-      }
-      return {};
+      control->Fail(HttpError{HttpErrorCode::Transport, exception.what()}, native_owner_released);
     }
+    return control;
   }
 
 private:
@@ -357,69 +500,9 @@ private:
   jclass request_class_ = nullptr;
   jmethodID constructor_ = nullptr;
   jmethodID start_ = nullptr;
+  jmethodID read_ = nullptr;
   jmethodID cancel_ = nullptr;
 };
-
-HttpResult MakeAndroidHttpResult(
-    JNIEnv* environment,
-    jint result,
-    jstring url,
-    jint status_code,
-    jobjectArray header_names,
-    jobjectArray header_values,
-    jbyteArray body,
-    jstring message
-) {
-  switch (static_cast<AndroidHttpResult>(result)) {
-  case AndroidHttpResult::Response: {
-    if (url == nullptr || header_names == nullptr || header_values == nullptr || body == nullptr) {
-      return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP response is incomplete"});
-    }
-    const jsize header_count = environment->GetArrayLength(header_names);
-    if (header_count != environment->GetArrayLength(header_values)) {
-      return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP response headers are invalid"});
-    }
-    HttpResponse response{
-        .url = android::JavaStringToUtf8(environment, url),
-        .status_code = status_code,
-        .headers = {},
-        .body = {},
-    };
-    response.headers.reserve(static_cast<std::size_t>(header_count));
-    for (jsize index = 0; index < header_count; ++index) {
-      android::LocalRef<jstring> name(
-          environment,
-          static_cast<jstring>(environment->GetObjectArrayElement(header_names, index))
-      );
-      android::LocalRef<jstring> value(
-          environment,
-          static_cast<jstring>(environment->GetObjectArrayElement(header_values, index))
-      );
-      if (!name || !value) {
-        return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP response header is invalid"});
-      }
-      response.headers.push_back({
-          android::JavaStringToUtf8(environment, name.Get()),
-          android::JavaStringToUtf8(environment, value.Get()),
-      });
-    }
-    response.body = android::JavaByteArrayToBytes(environment, body);
-    return HttpResult(std::move(response));
-  }
-  case AndroidHttpResult::Timeout:
-    return HttpResult(HttpError{
-        HttpErrorCode::Timeout,
-        JavaStringOrFallback(environment, message, "HuxerUI HTTP request timed out"),
-    });
-  case AndroidHttpResult::TransportError:
-  case AndroidHttpResult::Canceled:
-    return HttpResult(HttpError{
-        HttpErrorCode::Transport,
-        JavaStringOrFallback(environment, message, "HuxerUI HTTP request failed"),
-    });
-  }
-  return HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI Android HTTP result is invalid"});
-}
 
 } // namespace
 
@@ -429,41 +512,88 @@ std::shared_ptr<HttpTransport> CreateAndroidHttpTransport(JavaVM* virtual_machin
 
 } // namespace huxerui::detail
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIHttpRequest_nativeComplete(
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIHttpRequest_nativeUpload(
+    JNIEnv*, jclass, jlong native_handle, jlong transferred_bytes
+) {
+  using Handle = std::shared_ptr<huxerui::detail::AndroidHttpRequestControl>;
+  auto* owner = reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle));
+  if (owner != nullptr && *owner && transferred_bytes >= 0) {
+    (*owner)->Upload(static_cast<std::uint64_t>(transferred_bytes));
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIHttpRequest_nativeResponse(
     JNIEnv* environment,
     jclass,
     jlong native_handle,
-    jint result,
     jstring url,
     jint status_code,
     jobjectArray header_names,
     jobjectArray header_values,
-    jbyteArray body,
-    jstring message
+    jlong body_size
+) {
+  using Handle = std::shared_ptr<huxerui::detail::AndroidHttpRequestControl>;
+  auto* owner = reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle));
+  if (owner == nullptr || !*owner) {
+    return;
+  }
+  const std::shared_ptr<huxerui::detail::AndroidHttpRequestControl> control = *owner;
+  try {
+    control->Response(huxerui::detail::MakeAndroidHttpResponse(
+        environment, url, status_code, header_names, header_values, body_size
+    ));
+  } catch (...) {
+    if (environment->ExceptionCheck()) {
+      environment->ExceptionClear();
+    }
+    control->Fail(
+        huxerui::HttpError{
+            huxerui::HttpErrorCode::Transport,
+            "HuxerUI Android HTTP response could not be decoded",
+        },
+        true
+    );
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIHttpRequest_nativeBody(
+    JNIEnv* environment, jclass, jlong native_handle, jbyteArray body
+) {
+  using Handle = std::shared_ptr<huxerui::detail::AndroidHttpRequestControl>;
+  auto* owner = reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle));
+  if (owner == nullptr || !*owner) {
+    return;
+  }
+  const std::shared_ptr<huxerui::detail::AndroidHttpRequestControl> control = *owner;
+  try {
+    if (body == nullptr) {
+      throw std::runtime_error("HuxerUI Android HTTP response body is missing");
+    }
+    control->Body(huxerui::android::JavaByteArrayToBytes(environment, body));
+  } catch (...) {
+    if (environment->ExceptionCheck()) {
+      environment->ExceptionClear();
+    }
+    control->Fail(
+        huxerui::HttpError{
+            huxerui::HttpErrorCode::Transport,
+            "HuxerUI Android HTTP response body could not be decoded",
+        },
+        true
+    );
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIHttpRequest_nativeTerminal(
+    JNIEnv* environment, jclass, jlong native_handle, jint result, jstring message
 ) {
   using Handle = std::shared_ptr<huxerui::detail::AndroidHttpRequestControl>;
   std::unique_ptr<Handle> owner(reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle)));
   if (!owner || !*owner) {
     return;
   }
-  try {
-    (*owner)->Complete(huxerui::detail::MakeAndroidHttpResult(
-        environment,
-        result,
-        url,
-        status_code,
-        header_names,
-        header_values,
-        body,
-        message
-    ));
-  } catch (...) {
-    if (environment->ExceptionCheck()) {
-      environment->ExceptionClear();
-    }
-    (*owner)->Complete(huxerui::HttpResult(huxerui::HttpError{
-        huxerui::HttpErrorCode::Transport,
-        "HuxerUI Android HTTP response could not be decoded",
-    }));
-  }
+  (*owner)->Terminal(
+      static_cast<huxerui::detail::AndroidHttpTerminal>(result),
+      huxerui::detail::JavaStringOrFallback(environment, message, {})
+  );
 }

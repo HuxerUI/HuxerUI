@@ -12,7 +12,7 @@ User guides describe the current public SDK, development guides cover this repos
 - [Components and Input](guide/components.md): controls, navigation, gestures, and text editing.
 - [Themes and Presentation](guide/themes-and-presentation.md): themes, indication, animation, and layers.
 - [Files and Storage](guide/files.md): application storage, external files, and pickers.
-- [HTTP Client](guide/http.md): binary request and response bodies, Tasks, and errors.
+- [HTTP Client](guide/http.md): buffered and streaming responses, transfer progress, Tasks, and errors.
 - [Extending HuxerUI](guide/extending.md): custom components, layouts, modifiers, and platform services.
 - [Platform Support](guide/platforms.md): supported hosts, toolchains, and platform capabilities.
 

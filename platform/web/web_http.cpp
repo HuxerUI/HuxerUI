@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -18,10 +19,11 @@ namespace {
 
 using emscripten::val;
 
-constexpr int web_http_response = 0;
+constexpr int web_http_complete = 0;
 constexpr int web_http_transport_error = 1;
 constexpr int web_http_timeout = 2;
 constexpr int web_http_canceled = 3;
+constexpr int web_http_unsupported = 4;
 
 const char* HttpMethodName(HttpMethod method) {
   switch (method) {
@@ -72,14 +74,19 @@ val MakeWebRequest(const HttpRequest& request) {
 }
 
 // clang-format off
-EM_JS(emscripten::EM_VAL, CreateWebHttpOperation, (emscripten::EM_VAL request_handle, double timeout_ms), {
+EM_JS(emscripten::EM_VAL, CreateWebHttpOperation,
+      (emscripten::EM_VAL request_handle, double timeout_ms, bool require_incremental_response), {
   return Emval.toHandle({
     request: Emval.toValue(request_handle),
     timeoutMs: timeout_ms,
+    requireIncrementalResponse: require_incremental_response,
     nativeHandle: 0,
     controller: null,
+    reader: null,
+    read: null,
+    fallbackBody: null,
+    fallbackDelivered: false,
     timer: 0,
-    finish: null,
     finished: false,
     started: false,
   });
@@ -92,9 +99,8 @@ EM_JS(void, StartWebHttpOperation, (emscripten::EM_VAL operation_handle, std::ui
   }
   operation.started = true;
   operation.nativeHandle = native_handle;
-  operation.controller = new AbortController();
 
-  operation.finish = (result) => {
+  operation.finish = (kind, message) => {
     if (operation.finished) {
       return;
     }
@@ -106,10 +112,22 @@ EM_JS(void, StartWebHttpOperation, (emscripten::EM_VAL operation_handle, std::ui
     const callbackHandle = operation.nativeHandle;
     operation.nativeHandle = 0;
     operation.request = null;
-    Module._huxerui_web_http_complete(callbackHandle, Emval.toHandle(result));
+    operation.reader = null;
+    operation.read = null;
+    operation.fallbackBody = null;
+    Module._huxerui_web_http_terminal(callbackHandle, kind, Emval.toHandle(message || ""));
+  };
+
+  operation.fail = (error) => {
+    if (operation.finished) {
+      return;
+    }
+    const detail = error instanceof Error && error.message ? ": " + error.message : "";
+    operation.finish(1, "HuxerUI HTTP request failed" + detail);
   };
 
   try {
+    operation.controller = new AbortController();
     const request = operation.request;
     const headers = new Headers();
     for (const [name, value] of request.headers) {
@@ -136,34 +154,108 @@ EM_JS(void, StartWebHttpOperation, (emscripten::EM_VAL operation_handle, std::ui
           return;
         }
         operation.controller.abort();
-        operation.finish({kind: 2, message: "HuxerUI HTTP request timed out"});
+        operation.finish(2, "HuxerUI HTTP request timed out");
       };
       operation.timer = setTimeout(timeout, Math.min(operation.timeoutMs, 2147483647));
     }
 
-    fetch(request.url, options)
+    const fetchPromise = fetch(request.url, options);
+    if (request.body.byteLength !== 0) {
+      Module._huxerui_web_http_upload(operation.nativeHandle, request.body.byteLength);
+    }
+    fetchPromise
         .then(async (response) => {
+          if (operation.finished) {
+            return;
+          }
           const headers = [];
           response.headers.forEach((value, name) => headers.push([name, value]));
-          const body = new Uint8Array(await response.arrayBuffer());
-          operation.finish({
-            kind: 0,
+          let bodySize = -1;
+          const contentLength = response.headers.get("content-length");
+          const contentEncoding = response.headers.get("content-encoding");
+          const contentLengthIsDecimal = contentLength &&
+              [...contentLength].every((character) => character >= "0" && character <= "9");
+          if (!contentEncoding && contentLengthIsDecimal) {
+            const parsed = Number(contentLength);
+            if (Number.isSafeInteger(parsed)) {
+              bodySize = parsed;
+            }
+          }
+          if (request.method === "HEAD" || (response.status >= 100 && response.status < 200) ||
+              response.status === 204 || response.status === 304) {
+            bodySize = 0;
+          }
+          const metadata = {
             url: response.url,
             statusCode: response.status,
             headers,
-            body,
-          });
-        })
-        .catch((error) => {
-          if (!operation.finished) {
-            const detail = error instanceof Error && error.message ? ": " + error.message : "";
-            operation.finish({kind: 1, message: "HuxerUI HTTP request failed" + detail});
+            bodySize,
+          };
+
+          if (response.body && typeof response.body.getReader === "function") {
+            operation.reader = response.body.getReader();
+            operation.read = () => operation.reader.read()
+                .then((result) => {
+                  if (operation.finished) {
+                    return;
+                  }
+                  if (result.done) {
+                    operation.finish(0, "");
+                    return;
+                  }
+                  const body = result.value instanceof Uint8Array ? result.value : new Uint8Array(result.value);
+                  if (body.byteLength === 0) {
+                    operation.read();
+                    return;
+                  }
+                  Module._huxerui_web_http_body(operation.nativeHandle, Emval.toHandle(body));
+                })
+                .catch(operation.fail);
+            Module._huxerui_web_http_response(operation.nativeHandle, Emval.toHandle(metadata));
+            return;
           }
-        });
+          if (!response.body && bodySize === 0) {
+            Module._huxerui_web_http_response(operation.nativeHandle, Emval.toHandle(metadata));
+            operation.finish(0, "");
+            return;
+          }
+          if (operation.requireIncrementalResponse) {
+            operation.controller.abort();
+            operation.finish(4, "HuxerUI Web HTTP streaming requires ReadableStream support");
+            return;
+          }
+          const fallbackBody = new Uint8Array(await response.arrayBuffer());
+          if (operation.finished) {
+            return;
+          }
+          operation.fallbackBody = fallbackBody;
+          Module._huxerui_web_http_response(operation.nativeHandle, Emval.toHandle(metadata));
+        })
+        .catch(operation.fail);
   } catch (error) {
-    const detail = error instanceof Error && error.message ? ": " + error.message : "";
-    operation.finish({kind: 1, message: "HuxerUI HTTP request failed" + detail});
+    operation.fail(error);
   }
+});
+
+EM_JS(void, ReadWebHttpOperation, (emscripten::EM_VAL operation_handle), {
+  const operation = Emval.toValue(operation_handle);
+  if (!operation || operation.finished) {
+    return;
+  }
+  if (operation.read) {
+    operation.read();
+    return;
+  }
+  if (operation.fallbackBody && !operation.fallbackDelivered) {
+    operation.fallbackDelivered = true;
+    if (operation.fallbackBody.byteLength !== 0) {
+      Module._huxerui_web_http_body(operation.nativeHandle, Emval.toHandle(operation.fallbackBody));
+    } else {
+      operation.finish(0, "");
+    }
+    return;
+  }
+  operation.finish(0, "");
 });
 
 EM_JS(void, CancelWebHttpOperation, (emscripten::EM_VAL operation_handle), {
@@ -172,20 +264,34 @@ EM_JS(void, CancelWebHttpOperation, (emscripten::EM_VAL operation_handle), {
     return;
   }
   operation.controller?.abort();
-  operation.finish({kind: 3, message: "HuxerUI HTTP request canceled"});
+  operation.reader?.cancel().catch(() => {});
+  operation.finish(3, "HuxerUI HTTP request canceled");
+});
+
+EM_JS(void, FailWebHttpOperation, (emscripten::EM_VAL operation_handle, const char* message), {
+  const operation = Emval.toValue(operation_handle);
+  if (!operation || operation.finished) {
+    return;
+  }
+  operation.controller?.abort();
+  operation.reader?.cancel().catch(() => {});
+  operation.finish(1, UTF8ToString(message));
 });
 // clang-format on
 
-class WebHttpRequest final : public std::enable_shared_from_this<WebHttpRequest> {
+class WebHttpRequest final : public HttpTransportOperation, public std::enable_shared_from_this<WebHttpRequest> {
 public:
-  WebHttpRequest(HttpRequest request, HttpTransportCompletion completion)
-      : request_(std::move(request)), completion_(std::move(completion)) {}
+  WebHttpRequest(HttpRequest request, bool require_incremental_response, HttpTransportCallbacks callbacks)
+      : request_(std::move(request)), require_incremental_response_(require_incremental_response),
+        callbacks_(std::move(callbacks)) {}
 
   void Start() {
     const double timeout_ms = request_.timeout.has_value() ? static_cast<double>(request_.timeout->count()) : -1.0;
     val request = MakeWebRequest(request_);
     request_ = {};
-    operation_ = val::take_ownership(CreateWebHttpOperation(request.as_handle(), timeout_ms));
+    operation_ = val::take_ownership(
+        CreateWebHttpOperation(request.as_handle(), timeout_ms, require_incremental_response_)
+    );
 
     auto callback = std::make_unique<std::shared_ptr<WebHttpRequest>>(shared_from_this());
     const std::uintptr_t callback_handle = reinterpret_cast<std::uintptr_t>(callback.get());
@@ -193,104 +299,161 @@ public:
     StartWebHttpOperation(operation_.as_handle(), callback_handle);
   }
 
-  void Cancel() {
+  void RequestRead() override {
+    if (!finished_) {
+      ReadWebHttpOperation(operation_.as_handle());
+    }
+  }
+
+  void Cancel() noexcept override {
     if (finished_) {
       return;
     }
-    completion_ = {};
+    callbacks_ = {};
     CancelWebHttpOperation(operation_.as_handle());
   }
 
-  void Complete(val result) {
+  void Upload(std::uint64_t transferred_bytes) {
+    if (!finished_ && callbacks_.upload_progress) {
+      callbacks_.upload_progress(transferred_bytes);
+    }
+  }
+
+  void Response(val result) {
+    if (finished_ || !callbacks_.response) {
+      return;
+    }
+    try {
+      HttpTransportResponse response{
+          .url = result["url"].as<std::string>(),
+          .status_code = result["statusCode"].as<int>(),
+          .headers = {},
+          .body_size = std::nullopt,
+      };
+      const val headers = result["headers"];
+      const std::size_t header_count = headers["length"].as<std::size_t>();
+      response.headers.reserve(header_count);
+      for (std::size_t index = 0; index < header_count; ++index) {
+        const val entry = headers[index];
+        response.headers.push_back({entry[0].as<std::string>(), entry[1].as<std::string>()});
+      }
+      const double body_size = result["bodySize"].as<double>();
+      if (body_size >= 0) {
+        response.body_size = static_cast<std::uint64_t>(body_size);
+      }
+      callbacks_.response(std::move(response));
+    } catch (...) {
+      FailWebHttpOperation(operation_.as_handle(), "HuxerUI HTTP response is invalid");
+    }
+  }
+
+  void Body(val value) {
+    if (finished_ || !callbacks_.body) {
+      return;
+    }
+    try {
+      const std::size_t size = value["byteLength"].as<std::size_t>();
+      Bytes body(size);
+      if (size != 0) {
+        val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(body.data())))
+            .call<void>("set", value);
+      }
+      callbacks_.body(std::move(body));
+    } catch (...) {
+      FailWebHttpOperation(operation_.as_handle(), "HuxerUI HTTP response body is invalid");
+    }
+  }
+
+  void Terminal(int kind, std::string message) {
     if (finished_) {
       return;
     }
     finished_ = true;
     operation_ = val::undefined();
-
-    HttpTransportCompletion completion = std::move(completion_);
-    if (!completion) {
-      return;
-    }
-    try {
-      const int kind = result["kind"].as<int>();
-      if (kind == web_http_response) {
-        completion(HttpResult(MakeResponse(result)));
-      } else if (kind == web_http_timeout) {
-        completion(HttpResult(HttpError{HttpErrorCode::Timeout, ErrorMessage(result)}));
-      } else if (kind == web_http_transport_error) {
-        completion(HttpResult(HttpError{HttpErrorCode::Transport, ErrorMessage(result)}));
-      } else if (kind == web_http_canceled) {
-        return;
-      } else {
-        completion(HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI HTTP response is invalid"}));
+    HttpTransportCallbacks callbacks = std::move(callbacks_);
+    if (kind == web_http_complete) {
+      if (callbacks.complete) {
+        callbacks.complete();
       }
-    } catch (...) {
-      completion(HttpResult(HttpError{HttpErrorCode::Transport, "HuxerUI HTTP response is invalid"}));
+    } else if (kind == web_http_timeout) {
+      if (callbacks.error) {
+        callbacks.error(HttpError{HttpErrorCode::Timeout, std::move(message)});
+      }
+    } else if (kind == web_http_unsupported) {
+      if (callbacks.error) {
+        callbacks.error(HttpError{HttpErrorCode::Unsupported, std::move(message)});
+      }
+    } else if (kind == web_http_transport_error) {
+      if (callbacks.error) {
+        callbacks.error(HttpError{
+            HttpErrorCode::Transport,
+            message.empty() ? "HuxerUI HTTP request failed" : std::move(message),
+        });
+      }
+    } else if (kind != web_http_canceled && callbacks.error) {
+      callbacks.error(HttpError{HttpErrorCode::Transport, "HuxerUI HTTP response is invalid"});
     }
   }
 
 private:
-  static std::string ErrorMessage(const val& result) {
-    const val message = result["message"];
-    if (!message.isUndefined() && !message.isNull()) {
-      const std::string value = message.as<std::string>();
-      if (!value.empty()) {
-        return value;
-      }
-    }
-    return "HuxerUI HTTP request failed";
-  }
-
-  static HttpResponse MakeResponse(const val& result) {
-    HttpResponse response{
-        .url = result["url"].as<std::string>(),
-        .status_code = result["statusCode"].as<int>(),
-        .headers = {},
-        .body = {},
-    };
-
-    const val headers = result["headers"];
-    const std::size_t header_count = headers["length"].as<std::size_t>();
-    response.headers.reserve(header_count);
-    for (std::size_t index = 0; index < header_count; ++index) {
-      const val entry = headers[index];
-      response.headers.push_back({entry[0].as<std::string>(), entry[1].as<std::string>()});
-    }
-
-    const val body = result["body"];
-    const std::size_t body_size = body["byteLength"].as<std::size_t>();
-    response.body.resize(body_size);
-    if (body_size != 0) {
-      val(emscripten::typed_memory_view(body_size, reinterpret_cast<unsigned char*>(response.body.data())))
-          .call<void>("set", body);
-    }
-    return response;
-  }
-
   HttpRequest request_;
-  HttpTransportCompletion completion_;
+  bool require_incremental_response_ = false;
+  HttpTransportCallbacks callbacks_;
   val operation_ = val::undefined();
   bool finished_ = false;
 };
 
 class WebHttpTransport final : public HttpTransport {
 public:
-  std::function<void()> Start(HttpRequest request, HttpTransportCompletion completion) override {
-    auto operation = std::make_shared<WebHttpRequest>(std::move(request), std::move(completion));
+  std::shared_ptr<HttpTransportOperation>
+  Start(HttpRequest request, bool require_incremental_response, HttpTransportCallbacks callbacks) override {
+    auto operation = std::make_shared<WebHttpRequest>(
+        std::move(request), require_incremental_response, std::move(callbacks)
+    );
     operation->Start();
-    return [operation] { operation->Cancel(); };
+    return operation;
   }
 };
 
 } // namespace
 
 extern "C" EMSCRIPTEN_KEEPALIVE void
-huxerui_web_http_complete(std::uintptr_t native_handle, emscripten::EM_VAL result_handle) {
-  auto callback =
+huxerui_web_http_upload(std::uintptr_t native_handle, std::uint64_t transferred_bytes) {
+  auto* owner = reinterpret_cast<std::shared_ptr<WebHttpRequest>*>(native_handle);
+  if (owner != nullptr && *owner) {
+    (*owner)->Upload(transferred_bytes);
+  }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void
+huxerui_web_http_response(std::uintptr_t native_handle, emscripten::EM_VAL result_handle) {
+  val result = val::take_ownership(result_handle);
+  auto* owner = reinterpret_cast<std::shared_ptr<WebHttpRequest>*>(native_handle);
+  if (owner != nullptr && *owner) {
+    const std::shared_ptr<WebHttpRequest> request = *owner;
+    request->Response(std::move(result));
+  }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void
+huxerui_web_http_body(std::uintptr_t native_handle, emscripten::EM_VAL body_handle) {
+  val body = val::take_ownership(body_handle);
+  auto* owner = reinterpret_cast<std::shared_ptr<WebHttpRequest>*>(native_handle);
+  if (owner != nullptr && *owner) {
+    const std::shared_ptr<WebHttpRequest> request = *owner;
+    request->Body(std::move(body));
+  }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void
+huxerui_web_http_terminal(std::uintptr_t native_handle, int kind, emscripten::EM_VAL message_handle) {
+  val message = val::take_ownership(message_handle);
+  auto owner =
       std::unique_ptr<std::shared_ptr<WebHttpRequest>>(reinterpret_cast<std::shared_ptr<WebHttpRequest>*>(native_handle)
       );
-  (*callback)->Complete(val::take_ownership(result_handle));
+  if (owner && *owner) {
+    (*owner)->Terminal(kind, message.as<std::string>());
+  }
 }
 
 std::shared_ptr<HttpTransport> CreateWebHttpTransport() {

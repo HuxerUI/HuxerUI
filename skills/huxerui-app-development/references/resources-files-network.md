@@ -54,13 +54,19 @@ Destructive file operations require the user's intended scope. Prefer non-recurs
 
 ## HTTP
 
-Create requests with `HttpRequest`, `HttpMethod`, and headers during the owning application flow. `HttpRequest::body` and `HttpResponse::body` are owned `Bytes`; HuxerUI does not implicitly encode request text or decode response bytes. Inside the task, call `Send(...)` on the previously captured `HttpClient` handle. Inspect `HttpResult` before accessing response/error. Treat status codes, transport errors, cancellation, body size, encoding, and user-visible retry policy separately.
+Create requests with `HttpRequest`, `HttpMethod`, and headers during the owning application flow. `HttpRequest::body` and `HttpResponse::body` are owned `Bytes`; HuxerUI does not implicitly encode request text or decode response bytes.
+
+Use `HttpClient::Send()` for a response that should be buffered completely in `HttpResponse::body`. Use `SendStream()` when the body must be consumed incrementally, then read the move-only `HttpResponseStream` until `HttpStreamReadResult::IsComplete()` reports EOF. Only one `Read()` may be pending. An error before response headers is carried by `HttpStreamResult`, while a later body error is carried by `HttpStreamReadResult`.
+
+Both request forms accept an optional progress callback receiving `HttpProgress`; the callback runs on the owning Runtime UI thread. Upload and download totals are optional, and HTTP status codes remain responses rather than transport errors. Keep retry, decoding, persistence, and user-visible error policy in application code.
 
 ## Task lifetime
 
-Launch app-side async flows from `UseTaskScope()` so unmount cancels work. Return to owner state only while the scope is alive. Avoid detached platform callbacks that capture UI objects indefinitely.
+Launch app-side async flows from `UseTaskScope()` so unmount cancels work. Capture the required service and `State` values before launching the task rather than calling composition-bound facilities after suspension. Avoid detached platform callbacks that capture UI objects indefinitely.
 
-Call File asynchronous methods and `HttpClient::Send()` directly from the owning Task. File Async already owns its platform-appropriate worker or event completion path, while HTTP keeps its platform asynchronous transport; do not wrap either API in `RunWorker()`.
+Call File asynchronous methods, `HttpClient::Send()`, `HttpClient::SendStream()`, and `HttpResponseStream::Read()` directly from the owning Task. File Async already owns its platform-appropriate worker or event completion path, while HTTP keeps its platform asynchronous transport; do not wrap these APIs in `RunWorker()`.
+
+After `co_await` on these operations, the continuation is already back on the owning Runtime UI thread and may update captured `State` directly while the task scope remains alive. Do not use `TaskScope::Post()` for that continuation; `Post()` is only for an external thread or callback outside a running HuxerUI Task.
 
 Use `RunWorker()` only for application-owned synchronous CPU-bound or blocking work. Use `TaskScope::Post()` to hand an external callback back to the UI scope. These APIs do not keep a mobile application running in the background; platform background tasks are a separate capability.
 

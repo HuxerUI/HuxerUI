@@ -183,32 +183,113 @@ private:
 
 class HttpCompletion final {
 public:
-  void Complete(HttpResult result) {
-    {
-      std::scoped_lock lock(mutex_);
-      result_.emplace(std::move(result));
-    }
-    condition_.notify_one();
+  [[nodiscard]] detail::HttpTransportCallbacks Callbacks() {
+    return {
+        .response = [this](detail::HttpTransportResponse response) {
+          {
+            std::scoped_lock lock(mutex_);
+            response_.emplace(std::move(response));
+          }
+          condition_.notify_all();
+        },
+        .body = [this](Bytes body) {
+          {
+            std::scoped_lock lock(mutex_);
+            response_body_.insert(response_body_.end(), body.begin(), body.end());
+            ++body_events_;
+          }
+          condition_.notify_all();
+        },
+        .complete = [this] {
+          {
+            std::scoped_lock lock(mutex_);
+            complete_ = true;
+          }
+          condition_.notify_all();
+        },
+        .error = [this](HttpError error) {
+          {
+            std::scoped_lock lock(mutex_);
+            error_.emplace(std::move(error));
+          }
+          condition_.notify_all();
+        },
+    };
   }
 
-  [[nodiscard]] HttpResult Wait() {
+  void WaitForResponse() {
     std::unique_lock lock(mutex_);
-    if (!condition_.wait_for(lock, std::chrono::seconds{5}, [this] { return result_.has_value(); })) {
-      throw std::runtime_error("HuxerUI test timed out waiting for a WinHTTP result");
+    if (!condition_.wait_for(lock, std::chrono::seconds{5}, [this] { return response_.has_value() || error_; })) {
+      throw std::runtime_error("HuxerUI test timed out waiting for WinHTTP response headers");
     }
-    return std::move(*result_);
   }
 
-  [[nodiscard]] bool WaitFor(std::chrono::milliseconds timeout) {
+  void WaitForBodyEvent(std::size_t previous_events) {
     std::unique_lock lock(mutex_);
-    return condition_.wait_for(lock, timeout, [this] { return result_.has_value(); });
+    if (!condition_.wait_for(lock, std::chrono::seconds{5}, [this, previous_events] {
+          return body_events_ != previous_events || complete_ || error_.has_value();
+        })) {
+      throw std::runtime_error("HuxerUI test timed out waiting for a WinHTTP body event");
+    }
+  }
+
+  void WaitForTerminal() {
+    std::unique_lock lock(mutex_);
+    if (!condition_.wait_for(lock, std::chrono::seconds{5}, [this] { return complete_ || error_.has_value(); })) {
+      throw std::runtime_error("HuxerUI test timed out waiting for a WinHTTP terminal event");
+    }
+  }
+
+  [[nodiscard]] bool WaitForAny(std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, timeout, [this] {
+      return response_.has_value() || body_events_ != 0 || complete_ || error_.has_value();
+    });
+  }
+
+  [[nodiscard]] std::size_t BodyEvents() const {
+    std::scoped_lock lock(mutex_);
+    return body_events_;
+  }
+
+  [[nodiscard]] bool Complete() const {
+    std::scoped_lock lock(mutex_);
+    return complete_;
+  }
+
+  [[nodiscard]] std::optional<HttpError> Error() const {
+    std::scoped_lock lock(mutex_);
+    return error_;
+  }
+
+  [[nodiscard]] detail::HttpTransportResponse Response() const {
+    std::scoped_lock lock(mutex_);
+    return *response_;
+  }
+
+  [[nodiscard]] Bytes Body() const {
+    std::scoped_lock lock(mutex_);
+    return response_body_;
   }
 
 private:
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable condition_;
-  std::optional<HttpResult> result_;
+  std::optional<detail::HttpTransportResponse> response_;
+  Bytes response_body_;
+  std::optional<HttpError> error_;
+  std::size_t body_events_ = 0;
+  bool complete_ = false;
 };
+
+void DrainResponse(const std::shared_ptr<detail::HttpTransportOperation>& operation, HttpCompletion& completion) {
+  completion.WaitForResponse();
+  while (!completion.Complete() && !completion.Error().has_value()) {
+    const std::size_t events = completion.BodyEvents();
+    operation->RequestRead();
+    completion.WaitForBodyEvent(events);
+  }
+}
 
 std::string ResponseWithBody(std::string body) {
   return "HTTP/1.1 201 Created\r\n"
@@ -229,7 +310,7 @@ TEST_CASE("WindowsHttpTransportPreservesRequestAndResponseData") {
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
   HttpCompletion completion;
 
-  const std::function<void()> cancel = transport->Start(
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
       {
           .url = server.Url("/items?source=test"),
           .method = HttpMethod::Post,
@@ -237,25 +318,73 @@ TEST_CASE("WindowsHttpTransportPreservesRequestAndResponseData") {
           .body = BytesFromString(request_body),
           .timeout = std::chrono::seconds{5},
       },
-      [&completion](HttpResult result) { completion.Complete(std::move(result)); }
+      true,
+      completion.Callbacks()
   );
 
   const std::string request = server.WaitForRequest();
-  HttpResult result = completion.Wait();
-  cancel();
+  completion.WaitForResponse();
+  REQUIRE(completion.BodyEvents() == 0);
+  DrainResponse(operation, completion);
 
   REQUIRE(request.starts_with("POST /items?source=test HTTP/1.1\r\n"));
   REQUIRE(request.find("Content-Type: application/octet-stream\r\n") != std::string::npos);
   REQUIRE(request.find("X-Trace: winhttp\r\n") != std::string::npos);
   REQUIRE(request.ends_with(request_body));
 
-  REQUIRE(result.HasResponse());
-  const HttpResponse& response = result.Response();
+  REQUIRE_FALSE(completion.Error().has_value());
+  const detail::HttpTransportResponse response = completion.Response();
   REQUIRE(response.status_code == 201);
   REQUIRE(response.url == server.Url("/items?source=test"));
-  REQUIRE(response.body == BytesFromString(response_body));
+  REQUIRE(completion.Body() == BytesFromString(response_body));
+  REQUIRE(response.body_size == response_body.size());
   REQUIRE(std::count(response.headers.begin(), response.headers.end(), HttpHeader{"X-Test", "first"}) == 1);
   REQUIRE(std::count(response.headers.begin(), response.headers.end(), HttpHeader{"X-Test", "second"}) == 1);
+}
+
+TEST_CASE("WindowsHttpTransportReturnsOnlyTheFinalRedirectResponse") {
+  LoopbackHttpServer final_server(ResponseWithBody("final"), 0);
+  const std::string redirect_response = "HTTP/1.1 302 Found\r\nLocation: " + final_server.Url("/final") +
+                                        "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+  LoopbackHttpServer redirect_server(redirect_response, 0);
+  const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
+  HttpCompletion completion;
+
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
+      {.url = redirect_server.Url("/redirect"), .timeout = std::chrono::seconds{5}},
+      true,
+      completion.Callbacks()
+  );
+  (void)redirect_server.WaitForRequest();
+  (void)final_server.WaitForRequest();
+  DrainResponse(operation, completion);
+
+  REQUIRE_FALSE(completion.Error().has_value());
+  REQUIRE(completion.Response().status_code == 201);
+  REQUIRE(completion.Response().url == final_server.Url("/final"));
+  REQUIRE(completion.Body() == BytesFromString("final"));
+}
+
+TEST_CASE("WindowsHttpTransportUsesPlatformResponseDecompression") {
+  const unsigned char compressed_bytes[] = {
+      0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x4B, 0xCE, 0xCF,
+      0x2D, 0x28, 0x4A, 0x2D, 0x2E, 0x4E, 0x4D, 0x51, 0x00, 0x52, 0x05, 0xF9, 0x79,
+      0xC5, 0xA9, 0x00, 0xB1, 0xFF, 0x32, 0x6F, 0x13, 0x00, 0x00, 0x00,
+  };
+  const std::string compressed(reinterpret_cast<const char*>(compressed_bytes), sizeof(compressed_bytes));
+  const std::string response = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: " +
+                               std::to_string(compressed.size()) + "\r\nConnection: close\r\n\r\n" + compressed;
+  LoopbackHttpServer server(response, 0);
+  const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
+  HttpCompletion completion;
+
+  const std::shared_ptr<detail::HttpTransportOperation> operation =
+      transport->Start({.url = server.Url("/compressed")}, true, completion.Callbacks());
+  (void)server.WaitForRequest();
+  DrainResponse(operation, completion);
+
+  REQUIRE_FALSE(completion.Error().has_value());
+  REQUIRE(completion.Body() == BytesFromString("compressed response"));
 }
 
 TEST_CASE("WindowsHttpTransportAppliesOneDeadlineToTheWholeRequest") {
@@ -263,19 +392,19 @@ TEST_CASE("WindowsHttpTransportAppliesOneDeadlineToTheWholeRequest") {
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
   HttpCompletion completion;
 
-  const std::function<void()> cancel = transport->Start(
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
       {
           .url = server.Url("/slow"),
           .timeout = std::chrono::milliseconds{250},
       },
-      [&completion](HttpResult result) { completion.Complete(std::move(result)); }
+      true,
+      completion.Callbacks()
   );
   (void)server.WaitForRequest();
 
-  HttpResult result = completion.Wait();
-  cancel();
-  REQUIRE_FALSE(result.HasResponse());
-  REQUIRE(result.Error().code == HttpErrorCode::Timeout);
+  completion.WaitForTerminal();
+  REQUIRE(completion.Error()->code == HttpErrorCode::Timeout);
+  operation->Cancel();
   server.ReleaseResponse();
 }
 
@@ -284,18 +413,19 @@ TEST_CASE("WindowsHttpTransportCancellationSuppressesLateCompletion") {
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
   HttpCompletion completion;
 
-  const std::function<void()> cancel = transport->Start(
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
       {
           .url = server.Url("/cancel"),
           .timeout = std::nullopt,
       },
-      [&completion](HttpResult result) { completion.Complete(std::move(result)); }
+      true,
+      completion.Callbacks()
   );
   (void)server.WaitForRequest();
 
-  cancel();
+  operation->Cancel();
   server.ReleaseResponse();
-  REQUIRE_FALSE(completion.WaitFor(std::chrono::milliseconds{250}));
+  REQUIRE_FALSE(completion.WaitForAny(std::chrono::milliseconds{250}));
 }
 
 TEST_CASE("WindowsHttpTransportRejectsInvalidUtf8BeforeStartingNativeIO") {
@@ -304,15 +434,12 @@ TEST_CASE("WindowsHttpTransportRejectsInvalidUtf8BeforeStartingNativeIO") {
   std::string invalid_url = "http://example.test/";
   invalid_url.push_back(static_cast<char>(0xFF));
 
-  const std::function<void()> cancel =
-      transport->Start({.url = std::move(invalid_url)}, [&completion](HttpResult result) {
-        completion.Complete(std::move(result));
-      });
-  HttpResult result = completion.Wait();
-  cancel();
+  const std::shared_ptr<detail::HttpTransportOperation> operation =
+      transport->Start({.url = std::move(invalid_url)}, true, completion.Callbacks());
+  completion.WaitForTerminal();
+  operation->Cancel();
 
-  REQUIRE_FALSE(result.HasResponse());
-  REQUIRE(result.Error().code == HttpErrorCode::Transport);
+  REQUIRE(completion.Error()->code == HttpErrorCode::Transport);
 }
 
 } // namespace huxerui::test

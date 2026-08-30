@@ -17,6 +17,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -228,15 +229,98 @@ private:
 
 struct PendingRequest {
   std::future<HttpResult> result;
-  std::function<void()> cancel;
+  std::shared_ptr<detail::HttpTransportOperation> operation;
 };
 
 PendingRequest StartRequest(const std::shared_ptr<detail::HttpTransport>& transport, HttpRequest request) {
-  auto result = std::make_shared<std::promise<HttpResult>>();
-  std::future<HttpResult> future = result->get_future();
-  std::function<void()> cancel =
-      transport->Start(std::move(request), [result](HttpResult value) { result->set_value(std::move(value)); });
-  return {std::move(future), std::move(cancel)};
+  struct State {
+    void RequestRead() {
+      std::shared_ptr<detail::HttpTransportOperation> current;
+      {
+        std::scoped_lock lock(mutex);
+        if (operation) {
+          current = operation;
+        } else {
+          read_pending = true;
+        }
+      }
+      if (current) {
+        current->RequestRead();
+      }
+    }
+
+    void SetOperation(std::shared_ptr<detail::HttpTransportOperation> value) {
+      bool request_read = false;
+      {
+        std::scoped_lock lock(mutex);
+        operation = std::move(value);
+        request_read = read_pending;
+      }
+      if (request_read) {
+        operation->RequestRead();
+      }
+    }
+
+    void Complete(HttpResult result) {
+      bool publish = false;
+      {
+        std::scoped_lock lock(mutex);
+        if (!finished) {
+          finished = true;
+          publish = true;
+        }
+      }
+      if (publish) {
+        promise.set_value(std::move(result));
+      }
+    }
+
+    std::mutex mutex;
+    std::promise<HttpResult> promise;
+    std::shared_ptr<detail::HttpTransportOperation> operation;
+    std::optional<detail::HttpTransportResponse> response;
+    Bytes body;
+    bool read_pending = false;
+    bool finished = false;
+  };
+
+  auto state = std::make_shared<State>();
+  std::future<HttpResult> future = state->promise.get_future();
+  detail::HttpTransportCallbacks callbacks{
+      .response = [state](detail::HttpTransportResponse response) {
+        {
+          std::scoped_lock lock(state->mutex);
+          state->response.emplace(std::move(response));
+        }
+        state->RequestRead();
+      },
+      .body = [state](Bytes body) {
+        {
+          std::scoped_lock lock(state->mutex);
+          state->body.insert(state->body.end(), body.begin(), body.end());
+        }
+        state->RequestRead();
+      },
+      .complete = [state] {
+        detail::HttpTransportResponse metadata;
+        Bytes body;
+        {
+          std::scoped_lock lock(state->mutex);
+          metadata = std::move(*state->response);
+          body = std::move(state->body);
+        }
+        state->Complete(HttpResult(HttpResponse{
+            .url = std::move(metadata.url),
+            .status_code = metadata.status_code,
+            .headers = std::move(metadata.headers),
+            .body = std::move(body),
+        }));
+      },
+      .error = [state](HttpError error) { state->Complete(HttpResult(std::move(error))); },
+  };
+  auto operation = transport->Start(std::move(request), false, std::move(callbacks));
+  state->SetOperation(operation);
+  return {std::move(future), std::move(operation)};
 }
 
 std::uint16_t ClosedLoopbackPort() {
@@ -368,11 +452,17 @@ TEST_CASE("Linux HTTP transport suppresses completion after cancellation") {
   }});
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
   std::atomic<int> completions = 0;
-  std::function<void()> cancel =
-      transport->Start({.url = server.Url("/cancel"), .timeout = 2s}, [&completions](HttpResult) { ++completions; });
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
+      {.url = server.Url("/cancel"), .timeout = 2s},
+      true,
+      {
+          .complete = [&completions] { ++completions; },
+          .error = [&completions](HttpError) { ++completions; },
+      }
+  );
 
   REQUIRE(server.WaitForRequests(1));
-  cancel();
+  operation->Cancel();
   std::this_thread::sleep_for(250ms);
   REQUIRE(completions == 0);
 }
@@ -388,15 +478,21 @@ TEST_CASE("Linux HTTP transport resolves cancellation and completion races once"
     }});
     std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
     std::atomic<int> completions = 0;
-    std::function<void()> cancel =
-        transport->Start({.url = server.Url("/race"), .timeout = 2s}, [&completions](HttpResult) { ++completions; });
+    const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
+        {.url = server.Url("/race"), .timeout = 2s},
+        true,
+        {
+            .complete = [&completions] { ++completions; },
+            .error = [&completions](HttpError) { ++completions; },
+        }
+    );
     REQUIRE(server.WaitForRequests(1));
 
-    std::thread cancel_thread([&cancel, &release_response] {
+    std::thread cancel_thread([operation, &release_response] {
       while (!release_response.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
-      cancel();
+      operation->Cancel();
     });
     release_response.store(true, std::memory_order_release);
     cancel_thread.join();
@@ -412,8 +508,14 @@ TEST_CASE("Destroying Linux HTTP transport cancels active requests and joins its
   }});
   std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
   std::atomic<int> completions = 0;
-  std::function<void()> cancel =
-      transport->Start({.url = server.Url("/shutdown"), .timeout = 2s}, [&completions](HttpResult) { ++completions; });
+  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
+      {.url = server.Url("/shutdown"), .timeout = 2s},
+      true,
+      {
+          .complete = [&completions] { ++completions; },
+          .error = [&completions](HttpError) { ++completions; },
+      }
+  );
   REQUIRE(server.WaitForRequests(1));
 
   const auto start = std::chrono::steady_clock::now();
@@ -421,7 +523,7 @@ TEST_CASE("Destroying Linux HTTP transport cancels active requests and joins its
   const auto elapsed = std::chrono::steady_clock::now() - start;
   REQUIRE(elapsed < 2s);
   REQUIRE(completions == 0);
-  static_cast<void>(cancel);
+  static_cast<void>(operation);
 }
 
 } // namespace huxerui::test
