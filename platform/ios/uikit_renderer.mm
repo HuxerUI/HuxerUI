@@ -9,6 +9,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -353,6 +354,27 @@ void SetFillColor(CGContextRef context, Color color) {
 
 void SetStrokeColor(CGContextRef context, Color color) {
   CGContextSetRGBStrokeColor(context, color.red, color.green, color.blue, color.alpha);
+}
+
+void ApplyStrokeStyle(CGContextRef context, const StrokeStyle& style) {
+  CGLineCap cap = kCGLineCapButt;
+  if (style.cap == StrokeCap::Round) {
+    cap = kCGLineCapRound;
+  } else if (style.cap == StrokeCap::Square) {
+    cap = kCGLineCapSquare;
+  }
+  CGLineJoin join = kCGLineJoinMiter;
+  if (style.join == StrokeJoin::Round) {
+    join = kCGLineJoinRound;
+  } else if (style.join == StrokeJoin::Bevel) {
+    join = kCGLineJoinBevel;
+  }
+  std::vector<CGFloat> dashes(style.dash_pattern.begin(), style.dash_pattern.end());
+  CGContextSetLineWidth(context, style.width);
+  CGContextSetLineCap(context, cap);
+  CGContextSetLineJoin(context, join);
+  CGContextSetMiterLimit(context, style.miter_limit);
+  CGContextSetLineDash(context, style.dash_offset, dashes.empty() ? nullptr : dashes.data(), dashes.size());
 }
 
 void DrawCGImage(
@@ -1368,17 +1390,23 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawCircleCommand&
   );
 }
 
-void UIKitRenderer::RenderCommand(CGContextRef context, const DrawArcCommand& command) {
-  if (command.radius <= 0.0F || command.width <= 0.0F || command.color.alpha <= 0.0F ||
-      !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawLineCommand& command) {
+  if (command.start == command.end || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
     return;
   }
+  CGContextSaveGState(context);
+  SetStrokeColor(context, command.color);
+  ApplyStrokeStyle(context, command.style);
+  CGContextMoveToPoint(context, command.start.x, command.start.y);
+  CGContextAddLineToPoint(context, command.end.x, command.end.y);
+  CGContextStrokePath(context);
+  CGContextRestoreGState(context);
+}
 
-  CGLineCap cap = kCGLineCapButt;
-  if (command.cap == StrokeCap::Round) {
-    cap = kCGLineCapRound;
-  } else if (command.cap == StrokeCap::Square) {
-    cap = kCGLineCapSquare;
+void UIKitRenderer::RenderCommand(CGContextRef context, const DrawArcCommand& command) {
+  if (command.radius <= 0.0F || command.style.width <= 0.0F || command.color.alpha <= 0.0F ||
+      !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
+    return;
   }
 
   CGMutablePathRef path = CGPathCreateMutable();
@@ -1391,10 +1419,12 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawArcCommand& co
       command.start_angle,
       command.sweep_angle
   );
+  if (std::abs(command.sweep_angle) >= 2.0F * std::numbers::pi_v<float> - 0.0001F) {
+    CGPathCloseSubpath(path);
+  }
   CGContextSaveGState(context);
   SetStrokeColor(context, command.color);
-  CGContextSetLineWidth(context, command.width);
-  CGContextSetLineCap(context, cap);
+  ApplyStrokeStyle(context, command.style);
   CGContextAddPath(context, path);
   CGContextStrokePath(context);
   CGContextRestoreGState(context);
@@ -1402,21 +1432,31 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawArcCommand& co
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawBorderCommand& command) {
-  if (command.width <= 0.0F || command.color.alpha <= 0.0F) {
+  if (command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
     return;
   }
-  const float inset = command.width * 0.5F;
+  if (!command.style.dash_pattern.empty() || command.style.join != StrokeJoin::Miter ||
+      command.style.miter_limit != 4.0F) {
+    RenderCommand(context,
+                  StrokePathCommand{
+                      CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
+                      command.color,
+                      command.style,
+                  });
+    return;
+  }
+  const float inset = command.style.width * 0.5F;
   const CGRect rect = CGRectMake(
       command.rect.x + inset,
       command.rect.y + inset,
-      std::max(0.0F, command.rect.width - command.width),
-      std::max(0.0F, command.rect.height - command.width)
+      std::max(0.0F, command.rect.width - command.style.width),
+      std::max(0.0F, command.rect.height - command.style.width)
   );
   const float radius = std::max(0.0F, command.corner_radius - inset);
   CGPathRef path = CGPathCreateWithRoundedRect(rect, radius, radius, nullptr);
   CGContextSaveGState(context);
   SetStrokeColor(context, command.color);
-  CGContextSetLineWidth(context, command.width);
+  ApplyStrokeStyle(context, command.style);
   CGContextAddPath(context, path);
   CGContextStrokePath(context);
   CGContextRestoreGState(context);
@@ -1469,29 +1509,13 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const FillPathCommand& c
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const StrokePathCommand& command) {
-  if (command.path.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
+  if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
     return;
   }
-  CGLineCap cap = kCGLineCapButt;
-  if (command.cap == StrokeCap::Round) {
-    cap = kCGLineCapRound;
-  } else if (command.cap == StrokeCap::Square) {
-    cap = kCGLineCapSquare;
-  }
-  CGLineJoin join = kCGLineJoinMiter;
-  if (command.join == StrokeJoin::Round) {
-    join = kCGLineJoinRound;
-  } else if (command.join == StrokeJoin::Bevel) {
-    join = kCGLineJoinBevel;
-  }
-
   CGPathRef path = CreatePath(command.path);
   CGContextSaveGState(context);
   SetStrokeColor(context, command.color);
-  CGContextSetLineWidth(context, command.width);
-  CGContextSetLineCap(context, cap);
-  CGContextSetLineJoin(context, join);
-  CGContextSetMiterLimit(context, command.miter_limit);
+  ApplyStrokeStyle(context, command.style);
   CGContextAddPath(context, path);
   CGContextStrokePath(context);
   CGContextRestoreGState(context);

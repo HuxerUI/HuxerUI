@@ -406,15 +406,17 @@ Applications may construct vector images directly:
 const VectorAsset mark = VectorAsset::Create({24.0F, 24.0F}, [](VectorBuilder& vector) {
   Path path;
   path.MoveTo({2.0F, 12.0F}).LineTo({10.0F, 20.0F}).LineTo({22.0F, 4.0F});
-  vector.StrokePath(std::move(path), Color::Black(), 2.0F, StrokeCap::Round, StrokeJoin::Round);
+  vector.StrokePath(std::move(path), Color::Black(),
+                    StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
 });
 ```
 
 Packaged SVG files remain ImageResource values and live under `resources/images` with raster images.
-The resource generator validates them and compiles supported geometry into the versioned `HUXV` payload.
+The resource generator validates them and compiles supported geometry into the versioned `HUXVEC` payload.
 Runtime detects that payload signature when it first resolves the ImageResource; ResourceId does not encode the storage format and there is no public ImageKind.
 
-The initial SVG compiler supports `svg`, `g`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`; view boxes and intrinsic sizes; solid fill and stroke colors; fill rules; stroke widths, caps, joins, and miter limits; element transforms; and path arcs converted to cubic curves.
+The SVG compiler supports `svg`, `g`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`; view boxes and intrinsic sizes; solid fill and stroke colors; fill rules; stroke widths, caps, joins, miter limits, dash arrays, and dash offsets; element transforms; and path arcs converted to cubic curves.
+HUXVEC version 1 carries the complete stroke data, and the shared vector loader normalizes it through the same `StrokeStyle` contract used by Canvas.
 It rejects scripts, external entities, text rendering, embedded bitmaps, CSS stylesheets, gradients, filters, masks, clip paths, animation, and unsupported units with a source-file diagnostic.
 Unimplemented presentation semantics such as `preserveAspectRatio`, `display`, `visibility`, and group `opacity` are rejected rather than approximated.
 

@@ -68,6 +68,7 @@ private:
   void RenderCommand(const DrawImageCommand& command);
   void RenderCommand(const DrawExternalTextureCommand& command);
   void RenderCommand(const DrawCircleCommand& command);
+  void RenderCommand(const DrawLineCommand& command);
   void RenderCommand(const DrawArcCommand& command);
   void RenderCommand(const DrawBorderCommand& command);
   void RenderCommand(const DrawShadowCommand& command);

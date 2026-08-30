@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
 #include <huxerui/vector.h>
 
 #include "geometry_internal.h"
+#include "path_internal.h"
 #include "shadow_internal.h"
 #include "vector_internal.h"
 
@@ -63,6 +65,65 @@ void RequireNonNegative(float value, const char* message) {
   if (!std::isfinite(value) || value < 0.0F) {
     throw std::invalid_argument(message);
   }
+}
+
+StrokeStyle NormalizeStrokeStyle(StrokeStyle style) {
+  RequireNonNegative(style.width, "HuxerUI stroke width must be finite and non-negative");
+  switch (style.cap) {
+  case StrokeCap::Butt:
+  case StrokeCap::Round:
+  case StrokeCap::Square:
+    break;
+  default:
+    throw std::invalid_argument("HuxerUI stroke cap is invalid");
+  }
+  switch (style.join) {
+  case StrokeJoin::Miter:
+  case StrokeJoin::Round:
+  case StrokeJoin::Bevel:
+    break;
+  default:
+    throw std::invalid_argument("HuxerUI stroke join is invalid");
+  }
+  if (!std::isfinite(style.miter_limit) || style.miter_limit < 1.0F) {
+    throw std::invalid_argument("HuxerUI stroke miter limit must be finite and at least one");
+  }
+  if (!std::isfinite(style.dash_offset)) {
+    throw std::invalid_argument("HuxerUI stroke dash offset must be finite");
+  }
+
+  double cycle = 0.0;
+  for (const float length : style.dash_pattern) {
+    if (!std::isfinite(length) || length < 0.0F) {
+      throw std::invalid_argument("HuxerUI stroke dash lengths must be finite and non-negative");
+    }
+    cycle += length;
+  }
+  if (style.dash_pattern.size() % 2 != 0) {
+    const std::size_t original_size = style.dash_pattern.size();
+    if (original_size > style.dash_pattern.max_size() - original_size) {
+      throw std::invalid_argument("HuxerUI stroke dash pattern is too large");
+    }
+    style.dash_pattern.reserve(original_size * 2);
+    for (std::size_t index = 0; index < original_size; ++index) {
+      style.dash_pattern.push_back(style.dash_pattern[index]);
+    }
+    cycle *= 2.0;
+  }
+  if (!std::isfinite(cycle) || cycle > std::numeric_limits<float>::max()) {
+    throw std::invalid_argument("HuxerUI stroke dash cycle must be finite");
+  }
+  if (cycle == 0.0) {
+    style.dash_pattern.clear();
+    style.dash_offset = 0.0F;
+    return style;
+  }
+
+  style.dash_offset = std::fmod(style.dash_offset, static_cast<float>(cycle));
+  if (style.dash_offset < 0.0F) {
+    style.dash_offset += static_cast<float>(cycle);
+  }
+  return style;
 }
 
 void RequireCornerRadii(CornerRadii corner_radii) {
@@ -358,7 +419,7 @@ void PaintContext::DrawImageRect(
           if constexpr (std::same_as<Command, FillPathCommand>) {
             FillPath(value.path, resolve_color(value.color), value.fill_rule);
           } else if constexpr (std::same_as<Command, StrokePathCommand>) {
-            StrokePath(value.path, resolve_color(value.color), value.width, value.cap, value.join, value.miter_limit);
+            StrokePath(value.path, resolve_color(value.color), value.style);
           } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
             PushPathClip(value.path, value.fill_rule);
           } else if constexpr (std::same_as<Command, PopClipCommand>) {
@@ -395,9 +456,30 @@ void PaintContext::DrawCircle(Point center, float radius, Color color) {
   });
 }
 
-void PaintContext::DrawArc(
-    Point center, float radius, float start_angle, float sweep_angle, Color color, float width, StrokeCap cap
-) {
+void PaintContext::DrawLine(Point start, Point end, Color color, StrokeStyle style) {
+  RequireOpen();
+  if (!IsFinite(start) || !IsFinite(end)) {
+    throw std::invalid_argument("HuxerUI paint line endpoints must be finite");
+  }
+  RequireColor(color);
+  style = NormalizeStrokeStyle(std::move(style));
+  sequence_.commands_.emplace_back(DrawLineCommand{start, end, color, std::move(style)});
+  const auto& command = std::get<DrawLineCommand>(sequence_.commands_.back());
+  if (start == end || command.style.width <= 0.0F) {
+    return;
+  }
+  const float outset = command.style.width *
+                        (command.style.cap == StrokeCap::Square ? 0.70710678118F : 0.5F);
+  Include({
+      std::min(start.x, end.x) - outset,
+      std::min(start.y, end.y) - outset,
+      std::abs(end.x - start.x) + outset * 2.0F,
+      std::abs(end.y - start.y) + outset * 2.0F,
+  });
+}
+
+void PaintContext::DrawArc(Point center, float radius, float start_angle, float sweep_angle, Color color,
+                           StrokeStyle style) {
   RequireOpen();
   if (!IsFinite(center)) {
     throw std::invalid_argument("HuxerUI paint arc center must be finite");
@@ -407,7 +489,7 @@ void PaintContext::DrawArc(
     throw std::invalid_argument("HuxerUI paint arc angles must be finite radians");
   }
   RequireColor(color);
-  RequireNonNegative(width, "HuxerUI paint arc width must be finite and non-negative");
+  style = NormalizeStrokeStyle(std::move(style));
   sequence_.commands_.emplace_back(
       DrawArcCommand{
           center,
@@ -415,12 +497,15 @@ void PaintContext::DrawArc(
           start_angle,
           sweep_angle,
           color,
-          width,
-          cap,
+          std::move(style),
       }
   );
+  const auto& command = std::get<DrawArcCommand>(sequence_.commands_.back());
+  if (command.style.width <= 0.0F || radius <= 0.0F || sweep_angle == 0.0F) {
+    return;
+  }
   const float cap_outset =
-      cap == StrokeCap::Square ? std::max(0.0F, width) * 0.70710678118F : std::max(0.0F, width) * 0.5F;
+      command.style.cap == StrokeCap::Square ? command.style.width * 0.70710678118F : command.style.width * 0.5F;
   const float extent = std::max(0.0F, radius) + cap_outset;
   Include({
       center.x - extent,
@@ -430,32 +515,23 @@ void PaintContext::DrawArc(
   });
 }
 
-void PaintContext::DrawBorder(Rect rect, Color color, float width, CornerRadii corner_radii) {
+void PaintContext::DrawBorder(Rect rect, Color color, StrokeStyle style, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
   RequireColor(color);
-  RequireNonNegative(width, "HuxerUI paint border width must be finite and non-negative");
+  style = NormalizeStrokeStyle(std::move(style));
   RequireCornerRadii(corner_radii);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
-    const float inset = width * 0.5F;
-    const Rect centerline{
-        rect.x + inset,
-        rect.y + inset,
-        std::max(0.0F, rect.width - width),
-        std::max(0.0F, rect.height - width),
-    };
-    const CornerRadii centerline_radii{
-        std::max(0.0F, corner_radii.top_left - inset),
-        std::max(0.0F, corner_radii.top_right - inset),
-        std::max(0.0F, corner_radii.bottom_right - inset),
-        std::max(0.0F, corner_radii.bottom_left - inset),
-    };
-    StrokePath(Path::RoundedRect(centerline, centerline_radii), color, width);
+    StrokePath(detail::CreateBorderStrokePath(rect, corner_radii, style.width), color, std::move(style));
     return;
   }
-  sequence_.commands_.emplace_back(DrawBorderCommand{rect, color, width, corner_radii.top_left});
-  const float outset = std::max(0.0F, width) * 0.5F;
+  const float width = style.width;
+  sequence_.commands_.emplace_back(DrawBorderCommand{rect, color, std::move(style), corner_radii.top_left});
+  if (width <= 0.0F || rect.IsEmpty()) {
+    return;
+  }
+  const float outset = width * 0.5F;
   Include({
       rect.x - outset,
       rect.y - outset,
@@ -510,36 +586,30 @@ void PaintContext::FillPath(Path path, Color color, PathFillRule fill_rule) {
   }
 }
 
-void PaintContext::StrokePath(Path path, Color color, float width, StrokeCap cap, StrokeJoin join, float miter_limit) {
+void PaintContext::StrokePath(Path path, Color color, StrokeStyle style) {
   RequireOpen();
   RequireColor(color);
-  RequireNonNegative(width, "HuxerUI path stroke width must be finite and non-negative");
-  if (!std::isfinite(miter_limit) || miter_limit <= 0.0F) {
-    throw std::invalid_argument("HuxerUI path stroke miter limit must be finite and greater than zero");
-  }
+  style = NormalizeStrokeStyle(std::move(style));
   sequence_.commands_.emplace_back(
       StrokePathCommand{
           std::move(path),
           color,
-          width,
-          cap,
-          join,
-          miter_limit,
+          std::move(style),
       }
   );
   const auto& command = std::get<StrokePathCommand>(sequence_.commands_.back());
-  if (command.path.IsEmpty() || width <= 0.0F) {
+  if (command.path.IsEmpty() || command.style.width <= 0.0F) {
     return;
   }
   const Rect bounds = command.path.Bounds();
   float outset_multiplier = 1.0F;
-  if (join == StrokeJoin::Miter) {
-    outset_multiplier = std::max(outset_multiplier, miter_limit);
+  if (command.style.join == StrokeJoin::Miter) {
+    outset_multiplier = std::max(outset_multiplier, command.style.miter_limit);
   }
-  if (cap == StrokeCap::Square) {
+  if (command.style.cap == StrokeCap::Square) {
     outset_multiplier = std::max(outset_multiplier, 1.41421356237F);
   }
-  const float outset = width * 0.5F * outset_multiplier;
+  const float outset = command.style.width * 0.5F * outset_multiplier;
   Include({
       bounds.x - outset,
       bounds.y - outset,

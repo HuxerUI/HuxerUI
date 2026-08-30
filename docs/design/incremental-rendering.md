@@ -311,7 +311,7 @@ It remains true when local paint or an unclipped descendant contributes visible 
 An effective child clip can still make that descendant and therefore the clipped subtree invisible.
 
 `PaintSequence` contains immutable platform-neutral `PaintCommand` values in node-local coordinates.
-`PaintCommand` remains the vocabulary for rectangles, text, circles, arcs, Paths, borders, clips, transforms, shadows, external textures, and PlatformView placement boundaries.
+`PaintCommand` remains the vocabulary for rectangles, text, circles, lines, arcs, Paths, borders, clips, transforms, shadows, external textures, and PlatformView placement boundaries.
 The retained scene changes command ownership; it does not create a renderer-specific command model.
 
 Platform renderers traverse `RenderScene`, maintain the platform transform and clip stacks, and replay only the records referenced by the scene.

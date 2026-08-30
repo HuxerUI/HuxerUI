@@ -33,7 +33,9 @@ They do not change the underlying geometry value.
 
 ```cpp
 paint.FillPath(path, color, PathFillRule::NonZero);
-paint.StrokePath(path, color, width, StrokeCap::Round, StrokeJoin::Round);
+paint.StrokePath(path, color,
+                 StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round,
+                             .dash_pattern = {8.0F, 4.0F}});
 paint.DrawPathShadow(path, shadow_color, offset, blur_radius);
 paint.PushPathClip(path, PathFillRule::EvenOdd);
 paint.PopClip();
@@ -44,6 +46,19 @@ Path clips share the existing balanced clip stack and `PopClipCommand`.
 Stroke bounds conservatively include cap, join, width, and miter-limit overflow.
 Path shadows include offset and blur overflow but intentionally do not expose spread.
 Reliable spread for an arbitrary path requires a separately defined geometry-offset operation for concave contours and holes.
+
+`StrokeStyle` is the single stroke contract used by `DrawLine()`, `DrawArc()`, `DrawBorder()`, and `StrokePath()`.
+It owns width, cap, join, miter limit, dash pattern, and dash offset; commands do not expose parallel flat stroke parameters.
+Recording requires finite values, non-negative width and dash lengths, and a miter limit of at least one.
+`DrawRect()` remains fill-only rather than duplicating border behavior.
+`DrawLineCommand` preserves directed endpoints, while `VectorBuilder` stays Path-based because vector assets already represent line geometry as Path data.
+
+Dash lengths and offsets use the geometry's local logical units and therefore follow the same transforms as the stroke.
+Pattern entries alternate painted and skipped lengths, beginning with paint; an odd entry count repeats once to produce an even cycle.
+An empty or all-zero pattern is canonicalized to a solid stroke, zero entries inside a nonzero cycle are retained, and negative offsets wrap into the cycle.
+The selected cap applies to open contour endpoints and to each painted dash segment.
+Every Path contour restarts from the normalized offset.
+Lines begin at their `start`, arcs begin at `start_angle` and advance with the sweep direction, and borders begin on the top edge after the top-left corner and proceed clockwise.
 
 Blurred Path shadows exclude the shifted caster interior, matching rectangular shadow semantics and avoiding a second solid shape.
 
@@ -94,17 +109,23 @@ Animated retained behavior continues to use NodeExtension frame callbacks and pa
 
 ## Platform rendering
 
-Platform renderers convert Path elements to platform geometry while preserving fill rules, stroke caps, joins, transforms, and clip balance:
+Platform renderers convert Path elements to platform geometry while preserving fill rules, stroke styles, transforms, and clip balance:
 
 - Windows uses Direct2D path geometry.
 - macOS uses Core Graphics paths.
 - Android uses `android.graphics.Path` and the host Canvas.
+- iOS uses Core Graphics paths.
+- Linux uses Cairo paths.
+- Web uses Canvas 2D paths.
+
+Each renderer maps `StrokeStyle` into its native stroke state before replay.
+Uniform solid borders may use a native rounded-rectangle operation; dashed or otherwise non-default border geometry lowers to the same inset Path used for asymmetric corners, so there is still one border shape contract.
 
 Path shadow masks reuse each backend's existing blur machinery.
 Platform geometry, masks, layers, and device-dependent caches never enter shared Runtime state.
 
 ## Unsupported capabilities
 
-The Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, dashed strokes, gradient path fills, or Path-based pointer hit testing.
+The Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, gradient path fills, or Path-based pointer hit testing.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
 Rectangle linear and radial gradients use dedicated PaintCommands; there is no generic Brush abstraction.

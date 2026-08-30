@@ -564,7 +564,7 @@ void PaintFocusRing(const MountedNode& node, PaintContext& context) {
           frame.width + outset * 2.0F,
           frame.height + outset * 2.0F,
       },
-      ring.color, width, radii);
+      ring.color, StrokeStyle{.width = width}, radii);
 }
 
 void HideRenderTree(MountedNode& node) {
@@ -650,8 +650,8 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
     PaintNodeExtensionsBehindContent(node, content);
     if (node.resolved_border.has_value() && node.resolved_border->color.alpha > 0.0F &&
         node.resolved_border->width > 0.0F) {
-      content.DrawBorder(bounds, node.resolved_border->color, node.resolved_border->width,
-                         node.resolved_corner_radii);
+      content.DrawBorder(bounds, node.resolved_border->color,
+                         StrokeStyle{.width = node.resolved_border->width}, node.resolved_corner_radii);
     }
     if (node.kind == NodeKind::Text) {
       if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {

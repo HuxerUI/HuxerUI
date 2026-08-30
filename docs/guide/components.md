@@ -19,6 +19,19 @@ Use `CopyEncoded(std::span<const std::byte>)` and `CopyBytes(std::span<const std
 The returned byte views remain standard immutable spans rather than introducing another view type.
 
 `Canvas` and `Path` provide custom platform-neutral drawing that is replayed by every renderer.
+Filled rectangles use `DrawRect()`, while lines, arcs, borders, and paths share `StrokeStyle` for width, caps, joins, miter limits, and optional dashes.
+
+```cpp
+return Canvas([](PaintContext& paint, Size size) {
+  paint.DrawLine({0.0F, size.height * 0.5F}, {size.width, size.height * 0.5F}, Color::Black(),
+                 StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}});
+});
+```
+
+Dash lengths and offsets use the local logical units of the painted geometry.
+An empty pattern is solid, entries alternate between painted and skipped lengths, and an odd-length pattern repeats to form an even cycle.
+Each Path contour restarts the pattern; `DrawLine`, `DrawArc`, and `DrawBorder` define stable starting points so changing `dash_offset` is deterministic.
+Use `DrawBorder()` to stroke rectangle geometry; `DrawRect()` intentionally remains a fill operation.
 
 ## Buttons and selection controls
 

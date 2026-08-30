@@ -114,11 +114,12 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
       "(Landroid/graphics/Canvas;Landroid/graphics/Bitmap;FFFFFFFFFII)V"
   );
   draw_circle_ = environment->GetMethodID(view_class, "drawCircle", "(Landroid/graphics/Canvas;FFFI)V");
-  draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFI)V");
+  draw_line_ = environment->GetMethodID(view_class, "drawLine", "(Landroid/graphics/Canvas;FFFFIFIIF[FF)V");
+  draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFIIF[FF)V");
   draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
   draw_shadow_ = environment->GetMethodID(view_class, "drawShadow", "(Landroid/graphics/Canvas;FFFFIFF)V");
   fill_path_ = environment->GetMethodID(view_class, "fillPath", "(Landroid/graphics/Canvas;[FII)V");
-  stroke_path_ = environment->GetMethodID(view_class, "strokePath", "(Landroid/graphics/Canvas;[FIFIIF)V");
+  stroke_path_ = environment->GetMethodID(view_class, "strokePath", "(Landroid/graphics/Canvas;[FIFIIF[FF)V");
   draw_path_shadow_ = environment->GetMethodID(view_class, "drawPathShadow", "(Landroid/graphics/Canvas;[FFFFFIFFFI)V");
   push_clip_ = environment->GetMethodID(view_class, "pushClip", "(Landroid/graphics/Canvas;FFFFF)V");
   push_path_clip_ = environment->GetMethodID(view_class, "pushPathClip", "(Landroid/graphics/Canvas;[FI)V");
@@ -129,10 +130,10 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
 
   if (draw_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
-      draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_arc_ == nullptr || draw_border_ == nullptr ||
-      draw_shadow_ == nullptr || fill_path_ == nullptr || stroke_path_ == nullptr || draw_path_shadow_ == nullptr ||
-      push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr ||
-      pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
+      draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_line_ == nullptr || draw_arc_ == nullptr ||
+      draw_border_ == nullptr || draw_shadow_ == nullptr || fill_path_ == nullptr || stroke_path_ == nullptr ||
+      draw_path_shadow_ == nullptr || push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr ||
+      push_opacity_ == nullptr || pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the platform backend");
   }
 }
@@ -559,6 +560,33 @@ void AndroidRenderer::RenderCommand(
   );
 }
 
+void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawLineCommand& command) {
+  jfloatArray dashes =
+      command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern);
+  if (!command.style.dash_pattern.empty() && dashes == nullptr) {
+    return;
+  }
+  environment->CallVoidMethod(
+      view,
+      draw_line_,
+      canvas,
+      command.start.x,
+      command.start.y,
+      command.end.x,
+      command.end.y,
+      PackColor(command.color),
+      command.style.width,
+      static_cast<jint>(command.style.cap),
+      static_cast<jint>(command.style.join),
+      command.style.miter_limit,
+      dashes,
+      command.style.dash_offset
+  );
+  if (dashes != nullptr) {
+    environment->DeleteLocalRef(dashes);
+  }
+}
+
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const FillPathCommand& command) {
   jfloatArray path = ToPathArray(environment, command.path);
   if (path == nullptr) {
@@ -576,18 +604,29 @@ void AndroidRenderer::RenderCommand(
   if (path == nullptr) {
     return;
   }
+  jfloatArray dashes =
+      command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern);
+  if (!command.style.dash_pattern.empty() && dashes == nullptr) {
+    environment->DeleteLocalRef(path);
+    return;
+  }
   environment->CallVoidMethod(
       view,
       stroke_path_,
       canvas,
       path,
       PackColor(command.color),
-      command.width,
-      static_cast<jint>(command.cap),
-      static_cast<jint>(command.join),
-      command.miter_limit
+      command.style.width,
+      static_cast<jint>(command.style.cap),
+      static_cast<jint>(command.style.join),
+      command.style.miter_limit,
+      dashes,
+      command.style.dash_offset
   );
   environment->DeleteLocalRef(path);
+  if (dashes != nullptr) {
+    environment->DeleteLocalRef(dashes);
+  }
 }
 
 void AndroidRenderer::RenderCommand(
@@ -617,6 +656,11 @@ void AndroidRenderer::RenderCommand(
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawArcCommand& command) {
+  jfloatArray dashes =
+      command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern);
+  if (!command.style.dash_pattern.empty() && dashes == nullptr) {
+    return;
+  }
   environment->CallVoidMethod(
       view,
       draw_arc_,
@@ -627,14 +671,31 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
       command.start_angle * kRadiansToDegrees,
       command.sweep_angle * kRadiansToDegrees,
       PackColor(command.color),
-      command.width,
-      static_cast<jint>(command.cap)
+      command.style.width,
+      static_cast<jint>(command.style.cap),
+      static_cast<jint>(command.style.join),
+      command.style.miter_limit,
+      dashes,
+      command.style.dash_offset
   );
+  if (dashes != nullptr) {
+    environment->DeleteLocalRef(dashes);
+  }
 }
 
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawBorderCommand& command
 ) {
+  if (!command.style.dash_pattern.empty() || command.style.join != StrokeJoin::Miter ||
+      command.style.miter_limit != 4.0F) {
+    RenderCommand(environment, view, canvas,
+                  StrokePathCommand{
+                      CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
+                      command.color,
+                      command.style,
+                  });
+    return;
+  }
   environment->CallVoidMethod(
       view,
       draw_border_,
@@ -644,7 +705,7 @@ void AndroidRenderer::RenderCommand(
       command.rect.width,
       command.rect.height,
       PackColor(command.color),
-      command.width,
+      command.style.width,
       command.corner_radius
   );
 }

@@ -424,6 +424,8 @@ TEST_CASE("SvgResourcesCompileToTypedVectorPayloads") {
   REQUIRE(header.find("huxerui::ImageResource mark") != std::string::npos);
   const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "mark.huxv");
   REQUIRE(payload.starts_with("HUXVEC"));
+  REQUIRE(payload.size() >= 12);
+  REQUIRE(static_cast<unsigned char>(payload[8]) == 1U);
 
   DirectoryResources platform_resources(output / "package");
   huxerui::detail::AppResources resources(&platform_resources);
@@ -443,6 +445,87 @@ TEST_CASE("SvgResourcesCompileToTypedVectorPayloads") {
   REQUIRE(std::ranges::none_of(scene.Commands(), [](const huxerui::PaintCommand& command) {
     return std::holds_alternative<huxerui::DrawImageCommand>(command);
   }));
+}
+
+TEST_CASE("SvgResourcesPreserveNormalizedDashStyles") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(
+      root / "images" / "dashed.svg",
+      R"(<svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="#336699" stroke-width="2" stroke-linecap="round" stroke-linejoin="bevel"
+     stroke-miterlimit="1" stroke-dasharray="3px, 1 2px" stroke-dashoffset="-2">
+    <path d="M 2 8 L 22 8"/>
+  </g>
+</svg>)"
+  );
+
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
+  DirectoryResources platform(output / "package");
+  huxerui::detail::AppResources resources(&platform);
+  const huxerui::VectorAsset vector = resources.ResolveVector(
+      huxerui::ImageResource("test_app", "images/dashed"),
+      huxerui::Locale::Default()
+  );
+  huxerui::PaintSequence sequence;
+  huxerui::PaintContext context(sequence, {0.0F, 0.0F, 24.0F, 16.0F});
+  context.DrawImage(vector, {0.0F, 0.0F, 24.0F, 16.0F});
+  context.Finish();
+
+  const auto stroke = std::ranges::find_if(sequence.Commands(), [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::StrokePathCommand>(command);
+  });
+  REQUIRE(stroke != sequence.Commands().end());
+  const huxerui::StrokeStyle& style = std::get<huxerui::StrokePathCommand>(*stroke).style;
+  REQUIRE(style.width == 2.0F);
+  REQUIRE(style.cap == huxerui::StrokeCap::Round);
+  REQUIRE(style.join == huxerui::StrokeJoin::Bevel);
+  REQUIRE(style.miter_limit == 1.0F);
+  REQUIRE(style.dash_pattern == std::vector<float>{3.0F, 1.0F, 2.0F, 3.0F, 1.0F, 2.0F});
+  REQUIRE(style.dash_offset == 10.0F);
+}
+
+TEST_CASE("SvgResourcesRejectMalformedStrokeStyles") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path source = root / "images" / "dashed.svg";
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-dasharray="1px2px" d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "joined", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-dasharray lengths must be separated")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-dasharray="2 -1" d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "negative", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-dasharray lengths must be non-negative")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-dasharray=",1 2" d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "leading-empty", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-dasharray must not contain empty lengths")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-dasharray="1,,2" d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "middle-empty", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-dasharray must not contain empty lengths")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-dasharray="1 2," d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "trailing-empty", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-dasharray must not contain empty lengths")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path stroke="#000" stroke-miterlimit="0.5" d="M0 0L10 10"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "small-miter", "test_app"}),
+      Catch::Matchers::ContainsSubstring("stroke-miterlimit must be at least one")
+  );
 }
 
 TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndUnsupportedPresentationSemantics") {

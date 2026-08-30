@@ -28,4 +28,6 @@ public:
   [[nodiscard]] static std::span<const PathElement> Elements(const Path& path) noexcept;
 };
 
+[[nodiscard]] Path CreateBorderStrokePath(Rect rect, CornerRadii corner_radii, float width);
+
 } // namespace huxerui::detail

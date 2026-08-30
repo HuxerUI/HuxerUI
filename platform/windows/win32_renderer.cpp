@@ -1605,23 +1605,34 @@ struct Win32Renderer::State {
     );
   }
 
-  ComPtr<ID2D1StrokeStyle>
-  CreateStrokeStyle(StrokeCap cap, StrokeJoin join = StrokeJoin::Miter, float miter_limit = 10.0F) const {
-    ComPtr<ID2D1StrokeStyle> style;
-    const D2D1_CAP_STYLE d2d_cap = ToD2DCap(cap);
+  ComPtr<ID2D1StrokeStyle> CreateStrokeStyle(const StrokeStyle& stroke) const {
+    ComPtr<ID2D1StrokeStyle> result;
+    const D2D1_CAP_STYLE d2d_cap = ToD2DCap(stroke.cap);
+    std::vector<float> dashes;
+    if (!stroke.dash_pattern.empty()) {
+      dashes.reserve(stroke.dash_pattern.size());
+      for (const float length : stroke.dash_pattern) {
+        dashes.push_back(length / stroke.width);
+      }
+    }
     const D2D1_STROKE_STYLE_PROPERTIES properties{
         d2d_cap,
         d2d_cap,
         d2d_cap,
-        ToD2DJoin(join),
-        miter_limit,
-        D2D1_DASH_STYLE_SOLID,
-        0.0F,
+        ToD2DJoin(stroke.join),
+        stroke.miter_limit,
+        dashes.empty() ? D2D1_DASH_STYLE_SOLID : D2D1_DASH_STYLE_CUSTOM,
+        dashes.empty() ? 0.0F : stroke.dash_offset / stroke.width,
     };
-    if (FAILED(d2d_factory_->CreateStrokeStyle(properties, nullptr, 0, style.GetAddressOf()))) {
+    if (FAILED(d2d_factory_->CreateStrokeStyle(
+            properties,
+            dashes.empty() ? nullptr : dashes.data(),
+            static_cast<UINT32>(dashes.size()),
+            result.GetAddressOf()
+        ))) {
       return {};
     }
-    return style;
+    return result;
   }
 
   ComPtr<ID2D1PathGeometry> CreatePathGeometry(const Path& path, PathFillRule fill_rule) const {
@@ -1709,19 +1720,38 @@ struct Win32Renderer::State {
     );
   }
 
+  void RenderCommand(const DrawLineCommand& command) {
+    if (command.start == command.end || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
+      return;
+    }
+    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
+    if (!stroke_style) {
+      return;
+    }
+    SetBrushColor(command.color);
+    device_context_->DrawLine(
+        D2D1::Point2F(command.start.x, command.start.y),
+        D2D1::Point2F(command.end.x, command.end.y),
+        brush_.Get(),
+        command.style.width,
+        stroke_style.Get()
+    );
+  }
+
   void RenderCommand(const DrawArcCommand& command) {
-    if (command.radius <= 0.0F || command.width <= 0.0F || command.color.alpha <= 0.0F ||
+    if (command.radius <= 0.0F || command.style.width <= 0.0F || command.color.alpha <= 0.0F ||
         !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
       return;
     }
 
     SetBrushColor(command.color);
-    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.cap);
-    if (std::abs(command.sweep_angle) >= kFullCircle - 0.0001F) {
+    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
+    const bool full_circle = std::abs(command.sweep_angle) >= kFullCircle - 0.0001F;
+    if (full_circle && command.style.dash_pattern.empty()) {
       device_context_->DrawEllipse(
           D2D1::Ellipse(D2D1::Point2F(command.center.x, command.center.y), command.radius, command.radius),
           brush_.Get(),
-          command.width,
+          command.style.width,
           stroke_style.Get()
       );
       return;
@@ -1746,39 +1776,69 @@ struct Win32Renderer::State {
       return;
     }
     sink->BeginFigure(start, D2D1_FIGURE_BEGIN_HOLLOW);
-    sink->AddArc(
-        D2D1::ArcSegment(
-            end,
-            D2D1::SizeF(command.radius, command.radius),
-            0.0F,
-            command.sweep_angle > 0.0F ? D2D1_SWEEP_DIRECTION_CLOCKWISE : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
-            std::abs(command.sweep_angle) > 3.14159265358979323846F ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL
-        )
-    );
-    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    const D2D1_SWEEP_DIRECTION direction =
+        command.sweep_angle > 0.0F ? D2D1_SWEEP_DIRECTION_CLOCKWISE : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE;
+    if (full_circle) {
+      const float middle_angle = command.start_angle + std::copysign(kFullCircle * 0.5F, command.sweep_angle);
+      sink->AddArc(
+          D2D1::ArcSegment(
+              D2D1::Point2F(
+                  command.center.x + std::cos(middle_angle) * command.radius,
+                  command.center.y + std::sin(middle_angle) * command.radius
+              ),
+              D2D1::SizeF(command.radius, command.radius),
+              0.0F,
+              direction,
+              D2D1_ARC_SIZE_SMALL
+          )
+      );
+      sink->AddArc(
+          D2D1::ArcSegment(start, D2D1::SizeF(command.radius, command.radius), 0.0F, direction, D2D1_ARC_SIZE_SMALL)
+      );
+    } else {
+      sink->AddArc(
+          D2D1::ArcSegment(
+              end,
+              D2D1::SizeF(command.radius, command.radius),
+              0.0F,
+              direction,
+              std::abs(command.sweep_angle) > 3.14159265358979323846F ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL
+          )
+      );
+    }
+    sink->EndFigure(full_circle ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
     if (FAILED(sink->Close())) {
       return;
     }
 
-    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.width, stroke_style.Get());
+    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.style.width, stroke_style.Get());
   }
 
   void RenderCommand(const DrawBorderCommand& command) {
-    if (command.width <= 0.0F || command.color.alpha <= 0.0F || command.rect.width <= 0.0F ||
+    if (command.style.width <= 0.0F || command.color.alpha <= 0.0F || command.rect.width <= 0.0F ||
         command.rect.height <= 0.0F) {
       return;
     }
-    const float inset = command.width * 0.5F;
+    if (!command.style.dash_pattern.empty() || command.style.join != StrokeJoin::Miter ||
+        command.style.miter_limit != 4.0F) {
+      RenderCommand(StrokePathCommand{
+          CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
+          command.color,
+          command.style,
+      });
+      return;
+    }
+    const float inset = command.style.width * 0.5F;
     const Rect rect{
         command.rect.x + inset,
         command.rect.y + inset,
-        std::max(0.0F, command.rect.width - command.width),
-        std::max(0.0F, command.rect.height - command.width),
+        std::max(0.0F, command.rect.width - command.style.width),
+        std::max(0.0F, command.rect.height - command.style.width),
     };
     const float radius = std::max(0.0F, command.corner_radius - inset);
     SetBrushColor(command.color);
     device_context_
-        ->DrawRoundedRectangle(D2D1::RoundedRect(ToD2DRect(rect), radius, radius), brush_.Get(), command.width);
+        ->DrawRoundedRectangle(D2D1::RoundedRect(ToD2DRect(rect), radius, radius), brush_.Get(), command.style.width);
   }
 
   void RenderCommand(const DrawShadowCommand& command) {
@@ -1844,16 +1904,16 @@ struct Win32Renderer::State {
   }
 
   void RenderCommand(const StrokePathCommand& command) {
-    if (command.path.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
     ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
-    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.cap, command.join, command.miter_limit);
+    ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
     if (!geometry || !stroke_style) {
       return;
     }
     SetBrushColor(command.color);
-    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.width, stroke_style.Get());
+    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.style.width, stroke_style.Get());
   }
 
   void RenderCommand(const DrawPathShadowCommand& command) {

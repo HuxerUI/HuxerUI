@@ -244,7 +244,7 @@ TEST_CASE("TestSelectionAreaPaintsTheThemeFocusRingForKeyboardFocus") {
   const FlattenedScene& focused = runtime.BuildFrame();
   REQUIRE(std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
     const auto* border = std::get_if<DrawBorderCommand>(&command);
-    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->width == 3.0F;
+    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->style.width == 3.0F;
   }));
 }
 

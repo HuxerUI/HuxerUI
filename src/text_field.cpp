@@ -795,12 +795,10 @@ public:
                 gap_center + gap_half_width
             ),
             border,
-            border_width,
-            StrokeCap::Butt,
-            StrokeJoin::Round
+            StrokeStyle{.width = border_width, .join = StrokeJoin::Round}
         );
       } else {
-        context.DrawBorder(editor_frame, border, border_width, corner_radii_);
+        context.DrawBorder(editor_frame, border, StrokeStyle{.width = border_width}, corner_radii_);
       }
     }
 

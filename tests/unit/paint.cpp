@@ -57,7 +57,7 @@ TEST_CASE("PaintContextBuildsAnImmutableLocalSequence") {
   REQUIRE(sequence.Revision() == 0);
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   context.DrawRect({10.0F, 20.0F, 30.0F, 15.0F}, Color::White(), 4.0F);
-  context.DrawBorder({5.0F, 10.0F, 20.0F, 20.0F}, Color::Black(), 2.0F);
+  context.DrawBorder({5.0F, 10.0F, 20.0F, 20.0F}, Color::Black(), StrokeStyle{.width = 2.0F});
   context.Finish();
 
   REQUIRE(sequence.Revision() == 1);
@@ -104,7 +104,7 @@ TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
   context.DrawRect(pill, Color::White(), CornerRadii{10000.0F});
   context.DrawLinearGradient(pill, linear, CornerRadii{10000.0F});
   context.DrawRadialGradient(pill, radial, CornerRadii{10000.0F});
-  context.DrawBorder(pill, Color::Black(), 2.0F, CornerRadii{10000.0F});
+  context.DrawBorder(pill, Color::Black(), StrokeStyle{.width = 2.0F}, CornerRadii{10000.0F});
   context.DrawShadow(pill, Color::Black(), {}, 4.0F, 2.0F, CornerRadii{10000.0F});
   context.PushClip(pill, CornerRadii{10000.0F});
   context.PopClip();
@@ -315,8 +315,8 @@ TEST_CASE("PaintContextTracksTransformedAndClippedBounds") {
 TEST_CASE("PaintContextIncludesSquareArcCapsInBounds") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
-  context
-      .DrawArc({50.0F, 40.0F}, 10.0F, 0.0F, std::numbers::pi_v<float> * 0.5F, Color::White(), 4.0F, StrokeCap::Square);
+  context.DrawArc({50.0F, 40.0F}, 10.0F, 0.0F, std::numbers::pi_v<float> * 0.5F, Color::White(),
+                  StrokeStyle{.width = 4.0F, .cap = StrokeCap::Square});
   context.Finish();
 
   REQUIRE(sequence.Bounds().x < 38.0F);
@@ -387,8 +387,10 @@ TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(context.DrawCircle({}, -1.0F, Color::White()), std::invalid_argument);
-  REQUIRE_THROWS_AS(context.DrawArc({}, 10.0F, 0.0F, nan, Color::White(), 1.0F), std::invalid_argument);
-  REQUIRE_THROWS_AS(context.DrawBorder({}, Color::White(), -1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawLine({nan, 0.0F}, {}, Color::White(), StrokeStyle{}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.DrawArc({}, 10.0F, 0.0F, nan, Color::White(), StrokeStyle{.width = 1.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawBorder({}, Color::White(), StrokeStyle{.width = -1.0F}), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {}, -1.0F), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {}, nan), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawShadow({}, Color::Black(), {nan, 0.0F}, 1.0F), std::invalid_argument);
@@ -405,7 +407,8 @@ TEST_CASE("PaintContextRecordsPathCommandsAndBounds") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   context.FillPath(path, Color::White(), PathFillRule::EvenOdd);
-  context.StrokePath(path, Color::Black(), 2.0F, StrokeCap::Round, StrokeJoin::Round);
+  context.StrokePath(path, Color::Black(),
+                     StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
   context.DrawPathShadow(path, Color::Rgb(0, 0, 0, 0.25F), {4.0F, 6.0F}, 8.0F);
   context.PushPathClip(path);
   context.DrawRect({0.0F, 0.0F, 100.0F, 80.0F}, Color::White());
@@ -427,7 +430,7 @@ TEST_CASE("PaintContextUsesPathCommandsForAsymmetricCornerRadii") {
   const CornerRadii corners = CornerRadii::Top(16.0F);
   context.DrawShadow({10.0F, 10.0F, 60.0F, 40.0F}, Color::Black(), {}, 4.0F, 0.0F, corners);
   context.DrawRect({10.0F, 10.0F, 60.0F, 40.0F}, Color::White(), corners);
-  context.DrawBorder({10.0F, 10.0F, 60.0F, 40.0F}, Color::Black(), 1.0F, corners);
+  context.DrawBorder({10.0F, 10.0F, 60.0F, 40.0F}, Color::Black(), StrokeStyle{.width = 1.0F}, corners);
   context.PushClip({10.0F, 10.0F, 60.0F, 40.0F}, corners);
   context.PopClip();
   context.Finish();
@@ -440,6 +443,68 @@ TEST_CASE("PaintContextUsesPathCommandsForAsymmetricCornerRadii") {
   REQUIRE(border->path.Bounds() == Rect{10.5F, 10.5F, 59.0F, 39.0F});
   REQUIRE(std::holds_alternative<PushPathClipCommand>(sequence.Commands()[3]));
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
+}
+
+TEST_CASE("PaintContextNormalizesStrokeStylesAcrossCommands") {
+  Path path;
+  path.MoveTo({10.0F, 60.0F}).LineTo({70.0F, 60.0F});
+  const StrokeStyle style{
+      .width = 3.0F,
+      .cap = StrokeCap::Round,
+      .join = StrokeJoin::Bevel,
+      .miter_limit = 2.0F,
+      .dash_pattern = {4.0F, 2.0F, 1.0F},
+      .dash_offset = -1.0F,
+  };
+
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawLine({10.0F, 10.0F}, {90.0F, 10.0F}, Color::White(), style);
+  context.DrawArc({30.0F, 30.0F}, 10.0F, 0.0F, std::numbers::pi_v<float>, Color::White(), style);
+  context.DrawBorder({50.0F, 20.0F, 30.0F, 20.0F}, Color::White(), style);
+  context.StrokePath(path, Color::White(), style);
+  context.Finish();
+
+  const StrokeStyle expected{
+      .width = 3.0F,
+      .cap = StrokeCap::Round,
+      .join = StrokeJoin::Bevel,
+      .miter_limit = 2.0F,
+      .dash_pattern = {4.0F, 2.0F, 1.0F, 4.0F, 2.0F, 1.0F},
+      .dash_offset = 13.0F,
+  };
+  REQUIRE(std::get<DrawLineCommand>(sequence.Commands()[0]).style == expected);
+  REQUIRE(std::get<DrawArcCommand>(sequence.Commands()[1]).style == expected);
+  REQUIRE(std::get<DrawBorderCommand>(sequence.Commands()[2]).style == expected);
+  REQUIRE(std::get<StrokePathCommand>(sequence.Commands()[3]).style == expected);
+}
+
+TEST_CASE("PaintContextValidatesAndCanonicalizesStrokeStyles") {
+  const float infinity = std::numeric_limits<float>::infinity();
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+
+  REQUIRE_THROWS_AS(
+      context.DrawLine({}, {}, Color::White(), StrokeStyle{.dash_pattern = {-1.0F, 1.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.DrawLine({}, {}, Color::White(), StrokeStyle{.dash_pattern = {infinity, 1.0F}}),
+      std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawLine({}, {}, Color::White(), StrokeStyle{.dash_offset = infinity}),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawLine({}, {}, Color::White(), StrokeStyle{.miter_limit = 0.5F}),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawLine({}, {}, Color::White(), StrokeStyle{.cap = static_cast<StrokeCap>(99)}),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawLine({}, {}, Color::White(), StrokeStyle{.join = static_cast<StrokeJoin>(99)}),
+                    std::invalid_argument);
+
+  context.DrawLine({10.0F, 10.0F}, {20.0F, 10.0F}, Color::White(),
+                   StrokeStyle{.miter_limit = 1.0F, .dash_pattern = {0.0F, 0.0F}, .dash_offset = 12.0F});
+  context.Finish();
+  const StrokeStyle& style = std::get<DrawLineCommand>(sequence.Commands().back()).style;
+  REQUIRE(style.miter_limit == 1.0F);
+  REQUIRE(style.dash_pattern.empty());
+  REQUIRE(style.dash_offset == 0.0F);
 }
 
 } // namespace huxerui::test

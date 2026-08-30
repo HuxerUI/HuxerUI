@@ -1799,7 +1799,7 @@ TEST_CASE("TestMaterialChipGeometryAndColors") {
   REQUIRE(selected->style.foreground == style.selected_label);
   const bool paints_outline = std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
     const auto* border = std::get_if<DrawBorderCommand>(&command);
-    return border != nullptr && border->color == style.border && border->width == style.border_width;
+    return border != nullptr && border->color == style.border && border->style.width == style.border_width;
   });
   REQUIRE(paints_outline);
 }
@@ -2318,9 +2318,9 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   const auto initial_arcs = arcs(initial);
   REQUIRE(initial_arcs.size() == 2);
   REQUIRE(std::abs(initial_arcs[0].sweep_angle - pi * 2.0F) < 0.001F);
-  REQUIRE(initial_arcs[0].cap == StrokeCap::Butt);
+  REQUIRE(initial_arcs[0].style.cap == StrokeCap::Butt);
   REQUIRE(std::abs(initial_arcs[1].sweep_angle - pi * 0.5F) < 0.001F);
-  REQUIRE(initial_arcs[1].cap == StrokeCap::Round);
+  REQUIRE(initial_arcs[1].style.cap == StrokeCap::Round);
 
   const auto* root = determinate.RootNode();
   REQUIRE(root != nullptr);
@@ -2398,8 +2398,8 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
   const float expected_gap_angle =
       (style.track_gap + style.stroke_width) / (style.size * 0.5F - style.stroke_width * 0.5F);
   REQUIRE(track.color == style.track_color);
-  REQUIRE(track.cap == StrokeCap::Round);
-  REQUIRE(indicator.cap == StrokeCap::Round);
+  REQUIRE(track.style.cap == StrokeCap::Round);
+  REQUIRE(indicator.style.cap == StrokeCap::Round);
   REQUIRE(std::abs(track.start_angle - (indicator.start_angle + indicator.sweep_angle + expected_gap_angle)) < 0.001F);
   REQUIRE(std::abs(track.sweep_angle - (pi * 2.0F - indicator.sweep_angle - expected_gap_angle * 2.0F)) < 0.001F);
 
@@ -2821,7 +2821,7 @@ TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
 
   const bool drew_focus_ring = std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
     const auto* border = std::get_if<DrawBorderCommand>(&command);
-    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->width == 3.0F;
+    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->style.width == 3.0F;
   });
   REQUIRE(drew_focus_ring);
 }
@@ -2922,7 +2922,7 @@ TEST_CASE("TestIndicationReplacesResolvedBorderAndCornerRadii") {
   const FlattenedScene& pressed = runtime.BuildFrame();
   const DrawBorderCommand* border = FindBorderWithColor(pressed, pressed_border);
   REQUIRE(border != nullptr);
-  REQUIRE(border->width == 4.0F);
+  REQUIRE(border->style.width == 4.0F);
   REQUIRE(border->corner_radius == 20.0F);
   REQUIRE(FindBorderWithColor(pressed, normal_border) == nullptr);
 }
@@ -3018,7 +3018,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   REQUIRE(focus_changes.back() == "first:on");
   const DrawBorderCommand* first_border = FindBorderWithColor(first_focused, Color::Rgb(40, 180, 90));
   REQUIRE(first_border != nullptr);
-  REQUIRE(first_border->width == 3.0F);
+  REQUIRE(first_border->style.width == 3.0F);
   const detail::MountedNode* focused_first_node = FindMountedText(*runtime.RootNode(), "first");
   REQUIRE(focused_first_node != nullptr);
   const Rect focused_bounds = focused_first_node->PresentationBounds();

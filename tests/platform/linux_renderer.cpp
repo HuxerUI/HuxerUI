@@ -36,13 +36,38 @@ TEST_CASE("LinuxRendererReplaysPaintCommandsIntoCairoSurface") {
   renderer.Discard();
 }
 
+TEST_CASE("LinuxRendererDrawsDirectedDashedLines") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 40.0F, 16.0F});
+  paint.DrawLine({4.0F, 8.0F}, {36.0F, 8.0F}, Color::White(),
+                 StrokeStyle{.width = 2.0F, .dash_pattern = {4.0F, 4.0F}});
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 40, 16);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  REQUIRE((pixels[8 * 40 + 5] >> 24U) > 0U);
+  REQUIRE(pixels[8 * 40 + 10] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
 TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
   RenderNode root;
   PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
-  paint.DrawArc({24.0F, 24.0F}, 4.0F, 0.0F, 1.5707963F, Color::White(), 2.0F);
+  paint.DrawArc({24.0F, 24.0F}, 4.0F, 0.0F, 1.5707963F, Color::White(), StrokeStyle{.width = 2.0F});
   paint.Finish();
   RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
 
@@ -66,7 +91,7 @@ TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
 
   RenderNode root;
   PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
-  paint.DrawBorder({20.0F, 20.0F, 10.0F, 10.0F}, Color::White(), 2.0F);
+  paint.DrawBorder({20.0F, 20.0F, 10.0F, 10.0F}, Color::White(), StrokeStyle{.width = 2.0F});
   paint.Finish();
   RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
 
@@ -92,7 +117,7 @@ TEST_CASE("LinuxRendererDrawsNegativeArcSweepCounterclockwise") {
 
   RenderNode root;
   PaintContext paint(root.content, {0.0F, 0.0F, 32.0F, 32.0F});
-  paint.DrawArc({16.0F, 16.0F}, 8.0F, 0.0F, -1.5707963F, Color::White(), 3.0F);
+  paint.DrawArc({16.0F, 16.0F}, 8.0F, 0.0F, -1.5707963F, Color::White(), StrokeStyle{.width = 3.0F});
   paint.Finish();
   RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
 

@@ -211,6 +211,19 @@ const char* CssLineJoin(StrokeJoin join) noexcept {
   return "miter";
 }
 
+void ApplyStrokeStyle(val& context, const StrokeStyle& style) {
+  val dashes = val::array();
+  for (std::size_t index = 0; index < style.dash_pattern.size(); ++index) {
+    dashes.set(index, style.dash_pattern[index]);
+  }
+  context.set("lineWidth", style.width);
+  context.set("lineCap", std::string(CssLineCap(style.cap)));
+  context.set("lineJoin", std::string(CssLineJoin(style.join)));
+  context.set("miterLimit", style.miter_limit);
+  context.call<void>("setLineDash", dashes);
+  context.set("lineDashOffset", style.dash_offset);
+}
+
 void ApplyTransform(val& context, Transform2D transform) {
   context.call<void>(
       "transform",
@@ -1076,8 +1089,22 @@ void WebRenderer::RenderCommand(const DrawCircleCommand& command) {
   context_.call<void>("fill");
 }
 
+void WebRenderer::RenderCommand(const DrawLineCommand& command) {
+  if (command.start == command.end || command.style.width <= 0.0F) {
+    return;
+  }
+  context_.call<void>("save");
+  context_.call<void>("beginPath");
+  context_.call<void>("moveTo", command.start.x, command.start.y);
+  context_.call<void>("lineTo", command.end.x, command.end.y);
+  context_.set("strokeStyle", CssColor(command.color));
+  ApplyStrokeStyle(context_, command.style);
+  context_.call<void>("stroke");
+  context_.call<void>("restore");
+}
+
 void WebRenderer::RenderCommand(const DrawArcCommand& command) {
-  if (command.radius <= 0.0F || command.width <= 0.0F || command.sweep_angle == 0.0F) {
+  if (command.radius <= 0.0F || command.style.width <= 0.0F || command.sweep_angle == 0.0F) {
     return;
   }
   context_.call<void>("save");
@@ -1091,29 +1118,40 @@ void WebRenderer::RenderCommand(const DrawArcCommand& command) {
       command.start_angle + command.sweep_angle,
       command.sweep_angle < 0.0F
   );
+  if (std::abs(command.sweep_angle) >= 2.0F * std::numbers::pi_v<float> - 0.0001F) {
+    context_.call<void>("closePath");
+  }
   context_.set("strokeStyle", CssColor(command.color));
-  context_.set("lineWidth", command.width);
-  context_.set("lineCap", std::string(CssLineCap(command.cap)));
+  ApplyStrokeStyle(context_, command.style);
   context_.call<void>("stroke");
   context_.call<void>("restore");
 }
 
 void WebRenderer::RenderCommand(const DrawBorderCommand& command) {
-  if (command.width <= 0.0F) {
+  if (command.style.width <= 0.0F) {
     return;
   }
-  const float inset = command.width * 0.5F;
+  if (!command.style.dash_pattern.empty() || command.style.join != StrokeJoin::Miter ||
+      command.style.miter_limit != 4.0F) {
+    RenderCommand(StrokePathCommand{
+        CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
+        command.color,
+        command.style,
+    });
+    return;
+  }
+  const float inset = command.style.width * 0.5F;
   const Rect rect{
       command.rect.x + inset,
       command.rect.y + inset,
-      std::max(0.0F, command.rect.width - command.width),
-      std::max(0.0F, command.rect.height - command.width),
+      std::max(0.0F, command.rect.width - command.style.width),
+      std::max(0.0F, command.rect.height - command.style.width),
   };
   context_.call<void>("save");
   context_.call<void>("beginPath");
   AddRoundedRect(context_, rect, std::max(0.0F, command.corner_radius - inset));
   context_.set("strokeStyle", CssColor(command.color));
-  context_.set("lineWidth", command.width);
+  ApplyStrokeStyle(context_, command.style);
   context_.call<void>("stroke");
   context_.call<void>("restore");
 }
@@ -1145,14 +1183,14 @@ void WebRenderer::RenderCommand(const FillPathCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const StrokePathCommand& command) {
+  if (command.path.IsEmpty() || command.style.width <= 0.0F) {
+    return;
+  }
   context_.call<void>("save");
   context_.call<void>("beginPath");
   AddPath(context_, command.path);
   context_.set("strokeStyle", CssColor(command.color));
-  context_.set("lineWidth", command.width);
-  context_.set("lineCap", std::string(CssLineCap(command.cap)));
-  context_.set("lineJoin", std::string(CssLineJoin(command.join)));
-  context_.set("miterLimit", command.miter_limit);
+  ApplyStrokeStyle(context_, command.style);
   context_.call<void>("stroke");
   context_.call<void>("restore");
 }

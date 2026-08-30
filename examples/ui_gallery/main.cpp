@@ -112,25 +112,12 @@ void PaintOrbit(PaintContext& paint, Size size, const ColorScheme& colors) {
 
   paint.DrawPathShadow(field, Color::Rgb(0, 0, 0, 0.28F), {}, radius * 0.14F);
   paint.FillPath(field, colors.inverse_surface);
-  paint.DrawArc(center, radius * 0.70F, -pi * 0.10F, pi * 1.28F, colors.primary, radius * 0.055F, StrokeCap::Round);
-  paint.DrawArc(
-      center,
-      radius * 0.46F,
-      pi * 0.80F,
-      pi * 1.12F,
-      colors.secondary_container,
-      radius * 0.045F,
-      StrokeCap::Round
-  );
-  paint.DrawArc(
-      center,
-      radius * 0.86F,
-      pi * 0.58F,
-      pi * 0.58F,
-      colors.inverse_on_surface,
-      radius * 0.025F,
-      StrokeCap::Round
-  );
+  paint.DrawArc(center, radius * 0.70F, -pi * 0.10F, pi * 1.28F, colors.primary,
+                StrokeStyle{.width = radius * 0.055F, .cap = StrokeCap::Round});
+  paint.DrawArc(center, radius * 0.46F, pi * 0.80F, pi * 1.12F, colors.secondary_container,
+                StrokeStyle{.width = radius * 0.045F, .cap = StrokeCap::Round});
+  paint.DrawArc(center, radius * 0.86F, pi * 0.58F, pi * 0.58F, colors.inverse_on_surface,
+                StrokeStyle{.width = radius * 0.025F, .cap = StrokeCap::Round});
   paint.DrawCircle(center, radius * 0.14F, colors.primary);
   paint.DrawCircle(
       {center.x + std::cos(-pi * 0.10F) * radius * 0.70F, center.y + std::sin(-pi * 0.10F) * radius * 0.70F},
@@ -165,11 +152,8 @@ void PaintDataGraphic(PaintContext& paint, Size size, const ColorScheme& colors,
   );
   for (float fraction : {0.25F, 0.5F, 0.75F}) {
     const float y = inset + (size.height - inset * 2.0F) * fraction;
-    paint.StrokePath(
-        Path{}.MoveTo({inset, y}).LineTo({right, y}),
-        WithAlpha(colors.on_surface_variant, 0.18F),
-        1.0F
-    );
+    paint.DrawLine({inset, y}, {right, y}, WithAlpha(colors.on_surface_variant, 0.18F),
+                   StrokeStyle{.width = 1.0F});
   }
 
   Path line;
@@ -200,7 +184,8 @@ void PaintDataGraphic(PaintContext& paint, Size size, const ColorScheme& colors,
       }
   );
   paint.PopClip();
-  paint.StrokePath(line, colors.primary, 4.0F, StrokeCap::Round, StrokeJoin::Round);
+  paint.StrokePath(line, colors.primary,
+                   StrokeStyle{.width = 4.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
   paint.DrawCircle({right, final_y}, 7.0F, colors.background);
   paint.DrawCircle({right, final_y}, 4.0F, colors.primary);
 }
@@ -238,13 +223,12 @@ void PaintPathStudy(PaintContext& paint, Size size, const ColorScheme& colors) {
           .MoveTo({size.width * 0.20F, size.height * 0.53F})
           .QuadraticTo({size.width * 0.50F, size.height * 0.16F}, {size.width * 0.76F, size.height * 0.47F}),
       Color::Rgb(255, 255, 255, 0.64F),
-      9.0F,
-      StrokeCap::Round,
-      StrokeJoin::Round
+      StrokeStyle{.width = 9.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round}
   );
   paint.PopTransform();
   paint.PopClip();
-  paint.StrokePath(shape, colors.on_primary, 2.0F, StrokeCap::Round, StrokeJoin::Round);
+  paint.StrokePath(shape, colors.on_primary,
+                   StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
 }
 
 [[huxerui::composable]]

@@ -14,11 +14,18 @@
 
 `Canvas` receives a `PaintContext` and assigned `Size`. Give it explicit or parent-derived constraints. Draw in local coordinates and do not use Canvas to arbitrarily place `PlatformView` children.
 
-`PaintContext` emits platform-neutral commands for rectangles, gradients, text, images, circles, arcs, borders, shadows, paths, clips, and transforms. Balance every pushed clip or transform with a pop on every path. Call only public drawing methods; `PaintCommand`, `RenderScene`, and renderer integration are framework boundaries rather than application extension points.
+`PaintContext` emits platform-neutral commands for rectangles, gradients, text, images, circles, lines, arcs, borders, shadows, paths, clips, and transforms. Balance every pushed clip or transform with a pop on every path. Call only public drawing methods; `PaintCommand`, `RenderScene`, and renderer integration are framework boundaries rather than application extension points.
 
 ## Paths and text
 
-Use `Path` and its public builder operations for filled or stroked geometry. Respect fill rules, stroke cap/join, and radians for arcs. Text painting uses `TextStyle`, shaping options, and layout options. `UseTextMeasurer()` provides the active platform text measurer during composition; do not invent glyph metrics. Prefer `Text` for ordinary UI text because it owns layout and semantics.
+Use `Path` and its public builder operations for filled or stroked geometry. `StrokeStyle` is the single stroke configuration accepted by `DrawLine()`, `DrawArc()`, `DrawBorder()`, and `StrokePath()`; do not pass width, cap, or join as parallel arguments. Dash entries alternate painted and skipped lengths in local logical units, an odd entry count repeats to form an even cycle, and each Path contour restarts at `dash_offset`.
+
+```cpp
+paint.DrawLine({0.0F, 12.0F}, {120.0F, 12.0F}, Color::Black(),
+               StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}});
+```
+
+Respect fill rules and radians for arcs. Text painting uses `TextStyle`, shaping options, and layout options. `UseTextMeasurer()` provides the active platform text measurer during composition; do not invent glyph metrics. Prefer `Text` for ordinary UI text because it owns layout and semantics.
 
 ## External textures
 

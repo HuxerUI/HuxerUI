@@ -42,6 +42,28 @@ TEST_CASE("PaintContextExpandsVectorImagesIntoPlatformNeutralPathCommands") {
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
 }
 
+TEST_CASE("VectorAssetsRetainNormalizedStrokeStyles") {
+  const VectorAsset vector = VectorAsset::Create({20.0F, 10.0F}, [](VectorBuilder& builder) {
+    builder.StrokePath(Triangle(), Color::Black(),
+                       StrokeStyle{
+                           .width = 2.0F,
+                           .cap = StrokeCap::Round,
+                           .dash_pattern = {3.0F, 1.0F, 2.0F},
+                           .dash_offset = -2.0F,
+                       });
+  });
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 10.0F});
+  context.DrawImage(vector, {0.0F, 0.0F, 20.0F, 10.0F});
+  context.Finish();
+
+  const auto& command = std::get<StrokePathCommand>(sequence.Commands()[2]);
+  REQUIRE(command.style.width == 2.0F);
+  REQUIRE(command.style.cap == StrokeCap::Round);
+  REQUIRE(command.style.dash_pattern == std::vector<float>{3.0F, 1.0F, 2.0F, 3.0F, 1.0F, 2.0F});
+  REQUIRE(command.style.dash_offset == 10.0F);
+}
+
 TEST_CASE("VectorAssetsValidateGeometryAndBuilderBalance") {
   REQUIRE_THROWS_AS(VectorAsset::Create({}, [](VectorBuilder&) {}), std::invalid_argument);
   REQUIRE_THROWS_AS(

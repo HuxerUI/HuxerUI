@@ -381,6 +381,19 @@ cairo_line_join_t CairoLineJoin(StrokeJoin join) noexcept {
   return CAIRO_LINE_JOIN_MITER;
 }
 
+void ApplyStrokeStyle(cairo_t* context, const StrokeStyle& style) {
+  std::vector<double> dashes;
+  dashes.reserve(style.dash_pattern.size());
+  for (const float length : style.dash_pattern) {
+    dashes.push_back(length);
+  }
+  cairo_set_line_width(context, style.width);
+  cairo_set_line_cap(context, CairoLineCap(style.cap));
+  cairo_set_line_join(context, CairoLineJoin(style.join));
+  cairo_set_miter_limit(context, style.miter_limit);
+  cairo_set_dash(context, dashes.empty() ? nullptr : dashes.data(), static_cast<int>(dashes.size()), style.dash_offset);
+}
+
 void AddRoundedRect(cairo_t* context, Rect rect, float corner_radius) {
   const float radius = std::clamp(corner_radius, 0.0F, std::min(rect.width, rect.height) * 0.5F);
   if (radius <= 0.0F) {
@@ -919,17 +932,36 @@ private:
     cairo_fill(context_);
   }
 
+  void DrawCommand(const DrawLineCommand& command) {
+    if (command.start == command.end || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
+      return;
+    }
+    SetSourceColor(context_, command.color);
+    ApplyStrokeStyle(context_, command.style);
+    cairo_new_path(context_);
+    cairo_move_to(context_, command.start.x, command.start.y);
+    cairo_line_to(context_, command.end.x, command.end.y);
+    cairo_stroke(context_);
+  }
+
   void DrawCommand(const DrawArcCommand& command) {
-    if (command.radius <= 0.0F || command.width <= 0.0F || command.color.alpha <= 0.0F ||
+    if (command.radius <= 0.0F || command.style.width <= 0.0F || command.color.alpha <= 0.0F ||
         !std::isfinite(command.start_angle) || !std::isfinite(command.sweep_angle) || command.sweep_angle == 0.0F) {
       return;
     }
     SetSourceColor(context_, command.color);
-    cairo_set_line_width(context_, command.width);
-    cairo_set_line_cap(context_, CairoLineCap(command.cap));
+    ApplyStrokeStyle(context_, command.style);
     cairo_new_path(context_);
     if (std::abs(command.sweep_angle) >= kTau - 0.0001) {
-      cairo_arc(context_, command.center.x, command.center.y, command.radius, 0.0, kTau);
+      const double end_angle = command.start_angle + std::copysign(kTau, command.sweep_angle);
+      if (command.sweep_angle > 0.0F) {
+        cairo_arc(context_, command.center.x, command.center.y, command.radius, command.start_angle, end_angle);
+      } else {
+        cairo_arc_negative(
+            context_, command.center.x, command.center.y, command.radius, command.start_angle, end_angle
+        );
+      }
+      cairo_close_path(context_);
     } else if (command.sweep_angle > 0.0F) {
       cairo_arc(
           context_, command.center.x, command.center.y, command.radius, command.start_angle,
@@ -945,18 +977,27 @@ private:
   }
 
   void DrawCommand(const DrawBorderCommand& command) {
-    if (command.rect.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.rect.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
-    const float inset = command.width * 0.5F;
+    if (!command.style.dash_pattern.empty() || command.style.join != StrokeJoin::Miter ||
+        command.style.miter_limit != 4.0F) {
+      DrawCommand(StrokePathCommand{
+          CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
+          command.color,
+          command.style,
+      });
+      return;
+    }
+    const float inset = command.style.width * 0.5F;
     const Rect inner{
         command.rect.x + inset,
         command.rect.y + inset,
-        std::max(0.0F, command.rect.width - command.width),
-        std::max(0.0F, command.rect.height - command.width),
+        std::max(0.0F, command.rect.width - command.style.width),
+        std::max(0.0F, command.rect.height - command.style.width),
     };
     SetSourceColor(context_, command.color);
-    cairo_set_line_width(context_, command.width);
+    ApplyStrokeStyle(context_, command.style);
     cairo_new_path(context_);
     AddRoundedRect(context_, inner, std::max(0.0F, command.corner_radius - inset));
     cairo_stroke(context_);
@@ -1103,15 +1144,12 @@ private:
   }
 
   void DrawCommand(const StrokePathCommand& command) {
-    if (command.path.IsEmpty() || command.width <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
       return;
     }
     SetSourceColor(context_, command.color);
     AppendPath(context_, command.path);
-    cairo_set_line_width(context_, command.width);
-    cairo_set_line_cap(context_, CairoLineCap(command.cap));
-    cairo_set_line_join(context_, CairoLineJoin(command.join));
-    cairo_set_miter_limit(context_, command.miter_limit);
+    ApplyStrokeStyle(context_, command.style);
     cairo_stroke(context_);
   }
 

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <optional>
@@ -62,6 +63,8 @@ struct Style {
   std::uint8_t stroke_cap = 0;
   std::uint8_t stroke_join = 0;
   float miter_limit = 4.0F;
+  std::vector<float> dash_pattern;
+  float dash_offset = 0.0F;
 };
 
 struct ElementFrame {
@@ -175,6 +178,83 @@ std::vector<float> ParseNumberList(std::string_view value, std::string_view fiel
     cursor = next;
   }
   return result;
+}
+
+std::vector<float> ParseDashPattern(std::string_view value) {
+  const std::string trimmed = Trim(value);
+  if (trimmed == "none") {
+    return {};
+  }
+  if (trimmed.empty()) {
+    throw std::runtime_error("SVG stroke-dasharray must contain lengths or none");
+  }
+
+  std::vector<float> result;
+  const char* cursor = trimmed.c_str();
+  const char* end = cursor + trimmed.size();
+  while (cursor < end) {
+    if (*cursor == ',') {
+      throw std::runtime_error("SVG stroke-dasharray must not contain empty lengths");
+    }
+    char* next = nullptr;
+    const float length = std::strtof(cursor, &next);
+    if (next == cursor || !std::isfinite(length)) {
+      throw std::runtime_error("SVG stroke-dasharray contains an invalid length");
+    }
+    if (length < 0.0F) {
+      throw std::runtime_error("SVG stroke-dasharray lengths must be non-negative");
+    }
+    cursor = next;
+    bool has_explicit_unit = false;
+    if (end - cursor >= 2 && cursor[0] == 'p' && cursor[1] == 'x') {
+      cursor += 2;
+      has_explicit_unit = true;
+    }
+    if (cursor < end && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != ',') {
+      throw std::runtime_error(
+          has_explicit_unit ? "SVG stroke-dasharray lengths must be separated"
+                            : "SVG stroke-dasharray uses an unsupported unit"
+      );
+    }
+    result.push_back(length);
+
+    bool separated_by_space = false;
+    while (cursor < end && std::isspace(static_cast<unsigned char>(*cursor))) {
+      separated_by_space = true;
+      ++cursor;
+    }
+    if (cursor == end) {
+      break;
+    }
+    if (*cursor == ',') {
+      ++cursor;
+      while (cursor < end && std::isspace(static_cast<unsigned char>(*cursor))) {
+        ++cursor;
+      }
+      if (cursor == end || *cursor == ',') {
+        throw std::runtime_error("SVG stroke-dasharray must not contain empty lengths");
+      }
+    } else if (!separated_by_space) {
+      throw std::runtime_error("SVG stroke-dasharray lengths must be separated");
+    }
+  }
+  if (result.empty()) {
+    throw std::runtime_error("SVG stroke-dasharray must contain lengths or none");
+  }
+  return result;
+}
+
+void ValidateDashPattern(const std::vector<float>& pattern) {
+  double cycle = 0.0;
+  for (const float length : pattern) {
+    cycle += length;
+  }
+  if (pattern.size() % 2 != 0) {
+    cycle *= 2.0;
+  }
+  if (!std::isfinite(cycle) || cycle > std::numeric_limits<float>::max()) {
+    throw std::runtime_error("SVG stroke-dasharray cycle must be finite");
+  }
 }
 
 float ParseOpacity(std::string_view value, std::string_view field) {
@@ -646,9 +726,13 @@ void ApplyStyleProperty(Style& style, std::string_view name, std::string_view va
     }
   } else if (name == "stroke-miterlimit") {
     style.miter_limit = ParseNumber(value, name);
-    if (style.miter_limit <= 0.0F) {
-      throw std::runtime_error("SVG stroke-miterlimit must be positive");
+    if (style.miter_limit < 1.0F) {
+      throw std::runtime_error("SVG stroke-miterlimit must be at least one");
     }
+  } else if (name == "stroke-dasharray") {
+    style.dash_pattern = ParseDashPattern(value);
+  } else if (name == "stroke-dashoffset") {
+    style.dash_offset = ParseNumber(value, name);
   } else if (name == "opacity") {
     throw std::runtime_error("SVG group opacity is not supported; use fill-opacity and stroke-opacity");
   } else {
@@ -688,7 +772,8 @@ Style ResolveStyle(Style inherited, const std::map<std::string, std::string>& at
   for (const auto& [name, value] : attributes) {
     if (name == "fill" || name == "stroke" || name == "fill-opacity" || name == "stroke-opacity" ||
         name == "stroke-width" || name == "fill-rule" || name == "clip-rule" || name == "stroke-linecap" ||
-        name == "stroke-linejoin" || name == "stroke-miterlimit" || name == "opacity") {
+        name == "stroke-linejoin" || name == "stroke-miterlimit" || name == "stroke-dasharray" ||
+        name == "stroke-dashoffset" || name == "opacity") {
       ApplyStyleProperty(inherited, name, value);
     }
   }
@@ -710,6 +795,8 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
       "stroke-linecap",
       "stroke-linejoin",
       "stroke-miterlimit",
+      "stroke-dasharray",
+      "stroke-dashoffset",
       "opacity",
       "style",
       "transform",
@@ -880,6 +967,10 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     ++operation_count;
   }
   if (style.stroke.has_value() && style.stroke_width > 0.0F) {
+    ValidateDashPattern(style.dash_pattern);
+    if (style.dash_pattern.size() > std::numeric_limits<std::uint32_t>::max()) {
+      throw std::runtime_error("SVG stroke-dasharray contains too many lengths");
+    }
     Color color = *style.stroke;
     color.alpha *= style.stroke_opacity;
     writer.U8(2);
@@ -888,6 +979,11 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     writer.U8(style.stroke_cap);
     writer.U8(style.stroke_join);
     writer.F32(style.miter_limit);
+    writer.U32(static_cast<std::uint32_t>(style.dash_pattern.size()));
+    for (const float length : style.dash_pattern) {
+      writer.F32(length);
+    }
+    writer.F32(style.dash_offset);
     writer.PathValue(path);
     ++operation_count;
   }

@@ -56,6 +56,10 @@ public:
     return offset_ == bytes_.size();
   }
 
+  [[nodiscard]] std::size_t RemainingBytes() const noexcept {
+    return bytes_.size() - offset_;
+  }
+
 private:
   void Require(std::size_t count) const {
     if (count > bytes_.size() - offset_) {
@@ -156,8 +160,8 @@ void VectorBuilder::FillPath(Path path, Color color, PathFillRule fill_rule) {
   impl_->context.FillPath(std::move(path), color, fill_rule);
 }
 
-void VectorBuilder::StrokePath(Path path, Color color, float width, StrokeCap cap, StrokeJoin join, float miter_limit) {
-  impl_->context.StrokePath(std::move(path), color, width, cap, join, miter_limit);
+void VectorBuilder::StrokePath(Path path, Color color, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), color, std::move(style));
 }
 
 void VectorBuilder::PushClip(Path path, PathFillRule fill_rule) {
@@ -255,14 +259,26 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
               join_value > static_cast<std::uint8_t>(StrokeJoin::Bevel)) {
             throw std::logic_error("HuxerUI vector payload contains invalid stroke configuration");
           }
-          builder.StrokePath(
-              ReadPath(reader),
-              color,
-              width,
-              static_cast<StrokeCap>(cap_value),
-              static_cast<StrokeJoin>(join_value),
-              miter_limit
-          );
+          const std::uint32_t dash_count = reader.U32();
+          if (reader.RemainingBytes() < sizeof(float) ||
+              dash_count > (reader.RemainingBytes() - sizeof(float)) / sizeof(float)) {
+            throw std::logic_error("HuxerUI vector payload is truncated");
+          }
+          std::vector<float> dash_pattern;
+          dash_pattern.reserve(dash_count);
+          for (std::uint32_t dash_index = 0; dash_index < dash_count; ++dash_index) {
+            dash_pattern.push_back(reader.F32());
+          }
+          const float dash_offset = reader.F32();
+          builder.StrokePath(ReadPath(reader), color,
+                             StrokeStyle{
+                                 .width = width,
+                                 .cap = static_cast<StrokeCap>(cap_value),
+                                 .join = static_cast<StrokeJoin>(join_value),
+                                 .miter_limit = miter_limit,
+                                 .dash_pattern = std::move(dash_pattern),
+                                 .dash_offset = dash_offset,
+                             });
           break;
         }
         case 3: {

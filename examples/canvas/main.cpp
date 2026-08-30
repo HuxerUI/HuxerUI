@@ -76,7 +76,12 @@ void PaintTaiji(PaintContext& paint, Size size, const ColorScheme& colors) {
   paint.DrawCircle({center.x, center.y - half_radius}, radius * 0.105F, colors.surface_container_highest);
   paint.DrawCircle({center.x, center.y + half_radius}, radius * 0.105F, colors.on_surface);
   paint.PopClip();
-  paint.StrokePath(outline, colors.primary, std::max(2.0F, radius * 0.025F), StrokeCap::Round, StrokeJoin::Round);
+  paint.StrokePath(outline, colors.primary,
+                   StrokeStyle{
+                       .width = std::max(2.0F, radius * 0.025F),
+                       .cap = StrokeCap::Round,
+                       .join = StrokeJoin::Round,
+                   });
 }
 
 void PaintOrbit(PaintContext& paint, Size size, const ColorScheme& colors) {
@@ -90,25 +95,18 @@ void PaintOrbit(PaintContext& paint, Size size, const ColorScheme& colors) {
 
   paint.DrawPathShadow(field, Color::Rgb(0, 0, 0, 0.24F), {}, radius * 0.12F);
   paint.FillPath(field, colors.inverse_surface);
-  paint.DrawArc(center, radius * 0.70F, -pi * 0.10F, pi * 1.28F, colors.primary, radius * 0.055F, StrokeCap::Round);
+  paint.DrawArc(center, radius * 0.70F, -pi * 0.10F, pi * 1.28F, colors.primary,
+                StrokeStyle{.width = radius * 0.055F, .cap = StrokeCap::Round});
+  paint.DrawArc(center, radius * 0.46F, pi * 0.80F, pi * 1.12F, colors.secondary_container,
+                StrokeStyle{.width = radius * 0.045F, .cap = StrokeCap::Round});
   paint.DrawArc(
-      center,
-      radius * 0.46F,
-      pi * 0.80F,
-      pi * 1.12F,
-      colors.secondary_container,
-      radius * 0.045F,
-      StrokeCap::Round
-  );
-  paint.DrawArc(
-      center,
-      radius * 0.86F,
-      pi * 0.58F,
-      pi * 0.58F,
-      colors.inverse_on_surface,
-      radius * 0.025F,
-      StrokeCap::Round
-  );
+      center, radius * 0.86F, pi * 0.58F, pi * 0.58F, colors.inverse_on_surface,
+      StrokeStyle{
+          .width = radius * 0.025F,
+          .cap = StrokeCap::Round,
+          .dash_pattern = {radius * 0.08F, radius * 0.05F},
+          .dash_offset = radius * 0.03F,
+      });
   paint.DrawCircle(center, radius * 0.14F, colors.primary);
   paint.DrawCircle(
       {center.x + std::cos(-pi * 0.10F) * radius * 0.70F, center.y + std::sin(-pi * 0.10F) * radius * 0.70F},
@@ -146,13 +144,30 @@ void PaintPathStudy(PaintContext& paint, Size size, const ColorScheme& colors) {
 
   paint.DrawPathShadow(shape, Color::Rgb(0, 0, 0, 0.24F), {}, 18.0F);
   paint.FillPath(shape, colors.primary);
-  paint.StrokePath(shape, colors.on_primary, 3.0F, StrokeCap::Round, StrokeJoin::Round);
+  paint.StrokePath(shape, colors.on_primary,
+                   StrokeStyle{
+                       .width = 3.0F,
+                       .cap = StrokeCap::Round,
+                       .join = StrokeJoin::Round,
+                       .dash_pattern = {12.0F, 7.0F},
+                       .dash_offset = 3.0F,
+                   });
+
+  paint.DrawBorder(
+      {inset * 0.5F, inset * 0.5F, size.width - inset, size.height - inset},
+      Color::Rgb(255, 255, 255, 0.32F),
+      StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {7.0F, 5.0F}},
+      CornerRadii{12.0F});
+  paint.DrawLine({inset, size.height * 0.18F}, {size.width - inset, size.height * 0.18F},
+                 Color::Rgb(255, 255, 255, 0.54F),
+                 StrokeStyle{.width = 4.0F, .cap = StrokeCap::Round, .dash_pattern = {0.0F, 10.0F}});
 
   Path highlight;
   highlight.MoveTo({size.width * 0.22F, size.height * 0.52F})
       .QuadraticTo({size.width * 0.50F, size.height * 0.18F}, {size.width * 0.78F, size.height * 0.48F});
   paint.PushPathClip(shape);
-  paint.StrokePath(highlight, Color::Rgb(255, 255, 255, 0.60F), 8.0F, StrokeCap::Round, StrokeJoin::Round);
+  paint.StrokePath(highlight, Color::Rgb(255, 255, 255, 0.60F),
+                   StrokeStyle{.width = 8.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
   paint.PopClip();
 }
 

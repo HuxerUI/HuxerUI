@@ -123,7 +123,7 @@ View WindowControl(
     case WindowCommand::Activate:
       break;
     }
-    context.StrokePath(std::move(path), window->caption_foreground, 1.0F);
+    context.StrokePath(std::move(path), window->caption_foreground, StrokeStyle{.width = 1.0F});
   });
   const bool close = command == WindowCommand::Close;
   const Color hover = close ? Color::Rgb(196, 43, 28, 0.9F) : Color::Rgb(0, 0, 0, 0.08F);

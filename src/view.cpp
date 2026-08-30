@@ -635,7 +635,7 @@ private:
     context.DrawBorder(
         frame,
         disabled ? checkbox_style_.disabled_unchecked_border : checkbox_style_.unchecked_border,
-        std::max(0.0F, checkbox_style_.border_width),
+        StrokeStyle{.width = std::max(0.0F, checkbox_style_.border_width)},
         std::max(0.0F, checkbox_style_.corner_radius)
     );
   }
@@ -655,9 +655,8 @@ private:
         frame.x + frame.width * 0.5F,
         frame.y + frame.height * 0.5F,
     };
-    context.DrawArc(
-        center, std::max(0.0F, maximum_radius - border_width * 0.5F), 0.0F, full_circle, color, border_width
-    );
+    context.DrawArc(center, std::max(0.0F, maximum_radius - border_width * 0.5F), 0.0F, full_circle, color,
+                    StrokeStyle{.width = border_width});
     const float dot_radius = std::clamp(radio_button_style_.dot_radius * progress, 0.0F, maximum_radius);
     if (dot_radius > 0.0F) {
       context.DrawCircle(center, dot_radius, color);
@@ -684,7 +683,8 @@ private:
     context.DrawRect(frame, track, std::max(0.0F, switch_style_.corner_radius));
 
     if (switch_style_.track_border_width > 0.0F && border.alpha > 0.0F) {
-      context.DrawBorder(frame, border, switch_style_.track_border_width, std::max(0.0F, switch_style_.corner_radius));
+      context.DrawBorder(frame, border, StrokeStyle{.width = switch_style_.track_border_width},
+                         std::max(0.0F, switch_style_.corner_radius));
     }
 
     const float maximum_radius = std::max(0.0F, std::min(frame.width, frame.height) * 0.5F);
@@ -1280,12 +1280,13 @@ public:
     const Color track_color = progress_.has_value() ? style_.track_color : style_.indeterminate_track_color;
     const bool separated_track = style_.track_gap > 0.0F;
     if (!separated_track && track_color.alpha > 0.0F) {
-      context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color, stroke_width);
+      context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color, StrokeStyle{.width = stroke_width});
     }
 
     if (progress <= 0.0F) {
       if (separated_track && track_color.alpha > 0.0F) {
-        context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color, stroke_width, StrokeCap::Round);
+        context.DrawArc(center, radius, -pi * 0.5F, full_circle, track_color,
+                        StrokeStyle{.width = stroke_width, .cap = StrokeCap::Round});
       }
       return;
     }
@@ -1298,10 +1299,11 @@ public:
     const float gap_angle = std::min(sweep, adjusted_gap / radius);
     const float track_sweep = std::max(0.0F, full_circle - sweep - gap_angle * 2.0F);
     if (separated_track && track_color.alpha > 0.0F && track_sweep > 0.0F) {
-      context
-          .DrawArc(center, radius, start + sweep + gap_angle, track_sweep, track_color, stroke_width, StrokeCap::Round);
+      context.DrawArc(center, radius, start + sweep + gap_angle, track_sweep, track_color,
+                      StrokeStyle{.width = stroke_width, .cap = StrokeCap::Round});
     }
-    context.DrawArc(center, radius, start, sweep, style_.indicator_color, stroke_width, StrokeCap::Round);
+    context.DrawArc(center, radius, start, sweep, style_.indicator_color,
+                    StrokeStyle{.width = stroke_width, .cap = StrokeCap::Round});
   }
 
 private:

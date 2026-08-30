@@ -24,7 +24,7 @@ The CLI initially creates empty `images` and `raw` directories and writes `strin
 - `RawResource` addresses packaged raw data.
 - `ResourceConfiguration` and locale/DPI changes are platform-owned; use public resource APIs rather than constructing package paths.
 
-Use generated identifiers such as `app::images::logo`, `app::raw::config_json`, and `app::strings::welcome`. Raw identifiers include the sanitized filename extension, while raster density variants such as `logo.png` and `logo@2x.png` share one image identifier. SVG files become platform-neutral vector resources. `default.properties` supplies the fallback strings, while locale files such as `zh.properties` provide matching overrides.
+Use generated identifiers such as `app::images::logo`, `app::raw::config_json`, and `app::strings::welcome`. Raw identifiers include the sanitized filename extension, while raster density variants such as `logo.png` and `logo@2x.png` share one image identifier. SVG files become platform-neutral vector resources; supported stroke attributes include width, cap, join, miter limit, `stroke-dasharray`, and `stroke-dashoffset`. `default.properties` supplies the fallback strings, while locale files such as `zh.properties` provide matching overrides.
 
 Generated libraries use the same directory categories but register their own target-derived resource namespace and generated header. Read the library's generated `CMakeLists.txt` rather than assuming the application namespace.
 

@@ -121,7 +121,8 @@ const VectorAsset& SelectIndicatorAsset() {
   static const VectorAsset asset = VectorAsset::Create({16.0F, 16.0F}, [](VectorBuilder& builder) {
     Path path;
     path.MoveTo({3.5F, 6.0F}).LineTo({8.0F, 10.5F}).LineTo({12.5F, 6.0F});
-    builder.StrokePath(std::move(path), Color::Black(), 1.5F, StrokeCap::Round, StrokeJoin::Round);
+    builder.StrokePath(std::move(path), Color::Black(),
+                       StrokeStyle{.width = 1.5F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
   });
   return asset;
 }

@@ -46,6 +46,7 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawCircleCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawLineCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawArcCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawBorderCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawShadowCommand& command);
@@ -67,6 +68,7 @@ private:
   jmethodID draw_image_ = nullptr;
   jmethodID draw_external_texture_ = nullptr;
   jmethodID draw_circle_ = nullptr;
+  jmethodID draw_line_ = nullptr;
   jmethodID draw_arc_ = nullptr;
   jmethodID draw_border_ = nullptr;
   jmethodID draw_shadow_ = nullptr;

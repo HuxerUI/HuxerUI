@@ -5,9 +5,10 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
-import android.graphics.Canvas;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.DashPathEffect;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -141,7 +142,7 @@ public final class HuxerUIView extends ViewGroup {
     private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final Rect textBounds = new Rect();
     private final RectF rect = new RectF();
-    private final Path clipPath = new Path();
+    private final Path scratchPath = new Path();
     private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
     private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
     private final LruCache<ParagraphKey, StaticLayout> paragraphCache = new LruCache<>(256);
@@ -1564,21 +1565,30 @@ public final class HuxerUIView extends ViewGroup {
         canvas.drawCircle(centerX, centerY, radius, paint);
     }
 
+    private void drawLine(Canvas canvas, float startX, float startY, float endX, float endY, int color, float width,
+            int cap, int join, float miterLimit, float[] dashPattern, float dashOffset) {
+        if ((startX == endX && startY == endY) || width <= 0.0F) {
+            return;
+        }
+        prepareStrokePaint(color, width, cap, join, miterLimit, dashPattern, dashOffset);
+        canvas.drawLine(startX, startY, endX, endY, paint);
+    }
+
     private void drawArc(Canvas canvas, float centerX, float centerY, float radius, float startAngle, float sweepAngle,
-            int color, float width, int cap) {
+            int color, float width, int cap, int join, float miterLimit, float[] dashPattern, float dashOffset) {
         if (radius <= 0.0F || width <= 0.0F) {
             return;
         }
-        preparePaint(color, Paint.Style.STROKE, width);
-        if (cap == STROKE_CAP_ROUND) {
-            paint.setStrokeCap(Paint.Cap.ROUND);
-        } else if (cap == STROKE_CAP_SQUARE) {
-            paint.setStrokeCap(Paint.Cap.SQUARE);
-        } else {
-            paint.setStrokeCap(Paint.Cap.BUTT);
-        }
+        prepareStrokePaint(color, width, cap, join, miterLimit, dashPattern, dashOffset);
         rect.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
-        canvas.drawArc(rect, startAngle, sweepAngle, false, paint);
+        if (Math.abs(sweepAngle) >= 359.994F) {
+            scratchPath.reset();
+            scratchPath.addArc(rect, startAngle, Math.copySign(360.0F, sweepAngle));
+            scratchPath.close();
+            canvas.drawPath(scratchPath, paint);
+        } else {
+            canvas.drawArc(rect, startAngle, sweepAngle, false, paint);
+        }
     }
 
     private void drawBorder(Canvas canvas, float x, float y, float width, float height, int color, float strokeWidth,
@@ -1608,11 +1618,18 @@ public final class HuxerUIView extends ViewGroup {
     }
 
     private void strokePath(
-            Canvas canvas, float[] elements, int color, float width, int cap, int join, float miterLimit) {
+            Canvas canvas, float[] elements, int color, float width, int cap, int join, float miterLimit,
+            float[] dashPattern, float dashOffset) {
         if (width <= 0.0F) {
             return;
         }
         Path drawPath = preparePath(elements, 0);
+        prepareStrokePaint(color, width, cap, join, miterLimit, dashPattern, dashOffset);
+        canvas.drawPath(drawPath, paint);
+    }
+
+    private void prepareStrokePaint(int color, float width, int cap, int join, float miterLimit, float[] dashPattern,
+            float dashOffset) {
         preparePaint(color, Paint.Style.STROKE, width);
         if (cap == STROKE_CAP_ROUND) {
             paint.setStrokeCap(Paint.Cap.ROUND);
@@ -1625,7 +1642,9 @@ public final class HuxerUIView extends ViewGroup {
             paint.setStrokeJoin(Paint.Join.BEVEL);
         }
         paint.setStrokeMiter(miterLimit);
-        canvas.drawPath(drawPath, paint);
+        if (dashPattern != null && dashPattern.length != 0) {
+            paint.setPathEffect(new DashPathEffect(dashPattern, dashOffset));
+        }
     }
 
     private void drawPathShadow(Canvas canvas, float[] elements, float x, float y, float width, float height, int color,
@@ -1646,9 +1665,9 @@ public final class HuxerUIView extends ViewGroup {
             return;
         }
         float radius = Math.min(cornerRadius, Math.min(width, height) * 0.5F);
-        clipPath.reset();
-        clipPath.addRoundRect(rect, radius, radius, Path.Direction.CW);
-        canvas.clipPath(clipPath);
+        scratchPath.reset();
+        scratchPath.addRoundRect(rect, radius, radius, Path.Direction.CW);
+        canvas.clipPath(scratchPath);
     }
 
     private void pushPathClip(Canvas canvas, float[] elements, int fillRule) {
@@ -1696,6 +1715,7 @@ public final class HuxerUIView extends ViewGroup {
         paint.setStrokeCap(Paint.Cap.BUTT);
         paint.setStrokeJoin(Paint.Join.MITER);
         paint.setStrokeMiter(4.0F);
+        paint.setPathEffect(null);
     }
 
     private Path preparePath(float[] elements, int fillRule) {

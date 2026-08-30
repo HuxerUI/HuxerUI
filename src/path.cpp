@@ -251,6 +251,25 @@ Path Path::RoundedRect(Rect rect, CornerRadii corner_radii) {
   return path;
 }
 
+Path detail::CreateBorderStrokePath(Rect rect, CornerRadii corner_radii, float width) {
+  const float inset = width * 0.5F;
+  const Rect centerline{
+      rect.x + inset,
+      rect.y + inset,
+      std::max(0.0F, rect.width - width),
+      std::max(0.0F, rect.height - width),
+  };
+  return Path::RoundedRect(
+      centerline,
+      {
+          std::max(0.0F, corner_radii.top_left - inset),
+          std::max(0.0F, corner_radii.top_right - inset),
+          std::max(0.0F, corner_radii.bottom_right - inset),
+          std::max(0.0F, corner_radii.bottom_left - inset),
+      }
+  );
+}
+
 bool Path::IsEmpty() const noexcept {
   return !data_ || !data_->has_drawable_segment;
 }

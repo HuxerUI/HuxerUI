@@ -686,7 +686,7 @@ const DrawRectCommand* FindTextFieldCaret(const FlattenedScene& scene, Color col
 const StrokePathCommand* FindTextFieldOutline(const FlattenedScene& scene, Color color, float width) {
   for (const PaintCommand& command : scene.Commands()) {
     const auto* path = std::get_if<StrokePathCommand>(&command);
-    if (path && path->color == color && path->width == width) {
+    if (path && path->color == color && path->style.width == width) {
       return path;
     }
   }
