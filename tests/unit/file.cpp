@@ -53,6 +53,7 @@ private:
 static_assert(std::copy_constructible<File>);
 static_assert(std::move_constructible<File>);
 static_assert(!std::default_initializable<File>);
+static_assert(std::constructible_from<File, const Uri&>);
 static_assert(!std::copy_constructible<FileSystem>);
 
 TEST_CASE("FileResultDistinguishesValuesFromErrors") {
@@ -89,6 +90,74 @@ TEST_CASE("FileNormalizesUtf8PathsAndProvidesLexicalOperations") {
   REQUIRE_THROWS_AS(root.Child("nested/item"), std::invalid_argument);
   REQUIRE_THROWS_AS(root.Resolve("/absolute"), std::invalid_argument);
 }
+
+TEST_CASE("FileUriConversionPreservesAbsoluteUtf8PathsWithoutFilesystemAccess") {
+#if defined(_WIN32)
+  const File file("C:/huxerui-uri-tests/folder with space/100%/报告.txt");
+#else
+  const File file("/huxerui-uri-tests/folder with space/100%/报告.txt");
+#endif
+  const Uri uri = file.ToUri();
+
+  REQUIRE(uri.Scheme() == "file");
+  REQUIRE(uri.Authority().has_value());
+  REQUIRE(uri.Authority()->empty());
+  REQUIRE(uri.Query() == std::nullopt);
+  REQUIRE(uri.Fragment() == std::nullopt);
+  REQUIRE(uri.ToString().find("folder%20with%20space/100%25/%E6%8A%A5%E5%91%8A.txt") != std::string::npos);
+  REQUIRE(File(uri) == file);
+
+  const Uri localhost("file://localhost" + std::string(uri.Path()));
+  REQUIRE(File(localhost) == file);
+}
+
+TEST_CASE("FileUriConversionRejectsSchemesAndStructureThatDoNotIdentifyLocalFiles") {
+  REQUIRE_THROWS_AS(File(Uri("https://example.test/file.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:///folder/a%2Fb.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:///folder/a%00b.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:///folder/file.txt?query")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:///folder/file.txt#fragment")), std::invalid_argument);
+
+#if defined(_WIN32)
+  REQUIRE_THROWS_AS(File(Uri("file:/folder/file.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:////server/share/file.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file:///C:/folder/a%5Cb.txt")), std::invalid_argument);
+#else
+  REQUIRE(File(Uri("file:/tmp/item.txt")) == File("/tmp/item.txt"));
+  REQUIRE(File("/").ToUri().ToString() == "file:///");
+  REQUIRE_THROWS_AS(File(Uri("file://server/share/file.txt")), std::invalid_argument);
+#endif
+}
+
+#if defined(_WIN32)
+
+TEST_CASE("WindowsFileUriConversionMapsDriveAndUncPathsWithoutLegacyForms") {
+  const File drive(Uri("file:///C:/folder/item%20one.txt"));
+  REQUIRE(drive.Path() == "C:/folder/item one.txt");
+  REQUIRE(drive.ToUri().ToString() == "file:///C:/folder/item%20one.txt");
+  REQUIRE(File("C:/").ToUri().ToString() == "file:///C:/");
+
+  const File unc(Uri("file://server.example/Share/folder/item%20one.txt"));
+  REQUIRE(unc.Path() == "//server.example/Share/folder/item one.txt");
+  REQUIRE(unc.ToUri().ToString() == "file://server.example/Share/folder/item%20one.txt");
+
+  const File localhost_unc("//localhost/Share/folder/item.txt");
+  const Uri localhost_unc_uri = localhost_unc.ToUri();
+  REQUIRE(localhost_unc_uri.ToString() == "file://localhost/Share/folder/item.txt");
+  REQUIRE(File(localhost_unc_uri) == localhost_unc);
+
+  const File punctuation_unc("//server.example/Share@team[1]/item.txt");
+  const Uri punctuation_unc_uri = punctuation_unc.ToUri();
+  REQUIRE(punctuation_unc_uri.ToString() == "file://server.example/Share@team%5B1%5D/item.txt");
+  REQUIRE(File(punctuation_unc_uri) == punctuation_unc);
+
+  REQUIRE_THROWS_AS(File(Uri("file:///C|/folder/item.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file://server.example/C:/item.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file://user@server.example/Share/item.txt")), std::invalid_argument);
+  REQUIRE_THROWS_AS(File(Uri("file://server.example:445/Share/item.txt")), std::invalid_argument);
+}
+
+#endif
 
 TEST_CASE("FilePerformsSynchronousLocalFileAndDirectoryOperations") {
   TemporaryDirectory temporary;

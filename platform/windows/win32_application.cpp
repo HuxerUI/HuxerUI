@@ -41,27 +41,8 @@ bool IsAsciiAlpha(wchar_t value) noexcept {
   return (value >= L'A' && value <= L'Z') || (value >= L'a' && value <= L'z');
 }
 
-bool IsAsciiDigit(wchar_t value) noexcept {
-  return value >= L'0' && value <= L'9';
-}
-
-bool HasUrlScheme(std::wstring_view value) noexcept {
-  const std::size_t separator = value.find(L':');
-  if (separator == std::wstring_view::npos || separator == 0 || !IsAsciiAlpha(value.front())) {
-    return false;
-  }
-  // A single ASCII letter followed by ':' is a Windows drive designator, including drive-relative paths.
-  if (separator == 1) {
-    return false;
-  }
-  for (std::size_t index = 1; index < separator; ++index) {
-    const wchar_t character = value[index];
-    if (!IsAsciiAlpha(character) && !IsAsciiDigit(character) && character != L'+' && character != L'-' &&
-        character != L'.') {
-      return false;
-    }
-  }
-  return true;
+bool IsWindowsDriveDesignator(std::wstring_view value) noexcept {
+  return value.size() >= 2 && IsAsciiAlpha(value[0]) && value[1] == L':';
 }
 
 std::vector<std::wstring> CurrentWin32Arguments() {
@@ -121,9 +102,11 @@ ApplicationActivation ParseWin32ApplicationActivation(std::span<const std::wstri
     return FileActivation{std::move(files)};
   }
 
-  if (arguments.size() == 1 && HasUrlScheme(arguments.front())) {
-    if (std::optional<std::string> url = StrictWideToUtf8(arguments.front()); url.has_value() && !url->empty()) {
-      return UrlActivation{std::move(*url)};
+  if (arguments.size() == 1 && !IsWindowsDriveDesignator(arguments.front())) {
+    if (std::optional<std::string> url = StrictWideToUtf8(arguments.front())) {
+      if (std::optional<Uri> parsed = Uri::Parse(*url)) {
+        return UrlActivation{std::move(*parsed)};
+      }
     }
   }
   return LaunchActivation{};

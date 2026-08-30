@@ -28,7 +28,7 @@ std::optional<std::string> OptionalString(JNIEnv* environment, jstring value) {
 
 } // namespace
 
-ApplicationActivation DecodeAndroidApplicationActivation(
+std::optional<ApplicationActivation> DecodeAndroidApplicationActivation(
     JavaVM* virtual_machine,
     JNIEnv* environment,
     jobject context,
@@ -38,20 +38,24 @@ ApplicationActivation DecodeAndroidApplicationActivation(
     throw std::invalid_argument("HuxerUI Android application activation requires JNI and Context");
   }
   if (input.kind == 0) {
-    return LaunchActivation{};
+    return std::nullopt;
   }
   const std::optional<std::string> decoded_value = OptionalString(environment, input.value);
   if (environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI Android application activation value could not be read");
   }
   if (!decoded_value.has_value() || decoded_value->empty()) {
-    throw std::invalid_argument("HuxerUI Android application activation value must not be empty");
+    return std::nullopt;
   }
   if (input.kind == android_activation_url) {
-    return UrlActivation{*decoded_value};
+    std::optional<Uri> parsed = Uri::Parse(*decoded_value);
+    if (!parsed.has_value()) {
+      return std::nullopt;
+    }
+    return ApplicationActivation{UrlActivation{std::move(*parsed)}};
   }
   if (input.kind != android_activation_file) {
-    throw std::invalid_argument("HuxerUI Android application activation kind is invalid");
+    return std::nullopt;
   }
 
   const std::optional<std::string> decoded_name = OptionalString(environment, input.file_name);
@@ -60,7 +64,7 @@ ApplicationActivation DecodeAndroidApplicationActivation(
     throw std::runtime_error("HuxerUI Android file activation metadata could not be read");
   }
   if (!decoded_name.has_value() || decoded_name->empty() || input.file_size < -1) {
-    throw std::invalid_argument("HuxerUI Android file activation metadata is invalid");
+    return std::nullopt;
   }
 
   FileReferenceMetadata metadata{
@@ -75,7 +79,7 @@ ApplicationActivation DecodeAndroidApplicationActivation(
   files.push_back(
       CreateAndroidFileReference(virtual_machine, environment, context, std::move(metadata), *decoded_value)
   );
-  return FileActivation{std::move(files)};
+  return ApplicationActivation{FileActivation{std::move(files)}};
 }
 
 } // namespace huxerui::detail

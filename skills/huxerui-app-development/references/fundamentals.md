@@ -89,7 +89,7 @@ tasks.Launch([]() -> Task<void> {
 });
 ```
 
-`UseApplication()` returns the current Runtime's `ApplicationHandle`. Its `StartupActivation()` exposes the cold-start `ApplicationActivation`, whose alternatives are `LaunchActivation`, `UrlActivation`, and `FileActivation`. Its `OnActivation(...)` receives only later activations while the declaring composition lifetime is mounted.
+`UseApplication()` returns the current Runtime's `ApplicationHandle`. Its `StartupActivation()` exposes the cold-start `ApplicationActivation`, whose alternatives are `LaunchActivation`, `UrlActivation`, and `FileActivation`. `UrlActivation::url` is a validated `Uri`, while `FileActivation` retains platform-granted `FileReference` capabilities. Its `OnActivation(...)` receives only later activations while the declaring composition lifetime is mounted.
 
 `ApplicationHandle::LifecycleState()` reads and subscribes to the current `ApplicationLifecycleState`; use `ApplicationHandle::OnLifecycleChange(...)` when every ordered transition matters. Obtain the handle with `UseApplication()`, register callbacks during composition, and keep navigation or file-opening policy in application state.
 

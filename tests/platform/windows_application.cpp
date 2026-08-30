@@ -52,12 +52,12 @@ TEST_CASE("Win32ApplicationActivationPreservesLaunchAndUrlInputs") {
 
   const std::vector<std::wstring> url_arguments{L"huxerui://documents/%E6%B5%8B%E8%AF%95"};
   const ApplicationActivation url_activation = detail::ParseWin32ApplicationActivation(url_arguments);
-  REQUIRE(std::get<UrlActivation>(url_activation).url == "huxerui://documents/%E6%B5%8B%E8%AF%95");
+  REQUIRE(std::get<UrlActivation>(url_activation).url.ToString() == "huxerui://documents/%E6%B5%8B%E8%AF%95");
 
   const std::vector<wchar_t> url_payload = detail::EncodeWin32ApplicationArguments(url_arguments);
   const std::optional<ApplicationActivation> decoded_url = detail::DecodeWin32ApplicationActivation(url_payload);
   REQUIRE(decoded_url.has_value());
-  REQUIRE(std::get<UrlActivation>(*decoded_url).url == "huxerui://documents/%E6%B5%8B%E8%AF%95");
+  REQUIRE(std::get<UrlActivation>(*decoded_url).url.ToString() == "huxerui://documents/%E6%B5%8B%E8%AF%95");
 
   const std::vector<wchar_t> incomplete_payload{L'h', L'u', L'x', L'\0'};
   REQUIRE_FALSE(detail::DecodeWin32ApplicationActivation(incomplete_payload).has_value());
@@ -67,6 +67,11 @@ TEST_CASE("Win32ApplicationActivationPreservesLaunchAndUrlInputs") {
 
   const std::vector<std::wstring> drive_relative_argument{LR"(C:missing.txt)"};
   REQUIRE(std::holds_alternative<LaunchActivation>(detail::ParseWin32ApplicationActivation(drive_relative_argument)));
+
+  const std::vector<std::wstring> invalid_url_argument{L"huxerui://documents/测试"};
+  REQUIRE(std::holds_alternative<LaunchActivation>(detail::ParseWin32ApplicationActivation(invalid_url_argument)));
+  const std::vector<wchar_t> invalid_url_payload = detail::EncodeWin32ApplicationArguments(invalid_url_argument);
+  REQUIRE_FALSE(detail::DecodeWin32ApplicationActivation(invalid_url_payload).has_value());
 }
 
 TEST_CASE("Win32ApplicationActivationCreatesCapabilitiesOnlyForCompleteFileInputs") {

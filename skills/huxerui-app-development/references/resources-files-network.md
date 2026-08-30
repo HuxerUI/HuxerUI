@@ -38,7 +38,11 @@ Obtain the runtime-installed services during composition with `UseService<FileSy
 
 `Bytes` from `<huxerui/data.h>` is the canonical owned binary buffer. Use `std::span<const std::byte>` only for borrowed binary input instead of introducing another application byte-container type.
 
+`Uri` from `<huxerui/data.h>` is the immutable absolute RFC 3986 URI value. Use the throwing constructor for trusted caller input and `Uri::Parse()` for external text. Read `Scheme()` and `Path()` directly; `Authority()`, `Query()`, and `Fragment()` are optional so absent and present-empty components stay distinct. Serialization and equality are lexical, raw Unicode IRIs are unsupported, and `Uri` does not own route, query-map, normalization, or HTTP policy.
+
 `File` represents an application-visible path and offers synchronous and asynchronous stat, read, write, append, list, create, delete, copy, and move operations. Byte reads return `FileResult<Bytes>`; synchronous byte writes borrow a span for the call, while asynchronous byte writes take `Bytes` by value so storage remains owned across suspension. Handle `FileResult<T>` and `FileErrorCode`; do not assume every platform permits every path.
+
+Use `File(const Uri&)` and `File::ToUri()` only for supported local `file:` URI conversion. Preserve `FileReference` as the platform-granted capability for Android content URIs, Apple security-scoped URLs, browser handles, and other external files; do not project it into a local path or generic URI.
 
 `FileSystem::Directories()` provides application data, cache, temporary, and optional executable directories. Use those instead of hardcoded OS paths.
 

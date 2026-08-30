@@ -26,7 +26,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | Text input | `TextEditingValue`, configuration, field limits, `ValidationResult`, `Validate` | [text-input-and-semantics.md](text-input-and-semantics.md) | `text_input.h`, `view.h`, `validation.h` |
 | Semantics | `Semantics`, `SemanticBuilder`, semantic roles/actions | [text-input-and-semantics.md](text-input-and-semantics.md) | `semantics.h` |
 | Resources | string/image/raw resources, `UseString`, `UseImage`, `UseVectorImage`, `UseRawResource` | [resources-files-network.md](resources-files-network.md) | `resource.h` |
-| Files and network | `Bytes`, `File`, `FileReference`, `FilePicker`, `FileSystem`, `HttpClient` | [resources-files-network.md](resources-files-network.md) | `data.h`, `file.h`, `http.h` |
+| Files and network | `Bytes`, `Uri`, `File`, `FileReference`, `FilePicker`, `FileSystem`, `HttpClient` | [resources-files-network.md](resources-files-network.md) | `data.h`, `file.h`, `http.h` |
 | Navigation | `NavigationPath`, routed `NavigationStack`, controllers, browser codec | [navigation-and-window.md](navigation-and-window.md) | `navigation.h`, `web/navigation.h` |
 | Window | `WindowContentMode`, `WindowChromeMode`, safe area, system bars, title bar, `UseWindow`, `WindowHandle` | [navigation-and-window.md](navigation-and-window.md) | `window.h` |
 | Paint | `Color`, `VisualFill`, `Canvas`, `PaintContext`, `UseTextMeasurer`, `Path`, gradients, images, vectors | [canvas-paint-and-images.md](canvas-paint-and-images.md) | `color.h`, `paint.h`, `text.h`, `vector.h` |

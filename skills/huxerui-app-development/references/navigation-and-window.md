@@ -35,7 +35,7 @@ System bar background and foreground brightness come from the resolved `SystemBa
 
 ## Activation
 
-Use `UseApplication().StartupActivation()` for the cold-start `ApplicationActivation`. Inspect its `LaunchActivation`, `UrlActivation`, or `FileActivation` alternative with `std::visit` or `std::get_if`. Register `UseApplication().OnActivation(...)` for later activations while the declaring composition lifetime is mounted. Route external URLs or files by updating the authoritative navigation path rather than creating a parallel page stack.
+Use `UseApplication().StartupActivation()` for the cold-start `ApplicationActivation`. Inspect its `LaunchActivation`, `UrlActivation`, or `FileActivation` alternative with `std::visit` or `std::get_if`. `UrlActivation::url` is an already validated `Uri`; inspect its components without reparsing `ToString()`. `FileActivation` contains `FileReference` capabilities rather than assumed local paths. Register `UseApplication().OnActivation(...)` for later activations while the declaring composition lifetime is mounted. Route external URLs or files by updating the authoritative navigation path rather than creating a parallel page stack.
 
 ## System tray
 

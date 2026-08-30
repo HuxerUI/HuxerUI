@@ -169,6 +169,10 @@ Neither API requests or guarantees platform background execution.
 The root can observe application lifecycle state and receive cold-start or later activation containing URLs or external files.
 Navigation and file handling remain application policy; the platform shell only normalizes and delivers activation data.
 
+`UrlActivation::url` is an immutable validated `Uri` from `<huxerui/data.h>`.
+Inspect its typed components directly rather than parsing the serialized string again.
+`FileActivation` carries `FileReference` capabilities instead of assuming that every platform-opened document has a local path.
+
 `UseApplication()` returns the application-level handle.
 On desktop, its `SystemTray()` sub-handle presents one tray item and `Quit()` requests orderly application termination.
 Tray declarations reuse `MenuItem`, `MenuEntry`, and `MenuSection`; their `ImageVariant` icons must resolve to raster `ImageAsset` values.

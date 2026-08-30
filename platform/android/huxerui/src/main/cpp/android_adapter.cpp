@@ -515,7 +515,7 @@ public:
         environment, view_, context_, renderer_, PlatformRegistry(), runtime, MakeUIThreadDispatcher(dispatch_state_));
   }
 
-  ApplicationActivation DecodeApplicationActivation(
+  std::optional<ApplicationActivation> DecodeApplicationActivation(
       JNIEnv* environment, const AndroidApplicationActivationInput& input
   ) const {
     return DecodeAndroidApplicationActivation(virtual_machine_, environment, context_, input);
@@ -1095,7 +1095,11 @@ public:
       const AndroidApplicationActivationInput& startup_activation
   )
       : platform_(environment, view),
-        runtime_(application, platform_, platform_.DecodeApplicationActivation(environment, startup_activation)) {
+        runtime_(
+            application,
+            platform_,
+            platform_.DecodeApplicationActivation(environment, startup_activation).value_or(LaunchActivation{})
+        ) {
     platform_.AttachRuntime(environment, runtime_);
   }
 
@@ -1196,7 +1200,9 @@ public:
   }
 
   void HandleApplicationActivation(JNIEnv* environment, const AndroidApplicationActivationInput& input) {
-    runtime_.HandleApplicationActivation(platform_.DecodeApplicationActivation(environment, input));
+    if (std::optional<ApplicationActivation> activation = platform_.DecodeApplicationActivation(environment, input)) {
+      runtime_.HandleApplicationActivation(std::move(*activation));
+    }
   }
 
   void UpdateApplicationLifecycleState(jint state) {

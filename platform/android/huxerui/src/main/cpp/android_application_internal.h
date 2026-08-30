@@ -2,6 +2,8 @@
 
 #include <jni.h>
 
+#include <optional>
+
 #include <huxerui/app.h>
 
 namespace huxerui::detail {
@@ -16,7 +18,7 @@ struct AndroidApplicationActivationInput {
   jboolean writable = JNI_FALSE;
 };
 
-[[nodiscard]] ApplicationActivation DecodeAndroidApplicationActivation(
+[[nodiscard]] std::optional<ApplicationActivation> DecodeAndroidApplicationActivation(
     JavaVM* virtual_machine,
     JNIEnv* environment,
     jobject context,

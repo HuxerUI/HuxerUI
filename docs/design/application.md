@@ -25,7 +25,7 @@ struct LaunchActivation {
 };
 
 struct UrlActivation {
-  std::string url;
+  Uri url;
 
   bool operator==(const UrlActivation&) const = default;
 };
@@ -41,7 +41,9 @@ using ApplicationActivation = std::variant<
 >;
 ```
 
-`LaunchActivation` represents an ordinary launch without an external payload. `UrlActivation` contains a non-empty opaque UTF-8 URL that application code interprets. `FileActivation` contains one or more `FileReference` capability values and never converts platform-granted files into assumed local paths.
+`LaunchActivation` represents an ordinary launch without an external payload. `UrlActivation` contains a validated immutable `Uri` that application code interprets. `FileActivation` contains one or more `FileReference` capability values and never converts platform-granted files into assumed local paths.
+
+The generic syntax and serialization contract belongs to [URI and Local File URI](uri.md). Runtime does not parse the value again or apply route, network, or normalization policy.
 
 The closed variant prevents invalid combinations of unrelated optional fields. Future share or notification inputs require separate reviewed alternatives rather than a generic `PlatformPayload` escape hatch.
 
@@ -192,7 +194,7 @@ The implemented platform mappings are:
 The Windows application shell parses the process command line before constructing Runtime:
 
 - No payload produces `LaunchActivation`.
-- Exactly one argument with a non-drive URL scheme produces `UrlActivation`.
+- Exactly one argument containing a valid RFC 3986 URI with a non-drive scheme produces `UrlActivation`.
 - One or more arguments that all identify existing regular files produce `FileActivation` values backed by Windows `FileReference` capabilities.
 - Unknown options, directories, missing files, and mixed inputs remain an ordinary launch rather than being partially interpreted.
 
@@ -218,7 +220,7 @@ The Android `example_runner` uses `singleTop`. When Gradle selects `example_appl
 
 The AppKit shell installs its application delegate before finishing native launch. `application:openURLs:` input received during `finishLaunching` is fully normalized before Runtime construction: the first activation becomes `StartupActivation()`, while any remaining ordered activations enter the Runtime queue after construction. The same callback submits later input directly to the current Runtime. Consecutive file URLs form one `FileActivation`; non-file URLs remain separate `UrlActivation` values in their native order. A batch containing an invalid value, directory, or failed capability conversion is rejected without submitting a partial prefix.
 
-File activations reuse the security-scoped macOS `FileReference` implementation. The platform decoder retains capabilities and UTF-8 URL values only; it does not inspect routes or copy documents into application storage.
+File activations reuse the security-scoped macOS `FileReference` implementation. The platform decoder retains capabilities and validated `Uri` values only; it does not inspect routes or copy documents into application storage.
 
 The `example_application` bundle declares the `huxerui-example` custom URL scheme and `public.text` document type in its example-specific Info.plist. General applications own these native declarations through their packaging metadata rather than `AppOptions`.
 

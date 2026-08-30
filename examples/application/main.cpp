@@ -59,7 +59,7 @@ std::string DescribeActivation(const ApplicationActivation& activation) {
         if constexpr (std::is_same_v<Value, LaunchActivation>) {
           return std::string{"ordinary launch"};
         } else if constexpr (std::is_same_v<Value, UrlActivation>) {
-          return "URL: " + value.url;
+          return "URL: " + value.url.ToString();
         } else {
           std::string result = "files:";
           for (const FileReference& file : value.files) {

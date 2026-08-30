@@ -1,7 +1,6 @@
 #include <huxerui/app.h>
 
 #include <stdexcept>
-#include <type_traits>
 #include <utility>
 
 #include "application_internal.h"
@@ -13,24 +12,10 @@ namespace huxerui::detail {
 namespace {
 
 void ValidateApplicationActivation(const ApplicationActivation& activation) {
-  std::visit(
-      [](const auto& value) {
-        using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, LaunchActivation>) {
-          return;
-        } else if constexpr (std::is_same_v<Value, UrlActivation>) {
-          if (!value.url.empty()) {
-            return;
-          }
-        } else {
-          if (!value.files.empty()) {
-            return;
-          }
-        }
-        throw std::invalid_argument("HuxerUI application activation must contain a URL or at least one file");
-      },
-      activation
-  );
+  const auto* files = std::get_if<FileActivation>(&activation);
+  if (files != nullptr && files->files.empty()) {
+    throw std::invalid_argument("HuxerUI file activation must contain at least one file");
+  }
 }
 
 void ValidateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {

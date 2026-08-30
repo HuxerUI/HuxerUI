@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "ios_file_internal.h"
@@ -27,9 +28,12 @@ std::optional<ApplicationActivation> DecodeIosApplicationActivation(NSURL* url, 
       if (data == nil || data.length == 0) {
         return std::nullopt;
       }
-      return ApplicationActivation{
-          UrlActivation{std::string(static_cast<const char*>(data.bytes), data.length)},
-      };
+      std::optional<Uri> parsed =
+          Uri::Parse(std::string_view(static_cast<const char*>(data.bytes), data.length));
+      if (!parsed.has_value()) {
+        return std::nullopt;
+      }
+      return ApplicationActivation{UrlActivation{std::move(*parsed)}};
     } @catch (NSException*) {
       return std::nullopt;
     }

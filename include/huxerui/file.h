@@ -115,6 +115,7 @@ class File final {
 public:
   explicit File(std::string_view path);
   explicit File(std::u8string_view path);
+  explicit File(const Uri& uri);
   File(const File& parent, std::string_view child);
 
   File(const File&) = default;
@@ -134,6 +135,7 @@ public:
 
   [[nodiscard]] File Child(std::string_view name) const;
   [[nodiscard]] File Resolve(std::string_view relative_path) const;
+  [[nodiscard]] Uri ToUri() const;
 
   [[nodiscard]] bool Exists() const;
   [[nodiscard]] bool IsFile() const;

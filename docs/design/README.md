@@ -26,6 +26,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 
 ## Content and services
 
+- [URI and Local File URI](uri.md): immutable syntax, retained serialization, file conversion, and activation boundaries.
 - [Text and Fonts](text.md): styles, measurement, runs, and platform caches.
 - [Text Input and TextField](text-input.md): editing values, sessions, geometry, IME, and secure input.
 - [Select](select.md): controlled finite choices, popup ownership, item identity, focus, and semantics.

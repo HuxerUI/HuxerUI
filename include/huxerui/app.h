@@ -15,6 +15,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/data.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/file.h>
@@ -43,7 +44,7 @@ struct LaunchActivation {
 };
 
 struct UrlActivation {
-  std::string url;
+  Uri url;
 
   bool operator==(const UrlActivation&) const = default;
 };

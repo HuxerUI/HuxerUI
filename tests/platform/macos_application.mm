@@ -51,10 +51,10 @@ TEST_CASE("MacApplicationActivationPreservesOrderedUrlsAndFileCapabilities") {
     REQUIRE(first_files.files[0].Name() == "first.txt");
     REQUIRE(first_files.files[1].Name() == "第二.txt");
     REQUIRE(
-        std::get<UrlActivation>((*activations)[1]).url ==
+        std::get<UrlActivation>((*activations)[1]).url.ToString() ==
         "huxerui-example://documents/%E6%B5%8B%E8%AF%95"
     );
-    REQUIRE(std::get<UrlActivation>((*activations)[2]).url == "huxerui-example://documents/42");
+    REQUIRE(std::get<UrlActivation>((*activations)[2]).url.ToString() == "huxerui-example://documents/42");
     const FileActivation& last_files = std::get<FileActivation>((*activations)[3]);
     REQUIRE(last_files.files.size() == 1);
     REQUIRE(last_files.files[0].Name() == "third.txt");

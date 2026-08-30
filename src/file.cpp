@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "data_internal.h"
 #include "file_internal.h"
 #include "task_internal.h"
 
@@ -718,6 +719,186 @@ void EnqueueFileOperation(std::function<void()> operation) {
 }
 #endif
 
+namespace {
+
+bool EqualsAsciiCaseInsensitive(std::string_view left, std::string_view right) noexcept {
+  if (left.size() != right.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < left.size(); ++index) {
+    char left_character = left[index];
+    char right_character = right[index];
+    if (left_character >= 'A' && left_character <= 'Z') {
+      left_character = static_cast<char>(left_character + ('a' - 'A'));
+    }
+    if (right_character >= 'A' && right_character <= 'Z') {
+      right_character = static_cast<char>(right_character + ('a' - 'A'));
+    }
+    if (left_character != right_character) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string DecodeFileUriComponent(std::string_view value, bool path) {
+  std::string decoded;
+  decoded.reserve(value.size());
+  for (std::size_t index = 0; index < value.size();) {
+    if (value[index] != '%') {
+      decoded.push_back(value[index++]);
+      continue;
+    }
+    const unsigned char byte = static_cast<unsigned char>(
+        (HexDigitValue(value[index + 1]) << 4U) | HexDigitValue(value[index + 2])
+    );
+    if (byte <= 0x1FU || byte == 0x7FU || (path && byte == static_cast<unsigned char>('/'))
+#if defined(_WIN32)
+        || (path && byte == static_cast<unsigned char>('\\'))
+#endif
+    ) {
+      throw std::invalid_argument("HuxerUI file URI contains an encoded separator or control character");
+    }
+    decoded.push_back(static_cast<char>(byte));
+    index += 3;
+  }
+  ValidateUtf8(decoded, "file URI component");
+  return decoded;
+}
+
+std::string EncodeFileUriComponent(std::string_view value, bool path) {
+  constexpr char digits[] = "0123456789ABCDEF";
+  std::string encoded;
+  encoded.reserve(value.size());
+  for (unsigned char byte : value) {
+    if (byte <= 0x1FU || byte == 0x7FU) {
+      throw std::invalid_argument("HuxerUI file path contains a control character that cannot enter a file URI");
+    }
+    const char character = static_cast<char>(byte);
+    const bool allowed = byte <= 0x7FU &&
+                         (IsUriUnreserved(character) || IsUriSubDelimiter(character) ||
+                          (path && (character == ':' || character == '@' || character == '/')));
+    if (allowed) {
+      encoded.push_back(character);
+      continue;
+    }
+    encoded.push_back('%');
+    encoded.push_back(digits[byte >> 4U]);
+    encoded.push_back(digits[byte & 0x0FU]);
+  }
+  return encoded;
+}
+
+#if defined(_WIN32)
+
+bool IsWindowsDrivePath(std::string_view path) noexcept {
+  return path.size() >= 3 && IsAsciiAlpha(path[0]) && path[1] == ':' && path[2] == '/';
+}
+
+void ValidateWindowsFileUriAuthority(std::string_view value) {
+  if (value.find_first_of("@:[]") != std::string_view::npos) {
+    throw std::invalid_argument(
+        "HuxerUI Windows file URI authority must not contain user-info, a port, or an IP literal"
+    );
+  }
+}
+
+void ValidateWindowsUncName(std::string_view value, std::string_view description) {
+  if (value.empty() || value == "." || value == "..") {
+    throw std::invalid_argument("HuxerUI file URI must identify a Windows UNC " + std::string(description));
+  }
+  for (unsigned char character : value) {
+    if (character <= 0x1FU || character == 0x7FU || character == '<' || character == '>' || character == ':' ||
+        character == '"' || character == '/' || character == '\\' || character == '|' || character == '?' ||
+        character == '*') {
+      throw std::invalid_argument("HuxerUI file URI contains an invalid Windows UNC " + std::string(description));
+    }
+  }
+}
+
+#endif
+
+std::string FilePathFromUri(const Uri& uri) {
+  if (!EqualsAsciiCaseInsensitive(uri.Scheme(), "file")) {
+    throw std::invalid_argument("HuxerUI File requires a file URI");
+  }
+  if (uri.Query().has_value() || uri.Fragment().has_value()) {
+    throw std::invalid_argument("HuxerUI file URI must not contain a query or fragment");
+  }
+
+  const std::optional<std::string_view> authority_view = uri.Authority();
+#if defined(_WIN32)
+  if (authority_view.has_value()) {
+    ValidateWindowsFileUriAuthority(*authority_view);
+  }
+#endif
+  const std::string authority =
+      authority_view.has_value() ? DecodeFileUriComponent(*authority_view, false) : std::string{};
+  const bool local_authority = authority.empty() || EqualsAsciiCaseInsensitive(authority, "localhost");
+  const std::string path = DecodeFileUriComponent(uri.Path(), true);
+
+#if defined(_WIN32)
+  const bool drive_path = path.size() >= 4 && path[0] == '/' && IsWindowsDrivePath(std::string_view(path).substr(1));
+  if (local_authority && drive_path) {
+    return path.substr(1);
+  }
+  if (authority.empty()) {
+    throw std::invalid_argument("HuxerUI local Windows file URI must contain an absolute drive path");
+  }
+
+  ValidateWindowsUncName(authority, "server");
+  if (path.empty() || path.front() != '/') {
+    throw std::invalid_argument("HuxerUI Windows UNC file URI must contain an absolute share path");
+  }
+  const std::size_t share_end = path.find('/', 1);
+  const std::string_view share =
+      share_end == std::string::npos ? std::string_view(path).substr(1)
+                                     : std::string_view(path).substr(1, share_end - 1);
+  ValidateWindowsUncName(share, "share");
+  return "//" + authority + path;
+#else
+  if (!local_authority) {
+    throw std::invalid_argument("HuxerUI local file URI must not contain a remote authority");
+  }
+  if (path.empty() || path.front() != '/') {
+    throw std::invalid_argument("HuxerUI file URI must contain an absolute path");
+  }
+  return path;
+#endif
+}
+
+Uri FileUriFromPath(std::string_view path) {
+#if defined(_WIN32)
+  if (IsWindowsDrivePath(path)) {
+    return Uri("file:///" + EncodeFileUriComponent(path, true));
+  }
+  if (path.starts_with("//")) {
+    const std::size_t server_end = path.find('/', 2);
+    if (server_end == std::string_view::npos) {
+      throw std::invalid_argument("HuxerUI Windows UNC path must identify a share before conversion to a file URI");
+    }
+    const std::string_view server = path.substr(2, server_end - 2);
+    const std::size_t share_end = path.find('/', server_end + 1);
+    const std::string_view share = share_end == std::string_view::npos
+                                       ? path.substr(server_end + 1)
+                                       : path.substr(server_end + 1, share_end - server_end - 1);
+    ValidateWindowsUncName(server, "server");
+    ValidateWindowsUncName(share, "share");
+    return Uri(
+        "file://" + EncodeFileUriComponent(server, false) + EncodeFileUriComponent(path.substr(server_end), true)
+    );
+  }
+  throw std::invalid_argument("HuxerUI Windows file path cannot be represented as a file URI");
+#else
+  if (path.empty() || path.front() != '/') {
+    throw std::logic_error("HuxerUI File does not contain an absolute path");
+  }
+  return Uri("file://" + EncodeFileUriComponent(path, true));
+#endif
+}
+
+} // namespace
+
 FileResult<std::string> DecodeFileUtf8(FileResult<Bytes> bytes) {
   if (!bytes.Succeeded()) {
     return FileResult<std::string>(std::move(bytes).Error());
@@ -779,6 +960,8 @@ File::File(std::string_view path) {
 
 File::File(std::u8string_view path) : File(std::string_view(reinterpret_cast<const char*>(path.data()), path.size())) {}
 
+File::File(const Uri& uri) : File(detail::FilePathFromUri(uri)) {}
+
 File::File(const File& parent, std::string_view child) : File(detail::ResolveChild(parent.path_, child)) {}
 
 bool File::operator==(const File& other) const noexcept {
@@ -820,6 +1003,10 @@ File File::Child(std::string_view name) const {
 File File::Resolve(std::string_view relative_path) const {
   detail::ValidateRelativePath(relative_path);
   return File(detail::ResolvePath(path_, relative_path));
+}
+
+Uri File::ToUri() const {
+  return detail::FileUriFromPath(path_);
 }
 
 bool File::Exists() const {

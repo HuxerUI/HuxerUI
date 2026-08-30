@@ -18,7 +18,7 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 
 ## Non-goals
 
-The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, URI schemes, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, directory pickers, or a document-provider abstraction.
+The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, directory pickers, or a document-provider abstraction.
 
 It also does not persist picker grants across process launches or add drag-and-drop, clipboard, recent-file, or share-sheet APIs.
 Those capabilities may reuse `FileReference` later without expanding the initial picker contract.
@@ -60,6 +60,7 @@ class File final {
 public:
   explicit File(std::string_view path);
   explicit File(std::u8string_view path);
+  explicit File(const Uri& uri);
   File(const File& parent, std::string_view child);
 
   File(const File&) = default;
@@ -84,6 +85,10 @@ Invalid caller input throws `std::invalid_argument` synchronously.
 
 File equality compares normalized absolute local paths.
 
+`File(const Uri&)` accepts only supported absolute local `file:` URIs and gives the result no permissions beyond the process's existing filesystem access.
+`File::ToUri()` encodes the absolute path already retained by `File`; it never resolves the value again against a later current directory.
+The complete syntax, authority, encoding, Windows drive, UNC, and capability boundaries are defined in [URI and Local File URI](uri.md).
+
 ## Lexical path operations
 
 Lexical operations are synchronous, do not perform I/O, and do not have `Async` variants:
@@ -101,6 +106,7 @@ public:
 
   [[nodiscard]] File Child(std::string_view name) const;
   [[nodiscard]] File Resolve(std::string_view relative_path) const;
+  [[nodiscard]] Uri ToUri() const;
 };
 ```
 
@@ -112,6 +118,7 @@ The Windows implementation converts that representation to a platform UTF-16 pat
 `Parent()` and `ParentPath()` return `std::nullopt` for a filesystem root.
 `Child()` applies the same single-name validation as the parent-and-child constructor.
 `Resolve()` accepts a relative path and performs lexical normalization without resolving symbolic links.
+`ToUri()` percent-encodes the retained absolute path using the host-specific local file URI rules.
 
 ## Simple status predicates
 

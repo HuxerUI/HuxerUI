@@ -63,7 +63,11 @@ std::optional<std::vector<ApplicationActivation>> DecodeMacApplicationActivation
         if (!url_string.has_value()) {
           return std::nullopt;
         }
-        activations.emplace_back(UrlActivation{std::move(*url_string)});
+        std::optional<Uri> parsed = Uri::Parse(*url_string);
+        if (!parsed.has_value()) {
+          return std::nullopt;
+        }
+        activations.emplace_back(UrlActivation{std::move(*parsed)});
       }
       append_files();
       return activations;

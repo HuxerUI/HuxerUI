@@ -1,7 +1,7 @@
 # Files and Storage
 
-HuxerUI provides platform-neutral application storage, lexical path operations, asynchronous file I/O, external file references, and file pickers.
-Application code does not depend on operating-system path, URI, bookmark, or browser handle types.
+HuxerUI provides platform-neutral URI values, application storage, lexical path operations, asynchronous file I/O, external file references, and file pickers.
+Application code does not depend on operating-system path, URL, bookmark, or browser handle types.
 
 ## Application directories
 
@@ -21,6 +21,30 @@ Path joining and normalization are lexical; operations that touch storage report
 
 Keep user-visible paths in UTF-8.
 Windows conversion to and from UTF-16 occurs inside the platform file implementation.
+
+## URI values and local file conversion
+
+`Uri` from `<huxerui/data.h>` is an immutable absolute RFC 3986 URI value.
+Construct it directly for trusted caller input or use `Uri::Parse()` for external text that may be invalid.
+Its `Scheme()` and `Path()` are always present, while `Authority()`, `Query()`, and `Fragment()` use `std::optional<std::string_view>` so absent and present-empty components remain distinct.
+
+```cpp
+std::optional<Uri> activation_uri = Uri::Parse("huxerui://documents/42?preview");
+if (activation_uri.has_value() && activation_uri->Scheme() == "huxerui") {
+  ShowDocument(activation_uri->Path());
+}
+```
+
+`Uri` retains the validated ASCII serialization without normalization.
+Raw Unicode is not accepted as an IRI; encode textual data as UTF-8 bytes followed by URI percent encoding.
+
+Construct `File` from a supported local `file:` URI and use `File::ToUri()` for the inverse conversion.
+The conversion is lexical and does not require the target to exist.
+POSIX-like hosts accept only local authorities, while Windows additionally maps supported non-empty authorities to UNC paths; `localhost` with a non-drive path identifies a local UNC share.
+Query, fragment, user-info, port, encoded separators, and platform-incompatible file forms are rejected.
+
+Do not convert `FileReference` into `File` or `Uri` merely because a platform capability originated from an Android content URI, Apple security-scoped URL, or browser handle.
+The capability remains authoritative for access.
 
 ## Asynchronous operations
 
@@ -77,4 +101,4 @@ Validate user-selected content before parsing it.
 Keep recursive deletion within an application-owned directory or an explicitly granted capability.
 Treat external references as authority to the selected item, not to an arbitrary neighboring path.
 
-See [File and Application Storage Design](../design/files.md) for exact result, cancellation, and platform contracts.
+See [File and Application Storage Design](../design/files.md) and [URI and Local File URI Design](../design/uri.md) for exact conversion, result, cancellation, and platform contracts.
