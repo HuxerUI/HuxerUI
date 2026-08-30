@@ -30,6 +30,7 @@ import android.util.LruCache;
 import android.util.SparseIntArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -64,6 +65,20 @@ public final class HuxerUIView extends ViewGroup {
     private static final int POINTER_DEVICE_MOUSE = 0;
     private static final int POINTER_DEVICE_TOUCH = 1;
     private static final int POINTER_DEVICE_PEN = 2;
+
+    // These values mirror PointerCursorKind across JNI.
+    private static final int POINTER_CURSOR_TEXT = 1;
+    private static final int POINTER_CURSOR_HAND = 2;
+    private static final int POINTER_CURSOR_CROSSHAIR = 3;
+    private static final int POINTER_CURSOR_MOVE = 4;
+    private static final int POINTER_CURSOR_GRAB = 5;
+    private static final int POINTER_CURSOR_GRABBING = 6;
+    private static final int POINTER_CURSOR_RESIZE_HORIZONTAL = 7;
+    private static final int POINTER_CURSOR_RESIZE_VERTICAL = 8;
+    private static final int POINTER_CURSOR_RESIZE_NORTHEAST_SOUTHWEST = 9;
+    private static final int POINTER_CURSOR_RESIZE_NORTHWEST_SOUTHEAST = 10;
+    private static final int POINTER_CURSOR_NOT_ALLOWED = 11;
+    private static final int POINTER_CURSOR_WAIT = 12;
 
     // These values form the JNI protocol decoded explicitly by the platform adapter.
     private static final int BACK_BEGIN = 0;
@@ -1153,6 +1168,55 @@ public final class HuxerUIView extends ViewGroup {
         post(platformTasksCallback);
     }
 
+    private void setHuxerUIPointerCursor(int kind) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return;
+        }
+        int type;
+        switch (kind) {
+        case POINTER_CURSOR_TEXT:
+            type = PointerIcon.TYPE_TEXT;
+            break;
+        case POINTER_CURSOR_HAND:
+            type = PointerIcon.TYPE_HAND;
+            break;
+        case POINTER_CURSOR_CROSSHAIR:
+            type = PointerIcon.TYPE_CROSSHAIR;
+            break;
+        case POINTER_CURSOR_MOVE:
+            type = PointerIcon.TYPE_ALL_SCROLL;
+            break;
+        case POINTER_CURSOR_GRAB:
+            type = PointerIcon.TYPE_GRAB;
+            break;
+        case POINTER_CURSOR_GRABBING:
+            type = PointerIcon.TYPE_GRABBING;
+            break;
+        case POINTER_CURSOR_RESIZE_HORIZONTAL:
+            type = PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW;
+            break;
+        case POINTER_CURSOR_RESIZE_VERTICAL:
+            type = PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW;
+            break;
+        case POINTER_CURSOR_RESIZE_NORTHEAST_SOUTHWEST:
+            type = PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW;
+            break;
+        case POINTER_CURSOR_RESIZE_NORTHWEST_SOUTHEAST:
+            type = PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW;
+            break;
+        case POINTER_CURSOR_NOT_ALLOWED:
+            type = PointerIcon.TYPE_NO_DROP;
+            break;
+        case POINTER_CURSOR_WAIT:
+            type = PointerIcon.TYPE_WAIT;
+            break;
+        default:
+            type = PointerIcon.TYPE_DEFAULT;
+            break;
+        }
+        setPointerIcon(PointerIcon.getSystemIcon(getContext(), type));
+    }
+
     private void invalidateFullFrame() {
         invalidate();
     }
@@ -1175,6 +1239,9 @@ public final class HuxerUIView extends ViewGroup {
             super(content.getContext());
             this.root = root;
             this.content = content;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                setPointerIcon(PointerIcon.getSystemIcon(getContext(), PointerIcon.TYPE_DEFAULT));
+            }
             setClipChildren(true);
             setClipToPadding(true);
             setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);

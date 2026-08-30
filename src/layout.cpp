@@ -230,7 +230,8 @@ bool ExtensionHandlesHover(MountedNode& node, Point position) {
   });
 }
 
-bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
+bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route,
+                           bool include_pointer_cursor) {
   if (!node.participates_in_layout || !node.pointer_events_enabled) {
     return false;
   }
@@ -248,7 +249,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   const bool can_hit_children = within_scroll_viewport && within_child_clip;
   if (can_hit_children) {
     for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-      if (BuildPointerRouteImpl(**child, position, route)) {
+      if (BuildPointerRouteImpl(**child, position, route, include_pointer_cursor)) {
         return true;
       }
     }
@@ -257,7 +258,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   if (within_node &&
       (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) ||
        ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.focusable ||
-       node.kind == NodeKind::PlatformView)) {
+       (include_pointer_cursor && node.properties.pointer_cursor.has_value()) || node.kind == NodeKind::PlatformView)) {
     return true;
   }
   route.pop_back();
@@ -785,7 +786,12 @@ void LayoutNode(MountedNode& node, Point offset) {
 
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
   route.clear();
-  return BuildPointerRouteImpl(node, position, route);
+  return BuildPointerRouteImpl(node, position, route, false);
+}
+
+bool BuildPointerCursorRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route) {
+  route.clear();
+  return BuildPointerRouteImpl(node, position, route, true);
 }
 
 MountedNode* HitTestPointer(MountedNode& node, Point position) {

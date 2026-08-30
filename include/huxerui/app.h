@@ -323,6 +323,7 @@ private:
   void HandlePointerUp(const PointerEvent& event);
   bool CommitPendingTouchFocus(detail::PointerSession& session, Point position);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
+  void UpdatePointerCursor(std::optional<Point> position);
   void UpdateHoveredExtensions(Point position);
   void RefreshInteractionTree();
   bool DispatchKeyboardContextMenu();

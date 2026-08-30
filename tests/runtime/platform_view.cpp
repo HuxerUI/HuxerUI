@@ -157,6 +157,13 @@ View CoveredPlatformViewApp() {
   };
 }
 
+View CursorPlatformViewApp() {
+  return Column {
+    Text("Shared content").With(Frame{80.0F, 40.0F}),
+    PlatformView("test/View").With(Frame{80.0F, 40.0F}),
+  }.With(Frame{80.0F, 80.0F}, PointerCursor(PointerCursorKind::Hand));
+}
+
 View IndexedPlatformViewApp() {
   auto selected = UseState<std::size_t>(0);
   indexed_platform_view_page = selected;
@@ -445,6 +452,19 @@ TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
   covered.SetWindowMetrics({{300.0F, 200.0F}});
   covered.BuildRenderFrame();
   REQUIRE_FALSE(detail::RuntimeAccess::HitTestPlatformView(covered.CoreRuntime(), {20.0F, 20.0F}).has_value());
+}
+
+TEST_CASE("PlatformViewOwnsTheCursorOverItsNativeContent") {
+  TestPlatform platform;
+  Runtime runtime(CursorPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{100.0F, 100.0F}});
+  runtime.BuildRenderFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {20.0F, 20.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Hand);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {20.0F, 60.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Default);
 }
 
 TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to the current UI") {

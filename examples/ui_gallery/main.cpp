@@ -357,6 +357,17 @@ View ActionsDemo() {
           Chip("Disabled", false).OnChanged([](bool) {}).With(Enabled(false)),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center))
     ),
+    GallerySection(
+        "Pointer cursors",
+        "Hover these regions with a mouse or pen to see portable cursor declarations.",
+        Flow {
+          Tag("Hand", theme.colors.primary).With(PointerCursor(PointerCursorKind::Hand)),
+          Tag("Crosshair", theme.colors.primary).With(PointerCursor(PointerCursorKind::Crosshair)),
+          Tag("Grab", theme.colors.primary).With(PointerCursor(PointerCursorKind::Grab)),
+          Tag("Horizontal resize", theme.colors.primary)
+              .With(PointerCursor(PointerCursorKind::ResizeHorizontal)),
+        }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Center))
+    ),
   }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
 }
 

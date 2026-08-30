@@ -713,6 +713,30 @@ EM_JS(void, UninstallWebSession, (std::uintptr_t session_id), {
   }
 });
 
+EM_JS(void, SetWebPointerCursor, (std::uintptr_t session_id, int kind), {
+  const sessions = Module.huxerUIWebSessions;
+  const session = sessions && sessions.get(session_id);
+  if (!session || !session.root.isConnected) {
+    return;
+  }
+  const cursors = [
+    "default",
+    "text",
+    "pointer",
+    "crosshair",
+    "move",
+    "grab",
+    "grabbing",
+    "ew-resize",
+    "ns-resize",
+    "nesw-resize",
+    "nwse-resize",
+    "not-allowed",
+    "wait",
+  ];
+  session.root.style.cursor = cursors[kind] || "default";
+});
+
 EM_JS(void, ScheduleWebFrame, (std::uintptr_t session_id, double deadline), {
   const sessions = Module.huxerUIWebSessions;
   const session = sessions && sessions.get(session_id);
@@ -827,6 +851,10 @@ public:
 
   double Now() const noexcept override {
     return WebNow();
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    SetWebPointerCursor(session_id_, static_cast<int>(kind));
   }
 
   FontMetrics Metrics(const Font& font) override {

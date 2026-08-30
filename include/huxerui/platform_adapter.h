@@ -18,6 +18,7 @@ class PlatformClipboard;
 class PlatformResources;
 class PlatformTextInput;
 struct GestureSettings;
+enum class PointerCursorKind;
 enum class SystemBarContentBrightness;
 enum class WindowCommand;
 
@@ -60,6 +61,12 @@ public:
   virtual double Now() const noexcept = 0;
   void DispatchToUIThread(std::function<void()> task) const;
   virtual GestureSettings GestureDefaults() const noexcept;
+  /// Applies the resolved pointer cursor to the HuxerUI host surface.
+  ///
+  /// Embedded adapters without pointer-cursor support may leave this optional capability as a no-op.
+  virtual void SetPointerCursor(PointerCursorKind kind) {
+    static_cast<void>(kind);
+  }
   virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style,
                                                                float max_width, const TextLayoutOptions& options = {});
   virtual PlatformTextInput* TextInput() noexcept {

@@ -1502,6 +1502,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   if (!state_->mounted_root_ || state_->window_->metrics.viewport.width <= 0.0F ||
       state_->window_->metrics.viewport.height <= 0.0F) {
+    UpdatePointerCursor(state_->pointer_cursor_position_);
     RefreshInteractionTree();
     RefreshTextInputSession();
     BuildSemantics();
@@ -1590,6 +1591,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
   }
+  UpdatePointerCursor(state_->pointer_cursor_position_);
   RefreshTextInputSession();
   AdvancePointerRecognition(frame.timestamp);
   AdvanceDragDrop(frame);

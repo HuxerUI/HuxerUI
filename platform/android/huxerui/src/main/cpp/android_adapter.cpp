@@ -407,6 +407,7 @@ private:
     read_resource_ = environment->GetMethodID(view_class, "readResource", "([B)[B");
     set_system_bars_content_brightness_ =
         environment->GetMethodID(view_class, "setSystemBarsContentBrightness", "(II)V");
+    set_pointer_cursor_ = environment->GetMethodID(view_class, "setHuxerUIPointerCursor", "(I)V");
 
     if (get_context == nullptr || schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr ||
         font_metrics_ == nullptr || measure_text_ == nullptr || measure_text_run_ == nullptr ||
@@ -414,7 +415,7 @@ private:
         restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
         read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || resource_locale_ == nullptr ||
         resource_scale_ == nullptr || process_pss_bytes_ == nullptr || read_resource_ == nullptr ||
-        set_system_bars_content_brightness_ == nullptr) {
+        set_system_bars_content_brightness_ == nullptr || set_pointer_cursor_ == nullptr) {
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
       }
@@ -565,6 +566,13 @@ public:
     }
     environment->CallVoidMethod(view_, set_system_bars_content_brightness_, static_cast<jint>(status_bar),
                                 static_cast<jint>(navigation_bar));
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    JNIEnv* environment = Environment();
+    if (environment != nullptr && view_ != nullptr) {
+      environment->CallVoidMethod(view_, set_pointer_cursor_, static_cast<jint>(kind));
+    }
   }
 
 private:
@@ -1088,6 +1096,7 @@ private:
   jmethodID process_pss_bytes_ = nullptr;
   jmethodID read_resource_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
+  jmethodID set_pointer_cursor_ = nullptr;
   PlatformFrameState frame_state_;
 };
 

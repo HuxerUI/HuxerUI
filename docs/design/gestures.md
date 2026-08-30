@@ -518,6 +518,24 @@ Applications use the separate `ViewEvents::PointerIntercept` key when they need 
 The deepest ordinary target receives Down and Move while no competing owner exists.
 A successful tap sends PointerUp before Click or MultiTap output; another owner sends one PointerCancel.
 
+## Pointer cursor declarations
+
+`PointerCursor` is an ordinary property modifier rather than an event, gesture recognizer, or `NodeExtension` capability.
+Its optional `PointerCursorKind` value is stored in `ViewProperties` and makes that node eligible for cursor resolution without consuming input, changing enabled state, requesting focus, or changing window-drag hit testing.
+Cursor resolution reuses the pointer route traversal with cursor declarations as additional terminal candidates; ordinary pointer routing does not include those candidates, so a cursor-only overlay cannot block an interactive sibling behind it.
+
+Runtime scans the committed hit route from deepest node to root and uses the first explicit declaration.
+An explicit `PointerCursorKind::Default` stops ancestor fallback, and a disabled View participates in cursor resolution because the declaration describes presentation rather than interaction ownership.
+If the deepest hit node is a `PlatformView`, Runtime resolves the HuxerUI surface to `Default` and the native view hierarchy owns the actual cursor.
+
+Mouse and pen movement retain the latest window position.
+Runtime resolves the cursor both when input arrives and after final presentation geometry settles in `BuildFrame()`, so recomposition, transforms, layout changes, or a dynamic `State<PointerCursorKind>` update the cursor under a stationary pointer.
+Touch input does not change cursor state, and pointer cancellation restores `Default`.
+Runtime sends only the resolved kind through `PlatformAdapter::SetPointerCursor()`; platform adapters own native mapping and unsupported hosts may ignore it.
+
+This design does not add a resolver callback, cursor controller, pointer context, or duplicate hit-test implementation.
+Custom Canvas content computes a `PointerCursorKind` into ordinary State and declares it with `.With(PointerCursor(kind))`.
+
 The committed RenderComposition decides initial ownership before Runtime creates a PointerSession:
 
 ```text

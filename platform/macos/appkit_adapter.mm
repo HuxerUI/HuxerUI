@@ -74,6 +74,36 @@ huxerui::PointerButton MacPressedButtons(NSUInteger mask) noexcept {
   return buttons;
 }
 
+NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
+  switch (kind) {
+  case huxerui::PointerCursorKind::Default:
+    return NSCursor.arrowCursor;
+  case huxerui::PointerCursorKind::Text:
+    return NSCursor.IBeamCursor;
+  case huxerui::PointerCursorKind::Hand:
+    return NSCursor.pointingHandCursor;
+  case huxerui::PointerCursorKind::Crosshair:
+    return NSCursor.crosshairCursor;
+  case huxerui::PointerCursorKind::Move:
+  case huxerui::PointerCursorKind::Grab:
+    return NSCursor.openHandCursor;
+  case huxerui::PointerCursorKind::Grabbing:
+    return NSCursor.closedHandCursor;
+  case huxerui::PointerCursorKind::ResizeHorizontal:
+    return NSCursor.resizeLeftRightCursor;
+  case huxerui::PointerCursorKind::ResizeVertical:
+    return NSCursor.resizeUpDownCursor;
+  case huxerui::PointerCursorKind::ResizeNorthEastSouthWest:
+  case huxerui::PointerCursorKind::ResizeNorthWestSouthEast:
+    return NSCursor.crosshairCursor;
+  case huxerui::PointerCursorKind::NotAllowed:
+    return NSCursor.operationNotAllowedCursor;
+  case huxerui::PointerCursorKind::Wait:
+    return NSCursor.arrowCursor;
+  }
+  return NSCursor.arrowCursor;
+}
+
 } // namespace
 
 @interface HuxerUIWindow : NSWindow {
@@ -89,11 +119,13 @@ huxerui::PointerButton MacPressedButtons(NSUInteger mask) noexcept {
   NSPoint huxeruiPointerPosition;
   NSTrackingArea* huxeruiTrackingArea;
   NSEventModifierFlags huxeruiModifierFlags;
+  __strong NSCursor* huxeruiPointerCursor;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
 - (void)resourceConfigurationDidChange:(NSNotification*)notification;
 - (void)cancelPointer;
+- (void)setHuxerUIPointerCursor:(NSCursor*)cursor;
 - (void)commitHuxerUIFrame;
 @end
 
@@ -322,6 +354,12 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    if (view_ != nil) {
+      [view_ setHuxerUIPointerCursor:MacPointerCursor(kind)];
+    }
   }
 
   GestureSettings GestureDefaults() const noexcept override {
@@ -998,6 +1036,20 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
                                                     userInfo:nil];
   [self addTrackingArea:huxeruiTrackingArea];
   [super updateTrackingAreas];
+}
+
+- (void)resetCursorRects {
+  [super resetCursorRects];
+  [self addCursorRect:self.bounds cursor:huxeruiPointerCursor ?: NSCursor.arrowCursor];
+}
+
+- (void)setHuxerUIPointerCursor:(NSCursor*)cursor {
+  NSCursor* resolved = cursor ?: NSCursor.arrowCursor;
+  if (huxeruiPointerCursor == resolved) {
+    return;
+  }
+  huxeruiPointerCursor = resolved;
+  [self.window invalidateCursorRectsForView:self];
 }
 
 - (void)commitHuxerUIFrame {

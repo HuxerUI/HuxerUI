@@ -54,6 +54,38 @@ enum class MouseTrackingArea {
   NonClient,
 };
 
+LPCWSTR Win32PointerCursorResource(PointerCursorKind kind) noexcept {
+  switch (kind) {
+  case PointerCursorKind::Default:
+    return IDC_ARROW;
+  case PointerCursorKind::Text:
+    return IDC_IBEAM;
+  case PointerCursorKind::Hand:
+    return IDC_HAND;
+  case PointerCursorKind::Crosshair:
+    return IDC_CROSS;
+  case PointerCursorKind::Move:
+    return IDC_SIZEALL;
+  case PointerCursorKind::Grab:
+    return IDC_HAND;
+  case PointerCursorKind::Grabbing:
+    return IDC_SIZEALL;
+  case PointerCursorKind::ResizeHorizontal:
+    return IDC_SIZEWE;
+  case PointerCursorKind::ResizeVertical:
+    return IDC_SIZENS;
+  case PointerCursorKind::ResizeNorthEastSouthWest:
+    return IDC_SIZENESW;
+  case PointerCursorKind::ResizeNorthWestSouthEast:
+    return IDC_SIZENWSE;
+  case PointerCursorKind::NotAllowed:
+    return IDC_NO;
+  case PointerCursorKind::Wait:
+    return IDC_WAIT;
+  }
+  return IDC_ARROW;
+}
+
 double FileTimeSeconds(const FILETIME& time) noexcept {
   ULARGE_INTEGER value{};
   value.LowPart = time.dwLowDateTime;
@@ -416,6 +448,13 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    pointer_cursor_kind_ = kind;
+    if (mouse_tracking_area_ == MouseTrackingArea::Client) {
+      ApplyPointerCursor();
+    }
   }
 
   FontMetrics Metrics(const Font& font) override {
@@ -1081,6 +1120,10 @@ private:
       }
       return runtime_ != nullptr && runtime_->IsWindowDragRegion(ScreenPoint(l_param)) ? HTCAPTION : HTCLIENT;
     }
+    if (message == WM_SETCURSOR && LOWORD(l_param) == HTCLIENT) {
+      ApplyPointerCursor();
+      return TRUE;
+    }
     if (const std::optional<LRESULT> handled = HandleClientPointerMessage(source, message, w_param, l_param)) {
       return *handled;
     }
@@ -1151,6 +1194,12 @@ private:
       return *handled;
     }
     switch (message) {
+    case WM_SETCURSOR:
+      if (LOWORD(l_param) == HTCLIENT) {
+        ApplyPointerCursor();
+        return TRUE;
+      }
+      break;
     case WM_GETMINMAXINFO: {
       const LRESULT result = DefWindowProcW(window, message, w_param, l_param);
       if (!minimum_size_.has_value()) {
@@ -1445,6 +1494,10 @@ private:
     }
   }
 
+  void ApplyPointerCursor() const {
+    SetCursor(LoadCursorW(nullptr, Win32PointerCursorResource(pointer_cursor_kind_)));
+  }
+
   huxerui::Runtime* runtime_ = nullptr;
   HINSTANCE instance_ = nullptr;
   ATOM class_atom_ = 0;
@@ -1458,6 +1511,7 @@ private:
   bool timer_armed_ = false;
   PlatformFrameState frame_state_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
+  PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   HWND mouse_tracking_window_ = nullptr;
   bool pointer_down_ = false;
   bool performing_close_ = false;

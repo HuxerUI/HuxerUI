@@ -370,6 +370,10 @@ void ApplyFocusable(detail::ViewSpec& spec, const Focusable& modifier) {
   spec.focusable = modifier.value;
 }
 
+void ApplyPointerCursor(detail::ViewSpec& spec, const PointerCursor& modifier) {
+  spec.properties.pointer_cursor = modifier.kind;
+}
+
 bool UsesDisabledVisualState(const MountedNode& node) {
   return static_cast<const detail::MountedNode&>(node).applies_disabled_appearance;
 }
@@ -2596,6 +2600,10 @@ const detail::ModifierDescriptor& Enabled::Descriptor() {
 
 const detail::ModifierDescriptor& Focusable::Descriptor() {
   return ApplyOnlyModifierDescriptor<Focusable, ApplyFocusable>();
+}
+
+const detail::ModifierDescriptor& PointerCursor::Descriptor() {
+  return ApplyOnlyModifierDescriptor<PointerCursor, ApplyPointerCursor>();
 }
 
 const detail::ModifierDescriptor& Background::Descriptor() {

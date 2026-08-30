@@ -634,6 +634,10 @@ public:
     return current_time;
   }
 
+  void SetPointerCursor(huxerui::PointerCursorKind kind) override {
+    pointer_cursors.push_back(kind);
+  }
+
   void SetSystemBarsContentBrightness(
       huxerui::SystemBarContentBrightness status_bar, huxerui::SystemBarContentBrightness navigation_bar
   ) override {
@@ -738,6 +742,7 @@ public:
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
+  std::vector<huxerui::PointerCursorKind> pointer_cursors;
   int system_bars_updates = 0;
   std::optional<std::pair<huxerui::SystemBarContentBrightness, huxerui::SystemBarContentBrightness>>
       system_bar_brightness;

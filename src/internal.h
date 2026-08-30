@@ -389,6 +389,8 @@ struct ViewProperties {
   std::optional<SafeAreaPadding> safe_area_padding;
   // This marker participates only in system window hit testing and has no layout, paint, or retained lifecycle state.
   bool window_drag_region = false;
+  // Cursor resolution reads this declaration from the final pointer hit route without affecting layout or paint.
+  std::optional<PointerCursorKind> pointer_cursor;
   Frame frame;
   std::optional<VisualFill> background;
   std::optional<VisualFill> disabled_background;
@@ -1355,6 +1357,8 @@ struct Runtime::State {
   std::uint64_t semantic_revision_ = 0;
   std::uint64_t next_press_id_ = 1;
   std::optional<Point> current_interaction_origin_;
+  std::optional<Point> pointer_cursor_position_;
+  PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
   std::vector<detail::NodeExtensionHandle> hovered_extensions_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
@@ -1447,6 +1451,7 @@ void DeactivateExternalTextures(
 );
 void UpdateInteraction(MountedNode& node, InteractionState state, std::optional<InteractionEvent> event = std::nullopt);
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
+bool BuildPointerCursorRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
 bool HitTestWindowDragRegion(MountedNode& node, Point position);
 std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);

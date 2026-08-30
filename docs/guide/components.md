@@ -166,6 +166,20 @@ Attach `ViewEvents::ContextMenuRequested` when a View owns context actions inste
 The event reports a window-local position for secondary-button input and the focused View center for the Context Menu key or Shift+F10.
 `ViewEvents::PointerIntercept` may take exclusive ownership of any button stream by returning `true`; pending built-in recognizers and the raw target receive `Cancel` when another participant wins.
 
+Use `PointerCursor` to declare a portable cursor without adding a pointer handler or retained extension:
+
+```cpp
+return Canvas(painter).With(PointerCursor(PointerCursorKind::Crosshair));
+```
+
+The deepest explicit declaration under a mouse or pen wins.
+`PointerCursorKind::Default` explicitly restores the platform default for that region instead of inheriting an ancestor declaration.
+Controls do not impose a cursor convention; apply the modifier where the application's interaction calls for one.
+A cursor kind may come from `State`, so custom content can compute the appropriate kind and let ordinary local recomposition update the declaration.
+Assigning the same state value does not recompose or resend the cursor.
+Platforms map portable kinds to the closest native cursor, while a `PlatformView` keeps ownership of the cursor over its native content.
+Platforms without a traditional pointer cursor may ignore the declaration.
+
 `DragSource` transfers an immutable application value to one exact typed `DropTarget` while preserving the ordinary DragGesture recognition rules.
 The application handles `DropEvents<T>::Dropped` to perform the authoritative data mutation.
 An optional preview is ordinary View content presented in a non-interactive Layer.

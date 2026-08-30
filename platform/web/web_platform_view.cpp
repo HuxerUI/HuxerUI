@@ -279,6 +279,7 @@ struct WebPlatformViews::State {
     SetStyle(hosted->container, "isolation", "isolate");
     SetStyle(hosted->container, "contain", "layout paint");
     SetStyle(hosted->container, "pointerEvents", "auto");
+    SetStyle(hosted->container, "cursor", "auto");
     SetStyle(hosted->container, "zIndex", "0");
     SetStyle(hosted->element, "position", "absolute");
     SetStyle(hosted->element, "boxSizing", "border-box");

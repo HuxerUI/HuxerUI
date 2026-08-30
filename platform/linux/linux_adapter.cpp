@@ -51,6 +51,38 @@ namespace {
 constexpr float kDipsPerScrollStep = 40.0F;
 constexpr float kResizeBorderDips = 6.0F;
 
+const char* LinuxPointerCursorName(PointerCursorKind kind) noexcept {
+  switch (kind) {
+  case PointerCursorKind::Default:
+    return "default";
+  case PointerCursorKind::Text:
+    return "text";
+  case PointerCursorKind::Hand:
+    return "pointer";
+  case PointerCursorKind::Crosshair:
+    return "crosshair";
+  case PointerCursorKind::Move:
+    return "move";
+  case PointerCursorKind::Grab:
+    return "grab";
+  case PointerCursorKind::Grabbing:
+    return "grabbing";
+  case PointerCursorKind::ResizeHorizontal:
+    return "ew-resize";
+  case PointerCursorKind::ResizeVertical:
+    return "ns-resize";
+  case PointerCursorKind::ResizeNorthEastSouthWest:
+    return "nesw-resize";
+  case PointerCursorKind::ResizeNorthWestSouthEast:
+    return "nwse-resize";
+  case PointerCursorKind::NotAllowed:
+    return "not-allowed";
+  case PointerCursorKind::Wait:
+    return "wait";
+  }
+  return "default";
+}
+
 Key TranslateKey(guint key_value) noexcept {
   switch (key_value) {
   case GDK_KEY_Shift_L:
@@ -268,6 +300,12 @@ public:
   double Now() const noexcept override {
     using Clock = std::chrono::steady_clock;
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    if (drawing_area_ != nullptr) {
+      gtk_widget_set_cursor_from_name(GTK_WIDGET(drawing_area_), LinuxPointerCursorName(kind));
+    }
   }
 
   FontMetrics Metrics(const Font& font) override {

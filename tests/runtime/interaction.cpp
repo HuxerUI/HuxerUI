@@ -17,6 +17,7 @@ State<bool> include_apply_only_modifier;
 State<bool> recompose_activation_button;
 State<bool> alternate_scroll_bar_style;
 State<bool> alternate_default_indication;
+State<PointerCursorKind> dynamic_pointer_cursor;
 int drag_item_clicks = 0;
 int drag_item_cancels = 0;
 int covered_pointer_clicks = 0;
@@ -140,6 +141,22 @@ View PointerInputApp() {
           .On<ViewEvents::PointerCancel>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .OnClick([] { ++pointer_clicks; }),
   };
+}
+
+View PointerCursorApp() {
+  return Column {
+    Text("Hand").With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(PointerCursorKind::Hand)),
+    Text("Inherited").With(huxerui::Frame{100.0F, 40.0F}),
+    Text("Default").With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(PointerCursorKind::Default)),
+    Text("Disabled")
+        .With(huxerui::Frame{100.0F, 40.0F}, Enabled(false), PointerCursor(PointerCursorKind::NotAllowed)),
+  }.With(huxerui::Frame{100.0F, 160.0F}, PointerCursor(PointerCursorKind::Crosshair));
+}
+
+View DynamicPointerCursorApp() {
+  auto kind = UseState(PointerCursorKind::Hand);
+  dynamic_pointer_cursor = kind;
+  return Text("Dynamic").With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(kind.Get()));
 }
 
 View ExceptionalPointerInputApp() {
@@ -462,6 +479,77 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   );
   REQUIRE(received_pointer_events.size() == events_before_release);
   REQUIRE(pointer_clicks == 2);
+}
+
+View CursorOverlayPointerTargetApp() {
+  return Stack{
+      Button("Behind")
+          .With(huxerui::Frame{100.0F, 40.0F})
+          .OnClick([] { ++covered_pointer_clicks; }),
+      Text("Cursor overlay")
+          .With(huxerui::Frame{100.0F, 40.0F}, PointerCursor(PointerCursorKind::Crosshair)),
+  };
+}
+
+TEST_CASE("PointerCursorResolvesTheDeepestExplicitDeclaration") {
+  TestPlatform platform;
+  Runtime runtime{PointerCursorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {50.0F, 20.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Hand);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {50.0F, 60.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Crosshair);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {50.0F, 100.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Default);
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {50.0F, 140.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::NotAllowed);
+
+  runtime.HandlePointerEvent({
+      .type = PointerEventType::Move,
+      .pointer_id = 2,
+      .position = {50.0F, 20.0F},
+      .device_kind = PointerDeviceKind::Touch,
+  });
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::NotAllowed);
+
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 1, {50.0F, 140.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Default);
+}
+
+TEST_CASE("PointerCursorTracksRecompositionUnderAStationaryPointer") {
+  TestPlatform platform;
+  Runtime runtime{DynamicPointerCursorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Move, 3, {50.0F, 20.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Hand);
+
+  dynamic_pointer_cursor = PointerCursorKind::Grabbing;
+  runtime.BuildFrame();
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Grabbing);
+
+  const std::size_t update_count = platform.pointer_cursors.size();
+  dynamic_pointer_cursor = PointerCursorKind::Grabbing;
+  runtime.BuildFrame();
+  REQUIRE(platform.pointer_cursors.size() == update_count);
+}
+
+TEST_CASE("PointerCursorDoesNotTurnAVisualOverlayIntoAnInputTarget") {
+  covered_pointer_clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{CursorOverlayPointerTargetApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 4, {50.0F, 20.0F}});
+  REQUIRE(platform.pointer_cursors.back() == PointerCursorKind::Crosshair);
+  ClickAt(runtime, {50.0F, 20.0F}, 5);
+  REQUIRE(covered_pointer_clicks == 1);
 }
 
 TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {

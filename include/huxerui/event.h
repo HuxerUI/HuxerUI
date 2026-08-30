@@ -94,6 +94,39 @@ enum class PointerDeviceKind {
   Pen,
 };
 
+/// Identifies a portable pointer cursor requested by a View.
+///
+/// Platforms map each value to the closest native cursor they provide. A PlatformView keeps ownership of the cursor
+/// shown over its native content.
+enum class PointerCursorKind {
+  /// Uses the platform's ordinary cursor for the current surface.
+  Default,
+  /// Indicates selectable or editable text.
+  Text,
+  /// Indicates a link or another directly invokable target.
+  Hand,
+  /// Indicates precise point selection.
+  Crosshair,
+  /// Indicates content that can move in any direction.
+  Move,
+  /// Indicates content that can be grabbed.
+  Grab,
+  /// Indicates content currently being grabbed.
+  Grabbing,
+  /// Indicates horizontal resizing.
+  ResizeHorizontal,
+  /// Indicates vertical resizing.
+  ResizeVertical,
+  /// Indicates resizing along the northeast-to-southwest diagonal.
+  ResizeNorthEastSouthWest,
+  /// Indicates resizing along the northwest-to-southeast diagonal.
+  ResizeNorthWestSouthEast,
+  /// Indicates that the requested operation is unavailable.
+  NotAllowed,
+  /// Indicates that the application is busy.
+  Wait,
+};
+
 /// Identifies portable pointer buttons and pressed-button combinations.
 ///
 /// Primary and Secondary follow the operating system's semantic button roles rather than fixed physical positions.

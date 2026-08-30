@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "window_internal.h"
 
 #include <algorithm>
 #include <bit>
@@ -1358,6 +1359,29 @@ bool Runtime::HasContextMenuHandler(Point position) const {
   });
 }
 
+void Runtime::UpdatePointerCursor(std::optional<Point> position) {
+  state_->pointer_cursor_position_ = position;
+  PointerCursorKind kind = PointerCursorKind::Default;
+  if (position.has_value() && state_->mounted_root_ && state_->window_->metrics.viewport.width > 0.0F &&
+      state_->window_->metrics.viewport.height > 0.0F) {
+    std::vector<detail::MountedNode*> route;
+    if (BuildPointerCursorRoute(*state_->mounted_root_, *position, route) && !route.empty() &&
+        route.back()->kind != detail::NodeKind::PlatformView) {
+      for (auto node = route.rbegin(); node != route.rend(); ++node) {
+        if ((*node)->properties.pointer_cursor.has_value()) {
+          kind = *(*node)->properties.pointer_cursor;
+          break;
+        }
+      }
+    }
+  }
+  if (kind == state_->pointer_cursor_kind_) {
+    return;
+  }
+  state_->pointer_cursor_kind_ = kind;
+  state_->platform_->SetPointerCursor(kind);
+}
+
 void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
   if (!state_->mounted_root_) {
     return;
@@ -1366,6 +1390,9 @@ void Runtime::HandlePointerEvent(const PointerEvent& input_event) {
   const PointerEvent event = NormalizePointerEvent(input_event);
   detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, event.position, true);
   try {
+    if (SupportsHover(event.device_kind)) {
+      UpdatePointerCursor(event.type == PointerEventType::Cancel ? std::nullopt : std::optional{event.position});
+    }
     const auto active = state_->pointer_sessions_.find(event.pointer_id);
     if (active != state_->pointer_sessions_.end() && TextSelectionOverlayOwnsPointer(active->second)) {
       PointerSession& session = active->second;
