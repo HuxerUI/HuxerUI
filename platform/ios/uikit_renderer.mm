@@ -386,14 +386,6 @@ void ApplyStrokeStyle(CGContextRef context, const StrokeStyle& style) {
   CGContextSetLineDash(context, style.dash_offset, dashes.empty() ? nullptr : dashes.data(), dashes.size());
 }
 
-void ClipStrokePath(CGContextRef context, const Path& path, const StrokeStyle& style) {
-  const CFRef<CGPathRef> native_path(CreatePath(path));
-  ApplyStrokeStyle(context, style);
-  CGContextAddPath(context, native_path.Get());
-  CGContextReplacePathWithStrokedPath(context);
-  CGContextClip(context);
-}
-
 void DrawCGImage(
     CGContextRef context,
     CGImageRef image,
@@ -479,6 +471,14 @@ CGMutablePathRef CreatePath(const Path& source) {
     }
   }
   return path;
+}
+
+void ClipStrokePath(CGContextRef context, const Path& path, const StrokeStyle& style) {
+  const CFRef<CGPathRef> native_path(CreatePath(path));
+  ApplyStrokeStyle(context, style);
+  CGContextAddPath(context, native_path.Get());
+  CGContextReplacePathWithStrokedPath(context);
+  CGContextClip(context);
 }
 
 void FillCurrentPath(CGContextRef context, PathFillRule fill_rule) {
