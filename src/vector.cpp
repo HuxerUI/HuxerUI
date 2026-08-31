@@ -336,20 +336,6 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
         case 7: {
           const PathFillRule fill_rule = ReadFillRule(reader);
           const Rect gradient_rect = ReadRect(reader);
-          LinearGradient gradient{ReadPoint(reader), ReadPoint(reader), ReadGradientStops(reader)};
-          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
-          break;
-        }
-        case 8: {
-          const PathFillRule fill_rule = ReadFillRule(reader);
-          const Rect gradient_rect = ReadRect(reader);
-          RadialGradient gradient{ReadPoint(reader), {reader.F32(), reader.F32()}, ReadGradientStops(reader)};
-          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
-          break;
-        }
-        case 9: {
-          const PathFillRule fill_rule = ReadFillRule(reader);
-          const Rect gradient_rect = ReadRect(reader);
           const Point start = ReadPoint(reader);
           const Point end = ReadPoint(reader);
           const Transform2D transform = ReadTransform(reader);
@@ -357,7 +343,7 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
           builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
           break;
         }
-        case 10: {
+        case 8: {
           const PathFillRule fill_rule = ReadFillRule(reader);
           const Rect gradient_rect = ReadRect(reader);
           const Point center = ReadPoint(reader);

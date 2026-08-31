@@ -791,11 +791,13 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   REQUIRE(linear_fill.gradient_rect == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
   REQUIRE(linear_fill.gradient.start == huxerui::Point{0.25F, 0.0F});
   REQUIRE(linear_fill.gradient.end == huxerui::Point{0.75F, 0.0F});
+  REQUIRE(linear_fill.gradient.transform.IsIdentity());
   REQUIRE(linear_fill.gradient.stops[0].color == huxerui::Color::Rgb(0, 255, 0, 0.25F));
   const auto& radial_fill = std::get<huxerui::FillRadialGradientPathCommand>(*radial);
   REQUIRE(radial_fill.gradient_rect == huxerui::Rect{0.0F, 0.0F, 40.0F, 20.0F});
   REQUIRE(radial_fill.gradient.center == huxerui::Point{0.5F, 0.5F});
   REQUIRE(radial_fill.gradient.radius == huxerui::Size{0.125F, 0.25F});
+  REQUIRE(radial_fill.gradient.transform.IsIdentity());
 }
 
 TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
@@ -824,7 +826,7 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
 
   huxerui::resource_compiler::Compile({root, output, "test_app"});
   const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "transformed.huxv");
-  REQUIRE(static_cast<unsigned char>(payload[40]) == 9U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 7U);
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(

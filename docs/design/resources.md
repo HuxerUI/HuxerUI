@@ -423,7 +423,7 @@ Root viewport mapping supports `none` and the standard aligned `meet` or `slice`
 The compiler supports inline and presentation styles with SVG precedence, inherited `color` and `currentColor`, static display and visibility, exact opacity values zero and one, hexadecimal colors, the basic CSS color keywords, comma-separated `rgb()` and `rgba()` colors, and absolute CSS lengths based on 96 DPI.
 Percentages outside gradient coordinates and stop offsets, font-relative lengths, external styles, and presentation semantics that cannot be resolved without a browser remain unsupported.
 HUXVEC version 1 carries solid and gradient Path fills, complete stroke data, clips, and transforms.
-Its original identity-gradient operations retain their byte layout, while distinct transformed-gradient operations append one affine matrix without changing the format version.
+Every gradient operation stores its complete affine matrix, including the identity default.
 Gradient definitions support local `href` inheritance, `objectBoundingBox` and `userSpaceOnUse` coordinate units, `gradientTransform`, ordered stops, stop opacity, fill opacity, and pad extension.
 An explicitly declared `gradientTransform` replaces an inherited transform, matching other locally overridden gradient attributes.
 Object-bounds transforms already use normalized gradient coordinates; user-space transforms are conjugated through the gradient coordinate rectangle before being stored in the normalized HuxerUI gradient.

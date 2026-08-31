@@ -497,11 +497,6 @@ bool IsFinite(Transform transform) {
          std::isfinite(transform.m22) && std::isfinite(transform.tx) && std::isfinite(transform.ty);
 }
 
-bool IsIdentity(Transform transform) {
-  return transform.m11 == 1.0F && transform.m12 == 0.0F && transform.m21 == 0.0F && transform.m22 == 1.0F &&
-         transform.tx == 0.0F && transform.ty == 0.0F;
-}
-
 std::optional<Transform> Inverse(Transform transform) {
   const float determinant = transform.m11 * transform.m22 - transform.m12 * transform.m21;
   if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
@@ -1563,17 +1558,14 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.fill_opacity;
       }
-      const bool transformed = !IsIdentity(gradient.transform);
-      writer.U8(gradient.radial ? (transformed ? 10 : 8) : (transformed ? 9 : 7));
+      writer.U8(gradient.radial ? 8 : 7);
       writer.U8(style.fill_rule);
       writer.RectValue(gradient.coordinate_rect);
       writer.F32(gradient.first.x);
       writer.F32(gradient.first.y);
       writer.F32(gradient.second.x);
       writer.F32(gradient.second.y);
-      if (transformed) {
-        WriteTransformValue(writer, gradient.transform);
-      }
+      WriteTransformValue(writer, gradient.transform);
       WriteGradientStops(writer, gradient.stops);
       writer.PathValue(path);
       ++operation_count;
