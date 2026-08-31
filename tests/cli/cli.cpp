@@ -144,6 +144,7 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("all") != std::string::npos);
   REQUIRE(invocation.output.find("none") != std::string::npos);
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
+  REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliValidatesExplicitSourceCheckouts") {
@@ -1311,6 +1312,67 @@ TEST_CASE("HuxerUICliRejectsDeviceSelectionForDesktopRunsBeforeBuilding") {
 
   REQUIRE(result == 2);
   REQUIRE(error.str().find("--device is not supported for platform windows") != std::string::npos);
+  REQUIRE(output.str().empty());
+}
+
+TEST_CASE("HuxerUICliRequiresAValueForJavaHomeOverrides") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(temporary.Path(), {"build", "android", "--java-home"});
+
+  REQUIRE(invocation.result == 2);
+  REQUIRE(invocation.error.find("--java-home requires a value") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliRejectsJavaHomeOverridesForNonAndroidBuilds") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::vector<std::string_view> arguments{"build", "windows", "--java-home", "jdk"};
+  std::ostringstream output;
+  std::ostringstream error;
+  std::istringstream input;
+
+  const int result = huxerui::cli::Run(
+      arguments,
+      project,
+      {HUXERUI_TEST_SOURCE_DIRECTORY, huxerui::cli::SdkLocationSource::Executable},
+      input,
+      output,
+      error
+  );
+
+  REQUIRE(result == 2);
+  REQUIRE(error.str().find("--java-home is supported only for Android builds") != std::string::npos);
+  REQUIRE(output.str().empty());
+}
+
+TEST_CASE("HuxerUICliValidatesJavaHomeOverridesBeforeAndroidBuilds") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "android"}).result == 0);
+  const std::filesystem::path project = temporary.Path() / "sample";
+  const std::filesystem::path java_home = project / "jdk";
+  std::filesystem::create_directories(java_home);
+  const std::vector<std::string_view> arguments{"build", "android", "--java-home", "jdk"};
+  std::ostringstream output;
+  std::ostringstream error;
+  std::istringstream input;
+
+  const int result = huxerui::cli::Run(
+      arguments,
+      project,
+      {HUXERUI_TEST_SOURCE_DIRECTORY, huxerui::cli::SdkLocationSource::Executable},
+      input,
+      output,
+      error
+  );
+
+  REQUIRE(result == 1);
+#if defined(_WIN32)
+  REQUIRE(error.str().find("Java home does not contain bin/java.exe") != std::string::npos);
+#else
+  REQUIRE(error.str().find("Java home does not contain bin/java") != std::string::npos);
+#endif
+  REQUIRE(error.str().find(java_home.string()) != std::string::npos);
   REQUIRE(output.str().empty());
 }
 

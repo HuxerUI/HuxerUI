@@ -225,9 +225,9 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
+huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
+huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
 huxerui open ios [--source <path>]
 ```
 
@@ -320,6 +320,8 @@ The ABI-specific C++ build remains exclusively owned by Gradle's root-project `e
 Each ABI writes its merged HuxerUI package to an explicit variant-owned resource directory. Gradle selects the first built configured ABI and performs the one required copy into generated assets without inspecting private `.cxx` directories or comparing timestamps.
 The generated shell includes the source-controlled Gradle 8.13 wrapper, pins the official binary distribution by URL and SHA-256 checksum, and invokes only its local `gradlew` or `gradlew.bat`.
 Gradle itself therefore does not need to be installed separately; the Java runtime remains a host prerequisite.
+`--java-home <path>` validates a JDK root and temporarily exports it as `JAVA_HOME` for the Android Gradle invocation without changing the caller's shell, project metadata, or generated Gradle files.
+The explicit option takes precedence over an inherited `JAVA_HOME`; without it, the Gradle wrapper retains its standard environment and `PATH` lookup behavior.
 On an Android host, the same Gradle shell is restricted to `arm64-v8a` and receives the Termux `aapt2` executable through AGP's tool override.
 The Android host path does not introduce another generated project or native build owner; it requires an existing Android SDK platform and an NDK layout that can execute on Termux.
 

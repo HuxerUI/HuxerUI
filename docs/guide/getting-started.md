@@ -162,13 +162,14 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>]
+huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
+huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
+huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
 huxerui open ios [--source <path>]
 ```
 
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
+Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
 
 Continue with [Core Concepts](core-concepts.md) and [Components and Input](components.md).

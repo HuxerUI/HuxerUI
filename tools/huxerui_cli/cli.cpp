@@ -55,11 +55,11 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui setup <platform-list> [--yes]\n"
          << "  huxerui devices [platform]\n"
          << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>]\n"
+            "[--source <path>] [--java-home <path>]\n"
          << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>]\n"
+            "[--source <path>] [--java-home <path>]\n"
          << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>]\n"
+            "[--source <path>] [--java-home <path>]\n"
          << "  huxerui open ios [--source <path>]\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n"
@@ -591,6 +591,7 @@ int RunDevices(std::span<const std::string_view> arguments, std::ostream& output
 struct BuildOptions {
   std::optional<std::string_view> platforms;
   std::optional<std::filesystem::path> source;
+  std::optional<std::filesystem::path> java_home;
   std::string profile = "debug";
   std::string device;
   std::string cmake_generator;
@@ -628,6 +629,17 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
         throw UsageError("--source requires a value");
       }
       options.source = std::filesystem::path(arguments[index]);
+    } else if (arguments[index] == "--java-home") {
+      if (options.java_home) {
+        throw UsageError("--java-home may be specified only once");
+      }
+      if (++index >= arguments.size()) {
+        throw UsageError("--java-home requires a value");
+      }
+      if (arguments[index].empty()) {
+        throw UsageError("--java-home requires a non-empty path");
+      }
+      options.java_home = std::filesystem::path(arguments[index]);
     } else if (!options.platforms) {
       options.platforms = arguments[index];
     } else {
@@ -656,34 +668,39 @@ std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk
 }
 
 std::vector<const PlatformDriver*>
-ResolveBuildPlatforms(const Project& project, const std::optional<std::string_view>& requested,
-                      std::string_view command, std::string_view requested_device) {
+ResolveBuildPlatforms(const Project& project, const BuildOptions& options, std::string_view command) {
   std::vector<const PlatformDriver*> platforms;
-  if (!requested) {
+  if (!options.platforms) {
     const PlatformDriver* current = FindPlatformDriver(CurrentHostId());
     if (!current ||
         std::find(project.platforms.begin(), project.platforms.end(), current->Id()) == project.platforms.end()) {
       throw UsageError("build requires a platform when the current host platform is not enabled");
     }
     platforms.push_back(current);
-  } else if (*requested == "all") {
+  } else if (*options.platforms == "all") {
     for (const std::string& id : project.platforms) {
       platforms.push_back(FindPlatformDriver(id));
     }
   } else {
-    platforms = ResolvePlatforms(*requested);
+    platforms = ResolvePlatforms(*options.platforms);
   }
 
   if (!command.empty() && platforms.size() != 1) {
     throw UsageError(std::string(command) + " accepts exactly one platform");
   }
-  if (!requested_device.empty()) {
+  if (!options.device.empty()) {
     if (platforms.size() != 1) {
       throw UsageError("--device requires exactly one build platform");
     }
     if (!platforms.front()->SupportsDeviceDiscovery()) {
       throw UsageError("--device is not supported for platform " + std::string(platforms.front()->Id()));
     }
+  }
+  const bool builds_android = std::ranges::any_of(platforms, [](const PlatformDriver* platform) {
+    return platform->Id() == "android";
+  });
+  if (options.java_home && !builds_android) {
+    throw UsageError("--java-home is supported only for Android builds");
   }
   for (const PlatformDriver* platform : platforms) {
     if (std::find(project.platforms.begin(), project.platforms.end(), platform->Id()) == project.platforms.end()) {
@@ -701,6 +718,28 @@ ResolveBuildPlatforms(const Project& project, const std::optional<std::string_vi
     }
   }
   return platforms;
+}
+
+void ResolveJavaHome(BuildOptions& options, const std::filesystem::path& working_directory) {
+  if (!options.java_home) {
+    return;
+  }
+  const std::filesystem::path java_home =
+      (options.java_home->is_absolute() ? *options.java_home : working_directory / *options.java_home)
+          .lexically_normal();
+  if (!std::filesystem::is_directory(java_home)) {
+    throw std::runtime_error("Java home is not a directory: " + java_home.string());
+  }
+#if defined(_WIN32)
+  constexpr std::string_view java_executable = "java.exe";
+#else
+  constexpr std::string_view java_executable = "java";
+#endif
+  if (!std::filesystem::is_regular_file(java_home / "bin" / java_executable)) {
+    throw std::runtime_error("Java home does not contain bin/" + std::string(java_executable) + ": " +
+                             java_home.string());
+  }
+  options.java_home = java_home;
 }
 
 PlatformCommandContext MakeCommandContext(const Project& project, const PlatformDriver& platform,
@@ -756,6 +795,10 @@ void BuildPlatform(const Project& project, const PlatformDriver& platform,
   platform.PrepareBuildEnvironment();
   ExecuteCommands(platform.LibraryGraphCommands(context), output);
   platform.UpdateProjectIntegration(context);
+  if (platform.Id() == "android" && options.java_home) {
+    output << "Java home: " << options.java_home->string() << '\n';
+    SetProcessEnvironmentVariable("JAVA_HOME", options.java_home->string());
+  }
   ExecuteCommands(platform.BuildCommands(context), output);
 }
 
@@ -809,8 +852,8 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms =
-      ResolveBuildPlatforms(project, options.platforms, {}, options.device);
+  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options, {});
+  ResolveJavaHome(options, working_directory);
   if (!options.device.empty()) {
     options.selected_device = SelectDevice(*platforms.front(), options.device);
   }
@@ -828,8 +871,8 @@ int RunApplication(std::span<const std::string_view> arguments, const std::files
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms =
-      ResolveBuildPlatforms(project, options.platforms, "run", options.device);
+  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options, "run");
+  ResolveJavaHome(options, working_directory);
   const PlatformDriver& platform = *platforms.front();
   const std::optional<PlatformDevice> device = SelectDevice(platform, options.device);
   if (device) {
@@ -888,8 +931,8 @@ int RunPackage(std::span<const std::string_view> arguments, const std::filesyste
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms =
-      ResolveBuildPlatforms(project, options.platforms, {}, options.device);
+  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options, {});
+  ResolveJavaHome(options, working_directory);
   if (!options.device.empty()) {
     options.selected_device = SelectDevice(*platforms.front(), options.device);
   }
@@ -914,7 +957,7 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
   if (!options.platforms || *options.platforms != "ios") {
     throw UsageError("open usage: huxerui open ios [--source <path>]");
   }
-  if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty()) {
+  if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty() || options.java_home) {
     throw UsageError("open accepts only --source <path>");
   }
   const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
@@ -922,7 +965,7 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
   }
-  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options.platforms, "open", {});
+  const std::vector<const PlatformDriver*> platforms = ResolveBuildPlatforms(project, options, "open");
   const PlatformDriver& platform = *platforms.front();
   if (platform.Id() != "ios") {
     throw UsageError("open currently supports ios only");
