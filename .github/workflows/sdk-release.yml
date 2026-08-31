@@ -257,7 +257,7 @@ jobs:
           cmake
           -S .
           -B build
-          -DCMAKE_BUILD_TYPE=Release
+          -G "Ninja Multi-Config"
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
