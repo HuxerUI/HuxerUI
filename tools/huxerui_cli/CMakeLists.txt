@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(huxerui_cli VERSION 0.1.0 LANGUAGES CXX)
+    project(huxerui_cli VERSION 0.2.0 LANGUAGES CXX)
 endif ()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../3dparty/cmrc/CMakeRC.cmake")
